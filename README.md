@@ -6,56 +6,36 @@
 
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Its public package is intentionally narrow while the protocol implementation is still being built and verified.
 
-## Prototype API policy
-
-This repository is an early prototype and is not in production use. Public API stability is not protected for legacy consumers yet; obsolete labels, helper-role surfaces, and compatibility-only names are removed when they conflict with the current documentation and claim boundaries. Existing v1 transcript digest namespaces remain only where current vectors require them, while new public-facing names use Hash terminology.
-
 ## What the package exposes
 
-The published `sealed-lattice` package currently exposes safe-by-default helpers for:
+`sealed-lattice` package currently exposes safe-by-default helpers for:
 
 - transcript-core fixture verification through the packaged Rust/WASM kernel;
-- poll-spec validation, canonical poll/profile Hash-facing derivation over v1 transcript digest namespaces, threshold profile derivation, and frozen roster-profile derivation;
-- compact lifecycle labels, structured status reasons, lifecycle transitions, and action capability checks;
+- poll-spec validation, canonical poll/profile hash derivation, threshold profile derivation, and frozen roster-profile derivation;
+- lifecycle labels, lifecycle transitions, and action capability checks;
 - signed board consistency, cast receipt shells, close record shells, and target finality checks;
 - roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
 - verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM verifier;
-- aggregate derivation component verification for the scoped post-close M6 relation, without exposing aggregate shares, aggregate histograms, exact aggregate scores, aggregate score bits, openings, quotients, plaintext comparison inputs, receiver plaintexts, or proof witnesses.
+- aggregate derivation component verification for the scoped post-close aggregate derivation relation, without exposing aggregate shares, aggregate histograms, exact aggregate scores, aggregate score bits, openings, quotients, plaintext comparison inputs, receiver plaintexts, or proof witnesses;
+- a fail-closed `verifyBridgeProof` placeholder for the encrypted aggregate bridge. Internal representative-path bridge evidence exists, but the public SDK verifier remains unavailable until the claim-appropriate encrypted aggregate bridge verifier contract, full matrix evidence, negative coverage, and package-boundary checks are complete.
 
-Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof verification, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
+Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof acceptance, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
 
 ```ts
 import {
     validatePollSpec,
     verifyAggregateDerivationComponent,
+    verifyBridgeProof,
     verifyClaimBearingBallotPackage,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
 ```
 
-## What is internal
-
-Several protocol components exist only as workspace-internal implementation, test, or vector infrastructure:
-
-- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
-- deterministic PVSS ballot-algebra helpers used for regression tests;
-- ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
-- M7 sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, encrypted aggregate input layout binding, object validation, structured `BGVProfileRejected` refusals, allowed-operation registry, hash-stable report vectors, and report commands for the encrypted aggregate path;
-- M8 passive full-roster BGV setup commands, including participant setup records, public-key share roots, collective public key roots, KLLPS-compatible threshold verification roots, provisional relin/rotation/key-switch evaluation-key roots, evaluator-context digest bindings, sampled M7 arithmetic fixtures, actual secret/error distribution certificates, public RLWE sample accounting, setup parameter certificates, evaluation-key-size reports, streaming chunk fixtures, and development collective-key encryption fixtures;
-- Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
-- offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
-
-These pieces are not exported as a public voting API and must not be used for real ballot secrecy.
-
 ## Ballot privacy status
 
-The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM proof backend. Package verification requires the public verifier inputs carried with the package shell and is not a complete voting API or measured runtime profile-certified result.
+The ballot privacy implementation currently exposes verification-oriented APIs only. It can verify receiver-key proof records, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM proof backend. Package verification requires the public verifier inputs carried with the package shell and is not a complete voting API or supported-phone-certified result.
 
-The public status surface uses compact claim labels such as `pending`, `rosterFrozen`, `ballotSubmitted`, `targetAccepted`, `evaluationProofVerified`, `cpadProfileVerified`, `fullyVerified`, `forkDetected`, and `outsideClaim`, with structured reasons for missing evidence or outside-claim cases. Local replay is diagnostic only and never accepts a target or replaces the mandatory evaluation proof.
-
-Successful M6 aggregate derivation proof generation and component verification still report `pending`, because the encrypted aggregate bridge, evaluation proof, target acceptance, threshold decryption, CPAD closure, and final result claims remain unavailable.
-
-Current M5 dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance. The casual micro-roster path has verifier and proof-record generation harness coverage for every receiver count from 3 through 9, but claim-bearing package acceptance still rejects those rosters. Current proof-size and runtime benchmark evidence has only been run for the mandatory `n = 20`, `m = 20`, threshold-7 profile; micro-roster and dynamic-roster benchmark evidence remains future full-suite work.
+Current accepted ballot package dimensions are: 2 to 20 options; `shareVectorWidth = 11 * optionCount`; `n = 20` as the mandatory benchmark receiver count; dynamic frozen receiver counts from 10 to 50 only when the ballot proof statement carries bound roster-profile evidence; and explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance. The casual micro-roster path has verifier and proof-record generation harness coverage for every receiver count from 3 through 9, but claim-bearing package acceptance still rejects those rosters. Current proof-size and runtime benchmark evidence has only been run for the mandatory `n = 20`, `m = 20`, threshold-7 profile; micro-roster and dynamic-roster benchmark evidence remains future full-suite work.
 
 Implemented internally:
 
@@ -65,18 +45,31 @@ Implemented internally:
 - receiver-key proof records with proof-byte metadata and Rust/WASM verification for supported linear proof vectors;
 - ballot proof records that bind backend statements, component proof bundles, proof bytes, proof encodings, proof parameter sets, and public randomness;
 - scoped relation-bearing ballot package verification that recomputes the package digest, requires accepted receiver-key proof root evidence, checks receiver coverage, rejects witness leakage, binds the full ballot relation to the supplied component bundle, and verifies the top-level and component proof bytes;
-- aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted M5 Rust/WASM package verifier, recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum, and rejects public leakage of aggregate histograms, exact aggregate scores, aggregate score bits, plaintext comparison inputs, and raw aggregate witnesses;
-- native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path, including LaZer-oracle parity for canonical matrix and target coefficient representations.
-- M7 BGV-RNS backend evidence is implemented internally for the selected v63 encrypted aggregate path: `N = 32768`, `p = 65537`, 16 selected 47-bit data primes, one 47-bit special prime, coefficient-domain canonical RNS objects, `PlaintextRoot`, `CiphertextRoot`, `BGVProfileDigest`, `BGVBatchEncoderDigest`, `BGVBatchEncoderLayoutBindingDigest`, allowed evaluator-operation registry, structured `BGVProfileRejected` refusal records, convention-difference rejection fixtures, independent big-integer RNS reference vectors, native/WASM/browser canonical-root parity vectors, and M6-to-M7 encrypted aggregate input layout/report bindings. The pinned Lattigo oracle lane is development-only, builds from the verified archive rather than the mutable local checkout, binds `ReferenceOracle*` digest records, consumes sealed-lattice canonical coefficient material, and covers comparable all-selected-moduli ring/RNS/NTT and coefficient-arithmetic behavior only. Public package checks reject Lattigo, Docker, Go, oracle-vector, and oracle-serializer artifacts.
-- M8 passive setup evidence is implemented internally for full-roster BGV setup. It emits transcript-bound participant setup roots, public-key share roots, collective key roots, KLLPS-compatible threshold verification material, named encrypted-aggregate/evaluator input binding digests, provisional evaluation-key roots for the current M10 rotation set, sampled M7 arithmetic fixtures for relin/key-switch decomposition, actual collective-secret and error-distribution certificates, public RLWE sample counts, setup parameter certificates, evaluation-key-size reports, streaming chunk/storage-quota fixtures, and development collective-key encryption fixtures. M8 remains passive setup evidence only: it does not implement M9 bridge proofs, M10 evaluator closure, M12 evaluation proofs, KLLPS `PartDec`/`FinDec`, final Appendix B acceptance with `Q_target`, measured runtime closure, or active-malicious setup proofs.
+- aggregate derivation statements and components that bind a canonical post-close counted set of proof-byte-bearing package shells, voting-closed close-record evidence, contributor action context, contributor identity, homomorphic aggregate share commitment, full encoded share layout, no-wraparound certificate, and Rust/WASM proof bytes for hidden aggregate opening knowledge. Component verification reruns the counted packages through the accepted ballot package Rust/WASM package verifier, recomputes the aggregate package references, ballot-set digest, and public aggregate commitment sum, and rejects public leakage of aggregate histograms, exact aggregate scores, aggregate score bits, plaintext comparison inputs, and raw aggregate witnesses;
+- native and WASM verification of public vectors for the supported internal linear proof slices and full encoded-score package path.
+- BGV-RNS backend evidence is implemented internally for the selected encrypted aggregate path: `N = 32768`, `p = 65537`, 16 selected 47-bit data primes, one 47-bit special prime, coefficient-domain canonical RNS objects, `PlaintextRoot`, `CiphertextRoot`, `BGVProfileDigest`, `BGVBatchEncoderDigest`, allowed evaluator-operation registry, and aggregate-derivation-to-BGV-RNS encrypted aggregate layout/profile bindings. This is backend and encoding evidence only, not setup, bridge closure, evaluator closure, decryption, CPAD, mobile certification, or active-malicious closure.
+- Encrypted aggregate bridge internal representative-path evidence exists for witness-clean bridge objects, private Rust/WASM bridge plaintext assembly, passive transcript-derived collective public-key coefficient binding, checked relation verification, checked proof-record/contribution assembly, and aggregate-ready handoff helpers. The encrypted aggregate bridge is not closed: the public SDK verifier remains fail-closed, plaintext canonical-lift proof status remains `PlaintextCanonicalLiftProofMissing`, bridge evidence explicitly records `bgvEncryptionKeyMaterialKind: "passive-transcript-derived-collective-public-key"`, `developmentKeyOnly: false`, `thresholdDecryptable: false`, and `claimBearingBridgeEncryption: false`, current shared-witness metadata records 128 bits of challenge entropy but only a 20-bit effective binding floor for the weakest `F_65537` plaintext/batch link after rejection-attempt grinding, deterministic caller-supplied proof and encryption randomness seeds require explicit development acknowledgement and are not public entropy evidence, standalone bridge verification records that full aggregate derivation verification is a precondition, bridge claim closure remains open, full 342-row matrix evidence and complete negative coverage remain open, and closure labels remain unavailable.
 
 Still unavailable:
 
 - public ballot generation or casting APIs;
-- generated parameter certificate rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
-- the M9 encrypted aggregate bridge from committed aggregate shares to encrypted aggregate input, preserving bridge witness privacy;
-- the M10 encrypted aggregate reconstruction, evaluator-side score-bit/comparison derivation, packed bit-sliced BGV evaluator, and mandatory evaluation proof;
+- generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
+- Encrypted aggregate bridge closure for the encrypted aggregate bridge from committed aggregate shares to encrypted aggregate TargetBasisData, preserving bridge witness privacy;
+- the encrypted aggregate reconstruction, evaluator-side score-bit/comparison derivation, packed bit-sliced BGV evaluator, and mandatory evaluation proof;
 - production target-bound decryption and result release.
+
+## What is internal
+
+Several protocol components exist only as workspace-internal implementation, test, or vector infrastructure:
+
+- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
+- deterministic PVSS ballot-algebra helpers used for regression tests;
+- ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
+- sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, and allowed-operation registry for the encrypted aggregate path;
+- Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
+- offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
+
+These pieces are not exported as a public voting API and must not be used for real ballot secrecy.
 
 ## Repository layout
 
@@ -85,7 +78,8 @@ sealed-lattice/
   crates/
     sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
   docs/                         Public documentation site
-  implementation-documentation/ Internal protocol planning notes
+  implementation-documentation/ Internal protocol notes
+  reference-projects/          Ignored development-only external reference checkouts
   packages/
     crypto/                     Internal canonical JSON, digests, signatures
     protocol/                   Internal protocol logic and reference paths
@@ -127,16 +121,15 @@ Run the main CI-equivalent check:
 pnpm run check
 ```
 
-`pnpm run check` builds first, then runs the static gate. Use `pnpm run check:static` after an explicit build when you only need lint, TypeScript, Rust, package-boundary, vector, and dead-code checks.
+`pnpm run check` runs lint, TypeScript, public API snapshot, package build, public package policy, package-boundary, vector, dead-code, Rust format, Rust clippy, and Rust test verification.
 
 Run targeted verification:
 
 ```bash
-pnpm run test:precommit
 pnpm run vectors
 pnpm run test:node:fast
-pnpm run test:node:heavy
-pnpm run test:node:heavy:kernel
+pnpm run test:node:protocol
+pnpm run test:node:kernel
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
@@ -144,10 +137,21 @@ pnpm run test:proof-benchmark
 pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
 pnpm run test:proof-benchmark:browser:mobile:throttled
+pnpm run test:encrypted-aggregate-bridge:representative
+pnpm run test:encrypted-aggregate-bridge
 pnpm run verify:docs
 ```
 
-The pre-commit test command runs the fast Node project plus desktop and mobile browser Vitest projects against already built output. The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
+The pre-commit hook runs these commands directly:
+
+```bash
+pnpm run check
+pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run
+```
+
+The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. `pnpm run coverage:badge` runs the Node coverage lane, writes Shields-compatible coverage JSON into `docs/public`, and the Pages workflow publishes that JSON with the docs site for the README badge. The proof benchmark command builds once, then runs the Node and desktop Chromium benchmark projects sequentially to avoid benchmark worker memory contention on one machine. Use the individual proof-benchmark commands on separate CI workers when parallel resources are available. The mobile proof benchmark is throttled-only and manual-only through `pnpm run test:proof-benchmark:browser:mobile:throttled`.
+
+Heavy local runners write timestamped logs under `logs/`, which is gitignored. Logged runners include `pnpm run test:node:protocol`, `pnpm run test:node:kernel`, `pnpm run test:node`, `pnpm run test:browser`, all proof-benchmark scripts, and the encrypted aggregate bridge matrix scripts. Each run gets `logs/YYYY-MM-DD/YYYY-MM-DDTHH-mm-ss-SSSZ-script-name/` with `metadata.json`, `summary.json`, `combined.log`, and per-command logs; matrix runs also write per-row worker logs under `workers/`. CI disables local log emission by passing `--no-run-log`; use the same trailing argument locally when a one-off run should skip logs, for example `pnpm run test:node:kernel -- --no-run-log`.
 
 Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`. Checkpoint filenames are named after their test suite and step. Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when intentionally debugging from the latest local checkpoint.
 
@@ -155,7 +159,6 @@ Build and package-smoke the published SDK:
 
 ```bash
 pnpm run build
-pnpm run smoke:pack
 pnpm run smoke:pack:npm
 ```
 

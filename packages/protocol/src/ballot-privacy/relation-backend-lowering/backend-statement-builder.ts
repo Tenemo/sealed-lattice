@@ -1,10 +1,10 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 
 import {
     buildBackendBounds,
-    buildDigestExpandedRowBatch,
+    buildHashExpandedRowBatch,
     buildExplicitBackendRowBatch,
     buildExplicitShareCommitmentRowBatch,
     buildReceiverKeyBindingRows,
@@ -27,12 +27,12 @@ import type {
     ReceiverReference,
 } from './backend-contracts.js';
 import {
-    backendBoundsDigestPurpose,
-    backendMatrixDigestPurpose,
-    backendProofComponentsDigestPurpose,
-    backendStatementDigestPurpose,
+    backendBoundsHashPurpose,
+    backendMatrixHashPurpose,
+    backendProofComponentsHashPurpose,
+    backendStatementHashPurpose,
     backendStatementFormat,
-    backendTargetVectorDigestPurpose,
+    backendTargetVectorHashPurpose,
     receiverEncryptionModulus,
     relationStatementFormat,
 } from './backend-contracts.js';
@@ -46,7 +46,7 @@ import {
     buildShareCommitmentEquationRows,
     createVariableColumnLookup,
     decimalString,
-    deriveBackendDigest,
+    deriveBackendHash,
     referencesByReceiver,
 } from './backend-row-helpers.js';
 import { receiverReferenceKey } from './relation-row-builders.js';
@@ -91,13 +91,13 @@ const buildBackendProofComponents = (
         }
         const proofLoweringStatus: BallotPrivacyBackendProofComponent['proofLoweringStatus'] =
             componentBatches.every(
-                (batch) => batch.batchKind !== 'DigestExpandedRows',
+                (batch) => batch.batchKind !== 'HashExpandedRows',
             )
                 ? 'explicitRowsAvailable'
-                : 'digestExpandedRowsPending';
+                : 'HashExpandedRowsPending';
         const componentPayload: Omit<
             BallotPrivacyBackendProofComponent,
-            'componentDigest'
+            'componentHash'
         > = {
             coefficientModulus: componentBatches[0]?.modulus ?? '',
             componentId,
@@ -116,8 +116,8 @@ const buildBackendProofComponents = (
 
         proofComponents.push({
             ...componentPayload,
-            componentDigest: deriveBackendDigest(
-                backendProofComponentsDigestPurpose,
+            componentHash: deriveBackendHash(
+                backendProofComponentsHashPurpose,
                 componentPayload,
             ),
         });
@@ -144,7 +144,7 @@ const explicitReceiverEncryptionRelationKeys = (input: {
             const receiverPayload = payloadsByReceiver.get(receiverKey);
 
             return publicKey?.publicKeyVector !== undefined &&
-                publicKey.publicMatrixSeedDigest !== undefined &&
+                publicKey.publicMatrixSeedHash !== undefined &&
                 receiverPayload?.ciphertextChunks !== undefined
                 ? [receiverKey]
                 : [];
@@ -167,7 +167,7 @@ const explicitReceiverKeyRelationKeys = (input: {
             );
 
             return publicKey?.publicKeyVector !== undefined &&
-                publicKey.publicMatrixSeedDigest !== undefined
+                publicKey.publicMatrixSeedHash !== undefined
                 ? [receiverReferenceKey(receiver)]
                 : [];
         }),
@@ -184,7 +184,7 @@ const buildBackendStatement = (input: {
     readonly pvssThreshold: number;
     readonly receivers: readonly ReceiverReference[];
     readonly rosterSize: number;
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareCommitmentProfileHash: ProtocolHash;
     readonly shareVectorWidth: number;
     readonly variables: readonly BallotPrivacyLinearRelationVariable[];
 }): BallotPrivacyProofBackendStatement => {
@@ -254,8 +254,8 @@ const buildBackendStatement = (input: {
                 buildStructuredShareCommitmentRowBatch({
                     columnLookup,
                     rowOffset: nextExplicitRowOffset,
-                    shareCommitmentProfileDigest:
-                        input.shareCommitmentProfileDigest,
+                    shareCommitmentProfileHash:
+                        input.shareCommitmentProfileHash,
                     shareCommitmentRows: shareCommitmentRowsWithPublicVectors,
                     shareVectorWidth: input.shareVectorWidth,
                 });
@@ -265,8 +265,8 @@ const buildBackendStatement = (input: {
             const explicitShareCommitmentRows =
                 buildShareCommitmentEquationRows({
                     columnLookup,
-                    shareCommitmentProfileDigest:
-                        input.shareCommitmentProfileDigest,
+                    shareCommitmentProfileHash:
+                        input.shareCommitmentProfileHash,
                     shareCommitmentRows: shareCommitmentRowsWithPublicVectors,
                     shareVectorWidth: input.shareVectorWidth,
                 });
@@ -318,7 +318,7 @@ const buildBackendStatement = (input: {
         receivers: input.receivers,
     });
     let nextRowOffset = nextExplicitRowOffset;
-    const digestExpandedBatches = input.algebraicRows
+    const hashExpandedBatches = input.algebraicRows
         .filter((algebraicRow) => {
             if (algebraicRow.rowKind === 'ShareCommitmentEquation') {
                 return (
@@ -338,7 +338,7 @@ const buildBackendStatement = (input: {
             return true;
         })
         .map((algebraicRow) => {
-            const batch = buildDigestExpandedRowBatch({
+            const batch = buildHashExpandedRowBatch({
                 algebraicRow,
                 columnLookup,
                 rowOffset: nextRowOffset,
@@ -347,7 +347,7 @@ const buildBackendStatement = (input: {
 
             return batch;
         });
-    const rowBatches = [...explicitBatches, ...digestExpandedBatches] as const;
+    const rowBatches = [...explicitBatches, ...hashExpandedBatches] as const;
     const backendBounds = buildBackendBounds({
         bounds: input.bounds,
         columnLookup,
@@ -357,38 +357,35 @@ const buildBackendStatement = (input: {
         (rowCount, batch) => rowCount + batch.rowCount,
         0,
     );
-    const digestExpandedRowCount = digestExpandedBatches.reduce(
+    const hashExpandedRowCount = hashExpandedBatches.reduce(
         (rowCount, batch) => rowCount + batch.rowCount,
         0,
     );
-    const matrixDigest = deriveBackendDigest(backendMatrixDigestPurpose, {
+    const matrixHash = deriveBackendHash(backendMatrixHashPurpose, {
         rowBatches: rowBatches.map((batch) => ({
             batchKind: batch.batchKind,
             batchName: batch.batchName,
-            matrixDigest: batch.matrixDigest,
+            matrixHash: batch.matrixHash,
             rowCount: batch.rowCount,
             rowKind: batch.rowKind,
             rowOffset: batch.rowOffset,
         })),
     });
-    const targetVectorDigest = deriveBackendDigest(
-        backendTargetVectorDigestPurpose,
-        {
-            rowBatches: rowBatches.map((batch) => ({
-                batchKind: batch.batchKind,
-                batchName: batch.batchName,
-                rowCount: batch.rowCount,
-                rowKind: batch.rowKind,
-                rowOffset: batch.rowOffset,
-                targetVectorDigest: batch.targetVectorDigest,
-            })),
-        },
-    );
-    const boundsDigest = deriveBackendDigest(backendBoundsDigestPurpose, {
+    const targetVectorHash = deriveBackendHash(backendTargetVectorHashPurpose, {
+        rowBatches: rowBatches.map((batch) => ({
+            batchKind: batch.batchKind,
+            batchName: batch.batchName,
+            rowCount: batch.rowCount,
+            rowKind: batch.rowKind,
+            rowOffset: batch.rowOffset,
+            targetVectorHash: batch.targetVectorHash,
+        })),
+    });
+    const boundsHash = deriveBackendHash(backendBoundsHashPurpose, {
         bounds: backendBounds,
     });
-    const proofComponentsDigest = deriveBackendDigest(
-        backendProofComponentsDigestPurpose,
+    const proofComponentsHash = deriveBackendHash(
+        backendProofComponentsHashPurpose,
         {
             proofComponents,
         },
@@ -400,36 +397,36 @@ const buildBackendStatement = (input: {
     ];
     const backendStatementPayload: Omit<
         BallotPrivacyProofBackendStatement,
-        'backendStatementDigest'
+        'backendStatementHash'
     > = {
         backendStatementFormat,
         bounds: backendBounds,
-        boundsDigest,
+        boundsHash,
         columnCount: variableColumns.length,
-        digestExpandedRowCount,
+        hashExpandedRowCount,
         encodedCoordinateCount: input.encodedCoordinateCount,
         explicitRowCount,
         fieldModulus,
-        matrixDigest,
+        matrixHash,
         objectType: 'BallotPrivacyProofBackendStatement',
         objectVersion: 1,
         optionCount: input.optionCount,
         proofComponents,
-        proofComponentsDigest,
+        proofComponentsHash,
         pvssThreshold: input.pvssThreshold,
         relationLabel: 'BallotPrivacyPvssRelation',
         rosterSize: input.rosterSize,
         rowBatches,
-        rowCount: explicitRowCount + digestExpandedRowCount,
+        rowCount: explicitRowCount + hashExpandedRowCount,
         shareVectorWidth: input.shareVectorWidth,
         sourceRelationStatementFormat: relationStatementFormat,
-        targetVectorDigest,
+        targetVectorHash,
         variableColumns,
     };
     return {
         ...backendStatementPayload,
-        backendStatementDigest: deriveBackendDigest(
-            backendStatementDigestPurpose,
+        backendStatementHash: deriveBackendHash(
+            backendStatementHashPurpose,
             backendStatementPayload,
         ),
     };

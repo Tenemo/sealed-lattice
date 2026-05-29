@@ -13,8 +13,8 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import apiSnapshot from '../../api-snapshot.json' with { type: 'json' };
 import * as publicApiRuntime from '../../dist/index.js';
-import publicSurface from '../../public-surface.json' with { type: 'json' };
 
 type DeriveThresholdProfile = (
     input: ThresholdProfileInput,
@@ -42,20 +42,18 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
+const expectedRuntimeExports = [...apiSnapshot.runtimeExports].sort();
 
 describe('election foundation public package API in browsers', () => {
-    it('exposes callable safe runtime functions and keeps obvious raw APIs absent', () => {
-        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
-            [...publicSurface.runtimeExports].sort(),
-        );
-        for (const publicFunctionName of publicSurface.runtimeExports) {
+    it('exposes callable safe runtime functions', () => {
+        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual([
+            ...expectedRuntimeExports,
+        ]);
+        for (const publicFunctionName of expectedRuntimeExports) {
             expect(
                 typeof publicApiRuntimeRecord[publicFunctionName],
                 publicFunctionName,
             ).toBe('function');
-        }
-        for (const publicKey of publicSurface.forbiddenRuntimeExports) {
-            expect(publicKey in publicApiRuntimeRecord).toBe(false);
         }
     });
 
@@ -79,9 +77,9 @@ describe('election foundation public package API in browsers', () => {
                 thresholdProfile,
                 pollSpecValid: true,
                 localRosterAccepted: true,
-                rosterExternalAcceptanceDigest: 'accepted-roster-digest',
-                actionContextRosterExternalAcceptanceDigest:
-                    'accepted-roster-digest',
+                rosterExternalAcceptanceHash: 'accepted-roster-hash',
+                actionContextRosterExternalAcceptanceHash:
+                    'accepted-roster-hash',
                 setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 turnoutCount: thresholdProfile.releaseQuorum,
                 bridgeBenchmarkReportPresent: true,
@@ -93,9 +91,9 @@ describe('election foundation public package API in browsers', () => {
         });
         expect(
             deriveValidatedFirstValidOrder({
-                requiredContextDigest: 'context',
-                selectionPolicyDigest: 'policy',
-                expectedSelectionPolicyDigest: 'policy',
+                requiredContextHash: 'context',
+                selectionPolicyHash: 'policy',
+                expectedSelectionPolicyHash: 'policy',
                 currentRecoveryEpochMap: {
                     participant: {
                         signerIdentity: 'participant',
@@ -105,7 +103,7 @@ describe('election foundation public package API in browsers', () => {
                 },
                 objects: [
                     {
-                        objectDigest: 'candidate',
+                        objectHash: 'candidate',
                         objectType: 'TargetFinalityRecord',
                         boardSequence: 1,
                         boardPosition: 0,
@@ -113,7 +111,7 @@ describe('election foundation public package API in browsers', () => {
                         recoveryEpoch: 0,
                         deviceEpoch: 0,
                         actionSequence: 0,
-                        contextDigest: 'context',
+                        contextHash: 'context',
                         isByteIdenticalRetransmission: false,
                     },
                 ],
@@ -121,14 +119,14 @@ describe('election foundation public package API in browsers', () => {
         ).toMatchObject({
             ok: true,
             orderedObjects: [
-                expect.objectContaining({ objectDigest: 'candidate' }),
+                expect.objectContaining({ objectHash: 'candidate' }),
             ],
         });
         expect(
             verifyBoardConsistency({
                 ceremonyId: 'ceremony',
-                boardPolicyDigest: 'policy',
-                expectedBoardPublicKeyDigest: 'board-key',
+                boardPolicyHash: 'policy',
+                expectedBoardPublicKeyHash: 'board-key',
                 signedBoardHeads: [],
             }).refusedObjects,
         ).toEqual(

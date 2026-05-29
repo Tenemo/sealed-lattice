@@ -24,5 +24,5 @@ export {
 export {
     decodeSparseTopKTarget,
     deriveSparseTopKTarget,
-    deriveSparseTopKTargetDigest,
+    deriveSparseTopKTargetHash,
 } from './sparse-target.js';

@@ -1,7 +1,7 @@
 import { canonicalJson } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
-    ProtocolDigest,
+    ProtocolHash,
     ProtocolVerificationStatusLabel,
     RefusalRecord,
     RosterManifestTranscriptInput,
@@ -17,12 +17,12 @@ import {
     createRefusal,
     uniqueStrings,
 } from '../common/verification-helpers.js';
-import { derivePollSpecDigest } from '../lifecycle/poll-spec.js';
+import { derivePollSpecHash } from '../lifecycle/poll-spec.js';
 import { deriveFrozenRosterProfile } from '../lifecycle/thresholds.js';
 
-import { deriveRosterDigest } from './digests.js';
+import { deriveRosterHash } from './hashes.js';
 import {
-    mapInclusionProofsByObjectDigest,
+    mapInclusionProofsByObjectHash,
     verifyRequiredIncludedObjectPlacement,
 } from './inclusion.js';
 import {
@@ -40,31 +40,32 @@ const findConflictingRawManifest = (
     return input.suppliedElectionManifests?.find(
         (manifest) =>
             manifest.ceremonyId === acceptedManifest.ceremonyId &&
-            manifest.pollSpecDigest === acceptedManifest.pollSpecDigest &&
-            manifest.electionManifestDigest !==
-                acceptedManifest.electionManifestDigest,
+            manifest.pollSpecHash === acceptedManifest.pollSpecHash &&
+            manifest.electionManifestHash !==
+                acceptedManifest.electionManifestHash,
     );
 };
+
+const normalizeIdentityForComparison = (identity: string): string =>
+    identity.normalize('NFC');
 
 const verifyRosterManifestTranscriptUnchecked = (
     input: RosterManifestTranscriptInput,
 ): RosterManifestTranscriptVerification => {
     const refusedObjects: RefusalRecord[] = [];
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const registrationProofsByDigest = mapInclusionProofsByObjectDigest(
+    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
+    const registrationProofsByHash = mapInclusionProofsByObjectHash(
         input.registrationInclusionProofs,
     );
-    const receiverProofsByDigest = mapInclusionProofsByObjectDigest(
+    const receiverProofsByHash = mapInclusionProofsByObjectHash(
         input.receiverKeyRegistrationInclusionProofs,
     );
-    const trusteeProofsByDigest = mapInclusionProofsByObjectDigest(
+    const trusteeProofsByHash = mapInclusionProofsByObjectHash(
         input.trusteeSetupInclusionProofs,
     );
     const participantIdentities: string[] = [];
-    const participantPublicKeys = new Map<string, ProtocolDigest>();
+    const participantPublicKeys = new Map<string, ProtocolHash>();
     const seenParticipantIdentities = new Set<string>();
 
     refusedObjects.push(...boardResult.refusedObjects);
@@ -81,47 +82,50 @@ const verifyRosterManifestTranscriptUnchecked = (
         refusedObjects.push(...verifyRegistrationEntry(input, entry));
         refusedObjects.push(
             ...verifyRequiredIncludedObjectPlacement({
-                proofByDigest: registrationProofsByDigest,
-                objectDigest: entry.registrationEntryDigest,
+                proofByHash: registrationProofsByHash,
+                objectHash: entry.registrationEntryHash,
                 expectedObjectType: 'RegistrationEntry',
-                headsByDigest,
+                headsByHash,
                 objectBoardSequence: entry.boardSequence,
                 objectBoardPosition: entry.boardPosition,
                 rosterFreezeBoardSequence: input.rosterFreezeBoardSequence,
             }),
         );
 
-        if (seenParticipantIdentities.has(entry.participantIdentity)) {
+        const normalizedParticipantIdentity = normalizeIdentityForComparison(
+            entry.participantIdentity,
+        );
+        if (seenParticipantIdentities.has(normalizedParticipantIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateRegistration',
-                    'Roster freeze rejects duplicate participant registrations.',
-                    entry.registrationEntryDigest,
+                    'Roster freeze rejects duplicate participant registrations after Unicode NFC normalization.',
+                    entry.registrationEntryHash,
                     'RegistrationEntry',
                 ),
             );
             continue;
         }
 
-        seenParticipantIdentities.add(entry.participantIdentity);
+        seenParticipantIdentities.add(normalizedParticipantIdentity);
         participantPublicKeys.set(
-            entry.participantIdentity,
-            entry.signingPublicKeyDigest,
+            normalizedParticipantIdentity,
+            entry.signingPublicKeyHash,
         );
-        participantIdentities.push(entry.participantIdentity);
+        participantIdentities.push(normalizedParticipantIdentity);
     }
 
-    const organizerPublicKeyDigest = participantPublicKeys.get(
-        input.organizerIdentity,
+    const organizerPublicKeyHash = participantPublicKeys.get(
+        normalizeIdentityForComparison(input.organizerIdentity),
     );
-    if (organizerPublicKeyDigest === undefined) {
+    if (organizerPublicKeyHash === undefined) {
         refusedObjects.push(
             createRefusal(
-                'RosterDigestMismatch',
+                'RosterHashMismatch',
                 'Organizer identity must be part of the frozen all-trustee roster.',
             ),
         );
-    } else if (organizerPublicKeyDigest !== input.organizerPublicKeyDigest) {
+    } else if (organizerPublicKeyHash !== input.organizerPublicKeyHash) {
         refusedObjects.push(
             createRefusal(
                 'WrongPublicKey',
@@ -132,30 +136,33 @@ const verifyRosterManifestTranscriptUnchecked = (
 
     const receiverIdentities = new Set<string>();
     for (const entry of input.receiverKeyRegistrations) {
-        if (receiverIdentities.has(entry.participantIdentity)) {
+        const normalizedReceiverIdentity = normalizeIdentityForComparison(
+            entry.participantIdentity,
+        );
+        if (receiverIdentities.has(normalizedReceiverIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateReceiverKeyRegistration',
-                    'Roster freeze rejects duplicate receiver-key registrations.',
-                    entry.receiverKeyRegistrationDigest,
+                    'Roster freeze rejects duplicate receiver-key registrations after Unicode NFC normalization.',
+                    entry.receiverKeyRegistrationHash,
                     'ReceiverKeyRegistration',
                 ),
             );
         }
-        receiverIdentities.add(entry.participantIdentity);
+        receiverIdentities.add(normalizedReceiverIdentity);
         refusedObjects.push(
             ...verifyReceiverKeyRegistration(
                 input,
                 entry,
-                participantPublicKeys.get(entry.participantIdentity),
+                participantPublicKeys.get(normalizedReceiverIdentity),
             ),
         );
         refusedObjects.push(
             ...verifyRequiredIncludedObjectPlacement({
-                proofByDigest: receiverProofsByDigest,
-                objectDigest: entry.receiverKeyRegistrationDigest,
+                proofByHash: receiverProofsByHash,
+                objectHash: entry.receiverKeyRegistrationHash,
                 expectedObjectType: 'ReceiverKeyRegistration',
-                headsByDigest,
+                headsByHash,
                 objectBoardSequence: entry.boardSequence,
                 objectBoardPosition: entry.boardPosition,
                 rosterFreezeBoardSequence: input.rosterFreezeBoardSequence,
@@ -165,30 +172,33 @@ const verifyRosterManifestTranscriptUnchecked = (
 
     const trusteeIdentities = new Set<string>();
     for (const entry of input.trusteeSetupEntries) {
-        if (trusteeIdentities.has(entry.trusteeIdentity)) {
+        const normalizedTrusteeIdentity = normalizeIdentityForComparison(
+            entry.trusteeIdentity,
+        );
+        if (trusteeIdentities.has(normalizedTrusteeIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateTrusteeSetupEntry',
-                    'Roster freeze rejects duplicate trustee setup entries.',
-                    entry.trusteeSetupEntryDigest,
+                    'Roster freeze rejects duplicate trustee setup entries after Unicode NFC normalization.',
+                    entry.trusteeSetupEntryHash,
                     'TrusteeSetupEntry',
                 ),
             );
         }
-        trusteeIdentities.add(entry.trusteeIdentity);
+        trusteeIdentities.add(normalizedTrusteeIdentity);
         refusedObjects.push(
             ...verifyTrusteeSetupEntry(
                 input,
                 entry,
-                participantPublicKeys.get(entry.trusteeIdentity),
+                participantPublicKeys.get(normalizedTrusteeIdentity),
             ),
         );
         refusedObjects.push(
             ...verifyRequiredIncludedObjectPlacement({
-                proofByDigest: trusteeProofsByDigest,
-                objectDigest: entry.trusteeSetupEntryDigest,
+                proofByHash: trusteeProofsByHash,
+                objectHash: entry.trusteeSetupEntryHash,
                 expectedObjectType: 'TrusteeSetupEntry',
-                headsByDigest,
+                headsByHash,
                 objectBoardSequence: entry.boardSequence,
                 objectBoardPosition: entry.boardPosition,
                 rosterFreezeBoardSequence: input.rosterFreezeBoardSequence,
@@ -215,37 +225,37 @@ const verifyRosterManifestTranscriptUnchecked = (
         }
     }
 
-    const rosterDigest = deriveRosterDigest(input.registrationEntries);
-    const pollSpecDigest = derivePollSpecDigest(input.pollSpec);
-    if (input.electionManifest.pollSpecDigest !== pollSpecDigest) {
+    const rosterHash = deriveRosterHash(input.registrationEntries);
+    const pollSpecHash = derivePollSpecHash(input.pollSpec);
+    if (input.electionManifest.pollSpecHash !== pollSpecHash) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
-                'Election manifest poll spec digest must match the transcript poll specification.',
-                input.electionManifest.electionManifestDigest,
+                'ManifestHashMismatch',
+                'Election manifest poll spec hash must match the transcript poll specification.',
+                input.electionManifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
     }
-    if (input.frozenRosterProfile.pollSpecDigest !== pollSpecDigest) {
+    if (input.frozenRosterProfile.pollSpecHash !== pollSpecHash) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
-                'Frozen roster profile poll spec digest must match the transcript poll specification.',
-                input.frozenRosterProfile.thresholdProfileDigest,
+                'ManifestHashMismatch',
+                'Frozen roster profile poll spec hash must match the transcript poll specification.',
+                input.frozenRosterProfile.thresholdProfileHash,
                 'FrozenRosterProfile',
             ),
         );
     }
     if (
-        input.frozenRosterProfile.rosterDigest !== rosterDigest ||
+        input.frozenRosterProfile.rosterHash !== rosterHash ||
         input.frozenRosterProfile.rosterSize !== participantIdentities.length
     ) {
         refusedObjects.push(
             createRefusal(
-                'RosterDigestMismatch',
+                'RosterHashMismatch',
                 'Frozen roster profile must be derived from the accepted frozen roster.',
-                input.frozenRosterProfile.thresholdProfileDigest,
+                input.frozenRosterProfile.thresholdProfileHash,
                 'FrozenRosterProfile',
             ),
         );
@@ -253,21 +263,21 @@ const verifyRosterManifestTranscriptUnchecked = (
     try {
         const expectedFrozenRosterProfile = deriveFrozenRosterProfile({
             pollSpec: input.pollSpec,
-            rosterDigest,
+            rosterHash,
             rosterSize: participantIdentities.length,
-            dynamicRosterProfileCertificateDigest:
+            dynamicRosterProfileCertificateHash:
                 input.frozenRosterProfile.thresholdProfile
-                    .dynamicRosterProfileCertificateDigest ?? undefined,
+                    .dynamicRosterProfileCertificateHash ?? undefined,
         });
         if (
-            expectedFrozenRosterProfile.thresholdProfileDigest !==
-            input.frozenRosterProfile.thresholdProfileDigest
+            expectedFrozenRosterProfile.thresholdProfileHash !==
+            input.frozenRosterProfile.thresholdProfileHash
         ) {
             refusedObjects.push(
                 createRefusal(
-                    'ManifestDigestMismatch',
-                    'Frozen roster profile threshold profile digest must match the roster-freeze derived profile.',
-                    input.frozenRosterProfile.thresholdProfileDigest,
+                    'ManifestHashMismatch',
+                    'Frozen roster profile threshold profile hash must match the roster-freeze derived profile.',
+                    input.frozenRosterProfile.thresholdProfileHash,
                     'FrozenRosterProfile',
                 ),
             );
@@ -278,22 +288,22 @@ const verifyRosterManifestTranscriptUnchecked = (
         ) {
             refusedObjects.push(
                 createRefusal(
-                    'ManifestDigestMismatch',
+                    'ManifestHashMismatch',
                     'Frozen roster profile payload must match the roster-freeze derived profile.',
-                    input.frozenRosterProfile.thresholdProfileDigest,
+                    input.frozenRosterProfile.thresholdProfileHash,
                     'FrozenRosterProfile',
                 ),
             );
         }
         if (
-            expectedFrozenRosterProfile.thresholdProfileDigest !==
-            input.electionManifest.thresholdProfileDigest
+            expectedFrozenRosterProfile.thresholdProfileHash !==
+            input.electionManifest.thresholdProfileHash
         ) {
             refusedObjects.push(
                 createRefusal(
-                    'ManifestDigestMismatch',
-                    'Election manifest threshold profile digest must match the roster-freeze derived profile.',
-                    input.electionManifest.electionManifestDigest,
+                    'ManifestHashMismatch',
+                    'Election manifest threshold profile hash must match the roster-freeze derived profile.',
+                    input.electionManifest.electionManifestHash,
                     'ElectionManifest',
                 ),
             );
@@ -301,25 +311,25 @@ const verifyRosterManifestTranscriptUnchecked = (
     } catch {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
+                'ManifestHashMismatch',
                 'Frozen roster profile could not be derived from the poll policy and accepted roster.',
-                input.frozenRosterProfile.thresholdProfileDigest,
+                input.frozenRosterProfile.thresholdProfileHash,
                 'FrozenRosterProfile',
             ),
         );
     }
-    refusedObjects.push(...verifyManifest(input, rosterDigest));
+    refusedObjects.push(...verifyManifest(input, rosterHash));
     refusedObjects.push(
         ...verifyRequiredIncludedObjectPlacement({
-            proofByDigest: new Map([
+            proofByHash: new Map([
                 [
-                    input.manifestInclusionProof.includedObjectDigest,
+                    input.manifestInclusionProof.includedObjectHash,
                     input.manifestInclusionProof,
                 ],
             ]),
-            objectDigest: input.electionManifest.electionManifestDigest,
+            objectHash: input.electionManifest.electionManifestHash,
             expectedObjectType: 'ElectionManifest',
-            headsByDigest,
+            headsByHash,
             objectBoardSequence: input.electionManifest.boardSequence,
             objectBoardPosition: input.electionManifest.boardPosition,
         }),
@@ -330,16 +340,16 @@ const verifyRosterManifestTranscriptUnchecked = (
     ) {
         refusedObjects.push(
             createRefusal(
-                'ManifestDigestMismatch',
+                'ManifestHashMismatch',
                 'Election manifest inclusion must not precede the roster freeze board sequence.',
-                input.manifestInclusionProof.inclusionProofDigest,
+                input.manifestInclusionProof.inclusionProofHash,
                 'ElectionManifest',
             ),
         );
     }
 
     let conflictingManifest: ElectionManifest | undefined;
-    const acceptedConflictingManifestEvidenceDigests: ProtocolDigest[] = [];
+    const acceptedConflictingManifestEvidenceHashes: ProtocolHash[] = [];
     for (const evidence of input.conflictingManifestEvidence ?? []) {
         const evidenceRefusals: RefusalRecord[] = [
             ...verifyManifest(
@@ -350,7 +360,7 @@ const verifyRosterManifestTranscriptUnchecked = (
             ),
             ...verifyInclusionProof(
                 evidence.manifestInclusionProof,
-                headsByDigest,
+                headsByHash,
             ),
         ];
         if (
@@ -363,7 +373,7 @@ const verifyRosterManifestTranscriptUnchecked = (
                 createRefusal(
                     'InclusionProofInvalid',
                     'Conflicting manifest board position must match its inclusion proof.',
-                    evidence.manifestInclusionProof.inclusionProofDigest,
+                    evidence.manifestInclusionProof.inclusionProofHash,
                     'ElectionManifest',
                 ),
             );
@@ -372,17 +382,17 @@ const verifyRosterManifestTranscriptUnchecked = (
         if (evidenceRefusals.length > 0) {
             continue;
         }
-        acceptedConflictingManifestEvidenceDigests.push(
-            evidence.manifest.electionManifestDigest,
-            evidence.manifestInclusionProof.inclusionProofDigest,
+        acceptedConflictingManifestEvidenceHashes.push(
+            evidence.manifest.electionManifestHash,
+            evidence.manifestInclusionProof.inclusionProofHash,
         );
         if (
             evidence.manifest.ceremonyId ===
                 input.electionManifest.ceremonyId &&
-            evidence.manifest.pollSpecDigest ===
-                input.electionManifest.pollSpecDigest &&
-            evidence.manifest.electionManifestDigest !==
-                input.electionManifest.electionManifestDigest
+            evidence.manifest.pollSpecHash ===
+                input.electionManifest.pollSpecHash &&
+            evidence.manifest.electionManifestHash !==
+                input.electionManifest.electionManifestHash
         ) {
             conflictingManifest ??= evidence.manifest;
         }
@@ -394,7 +404,7 @@ const verifyRosterManifestTranscriptUnchecked = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Conflicting manifest evidence must include a board inclusion proof.',
-                rawConflictingManifest.electionManifestDigest,
+                rawConflictingManifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
@@ -410,7 +420,7 @@ const verifyRosterManifestTranscriptUnchecked = (
             createRefusal(
                 'ConflictingManifest',
                 'Supplied board view contains conflicting manifests for the same ceremony and poll spec.',
-                conflictingManifest.electionManifestDigest,
+                conflictingManifest.electionManifestHash,
                 'ElectionManifest',
             ),
         );
@@ -421,30 +431,30 @@ const verifyRosterManifestTranscriptUnchecked = (
     return {
         ok: transcriptAccepted,
         statusLabels,
-        acceptedDigests: transcriptAccepted
+        acceptedHashes: transcriptAccepted
             ? uniqueStrings([
-                  ...boardResult.acceptedDigests,
+                  ...boardResult.acceptedHashes,
                   ...input.registrationEntries.map(
-                      (entry) => entry.registrationEntryDigest,
+                      (entry) => entry.registrationEntryHash,
                   ),
                   ...input.receiverKeyRegistrations.map(
-                      (entry) => entry.receiverKeyRegistrationDigest,
+                      (entry) => entry.receiverKeyRegistrationHash,
                   ),
                   ...input.trusteeSetupEntries.map(
-                      (entry) => entry.trusteeSetupEntryDigest,
+                      (entry) => entry.trusteeSetupEntryHash,
                   ),
-                  rosterDigest,
-                  input.electionManifest.electionManifestDigest,
-                  input.manifestInclusionProof.inclusionProofDigest,
-                  ...acceptedConflictingManifestEvidenceDigests,
+                  rosterHash,
+                  input.electionManifest.electionManifestHash,
+                  input.manifestInclusionProof.inclusionProofHash,
+                  ...acceptedConflictingManifestEvidenceHashes,
               ])
             : [],
         refusedObjects,
         forkEvidence,
-        electionManifestDigest: transcriptAccepted
-            ? input.electionManifest.electionManifestDigest
+        electionManifestHash: transcriptAccepted
+            ? input.electionManifest.electionManifestHash
             : undefined,
-        rosterDigest: transcriptAccepted ? rosterDigest : undefined,
+        rosterHash: transcriptAccepted ? rosterHash : undefined,
         participantIdentities,
     };
 };
@@ -458,10 +468,10 @@ export const verifyRosterManifestTranscript = (
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
-                    'RosterDigestMismatch',
+                    'RosterHashMismatch',
                     'Roster-manifest transcript could not be canonicalized or validated.',
                 ),
             ],

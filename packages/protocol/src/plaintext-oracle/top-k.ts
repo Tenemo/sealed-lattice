@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     ComparatorPolynomialSet,
     FieldElement,
@@ -12,7 +12,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    derivePollSpecDigest,
+    derivePollSpecHash,
     validatePollSpec,
 } from '../lifecycle/poll-spec.js';
 
@@ -137,18 +137,18 @@ const derivePlaintextTally = (input: {
     const tallyFieldElements = optionTallies.map((tally) =>
         normalizeFieldElement(tally),
     );
-    const pollSpecDigest = derivePollSpecDigest(input.pollSpec);
+    const pollSpecHash = derivePollSpecHash(input.pollSpec);
     const tallyPayload = {
         maximumRosterSize,
         normalizedBallots,
         optionTallies,
-        pollSpecDigest,
+        pollSpecHash,
         tallyFieldElements,
     };
 
     return {
         ...tallyPayload,
-        tallyDigest: deriveProtocolDigest('PlaintextTallyDigest', tallyPayload),
+        tallyHash: deriveProtocolHash('PlaintextTallyHash', tallyPayload),
     };
 };
 
@@ -176,10 +176,7 @@ const multiplyPolynomialByLinearTerm = (
     coefficients: readonly FieldElement[],
     root: FieldElement,
 ): readonly FieldElement[] => {
-    const output = Array.from(
-        { length: coefficients.length + 1 },
-        () => 0 as FieldElement,
-    );
+    const output = Array.from({ length: coefficients.length + 1 }, () => 0);
 
     coefficients.forEach((coefficient, coefficientIndex) => {
         output[coefficientIndex] = addFieldElements(
@@ -309,8 +306,8 @@ export const deriveComparatorPolynomialSet = (
 
     return {
         ...comparatorPayload,
-        comparatorDigest: deriveProtocolDigest(
-            'TopKCircuitDigest',
+        comparatorHash: deriveProtocolHash(
+            'TopKCircuitHash',
             comparatorPayload,
         ),
     };
@@ -335,14 +332,14 @@ export const derivePlaintextTopKOracle = (input: {
         comparatorDomainMinimum,
         ranking,
         sparseTarget,
-        tallyDigest: tally.tallyDigest,
+        tallyHash: tally.tallyHash,
         topOptionCount: input.pollSpec.topOptionCount,
     };
 
     return {
         ...oraclePayload,
-        oracleDigest: deriveProtocolDigest(
-            'PlaintextTopKOracleDigest',
+        oracleHash: deriveProtocolHash(
+            'PlaintextTopKOracleHash',
             oraclePayload,
         ),
         tally,

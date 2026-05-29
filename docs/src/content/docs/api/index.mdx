@@ -1,52 +1,42 @@
 ---
 title: API reference
-description: The current public package surface and generated reference for the sealed-lattice facade.
+description: The current public function and type surface for sealed-lattice.
 editUrl: false
 ---
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-Use the root package name for the full supported public surface. The package currently exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs.
-
-## What lives here
-
-- `sealed-lattice` as the only public package name
-- transcript-core fixture verification
-- threshold, lifecycle, poll specification, and capability helpers
-- board consistency, target finality, roster-manifest, cast receipt, close record, first-valid ordering, and recovery-epoch helpers
-- ML-DSA-65 signed-root verification inside those election foundation helpers, including runtime envelope-field checks
-- receiver-key proof, ballot proof-record, and proof-byte-bearing claim-bearing package verification through the packaged Rust/WASM backend
-- fail-closed target-bound decryption gates that require a target-bound share-selection profile and explicit proof certificates before decryption-share or recombination capabilities are allowed
-- generated reference pages that confirm the current public surface stays narrow
-
-## Typical import style
+Use the root package name for every supported public import.
 
 ```typescript
 import {
     deriveThresholdProfile,
     validatePollSpec,
-    verifyClaimBearingBallotPackage,
     verifyBoardConsistency,
+    verifyClaimBearingBallotPackage,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
 ```
 
-## Use the root package when
+## What lives here
 
-- you need the stable published package identity
-- you want to verify transcript-core fixtures and run the safe election foundation
-- you need to verify supported receiver-key proofs, ballot proof records, or proof-byte-bearing claim-bearing packages
-- you want structured board, finality, manifest, first-valid, or recovery refusals
-- you want to follow the documented path without depending on private workspace packages
+- poll specification validation and canonical hash derivation
+- threshold and frozen roster profile derivation
+- lifecycle label, lifecycle transition, and action capability checks
+- board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
+- transcript-core fixture verification through the bundled Rust/WASM kernel
+- receiver-key proof, ballot proof record, and claim-bearing ballot package verification
+- aggregate derivation component verification for post-close contribution evidence
+- generated reference pages for the exported runtime functions and public types
 
-## What stays intentionally internal
+## Current limits
 
-- crypto provider wrappers
-- ballot generation, proof construction, and fixture-only proof helpers
-- local replay record, target-accepted-record, and decryption-share shell helpers
-- the Rust/WASM loader internals
-- testkit utilities
-- any future public subpath layout
+- no public subpaths are supported
+- no ballot generation or casting API is available yet
+- no proof construction API is available yet
+- no aggregation or tally evaluation API is available yet
+- no production target-bound decryption or result release API is available yet
+- reserved complete-protocol entry points fail closed with `OperationUnavailable`
 
 ## Generated reference
 
@@ -54,11 +44,11 @@ import {
     <LinkCard
         title="Generated reference"
         href="./reference/"
-        description="Browse the generated page for the current transcript-core, election foundation, and ballot privacy verification surface."
+        description="Browse the generated page for exported functions and public types."
     />
     <LinkCard
-        title="Workspace layout"
-        href="../guides/workspace-layout/"
-        description="Read the private package split and dependency rules behind the current facade."
+        title="Get started"
+        href="../guides/getting-started/"
+        description="Install the package and run the shortest current verification example."
     />
 </CardGrid>

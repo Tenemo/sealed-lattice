@@ -22,6 +22,7 @@ impl PolynomialVector {
         Ok(Self { ring, entries })
     }
 
+    #[cfg(test)]
     pub fn zero(ring: PolynomialRing, length: usize) -> CanonicalResult<Self> {
         if length == 0 {
             return Err(invalid_vector("zero vector length must be non-zero"));
@@ -44,26 +45,41 @@ impl PolynomialVector {
 
     pub fn add(&self, other: &Self) -> CanonicalResult<Self> {
         self.require_same_shape(other)?;
-        let entries = self
-            .entries
-            .iter()
-            .zip(other.entries())
-            .map(|(left, right)| self.ring.add(left, right))
-            .collect::<CanonicalResult<Vec<_>>>()?;
+        let mut entries = self.entries.clone();
+        for (output_entry, right_entry) in entries.iter_mut().zip(other.entries()) {
+            self.ring.add_assign(output_entry, right_entry)?;
+        }
 
         Self::new(self.ring, entries)
     }
 
+    pub fn add_assign(&mut self, other: &Self) -> CanonicalResult<()> {
+        self.require_same_shape(other)?;
+        for (output_entry, right_entry) in self.entries.iter_mut().zip(other.entries()) {
+            self.ring.add_assign(output_entry, right_entry)?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub fn sub(&self, other: &Self) -> CanonicalResult<Self> {
         self.require_same_shape(other)?;
-        let entries = self
-            .entries
-            .iter()
-            .zip(other.entries())
-            .map(|(left, right)| self.ring.sub(left, right))
-            .collect::<CanonicalResult<Vec<_>>>()?;
+        let mut entries = self.entries.clone();
+        for (output_entry, right_entry) in entries.iter_mut().zip(other.entries()) {
+            self.ring.sub_assign(output_entry, right_entry)?;
+        }
 
         Self::new(self.ring, entries)
+    }
+
+    pub fn sub_assign(&mut self, other: &Self) -> CanonicalResult<()> {
+        self.require_same_shape(other)?;
+        for (output_entry, right_entry) in self.entries.iter_mut().zip(other.entries()) {
+            self.ring.sub_assign(output_entry, right_entry)?;
+        }
+
+        Ok(())
     }
 
     #[cfg(test)]
@@ -161,6 +177,22 @@ mod tests {
         let difference = left.sub(&right).expect("subtraction should succeed");
 
         assert_eq!(difference.entries(), &[vec![14, 16, 1, 3]]);
+    }
+
+    #[test]
+    fn mutates_vectors_entrywise_without_changing_modular_results() {
+        let ring = PolynomialRing::new(4, 17).expect("ring should validate");
+        let mut output = PolynomialVector::new(ring, vec![vec![16, 1, 8, 9], vec![0, 10, 11, 12]])
+            .expect("output vector should validate");
+        let addend = PolynomialVector::new(ring, vec![vec![2, 16, 9, 7], vec![16, 8, 7, 6]])
+            .expect("addend vector should validate");
+        output.add_assign(&addend).expect("addition should succeed");
+        assert_eq!(output.entries(), &[vec![1, 0, 0, 16], vec![16, 1, 1, 1]]);
+
+        output
+            .sub_assign(&addend)
+            .expect("subtraction should succeed");
+        assert_eq!(output.entries(), &[vec![16, 1, 8, 9], vec![0, 10, 11, 12]]);
     }
 
     #[test]

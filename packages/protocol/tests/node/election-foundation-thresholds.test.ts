@@ -8,14 +8,14 @@ import { describe, expect, it } from 'vitest';
 import {
     deriveFrozenRosterProfile,
     deriveThresholdProfile,
-} from '../../src/index';
+} from '#packages/protocol/src/index';
 
-const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
-const invalidDynamicRosterProfileCertificateDigest = 'not-a-protocol-digest';
-const rosterDigest = 'b'.repeat(128);
+const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
+const invalidDynamicRosterProfileCertificateHash = 'not-a-protocol-hash';
+const rosterHash = 'b'.repeat(128);
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 const pollSpec = {
-    duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+    duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
     maxRosterSize: 50,
     minRosterSize: 10,
     options: ['Alpha', 'Beta'],
@@ -35,28 +35,24 @@ const pollSpec = {
 
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
-    certificateDigest: 'target-bound-certificate-digest',
+    certificateHash: 'target-bound-certificate-hash',
     cpadProfileId,
-    targetBasisDigest: 'target-basis-digest',
+    targetBasisHash: 'target-basis-hash',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
     minimumArrivalsForRobustDecode: 9,
     invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
-const retiredGenericThresholdDecryptionProfileId = [
-    'BGV-RNS',
-    'AsyncThresholdDecryption',
-    'CPAD-v1',
-].join('-');
+const retiredKllpsCpadProfileId = 'KLLPS26-AsyncLagrangeTarget-CPAD-v1';
 
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
     const profile = deriveThresholdProfile({
         casualMicroRosterAcknowledged: rosterSize < 10,
-        dynamicRosterProfileCertificateDigest:
+        dynamicRosterProfileCertificateHash:
             rosterSize >= 10 && rosterSize !== 20
-                ? dynamicRosterProfileCertificateDigest
+                ? dynamicRosterProfileCertificateHash
                 : undefined,
         rosterSize,
         targetBoundShareSelectionProfile: {
@@ -142,10 +138,10 @@ describe('election foundation threshold profiles', () => {
             releaseQuorum,
         }) => {
             const profile = deriveThresholdProfile({
-                dynamicRosterProfileCertificateDigest:
+                dynamicRosterProfileCertificateHash:
                     rosterSize === 20
                         ? undefined
-                        : dynamicRosterProfileCertificateDigest,
+                        : dynamicRosterProfileCertificateHash,
                 rosterSize,
             });
 
@@ -172,7 +168,9 @@ describe('election foundation threshold profiles', () => {
 
     it.each([...casualMicroRosterSizes, 10, 11, 16, 20, 21, 30, 40, 50])(
         'keeps threshold feasibility invariants for roster size %d',
-        expectFeasibleThresholds,
+        (rosterSize) => {
+            expectFeasibleThresholds(rosterSize);
+        },
     );
 
     it('rejects roster sizes below three', () => {
@@ -223,14 +221,14 @@ describe('election foundation threshold profiles', () => {
         expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
         expect(profile.claimBoundary).toBe('MandatoryBenchmark');
         expect(profile.claimBearing).toBe(true);
-        expect(profile.dynamicRosterProfileCertificateDigest).toBeNull();
+        expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
         expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
     });
 
     it('keeps mandatory benchmark profiles independent from dynamic roster certificate inputs', () => {
         const baselineProfile = deriveThresholdProfile({ rosterSize: 20 });
         const profileWithCertificate = deriveThresholdProfile({
-            dynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateHash,
             rosterSize: 20,
         });
 
@@ -238,13 +236,13 @@ describe('election foundation threshold profiles', () => {
 
         const baselineFrozenRosterProfile = deriveFrozenRosterProfile({
             pollSpec,
-            rosterDigest,
+            rosterHash,
             rosterSize: 20,
         });
         const frozenRosterProfileWithCertificate = deriveFrozenRosterProfile({
-            dynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateHash,
             pollSpec,
-            rosterDigest,
+            rosterHash,
             rosterSize: 20,
         });
 
@@ -253,39 +251,39 @@ describe('election foundation threshold profiles', () => {
         );
     });
 
-    it('does not carry invalid dynamic roster certificate digests into mandatory benchmark profiles', () => {
+    it('does not carry invalid dynamic roster certificate Hashes into mandatory benchmark profiles', () => {
         const profile = deriveThresholdProfile({
-            dynamicRosterProfileCertificateDigest:
-                invalidDynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateHash:
+                invalidDynamicRosterProfileCertificateHash,
             rosterSize: 20,
         });
 
         expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
         expect(profile.claimBoundary).toBe('MandatoryBenchmark');
         expect(profile.claimBearing).toBe(true);
-        expect(profile.dynamicRosterProfileCertificateDigest).toBeNull();
+        expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
 
         const frozenRosterProfile = deriveFrozenRosterProfile({
-            dynamicRosterProfileCertificateDigest:
-                invalidDynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateHash:
+                invalidDynamicRosterProfileCertificateHash,
             pollSpec,
-            rosterDigest,
+            rosterHash,
             rosterSize: 20,
         });
 
         expect(
-            frozenRosterProfile.dynamicRosterProfileCertificateDigest,
+            frozenRosterProfile.dynamicRosterProfileCertificateHash,
         ).toBeNull();
         expect(
             frozenRosterProfile.thresholdProfile
-                .dynamicRosterProfileCertificateDigest,
+                .dynamicRosterProfileCertificateHash,
         ).toBeNull();
         expect(() =>
             deriveFrozenRosterProfile({
-                dynamicRosterProfileCertificateDigest:
-                    invalidDynamicRosterProfileCertificateDigest,
+                dynamicRosterProfileCertificateHash:
+                    invalidDynamicRosterProfileCertificateHash,
                 pollSpec,
-                rosterDigest,
+                rosterHash,
                 rosterSize: 21,
             }),
         ).toThrow(
@@ -297,7 +295,7 @@ describe('election foundation threshold profiles', () => {
         'marks roster size %d as a certified dynamic profile',
         (rosterSize) => {
             const profile = deriveThresholdProfile({
-                dynamicRosterProfileCertificateDigest,
+                dynamicRosterProfileCertificateHash,
                 rosterSize,
             });
 
@@ -339,7 +337,7 @@ describe('election foundation threshold profiles', () => {
             heBackendCorruptionModel: {
                 kind: 'CertifiedCustom',
                 backendCorruptionBound: 8,
-                certificateDigest: 'certified-profile-digest',
+                certificateHash: 'certified-profile-hash',
             },
         });
 
@@ -392,7 +390,7 @@ describe('election foundation threshold profiles', () => {
                 rosterSize: 20,
                 targetBoundShareSelectionProfile: {
                     ...targetBoundShareSelectionProfile,
-                    cpadProfileId: retiredGenericThresholdDecryptionProfileId,
+                    cpadProfileId: retiredKllpsCpadProfileId,
                 },
             }),
         ).toThrow(
@@ -404,11 +402,11 @@ describe('election foundation threshold profiles', () => {
                 rosterSize: 20,
                 targetBoundShareSelectionProfile: {
                     ...targetBoundShareSelectionProfile,
-                    targetBasisDigest: '',
+                    targetBasisHash: '',
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile requires a target-basis digest.',
+            'Target-bound share-selection profile requires a target-basis hash.',
         );
     });
 
@@ -430,11 +428,11 @@ describe('election foundation threshold profiles', () => {
                 rosterSize: 20,
                 targetBoundShareSelectionProfile: {
                     ...targetBoundShareSelectionProfile,
-                    certificateDigest: '',
+                    certificateHash: '',
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile requires a certificate digest.',
+            'Target-bound share-selection profile requires a certificate hash.',
         );
 
         expect(() =>

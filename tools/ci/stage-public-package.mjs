@@ -7,7 +7,7 @@ import {
     writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
  * @typedef {object} StagePublicPackageInput
@@ -25,11 +25,6 @@ import { fileURLToPath } from 'node:url';
  * @property {string} packageDirectory
  * @property {string} packageJsonPath
  * @property {string} readmePath
- */
-
-/**
- * @typedef {object} StagePublicPackageArguments
- * @property {string} destinationPath
  */
 
 /** @type {string} */
@@ -56,12 +51,13 @@ export const getRootReadmePath = (projectRoot = repoRoot) =>
 export const getRootPackageJsonPath = (projectRoot = repoRoot) =>
     path.resolve(projectRoot, 'package.json');
 
-const requiredPackageEntries = [
-    'package.json',
-    'LICENSE',
-    'public-surface.json',
-    'dist',
-];
+const requiredPackageEntries = ['package.json', 'LICENSE', 'dist'];
+
+/**
+ * @typedef {object} StagePublicPackageArguments
+ * @property {string} destinationPath
+ * @property {string | undefined} projectRoot
+ */
 
 /**
  * @param {string} packageJsonText
@@ -103,6 +99,44 @@ export const readPublicPackageMetadata = async (projectRoot = repoRoot) => {
 };
 
 /**
+ * @param {readonly string[]} args
+ * @param {string} optionName
+ * @returns {string | undefined}
+ */
+const readOptionValue = (args, optionName) => {
+    const optionIndex = args.indexOf(optionName);
+    if (optionIndex === -1) {
+        return undefined;
+    }
+
+    const optionValue = args[optionIndex + 1];
+    if (optionValue === undefined || optionValue.startsWith('--')) {
+        throw new Error(`${optionName} requires a value.`);
+    }
+
+    return optionValue;
+};
+
+/**
+ * @param {readonly string[]} args
+ * @returns {StagePublicPackageArguments}
+ */
+export const parseStagePublicPackageArguments = (args) => {
+    const destinationPath = readOptionValue(args, '--out');
+
+    if (destinationPath === undefined) {
+        throw new Error(
+            'Usage: node ./tools/ci/stage-public-package.mjs --out <directory> [--project-root <directory>]',
+        );
+    }
+
+    return {
+        destinationPath,
+        projectRoot: readOptionValue(args, '--project-root'),
+    };
+};
+
+/**
  * @param {string} destinationPath
  * @returns {Promise<void>}
  */
@@ -124,7 +158,7 @@ export const stagePublicPackage = async (input) => {
     const { destinationPath, projectRoot = repoRoot } = input;
 
     if (typeof destinationPath !== 'string' || destinationPath.length === 0) {
-        throw new Error('Public package staging requires --out');
+        throw new Error('Public package staging requires a destination path.');
     }
 
     const publicPackageDirectory = getPublicPackageDirectory(projectRoot);
@@ -168,36 +202,15 @@ export const stagePublicPackage = async (input) => {
     };
 };
 
-/**
- * @param {string[]} commandLineArguments
- * @returns {StagePublicPackageArguments}
- */
-export const parseStagePublicPackageArguments = (commandLineArguments) => {
-    const outputIndex = commandLineArguments.indexOf('--out');
-    if (outputIndex === -1) {
-        throw new Error('Public package staging requires --out');
-    }
+const scriptEntryPoint = process.argv[1];
+const isMainModule =
+    scriptEntryPoint !== undefined &&
+    import.meta.url === pathToFileURL(scriptEntryPoint).href;
 
-    const destinationPath = commandLineArguments[outputIndex + 1];
-    if (destinationPath === undefined || destinationPath.length === 0) {
-        throw new Error('Public package staging requires --out');
-    }
-
-    return { destinationPath };
-};
-
-/**
- * @returns {Promise<void>}
- */
-const main = async () => {
-    const { destinationPath } = parseStagePublicPackageArguments(
-        process.argv.slice(2),
+if (isMainModule) {
+    const stagedPackage = await stagePublicPackage(
+        parseStagePublicPackageArguments(process.argv.slice(2)),
     );
-    const { packageDirectory } = await stagePublicPackage({ destinationPath });
 
-    console.log(packageDirectory);
-};
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    void main();
+    console.log(`Staged public package: ${stagedPackage.packageDirectory}`);
 }

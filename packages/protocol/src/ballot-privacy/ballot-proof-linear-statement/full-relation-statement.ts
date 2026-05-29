@@ -1,8 +1,5 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
-import type {
-    BallotProofStatement,
-    ProtocolDigest,
-} from '@sealed-lattice/types';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import type { BallotProofStatement, ProtocolHash } from '@sealed-lattice/types';
 
 import {
     type BallotPrivacyBackendProofComponentId,
@@ -22,7 +19,7 @@ import {
 import { secretStateForStructuredReceiverEncryptionStatement } from './receiver-encryption-secret-state.js';
 import type {
     BallotProofComponentBundleStatement,
-    BallotProofComponentProofStatementPlan,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofComponentStatement,
     BallotProofFullRelationLinearProofStatement,
     BallotProofRecordGenerationSecretState,
@@ -35,10 +32,10 @@ import {
     receiverShareRepresentativeBitLength,
 } from './statement-contracts.js';
 import {
-    deriveLinearStatementDigest,
-    deriveStatementMatrixDigest,
-    deriveTargetVectorDigest,
-} from './statement-digests.js';
+    deriveLinearStatementHash,
+    deriveStatementMatrixHash,
+    deriveTargetVectorHash,
+} from './statement-hashes.js';
 import {
     constantPolynomial,
     decimalBigInt,
@@ -78,9 +75,9 @@ const coefficientModulusFromParameterSet = (
         `${label}.coefficientModulus`,
     );
 
-const requireMatchingDigest = (input: {
-    readonly actual: ProtocolDigest | undefined;
-    readonly expected: ProtocolDigest;
+const requireMatchingHash = (input: {
+    readonly actual: ProtocolHash | undefined;
+    readonly expected: ProtocolHash;
     readonly label: string;
 }): void => {
     if (input.actual !== input.expected) {
@@ -94,7 +91,7 @@ const assertReceiverReferencesMatch = (input: {
         readonly receiverRosterPosition: number;
         readonly [key: string]: unknown;
     }[];
-    readonly digestFieldName: string;
+    readonly hashFieldName: string;
     readonly label: string;
     readonly statementReferences: readonly {
         readonly receiverIdentity: string;
@@ -123,11 +120,11 @@ const assertReceiverReferencesMatch = (input: {
             );
         }
         if (
-            statementReference[input.digestFieldName] !==
-            contextReference[input.digestFieldName]
+            statementReference[input.hashFieldName] !==
+            contextReference[input.hashFieldName]
         ) {
             throw new Error(
-                `${input.label} digest does not match the relation public context.`,
+                `${input.label} hash does not match the relation public context.`,
             );
         }
     }
@@ -140,95 +137,95 @@ const assertBallotStatementMatchesPublicContext = (input: {
 }): void => {
     const statement = input.statement;
     const publicContext = input.publicContext;
-    requireMatchingDigest({
-        actual: publicContext.ballotProofStatementDigest,
-        expected: statement.ballotProofStatementDigest,
-        label: 'Relation public context ballot proof statement digest',
+    requireMatchingHash({
+        actual: publicContext.ballotProofStatementHash,
+        expected: statement.ballotProofStatementHash,
+        label: 'Relation public context ballot proof statement hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.manifestDigest,
-        expected: statement.manifestDigest,
-        label: 'Manifest digest',
+    requireMatchingHash({
+        actual: publicContext.manifestHash,
+        expected: statement.manifestHash,
+        label: 'Manifest hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.rosterDigest,
-        expected: statement.rosterDigest,
-        label: 'Roster digest',
+    requireMatchingHash({
+        actual: publicContext.rosterHash,
+        expected: statement.rosterHash,
+        label: 'Roster hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.pollSpecDigest,
-        expected: statement.pollSpecDigest,
-        label: 'Poll spec digest',
+    requireMatchingHash({
+        actual: publicContext.pollSpecHash,
+        expected: statement.pollSpecHash,
+        label: 'Poll spec hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.actionContextDigest,
-        expected: statement.actionContextDigest,
-        label: 'Action context digest',
+    requireMatchingHash({
+        actual: publicContext.actionContextHash,
+        expected: statement.actionContextHash,
+        label: 'Action context hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.rosterExternalAcceptanceDigest,
-        expected: statement.rosterExternalAcceptanceDigest,
-        label: 'Roster acceptance digest',
+    requireMatchingHash({
+        actual: publicContext.rosterExternalAcceptanceHash,
+        expected: statement.rosterExternalAcceptanceHash,
+        label: 'Roster acceptance hash',
     });
-    requireMatchingDigest({
+    requireMatchingHash({
         actual: publicContext.receiverKeyRoot,
         expected: statement.receiverKeyRoot,
         label: 'Receiver key root',
     });
-    requireMatchingDigest({
+    requireMatchingHash({
         actual: publicContext.receiverKeyProofRoot,
         expected: statement.receiverKeyProofRoot,
         label: 'Receiver key proof root',
     });
-    requireMatchingDigest({
-        actual: publicContext.shareCommitmentProfileDigest,
-        expected: statement.shareCommitmentProfileDigest,
-        label: 'Share commitment profile digest',
+    requireMatchingHash({
+        actual: publicContext.shareCommitmentProfileHash,
+        expected: statement.shareCommitmentProfileHash,
+        label: 'Share commitment profile hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.receiverEncryptionProfileDigest,
-        expected: statement.receiverEncryptionProfileDigest,
-        label: 'Receiver encryption profile digest',
+    requireMatchingHash({
+        actual: publicContext.receiverEncryptionProfileHash,
+        expected: statement.receiverEncryptionProfileHash,
+        label: 'Receiver encryption profile hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.ballotProofProfileDigest,
-        expected: statement.ballotProofProfileDigest,
-        label: 'Ballot proof profile digest',
+    requireMatchingHash({
+        actual: publicContext.ballotProofProfileHash,
+        expected: statement.ballotProofProfileHash,
+        label: 'Ballot proof profile hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.scoreMembershipProfileDigest,
-        expected: statement.scoreMembershipProfileDigest,
-        label: 'Score membership profile digest',
+    requireMatchingHash({
+        actual: publicContext.scoreMembershipProfileHash,
+        expected: statement.scoreMembershipProfileHash,
+        label: 'Score membership profile hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.ballotScoreEncodingProfileDigest,
-        expected: statement.ballotScoreEncodingProfileDigest,
-        label: 'Ballot score encoding profile digest',
+    requireMatchingHash({
+        actual: publicContext.ballotScoreEncodingProfileHash,
+        expected: statement.ballotScoreEncodingProfileHash,
+        label: 'Ballot score encoding profile hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.ballotShareLayoutProfileDigest,
-        expected: statement.ballotShareLayoutProfileDigest,
-        label: 'Ballot share layout profile digest',
+    requireMatchingHash({
+        actual: publicContext.ballotShareLayoutProfileHash,
+        expected: statement.ballotShareLayoutProfileHash,
+        label: 'Ballot share layout profile hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.aggregateInputEncodingProfileDigest,
-        expected: statement.aggregateInputEncodingProfileDigest,
-        label: 'Aggregate input encoding profile digest',
+    requireMatchingHash({
+        actual: publicContext.aggregateInputEncodingProfileHash,
+        expected: statement.aggregateInputEncodingProfileHash,
+        label: 'Aggregate input encoding profile hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.encodedShareVectorLayoutDigest,
-        expected: statement.encodedShareVectorLayoutDigest,
-        label: 'Encoded share vector layout digest',
+    requireMatchingHash({
+        actual: publicContext.encodedShareVectorLayoutHash,
+        expected: statement.encodedShareVectorLayoutHash,
+        label: 'Encoded share vector layout hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.encodedAggregateLayoutDigest,
-        expected: statement.encodedAggregateLayoutDigest,
-        label: 'Encoded aggregate layout digest',
+    requireMatchingHash({
+        actual: publicContext.encodedAggregateLayoutHash,
+        expected: statement.encodedAggregateLayoutHash,
+        label: 'Encoded aggregate layout hash',
     });
-    requireMatchingDigest({
-        actual: publicContext.shareCommitmentMessageBoundCertDigest,
-        expected: statement.shareCommitmentMessageBoundCertDigest,
-        label: 'Share commitment message-bound certificate digest',
+    requireMatchingHash({
+        actual: publicContext.shareCommitmentMessageBoundCertHash,
+        expected: statement.shareCommitmentMessageBoundCertHash,
+        label: 'Share commitment message-bound certificate hash',
     });
     if (statement.optionCount !== input.relationInput.optionCount) {
         throw new Error(
@@ -242,19 +239,19 @@ const assertBallotStatementMatchesPublicContext = (input: {
     }
     assertReceiverReferencesMatch({
         contextReferences: publicContext.receiverPublicKeys,
-        digestFieldName: 'receiverPublicKeyDigest',
+        hashFieldName: 'receiverPublicKeyHash',
         label: 'Receiver public-key',
         statementReferences: statement.receiverPublicKeys,
     });
     assertReceiverReferencesMatch({
         contextReferences: publicContext.receiverPayloads,
-        digestFieldName: 'receiverPayloadDigest',
+        hashFieldName: 'receiverPayloadHash',
         label: 'Receiver payload',
         statementReferences: statement.receiverPayloads,
     });
     assertReceiverReferencesMatch({
         contextReferences: publicContext.shareCommitments,
-        digestFieldName: 'shareCommitmentDigest',
+        hashFieldName: 'shareCommitmentHash',
         label: 'Share commitment',
         statementReferences: statement.shareCommitments,
     });
@@ -306,24 +303,24 @@ const assertFullReceiverPayloadsAreExplicit = (input: {
     }
 };
 
-const deriveFullRelationBindingDigest = (input: {
+const deriveFullRelationBindingHash = (input: {
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
     readonly componentBundleStatement: BallotProofComponentBundleStatement;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        componentBundleStatementDigest:
-            input.componentBundleStatement.componentBundleStatementDigest,
-        proofComponentsDigest:
-            input.loweredStatement.backendStatement.proofComponentsDigest,
+}): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        componentBundleStatementHash:
+            input.componentBundleStatement.componentBundleStatementHash,
+        proofComponentsHash:
+            input.loweredStatement.backendStatement.proofComponentsHash,
         purpose: 'ballot-proof-full-relation-binding-v1',
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
     });
 
 const fullRelationBindingWitnessScalar = (
-    relationBindingDigest: ProtocolDigest,
-): bigint => 1n + (BigInt(`0x${relationBindingDigest.slice(0, 16)}`) % 127n);
+    relationBindingHash: ProtocolHash,
+): bigint => 1n + (BigInt(`0x${relationBindingHash.slice(0, 16)}`) % 127n);
 
 const buildFullRelationLinearProofStatement = (input: {
     readonly componentBundleStatement: BallotProofComponentBundleStatement;
@@ -346,10 +343,8 @@ const buildFullRelationLinearProofStatement = (input: {
         input.parameterSet,
         'ballot proof parameter set',
     );
-    const relationBindingDigest = deriveFullRelationBindingDigest(input);
-    const bindingScalar = fullRelationBindingWitnessScalar(
-        relationBindingDigest,
-    );
+    const relationBindingHash = deriveFullRelationBindingHash(input);
+    const bindingScalar = fullRelationBindingWitnessScalar(relationBindingHash);
     const statementMatrixCoefficients = [
         [
             constantPolynomial({
@@ -366,53 +361,51 @@ const buildFullRelationLinearProofStatement = (input: {
             sourceRingDegree,
         }),
     ];
-    const statementMatrixDigest = deriveStatementMatrixDigest(
+    const statementMatrixHash = deriveStatementMatrixHash(
         statementMatrixCoefficients,
     );
-    const targetVectorDigest = deriveTargetVectorDigest(
-        targetVectorCoefficients,
-    );
+    const targetVectorHash = deriveTargetVectorHash(targetVectorCoefficients);
     const statementPayload: Omit<
         BallotProofFullRelationLinearProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.loweredStatement.publicContext.ballotProofStatementDigest ===
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.loweredStatement.publicContext.ballotProofStatementHash ===
         undefined
             ? {}
             : {
-                  ballotProofStatementDigest:
+                  ballotProofStatementHash:
                       input.loweredStatement.publicContext
-                          .ballotProofStatementDigest,
+                          .ballotProofStatementHash,
               }),
         coefficientModulus: coefficientModulus.toString(),
-        componentBundleStatementDigest:
-            input.componentBundleStatement.componentBundleStatementDigest,
+        componentBundleStatementHash:
+            input.componentBundleStatement.componentBundleStatementHash,
         objectType: 'BallotProofLinearProofStatement',
         objectVersion: 1,
         parameterProfileId: fullBallotProofParameterProfileId,
         projectionCoverage: 'full-encoded-score-ballot-relation',
         relation: linearProofRelation,
-        relationBindingDigest,
+        relationBindingHash,
         relationBindingKind: 'component-bundle-and-lowered-relation',
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
         ringDegree: sourceRingDegree,
         statementColumns: 1,
         statementMatrixCoefficients,
-        statementMatrixDigest,
+        statementMatrixHash,
         statementRows: 1,
         matrixCoefficientRepresentation: 'canonicalUnsignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetVectorCoefficients,
-        targetVectorDigest,
+        targetVectorHash,
         witnessL2BoundSquared,
     };
 
     return {
         linearStatement: {
             ...statementPayload,
-            statementDigest: deriveLinearStatementDigest(statementPayload),
+            statementHash: deriveLinearStatementHash(statementPayload),
         },
         secretState: {
             sourceWitnessCoefficients: [
@@ -440,16 +433,16 @@ const componentStatementById = (
         ),
     );
 
-const componentPlanById = (
-    componentStatementPlans: readonly BallotProofComponentProofStatementPlan[],
+const componentDescriptorById = (
+    componentStatementDescriptors: readonly BallotProofComponentProofStatementDescriptor[],
 ): ReadonlyMap<
     BallotPrivacyBackendProofComponentId,
-    BallotProofComponentProofStatementPlan
+    BallotProofComponentProofStatementDescriptor
 > =>
     new Map(
-        componentStatementPlans.map((componentStatementPlan) => [
-            componentStatementPlan.componentId,
-            componentStatementPlan,
+        componentStatementDescriptors.map((componentStatementDescriptor) => [
+            componentStatementDescriptor.componentId,
+            componentStatementDescriptor,
         ]),
     );
 
@@ -472,23 +465,23 @@ const requiredComponentStatement = (input: {
     return componentStatement;
 };
 
-const requiredComponentStatementPlan = (input: {
+const requiredComponentStatementDescriptor = (input: {
     readonly componentId: BallotPrivacyBackendProofComponentId;
-    readonly componentPlansById: ReadonlyMap<
+    readonly componentDescriptorsById: ReadonlyMap<
         BallotPrivacyBackendProofComponentId,
-        BallotProofComponentProofStatementPlan
+        BallotProofComponentProofStatementDescriptor
     >;
-}): BallotProofComponentProofStatementPlan => {
-    const componentStatementPlan = input.componentPlansById.get(
+}): BallotProofComponentProofStatementDescriptor => {
+    const componentStatementDescriptor = input.componentDescriptorsById.get(
         input.componentId,
     );
-    if (componentStatementPlan === undefined) {
+    if (componentStatementDescriptor === undefined) {
         throw new Error(
-            `Component proof statement plan ${input.componentId} is missing from the full bundle.`,
+            `Component proof statement descriptor ${input.componentId} is missing from the full bundle.`,
         );
     }
 
-    return componentStatementPlan;
+    return componentStatementDescriptor;
 };
 
 export {
@@ -499,7 +492,7 @@ export {
     buildFullRelationLinearProofStatement,
     secretStateForStructuredReceiverEncryptionStatement,
     componentStatementById,
-    componentPlanById,
+    componentDescriptorById,
     requiredComponentStatement,
-    requiredComponentStatementPlan,
+    requiredComponentStatementDescriptor,
 };

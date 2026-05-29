@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     ReceiverEncryptionProfile,
     ReceiverEncryptionPublicKey,
@@ -7,8 +7,8 @@ import type {
     ShareCommitmentProfile,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import { createReceiverPayloadShell } from '../objects.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     BallotPrivacyRandomnessSource,
@@ -31,7 +31,7 @@ import {
     sampleCenteredBinomialVector,
 } from './primitive-contracts.js';
 import {
-    deriveReceiverKeyMaterialDigest,
+    deriveReceiverKeyMaterialHash,
     encodePayloadPlaintextBits,
     encodePlaintextChunkPolynomial,
     validateReceiverPublicKeyMaterial,
@@ -93,17 +93,15 @@ export const encryptReceiverPayload = (input: {
     readonly witness?: ReceiverEncryptionWitness;
 }): ReceiverPayloadEncryptionResult => {
     validateReceiverPublicKeyMaterial(input.publicKeyMaterial);
-    const expectedKeyMaterialDigest = deriveReceiverKeyMaterialDigest({
+    const expectedKeyMaterialHash = deriveReceiverKeyMaterialHash({
         publicKeyVector: input.publicKeyMaterial.publicKeyVector,
-        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        publicMatrixSeedHash: input.publicKeyMaterial.publicMatrixSeedHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
     });
-    if (
-        input.receiverPublicKey.keyMaterialDigest !== expectedKeyMaterialDigest
-    ) {
+    if (input.receiverPublicKey.keyMaterialHash !== expectedKeyMaterialHash) {
         throw new RangeError(
-            'Receiver public-key material does not match the public key digest.',
+            'Receiver public-key material does not match the public key hash.',
         );
     }
     if (
@@ -130,12 +128,12 @@ export const encryptReceiverPayload = (input: {
         sampleReceiverEncryptionWitness(
             randomnessSource,
             {
-                ballotPackageContextDigest:
-                    input.plaintext.ballotPackageContextDigest,
+                ballotPackageContextHash:
+                    input.plaintext.ballotPackageContextHash,
                 receiverIdentity: input.plaintext.receiverIdentity,
                 receiverRosterPosition: input.plaintext.receiverRosterPosition,
-                receiverPublicKeyDigest:
-                    input.receiverPublicKey.receiverPublicKeyDigest,
+                receiverPublicKeyHash:
+                    input.receiverPublicKey.receiverPublicKeyHash,
             },
             chunkCount,
         );
@@ -145,8 +143,8 @@ export const encryptReceiverPayload = (input: {
         );
     }
     const publicMatrix = deriveReceiverPublicMatrix(
-        input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
-        input.publicKeyMaterial.publicMatrixSeedDigest,
+        input.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        input.publicKeyMaterial.publicMatrixSeedHash,
     );
     const ciphertextChunks = Array.from(
         { length: chunkCount },
@@ -194,39 +192,38 @@ export const encryptReceiverPayload = (input: {
             };
         },
     );
-    const ciphertextBodyDigest = deriveProtocolDigest(
+    const ciphertextBodyHash = deriveProtocolHash(
         'ReceiverPayloadCiphertextRoot',
         {
             ciphertextChunks,
             plaintextBitLength: plaintextBits.length,
-            receiverEncryptionProfileDigest:
-                input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+            receiverEncryptionProfileHash:
+                input.receiverEncryptionProfile.receiverEncryptionProfileHash,
         },
     );
-    const payloadContextDigest = deriveProtocolDigest('ReceiverPayloadDigest', {
-        ballotPackageContextDigest: input.plaintext.ballotPackageContextDigest,
+    const payloadContextHash = deriveProtocolHash('ReceiverPayloadHash', {
+        ballotPackageContextHash: input.plaintext.ballotPackageContextHash,
         ceremonyId: input.plaintext.ceremonyId,
-        manifestDigest: input.plaintext.manifestDigest,
-        pollSpecDigest: input.plaintext.pollSpecDigest,
+        manifestHash: input.plaintext.manifestHash,
+        pollSpecHash: input.plaintext.pollSpecHash,
         receiverIdentity: input.plaintext.receiverIdentity,
         receiverRosterPosition: input.plaintext.receiverRosterPosition,
-        rosterDigest: input.plaintext.rosterDigest,
-        voterIdentityDigest: input.plaintext.voterIdentityDigest,
+        rosterHash: input.plaintext.rosterHash,
+        voterIdentityHash: input.plaintext.voterIdentityHash,
     });
     const receiverPayload = createReceiverPayloadShell({
         ceremonyId: input.plaintext.ceremonyId,
-        manifestDigest: input.plaintext.manifestDigest,
-        rosterDigest: input.plaintext.rosterDigest,
-        pollSpecDigest: input.plaintext.pollSpecDigest,
-        voterIdentityDigest: input.plaintext.voterIdentityDigest,
+        manifestHash: input.plaintext.manifestHash,
+        rosterHash: input.plaintext.rosterHash,
+        pollSpecHash: input.plaintext.pollSpecHash,
+        voterIdentityHash: input.plaintext.voterIdentityHash,
         receiverIdentity: input.plaintext.receiverIdentity,
         receiverRosterPosition: input.plaintext.receiverRosterPosition,
-        receiverPublicKeyDigest:
-            input.receiverPublicKey.receiverPublicKeyDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
-        payloadContextDigest,
-        ciphertextBodyDigest,
+        receiverPublicKeyHash: input.receiverPublicKey.receiverPublicKeyHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        payloadContextHash,
+        ciphertextBodyHash,
     });
 
     return {
@@ -258,14 +255,14 @@ export const verifyReceiverPayloadWitness = (input: {
     const refusedObjects: RefusalRecord[] = [];
 
     if (
-        recomputedPayload.receiverPayload.receiverPayloadDigest !==
-        input.expectedReceiverPayload.receiverPayloadDigest
+        recomputedPayload.receiverPayload.receiverPayloadHash !==
+        input.expectedReceiverPayload.receiverPayloadHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Receiver payload witness does not reproduce the expected encrypted payload digest.',
-                input.expectedReceiverPayload.receiverPayloadDigest,
+                'Receiver payload witness does not reproduce the expected encrypted payload hash.',
+                input.expectedReceiverPayload.receiverPayloadHash,
             ),
         );
     }
@@ -280,7 +277,7 @@ export const verifyReceiverPayloadWitness = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Receiver payload witness does not reproduce the expected ciphertext chunks.',
-                input.expectedReceiverPayload.receiverPayloadDigest,
+                input.expectedReceiverPayload.receiverPayloadHash,
             ),
         );
     }

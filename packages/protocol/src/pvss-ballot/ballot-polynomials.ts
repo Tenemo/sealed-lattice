@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolDigest,
+    deriveProtocolHash,
     hash512Hex,
 } from '@sealed-lattice/crypto';
 import type {
@@ -27,10 +27,10 @@ const textEncoder = new TextEncoder();
 const coefficientDerivationDomain =
     'sealed-lattice-internal/pvss-ballot-fixture-coefficient-v1';
 
-const deriveFieldElementFromDigest = (digestHex: string): FieldElement => {
-    const digestValue = BigInt(`0x${digestHex}`);
+const deriveFieldElementFromHash = (hashHex: string): FieldElement => {
+    const hashValue = BigInt(`0x${hashHex}`);
 
-    return Number(digestValue % BigInt(fieldModulus));
+    return Number(hashValue % BigInt(fieldModulus));
 };
 
 const deriveDeterministicCoefficient = (
@@ -38,18 +38,17 @@ const deriveDeterministicCoefficient = (
     optionIndex: number,
     coefficientIndex: number,
 ): FieldElement =>
-    deriveFieldElementFromDigest(
+    deriveFieldElementFromHash(
         hash512Hex(coefficientDerivationDomain, [
             textEncoder.encode(
                 canonicalJson({
                     ceremonyId: input.ceremonyId,
-                    duplicateBallotPolicyDigest:
-                        input.duplicateBallotPolicyDigest,
-                    electionManifestDigest: input.electionManifestDigest,
+                    duplicateBallotPolicyHash: input.duplicateBallotPolicyHash,
+                    electionManifestHash: input.electionManifestHash,
                     fixtureEntropy: input.fixtureEntropy,
-                    rosterDigest: input.rosterDigest,
-                    pollSpecDigest: input.pollSpecDigest,
-                    thresholdProfileDigest: input.thresholdProfileDigest,
+                    rosterHash: input.rosterHash,
+                    pollSpecHash: input.pollSpecHash,
+                    thresholdProfileHash: input.thresholdProfileHash,
                     voterIdentity: input.voterIdentity,
                     voterRosterPosition: input.voterRosterPosition,
                     optionIndex,
@@ -59,10 +58,10 @@ const deriveDeterministicCoefficient = (
         ]),
     );
 
-export const deriveBallotPolynomialSetDigest = (
-    polynomialSet: Omit<BallotPolynomialSet, 'ballotPolynomialSetDigest'>,
+export const deriveBallotPolynomialSetHash = (
+    polynomialSet: Omit<BallotPolynomialSet, 'ballotPolynomialSetHash'>,
 ): string =>
-    deriveProtocolDigest('BallotPolynomialSetDigest', {
+    deriveProtocolHash('BallotPolynomialSetHash', {
         objectType: 'BallotPolynomialSet',
         normalizedBallot: polynomialSet.normalizedBallot,
         optionPolynomials: polynomialSet.optionPolynomials,
@@ -141,7 +140,7 @@ export const deriveBallotPolynomialSet = (
 
     return {
         ...polynomialPayload,
-        ballotPolynomialSetDigest:
-            deriveBallotPolynomialSetDigest(polynomialPayload),
+        ballotPolynomialSetHash:
+            deriveBallotPolynomialSetHash(polynomialPayload),
     };
 };

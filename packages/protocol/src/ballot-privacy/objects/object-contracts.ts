@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotPrivacyProofBackendStatus,
     BallotPrivacyRosterProfileEvidence,
@@ -8,7 +8,7 @@ import type {
     BallotProofRecord,
     BallotProofStatement,
     ClaimBearingBallotPackage,
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverEncryptionPublicKey,
     ReceiverKeyProof,
     ReceiverKeyProofRootEvidence,
@@ -17,62 +17,62 @@ import type {
     ShareCommitment,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import {
     shareCommitmentModuleDegree,
     shareCommitmentModuleRank,
     shareCommitmentModulus,
 } from '../protocol-parameters.js';
+import { createRefusal } from '../verification-helpers.js';
 
 type ReceiverEncryptionPublicKeyPayload = Omit<
     ReceiverEncryptionPublicKey,
-    'receiverPublicKeyDigest'
+    'receiverPublicKeyHash'
 >;
 
 type ReceiverKeyProofPayload = Omit<ReceiverKeyProof, 'receiverKeyProofRoot'>;
 
 type ReceiverKeyProofRootEvidencePayload = Omit<
     ReceiverKeyProofRootEvidence,
-    'receiverKeyProofRootEvidenceDigest'
+    'receiverKeyProofRootEvidenceHash'
 >;
 
 type ReceiverPayloadCiphertextPayload = Pick<
     ReceiverPayload,
     | 'ceremonyId'
-    | 'manifestDigest'
-    | 'payloadContextDigest'
-    | 'receiverEncryptionProfileDigest'
+    | 'manifestHash'
+    | 'payloadContextHash'
+    | 'receiverEncryptionProfileHash'
     | 'receiverIdentity'
-    | 'receiverPublicKeyDigest'
+    | 'receiverPublicKeyHash'
     | 'receiverRosterPosition'
-    | 'ciphertextBodyDigest'
+    | 'ciphertextBodyHash'
 >;
 
-type ReceiverPayloadPayload = Omit<ReceiverPayload, 'receiverPayloadDigest'>;
+type ReceiverPayloadPayload = Omit<ReceiverPayload, 'receiverPayloadHash'>;
 
-type ShareCommitmentPayload = Omit<ShareCommitment, 'shareCommitmentDigest'>;
+type ShareCommitmentPayload = Omit<ShareCommitment, 'shareCommitmentHash'>;
 
 type BallotProofStatementPayload = Omit<
     BallotProofStatement,
-    'ballotProofStatementDigest'
+    'ballotProofStatementHash'
 >;
 
 type BallotProofRecordPayload = Omit<
     BallotProofRecord,
-    'ballotProofRecordDigest'
+    'ballotProofRecordHash'
 >;
 
 type BallotPrivacyRosterProfileEvidencePayload = Omit<
     BallotPrivacyRosterProfileEvidence,
-    'rosterProfileEvidenceDigest'
+    'rosterProfileEvidenceHash'
 >;
 
-type ScopedRelationBearingBallotPackageDigestPayload = {
+type ScopedRelationBearingBallotPackageHashPayload = {
     readonly objectType: 'ClaimBearingBallotPackage';
     readonly objectVersion: 1;
     readonly ballotProofStatement: Omit<
         BallotProofStatementPayload,
-        'ballotPackageDigest'
+        'ballotPackageHash'
     >;
     readonly receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidence;
     readonly receiverPayloads: readonly ReceiverPayload[];
@@ -81,17 +81,17 @@ type ScopedRelationBearingBallotPackageDigestPayload = {
 
 type BallotProofComponentProofRecordPayload = Omit<
     BallotProofComponentProofRecord,
-    'componentProofRecordDigest'
+    'componentProofRecordHash'
 >;
 
 type BallotProofComponentProofBundlePayload = Omit<
     BallotProofComponentProofBundle,
-    'componentProofBundleDigest'
+    'componentProofBundleHash'
 >;
 
 type ReceiverEncryptionPublicKeyInput = Omit<
     ReceiverEncryptionPublicKey,
-    'objectType' | 'objectVersion' | 'receiverPublicKeyDigest'
+    'objectType' | 'objectVersion' | 'receiverPublicKeyHash'
 >;
 
 type ReceiverKeyProofInput = Omit<
@@ -101,7 +101,7 @@ type ReceiverKeyProofInput = Omit<
 
 type ReceiverKeyProofRootEvidenceInput = Omit<
     ReceiverKeyProofRootEvidence,
-    'objectType' | 'objectVersion' | 'receiverKeyProofRootEvidenceDigest'
+    'objectType' | 'objectVersion' | 'receiverKeyProofRootEvidenceHash'
 >;
 
 type ReceiverPayloadInput = Omit<
@@ -109,17 +109,17 @@ type ReceiverPayloadInput = Omit<
     | 'objectType'
     | 'objectVersion'
     | 'receiverPayloadCiphertextRoot'
-    | 'receiverPayloadDigest'
+    | 'receiverPayloadHash'
 >;
 
 type ShareCommitmentInput = Omit<
     ShareCommitment,
-    'objectType' | 'objectVersion' | 'shareCommitmentDigest'
+    'objectType' | 'objectVersion' | 'shareCommitmentHash'
 >;
 
 export type BallotProofComponentProofVerificationInput = {
     readonly componentId: BallotProofComponentId;
-    readonly componentProofStatementDigest: ProtocolDigest;
+    readonly componentProofStatementHash: ProtocolHash;
     readonly proofBytesHex: string;
     readonly proofEncoding: unknown;
     readonly proofParameterSet: unknown;
@@ -129,9 +129,9 @@ export type BallotProofComponentProofVerificationInput = {
         | 'sparse-polynomial-matrix-linear-proof-v1'
         | 'structured-module-sis-share-commitment-v1'
         | 'structured-module-lwe-linear-proof-v1'
-        | 'public-zero-witness-binding-check-v1';
+        | 'public-binding-check-only-v1';
     readonly publicRandomnessHex: string;
-    readonly statementDigest: ProtocolDigest;
+    readonly statementHash: ProtocolHash;
 };
 
 type UnknownObject = Readonly<Record<string, unknown>>;
@@ -145,7 +145,7 @@ type ScopedRelationBearingBallotPackageVerificationShell =
 const unavailableProofBackendMessage =
     'The pure TypeScript protocol shell does not verify ballot privacy proof bytes or accept scoped relation package claims. Use the packaged Rust/WASM verifier for receiver-key proof, ballot proof-record, and proof-byte-bearing scoped relation package verification.';
 
-const protocolDigestPattern = /^[a-f0-9]{128}$/u;
+const protocolHashPattern = /^[a-f0-9]{128}$/u;
 
 const proofBytesHexPattern = /^(?:[a-f0-9]{2})+$/u;
 
@@ -168,14 +168,14 @@ const allowedBallotProofComponentStatementFormats = new Set<
     'sparse-polynomial-matrix-linear-proof-v1',
     'structured-module-sis-share-commitment-v1',
     'structured-module-lwe-linear-proof-v1',
-    'public-zero-witness-binding-check-v1',
+    'public-binding-check-only-v1',
 ]);
 
-type BallotProofComponentProofBytesAvailability =
-    | 'available-for-small-dense-oracle'
-    | 'requires-sparse-proof-statement'
-    | 'requires-structured-proof-statement'
-    | 'public-zero-witness-binding-check';
+type BallotProofComponentProofBackendRequirement =
+    | 'dense-proof-bytes-available-lab-only'
+    | 'sparse-proof-statement-required'
+    | 'structured-proof-statement-required'
+    | 'public-binding-check-only';
 
 const componentProofBytesMustBeEmpty = (
     componentId: BallotProofComponentId,
@@ -210,9 +210,7 @@ const componentProofStatementFormatIsExpected = (
                 proofStatementFormat === 'structured-module-lwe-linear-proof-v1'
             );
         case 'receiver-key-binding-component':
-            return (
-                proofStatementFormat === 'public-zero-witness-binding-check-v1'
-            );
+            return proofStatementFormat === 'public-binding-check-only-v1';
     }
 };
 
@@ -229,37 +227,37 @@ const expectedComponentProofStatementFormatLabel = (
         case 'receiver-encryption-component':
             return 'structured-module-lwe-linear-proof-v1';
         case 'receiver-key-binding-component':
-            return 'public-zero-witness-binding-check-v1';
+            return 'public-binding-check-only-v1';
     }
 };
 
-const componentProofBytesAvailabilityForStatementFormat = (
+const componentProofBackendRequirementForStatementFormat = (
     proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'],
-): BallotProofComponentProofBytesAvailability => {
+): BallotProofComponentProofBackendRequirement => {
     switch (proofStatementFormat) {
         case 'dense-polynomial-matrix-linear-proof-v1':
-            return 'available-for-small-dense-oracle';
+            return 'dense-proof-bytes-available-lab-only';
         case 'sparse-polynomial-matrix-linear-proof-v1':
         case 'structured-module-sis-share-commitment-v1':
-            return 'requires-sparse-proof-statement';
+            return 'sparse-proof-statement-required';
         case 'structured-module-lwe-linear-proof-v1':
-            return 'requires-structured-proof-statement';
-        case 'public-zero-witness-binding-check-v1':
-            return 'public-zero-witness-binding-check';
+            return 'structured-proof-statement-required';
+        case 'public-binding-check-only-v1':
+            return 'public-binding-check-only';
     }
 };
 
-const componentProofBytesAvailabilityIsExpected = (
+const componentProofBackendRequirementIsExpected = (
     componentId: BallotProofComponentId,
     proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'],
-    proofBytesAvailability: string,
+    proofBackendRequirement: string,
 ): boolean =>
     componentProofStatementFormatIsExpected(
         componentId,
         proofStatementFormat,
     ) &&
-    componentProofBytesAvailabilityForStatementFormat(proofStatementFormat) ===
-        proofBytesAvailability;
+    componentProofBackendRequirementForStatementFormat(proofStatementFormat) ===
+        proofBackendRequirement;
 
 export const describeBallotPrivacyProofBackend =
     (): BallotPrivacyProofBackendStatus => ({
@@ -274,80 +272,75 @@ type BallotProofStatementInput = Omit<
     BallotProofStatement,
     | 'objectType'
     | 'objectVersion'
-    | 'ballotProofStatementDigest'
-    | 'challengeDomainDigest'
+    | 'ballotProofStatementHash'
+    | 'challengeDomainHash'
     | 'shareVectorWidth'
 > & {
     readonly challengeDomainLabel?: string;
 };
 
-const deriveReceiverEncryptionPublicKeyDigest = (
+const deriveReceiverEncryptionPublicKeyHash = (
     publicKey: ReceiverEncryptionPublicKeyPayload,
-): ProtocolDigest => deriveProtocolDigest('PublicKeyDigest', publicKey);
+): ProtocolHash => deriveProtocolHash('PublicKeyHash', publicKey);
 
 const deriveReceiverKeyProofRoot = (
     receiverKeyProof: ReceiverKeyProofPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverKeyProofRoot', receiverKeyProof);
+): ProtocolHash => deriveProtocolHash('ReceiverKeyProofRoot', receiverKeyProof);
 
-const deriveReceiverKeyProofRootEvidenceDigest = (
+const deriveReceiverKeyProofRootEvidenceHash = (
     receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidencePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         payload: receiverKeyProofRootEvidence,
         purpose: 'receiver-key-proof-root-evidence-v1',
     });
 
 const deriveReceiverPayloadCiphertextRoot = (
     receiverPayload: ReceiverPayloadCiphertextPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverPayloadCiphertextRoot', receiverPayload);
+): ProtocolHash =>
+    deriveProtocolHash('ReceiverPayloadCiphertextRoot', receiverPayload);
 
-const deriveReceiverPayloadDigest = (
+const deriveReceiverPayloadHash = (
     receiverPayload: ReceiverPayloadPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ReceiverPayloadDigest', receiverPayload);
+): ProtocolHash => deriveProtocolHash('ReceiverPayloadHash', receiverPayload);
 
-const deriveShareCommitmentDigest = (
+const deriveShareCommitmentHash = (
     shareCommitment: ShareCommitmentPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ShareCommitmentDigest', shareCommitment);
+): ProtocolHash => deriveProtocolHash('ShareCommitmentHash', shareCommitment);
 
-const deriveBallotProofStatementDigest = (
+const deriveBallotProofStatementHash = (
     statement: BallotProofStatementPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('BallotProofStatementDigest', statement);
+): ProtocolHash => deriveProtocolHash('BallotProofStatementHash', statement);
 
-const deriveBallotProofRecordDigest = (
+const deriveBallotProofRecordHash = (
     proofRecord: BallotProofRecordPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('BallotProofRecordDigest', proofRecord);
+): ProtocolHash => deriveProtocolHash('BallotProofRecordHash', proofRecord);
 
-const deriveBallotPrivacyRosterProfileEvidenceDigest = (
+const deriveBallotPrivacyRosterProfileEvidenceHash = (
     evidence: BallotPrivacyRosterProfileEvidencePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('BallotPrivacyRosterProfileEvidenceDigest', evidence);
+): ProtocolHash =>
+    deriveProtocolHash('BallotPrivacyRosterProfileEvidenceHash', evidence);
 
-const deriveBallotProofComponentProofRecordDigest = (
+const deriveBallotProofComponentProofRecordHash = (
     proofRecord: BallotProofComponentProofRecordPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         payload: proofRecord,
         purpose: 'ballot-proof-component-proof-record-v1',
     });
 
-const deriveBallotProofComponentProofBundleDigest = (
+const deriveBallotProofComponentProofBundleHash = (
     proofBundle: BallotProofComponentProofBundlePayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         payload: proofBundle,
         purpose: 'ballot-proof-component-proof-bundle-v1',
     });
 
-export const deriveProofBytesDigest = (input: {
+export const deriveProofBytesHash = (input: {
     readonly allowEmpty?: boolean;
     readonly proofBytesHex: string;
-}): ProtocolDigest => {
+}): ProtocolHash => {
     const proofBytesPattern =
         input.allowEmpty === true
             ? proofBytesHexAllowEmptyPattern
@@ -360,7 +353,7 @@ export const deriveProofBytesDigest = (input: {
         );
     }
 
-    return deriveProtocolDigest('ProofBytesDigest', {
+    return deriveProtocolHash('ProofBytesHash', {
         objectType: 'ProofBytes',
         objectVersion: 1,
         proofBytesHex: input.proofBytesHex,
@@ -370,133 +363,134 @@ export const deriveProofBytesDigest = (input: {
 
 export const deriveBallotProofComponentProofRoot = (input: {
     readonly componentId: BallotProofComponentId;
-    readonly componentProofStatementDigest: ProtocolDigest;
-    readonly componentStatementDigest: ProtocolDigest;
-    readonly proofBytesDigest: ProtocolDigest;
-    readonly proofEncodingProfileDigest: ProtocolDigest;
-    readonly proofParameterSetDigest: ProtocolDigest;
+    readonly componentProofStatementHash: ProtocolHash;
+    readonly componentStatementHash: ProtocolHash;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofEncodingProfileHash: ProtocolHash;
+    readonly proofParameterSetHash: ProtocolHash;
     readonly proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'];
-    readonly publicRandomnessDigest: ProtocolDigest;
-    readonly statementDigest: ProtocolDigest;
-}): ProtocolDigest => {
+    readonly publicRandomnessHash: ProtocolHash;
+    readonly statementHash: ProtocolHash;
+}): ProtocolHash => {
     const payload: Record<string, unknown> = {
         componentId: input.componentId,
-        componentStatementDigest: input.componentStatementDigest,
-        proofBytesDigest: input.proofBytesDigest,
-        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
-        proofParameterSetDigest: input.proofParameterSetDigest,
+        componentStatementHash: input.componentStatementHash,
+        proofBytesHash: input.proofBytesHash,
+        proofEncodingProfileHash: input.proofEncodingProfileHash,
+        proofParameterSetHash: input.proofParameterSetHash,
         proofStatementFormat: input.proofStatementFormat,
-        publicRandomnessDigest: input.publicRandomnessDigest,
+        publicRandomnessHash: input.publicRandomnessHash,
         purpose: 'ballot-proof-component-proof-root-v1',
-        statementDigest: input.statementDigest,
+        statementHash: input.statementHash,
     };
-    payload.componentProofStatementDigest = input.componentProofStatementDigest;
+    payload.componentProofStatementHash = input.componentProofStatementHash;
 
-    return deriveProtocolDigest('ChallengeDomainDigest', payload);
+    return deriveProtocolHash('ChallengeDomainHash', payload);
 };
 
-export const deriveReceiverKeyProofEncodingProfileDigest = (input: {
+export const deriveReceiverKeyProofEncodingProfileHash = (input: {
     readonly proofEncoding: unknown;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+}): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         proofEncoding: input.proofEncoding,
         purpose: 'receiver-key-linear-proof-encoding-profile-v1',
     });
 
-export const deriveReceiverKeyProofParameterSetDigest = (input: {
+export const deriveReceiverKeyProofParameterSetHash = (input: {
     readonly parameterSet: unknown;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+}): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         parameterSet: input.parameterSet,
         purpose: 'receiver-key-linear-proof-parameter-set-v1',
     });
 
-export const deriveReceiverKeyProofPublicRandomnessDigest = (input: {
+export const deriveReceiverKeyProofPublicRandomnessHash = (input: {
     readonly publicRandomnessHex: string;
-}): ProtocolDigest => {
+}): ProtocolHash => {
     if (!/^[a-f0-9]{64}$/u.test(input.publicRandomnessHex)) {
         throw new RangeError(
             'Receiver-key proof public randomness must be 32 lowercase hexadecimal bytes.',
         );
     }
 
-    return deriveProtocolDigest('ChallengeDomainDigest', {
+    return deriveProtocolHash('ChallengeDomainHash', {
         publicRandomnessHex: input.publicRandomnessHex,
         purpose: 'receiver-key-linear-proof-public-randomness-v1',
     });
 };
 
-export const deriveBallotProofEncodingProfileDigest = (input: {
+export const deriveBallotProofEncodingProfileHash = (input: {
     readonly proofEncoding: unknown;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+}): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         proofEncoding: input.proofEncoding,
         purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
     });
 
-export const deriveBallotProofParameterSetDigest = (input: {
+export const deriveBallotProofParameterSetHash = (input: {
     readonly parameterSet: unknown;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+}): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         parameterSet: input.parameterSet,
         purpose: 'ballot-proof-linear-proof-parameter-set-v1',
     });
 
-export const deriveBallotProofPublicRandomnessDigest = (input: {
+export const deriveBallotProofPublicRandomnessHash = (input: {
     readonly publicRandomnessHex: string;
-}): ProtocolDigest => {
+}): ProtocolHash => {
     if (!/^[a-f0-9]{64}$/u.test(input.publicRandomnessHex)) {
         throw new RangeError(
             'Ballot proof public randomness must be 32 lowercase hexadecimal bytes.',
         );
     }
 
-    return deriveProtocolDigest('ChallengeDomainDigest', {
+    return deriveProtocolHash('ChallengeDomainHash', {
         publicRandomnessHex: input.publicRandomnessHex,
         purpose: 'ballot-proof-linear-proof-public-randomness-v1',
     });
 };
 
-const deriveBallotProofChallengeDigest = (input: {
+const deriveBallotProofChallengeHash = (input: {
     readonly statement: BallotProofStatement;
-    readonly backendStatementDigest?: ProtocolDigest;
-    readonly componentBundleStatementDigest?: ProtocolDigest;
-    readonly componentProofBundleDigest?: ProtocolDigest;
-    readonly relationStatementDigest: ProtocolDigest;
-    readonly linearStatementDigest?: ProtocolDigest;
-    readonly statementMatrixDigest?: ProtocolDigest;
-    readonly targetVectorDigest?: ProtocolDigest;
-    readonly proofRoot: ProtocolDigest;
-    readonly proofBytesDigest: ProtocolDigest;
-    readonly proofEncodingProfileDigest?: ProtocolDigest;
-    readonly proofParameterSetDigest?: ProtocolDigest;
-    readonly publicRandomnessDigest?: ProtocolDigest;
-}): ProtocolDigest => {
+    readonly backendStatementHash?: ProtocolHash;
+    readonly componentBundleStatementHash?: ProtocolHash;
+    readonly componentProofBundleHash?: ProtocolHash;
+    readonly relationStatementHash: ProtocolHash;
+    readonly linearStatementHash?: ProtocolHash;
+    readonly statementMatrixHash?: ProtocolHash;
+    readonly targetVectorHash?: ProtocolHash;
+    readonly proofRoot: ProtocolHash;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofEncodingProfileHash?: ProtocolHash;
+    readonly proofParameterSetHash?: ProtocolHash;
+    readonly publicRandomnessHash?: ProtocolHash;
+}): ProtocolHash => {
     const challengePayload: Record<string, unknown> = {
-        ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
-        challengeDomainDigest: input.statement.challengeDomainDigest,
-        proofBytesDigest: input.proofBytesDigest,
+        ballotProofStatementHash: input.statement.ballotProofStatementHash,
+        challengeDomainHash: input.statement.challengeDomainHash,
+        proofBytesHash: input.proofBytesHash,
         proofRoot: input.proofRoot,
-        relationStatementDigest: input.relationStatementDigest,
+        purpose: 'ballot-proof-challenge-v1',
+        relationStatementHash: input.relationStatementHash,
     };
 
-    for (const [fieldName, digestValue] of Object.entries({
-        backendStatementDigest: input.backendStatementDigest,
-        componentBundleStatementDigest: input.componentBundleStatementDigest,
-        componentProofBundleDigest: input.componentProofBundleDigest,
-        linearStatementDigest: input.linearStatementDigest,
-        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
-        proofParameterSetDigest: input.proofParameterSetDigest,
-        publicRandomnessDigest: input.publicRandomnessDigest,
-        statementMatrixDigest: input.statementMatrixDigest,
-        targetVectorDigest: input.targetVectorDigest,
+    for (const [fieldName, hashValue] of Object.entries({
+        backendStatementHash: input.backendStatementHash,
+        componentBundleStatementHash: input.componentBundleStatementHash,
+        componentProofBundleHash: input.componentProofBundleHash,
+        linearStatementHash: input.linearStatementHash,
+        proofEncodingProfileHash: input.proofEncodingProfileHash,
+        proofParameterSetHash: input.proofParameterSetHash,
+        publicRandomnessHash: input.publicRandomnessHash,
+        statementMatrixHash: input.statementMatrixHash,
+        targetVectorHash: input.targetVectorHash,
     })) {
-        if (digestValue !== undefined) {
-            challengePayload[fieldName] = digestValue;
+        if (hashValue !== undefined) {
+            challengePayload[fieldName] = hashValue;
         }
     }
 
-    return deriveProtocolDigest('ChallengeDomainDigest', challengePayload);
+    return deriveProtocolHash('ChallengeDomainHash', challengePayload);
 };
 
 const hasOwnProperty = (value: object, key: PropertyKey): boolean =>
@@ -512,32 +506,32 @@ const omitProperty = <InputValue extends object, Key extends keyof InputValue>(
     return remainingProperties;
 };
 
-const scopedRelationBearingBallotPackageDigestPayload = (input: {
+const scopedRelationBearingBallotPackageHashPayload = (input: {
     readonly ballotProofStatement: BallotProofStatement;
     readonly receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidence;
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
-}): ScopedRelationBearingBallotPackageDigestPayload => ({
+}): ScopedRelationBearingBallotPackageHashPayload => ({
     objectType: 'ClaimBearingBallotPackage',
     objectVersion: 1,
     ballotProofStatement: omitProperty(
-        omitProperty(input.ballotProofStatement, 'ballotProofStatementDigest'),
-        'ballotPackageDigest',
+        omitProperty(input.ballotProofStatement, 'ballotProofStatementHash'),
+        'ballotPackageHash',
     ),
     receiverKeyProofRootEvidence: input.receiverKeyProofRootEvidence,
     receiverPayloads: input.receiverPayloads,
     shareCommitments: input.shareCommitments,
 });
 
-export const deriveClaimBearingBallotPackageDigest = (input: {
+export const deriveClaimBearingBallotPackageHash = (input: {
     readonly ballotProofStatement: BallotProofStatement;
     readonly receiverKeyProofRootEvidence: ReceiverKeyProofRootEvidence;
     readonly receiverPayloads: readonly ReceiverPayload[];
     readonly shareCommitments: readonly ShareCommitment[];
-}): ProtocolDigest =>
-    deriveProtocolDigest(
-        'BallotPackageDigest',
-        scopedRelationBearingBallotPackageDigestPayload(input),
+}): ProtocolHash =>
+    deriveProtocolHash(
+        'BallotPackageHash',
+        scopedRelationBearingBallotPackageHashPayload(input),
     );
 
 const isUnknownObject = (value: unknown): value is UnknownObject =>
@@ -565,7 +559,7 @@ const createReceiverReferenceKey = (
 
 const collectReceiverReferenceRefusals = (input: {
     readonly references: readonly ReceiverReference[];
-    readonly objectDigest: ProtocolDigest;
+    readonly objectHash: ProtocolHash;
     readonly label: string;
 }): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
@@ -583,7 +577,7 @@ const collectReceiverReferenceRefusals = (input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `${input.label} contains an invalid receiver identity or roster position.`,
-                    input.objectDigest,
+                    input.objectHash,
                 ),
             );
             continue;
@@ -593,7 +587,7 @@ const collectReceiverReferenceRefusals = (input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `${input.label} contains a duplicate receiver reference.`,
-                    input.objectDigest,
+                    input.objectHash,
                 ),
             );
         }
@@ -614,8 +608,8 @@ export const createReceiverEncryptionPublicKeyShell = (
 
     return {
         ...publicKeyPayload,
-        receiverPublicKeyDigest:
-            deriveReceiverEncryptionPublicKeyDigest(publicKeyPayload),
+        receiverPublicKeyHash:
+            deriveReceiverEncryptionPublicKeyHash(publicKeyPayload),
     };
 };
 
@@ -647,14 +641,14 @@ export const createReceiverKeyProofRootEvidence = (
 
     return {
         ...evidencePayload,
-        receiverKeyProofRootEvidenceDigest:
-            deriveReceiverKeyProofRootEvidenceDigest(evidencePayload),
+        receiverKeyProofRootEvidenceHash:
+            deriveReceiverKeyProofRootEvidenceHash(evidencePayload),
     };
 };
 
 export {
     unavailableProofBackendMessage,
-    protocolDigestPattern,
+    protocolHashPattern,
     proofBytesHexPattern,
     proofBytesHexAllowEmptyPattern,
     unsignedDecimalStringPattern,
@@ -666,18 +660,18 @@ export {
     componentProofBytesMustBeEmpty,
     componentProofStatementFormatIsExpected,
     expectedComponentProofStatementFormatLabel,
-    componentProofBytesAvailabilityIsExpected,
+    componentProofBackendRequirementIsExpected,
     deriveReceiverKeyProofRoot,
-    deriveReceiverKeyProofRootEvidenceDigest,
+    deriveReceiverKeyProofRootEvidenceHash,
     deriveReceiverPayloadCiphertextRoot,
-    deriveReceiverPayloadDigest,
-    deriveShareCommitmentDigest,
-    deriveBallotProofStatementDigest,
-    deriveBallotProofRecordDigest,
-    deriveBallotPrivacyRosterProfileEvidenceDigest,
-    deriveBallotProofComponentProofRecordDigest,
-    deriveBallotProofComponentProofBundleDigest,
-    deriveBallotProofChallengeDigest,
+    deriveReceiverPayloadHash,
+    deriveShareCommitmentHash,
+    deriveBallotProofStatementHash,
+    deriveBallotProofRecordHash,
+    deriveBallotPrivacyRosterProfileEvidenceHash,
+    deriveBallotProofComponentProofRecordHash,
+    deriveBallotProofComponentProofBundleHash,
+    deriveBallotProofChallengeHash,
     hasOwnProperty,
     omitProperty,
     isUnknownObject,

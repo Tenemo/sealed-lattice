@@ -1,41 +1,41 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { deriveProtocolDigest } from "#packages/crypto/src/digests.js";
-import { createReceiverEncryptionPublicKeyShell } from "#packages/protocol/src/ballot-privacy/objects.js";
-import { createBallotPrivacyProfileSet } from "#packages/protocol/src/ballot-privacy/profiles.js";
+import { deriveProtocolHash } from '#packages/crypto/src/hashes.js';
 import {
     createFixtureRandomnessSource,
     createReceiverKeyProof,
     generateReceiverState,
     type ReceiverEncryptionSecretState,
-} from "#packages/protocol/src/ballot-privacy/lattice-primitives.js";
+} from '#packages/protocol/src/ballot-privacy/lattice-primitives.js';
+import { createReceiverEncryptionPublicKeyShell } from '#packages/protocol/src/ballot-privacy/objects.js';
+import { createBallotPrivacyProfileSet } from '#packages/protocol/src/ballot-privacy/profiles.js';
 import {
     createReceiverKeyProofBackendStatement,
     type ReceiverKeyProofBackendStatement,
-} from "#packages/protocol/src/ballot-privacy/receiver-key-backend-statement.js";
+} from '#packages/protocol/src/ballot-privacy/receiver-key-backend-statement.js';
 import {
     createReceiverKeyLinearProofStatement,
     type ReceiverKeyLinearProofStatement,
-} from "#packages/protocol/src/ballot-privacy/receiver-key-linear-statement.js";
+} from '#packages/protocol/src/ballot-privacy/receiver-key-linear-statement.js';
 import type {
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverEncryptionPublicKey,
     ReceiverKeyProof,
-} from "#packages/types/src/index.js";
+} from '#packages/types/src/index.js';
 
-const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const outputPath = path.resolve(
     repoRoot,
-    "test-vectors/ballot-privacy/receiver-key-proof-vectors.json",
+    'test-vectors/ballot-privacy/receiver-key-proof-vectors.json',
 );
 
-interface ReceiverKeyProofVectorCase {
+type ReceiverKeyProofVectorCase = {
     readonly caseName: string;
     readonly description: string;
     readonly mutation: string;
-    readonly expectedOutcome: "accept" | "reject";
+    readonly expectedOutcome: 'accept' | 'reject';
     readonly proofConstructionAccepted: boolean;
     readonly receiverPublicKey?: ReceiverEncryptionPublicKey;
     readonly receiverKeyProof?: ReceiverKeyProof;
@@ -44,53 +44,59 @@ interface ReceiverKeyProofVectorCase {
     readonly refusalMessages?: readonly string[];
     readonly trace: {
         readonly expectedLogicalRejectionLayer?:
-            | "receiver-key-proof-construction"
-            | "backend-statement-preflight"
-            | "linear-statement-preflight"
-            | "receiver-key-proof-shell";
-        readonly backendStatementDigest?: ProtocolDigest;
-        readonly baselineBackendStatementDigest?: ProtocolDigest;
-        readonly linearStatementDigest?: ProtocolDigest;
-        readonly baselineLinearStatementDigest?: ProtocolDigest;
-        readonly expectedDigestChanged?: true;
+            | 'receiver-key-proof-construction'
+            | 'backend-statement-preflight'
+            | 'linear-statement-preflight'
+            | 'receiver-key-proof-shell';
+        readonly backendStatementHash?: ProtocolHash;
+        readonly baselineBackendStatementHash?: ProtocolHash;
+        readonly linearStatementHash?: ProtocolHash;
+        readonly baselineLinearStatementHash?: ProtocolHash;
+        readonly expectedHashChanged?: true;
     };
-}
+};
 
-const digest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest("ChallengeDomainDigest", {
+type ReceiverKeyProofBaselineInput = {
+    readonly backendStatement: ReceiverKeyProofBackendStatement;
+    readonly linearStatement: ReceiverKeyLinearProofStatement;
+    readonly profileSet: ReturnType<typeof createBallotPrivacyProfileSet>;
+    readonly receiverKeyProof: ReceiverKeyProof;
+    readonly receiverState: ReturnType<typeof generateReceiverState>;
+};
+
+const hash = (label: string): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
-        purpose: "receiver-key-proof-vector",
+        purpose: 'receiver-key-proof-vector',
     });
 
 const fixtureRandomness = createFixtureRandomnessSource(
-    "receiver-key-proof-vectors",
+    'receiver-key-proof-vectors',
 );
 
 const deepClone = <Value,>(value: Value): Value =>
     JSON.parse(JSON.stringify(value)) as Value;
 
-const mutateProtocolDigest = (
+const mutateProtocolHash = (
     label: string,
-    previousDigest?: ProtocolDigest,
-): ProtocolDigest => {
-    const candidate = digest(label);
+    previousHash?: ProtocolHash,
+): ProtocolHash => {
+    const candidate = hash(label);
 
-    return candidate === previousDigest
-        ? digest(`${label}-alternate`)
-        : candidate;
+    return candidate === previousHash ? hash(`${label}-alternate`) : candidate;
 };
 
-const baselineInput = () => {
+const baselineInput = (): ReceiverKeyProofBaselineInput => {
     const profileSet = createBallotPrivacyProfileSet();
     const receiverState = generateReceiverState({
-        ceremonyId: "ceremony-receiver-key-vectors",
-        manifestDigest: digest("manifest"),
+        ceremonyId: 'ceremony-receiver-key-vectors',
+        manifestHash: hash('manifest'),
         randomnessSource: fixtureRandomness,
         receiverEncryptionProfile: profileSet.receiverEncryptionProfile,
-        receiverIdentity: "receiver-1",
+        receiverIdentity: 'receiver-1',
         receiverRosterPosition: 1,
         recoveryEpoch: 0,
-        rosterDigest: digest("roster"),
+        rosterHash: hash('roster'),
     });
     const backendStatement = createReceiverKeyProofBackendStatement({
         publicKeyMaterial: receiverState.publicKeyMaterial,
@@ -126,34 +132,34 @@ const acceptingCase = (input: {
     readonly receiverKeyProof: ReceiverKeyProof;
     readonly backendStatement: ReceiverKeyProofBackendStatement;
     readonly linearStatement: ReceiverKeyLinearProofStatement;
-    readonly baselineBackendStatementDigest?: ProtocolDigest;
-    readonly baselineLinearStatementDigest?: ProtocolDigest;
+    readonly baselineBackendStatementHash?: ProtocolHash;
+    readonly baselineLinearStatementHash?: ProtocolHash;
 }): ReceiverKeyProofVectorCase => ({
     backendStatement: input.backendStatement,
     caseName: input.caseName,
     description: input.description,
-    expectedOutcome: "accept",
+    expectedOutcome: 'accept',
     mutation: input.mutation,
     proofConstructionAccepted: true,
     linearStatement: input.linearStatement,
     receiverKeyProof: input.receiverKeyProof,
     receiverPublicKey: input.receiverPublicKey,
     trace: {
-        backendStatementDigest: input.backendStatement.backendStatementDigest,
-        linearStatementDigest: input.linearStatement.statementDigest,
-        ...(input.baselineBackendStatementDigest === undefined
+        backendStatementHash: input.backendStatement.backendStatementHash,
+        linearStatementHash: input.linearStatement.statementHash,
+        ...(input.baselineBackendStatementHash === undefined
             ? {}
             : {
-                  baselineBackendStatementDigest:
-                      input.baselineBackendStatementDigest,
-                  expectedDigestChanged: true as const,
+                  baselineBackendStatementHash:
+                      input.baselineBackendStatementHash,
+                  expectedHashChanged: true as const,
               }),
-        ...(input.baselineLinearStatementDigest === undefined
+        ...(input.baselineLinearStatementHash === undefined
             ? {}
             : {
-                  baselineLinearStatementDigest:
-                      input.baselineLinearStatementDigest,
-                  expectedDigestChanged: true as const,
+                  baselineLinearStatementHash:
+                      input.baselineLinearStatementHash,
+                  expectedHashChanged: true as const,
               }),
     },
 });
@@ -170,17 +176,17 @@ const constructionRejectingCase = (
         return {
             caseName,
             description,
-            expectedOutcome: "reject",
+            expectedOutcome: 'reject',
             mutation,
             proofConstructionAccepted: false,
             refusalMessages: [
                 error instanceof Error
                     ? error.message
-                    : "Receiver-key proof construction rejected the vector.",
+                    : 'Receiver-key proof construction rejected the vector.',
             ],
             trace: {
                 expectedLogicalRejectionLayer:
-                    "receiver-key-proof-construction",
+                    'receiver-key-proof-construction',
             },
         };
     }
@@ -202,16 +208,16 @@ const backendPreflightRejectingCase = (input: {
     backendStatement: input.backendStatement,
     caseName: input.caseName,
     description: input.description,
-    expectedOutcome: "reject",
+    expectedOutcome: 'reject',
     mutation: input.mutation,
     proofConstructionAccepted: true,
     linearStatement: input.linearStatement,
     receiverKeyProof: input.receiverKeyProof,
     receiverPublicKey: input.receiverPublicKey,
     trace: {
-        backendStatementDigest: input.backendStatement.backendStatementDigest,
-        linearStatementDigest: input.linearStatement.statementDigest,
-        expectedLogicalRejectionLayer: "backend-statement-preflight",
+        backendStatementHash: input.backendStatement.backendStatementHash,
+        linearStatementHash: input.linearStatement.statementHash,
+        expectedLogicalRejectionLayer: 'backend-statement-preflight',
     },
 });
 
@@ -227,16 +233,16 @@ const linearPreflightRejectingCase = (input: {
     backendStatement: input.backendStatement,
     caseName: input.caseName,
     description: input.description,
-    expectedOutcome: "reject",
+    expectedOutcome: 'reject',
     mutation: input.mutation,
     proofConstructionAccepted: true,
     linearStatement: input.linearStatement,
     receiverKeyProof: input.receiverKeyProof,
     receiverPublicKey: input.receiverPublicKey,
     trace: {
-        backendStatementDigest: input.backendStatement.backendStatementDigest,
-        expectedLogicalRejectionLayer: "linear-statement-preflight",
-        linearStatementDigest: input.linearStatement.statementDigest,
+        backendStatementHash: input.backendStatement.backendStatementHash,
+        expectedLogicalRejectionLayer: 'linear-statement-preflight',
+        linearStatementHash: input.linearStatement.statementHash,
     },
 });
 
@@ -252,16 +258,16 @@ const proofShellRejectingCase = (input: {
     backendStatement: input.backendStatement,
     caseName: input.caseName,
     description: input.description,
-    expectedOutcome: "reject",
+    expectedOutcome: 'reject',
     mutation: input.mutation,
     proofConstructionAccepted: true,
     linearStatement: input.linearStatement,
     receiverKeyProof: input.receiverKeyProof,
     receiverPublicKey: input.receiverPublicKey,
     trace: {
-        backendStatementDigest: input.backendStatement.backendStatementDigest,
-        linearStatementDigest: input.linearStatement.statementDigest,
-        expectedLogicalRejectionLayer: "receiver-key-proof-shell",
+        backendStatementHash: input.backendStatement.backendStatementHash,
+        linearStatementHash: input.linearStatement.statementHash,
+        expectedLogicalRejectionLayer: 'receiver-key-proof-shell',
     },
 });
 
@@ -297,15 +303,15 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
     const baseline = baselineInput();
     const changedManifest = (() => {
         const changedReceiverState = generateReceiverState({
-            ceremonyId: "ceremony-receiver-key-vectors",
-            manifestDigest: digest("manifest-changed"),
+            ceremonyId: 'ceremony-receiver-key-vectors',
+            manifestHash: hash('manifest-changed'),
             randomnessSource: fixtureRandomness,
             receiverEncryptionProfile:
                 baseline.profileSet.receiverEncryptionProfile,
-            receiverIdentity: "receiver-1",
+            receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest("roster"),
+            rosterHash: hash('roster'),
         });
         const backendStatement = createReceiverKeyProofBackendStatement({
             publicKeyMaterial: changedReceiverState.publicKeyMaterial,
@@ -338,18 +344,18 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
     const wrongKeyMaterialReceiverPublicKey =
         createReceiverEncryptionPublicKeyShell({
             ceremonyId: baselineReceiverPublicKey.ceremonyId,
-            keyMaterialDigest: mutateProtocolDigest(
-                "wrong-key-material",
-                baselineReceiverPublicKey.keyMaterialDigest,
+            keyMaterialHash: mutateProtocolHash(
+                'wrong-key-material',
+                baselineReceiverPublicKey.keyMaterialHash,
             ),
-            manifestDigest: baselineReceiverPublicKey.manifestDigest,
-            receiverEncryptionProfileDigest:
-                baselineReceiverPublicKey.receiverEncryptionProfileDigest,
+            manifestHash: baselineReceiverPublicKey.manifestHash,
+            receiverEncryptionProfileHash:
+                baselineReceiverPublicKey.receiverEncryptionProfileHash,
             receiverIdentity: baselineReceiverPublicKey.receiverIdentity,
             receiverRosterPosition:
                 baselineReceiverPublicKey.receiverRosterPosition,
             recoveryEpoch: baselineReceiverPublicKey.recoveryEpoch,
-            rosterDigest: baselineReceiverPublicKey.rosterDigest,
+            rosterHash: baselineReceiverPublicKey.rosterHash,
         });
     const wrongSecretReplacement =
         baseline.receiverState.secretState.secretVector[0]?.[0] === 2 ? 1 : 2;
@@ -359,15 +365,15 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
         rowBatches: [
             {
                 ...clonedNoncanonicalStatement.rowBatches[0],
-                modulus: "012289",
+                modulus: '012289',
             },
         ],
     } as unknown as ReceiverKeyProofBackendStatement;
-    const mutatedMatrixDigestStatement = {
+    const mutatedMatrixHashStatement = {
         ...deepClone(baseline.backendStatement),
-        matrixDigest: mutateProtocolDigest(
-            "mutated-receiver-key-matrix-digest",
-            baseline.backendStatement.matrixDigest,
+        matrixHash: mutateProtocolHash(
+            'mutated-receiver-key-matrix-hash',
+            baseline.backendStatement.matrixHash,
         ),
     };
     const missingBoundStatement = {
@@ -409,8 +415,8 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
     } as unknown as ReceiverKeyLinearProofStatement;
     const mutatedProofRoot = {
         ...baseline.receiverKeyProof,
-        proofRoot: mutateProtocolDigest(
-            "mutated-receiver-key-proof-root",
+        proofRoot: mutateProtocolHash(
+            'mutated-receiver-key-proof-root',
             baseline.receiverKeyProof.proofRoot,
         ),
     };
@@ -418,32 +424,31 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
     return [
         acceptingCase({
             backendStatement: baseline.backendStatement,
-            caseName: "valid-receiver-key-proof-backend-statement",
+            caseName: 'valid-receiver-key-proof-backend-statement',
             description:
-                "A roster-bound receiver key proof shell, linear statement, and backend statement pass public preflight.",
+                'A roster-bound receiver key proof shell, linear statement, and backend statement pass public preflight.',
             linearStatement: baseline.linearStatement,
-            mutation: "none",
+            mutation: 'none',
             receiverKeyProof: baseline.receiverKeyProof,
             receiverPublicKey: baseline.receiverState.receiverPublicKey,
         }),
         acceptingCase({
             backendStatement: changedManifest.backendStatement,
-            baselineBackendStatementDigest:
-                baseline.backendStatement.backendStatementDigest,
-            baselineLinearStatementDigest:
-                baseline.linearStatement.statementDigest,
-            caseName: "changed-manifest-changes-backend-statement-digest",
+            baselineBackendStatementHash:
+                baseline.backendStatement.backendStatementHash,
+            baselineLinearStatementHash: baseline.linearStatement.statementHash,
+            caseName: 'changed-manifest-changes-backend-statement-hash',
             description:
-                "Changing the manifest produces different accepted receiver-key backend and linear statement digests.",
+                'Changing the manifest produces different accepted receiver-key backend and linear statement Hashes.',
             linearStatement: changedManifest.linearStatement,
-            mutation: "manifestDigest",
+            mutation: 'manifestHash',
             receiverKeyProof: changedManifest.receiverKeyProof,
             receiverPublicKey: changedManifest.receiverPublicKey,
         }),
         constructionRejectingCase(
-            "wrong-ceremony-rejects",
-            "A receiver public key with a mutated ceremony is rejected before a backend statement is issued.",
-            "receiverPublicKey.ceremonyId",
+            'wrong-ceremony-rejects',
+            'A receiver public key with a mutated ceremony is rejected before a backend statement is issued.',
+            'receiverPublicKey.ceremonyId',
             () =>
                 createReceiverKeyProofBackendStatement({
                     publicKeyMaterial: baseline.receiverState.publicKeyMaterial,
@@ -451,14 +456,14 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
                         baseline.profileSet.receiverEncryptionProfile,
                     receiverPublicKey: {
                         ...baseline.receiverState.receiverPublicKey,
-                        ceremonyId: "wrong-ceremony",
+                        ceremonyId: 'wrong-ceremony',
                     },
                 }),
         ),
         constructionRejectingCase(
-            "wrong-roster-digest-rejects",
-            "A receiver public key with a mutated roster digest is rejected before a backend statement is issued.",
-            "receiverPublicKey.rosterDigest",
+            'wrong-roster-hash-rejects',
+            'A receiver public key with a mutated roster hash is rejected before a backend statement is issued.',
+            'receiverPublicKey.rosterHash',
             () =>
                 createReceiverKeyProofBackendStatement({
                     publicKeyMaterial: baseline.receiverState.publicKeyMaterial,
@@ -466,14 +471,14 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
                         baseline.profileSet.receiverEncryptionProfile,
                     receiverPublicKey: {
                         ...baseline.receiverState.receiverPublicKey,
-                        rosterDigest: digest("wrong-roster"),
+                        rosterHash: hash('wrong-roster'),
                     },
                 }),
         ),
         constructionRejectingCase(
-            "wrong-recovery-epoch-rejects",
-            "A receiver public key with a mutated recovery epoch is rejected before a backend statement is issued.",
-            "receiverPublicKey.recoveryEpoch",
+            'wrong-recovery-epoch-rejects',
+            'A receiver public key with a mutated recovery epoch is rejected before a backend statement is issued.',
+            'receiverPublicKey.recoveryEpoch',
             () =>
                 createReceiverKeyProofBackendStatement({
                     publicKeyMaterial: baseline.receiverState.publicKeyMaterial,
@@ -486,14 +491,14 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
                 }),
         ),
         constructionRejectingCase(
-            "wrong-public-matrix-seed-rejects",
-            "A substituted public matrix seed is rejected before a backend statement is issued.",
-            "publicKeyMaterial.publicMatrixSeedDigest",
+            'wrong-public-matrix-seed-rejects',
+            'A substituted public matrix seed is rejected before a backend statement is issued.',
+            'publicKeyMaterial.publicMatrixSeedHash',
             () =>
                 createReceiverKeyProofBackendStatement({
                     publicKeyMaterial: {
                         ...baseline.receiverState.publicKeyMaterial,
-                        publicMatrixSeedDigest: digest("wrong-matrix-seed"),
+                        publicMatrixSeedHash: hash('wrong-matrix-seed'),
                     },
                     receiverEncryptionProfile:
                         baseline.profileSet.receiverEncryptionProfile,
@@ -501,9 +506,9 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
                 }),
         ),
         constructionRejectingCase(
-            "wrong-key-material-digest-rejects",
-            "A receiver key with a canonical but mismatched key material digest is rejected.",
-            "receiverPublicKey.keyMaterialDigest",
+            'wrong-key-material-hash-rejects',
+            'A receiver key with a canonical but mismatched key material hash is rejected.',
+            'receiverPublicKey.keyMaterialHash',
             () =>
                 createReceiverKeyProofBackendStatement({
                     publicKeyMaterial: baseline.receiverState.publicKeyMaterial,
@@ -513,9 +518,9 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
                 }),
         ),
         constructionRejectingCase(
-            "oversize-secret-witness-rejects",
-            "A receiver-key witness with an out-of-bound secret coefficient is rejected before proof creation.",
-            "secretState.secretVector[0][0]",
+            'oversize-secret-witness-rejects',
+            'A receiver-key witness with an out-of-bound secret coefficient is rejected before proof creation.',
+            'secretState.secretVector[0][0]',
             () =>
                 void createReceiverKeyProof({
                     publicKeyMaterial: baseline.receiverState.publicKeyMaterial,
@@ -529,9 +534,9 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
                 }),
         ),
         constructionRejectingCase(
-            "oversize-error-witness-rejects",
-            "A receiver-key witness with an out-of-bound error coefficient is rejected before proof creation.",
-            "secretState.errorVector[0][0]",
+            'oversize-error-witness-rejects',
+            'A receiver-key witness with an out-of-bound error coefficient is rejected before proof creation.',
+            'secretState.errorVector[0][0]',
             () =>
                 void createReceiverKeyProof({
                     publicKeyMaterial: baseline.receiverState.publicKeyMaterial,
@@ -545,9 +550,9 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
                 }),
         ),
         constructionRejectingCase(
-            "wrong-secret-equation-rejects",
-            "A short but substituted secret vector is rejected because it no longer satisfies the public-key equation.",
-            "secretState.secretVector[0][0]",
+            'wrong-secret-equation-rejects',
+            'A short but substituted secret vector is rejected because it no longer satisfies the public-key equation.',
+            'secretState.secretVector[0][0]',
             () =>
                 void createReceiverKeyProof({
                     publicKeyMaterial: baseline.receiverState.publicKeyMaterial,
@@ -562,61 +567,61 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
         ),
         backendPreflightRejectingCase({
             backendStatement: noncanonicalBackendStatement,
-            caseName: "noncanonical-backend-modulus-rejects",
+            caseName: 'noncanonical-backend-modulus-rejects',
             description:
-                "A receiver-key backend statement with a noncanonical decimal modulus is rejected by preflight.",
-            mutation: "backendStatement.rowBatches[0].modulus",
+                'A receiver-key backend statement with a noncanonical decimal modulus is rejected by preflight.',
+            mutation: 'backendStatement.rowBatches[0].modulus',
             linearStatement: baseline.linearStatement,
             receiverKeyProof: baseline.receiverKeyProof,
             receiverPublicKey: baseline.receiverState.receiverPublicKey,
         }),
         backendPreflightRejectingCase({
-            backendStatement: mutatedMatrixDigestStatement,
-            caseName: "mutated-backend-matrix-digest-rejects",
+            backendStatement: mutatedMatrixHashStatement,
+            caseName: 'mutated-backend-matrix-hash-rejects',
             description:
-                "A receiver-key backend statement with a mutated matrix digest is rejected by preflight.",
-            mutation: "backendStatement.matrixDigest",
+                'A receiver-key backend statement with a mutated matrix hash is rejected by preflight.',
+            mutation: 'backendStatement.matrixHash',
             linearStatement: baseline.linearStatement,
             receiverKeyProof: baseline.receiverKeyProof,
             receiverPublicKey: baseline.receiverState.receiverPublicKey,
         }),
         backendPreflightRejectingCase({
             backendStatement: missingBoundStatement,
-            caseName: "missing-backend-bound-rejects",
+            caseName: 'missing-backend-bound-rejects',
             description:
-                "A receiver-key backend statement missing one short-vector bound is rejected by preflight.",
-            mutation: "backendStatement.bounds",
+                'A receiver-key backend statement missing one short-vector bound is rejected by preflight.',
+            mutation: 'backendStatement.bounds',
             linearStatement: baseline.linearStatement,
             receiverKeyProof: baseline.receiverKeyProof,
             receiverPublicKey: baseline.receiverState.receiverPublicKey,
         }),
         linearPreflightRejectingCase({
             backendStatement: baseline.backendStatement,
-            caseName: "mutated-linear-statement-matrix-rejects",
+            caseName: 'mutated-linear-statement-matrix-rejects',
             description:
-                "A receiver-key linear statement with a mutated matrix coefficient is rejected by preflight.",
+                'A receiver-key linear statement with a mutated matrix coefficient is rejected by preflight.',
             linearStatement: mutatedLinearMatrixStatement,
-            mutation: "linearStatement.statementMatrixCoefficients[0][0][0]",
+            mutation: 'linearStatement.statementMatrixCoefficients[0][0][0]',
             receiverKeyProof: baseline.receiverKeyProof,
             receiverPublicKey: baseline.receiverState.receiverPublicKey,
         }),
         linearPreflightRejectingCase({
             backendStatement: baseline.backendStatement,
-            caseName: "mutated-linear-statement-target-rejects",
+            caseName: 'mutated-linear-statement-target-rejects',
             description:
-                "A receiver-key linear statement with a mutated target coefficient is rejected by preflight.",
+                'A receiver-key linear statement with a mutated target coefficient is rejected by preflight.',
             linearStatement: mutatedLinearTargetStatement,
-            mutation: "linearStatement.targetVectorCoefficients[0][0]",
+            mutation: 'linearStatement.targetVectorCoefficients[0][0]',
             receiverKeyProof: baseline.receiverKeyProof,
             receiverPublicKey: baseline.receiverState.receiverPublicKey,
         }),
         proofShellRejectingCase({
             backendStatement: baseline.backendStatement,
-            caseName: "mutated-proof-root-rejects",
+            caseName: 'mutated-proof-root-rejects',
             description:
-                "A receiver-key proof shell with a mutated proof root is rejected before backend acceptance.",
+                'A receiver-key proof shell with a mutated proof root is rejected before backend acceptance.',
             linearStatement: baseline.linearStatement,
-            mutation: "receiverKeyProof.proofRoot",
+            mutation: 'receiverKeyProof.proofRoot',
             receiverKeyProof: mutatedProofRoot,
             receiverPublicKey: baseline.receiverState.receiverPublicKey,
         }),
@@ -626,33 +631,33 @@ const cases = (): readonly ReceiverKeyProofVectorCase[] => {
 const main = async (): Promise<void> => {
     const vectorFile = {
         cases: cases(),
-        generationStatus: "generated",
-        objectType: "ReceiverKeyProofBackendStatementVectors",
+        generationStatus: 'generated',
+        objectType: 'ReceiverKeyProofBackendStatementVectors',
         objectVersion: 1,
-        profileId: "receiver-key-proof-backend-statement-v1",
+        profileId: 'receiver-key-proof-backend-statement-v1',
         requiredCaseNames: [
-            "valid-receiver-key-proof-backend-statement",
-            "changed-manifest-changes-backend-statement-digest",
-            "wrong-ceremony-rejects",
-            "wrong-roster-digest-rejects",
-            "wrong-recovery-epoch-rejects",
-            "wrong-public-matrix-seed-rejects",
-            "wrong-key-material-digest-rejects",
-            "oversize-secret-witness-rejects",
-            "oversize-error-witness-rejects",
-            "wrong-secret-equation-rejects",
-            "noncanonical-backend-modulus-rejects",
-            "mutated-backend-matrix-digest-rejects",
-            "missing-backend-bound-rejects",
-            "mutated-linear-statement-matrix-rejects",
-            "mutated-linear-statement-target-rejects",
-            "mutated-proof-root-rejects",
+            'valid-receiver-key-proof-backend-statement',
+            'changed-manifest-changes-backend-statement-hash',
+            'wrong-ceremony-rejects',
+            'wrong-roster-hash-rejects',
+            'wrong-recovery-epoch-rejects',
+            'wrong-public-matrix-seed-rejects',
+            'wrong-key-material-hash-rejects',
+            'oversize-secret-witness-rejects',
+            'oversize-error-witness-rejects',
+            'wrong-secret-equation-rejects',
+            'noncanonical-backend-modulus-rejects',
+            'mutated-backend-matrix-hash-rejects',
+            'missing-backend-bound-rejects',
+            'mutated-linear-statement-matrix-rejects',
+            'mutated-linear-statement-target-rejects',
+            'mutated-proof-root-rejects',
         ],
         statementFormat:
-            "SparseSignedIntegerBackendStatement-v1 + receiver-key-linear-module-lwe-statement-v1",
+            'SparseSignedIntegerBackendStatement-v1 + receiver-key-linear-module-lwe-statement-v1',
         vectorProvenance: {
             generator:
-                "tools/ballot-privacy-vectors/generate-receiver-key-proof-vectors.mts",
+                'tools/ballot-privacy-vectors/generate-receiver-key-proof-vectors.mts',
             secretWitnessMaterialIncluded: false,
             publicKeyCoefficientMaterialIncluded: true,
         },

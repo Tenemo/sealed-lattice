@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "fixtureId": "m7-sealed-lattice-canonical-rns-coefficient-material-v1",
+  "fixtureId": "bgv-rns-sealed-lattice-canonical-rns-coefficient-material-v1",
   "source": "sealed-lattice-rust-wasm-canonical-rns-fixture",
   "polynomialDegree": 32768,
   "moduli": [

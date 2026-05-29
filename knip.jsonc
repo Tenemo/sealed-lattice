@@ -1,0 +1,58 @@
+{
+    "$schema": "https://unpkg.com/knip@5/schema.json",
+    "workspaces": {
+        ".": {
+            "entry": [
+                "tests/**/*.ts",
+                "tools/**/*.ts",
+                "tools/**/*.mts",
+                "tools/**/*.cjs",
+                "docs/typedoc/**/*.ts",
+                "docs/astro.config.ts",
+                "docs/src/content.config.ts"
+            ],
+            "project": [
+                "tests/**/*.ts",
+                "tools/**/*.ts",
+                "tools/**/*.mts",
+                "tools/**/*.cjs",
+                "docs/typedoc/**/*.ts",
+                "docs/src/**/*.ts"
+            ],
+            "ignore": ["docs/src/env.d.ts"],
+            "ignoreDependencies": [
+                // The docs theme imports these packages from CSS. Knip does not follow CSS @import dependencies.
+                "@fontsource/ibm-plex-sans",
+                "@fontsource/jetbrains-mono",
+                // The packed-package verifier invokes publint through the shared package-manager runner.
+                "publint",
+                // The Wasm kernel build resolves binaryen's wasm-opt script by path.
+                "binaryen",
+                // Root-level public API tests intentionally import the workspace package by its published name.
+                "sealed-lattice"
+            ]
+        },
+        "packages/sdk": {
+            "project": ["src/**/*.ts"],
+            "ignoreDependencies": [
+                // The public package intentionally declares the crypto backends used by the vendored runtime surface.
+                "@noble/hashes",
+                "@noble/post-quantum"
+            ]
+        },
+        "packages/types": {
+            "project": ["src/**/*.ts"]
+        },
+        "packages/protocol": {
+            "entry": ["tests/**/*.ts"],
+            "project": ["src/**/*.ts", "tests/**/*.ts"]
+        },
+        "packages/crypto": {
+            "project": ["src/**/*.ts"]
+        },
+        "packages/wasm": {
+            "entry": ["tests/**/*.ts"],
+            "project": ["src/**/*.ts", "tests/**/*.ts"]
+        }
+    }
+}

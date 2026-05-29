@@ -66,11 +66,11 @@ type oracleReport struct {
 	MultiplicationMatched                bool     `json:"multiplicationMatched"`
 	SealedLatticeCanonicalMaterialUsed   bool     `json:"sealedLatticeCanonicalMaterialUsed"`
 	CanonicalMaterialFixtureID           string   `json:"canonicalMaterialFixtureId"`
-	CanonicalMaterialFixtureDigest       string   `json:"canonicalMaterialFixtureDigest"`
+	CanonicalMaterialFixtureHash       string   `json:"canonicalMaterialFixtureHash"`
 	CanonicalMaterialSerializationPolicy string   `json:"canonicalMaterialSerializationPolicy"`
 	ReferenceSerializationUsed           bool     `json:"referenceSerializationUsed"`
 	ProtocolEvidence                     bool     `json:"protocolEvidence"`
-	InputDigest                          string   `json:"inputDigest"`
+	InputHash                          string   `json:"inputHash"`
 	RoundTripSamples                     []sample `json:"roundTripSamples"`
 	AdditionSamples                      []sample `json:"additionSamples"`
 }
@@ -90,7 +90,7 @@ func main() {
 }
 
 func buildReport() (oracleReport, error) {
-	fixture, fixtureDigest, err := loadCanonicalFixture()
+	fixture, fixtureHash, err := loadCanonicalFixture()
 	if err != nil {
 		return oracleReport{}, err
 	}
@@ -155,11 +155,11 @@ func buildReport() (oracleReport, error) {
 		MultiplicationMatched:                multiplicationMatched,
 		SealedLatticeCanonicalMaterialUsed:   true,
 		CanonicalMaterialFixtureID:           fixture.FixtureID,
-		CanonicalMaterialFixtureDigest:       fixtureDigest,
+		CanonicalMaterialFixtureHash:       fixtureHash,
 		CanonicalMaterialSerializationPolicy: fixture.ReferenceSerializationPolicy,
 		ReferenceSerializationUsed:           false,
 		ProtocolEvidence:                     false,
-		InputDigest:                          digestInputs(left),
+		InputHash:                          hashInputs(left),
 		RoundTripSamples:                     samples(recovered.Coeffs[0], fixture.SamplePositions),
 		AdditionSamples:                      samples(addition.Coeffs[0], fixture.SamplePositions),
 	}, nil
@@ -170,7 +170,7 @@ func loadCanonicalFixture() (canonicalRnsFixture, string, error) {
 	if err != nil {
 		return canonicalRnsFixture{}, "", fmt.Errorf("read sealed-lattice canonical material fixture: %w", err)
 	}
-	digest := sha256.Sum256(source)
+	hash := sha256.Sum256(source)
 
 	var fixture canonicalRnsFixture
 	if err := json.Unmarshal(source, &fixture); err != nil {
@@ -180,7 +180,7 @@ func loadCanonicalFixture() (canonicalRnsFixture, string, error) {
 		return canonicalRnsFixture{}, "", err
 	}
 
-	return fixture, hex.EncodeToString(digest[:]), nil
+	return fixture, hex.EncodeToString(hash[:]), nil
 }
 
 func validateCanonicalFixture(fixture canonicalRnsFixture) error {
@@ -188,7 +188,11 @@ func validateCanonicalFixture(fixture canonicalRnsFixture) error {
 		return fmt.Errorf("sealed-lattice canonical material fixture schema version is %d, expected 1", fixture.SchemaVersion)
 	}
 	if fixture.Source != "sealed-lattice-rust-wasm-canonical-rns-fixture" {
-		return fmt.Errorf("sealed-lattice canonical material fixture source is %q", fixture.Source)
+		return fmt.Errorf(
+			"sealed-lattice canonical material fixture source is %q, expected %q",
+			fixture.Source,
+			"sealed-lattice-rust-wasm-canonical-rns-fixture",
+		)
 	}
 	if fixture.PolynomialDegree != polynomialDegree {
 		return fmt.Errorf("sealed-lattice canonical material fixture polynomial degree is %d, expected %d", fixture.PolynomialDegree, polynomialDegree)
@@ -243,7 +247,7 @@ func samples(values []uint64, positions []int) []sample {
 	return output
 }
 
-func digestInputs(poly ring.Poly) string {
+func hashInputs(poly ring.Poly) string {
 	hasher := sha256.New()
 	for _, limb := range poly.Coeffs {
 		for _, value := range samples(limb, []int{0, 1, 2, 17, len(limb) / 2, len(limb) - 1}) {

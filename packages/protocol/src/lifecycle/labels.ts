@@ -1,7 +1,7 @@
 import {
     activeMaliciousMheProfileId,
-    developmentIntegrationProfileId,
     evaluationProofProfileId,
+    passiveMhePrototypeProfileId,
     thresholdDecryptionProfileId,
 } from '@sealed-lattice/types';
 import type {
@@ -156,7 +156,7 @@ const deriveResultClaimLabels = (
 };
 
 const securityProfileModeLabelsById = new Map<string, ModeStatusLabel>([
-    [developmentIntegrationProfileId, 'developmentIntegration'],
+    [passiveMhePrototypeProfileId, 'passiveMhePrototype'],
     [evaluationProofProfileId, 'evaluationProofClosure'],
     [thresholdDecryptionProfileId, 'kllpsCpadClosure'],
     [activeMaliciousMheProfileId, 'activeMaliciousClosure'],
@@ -176,10 +176,10 @@ const deriveSecurityProfileModes = (
     if (
         (input.securityProfileIds === undefined ||
             input.securityProfileIds.length === 0) &&
-        (input.mheSecurityClosure ?? 'developmentIntegration') ===
-            'developmentIntegration'
+        (input.mheSecurityClosure ?? 'PassiveMHEPrototype') ===
+            'PassiveMHEPrototype'
     ) {
-        labels.push('developmentIntegration');
+        labels.push('passiveMhePrototype');
     }
 
     return Array.from(new Set(labels));

@@ -103,7 +103,7 @@ describe('test vector helpers', () => {
         });
     });
 
-    it('reports digest drift, missing files, and duplicate entries', () => {
+    it('reports hash drift, missing files, and duplicate entries', () => {
         const actualManifest = {
             schemaVersion: 1 as const,
             entries: [
@@ -143,7 +143,7 @@ describe('test vector helpers', () => {
         expect(validateVectorManifest(manifest, actualManifest)).toEqual(
             expect.arrayContaining([
                 'Vector manifest path is duplicated: crypto/example.json',
-                'Vector digest drift detected for crypto/example.json: expected 0000000000000000000000000000000000000000000000000000000000000000, received 3a37782e8974c48eebf2a0517c866ad15641c53b3d31993188796b56aeb79624',
+                'Vector hash drift detected for crypto/example.json: expected 0000000000000000000000000000000000000000000000000000000000000000, received 3a37782e8974c48eebf2a0517c866ad15641c53b3d31993188796b56aeb79624',
                 'Vector manifest entry is missing on disk: missing.json',
                 'Vector manifest path must stay within test-vectors: nested/../../outside.json',
                 'Vector manifest path must stay within test-vectors: C:/outside.json',

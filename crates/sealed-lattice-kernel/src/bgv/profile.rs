@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::{
     encoding::CanonicalResult,
-    hashing::{derive_protocol_digest, hash512_hex},
+    hashing::{derive_protocol_hash, hash512_hex},
 };
 
 pub(crate) const PROFILE_ID: &str = "sealed-lattice-bgv-rns-v1";
@@ -23,7 +23,7 @@ pub(crate) const BALLOT_SCORE_ENCODING_PROFILE_ID: &str =
 pub(crate) const BALLOT_SHARE_LAYOUT_PROFILE_ID: &str =
     "ballot-share-layout-score-plus-one-hot-buckets-v1";
 pub(crate) const AGGREGATE_INPUT_ENCODING_PROFILE_ID: &str =
-    "aggregate-input-encoding-profile-m6-derived-shares-v1";
+    "aggregate-input-encoding-profile-aggregate-derivation-shares-v1";
 pub(crate) const ENCODED_AGGREGATE_LAYOUT_ID: &str =
     "encoded-aggregate-layout-encrypted-aggregate-input-v1";
 pub(crate) const TOP_K_EVALUATOR_INPUT_LAYOUT_ID: &str =
@@ -90,7 +90,12 @@ impl BgvBasisKind {
     pub(crate) fn moduli_for_level(self, level: usize) -> Option<Vec<u64>> {
         let moduli = self.all_moduli();
         let required_count = match self {
-            Self::Special => 1,
+            Self::Special => {
+                if level != 0 {
+                    return None;
+                }
+                1
+            }
             Self::Data | Self::Extended => level.checked_add(1)?,
         };
         if required_count == 0 || required_count > moduli.len() {
@@ -284,6 +289,35 @@ pub(crate) fn root_parameters_for_modulus(modulus: u64) -> Option<RootParameters
         .find(|parameters| parameters.modulus == modulus)
 }
 
+pub(crate) fn data_prime_bit_length() -> u32 {
+    DATA_PRIMES
+        .iter()
+        .map(|modulus| modulus_bit_length(*modulus))
+        .max()
+        .unwrap_or(0)
+}
+
+pub(crate) fn modulus_bit_length(modulus: u64) -> u32 {
+    u64::BITS - modulus.leading_zeros()
+}
+
+pub(crate) fn moduli_bit_length_sum(moduli: impl IntoIterator<Item = u64>) -> usize {
+    moduli
+        .into_iter()
+        .map(|modulus| {
+            usize::try_from(modulus_bit_length(modulus)).expect("modulus bit length fits usize")
+        })
+        .sum()
+}
+
+pub(crate) fn data_basis_modulus_bits() -> usize {
+    moduli_bit_length_sum(DATA_PRIMES)
+}
+
+pub(crate) fn extended_basis_modulus_bits() -> usize {
+    moduli_bit_length_sum(DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]))
+}
+
 pub(crate) fn selected_profile_value() -> Value {
     json!({
         "profileId": PROFILE_ID,
@@ -295,7 +329,7 @@ pub(crate) fn selected_profile_value() -> Value {
         "specialBasisId": SPECIAL_BASIS_ID,
         "dataPrimes": DATA_PRIMES,
         "specialPrime": SPECIAL_PRIME,
-        "dataPrimeBitLength": 47,
+        "dataPrimeBitLength": data_prime_bit_length(),
         "dataLevels": DATA_PRIMES.len(),
         "extendedLevels": DATA_PRIMES.len() + 1,
         "aggregateShareLayoutId": AGGREGATE_SHARE_LAYOUT_ID,
@@ -313,54 +347,54 @@ pub(crate) fn selected_profile_value() -> Value {
     })
 }
 
-pub(crate) fn profile_digest() -> CanonicalResult<String> {
-    derive_protocol_digest("BGVProfileDigest", &selected_profile_value())
+pub(crate) fn profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash("BGVProfileHash", &selected_profile_value())
 }
 
-pub(crate) fn backend_profile_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "RustBgvBackendProfileDigest",
+pub(crate) fn backend_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "RustBgvBackendProfileHash",
         &json!({
             "backendProfileId": BACKEND_PROFILE_ID,
-            "profileDigest": profile_digest()?,
+            "profileHash": profile_hash()?,
             "ownedBy": "sealed-lattice-rust-wasm",
             "referenceOracleStatus": "development-only-not-runtime",
         }),
     )
 }
 
-pub(crate) fn batch_encoder_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BGVBatchEncoderDigest",
+pub(crate) fn batch_encoder_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BGVBatchEncoderHash",
         &json!({
             "encoderId": BATCH_ENCODER_ID,
-            "profileDigest": profile_digest()?,
+            "profileHash": profile_hash()?,
             "plaintextModulus": PLAINTEXT_MODULUS,
             "polynomialDegree": POLYNOMIAL_DEGREE,
             "layoutId": AGGREGATE_SHARE_LAYOUT_ID,
-            "layoutBindingDigest": batch_layout_binding_digest()?,
+            "layoutBindingHash": batch_layout_binding_hash()?,
         }),
     )
 }
 
-pub(crate) fn layout_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "TargetBasisDigest",
+pub(crate) fn layout_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "TargetBasisHash",
         &json!({
             "layoutId": AGGREGATE_SHARE_LAYOUT_ID,
-            "profileDigest": profile_digest()?,
+            "profileHash": profile_hash()?,
             "slotCount": POLYNOMIAL_DEGREE,
             "coordinateField": "GF(65537)",
-            "source": "M6AggregateShareCoordinates",
+            "source": "AggregateDerivationShareCoordinates",
             "bridgePath": "EncryptedAggregateBridge-v1",
             "witnessPrivacy": "contributor-private-aggregate-shares",
         }),
     )
 }
 
-pub(crate) fn ballot_score_encoding_profile_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BallotScoreEncodingProfileDigest",
+pub(crate) fn ballot_score_encoding_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BallotScoreEncodingProfileHash",
         &json!({
             "profileId": BALLOT_SCORE_ENCODING_PROFILE_ID,
             "scoreRange": {
@@ -374,9 +408,9 @@ pub(crate) fn ballot_score_encoding_profile_digest() -> CanonicalResult<String> 
     )
 }
 
-pub(crate) fn ballot_share_layout_profile_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BallotShareLayoutProfileDigest",
+pub(crate) fn ballot_share_layout_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BallotShareLayoutProfileHash",
         &json!({
             "profileId": BALLOT_SHARE_LAYOUT_PROFILE_ID,
             "coordinateOrder": "score-share-then-one-hot-score-buckets-per-option",
@@ -386,39 +420,39 @@ pub(crate) fn ballot_share_layout_profile_digest() -> CanonicalResult<String> {
     )
 }
 
-pub(crate) fn aggregate_input_encoding_profile_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "AggregateInputEncodingProfileDigest",
+pub(crate) fn aggregate_input_encoding_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "AggregateInputEncodingProfileHash",
         &json!({
             "profileId": AGGREGATE_INPUT_ENCODING_PROFILE_ID,
-            "sourceMilestone": "M6",
-            "sourceObject": "M6DerivedAggregateShareCoordinates",
+            "sourceRelation": "aggregate derivation",
+            "sourceObject": "AggregateDerivationShareCoordinates",
             "bridgePath": "EncryptedAggregateBridge-v1",
             "witnessPrivacy": "contributor-private-aggregate-shares",
         }),
     )
 }
 
-pub(crate) fn encoded_aggregate_layout_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "EncodedAggregateLayoutDigest",
+pub(crate) fn encoded_aggregate_layout_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "EncodedAggregateLayoutHash",
         &json!({
             "layoutId": ENCODED_AGGREGATE_LAYOUT_ID,
-            "encryptedAggregateInputLayoutDigest": layout_digest()?,
-            "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
+            "encryptedAggregateInputLayoutHash": layout_hash()?,
+            "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
             "slotCount": POLYNOMIAL_DEGREE,
             "scalarOnlyAggregateLayout": false,
         }),
     )
 }
 
-pub(crate) fn top_k_evaluator_input_layout_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "TopKEvaluatorInputLayoutDigest",
+pub(crate) fn top_k_evaluator_input_layout_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "TopKEvaluatorInputLayoutHash",
         &json!({
             "layoutId": TOP_K_EVALUATOR_INPUT_LAYOUT_ID,
-            "encryptedAggregateInputLayoutDigest": layout_digest()?,
-            "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
+            "encryptedAggregateInputLayoutHash": layout_hash()?,
+            "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
             "acceptedEvaluatorInput": "encrypted-aggregate-histogram-score-coordinates",
             "rejectScalarOnlyAggregateLayouts": true,
         }),
@@ -428,12 +462,12 @@ pub(crate) fn top_k_evaluator_input_layout_digest() -> CanonicalResult<String> {
 pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
     Ok(json!({
         "layoutKind": BATCH_LAYOUT_KIND,
-        "ballotScoreEncodingProfileDigest": ballot_score_encoding_profile_digest()?,
-        "ballotShareLayoutProfileDigest": ballot_share_layout_profile_digest()?,
-        "aggregateInputEncodingProfileDigest": aggregate_input_encoding_profile_digest()?,
-        "encodedAggregateLayoutDigest": encoded_aggregate_layout_digest()?,
-        "encryptedAggregateInputLayoutDigest": layout_digest()?,
-        "topKEvaluatorInputLayoutDigest": top_k_evaluator_input_layout_digest()?,
+        "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
+        "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash()?,
+        "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
+        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
+        "encryptedAggregateInputLayoutHash": layout_hash()?,
+        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
         "coordinateOrder": "score-share-then-one-hot-score-buckets-per-option",
         "oneHotBucketOrder": "ascending-score-1-through-10",
         "scoreBucketCount": 10,
@@ -445,19 +479,19 @@ pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
     }))
 }
 
-pub(crate) fn batch_layout_binding_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "BGVBatchEncoderLayoutBindingDigest",
+pub(crate) fn batch_layout_binding_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BGVBatchEncoderLayoutBindingHash",
         &batch_layout_binding_value()?,
     )
 }
 
-pub(crate) fn canonical_ciphertext_convention_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "CanonicalCiphertextConventionDigest",
+pub(crate) fn canonical_ciphertext_convention_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "CanonicalCiphertextConventionHash",
         &json!({
             "conventionId": CANONICAL_CIPHERTEXT_CONVENTION_ID,
-            "profileDigest": profile_digest()?,
+            "profileHash": profile_hash()?,
             "coefficientDomainOnly": true,
             "lattigoSerializationAccepted": false,
         }),
@@ -467,8 +501,8 @@ pub(crate) fn canonical_ciphertext_convention_digest() -> CanonicalResult<String
 pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
     Ok(json!({
         "operationRegistryId": OPERATION_REGISTRY_ID,
-        "profileDigest": profile_digest()?,
-        "batchEncoderDigest": batch_encoder_digest()?,
+        "profileHash": profile_hash()?,
+        "batchEncoderHash": batch_encoder_hash()?,
         "allowedOperations": [
             "encodeEncryptedAggregateInput",
             "validateCoefficientDomainPlaintext",
@@ -499,14 +533,14 @@ pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
     }))
 }
 
-pub(crate) fn allowed_operation_registry_digest() -> CanonicalResult<String> {
-    derive_protocol_digest(
-        "AllowedEvaluatorOpsDigest",
+pub(crate) fn allowed_operation_registry_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "AllowedEvaluatorOpsHash",
         &allowed_operation_registry_value()?,
     )
 }
 
-pub(crate) fn security_estimator_input_digest() -> CanonicalResult<String> {
+pub(crate) fn security_estimator_input_hash() -> CanonicalResult<String> {
     Ok(hash512_hex(
         "sealed-lattice-bgv-rns/security-estimator-input-v1",
         &[
@@ -528,14 +562,30 @@ pub(crate) fn security_estimator_input_digest() -> CanonicalResult<String> {
 mod tests {
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        aggregate_input_encoding_profile_digest, allowed_operation_registry_digest,
-        ballot_score_encoding_profile_digest, ballot_share_layout_profile_digest,
-        batch_encoder_digest, batch_layout_binding_digest, batch_layout_binding_value,
-        canonical_ciphertext_convention_digest, encoded_aggregate_layout_digest, layout_digest,
-        profile_digest, root_parameters_for_modulus, security_estimator_input_digest,
-        top_k_evaluator_input_layout_digest,
+        aggregate_input_encoding_profile_hash, allowed_operation_registry_hash,
+        ballot_score_encoding_profile_hash, ballot_share_layout_profile_hash, batch_encoder_hash,
+        batch_layout_binding_hash, batch_layout_binding_value,
+        canonical_ciphertext_convention_hash, data_basis_modulus_bits,
+        encoded_aggregate_layout_hash, extended_basis_modulus_bits, layout_hash,
+        moduli_bit_length_sum, profile_hash, root_parameters_for_modulus,
+        security_estimator_input_hash, top_k_evaluator_input_layout_hash,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
+
+    fn pow_mod(base: u64, mut exponent: u64, modulus: u64) -> u64 {
+        let mut result = 1_u128;
+        let modulus_wide = u128::from(modulus);
+        let mut base_wide = u128::from(base) % modulus_wide;
+        while exponent > 0 {
+            if exponent & 1 == 1 {
+                result = (result * base_wide) % modulus_wide;
+            }
+            base_wide = (base_wide * base_wide) % modulus_wide;
+            exponent >>= 1;
+        }
+
+        u64::try_from(result).expect("modular exponentiation result fits in u64")
+    }
 
     #[test]
     fn selected_moduli_are_ntt_ready_primes() {
@@ -547,6 +597,75 @@ mod tests {
             assert!(root_parameters_for_modulus(modulus).is_some());
         }
         assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_some());
+    }
+
+    #[test]
+    fn selected_root_parameters_have_negacyclic_orders_and_inverses() {
+        for parameters in super::ROOT_PARAMETERS {
+            assert_eq!(
+                pow_mod(
+                    parameters.negacyclic_root,
+                    POLYNOMIAL_DEGREE as u64,
+                    parameters.modulus
+                ),
+                parameters.modulus - 1,
+                "negacyclic root must have half-order -1 for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                pow_mod(
+                    parameters.negacyclic_root,
+                    2 * POLYNOMIAL_DEGREE as u64,
+                    parameters.modulus
+                ),
+                1,
+                "negacyclic root must have full 2N order for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                pow_mod(
+                    parameters.cyclic_root,
+                    POLYNOMIAL_DEGREE as u64,
+                    parameters.modulus
+                ),
+                1,
+                "cyclic root must have N order for modulus {}",
+                parameters.modulus
+            );
+            assert_ne!(
+                pow_mod(
+                    parameters.cyclic_root,
+                    (POLYNOMIAL_DEGREE / 2) as u64,
+                    parameters.modulus
+                ),
+                1,
+                "cyclic root must not have order N/2 for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                (u128::from(parameters.negacyclic_root)
+                    * u128::from(parameters.inverse_negacyclic_root))
+                    % u128::from(parameters.modulus),
+                1,
+                "inverse negacyclic root mismatch for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                (u128::from(parameters.cyclic_root) * u128::from(parameters.inverse_cyclic_root))
+                    % u128::from(parameters.modulus),
+                1,
+                "inverse cyclic root mismatch for modulus {}",
+                parameters.modulus
+            );
+            assert_eq!(
+                (u128::from(POLYNOMIAL_DEGREE as u64)
+                    * u128::from(parameters.inverse_polynomial_degree))
+                    % u128::from(parameters.modulus),
+                1,
+                "inverse degree mismatch for modulus {}",
+                parameters.modulus
+            );
+        }
     }
 
     #[test]
@@ -569,69 +688,114 @@ mod tests {
         );
         assert_eq!(
             BgvBasisKind::Special
-                .moduli_for_level(99)
-                .expect("special basis ignores levels"),
+                .moduli_for_level(0)
+                .expect("special basis level zero"),
             vec![SPECIAL_PRIME]
+        );
+        assert!(BgvBasisKind::Special.moduli_for_level(1).is_none());
+        assert!(BgvBasisKind::Special.moduli_for_level(99).is_none());
+    }
+
+    #[test]
+    fn modulus_bit_accounting_sums_actual_modulus_widths() {
+        assert_eq!(moduli_bit_length_sum([0, 1, 255, 256]), 18);
+        assert_eq!(
+            data_basis_modulus_bits(),
+            DATA_PRIMES
+                .iter()
+                .map(
+                    |modulus| usize::try_from(u64::BITS - modulus.leading_zeros())
+                        .expect("bit length fits usize")
+                )
+                .sum::<usize>()
+        );
+        assert_eq!(
+            extended_basis_modulus_bits(),
+            data_basis_modulus_bits()
+                + usize::try_from(u64::BITS - SPECIAL_PRIME.leading_zeros())
+                    .expect("bit length fits usize")
         );
     }
 
     #[test]
-    fn selected_profile_digests_are_stable_hex_roots() {
-        let stable_digests = [
+    fn selected_profile_hashes_are_stable_hex_roots() {
+        let stable_hashes = [
             (
-                profile_digest(),
-                "d875931773a704df5f3b5d3dad4ef526bbe671a66465b75c19b2c1190929f86326822cd3ede1233eba2905a4b3c086e0426af5a3f7150f537d76b8349f73b3c2",
+                "profile",
+                profile_hash(),
+                "4a2efbb3218fcbde79d396688ebd4bf5f5ed7300f23316e6900aa0cb7dd0057bccc3892df183a6a4f628cc26c8163cf9b226e37f54519216067be5efd5ca743e",
             ),
             (
-                batch_encoder_digest(),
-                "dd8249296f1b3d5f13ab5229b9ae94b15f10ec68b1a65c1e578d1b4d144fe772d205ea2d715114188e6ffbff414b9af75487987862effdbb4fae42ad6b257fe4",
+                "batch encoder",
+                batch_encoder_hash(),
+                "b76e6b5f37b480032f9f1770f854f6102483f737c0c3d7740ee9f837141648e55ce6b502649661ebd0284e0870a70ea6d8a9370e1afd3e130f62f6ef90885e0c",
             ),
             (
-                layout_digest(),
-                "88451e87d7f817d6b902d5d8ca4473e381aa56a78140ae165c7554403ebd7bfa44fe2edfab250afea26a3829108879fea523e14c28828356ffd87f80a0d9a89e",
+                "layout",
+                layout_hash(),
+                "cb0146fae3f1751991d30d0bc19d5005a733db746a5f91ceb8bb6fba557bf4326852ad22dc2530c3fe94ca9a066751befe8f3558cc9865a6091da385d65f6fe6",
             ),
             (
-                batch_layout_binding_digest(),
-                "14e66d0972e0a8afc5799add5cea3d09c3ae1f08c6850558d988e47b8f953dc847922c1fba7b372051a565e6b7e1ea5a2f6a864f31dc3b26607c933d9b462e8f",
+                "batch layout binding",
+                batch_layout_binding_hash(),
+                "2bdddaf7eba3787d244cb6622e252b6ee9391a8d3aa22a23fa9e46a777d036a7d8852e38f664dec7fd50e2308bec608f896cbd3b3ae925844bc77f673330baab",
             ),
             (
-                ballot_score_encoding_profile_digest(),
-                "f8ef46e35e3845d7736dbd4e2def724b6082e98b01cc9936d0fb59216b65f6d6f8462b987c6c1f2e0593a8de330734dae85e8b58e963f8808b700ef03ceacf30",
+                "ballot score encoding profile",
+                ballot_score_encoding_profile_hash(),
+                "5d97f29a451d5e4bc1a5683e3edf1469296ee6347201beebf6091cf72a2e963cd67ed00ca353457cdb27230f8a58ebc88f498ffac4f9661e60e70dad27b373fa",
             ),
             (
-                ballot_share_layout_profile_digest(),
-                "c44544accf39fd10bf19a3c26be13352deac6e682b7339f19a420991505c858e1be7d9be2ebbc2632c421a9b56f9a98d592b92fa4a3e75614e536fe8f4e0dfd7",
+                "ballot share layout profile",
+                ballot_share_layout_profile_hash(),
+                "cfedd8025cebd77752d753d7e3a83a8a2c858e404d3a1d8ae5fae4ce297541d813b0f5505179dbd31842e8cf2aca71e0f259dfa109112c2e88fcea39a0e17dd5",
             ),
             (
-                aggregate_input_encoding_profile_digest(),
-                "d9136003638ac0ab717681cd58a37e182f986a17a3b45612a6089080cdf95b80622b01857b6c5aea8a37da60ca8595bd1da1a665fb76faed2f0ba4a23181c35b",
+                "aggregate input encoding profile",
+                aggregate_input_encoding_profile_hash(),
+                "3b4685fe3a76ba943b21bcf2cc775401671cb54fb2b4acea30b13637d86219b3d4f1fecfebdd538b7da83118ce3427e7f5935032296cc697f03c0d952764ddb4",
             ),
             (
-                encoded_aggregate_layout_digest(),
-                "2e26e73278c79f9fdf8def4a68601500ddb86882a73ac43ffe25c90a7c0760c18ae72530a80d6f7b8f8aeff3abb31cbd35e7e59cb93edbedb4a4c455a13340e5",
+                "encoded aggregate layout",
+                encoded_aggregate_layout_hash(),
+                "5326486ddf587930a12be856d2c79cf255c4d74aa0ab36c140f0882d90ad5a5bfb84785ac57143eb520e202afcb7101e409f8f77361f29f32001972ed869ad36",
             ),
             (
-                top_k_evaluator_input_layout_digest(),
-                "648022bf9e49d1bfacb52bc4391b6a4dd1729236495de0f27975141fea91e52557b379fa25aecb6a5e07f122bbb3c4166b8028773c168063356be37676960915",
+                "top-k evaluator input layout",
+                top_k_evaluator_input_layout_hash(),
+                "f6b51420ef079f4553dc3383ec4d7a3db6ca0951b8f6d99ae6c60b42d058739ebeb66e0d95a0697c3891e798b910054781b925a7ce7601b128922cef50ad5640",
             ),
             (
-                canonical_ciphertext_convention_digest(),
-                "71822f4b2f96f38140609db8621bd0c55948dca126eead0c80bffe5e287772af901e2e9dc83f5cce3578781ec595cb846936d804d70a9c084c58c3439017ed31",
+                "canonical ciphertext convention",
+                canonical_ciphertext_convention_hash(),
+                "f12e731e1096504c1ade1fb25422d610888e44bcc1936234b160774f2e60e83dc8bd9d9b3ff43ddb6195b5ea6baec08544088e562f86b439a252de76c20d3bc8",
             ),
             (
-                allowed_operation_registry_digest(),
-                "a9040aab3345f6a38f01a1d279c7cb15a3b845cf36f39a5221c99658c57e113613bd3dd95aaa933157cc46fd6d51a947fd9c45627753b35d5d402fd5c70e1156",
+                "allowed operation registry",
+                allowed_operation_registry_hash(),
+                "ca576ed087e0fbddd7e82bb439610a4e3c3c761bce521363a2ed7d6fbc1c836dbf97c42fa0acb645007452f52365ba27ca42d8382ea582ab27b23ddf38b30498",
             ),
             (
-                security_estimator_input_digest(),
+                "security estimator input",
+                security_estimator_input_hash(),
                 "4bce752346f1caf9652f456f27645da0a19ff8c9cf5376eef941d9cb4411e22fa4c2f8eaf8707df98b7a48318ef3987ba85e656143e71587d68e16edfdb2f428",
             ),
         ];
 
-        for (actual_digest, expected_digest) in stable_digests {
-            let actual_digest = actual_digest.expect("digest should derive");
-            assert_eq!(actual_digest, expected_digest);
+        let mut mismatched_hashes = Vec::new();
+        for (profile_hash_label, actual_hash, expected_hash) in stable_hashes {
+            let actual_hash = actual_hash.expect("hash should derive");
+            if actual_hash != expected_hash {
+                mismatched_hashes.push(format!(
+                    "{profile_hash_label}: expected {expected_hash}, received {actual_hash}"
+                ));
+            }
         }
+        assert!(
+            mismatched_hashes.is_empty(),
+            "{}",
+            mismatched_hashes.join("\n")
+        );
     }
 
     #[test]
@@ -649,9 +813,9 @@ mod tests {
         );
         assert_eq!(binding["scoreBucketCount"], 10);
         assert!(
-            binding["encryptedAggregateInputLayoutDigest"]
+            binding["encryptedAggregateInputLayoutHash"]
                 .as_str()
-                .expect("target digest")
+                .expect("target hash")
                 .chars()
                 .all(|character| character.is_ascii_hexdigit())
         );

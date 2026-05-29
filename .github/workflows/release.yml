@@ -27,10 +27,6 @@ concurrency:
     group: release
     cancel-in-progress: false
 
-env:
-    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    SEALED_LATTICE_TURBO_CACHE: "local:,remote:"
-
 jobs:
     validate-dispatch:
         name: validate dispatch
@@ -54,14 +50,14 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - run: cargo fmt --check
+            - run: cargo fmt --check -p sealed-lattice-kernel
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
             - run: cargo test --workspace
 
@@ -72,10 +68,10 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -88,15 +84,19 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 25
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - run: pnpm run check
+            - run: |
+                  pnpm run build
+                  pnpm run lint
+                  pnpm run tsc
+                  pnpm run api-surface:check
+                  pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
+                  pnpm exec tsx ./tools/ci/check-package-boundaries.ts
+                  pnpm run vectors
+                  pnpm exec knip
 
     node-fast:
         name: node fast
@@ -105,83 +105,49 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - run: pnpm run test:node:fast
+            - run: pnpm run test:node:fast -- --no-run-log
 
-    node-relation-heavy:
-        name: node relation heavy
-        needs:
-            - validate-dispatch
-        runs-on: ubuntu-latest
-        timeout-minutes: 20
-        steps:
-            - uses: actions/checkout@v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - run: pnpm run test:node:relation-heavy
-
-    node-proof-input-heavy:
-        name: node proof input heavy
-        needs:
-            - validate-dispatch
-        runs-on: ubuntu-latest
-        timeout-minutes: 30
-        steps:
-            - uses: actions/checkout@v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - run: pnpm run test:node:proof-input-heavy
-
-    node-kernel-remaining:
-        name: node kernel remaining
-        needs:
-            - validate-dispatch
-        runs-on: ubuntu-latest
-        timeout-minutes: 25
-        steps:
-            - uses: actions/checkout@v6.0.2
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - run: pnpm run test:node:kernel-remaining
-
-    node-kernel-aggregate:
-        name: node kernel aggregate
+    node-protocol:
+        name: node protocol
         needs:
             - validate-dispatch
         runs-on: ubuntu-latest
         timeout-minutes: 60
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - run: pnpm run test:node:kernel-aggregate
+            - run: pnpm run test:node:protocol -- --no-run-log
+
+    node-kernel:
+        name: node kernel
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - run: pnpm run test:node:kernel -- --no-run-log
 
     verify:
         name: verify
@@ -190,22 +156,27 @@ jobs:
         needs:
             - verify-static
             - node-fast
-            - node-relation-heavy
-            - node-proof-input-heavy
-            - node-kernel-remaining
-            - node-kernel-aggregate
+            - node-protocol
+            - node-kernel
         if: ${{ always() }}
         steps:
-            - name: Check split verify jobs
-              env:
-                  NEEDS_JSON: ${{ toJSON(needs) }}
-              run: >-
-                  node -e "const needs = JSON.parse(process.env.NEEDS_JSON);
-                  const failed = Object.entries(needs).filter(([, job]) =>
-                  job.result !== 'success'); if (failed.length > 0) {
-                  console.error(failed.map(([name, job]) => name + ': ' +
-                  job.result).join('\n')); process.exit(1); }
-                  console.log('Split verify jobs passed.');"
+            - name: Check verify jobs
+              run: |
+                  node --input-type=module <<'NODE'
+                  const needs = ${{ toJSON(needs) }};
+                  const failed = Object.entries(needs).filter(
+                    ([, job]) => job.result !== 'success',
+                  );
+                  if (failed.length > 0) {
+                    console.error(
+                      failed
+                        .map(([name, job]) => `${name}: ${job.result}`)
+                        .join('\n'),
+                    );
+                    process.exit(1);
+                  }
+                  console.log('Verify jobs passed.');
+                  NODE
 
     coverage:
         name: coverage
@@ -214,11 +185,11 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 25
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -231,11 +202,11 @@ jobs:
         runs-on: macos-latest
         timeout-minutes: 45
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -250,11 +221,11 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 25
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -268,18 +239,17 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 60
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
             - run: |
                   PUBLIC_PACKAGE_DIR="$(mktemp -d)"
@@ -309,7 +279,7 @@ jobs:
             run:
                 shell: bash
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   fetch-depth: 0
                   persist-credentials: false
@@ -320,7 +290,7 @@ jobs:
               run: echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@1.90.0
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
@@ -417,7 +387,6 @@ jobs:
             - run: pnpm run build
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
-            - run: pnpm run smoke:pack
             - run: pnpm run smoke:pack:npm
             - run: |
                   PUBLIC_PACKAGE_DIR="$(mktemp -d)"
@@ -425,7 +394,7 @@ jobs:
                   cd "${PUBLIC_PACKAGE_DIR}"
                   npm publish --dry-run --ignore-scripts
 
-            - uses: actions/upload-artifact@v7.0.1
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
                   if-no-files-found: error
                   name: release-package
@@ -454,18 +423,18 @@ jobs:
                     exit 1
                   fi
 
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   fetch-depth: 0
                   persist-credentials: true
                   ref: ${{ needs.prepare-release.outputs.source_sha }}
                   ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
-            - uses: actions/setup-node@v6.3.0
+            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
               with:
                   node-version-file: .nvmrc
 
-            - uses: actions/download-artifact@v8.0.1
+            - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
               with:
                   name: release-package
                   path: .
@@ -545,16 +514,16 @@ jobs:
             run:
                 shell: bash
         steps:
-            - uses: actions/checkout@v6.0.2
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
                   ref: ${{ needs.prepare-release.outputs.tag }}
 
-            - uses: actions/setup-node@v6.3.0
+            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
               with:
                   node-version-file: .nvmrc
 
-            - uses: actions/download-artifact@v8.0.1
+            - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
               with:
                   name: release-package
                   path: .

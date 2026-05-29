@@ -1,4 +1,4 @@
-import type { ProtocolDigest, RefusalRecord } from '@sealed-lattice/types';
+import type { ProtocolHash, RefusalRecord } from '@sealed-lattice/types';
 
 import {
     ballotPrivacyFieldModulus,
@@ -18,39 +18,39 @@ import {
 const relationStatementFormat =
     'SparseIntegerRowsModuloGF65537WithBoundGadgets-v1';
 
-const relationStatementDigestPurpose =
+const relationStatementHashPurpose =
     'ballot-privacy-linear-relation-statement-v1';
 
 const backendStatementFormat = 'SparseSignedIntegerBackendStatement-v1';
 
-const backendStatementDigestPurpose = 'ballot-privacy-backend-statement-v1';
+const backendStatementHashPurpose = 'ballot-privacy-backend-statement-v1';
 
-const explicitBackendMatrixDigestPurpose =
+const explicitBackendMatrixHashPurpose =
     'ballot-privacy-backend-explicit-matrix-v1';
 
-const explicitBackendTargetVectorDigestPurpose =
+const explicitBackendTargetVectorHashPurpose =
     'ballot-privacy-backend-explicit-target-vector-v1';
 
-const digestExpandedBackendMatrixDigestPurpose =
-    'ballot-privacy-backend-digest-expanded-matrix-v1';
+const hashExpandedBackendMatrixHashPurpose =
+    'ballot-privacy-backend-hash-expanded-matrix-v1';
 
-const digestExpandedBackendTargetVectorDigestPurpose =
-    'ballot-privacy-backend-digest-expanded-target-vector-v1';
+const hashExpandedBackendTargetVectorHashPurpose =
+    'ballot-privacy-backend-hash-expanded-target-vector-v1';
 
-const structuredShareCommitmentBackendMatrixDigestPurpose =
+const structuredShareCommitmentBackendMatrixHashPurpose =
     'ballot-privacy-backend-structured-share-commitment-matrix-v1';
 
-const structuredShareCommitmentBackendTargetVectorDigestPurpose =
+const structuredShareCommitmentBackendTargetVectorHashPurpose =
     'ballot-privacy-backend-structured-share-commitment-target-vector-v1';
 
-const backendMatrixDigestPurpose = 'ballot-privacy-backend-matrix-v1';
+const backendMatrixHashPurpose = 'ballot-privacy-backend-matrix-v1';
 
-const backendTargetVectorDigestPurpose =
+const backendTargetVectorHashPurpose =
     'ballot-privacy-backend-target-vector-v1';
 
-const backendBoundsDigestPurpose = 'ballot-privacy-backend-bounds-v1';
+const backendBoundsHashPurpose = 'ballot-privacy-backend-bounds-v1';
 
-const backendProofComponentsDigestPurpose =
+const backendProofComponentsHashPurpose =
     'ballot-privacy-backend-proof-components-v1';
 
 type ReceiverReference = {
@@ -59,24 +59,24 @@ type ReceiverReference = {
 };
 
 type ReceiverPublicKeyReference = ReceiverReference & {
-    readonly keyMaterialDigest?: ProtocolDigest;
-    readonly publicMatrixSeedDigest?: ProtocolDigest;
+    readonly keyMaterialHash?: ProtocolHash;
+    readonly publicMatrixSeedHash?: ProtocolHash;
     readonly publicKeyVector?: readonly (readonly number[])[];
-    readonly receiverPublicKeyDigest: ProtocolDigest;
+    readonly receiverPublicKeyHash: ProtocolHash;
 };
 
 type ReceiverPayloadReference = ReceiverReference & {
-    readonly ciphertextBodyDigest?: ProtocolDigest;
+    readonly ciphertextBodyHash?: ProtocolHash;
     readonly ciphertextChunks?: readonly {
         readonly chunkIndex: number;
         readonly firstCiphertextVector: readonly (readonly number[])[];
         readonly secondCiphertextPolynomial: readonly number[];
     }[];
-    readonly ciphertextChunkDigest?: ProtocolDigest;
+    readonly ciphertextChunkHash?: ProtocolHash;
     readonly ciphertextChunkCount?: number;
     readonly plaintextBitLength?: number;
-    readonly receiverPayloadDigest: ProtocolDigest;
-    readonly receiverPayloadCiphertextRoot: ProtocolDigest;
+    readonly receiverPayloadHash: ProtocolHash;
+    readonly receiverPayloadCiphertextRoot: ProtocolHash;
 };
 
 type ReceiverPayloadCiphertextChunkReference = NonNullable<
@@ -84,35 +84,35 @@ type ReceiverPayloadCiphertextChunkReference = NonNullable<
 >[number];
 
 type ShareCommitmentReference = ReceiverReference & {
-    readonly commitmentBodyDigest?: ProtocolDigest;
+    readonly commitmentBodyHash?: ProtocolHash;
     readonly commitmentPolynomialVector?: readonly (readonly string[])[];
-    readonly commitmentPolynomialVectorDigest?: ProtocolDigest;
-    readonly shareCommitmentDigest: ProtocolDigest;
+    readonly commitmentPolynomialVectorHash?: ProtocolHash;
+    readonly shareCommitmentHash: ProtocolHash;
 };
 
 export type BallotPrivacyRelationBackendPublicContext = {
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly actionContextDigest: ProtocolDigest;
-    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest?: ProtocolDigest;
-    readonly receiverKeyRoot: ProtocolDigest;
-    readonly receiverKeyProofRoot: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly actionContextHash: ProtocolHash;
+    readonly rosterExternalAcceptanceHash: ProtocolHash;
+    readonly ballotProofStatementHash?: ProtocolHash;
+    readonly receiverKeyRoot: ProtocolHash;
+    readonly receiverKeyProofRoot: ProtocolHash;
     readonly receiverPublicKeys: readonly ReceiverPublicKeyReference[];
     readonly receiverPayloads: readonly ReceiverPayloadReference[];
     readonly shareCommitments: readonly ShareCommitmentReference[];
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
-    readonly receiverEncryptionProfileDigest: ProtocolDigest;
-    readonly ballotProofProfileDigest: ProtocolDigest;
-    readonly scoreMembershipProfileDigest: ProtocolDigest;
-    readonly ballotScoreEncodingProfileDigest: ProtocolDigest;
-    readonly ballotShareLayoutProfileDigest: ProtocolDigest;
-    readonly aggregateInputEncodingProfileDigest: ProtocolDigest;
-    readonly encodedShareVectorLayoutDigest: ProtocolDigest;
-    readonly encodedAggregateLayoutDigest: ProtocolDigest;
-    readonly shareCommitmentMessageBoundCertDigest: ProtocolDigest;
+    readonly shareCommitmentProfileHash: ProtocolHash;
+    readonly receiverEncryptionProfileHash: ProtocolHash;
+    readonly ballotProofProfileHash: ProtocolHash;
+    readonly scoreMembershipProfileHash: ProtocolHash;
+    readonly ballotScoreEncodingProfileHash: ProtocolHash;
+    readonly ballotShareLayoutProfileHash: ProtocolHash;
+    readonly aggregateInputEncodingProfileHash: ProtocolHash;
+    readonly encodedShareVectorLayoutHash: ProtocolHash;
+    readonly encodedAggregateLayoutHash: ProtocolHash;
+    readonly shareCommitmentMessageBoundCertHash: ProtocolHash;
 };
 
 type BallotPrivacyLinearRelationVariableRole =
@@ -205,8 +205,8 @@ type BallotPrivacyAlgebraicRelationRow = {
     readonly shareCommitmentPolynomialVector?: readonly (readonly string[])[];
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
-    readonly targetDigest: ProtocolDigest;
-    readonly publicInputDigests: Record<string, ProtocolDigest>;
+    readonly targetHash: ProtocolHash;
+    readonly publicInputHashes: Record<string, ProtocolHash>;
     readonly variableNames: readonly string[];
 };
 
@@ -234,21 +234,21 @@ type BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor = {
     readonly ciphertextChunkCount: number;
     readonly plaintextBitLength: number;
     readonly receiverIdentity: string;
-    readonly receiverPayloadDigest: ProtocolDigest;
+    readonly receiverPayloadHash: ProtocolHash;
     readonly receiverRosterPosition: number;
-    readonly receiverPublicKeyDigest: ProtocolDigest;
+    readonly receiverPublicKeyHash: ProtocolHash;
     readonly rowCount: number;
     readonly rowOffsetWithinBatch: number;
 };
 
 type BallotPrivacyBackendStatementShareCommitmentRowDescriptor = {
-    readonly commitmentBodyDigest: ProtocolDigest;
-    readonly commitmentPolynomialVectorDigest: ProtocolDigest;
+    readonly commitmentBodyHash: ProtocolHash;
+    readonly commitmentPolynomialVectorHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly rowCount: number;
     readonly rowOffsetWithinBatch: number;
-    readonly shareCommitmentDigest: ProtocolDigest;
+    readonly shareCommitmentHash: ProtocolHash;
 };
 
 type BallotPrivacyBackendStatementRowBatch =
@@ -261,7 +261,7 @@ type BallotPrivacyBackendStatementRowBatch =
               | 'receiver_payload_plaintext_bit_decomposition_rows'
               | 'share_commitment_equation_rows'
               | 'receiver_payload_plaintext_binding_rows';
-          readonly matrixDigest: ProtocolDigest;
+          readonly matrixHash: ProtocolHash;
           readonly modulus: string;
           readonly rowCount: number;
           readonly rowKind:
@@ -273,49 +273,49 @@ type BallotPrivacyBackendStatementRowBatch =
               | 'ReceiverPayloadPlaintextBindingRows';
           readonly rowOffset: number;
           readonly rows: readonly BallotPrivacyBackendStatementExplicitRow[];
-          readonly targetVectorDigest: ProtocolDigest;
+          readonly targetVectorHash: ProtocolHash;
           readonly variableColumnIndices: readonly number[];
       }
     | {
           readonly batchKind: 'StructuredModuleSisShareCommitmentRows';
           readonly batchName: 'share_commitment_equation_rows';
-          readonly matrixDigest: ProtocolDigest;
+          readonly matrixHash: ProtocolHash;
           readonly modulus: string;
           readonly rowCount: number;
           readonly rowKind: 'ShareCommitmentEquationRows';
           readonly rowOffset: number;
           readonly shareCommitmentRows: readonly BallotPrivacyBackendStatementShareCommitmentRowDescriptor[];
-          readonly targetVectorDigest: ProtocolDigest;
+          readonly targetVectorHash: ProtocolHash;
           readonly variableColumnIndices: readonly number[];
       }
     | {
           readonly batchKind: 'StructuredModuleLweReceiverEncryptionRows';
           readonly batchName: 'receiver_payload_encryption_equation_rows';
-          readonly matrixDigest: ProtocolDigest;
+          readonly matrixHash: ProtocolHash;
           readonly modulus: string;
           readonly receiverRows: readonly BallotPrivacyBackendStatementReceiverEncryptionRowDescriptor[];
           readonly rowCount: number;
           readonly rowKind: 'ReceiverPayloadEncryptionEquationRows';
           readonly rowOffset: number;
-          readonly targetVectorDigest: ProtocolDigest;
+          readonly targetVectorHash: ProtocolHash;
           readonly variableColumnIndices: readonly number[];
       }
     | {
-          readonly batchKind: 'DigestExpandedRows';
+          readonly batchKind: 'HashExpandedRows';
           readonly batchName: string;
           readonly coefficientExpansionDomain: string;
-          readonly matrixDigest: ProtocolDigest;
+          readonly matrixHash: ProtocolHash;
           readonly modulus: string;
-          readonly publicInputDigests: Record<string, ProtocolDigest>;
+          readonly publicInputHashes: Record<string, ProtocolHash>;
           readonly receiverIdentity: string;
           readonly receiverRosterPosition: number;
           readonly rowCount: number;
           readonly rowKind: BallotPrivacyAlgebraicRelationRowKind;
           readonly rowOffset: number;
           readonly sourceAlgebraicRowName: string;
-          readonly targetDigest: ProtocolDigest;
+          readonly targetHash: ProtocolHash;
           readonly targetExpansionDomain: string;
-          readonly targetVectorDigest: ProtocolDigest;
+          readonly targetVectorHash: ProtocolHash;
           readonly variableColumnIndices: readonly number[];
       };
 
@@ -337,12 +337,12 @@ export type BallotPrivacyBackendProofComponentId =
     | 'receiver-key-binding-component';
 
 export type BallotPrivacyBackendProofComponent = {
-    readonly componentDigest: ProtocolDigest;
+    readonly componentHash: ProtocolHash;
     readonly componentId: BallotPrivacyBackendProofComponentId;
     readonly coefficientModulus: string;
     readonly proofLoweringStatus:
         | 'explicitRowsAvailable'
-        | 'digestExpandedRowsPending';
+        | 'HashExpandedRowsPending';
     readonly rowBatchNames: readonly string[];
     readonly rowCount: number;
     readonly rowKinds: readonly string[];
@@ -353,7 +353,7 @@ export type BallotPrivacyBackendProofComponent = {
 export type BallotPrivacyProofBackendStatement = {
     readonly objectType: 'BallotPrivacyProofBackendStatement';
     readonly objectVersion: 1;
-    readonly backendStatementDigest: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
     readonly backendStatementFormat: typeof backendStatementFormat;
     readonly relationLabel: 'BallotPrivacyPvssRelation';
     readonly sourceRelationStatementFormat: typeof relationStatementFormat;
@@ -366,15 +366,15 @@ export type BallotPrivacyProofBackendStatement = {
     readonly columnCount: number;
     readonly rowCount: number;
     readonly explicitRowCount: number;
-    readonly digestExpandedRowCount: number;
+    readonly hashExpandedRowCount: number;
     readonly variableColumns: readonly BallotPrivacyBackendStatementVariableColumn[];
     readonly rowBatches: readonly BallotPrivacyBackendStatementRowBatch[];
     readonly bounds: readonly BallotPrivacyBackendStatementBound[];
     readonly proofComponents: readonly BallotPrivacyBackendProofComponent[];
-    readonly proofComponentsDigest: ProtocolDigest;
-    readonly matrixDigest: ProtocolDigest;
-    readonly targetVectorDigest: ProtocolDigest;
-    readonly boundsDigest: ProtocolDigest;
+    readonly proofComponentsHash: ProtocolHash;
+    readonly matrixHash: ProtocolHash;
+    readonly targetVectorHash: ProtocolHash;
+    readonly boundsHash: ProtocolHash;
 };
 
 export type BallotPrivacyLoweredLinearRelationStatement = {
@@ -382,7 +382,7 @@ export type BallotPrivacyLoweredLinearRelationStatement = {
     readonly objectVersion: 1;
     readonly relationStatementFormat: typeof relationStatementFormat;
     readonly relationLabel: 'BallotPrivacyPvssRelation';
-    readonly relationStatementDigest: ProtocolDigest;
+    readonly relationStatementHash: ProtocolHash;
     readonly optionCount: number;
     readonly rosterSize: number;
     readonly pvssThreshold: number;
@@ -519,12 +519,12 @@ const receiverPayloadPlaintextBitVariableNameForLayout = (
     );
 };
 
-const digestExpandedReceiverEncryptionRandomnessVariableName = (
+const hashExpandedReceiverEncryptionRandomnessVariableName = (
     receiverRosterPosition: number,
 ): string =>
     `receiver_${receiverRosterPosition}_receiver_encryption_randomness`;
 
-const digestExpandedReceiverEncryptionNoiseVariableName = (
+const hashExpandedReceiverEncryptionNoiseVariableName = (
     receiverRosterPosition: number,
 ): string => `receiver_${receiverRosterPosition}_receiver_encryption_noise`;
 
@@ -579,19 +579,19 @@ const receiverPayloadPlaintextPolynomialVariableName = (
 
 export {
     relationStatementFormat,
-    relationStatementDigestPurpose,
+    relationStatementHashPurpose,
     backendStatementFormat,
-    backendStatementDigestPurpose,
-    explicitBackendMatrixDigestPurpose,
-    explicitBackendTargetVectorDigestPurpose,
-    digestExpandedBackendMatrixDigestPurpose,
-    digestExpandedBackendTargetVectorDigestPurpose,
-    structuredShareCommitmentBackendMatrixDigestPurpose,
-    structuredShareCommitmentBackendTargetVectorDigestPurpose,
-    backendMatrixDigestPurpose,
-    backendTargetVectorDigestPurpose,
-    backendBoundsDigestPurpose,
-    backendProofComponentsDigestPurpose,
+    backendStatementHashPurpose,
+    explicitBackendMatrixHashPurpose,
+    explicitBackendTargetVectorHashPurpose,
+    hashExpandedBackendMatrixHashPurpose,
+    hashExpandedBackendTargetVectorHashPurpose,
+    structuredShareCommitmentBackendMatrixHashPurpose,
+    structuredShareCommitmentBackendTargetVectorHashPurpose,
+    backendMatrixHashPurpose,
+    backendTargetVectorHashPurpose,
+    backendBoundsHashPurpose,
+    backendProofComponentsHashPurpose,
     shareCommitmentModulus,
     shareCommitmentModuleRank,
     shareCommitmentModuleDegree,
@@ -615,8 +615,8 @@ export {
     receiverPayloadPlaintextShareBitVariableName,
     receiverPayloadPlaintextOpeningBitVariableName,
     receiverPayloadPlaintextBitVariableNameForLayout,
-    digestExpandedReceiverEncryptionRandomnessVariableName,
-    digestExpandedReceiverEncryptionNoiseVariableName,
+    hashExpandedReceiverEncryptionRandomnessVariableName,
+    hashExpandedReceiverEncryptionNoiseVariableName,
     receiverEncryptionRandomnessVariableName,
     receiverEncryptionFirstNoiseVariableName,
     receiverEncryptionSecondNoiseVariableName,

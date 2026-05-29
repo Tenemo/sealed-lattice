@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit public-only receiver-key linear proof compatibility vectors."""
+"""Emit public-only receiver-key linear proof vectors."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from emit_linear_vectors import (
 )
 
 
-VECTOR_PROFILE_ID = "receiver-key-linear-module-lwe-compatibility-v1"
+VECTOR_PROFILE_ID = "receiver-key-linear-module-lwe-unsupported-v1"
 REQUIRED_CASE_NAMES = [
     "valid-receiver-key-linear-proof",
     "mutated-receiver-key-statement-matrix",
@@ -427,10 +427,10 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "upstreamCommitHash": run_command(["git", "rev-parse", "HEAD"], cwd=lazer_root),
         "dockerfileSha256": sha256_file(repo_root / "tools" / "lazer-oracle" / "Dockerfile"),
         "oracleDriverSha256": sha256_file(
-            repo_root / "tools" / "lazer-oracle" / "generate-receiver-key-linear-vectors.ts"
+            repo_root / "tools" / "lazer-oracle" / "generate-vectors.ts"
         ),
         "oracleRunnerSha256": sha256_file(
-            repo_root / "tools" / "lazer-oracle" / "run_receiver_key_oracle.py"
+            repo_root / "tools" / "lazer-oracle" / "run_oracle.py"
         ),
         "receiverKeyParameterSourceSha256": sha256_file(
             repo_root / "tools" / "lazer-oracle" / "receiver-key-linear-params.py"
@@ -439,8 +439,8 @@ def emit_vectors(repo_root: Path, lazer_root: Path, out_path: Path) -> None:
         "pythonVersion": platform.python_version(),
         "sageVersion": sage_version,
         "compilerVersion": run_command(["gcc", "--version"]).splitlines()[0],
-        "buildCommand": "tsx tools/lazer-oracle/generate-receiver-key-linear-vectors.ts",
-        "parameterGenerationCommand": "docker run sagemath/sagemath:latest sage lin-codegen.sage tools/lazer-oracle/receiver-key-linear-params.py",
+        "buildCommand": "tsx tools/lazer-oracle/generate-vectors.ts --profile receiver-key-linear",
+        "parameterGenerationCommand": "docker run sagemath/sagemath@sha256:2401ffa8e9fc85c7ea17d3649bde5958b4dbf0858b3e504098c4102720151711 sage lin-codegen.sage tools/lazer-oracle/receiver-key-linear-params.py",
         "profileWarning": "LaZer lin-codegen emits protocol-not-complete for this exploratory receiver-key parameter file; vectors are used for porting behavior only, not production closure.",
         "licenseNote": "LaZer is used only as an offline vector oracle; no upstream C library is shipped in sealed-lattice.",
     }

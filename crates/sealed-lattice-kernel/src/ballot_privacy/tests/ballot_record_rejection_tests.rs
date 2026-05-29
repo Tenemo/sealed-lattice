@@ -1,5 +1,5 @@
 use super::*;
-use crate::ballot_privacy::linear_proof_profile_constants::{
+use crate::ballot_privacy::linear_proof::profile_constants::{
     DEMO_GENERATED_PARAMETER_CONTRACT, DEMO_GENERATED_PROFILE,
 };
 
@@ -28,22 +28,22 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
         .as_str()
         .expect("valid vector publicRandomnessHex should be a string");
     let proof_size_bytes = proof_bytes_hex.len() / 2;
-    let test_digest = |label: &str| {
-        super::derive_digest(
-            "ChallengeDomainDigest",
+    let test_hash = |label: &str| {
+        super::derive_hash(
+            "ChallengeDomainHash",
             &json!({
                 "label": label,
                 "purpose": "ballot-proof-record-native-test"
             }),
         )
-        .expect("test digest should derive")
+        .expect("test hash should derive")
     };
     let create_statement = || {
         let receiver_public_keys = (1..=20)
             .map(|receiver_roster_position| {
                 json!({
                     "receiverIdentity": format!("receiver-{receiver_roster_position}"),
-                    "receiverPublicKeyDigest": test_digest(&format!("receiver-public-key-{receiver_roster_position}")),
+                    "receiverPublicKeyHash": test_hash(&format!("receiver-public-key-{receiver_roster_position}")),
                     "receiverRosterPosition": receiver_roster_position
                 })
             })
@@ -52,8 +52,8 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
             .map(|receiver_roster_position| {
                 json!({
                     "receiverIdentity": format!("receiver-{receiver_roster_position}"),
-                    "receiverPayloadCiphertextRoot": test_digest(&format!("receiver-ciphertext-{receiver_roster_position}")),
-                    "receiverPayloadDigest": test_digest(&format!("receiver-payload-{receiver_roster_position}")),
+                    "receiverPayloadCiphertextRoot": test_hash(&format!("receiver-ciphertext-{receiver_roster_position}")),
+                    "receiverPayloadHash": test_hash(&format!("receiver-payload-{receiver_roster_position}")),
                     "receiverRosterPosition": receiver_roster_position
                 })
             })
@@ -63,70 +63,69 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
                 json!({
                     "receiverIdentity": format!("receiver-{receiver_roster_position}"),
                     "receiverRosterPosition": receiver_roster_position,
-                    "shareCommitmentDigest": test_digest(&format!("share-commitment-{receiver_roster_position}"))
+                    "shareCommitmentHash": test_hash(&format!("share-commitment-{receiver_roster_position}"))
                 })
             })
             .collect::<Vec<_>>();
         let statement_payload = json!({
-            "actionContextDigest": test_digest("action-context"),
-            "aggregateInputEncodingProfileDigest": test_digest("aggregate-input-encoding-profile"),
-            "ballotPackageDigest": test_digest("ballot-package"),
-            "ballotProofProfileDigest": test_digest("ballot-proof-profile"),
-            "ballotScoreEncodingProfileDigest": test_digest("ballot-score-encoding-profile"),
-            "ballotShareLayoutProfileDigest": test_digest("ballot-share-layout-profile"),
+            "actionContextHash": test_hash("action-context"),
+            "aggregateInputEncodingProfileHash": test_hash("aggregate-input-encoding-profile"),
+            "ballotPackageHash": test_hash("ballot-package"),
+            "ballotProofProfileHash": test_hash("ballot-proof-profile"),
+            "ballotScoreEncodingProfileHash": test_hash("ballot-score-encoding-profile"),
+            "ballotShareLayoutProfileHash": test_hash("ballot-share-layout-profile"),
             "ceremonyId": "ceremony-ballot-proof-record",
-            "challengeDomainDigest": test_digest("challenge-domain"),
-            "duplicateBallotPolicyDigest": test_digest("duplicate-policy"),
-            "encodedAggregateLayoutDigest": test_digest("encoded-aggregate-layout"),
-            "encodedShareVectorLayoutDigest": test_digest("encoded-share-vector-layout"),
-            "manifestDigest": test_digest("manifest"),
+            "challengeDomainHash": test_hash("challenge-domain"),
+            "duplicateBallotPolicyHash": test_hash("duplicate-policy"),
+            "encodedAggregateLayoutHash": test_hash("encoded-aggregate-layout"),
+            "encodedShareVectorLayoutHash": test_hash("encoded-share-vector-layout"),
+            "manifestHash": test_hash("manifest"),
             "objectType": "BallotProofStatement",
             "objectVersion": 1,
             "optionCount": 20,
-            "pollSpecDigest": test_digest("poll-spec"),
-            "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
-            "receiverKeyProofRoot": test_digest("receiver-key-proof-root"),
-            "receiverKeyRoot": test_digest("receiver-key-root"),
+            "pollSpecHash": test_hash("poll-spec"),
+            "receiverEncryptionProfileHash": test_hash("receiver-encryption-profile"),
+            "receiverKeyProofRoot": test_hash("receiver-key-proof-root"),
+            "receiverKeyRoot": test_hash("receiver-key-root"),
             "receiverPayloads": receiver_payloads,
             "receiverPublicKeys": receiver_public_keys,
-            "rosterDigest": test_digest("roster"),
-            "rosterExternalAcceptanceDigest": test_digest("external-acceptance"),
-            "scoreDomainDigest": test_digest("score-domain"),
-            "scoreMembershipProfileDigest": test_digest("score-membership-profile"),
-            "shareCommitmentMessageBoundCertDigest": test_digest("share-commitment-bound-cert"),
-            "shareCommitmentProfileDigest": test_digest("share-commitment-profile"),
+            "rosterHash": test_hash("roster"),
+            "rosterExternalAcceptanceHash": test_hash("external-acceptance"),
+            "scoreDomainHash": test_hash("score-domain"),
+            "scoreMembershipProfileHash": test_hash("score-membership-profile"),
+            "shareCommitmentMessageBoundCertHash": test_hash("share-commitment-bound-cert"),
+            "shareCommitmentProfileHash": test_hash("share-commitment-profile"),
             "shareCommitments": share_commitments,
             "shareVectorWidth": 220,
-            "thresholdProfileDigest": test_digest("threshold-profile"),
-            "tiePolicyDigest": test_digest("tie-policy"),
+            "thresholdProfileHash": test_hash("threshold-profile"),
+            "tiePolicyHash": test_hash("tie-policy"),
             "topOptionCount": 3,
-            "voterIdentityDigest": test_digest("voter-1"),
+            "voterIdentityHash": test_hash("voter-1"),
             "voterRosterPosition": 1,
-            "voterSigningKeyDigest": test_digest("voter-signing-key")
+            "voterSigningKeyHash": test_hash("voter-signing-key")
         });
-        let statement_digest =
-            super::derive_digest("BallotProofStatementDigest", &statement_payload)
-                .expect("statement digest should derive");
+        let statement_hash = super::derive_hash("BallotProofStatementHash", &statement_payload)
+            .expect("statement hash should derive");
         let mut statement = statement_payload;
         statement
             .as_object_mut()
             .expect("statement should be an object")
             .insert(
-                "ballotProofStatementDigest".to_string(),
-                json!(statement_digest),
+                "ballotProofStatementHash".to_string(),
+                json!(statement_hash),
             );
 
         statement
     };
     let create_linear_statement =
         |statement: &Value, parameter_set: &Value, target_vector_coefficients: Value| {
-            let backend_statement_digest = test_digest("backend-statement");
-            let relation_statement_digest = test_digest("relation-statement");
-            let statement_matrix_digest = test_digest("statement-matrix");
-            let target_vector_digest = test_digest("target-vector");
+            let backend_statement_hash = test_hash("backend-statement");
+            let relation_statement_hash = test_hash("relation-statement");
+            let statement_matrix_hash = test_hash("statement-matrix");
+            let target_vector_hash = test_hash("target-vector");
             let linear_statement_payload = json!({
-                "backendStatementDigest": backend_statement_digest,
-                "ballotProofStatementDigest": statement["ballotProofStatementDigest"],
+                "backendStatementHash": backend_statement_hash,
+                "ballotProofStatementHash": statement["ballotProofStatementHash"],
                 "coefficientModulus": DEMO_GENERATED_PARAMETER_CONTRACT
                     .source_coefficient_modulus
                     .to_string(),
@@ -134,32 +133,32 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
                 "objectVersion": 1,
                 "parameterProfileId": parameter_set["profileId"],
                 "relation": "A*w + t = 0",
-                "relationStatementDigest": relation_statement_digest,
+                "relationStatementHash": relation_statement_hash,
                 "ringDegree": DEMO_GENERATED_PARAMETER_CONTRACT.source_ring_degree,
                 "statementColumns": DEMO_GENERATED_PARAMETER_CONTRACT.statement_columns,
                 "statementMatrixCoefficients": valid_case["statementMatrixCoefficients"].clone(),
-                "statementMatrixDigest": statement_matrix_digest,
+                "statementMatrixHash": statement_matrix_hash,
                 "statementRows": DEMO_GENERATED_PARAMETER_CONTRACT.statement_rows,
                 "targetCoefficientRepresentation": "centeredSignedSourceModulus",
                 "targetVectorCoefficients": target_vector_coefficients,
-                "targetVectorDigest": target_vector_digest,
+                "targetVectorHash": target_vector_hash,
                 "witnessL2BoundSquared": DEMO_GENERATED_PROFILE
                     .exact_norm_bound_squared
                     .to_string()
             });
-            let statement_digest = super::derive_digest(
-                "ChallengeDomainDigest",
+            let statement_hash = super::derive_hash(
+                "ChallengeDomainHash",
                 &json!({
                     "payload": linear_statement_payload,
                     "purpose": "ballot-proof-linear-proof-statement-v1"
                 }),
             )
-            .expect("linear statement digest should derive");
+            .expect("linear statement hash should derive");
             let mut linear_statement = linear_statement_payload;
             linear_statement
                 .as_object_mut()
                 .expect("linear statement should be an object")
-                .insert("statementDigest".to_string(), json!(statement_digest));
+                .insert("statementHash".to_string(), json!(statement_hash));
 
             linear_statement
         };
@@ -183,8 +182,8 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
                                linear_statement: &Value,
                                parameter_set: &Value,
                                proof_encoding: &Value| {
-        let proof_bytes_digest = super::derive_digest(
-            "ProofBytesDigest",
+        let proof_bytes_hash = super::derive_hash(
+            "ProofBytesHash",
             &json!({
                 "objectType": "ProofBytes",
                 "objectVersion": 1,
@@ -192,65 +191,63 @@ fn proof_byte_bearing_ballot_record_rejects_without_full_relation_coverage() {
                 "proofSizeBytes": proof_size_bytes
             }),
         )
-        .expect("proof bytes digest should derive");
-        let proof_encoding_profile_digest =
-            super::derive_ballot_proof_encoding_profile_digest(proof_encoding)
-                .expect("proof encoding profile digest should derive");
-        let proof_parameter_set_digest =
-            super::derive_ballot_proof_parameter_set_digest(parameter_set)
-                .expect("proof parameter set digest should derive");
-        let public_randomness_digest =
-            super::derive_ballot_proof_public_randomness_digest(public_randomness_hex)
-                .expect("public randomness digest should derive");
-        let proof_root = super::derive_digest(
-            "BallotProofRecordDigest",
+        .expect("proof bytes hash should derive");
+        let proof_encoding_profile_hash =
+            super::derive_ballot_proof_encoding_profile_hash(proof_encoding)
+                .expect("proof encoding profile hash should derive");
+        let proof_parameter_set_hash = super::derive_ballot_proof_parameter_set_hash(parameter_set)
+            .expect("proof parameter set hash should derive");
+        let public_randomness_hash =
+            super::derive_ballot_proof_public_randomness_hash(public_randomness_hex)
+                .expect("public randomness hash should derive");
+        let proof_root = super::derive_hash(
+            "BallotProofRecordHash",
             &json!({
-                "linearStatementDigest": linear_statement["statementDigest"],
-                "proofBytesDigest": proof_bytes_digest,
-                "proofEncodingProfileDigest": proof_encoding_profile_digest,
-                "proofParameterSetDigest": proof_parameter_set_digest,
-                "publicRandomnessDigest": public_randomness_digest,
+                "linearStatementHash": linear_statement["statementHash"],
+                "proofBytesHash": proof_bytes_hash,
+                "proofEncodingProfileHash": proof_encoding_profile_hash,
+                "proofParameterSetHash": proof_parameter_set_hash,
+                "publicRandomnessHash": public_randomness_hash,
                 "purpose": "ballot-proof-linear-proof-record-root-v1"
             }),
         )
         .expect("proof root should derive");
         let proof_payload = json!({
-            "backendStatementDigest": linear_statement["backendStatementDigest"],
-            "ballotProofProfileDigest": statement["ballotProofProfileDigest"],
-            "ballotProofStatementDigest": statement["ballotProofStatementDigest"],
-            "challengeDigest": "",
-            "linearStatementDigest": linear_statement["statementDigest"],
+            "backendStatementHash": linear_statement["backendStatementHash"],
+            "ballotProofProfileHash": statement["ballotProofProfileHash"],
+            "ballotProofStatementHash": statement["ballotProofStatementHash"],
+            "challengeHash": "",
+            "linearStatementHash": linear_statement["statementHash"],
             "objectType": "BallotProofRecord",
             "objectVersion": 1,
             "proofBackend": "LocalLinearLatticeRelation",
-            "proofBytesDigest": proof_bytes_digest,
-            "proofEncodingProfileDigest": proof_encoding_profile_digest,
-            "proofParameterSetDigest": proof_parameter_set_digest,
+            "proofBytesHash": proof_bytes_hash,
+            "proofEncodingProfileHash": proof_encoding_profile_hash,
+            "proofParameterSetHash": proof_parameter_set_hash,
             "proofRoot": proof_root,
             "proofSizeBytes": proof_size_bytes,
-            "publicRandomnessDigest": public_randomness_digest,
-            "relationStatementDigest": linear_statement["relationStatementDigest"],
-            "statementMatrixDigest": linear_statement["statementMatrixDigest"],
-            "targetVectorDigest": linear_statement["targetVectorDigest"]
+            "publicRandomnessHash": public_randomness_hash,
+            "relationStatementHash": linear_statement["relationStatementHash"],
+            "statementMatrixHash": linear_statement["statementMatrixHash"],
+            "targetVectorHash": linear_statement["targetVectorHash"]
         });
-        let challenge_digest =
-            super::derive_ballot_proof_challenge_digest(statement, &proof_payload)
-                .expect("challenge digest should derive");
+        let challenge_hash = super::derive_ballot_proof_challenge_hash(statement, &proof_payload)
+            .expect("challenge hash should derive");
         let mut proof_payload_with_challenge = proof_payload;
         proof_payload_with_challenge
             .as_object_mut()
             .expect("proof payload should be an object")
-            .insert("challengeDigest".to_string(), json!(challenge_digest));
-        let ballot_proof_record_digest =
-            super::derive_digest("BallotProofRecordDigest", &proof_payload_with_challenge)
-                .expect("ballot proof record digest should derive");
+            .insert("challengeHash".to_string(), json!(challenge_hash));
+        let ballot_proof_record_hash =
+            super::derive_hash("BallotProofRecordHash", &proof_payload_with_challenge)
+                .expect("ballot proof record hash should derive");
         let mut ballot_proof = proof_payload_with_challenge;
         ballot_proof
             .as_object_mut()
             .expect("ballot proof should be an object")
             .insert(
-                "ballotProofRecordDigest".to_string(),
-                json!(ballot_proof_record_digest),
+                "ballotProofRecordHash".to_string(),
+                json!(ballot_proof_record_hash),
             );
 
         ballot_proof
@@ -434,22 +431,22 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
         .as_str()
         .expect("valid vector publicRandomnessHex should be a string");
     let proof_size_bytes = proof_bytes_hex.len() / 2;
-    let test_digest = |label: &str| {
-        super::derive_digest(
-            "ChallengeDomainDigest",
+    let test_hash = |label: &str| {
+        super::derive_hash(
+            "ChallengeDomainHash",
             &json!({
                 "label": label,
                 "purpose": "encoded-score-field-ballot-proof-record-native-test"
             }),
         )
-        .expect("test digest should derive")
+        .expect("test hash should derive")
     };
     let create_statement = || {
         let receiver_public_keys = (1..=20)
             .map(|receiver_roster_position| {
                 json!({
                     "receiverIdentity": format!("receiver-{receiver_roster_position}"),
-                    "receiverPublicKeyDigest": test_digest(&format!("receiver-public-key-{receiver_roster_position}")),
+                    "receiverPublicKeyHash": test_hash(&format!("receiver-public-key-{receiver_roster_position}")),
                     "receiverRosterPosition": receiver_roster_position
                 })
             })
@@ -458,8 +455,8 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
             .map(|receiver_roster_position| {
                 json!({
                     "receiverIdentity": format!("receiver-{receiver_roster_position}"),
-                    "receiverPayloadCiphertextRoot": test_digest(&format!("receiver-ciphertext-{receiver_roster_position}")),
-                    "receiverPayloadDigest": test_digest(&format!("receiver-payload-{receiver_roster_position}")),
+                    "receiverPayloadCiphertextRoot": test_hash(&format!("receiver-ciphertext-{receiver_roster_position}")),
+                    "receiverPayloadHash": test_hash(&format!("receiver-payload-{receiver_roster_position}")),
                     "receiverRosterPosition": receiver_roster_position
                 })
             })
@@ -469,57 +466,56 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
                 json!({
                     "receiverIdentity": format!("receiver-{receiver_roster_position}"),
                     "receiverRosterPosition": receiver_roster_position,
-                    "shareCommitmentDigest": test_digest(&format!("share-commitment-{receiver_roster_position}"))
+                    "shareCommitmentHash": test_hash(&format!("share-commitment-{receiver_roster_position}"))
                 })
             })
             .collect::<Vec<_>>();
         let statement_payload = json!({
-            "actionContextDigest": test_digest("action-context"),
-            "aggregateInputEncodingProfileDigest": test_digest("aggregate-input-encoding-profile"),
-            "ballotPackageDigest": test_digest("ballot-package"),
-            "ballotProofProfileDigest": test_digest("ballot-proof-profile"),
-            "ballotScoreEncodingProfileDigest": test_digest("ballot-score-encoding-profile"),
-            "ballotShareLayoutProfileDigest": test_digest("ballot-share-layout-profile"),
+            "actionContextHash": test_hash("action-context"),
+            "aggregateInputEncodingProfileHash": test_hash("aggregate-input-encoding-profile"),
+            "ballotPackageHash": test_hash("ballot-package"),
+            "ballotProofProfileHash": test_hash("ballot-proof-profile"),
+            "ballotScoreEncodingProfileHash": test_hash("ballot-score-encoding-profile"),
+            "ballotShareLayoutProfileHash": test_hash("ballot-share-layout-profile"),
             "ceremonyId": "ceremony-encoded-score-field-ballot-proof-record",
-            "challengeDomainDigest": test_digest("challenge-domain"),
-            "duplicateBallotPolicyDigest": test_digest("duplicate-policy"),
-            "encodedAggregateLayoutDigest": test_digest("encoded-aggregate-layout"),
-            "encodedShareVectorLayoutDigest": test_digest("encoded-share-vector-layout"),
-            "manifestDigest": test_digest("manifest"),
+            "challengeDomainHash": test_hash("challenge-domain"),
+            "duplicateBallotPolicyHash": test_hash("duplicate-policy"),
+            "encodedAggregateLayoutHash": test_hash("encoded-aggregate-layout"),
+            "encodedShareVectorLayoutHash": test_hash("encoded-share-vector-layout"),
+            "manifestHash": test_hash("manifest"),
             "objectType": "BallotProofStatement",
             "objectVersion": 1,
             "optionCount": 20,
-            "pollSpecDigest": test_digest("poll-spec"),
-            "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
-            "receiverKeyProofRoot": test_digest("receiver-key-proof-root"),
-            "receiverKeyRoot": test_digest("receiver-key-root"),
+            "pollSpecHash": test_hash("poll-spec"),
+            "receiverEncryptionProfileHash": test_hash("receiver-encryption-profile"),
+            "receiverKeyProofRoot": test_hash("receiver-key-proof-root"),
+            "receiverKeyRoot": test_hash("receiver-key-root"),
             "receiverPayloads": receiver_payloads,
             "receiverPublicKeys": receiver_public_keys,
-            "rosterDigest": test_digest("roster"),
-            "rosterExternalAcceptanceDigest": test_digest("external-acceptance"),
-            "scoreDomainDigest": test_digest("score-domain"),
-            "scoreMembershipProfileDigest": test_digest("score-membership-profile"),
-            "shareCommitmentMessageBoundCertDigest": test_digest("share-commitment-bound-cert"),
-            "shareCommitmentProfileDigest": test_digest("share-commitment-profile"),
+            "rosterHash": test_hash("roster"),
+            "rosterExternalAcceptanceHash": test_hash("external-acceptance"),
+            "scoreDomainHash": test_hash("score-domain"),
+            "scoreMembershipProfileHash": test_hash("score-membership-profile"),
+            "shareCommitmentMessageBoundCertHash": test_hash("share-commitment-bound-cert"),
+            "shareCommitmentProfileHash": test_hash("share-commitment-profile"),
             "shareCommitments": share_commitments,
             "shareVectorWidth": 220,
-            "thresholdProfileDigest": test_digest("threshold-profile"),
-            "tiePolicyDigest": test_digest("tie-policy"),
+            "thresholdProfileHash": test_hash("threshold-profile"),
+            "tiePolicyHash": test_hash("tie-policy"),
             "topOptionCount": 3,
-            "voterIdentityDigest": test_digest("voter-1"),
+            "voterIdentityHash": test_hash("voter-1"),
             "voterRosterPosition": 1,
-            "voterSigningKeyDigest": test_digest("voter-signing-key")
+            "voterSigningKeyHash": test_hash("voter-signing-key")
         });
-        let statement_digest =
-            super::derive_digest("BallotProofStatementDigest", &statement_payload)
-                .expect("statement digest should derive");
+        let statement_hash = super::derive_hash("BallotProofStatementHash", &statement_payload)
+            .expect("statement hash should derive");
         let mut statement = statement_payload;
         statement
             .as_object_mut()
             .expect("statement should be an object")
             .insert(
-                "ballotProofStatementDigest".to_string(),
-                json!(statement_digest),
+                "ballotProofStatementHash".to_string(),
+                json!(statement_hash),
             );
 
         statement
@@ -529,10 +525,10 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
         let linear_statement_object = linear_statement
             .as_object_mut()
             .expect("linear statement should be an object");
-        linear_statement_object.remove("statementDigest");
+        linear_statement_object.remove("statementHash");
         linear_statement_object.insert(
-            "ballotProofStatementDigest".to_string(),
-            statement["ballotProofStatementDigest"].clone(),
+            "ballotProofStatementHash".to_string(),
+            statement["ballotProofStatementHash"].clone(),
         );
         linear_statement_object.insert(
             "statementMatrixCoefficients".to_string(),
@@ -557,49 +553,49 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
             vector_case["targetCoefficientRepresentation"].clone(),
         );
         linear_statement_object.insert(
-            "statementMatrixDigest".to_string(),
+            "statementMatrixHash".to_string(),
             json!(
-                super::derive_digest(
-                    "ChallengeDomainDigest",
+                super::derive_hash(
+                    "ChallengeDomainHash",
                     &json!({
                         "purpose": "ballot-proof-linear-statement-matrix-v1",
                         "statementMatrixCoefficients": vector_case["statementMatrixCoefficients"]
                     }),
                 )
-                .expect("statement matrix digest should derive")
+                .expect("statement matrix hash should derive")
             ),
         );
         linear_statement_object.insert(
-            "targetVectorDigest".to_string(),
+            "targetVectorHash".to_string(),
             json!(
-                super::derive_digest(
-                    "ChallengeDomainDigest",
+                super::derive_hash(
+                    "ChallengeDomainHash",
                     &json!({
                         "purpose": "ballot-proof-linear-target-vector-v1",
                         "targetVectorCoefficients": vector_case["targetVectorCoefficients"]
                     }),
                 )
-                .expect("target vector digest should derive")
+                .expect("target vector hash should derive")
             ),
         );
-        let statement_digest = super::derive_digest(
-            "ChallengeDomainDigest",
+        let statement_hash = super::derive_hash(
+            "ChallengeDomainHash",
             &json!({
                 "payload": linear_statement,
                 "purpose": "ballot-proof-linear-proof-statement-v1"
             }),
         )
-        .expect("linear statement digest should derive");
+        .expect("linear statement hash should derive");
         linear_statement
             .as_object_mut()
             .expect("linear statement should still be an object")
-            .insert("statementDigest".to_string(), json!(statement_digest));
+            .insert("statementHash".to_string(), json!(statement_hash));
 
         linear_statement
     };
     let create_ballot_proof = |statement: &Value, linear_statement: &Value| {
-        let proof_bytes_digest = super::derive_digest(
-            "ProofBytesDigest",
+        let proof_bytes_hash = super::derive_hash(
+            "ProofBytesHash",
             &json!({
                 "objectType": "ProofBytes",
                 "objectVersion": 1,
@@ -607,65 +603,64 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
                 "proofSizeBytes": proof_size_bytes
             }),
         )
-        .expect("proof bytes digest should derive");
-        let proof_encoding_profile_digest =
-            super::derive_ballot_proof_encoding_profile_digest(&valid_case["proofEncoding"])
-                .expect("proof encoding profile digest should derive");
-        let proof_parameter_set_digest =
-            super::derive_ballot_proof_parameter_set_digest(&valid_case["parameterSet"])
-                .expect("proof parameter set digest should derive");
-        let public_randomness_digest =
-            super::derive_ballot_proof_public_randomness_digest(public_randomness_hex)
-                .expect("public randomness digest should derive");
-        let proof_root = super::derive_digest(
-            "BallotProofRecordDigest",
+        .expect("proof bytes hash should derive");
+        let proof_encoding_profile_hash =
+            super::derive_ballot_proof_encoding_profile_hash(&valid_case["proofEncoding"])
+                .expect("proof encoding profile hash should derive");
+        let proof_parameter_set_hash =
+            super::derive_ballot_proof_parameter_set_hash(&valid_case["parameterSet"])
+                .expect("proof parameter set hash should derive");
+        let public_randomness_hash =
+            super::derive_ballot_proof_public_randomness_hash(public_randomness_hex)
+                .expect("public randomness hash should derive");
+        let proof_root = super::derive_hash(
+            "BallotProofRecordHash",
             &json!({
-                "linearStatementDigest": linear_statement["statementDigest"],
-                "proofBytesDigest": proof_bytes_digest,
-                "proofEncodingProfileDigest": proof_encoding_profile_digest,
-                "proofParameterSetDigest": proof_parameter_set_digest,
-                "publicRandomnessDigest": public_randomness_digest,
+                "linearStatementHash": linear_statement["statementHash"],
+                "proofBytesHash": proof_bytes_hash,
+                "proofEncodingProfileHash": proof_encoding_profile_hash,
+                "proofParameterSetHash": proof_parameter_set_hash,
+                "publicRandomnessHash": public_randomness_hash,
                 "purpose": "ballot-proof-linear-proof-record-root-v1"
             }),
         )
         .expect("proof root should derive");
         let proof_payload = json!({
-            "backendStatementDigest": linear_statement["backendStatementDigest"],
-            "ballotProofProfileDigest": statement["ballotProofProfileDigest"],
-            "ballotProofStatementDigest": statement["ballotProofStatementDigest"],
-            "challengeDigest": "",
-            "linearStatementDigest": linear_statement["statementDigest"],
+            "backendStatementHash": linear_statement["backendStatementHash"],
+            "ballotProofProfileHash": statement["ballotProofProfileHash"],
+            "ballotProofStatementHash": statement["ballotProofStatementHash"],
+            "challengeHash": "",
+            "linearStatementHash": linear_statement["statementHash"],
             "objectType": "BallotProofRecord",
             "objectVersion": 1,
             "proofBackend": "LocalLinearLatticeRelation",
-            "proofBytesDigest": proof_bytes_digest,
-            "proofEncodingProfileDigest": proof_encoding_profile_digest,
-            "proofParameterSetDigest": proof_parameter_set_digest,
+            "proofBytesHash": proof_bytes_hash,
+            "proofEncodingProfileHash": proof_encoding_profile_hash,
+            "proofParameterSetHash": proof_parameter_set_hash,
             "proofRoot": proof_root,
             "proofSizeBytes": proof_size_bytes,
-            "publicRandomnessDigest": public_randomness_digest,
-            "relationStatementDigest": linear_statement["relationStatementDigest"],
-            "statementMatrixDigest": linear_statement["statementMatrixDigest"],
-            "targetVectorDigest": linear_statement["targetVectorDigest"]
+            "publicRandomnessHash": public_randomness_hash,
+            "relationStatementHash": linear_statement["relationStatementHash"],
+            "statementMatrixHash": linear_statement["statementMatrixHash"],
+            "targetVectorHash": linear_statement["targetVectorHash"]
         });
-        let challenge_digest =
-            super::derive_ballot_proof_challenge_digest(statement, &proof_payload)
-                .expect("challenge digest should derive");
+        let challenge_hash = super::derive_ballot_proof_challenge_hash(statement, &proof_payload)
+            .expect("challenge hash should derive");
         let mut proof_payload_with_challenge = proof_payload;
         proof_payload_with_challenge
             .as_object_mut()
             .expect("proof payload should be an object")
-            .insert("challengeDigest".to_string(), json!(challenge_digest));
-        let ballot_proof_record_digest =
-            super::derive_digest("BallotProofRecordDigest", &proof_payload_with_challenge)
-                .expect("ballot proof record digest should derive");
+            .insert("challengeHash".to_string(), json!(challenge_hash));
+        let ballot_proof_record_hash =
+            super::derive_hash("BallotProofRecordHash", &proof_payload_with_challenge)
+                .expect("ballot proof record hash should derive");
         let mut ballot_proof = proof_payload_with_challenge;
         ballot_proof
             .as_object_mut()
             .expect("ballot proof should be an object")
             .insert(
-                "ballotProofRecordDigest".to_string(),
-                json!(ballot_proof_record_digest),
+                "ballotProofRecordHash".to_string(),
+                json!(ballot_proof_record_hash),
             );
 
         ballot_proof
@@ -713,27 +708,24 @@ fn encoded_score_field_ballot_record_rejects_without_full_relation_coverage() {
         let relabeled_object = relabeled_linear_statement
             .as_object_mut()
             .expect("relabeled statement should be an object");
-        relabeled_object.remove("statementDigest");
+        relabeled_object.remove("statementHash");
         relabeled_object.insert(
             "projectionCoverage".to_string(),
             json!(super::FULL_BALLOT_PROOF_PROJECTION_COVERAGE),
         );
     }
-    let relabeled_statement_digest = super::derive_digest(
-        "ChallengeDomainDigest",
+    let relabeled_statement_hash = super::derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "payload": relabeled_linear_statement,
             "purpose": "ballot-proof-linear-proof-statement-v1"
         }),
     )
-    .expect("relabeled linear statement digest should derive");
+    .expect("relabeled linear statement hash should derive");
     relabeled_linear_statement
         .as_object_mut()
         .expect("relabeled statement should still be an object")
-        .insert(
-            "statementDigest".to_string(),
-            json!(relabeled_statement_digest),
-        );
+        .insert("statementHash".to_string(), json!(relabeled_statement_hash));
     let relabeled_ballot_proof = create_ballot_proof(&statement, &relabeled_linear_statement);
     let relabeled_verification = super::verify_ballot_proof(
         &statement,
@@ -786,9 +778,9 @@ pub(super) fn component_proof_record_for_vector(
     let proof_size_bytes = proof_bytes_hex.len() / 2;
     json!({
         "componentId": component_id,
-        "componentProofRecordDigest": test_digest(&format!("{component_id}-component-proof-record")),
-        "proofBytesDigest": super::derive_digest(
-            "ProofBytesDigest",
+        "componentProofRecordHash": test_hash(&format!("{component_id}-component-proof-record")),
+        "proofBytesHash": super::derive_hash(
+            "ProofBytesHash",
             &json!({
                 "objectType": "ProofBytes",
                 "objectVersion": 1,
@@ -796,7 +788,7 @@ pub(super) fn component_proof_record_for_vector(
                 "proofSizeBytes": proof_size_bytes
             }),
         )
-        .expect("proof bytes digest should derive"),
+        .expect("proof bytes hash should derive"),
         "proofSizeBytes": proof_size_bytes
     })
 }
@@ -843,6 +835,6 @@ pub(super) fn dense_component_proof_input_for_vector(
         "proofStatement": proof_statement,
         "proofStatementFormat": "dense-polynomial-matrix-linear-proof-v1",
         "publicRandomnessHex": vector_case["publicRandomnessHex"],
-        "statementDigest": vectors["linearStatement"]["statementDigest"]
+        "statementHash": vectors["linearStatement"]["statementHash"]
     })
 }

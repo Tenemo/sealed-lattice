@@ -14,6 +14,6 @@
     },
     "scripts": {
         "check": "tsc --project tsconfig.json --pretty false --noEmit",
-        "build": "pnpm exec del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json"
+        "build": "del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json"
     }
 }

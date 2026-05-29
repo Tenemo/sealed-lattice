@@ -4,7 +4,7 @@ import type {
     BoardConsistencyVerification,
     ConflictingHeadEvidence,
     InclusionProof,
-    ProtocolDigest,
+    ProtocolHash,
     ProtocolVerificationStatusLabel,
     RefusalRecord,
     SignedBoardHead,
@@ -13,46 +13,47 @@ import type {
 import {
     buildBoardHeadMap,
     createRefusal,
-    defaultSignedRootContextDigest,
+    defaultSignedRootContextHash,
     isNonNegativeInteger,
     signedObjectRootByteLength,
     uniqueStrings,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
 import {
-    deriveBoardBranchNodeDigest,
-    deriveBoardEntryDigest,
-    deriveBoardEntryListRootDigest,
-    deriveBoardHeadDigest,
-    deriveBoardLeafNodeDigest,
-    deriveBoardRootFromNodeDigest,
-    deriveConflictingHeadEvidenceDigest,
-    deriveInclusionProofDigest,
+    deriveBoardBranchNodeHash,
+    deriveBoardEntryHash,
+    deriveBoardEntryListRootHash,
+    deriveBoardHeadHash,
+    deriveBoardLeafNodeHash,
+    deriveBoardRootFromNodeHash,
+    deriveConflictingHeadEvidenceHash,
+    deriveInclusionProofHash,
     inclusionProofUsesMerklePath,
     isBoardEntryMerklePath,
-} from './digests.js';
+} from './hashes.js';
 export {
-    deriveBoardEntryDigest,
+    deriveBoardEntryHash,
     deriveBoardEntryMerklePath,
-    deriveBoardHeadDigest,
-    deriveBoardRootDigest,
-    deriveConflictingHeadEvidenceDigest,
-    deriveInclusionProofDigest,
-} from './digests.js';
+    deriveBoardHeadHash,
+    deriveBoardRootHash,
+    deriveConflictingHeadEvidenceHash,
+    deriveInclusionProofHash,
+} from './hashes.js';
 
 const verifyBoardHead = (
     input: BoardConsistencyInput,
     head: SignedBoardHead,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const expectedHeadDigest = deriveBoardHeadDigest(head);
+    const expectedHeadHash = deriveBoardHeadHash(head);
 
-    if (head.headDigest !== expectedHeadDigest) {
+    if (head.headHash !== expectedHeadHash) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
-                'Board head digest does not match its canonical payload.',
-                head.headDigest,
+                'Board head hash does not match its canonical payload.',
+                head.headHash,
                 'BoardHead',
             ),
         );
@@ -62,17 +63,17 @@ const verifyBoardHead = (
             createRefusal(
                 'WrongCeremony',
                 'Board head ceremony does not match the verified ceremony.',
-                head.headDigest,
+                head.headHash,
                 'BoardHead',
             ),
         );
     }
-    if (head.boardPolicyDigest !== input.boardPolicyDigest) {
+    if (head.boardPolicyHash !== input.boardPolicyHash) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
-                'Board head policy digest does not match the verified board policy.',
-                head.headDigest,
+                'Board head policy hash does not match the verified board policy.',
+                head.headHash,
                 'BoardHead',
             ),
         );
@@ -86,27 +87,27 @@ const verifyBoardHead = (
             createRefusal(
                 'BoardConsistencyFailure',
                 'Board head version and sequence must be canonical.',
-                head.headDigest,
+                head.headHash,
                 'BoardHead',
             ),
         );
     }
-    if (head.previousHeadDigest === null && head.boardSequence !== 0) {
+    if (head.previousHeadHash === null && head.boardSequence !== 0) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
-                'Only the genesis board head may omit the previous head digest.',
-                head.headDigest,
+                'Only the genesis board head may omit the previous head hash.',
+                head.headHash,
                 'BoardHead',
             ),
         );
     }
-    if (head.previousHeadDigest !== null && head.boardSequence === 0) {
+    if (head.previousHeadHash !== null && head.boardSequence === 0) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
-                'The genesis board head must not bind a previous head digest.',
-                head.headDigest,
+                'The genesis board head must not bind a previous head hash.',
+                head.headHash,
                 'BoardHead',
             ),
         );
@@ -118,14 +119,14 @@ const verifyBoardHead = (
         signerRole: 'Board',
         signerIdentity: 'board',
         ceremonyId: input.ceremonyId,
-        manifestDigest: null,
-        objectRoot: head.headDigest,
-        boardHeadDigest: null,
+        manifestHash: null,
+        objectRoot: head.headHash,
+        boardHeadHash: null,
         byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        contextDigest: defaultSignedRootContextDigest,
-        publicKeyDigest: input.expectedBoardPublicKeyDigest,
+        contextHash: defaultSignedRootContextHash,
+        publicKeyHash: input.expectedBoardPublicKeyHash,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
@@ -133,26 +134,26 @@ const verifyBoardHead = (
 };
 
 const isVerifiedAncestor = (
-    ancestorDigest: ProtocolDigest,
-    descendantDigest: ProtocolDigest,
-    headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
+    ancestorHash: ProtocolHash,
+    descendantHash: ProtocolHash,
+    headsByHash: ReadonlyMap<ProtocolHash, SignedBoardHead>,
 ): boolean => {
-    let currentHead = headsByDigest.get(descendantDigest);
-    const visitedHeadDigests = new Set<ProtocolDigest>();
+    let currentHead = headsByHash.get(descendantHash);
+    const visitedHeadHashes = new Set<ProtocolHash>();
 
     while (currentHead !== undefined) {
-        if (currentHead.headDigest === ancestorDigest) {
+        if (currentHead.headHash === ancestorHash) {
             return true;
         }
         if (
-            currentHead.previousHeadDigest === null ||
-            visitedHeadDigests.has(currentHead.headDigest)
+            currentHead.previousHeadHash === null ||
+            visitedHeadHashes.has(currentHead.headHash)
         ) {
             return false;
         }
 
-        visitedHeadDigests.add(currentHead.headDigest);
-        currentHead = headsByDigest.get(currentHead.previousHeadDigest);
+        visitedHeadHashes.add(currentHead.headHash);
+        currentHead = headsByHash.get(currentHead.previousHeadHash);
     }
 
     return false;
@@ -161,7 +162,7 @@ const isVerifiedAncestor = (
 const findConflictingHeads = (
     heads: readonly SignedBoardHead[],
 ): ConflictingHeadEvidence | undefined => {
-    const headsByDigest = buildBoardHeadMap(heads);
+    const headsByHash = buildBoardHeadMap(heads);
 
     for (let leftIndex = 0; leftIndex < heads.length; leftIndex += 1) {
         for (
@@ -173,33 +174,32 @@ const findConflictingHeads = (
             const rightHead = heads[rightIndex];
             if (
                 leftHead?.ceremonyId !== rightHead?.ceremonyId ||
-                leftHead.boardPolicyDigest !== rightHead.boardPolicyDigest
+                leftHead.boardPolicyHash !== rightHead.boardPolicyHash
             ) {
                 continue;
             }
             const leftIsAncestor = isVerifiedAncestor(
-                leftHead.headDigest,
-                rightHead.headDigest,
-                headsByDigest,
+                leftHead.headHash,
+                rightHead.headHash,
+                headsByHash,
             );
             const rightIsAncestor = isVerifiedAncestor(
-                rightHead.headDigest,
-                leftHead.headDigest,
-                headsByDigest,
+                rightHead.headHash,
+                leftHead.headHash,
+                headsByHash,
             );
 
             if (!leftIsAncestor && !rightIsAncestor) {
                 const evidence = {
                     ceremonyId: leftHead.ceremonyId,
-                    boardPolicyDigest: leftHead.boardPolicyDigest,
-                    leftBoardHeadDigest: leftHead.headDigest,
-                    rightBoardHeadDigest: rightHead.headDigest,
+                    boardPolicyHash: leftHead.boardPolicyHash,
+                    leftBoardHeadHash: leftHead.headHash,
+                    rightBoardHeadHash: rightHead.headHash,
                 };
 
                 return {
                     ...evidence,
-                    evidenceDigest:
-                        deriveConflictingHeadEvidenceDigest(evidence),
+                    evidenceHash: deriveConflictingHeadEvidenceHash(evidence),
                 };
             }
         }
@@ -212,19 +212,19 @@ const verifyPreviousHeadLinks = (
     heads: readonly SignedBoardHead[],
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const headsByDigest = buildBoardHeadMap(heads);
+    const headsByHash = buildBoardHeadMap(heads);
 
     for (const head of heads) {
-        if (head.previousHeadDigest === null) {
+        if (head.previousHeadHash === null) {
             continue;
         }
-        const previousHead = headsByDigest.get(head.previousHeadDigest);
+        const previousHead = headsByHash.get(head.previousHeadHash);
         if (previousHead === undefined) {
             refusedObjects.push(
                 createRefusal(
                     'BoardConsistencyFailure',
                     'Board head chain is missing a previous signed head.',
-                    head.headDigest,
+                    head.headHash,
                     'BoardHead',
                 ),
             );
@@ -235,7 +235,7 @@ const verifyPreviousHeadLinks = (
                 createRefusal(
                     'BoardConsistencyFailure',
                     'Board head sequence must increase by one across the signed chain.',
-                    head.headDigest,
+                    head.headHash,
                     'BoardHead',
                 ),
             );
@@ -248,79 +248,79 @@ const verifyPreviousHeadLinks = (
 const verifySuppliedForkEvidence = (
     input: BoardConsistencyInput,
     evidence: ConflictingHeadEvidence,
-    headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
+    headsByHash: ReadonlyMap<ProtocolHash, SignedBoardHead>,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveConflictingHeadEvidenceDigest({
-        boardPolicyDigest: evidence.boardPolicyDigest,
+    const expectedHash = deriveConflictingHeadEvidenceHash({
+        boardPolicyHash: evidence.boardPolicyHash,
         ceremonyId: evidence.ceremonyId,
         equivocatingWitnessIdentities:
             evidence.equivocatingWitnessIdentities ?? [],
-        leftBoardHeadDigest: evidence.leftBoardHeadDigest,
-        rightBoardHeadDigest: evidence.rightBoardHeadDigest,
+        leftBoardHeadHash: evidence.leftBoardHeadHash,
+        rightBoardHeadHash: evidence.rightBoardHeadHash,
         targetFinalityScope: evidence.targetFinalityScope,
     });
 
-    if (evidence.evidenceDigest !== expectedDigest) {
+    if (evidence.evidenceHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
-                'Supplied fork evidence digest does not match its canonical payload.',
-                evidence.evidenceDigest,
+                'Supplied fork evidence hash does not match its canonical payload.',
+                evidence.evidenceHash,
             ),
         );
     }
     if (
         evidence.ceremonyId !== input.ceremonyId ||
-        evidence.boardPolicyDigest !== input.boardPolicyDigest
+        evidence.boardPolicyHash !== input.boardPolicyHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
                 'Supplied fork evidence does not match the verified ceremony and board policy.',
-                evidence.evidenceDigest,
+                evidence.evidenceHash,
             ),
         );
     }
-    const leftHead = headsByDigest.get(evidence.leftBoardHeadDigest);
-    const rightHead = headsByDigest.get(evidence.rightBoardHeadDigest);
+    const leftHead = headsByHash.get(evidence.leftBoardHeadHash);
+    const rightHead = headsByHash.get(evidence.rightBoardHeadHash);
     if (leftHead === undefined || rightHead === undefined) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
                 'Supplied fork evidence must reference known signed board heads.',
-                evidence.evidenceDigest,
+                evidence.evidenceHash,
             ),
         );
         return refusedObjects;
     }
-    if (leftHead.headDigest === rightHead.headDigest) {
+    if (leftHead.headHash === rightHead.headHash) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
                 'Supplied fork evidence must reference two distinct board heads.',
-                evidence.evidenceDigest,
+                evidence.evidenceHash,
             ),
         );
         return refusedObjects;
     }
 
     const leftIsAncestor = isVerifiedAncestor(
-        leftHead.headDigest,
-        rightHead.headDigest,
-        headsByDigest,
+        leftHead.headHash,
+        rightHead.headHash,
+        headsByHash,
     );
     const rightIsAncestor = isVerifiedAncestor(
-        rightHead.headDigest,
-        leftHead.headDigest,
-        headsByDigest,
+        rightHead.headHash,
+        leftHead.headHash,
+        headsByHash,
     );
     if (leftIsAncestor || rightIsAncestor) {
         refusedObjects.push(
             createRefusal(
                 'BoardConsistencyFailure',
                 'Supplied fork evidence references compatible board heads.',
-                evidence.evidenceDigest,
+                evidence.evidenceHash,
             ),
         );
     }
@@ -330,7 +330,7 @@ const verifySuppliedForkEvidence = (
 
 const deriveBoardRootFromMerkleInclusionProof = (
     inclusionProof: InclusionProof,
-): ProtocolDigest | undefined => {
+): ProtocolHash | undefined => {
     const { boardEntryCount, boardEntryMerklePath } = inclusionProof;
     if (
         typeof boardEntryCount !== 'number' ||
@@ -343,9 +343,9 @@ const deriveBoardRootFromMerkleInclusionProof = (
         return undefined;
     }
 
-    let computedNodeDigest = deriveBoardLeafNodeDigest(
+    let computedNodeHash = deriveBoardLeafNodeHash(
         inclusionProof.boardPosition,
-        inclusionProof.boardEntryDigest,
+        inclusionProof.boardEntryHash,
     );
     let levelIndex = inclusionProof.boardPosition;
     let levelWidth = boardEntryCount;
@@ -357,26 +357,26 @@ const deriveBoardRootFromMerkleInclusionProof = (
             if (levelIndex + 1 < levelWidth) {
                 if (
                     pathStep?.siblingPosition !== 'Right' ||
-                    typeof pathStep.siblingDigest !== 'string'
+                    typeof pathStep.siblingHash !== 'string'
                 ) {
                     return undefined;
                 }
-                computedNodeDigest = deriveBoardBranchNodeDigest(
-                    computedNodeDigest,
-                    pathStep.siblingDigest,
+                computedNodeHash = deriveBoardBranchNodeHash(
+                    computedNodeHash,
+                    pathStep.siblingHash,
                 );
                 pathStepIndex += 1;
             }
         } else {
             if (
                 pathStep?.siblingPosition !== 'Left' ||
-                typeof pathStep.siblingDigest !== 'string'
+                typeof pathStep.siblingHash !== 'string'
             ) {
                 return undefined;
             }
-            computedNodeDigest = deriveBoardBranchNodeDigest(
-                pathStep.siblingDigest,
-                computedNodeDigest,
+            computedNodeHash = deriveBoardBranchNodeHash(
+                pathStep.siblingHash,
+                computedNodeHash,
             );
             pathStepIndex += 1;
         }
@@ -389,74 +389,74 @@ const deriveBoardRootFromMerkleInclusionProof = (
         return undefined;
     }
 
-    return deriveBoardRootFromNodeDigest(boardEntryCount, computedNodeDigest);
+    return deriveBoardRootFromNodeHash(boardEntryCount, computedNodeHash);
 };
 
 export const verifyInclusionProof = (
     inclusionProof: InclusionProof,
-    headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
+    headsByHash: ReadonlyMap<ProtocolHash, SignedBoardHead>,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const head = headsByDigest.get(inclusionProof.boardHeadDigest);
-    const expectedBoardEntryDigest = deriveBoardEntryDigest({
+    const head = headsByHash.get(inclusionProof.boardHeadHash);
+    const expectedBoardEntryHash = deriveBoardEntryHash({
         boardPosition: inclusionProof.boardPosition,
-        includedObjectDigest: inclusionProof.includedObjectDigest,
+        includedObjectHash: inclusionProof.includedObjectHash,
         includedObjectType: inclusionProof.includedObjectType,
     });
     const usesMerklePath = inclusionProofUsesMerklePath(inclusionProof);
-    const usesBoardEntryDigestList =
-        inclusionProof.boardEntryDigests !== undefined;
+    const usesBoardEntryHashList =
+        inclusionProof.boardEntryHashes !== undefined;
     const expectedBoardRoot = usesMerklePath
         ? deriveBoardRootFromMerkleInclusionProof(inclusionProof)
-        : Array.isArray(inclusionProof.boardEntryDigests)
-          ? deriveBoardEntryListRootDigest(inclusionProof.boardEntryDigests)
+        : Array.isArray(inclusionProof.boardEntryHashes)
+          ? deriveBoardEntryListRootHash(inclusionProof.boardEntryHashes)
           : undefined;
-    const expectedDigest = deriveInclusionProofDigest({
-        boardHeadDigest: inclusionProof.boardHeadDigest,
-        boardEntryDigest: inclusionProof.boardEntryDigest,
+    const expectedHash = deriveInclusionProofHash({
+        boardHeadHash: inclusionProof.boardHeadHash,
+        boardEntryHash: inclusionProof.boardEntryHash,
         boardEntryCount: inclusionProof.boardEntryCount,
         boardEntryMerklePath: inclusionProof.boardEntryMerklePath,
-        boardEntryDigests: inclusionProof.boardEntryDigests,
+        boardEntryHashes: inclusionProof.boardEntryHashes,
         boardPosition: inclusionProof.boardPosition,
         boardRoot: inclusionProof.boardRoot,
         boardSequence: inclusionProof.boardSequence,
-        includedObjectDigest: inclusionProof.includedObjectDigest,
+        includedObjectHash: inclusionProof.includedObjectHash,
         includedObjectType: inclusionProof.includedObjectType,
     });
 
-    if (inclusionProof.inclusionProofDigest !== expectedDigest) {
+    if (inclusionProof.inclusionProofHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
-                'Inclusion proof digest does not match its canonical payload.',
-                inclusionProof.inclusionProofDigest,
+                'Inclusion proof hash does not match its canonical payload.',
+                inclusionProof.inclusionProofHash,
             ),
         );
     }
-    if (inclusionProof.boardEntryDigest !== expectedBoardEntryDigest) {
+    if (inclusionProof.boardEntryHash !== expectedBoardEntryHash) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
-                'Inclusion proof board-entry digest does not match its canonical payload.',
-                inclusionProof.inclusionProofDigest,
+                'Inclusion proof board-entry hash does not match its canonical payload.',
+                inclusionProof.inclusionProofHash,
             ),
         );
     }
-    if (usesMerklePath && usesBoardEntryDigestList) {
+    if (usesMerklePath && usesBoardEntryHashList) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof must use exactly one board inclusion witness model.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     }
-    if (!usesMerklePath && !usesBoardEntryDigestList) {
+    if (!usesMerklePath && !usesBoardEntryHashList) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof must include a board inclusion witness.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     }
@@ -465,7 +465,7 @@ export const verifyInclusionProof = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof board witness is malformed.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     } else if (inclusionProof.boardRoot !== expectedBoardRoot) {
@@ -473,7 +473,7 @@ export const verifyInclusionProof = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof board root does not match its board inclusion witness.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     }
@@ -482,7 +482,7 @@ export const verifyInclusionProof = (
             createRefusal(
                 'UnknownBoardHead',
                 'Inclusion proof references an unknown signed board head.',
-                inclusionProof.includedObjectDigest,
+                inclusionProof.includedObjectHash,
                 inclusionProof.includedObjectType,
             ),
         );
@@ -491,7 +491,7 @@ export const verifyInclusionProof = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof sequence does not match the board head.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     } else if (head.boardRoot !== inclusionProof.boardRoot) {
@@ -499,7 +499,7 @@ export const verifyInclusionProof = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof board root does not match the signed board head.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     }
@@ -508,19 +508,19 @@ export const verifyInclusionProof = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof board position must be a non-negative integer.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     } else if (
-        Array.isArray(inclusionProof.boardEntryDigests) &&
-        inclusionProof.boardEntryDigests[inclusionProof.boardPosition] !==
-            inclusionProof.boardEntryDigest
+        Array.isArray(inclusionProof.boardEntryHashes) &&
+        inclusionProof.boardEntryHashes[inclusionProof.boardPosition] !==
+            inclusionProof.boardEntryHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof board entry is not present at the claimed board position.',
-                inclusionProof.inclusionProofDigest,
+                inclusionProof.inclusionProofHash,
             ),
         );
     }
@@ -534,46 +534,46 @@ const verifyConsistencyProofs = (
     const refusedObjects: RefusalRecord[] = [];
 
     for (const proof of input.consistencyProofs ?? []) {
-        const proofHeadDigests = new Set(
-            proof.signedBoardHeads.map((head) => head.headDigest),
+        const proofHeadHashes = new Set(
+            proof.signedBoardHeads.map((head) => head.headHash),
         );
         if (proof.proofType !== 'SignedHeadChain') {
             refusedObjects.push(
                 createRefusal(
                     'BoardConsistencyFailure',
                     'Consistency proof must use the signed-head chain proof model.',
-                    proof.toBoardHeadDigest,
+                    proof.toBoardHeadHash,
                     'BoardHead',
                 ),
             );
         }
-        if (!proofHeadDigests.has(proof.toBoardHeadDigest)) {
+        if (!proofHeadHashes.has(proof.toBoardHeadHash)) {
             refusedObjects.push(
                 createRefusal(
                     'BoardConsistencyFailure',
                     'Consistency proof does not contain its target board head.',
-                    proof.toBoardHeadDigest,
+                    proof.toBoardHeadHash,
                     'BoardHead',
                 ),
             );
         }
         if (
-            proof.fromBoardHeadDigest !== null &&
-            !proofHeadDigests.has(proof.fromBoardHeadDigest)
+            proof.fromBoardHeadHash !== null &&
+            !proofHeadHashes.has(proof.fromBoardHeadHash)
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BoardConsistencyFailure',
                     'Consistency proof does not contain its starting board head.',
-                    proof.fromBoardHeadDigest,
+                    proof.fromBoardHeadHash,
                     'BoardHead',
                 ),
             );
         }
         const proofInput = {
             ceremonyId: input.ceremonyId,
-            boardPolicyDigest: input.boardPolicyDigest,
-            expectedBoardPublicKeyDigest: input.expectedBoardPublicKeyDigest,
+            boardPolicyHash: input.boardPolicyHash,
+            expectedBoardPublicKeyHash: input.expectedBoardPublicKeyHash,
             signedBoardHeads: proof.signedBoardHeads,
         };
         for (const head of proof.signedBoardHeads) {
@@ -581,22 +581,22 @@ const verifyConsistencyProofs = (
         }
         refusedObjects.push(...verifyPreviousHeadLinks(proof.signedBoardHeads));
 
-        const proofHeadsByDigest = buildBoardHeadMap(proof.signedBoardHeads);
+        const proofHeadsByHash = buildBoardHeadMap(proof.signedBoardHeads);
         if (
-            proof.fromBoardHeadDigest !== null &&
-            proofHeadDigests.has(proof.fromBoardHeadDigest) &&
-            proofHeadDigests.has(proof.toBoardHeadDigest) &&
+            proof.fromBoardHeadHash !== null &&
+            proofHeadHashes.has(proof.fromBoardHeadHash) &&
+            proofHeadHashes.has(proof.toBoardHeadHash) &&
             !isVerifiedAncestor(
-                proof.fromBoardHeadDigest,
-                proof.toBoardHeadDigest,
-                proofHeadsByDigest,
+                proof.fromBoardHeadHash,
+                proof.toBoardHeadHash,
+                proofHeadsByHash,
             )
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BoardConsistencyFailure',
                     'Consistency proof does not show the starting head as an ancestor of the target head.',
-                    proof.toBoardHeadDigest,
+                    proof.toBoardHeadHash,
                     'BoardHead',
                 ),
             );
@@ -608,7 +608,7 @@ const verifyConsistencyProofs = (
                 createRefusal(
                     'BoardForkDetected',
                     'Consistency proof contains conflicting signed heads.',
-                    forkEvidence.evidenceDigest,
+                    forkEvidence.evidenceHash,
                 ),
             );
         }
@@ -623,13 +623,13 @@ const verifyBoardConsistencyUnchecked = (
     const refusedObjects: RefusalRecord[] = [];
 
     if (
-        typeof input.expectedBoardPublicKeyDigest !== 'string' ||
-        input.expectedBoardPublicKeyDigest.length === 0
+        typeof input.expectedBoardPublicKeyHash !== 'string' ||
+        input.expectedBoardPublicKeyHash.length === 0
     ) {
         refusedObjects.push(
             createRefusal(
                 'WrongPublicKey',
-                'Board evidence must bind the expected board public-key digest.',
+                'Board evidence must bind the expected board public-key hash.',
             ),
         );
     }
@@ -650,10 +650,10 @@ const verifyBoardConsistencyUnchecked = (
     refusedObjects.push(...verifyPreviousHeadLinks(input.signedBoardHeads));
     refusedObjects.push(...verifyConsistencyProofs(input));
 
-    const headsByDigest = buildBoardHeadMap(input.signedBoardHeads);
+    const headsByHash = buildBoardHeadMap(input.signedBoardHeads);
     for (const inclusionProof of input.inclusionProofs ?? []) {
         refusedObjects.push(
-            ...verifyInclusionProof(inclusionProof, headsByDigest),
+            ...verifyInclusionProof(inclusionProof, headsByHash),
         );
     }
 
@@ -662,7 +662,7 @@ const verifyBoardConsistencyUnchecked = (
         const evidenceRefusals = verifySuppliedForkEvidence(
             input,
             evidence,
-            headsByDigest,
+            headsByHash,
         );
         refusedObjects.push(...evidenceRefusals);
         if (evidenceRefusals.length === 0) {
@@ -683,11 +683,11 @@ const verifyBoardConsistencyUnchecked = (
     return {
         ok: refusedObjects.length === 0 && discoveredForkEvidence === undefined,
         statusLabels,
-        acceptedDigests: boardAccepted
+        acceptedHashes: boardAccepted
             ? uniqueStrings([
-                  ...input.signedBoardHeads.map((head) => head.headDigest),
+                  ...input.signedBoardHeads.map((head) => head.headHash),
                   ...(input.inclusionProofs ?? []).map(
-                      (proof) => proof.inclusionProofDigest,
+                      (proof) => proof.inclusionProofHash,
                   ),
               ])
             : [],
@@ -699,12 +699,12 @@ const verifyBoardConsistencyUnchecked = (
                       createRefusal(
                           'BoardForkDetected',
                           'Supplied board evidence contains conflicting signed heads.',
-                          discoveredForkEvidence.evidenceDigest,
+                          discoveredForkEvidence.evidenceHash,
                       ),
                   ],
         forkEvidence: discoveredForkEvidence,
-        verifiedHeadDigests: uniqueStrings(
-            input.signedBoardHeads.map((head) => head.headDigest),
+        verifiedHeadHashes: uniqueStrings(
+            input.signedBoardHeads.map((head) => head.headHash),
         ),
     };
 };
@@ -714,18 +714,21 @@ export const verifyBoardConsistency = (
 ): BoardConsistencyVerification => {
     try {
         return verifyBoardConsistencyUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'BoardConsistencyFailure',
-                    'Board evidence could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Board evidence could not be canonicalized or validated.',
+                        error,
+                    ),
                 ),
             ],
-            verifiedHeadDigests: [],
+            verifiedHeadHashes: [],
         };
     }
 };

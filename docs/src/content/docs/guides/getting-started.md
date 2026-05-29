@@ -1,52 +1,87 @@
 ---
 title: Get started
-description: The shortest path to the current sealed-lattice public verification boundary and workspace contract.
+description: Install sealed-lattice and use the current public verification helpers.
 sidebar:
     order: 1
 ---
 
-Start with the public package name and the current rule: `sealed-lattice` exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs.
+`sealed-lattice` provides verification helpers for post-quantum threshold voting artifacts in Node and browsers.
 
-## Public package rules
+Use it to validate poll definitions, derive threshold profiles, check lifecycle and action rules, verify public board and roster evidence, and verify supported ballot privacy proof records with the bundled Rust/WASM verifier.
 
-- The only committed public package name is `sealed-lattice`.
-- The public runtime facade currently exports transcript-core fixture verification plus threshold, lifecycle, poll specification, capability, board, target-finality, roster-manifest, cast receipt, close record, first-valid, recovery, receiver-key proof, ballot proof record, and proof-byte-bearing scoped relation-bearing ballot package verification helpers.
-- No public subpaths are promised yet.
-- The current release freezes packaging, docs, smoke checks, transcript-core fixtures, election foundation vectors, ballot privacy verification APIs, and the workspace shape.
+The package is under active implementation and has not been independently audited. Use it for development, integration experiments, and verification tooling, not production elections.
 
-## Consumer posture
+## Install
+
+```bash
+npm install sealed-lattice
+```
+
+```bash
+pnpm add sealed-lattice
+```
+
+## Validate a poll
+
+```typescript
+import { deriveThresholdProfile, validatePollSpec } from "sealed-lattice";
+
+const pollValidation = validatePollSpec({
+    pollId: "board-election-2026",
+    question: "Which proposal should be adopted?",
+    options: ["Proposal A", "Proposal B"],
+    topOptionCount: 1,
+});
+
+if (!pollValidation.ok) {
+    throw new Error(
+        pollValidation.errors[0]?.message ?? "Invalid poll specification.",
+    );
+}
+
+const thresholdProfile = deriveThresholdProfile({
+    rosterSize: 20,
+});
+```
+
+`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdProfile` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
+
+## Import verification helpers
 
 ```typescript
 import {
-    deriveThresholdProfile,
-    validatePollSpec,
+    verifyBallotProof,
+    verifyBoardConsistency,
     verifyClaimBearingBallotPackage,
+    verifyReceiverKeyProof,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
 ```
 
-The transcript-core verifier accepts fixture objects and returns deterministic verification or rejection labels. The election foundation helpers validate public poll shape, derive threshold profiles, check lifecycle transitions, derive status labels, and refuse premature protocol actions. The ballot privacy verifier APIs verify supported receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM backend. These APIs do not implement a full voting workflow.
+These helpers verify structured public evidence and return accepted Hashes, status labels, and refusal records where applicable.
 
-## What the current release includes
+## What you can use today
 
-- the private Turborepo workspace layout
-- the published `sealed-lattice` package identity
-- private types, protocol, crypto, wasm, and testkit shells
-- a Rust transcript-core and ballot privacy proof backend plus an internal WASM loader
-- election foundation checks for threshold, lifecycle, poll specification, capability, board/finality, roster-manifest, cast/close receipt, first-valid, and recovery behavior
-- verification-oriented receiver-key proof, ballot proof-record, and proof-byte-bearing scoped relation-bearing package APIs
-- docs, TypeDoc, pack smoke, vector manifest verification, and CI verification
+- poll specification validation and canonical hash derivation
+- threshold and frozen roster profile derivation
+- lifecycle label, lifecycle transition, and action capability checks
+- board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
+- transcript-core fixture verification through the bundled Rust/WASM kernel
+- receiver-key proof, ballot proof record, and claim-bearing ballot package verification
+- aggregate derivation component verification for post-close contribution evidence
 
-## What is not published yet
+## What is not available yet
 
-- ballot generation, casting, aggregation, or tally APIs
-- proof construction APIs or unsafe generation helpers
-- local replay record helpers, semantic target acceptance, decryption-share shell helpers, or decryption APIs
-- public crypto provider wrappers
-- public WASM or native arithmetic entry points
+- ballot generation or casting APIs
+- proof construction APIs
+- aggregation or tally evaluation APIs
+- production target-bound decryption or result release
+- production-readiness, audit, or certification claims
+
+Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching protocol layer exists.
 
 ## Next reads
 
-- [Workspace layout](../workspace-layout/) for package ownership and dependency direction
-- [Development workflow](../development-workflow/) for the actual build and verification path
-- [Security and non-goals](../security-and-non-goals/) for the current claim boundary
+- [API reference](../../api/) for the public function and type surface
+- [Security and non-goals](../security-and-non-goals/) for current safety boundaries
+- [Development workflow](../development-workflow/) for local build and verification commands

@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { deriveReceiverPublicMatrix } from '../lattice-primitives.js';
 import {
@@ -8,7 +8,6 @@ import {
 import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
 
 import {
-    addModularProduct,
     assertProjectionSatisfiesRows,
     numberPolynomialCoefficient,
     numberVectorCoefficient,
@@ -31,7 +30,6 @@ import type {
 } from './statement-contracts.js';
 import {
     linearProofRelation,
-    negacyclicNumberCoefficient,
     polynomialCoefficient,
     positiveModulo,
     receiverEncryptionMessageScale,
@@ -42,11 +40,11 @@ import {
     shareCommitmentModuleRank,
 } from './statement-contracts.js';
 import {
-    deriveLinearStatementDigest,
-    deriveStatementMatrixDigest,
-    deriveStructuredShareCommitmentStatementDigest,
-    deriveTargetVectorDigest,
-} from './statement-digests.js';
+    deriveLinearStatementHash,
+    deriveStatementMatrixHash,
+    deriveStructuredShareCommitmentStatementHash,
+    deriveTargetVectorHash,
+} from './statement-hashes.js';
 import { witnessValueForVariable } from './statement-witness-values.js';
 import {
     componentById,
@@ -62,6 +60,320 @@ import {
     usedBackendColumnIndices,
     zeroPolynomial,
 } from './witness-accessors.js';
+
+const receiverEncryptionTransformLength = receiverEncryptionModuleDegree * 2;
+const transformedReceiverEncryptionPublicMatrixCache = new Map<
+    string,
+    readonly (readonly (readonly number[])[])[]
+>();
+
+const modularPower = (input: {
+    readonly base: number;
+    readonly exponent: number;
+    readonly modulus: number;
+}): number => {
+    let result = 1;
+    let power = input.base % input.modulus;
+    let remainingExponent = input.exponent;
+    while (remainingExponent > 0) {
+        if (remainingExponent % 2 === 1) {
+            result = (result * power) % input.modulus;
+        }
+        power = (power * power) % input.modulus;
+        remainingExponent = Math.floor(remainingExponent / 2);
+    }
+
+    return result;
+};
+
+const primitiveRootModulo = (modulus: number): number => {
+    for (let candidate = 2; candidate < modulus; candidate += 1) {
+        if (
+            modularPower({
+                base: candidate,
+                exponent: (modulus - 1) / 2,
+                modulus,
+            }) !== 1 &&
+            modularPower({
+                base: candidate,
+                exponent: (modulus - 1) / 3,
+                modulus,
+            }) !== 1
+        ) {
+            return candidate;
+        }
+    }
+
+    throw new Error('Receiver encryption modulus has no primitive root.');
+};
+
+const receiverEncryptionPrimitiveRoot = primitiveRootModulo(
+    receiverEncryptionModulus,
+);
+
+const receiverEncryptionTransformRoot = modularPower({
+    base: receiverEncryptionPrimitiveRoot,
+    exponent:
+        (receiverEncryptionModulus - 1) / receiverEncryptionTransformLength,
+    modulus: receiverEncryptionModulus,
+});
+
+const receiverEncryptionInverseTransformRoot = modularPower({
+    base: receiverEncryptionTransformRoot,
+    exponent: receiverEncryptionModulus - 2,
+    modulus: receiverEncryptionModulus,
+});
+
+const receiverEncryptionInverseTransformLength = modularPower({
+    base: receiverEncryptionTransformLength,
+    exponent: receiverEncryptionModulus - 2,
+    modulus: receiverEncryptionModulus,
+});
+
+const receiverEncryptionBitReverseIndexes = Array.from(
+    { length: receiverEncryptionTransformLength },
+    (_unusedValue, valueIndex) => {
+        let reversedIndex = 0;
+        let remainingValue = valueIndex;
+        for (
+            let bitIndex = 0;
+            bitIndex < Math.log2(receiverEncryptionTransformLength);
+            bitIndex += 1
+        ) {
+            reversedIndex = (reversedIndex << 1) | (remainingValue & 1);
+            remainingValue >>= 1;
+        }
+
+        return reversedIndex;
+    },
+);
+
+const receiverEncryptionNumberTheoreticTransform = (
+    values: number[],
+    inverse: boolean,
+): void => {
+    for (
+        let valueIndex = 0;
+        valueIndex < receiverEncryptionTransformLength;
+        valueIndex += 1
+    ) {
+        const reversedIndex = receiverEncryptionBitReverseIndexes[valueIndex];
+        if (reversedIndex > valueIndex) {
+            const originalValue = values[valueIndex] ?? 0;
+            values[valueIndex] = values[reversedIndex] ?? 0;
+            values[reversedIndex] = originalValue;
+        }
+    }
+
+    const root = inverse
+        ? receiverEncryptionInverseTransformRoot
+        : receiverEncryptionTransformRoot;
+    for (
+        let transformBlockLength = 2;
+        transformBlockLength <= receiverEncryptionTransformLength;
+        transformBlockLength *= 2
+    ) {
+        const halfBlockLength = transformBlockLength / 2;
+        const blockRoot = modularPower({
+            base: root,
+            exponent: receiverEncryptionTransformLength / transformBlockLength,
+            modulus: receiverEncryptionModulus,
+        });
+        for (
+            let blockStartIndex = 0;
+            blockStartIndex < receiverEncryptionTransformLength;
+            blockStartIndex += transformBlockLength
+        ) {
+            let twiddleFactor = 1;
+            for (
+                let blockOffset = 0;
+                blockOffset < halfBlockLength;
+                blockOffset += 1
+            ) {
+                const evenValue = values[blockStartIndex + blockOffset] ?? 0;
+                const oddValue =
+                    ((values[blockStartIndex + blockOffset + halfBlockLength] ??
+                        0) *
+                        twiddleFactor) %
+                    receiverEncryptionModulus;
+                const sum = evenValue + oddValue;
+                const difference = evenValue - oddValue;
+                values[blockStartIndex + blockOffset] =
+                    sum >= receiverEncryptionModulus
+                        ? sum - receiverEncryptionModulus
+                        : sum;
+                values[blockStartIndex + blockOffset + halfBlockLength] =
+                    difference < 0
+                        ? difference + receiverEncryptionModulus
+                        : difference;
+                twiddleFactor =
+                    (twiddleFactor * blockRoot) % receiverEncryptionModulus;
+            }
+        }
+    }
+
+    if (inverse) {
+        for (
+            let valueIndex = 0;
+            valueIndex < receiverEncryptionTransformLength;
+            valueIndex += 1
+        ) {
+            values[valueIndex] =
+                ((values[valueIndex] ?? 0) *
+                    receiverEncryptionInverseTransformLength) %
+                receiverEncryptionModulus;
+        }
+    }
+};
+
+const transformedReceiverEncryptionPolynomial = (
+    polynomial: readonly number[],
+): number[] => {
+    const transformedPolynomial = Array.from(
+        { length: receiverEncryptionTransformLength },
+        (_unusedValue, coefficientIndex) =>
+            coefficientIndex < receiverEncryptionModuleDegree
+                ? numberPolynomialCoefficient({
+                      coefficientIndex,
+                      polynomial,
+                  })
+                : 0,
+    );
+    receiverEncryptionNumberTheoreticTransform(transformedPolynomial, false);
+
+    return transformedPolynomial;
+};
+
+const transformedReceiverEncryptionVectorPolynomial = (input: {
+    readonly coefficientIndex: number;
+    readonly vector: readonly (readonly number[])[];
+}): number[] =>
+    transformedReceiverEncryptionPolynomial(
+        input.vector[input.coefficientIndex] ?? [],
+    );
+
+const addTransformedProduct = (input: {
+    readonly accumulatedTransformedProduct: number[];
+    readonly leftTransformedPolynomial: readonly number[];
+    readonly rightTransformedPolynomial: readonly number[];
+}): void => {
+    for (
+        let valueIndex = 0;
+        valueIndex < receiverEncryptionTransformLength;
+        valueIndex += 1
+    ) {
+        input.accumulatedTransformedProduct[valueIndex] =
+            ((input.accumulatedTransformedProduct[valueIndex] ?? 0) +
+                (((input.leftTransformedPolynomial[valueIndex] ?? 0) *
+                    (input.rightTransformedPolynomial[valueIndex] ?? 0)) %
+                    receiverEncryptionModulus)) %
+            receiverEncryptionModulus;
+    }
+};
+
+const negacyclicProductFromTransformedAccumulator = (
+    transformedAccumulator: number[],
+): number[] => {
+    receiverEncryptionNumberTheoreticTransform(transformedAccumulator, true);
+
+    return Array.from(
+        { length: receiverEncryptionModuleDegree },
+        (_unusedValue, coefficientIndex) =>
+            positiveModulo(
+                (transformedAccumulator[coefficientIndex] ?? 0) -
+                    (transformedAccumulator[
+                        coefficientIndex + receiverEncryptionModuleDegree
+                    ] ?? 0),
+                receiverEncryptionModulus,
+            ),
+    );
+};
+
+const zeroTransformedAccumulator = (): number[] =>
+    Array.from({ length: receiverEncryptionTransformLength }, () => 0);
+
+const transformedReceiverEncryptionPublicMatrix = (
+    receiverEncryptionProfileHash: ProtocolHash,
+    publicMatrixSeedHash: ProtocolHash,
+): readonly (readonly (readonly number[])[])[] => {
+    const cacheKey = `${receiverEncryptionProfileHash}:${publicMatrixSeedHash}`;
+    const cachedMatrix =
+        transformedReceiverEncryptionPublicMatrixCache.get(cacheKey);
+    if (cachedMatrix !== undefined) {
+        return cachedMatrix;
+    }
+    const transformedMatrix = deriveReceiverPublicMatrix(
+        receiverEncryptionProfileHash,
+        publicMatrixSeedHash,
+    ).map((matrixRow) =>
+        matrixRow.map((polynomial) =>
+            transformedReceiverEncryptionPolynomial(polynomial),
+        ),
+    );
+    transformedReceiverEncryptionPublicMatrixCache.set(
+        cacheKey,
+        transformedMatrix,
+    );
+
+    return transformedMatrix;
+};
+
+const transformedReceiverEncryptionPublicMatrixColumns = (
+    transformedPublicMatrix: readonly (readonly (readonly number[])[])[],
+): readonly (readonly (readonly number[])[])[] =>
+    Array.from(
+        { length: receiverEncryptionModuleRank },
+        (_unusedValue, ciphertextVectorIndex) =>
+            transformedPublicMatrix.map(
+                (matrixRow) => matrixRow[ciphertextVectorIndex] ?? [],
+            ),
+    );
+
+const transformedReceiverEncryptionPublicKeyVector = (
+    publicKeyVector: readonly (readonly number[])[],
+): readonly (readonly number[])[] =>
+    Array.from(
+        { length: receiverEncryptionModuleRank },
+        (_unusedValue, vectorIndex) =>
+            transformedReceiverEncryptionVectorPolynomial({
+                coefficientIndex: vectorIndex,
+                vector: publicKeyVector,
+            }),
+    );
+
+const transformedReceiverEncryptionRandomnessVector = (
+    encryptionRandomnessVector: readonly (readonly number[])[],
+): readonly (readonly number[])[] =>
+    Array.from(
+        { length: receiverEncryptionModuleRank },
+        (_unusedValue, vectorIndex) =>
+            transformedReceiverEncryptionVectorPolynomial({
+                coefficientIndex: vectorIndex,
+                vector: encryptionRandomnessVector,
+            }),
+    );
+
+const structuredReceiverEncryptionProduct = (input: {
+    readonly leftTransformedVector: readonly (readonly number[])[];
+    readonly rightTransformedVector: readonly (readonly number[])[];
+}): number[] => {
+    const transformedAccumulator = zeroTransformedAccumulator();
+    for (
+        let vectorIndex = 0;
+        vectorIndex < receiverEncryptionModuleRank;
+        vectorIndex += 1
+    ) {
+        addTransformedProduct({
+            accumulatedTransformedProduct: transformedAccumulator,
+            leftTransformedPolynomial:
+                input.leftTransformedVector[vectorIndex] ?? [],
+            rightTransformedPolynomial:
+                input.rightTransformedVector[vectorIndex] ?? [],
+        });
+    }
+
+    return negacyclicProductFromTransformedAccumulator(transformedAccumulator);
+};
 
 const verifyStructuredReceiverEncryptionRowBatch = (input: {
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
@@ -96,18 +408,27 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
         const receiverPayload = payloadsByReceiver.get(receiverKey);
         if (
             publicKey?.publicKeyVector === undefined ||
-            publicKey.publicMatrixSeedDigest === undefined ||
+            publicKey.publicMatrixSeedHash === undefined ||
             receiverPayload?.ciphertextChunks === undefined
         ) {
             throw new Error(
                 'Structured receiver encryption rows are missing public key or ciphertext material.',
             );
         }
-        const publicMatrix = deriveReceiverPublicMatrix(
-            input.loweredStatement.publicContext
-                .receiverEncryptionProfileDigest,
-            publicKey.publicMatrixSeedDigest,
-        );
+        const transformedPublicMatrix =
+            transformedReceiverEncryptionPublicMatrix(
+                input.loweredStatement.publicContext
+                    .receiverEncryptionProfileHash,
+                publicKey.publicMatrixSeedHash,
+            );
+        const transformedPublicMatrixColumns =
+            transformedReceiverEncryptionPublicMatrixColumns(
+                transformedPublicMatrix,
+            );
+        const transformedPublicKeyVector =
+            transformedReceiverEncryptionPublicKeyVector(
+                publicKey.publicKeyVector,
+            );
         const plaintextBits = receiverPayloadPlaintextBits({
             plaintextBitLength: receiverRow.plaintextBitLength,
             projectionWitness: input.projectionWitness,
@@ -121,11 +442,23 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
                 receiverRow.receiverRosterPosition,
                 ciphertextChunk.chunkIndex,
             );
+            const transformedRandomnessVector =
+                transformedReceiverEncryptionRandomnessVector(
+                    chunkWitness.encryptionRandomnessVector,
+                );
             for (
                 let ciphertextVectorIndex = 0;
                 ciphertextVectorIndex < receiverEncryptionModuleRank;
                 ciphertextVectorIndex += 1
             ) {
+                const firstCiphertextProduct =
+                    structuredReceiverEncryptionProduct({
+                        leftTransformedVector:
+                            transformedPublicMatrixColumns[
+                                ciphertextVectorIndex
+                            ] ?? [],
+                        rightTransformedVector: transformedRandomnessVector,
+                    });
                 for (
                     let outputCoefficientIndex = 0;
                     outputCoefficientIndex < receiverEncryptionModuleDegree;
@@ -139,39 +472,10 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
                         }),
                         receiverEncryptionModulus,
                     );
-                    for (
-                        let randomnessVectorIndex = 0;
-                        randomnessVectorIndex < receiverEncryptionModuleRank;
-                        randomnessVectorIndex += 1
-                    ) {
-                        for (
-                            let randomnessCoefficientIndex = 0;
-                            randomnessCoefficientIndex <
-                            receiverEncryptionModuleDegree;
-                            randomnessCoefficientIndex += 1
-                        ) {
-                            rowSum = addModularProduct({
-                                coefficient: negacyclicNumberCoefficient({
-                                    outputCoefficientIndex,
-                                    polynomial:
-                                        publicMatrix[randomnessVectorIndex]?.[
-                                            ciphertextVectorIndex
-                                        ] ?? [],
-                                    witnessCoefficientIndex:
-                                        randomnessCoefficientIndex,
-                                }),
-                                currentValue: rowSum,
-                                witness: numberVectorCoefficient({
-                                    coefficientIndex:
-                                        randomnessCoefficientIndex,
-                                    vector: chunkWitness.encryptionRandomnessVector,
-                                    vectorIndex: randomnessVectorIndex,
-                                }),
-                            });
-                        }
-                    }
                     rowSum = positiveModulo(
                         rowSum +
+                            (firstCiphertextProduct[outputCoefficientIndex] ??
+                                0) +
                             numberVectorCoefficient({
                                 coefficientIndex: outputCoefficientIndex,
                                 vector: chunkWitness.firstNoiseVector,
@@ -188,6 +492,12 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
                 }
             }
 
+            const secondCiphertextProduct = structuredReceiverEncryptionProduct(
+                {
+                    leftTransformedVector: transformedPublicKeyVector,
+                    rightTransformedVector: transformedRandomnessVector,
+                },
+            );
             for (
                 let outputCoefficientIndex = 0;
                 outputCoefficientIndex < receiverEncryptionModuleDegree;
@@ -200,38 +510,9 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
                     }),
                     receiverEncryptionModulus,
                 );
-                for (
-                    let randomnessVectorIndex = 0;
-                    randomnessVectorIndex < receiverEncryptionModuleRank;
-                    randomnessVectorIndex += 1
-                ) {
-                    for (
-                        let randomnessCoefficientIndex = 0;
-                        randomnessCoefficientIndex <
-                        receiverEncryptionModuleDegree;
-                        randomnessCoefficientIndex += 1
-                    ) {
-                        rowSum = addModularProduct({
-                            coefficient: negacyclicNumberCoefficient({
-                                outputCoefficientIndex,
-                                polynomial:
-                                    publicKey.publicKeyVector[
-                                        randomnessVectorIndex
-                                    ] ?? [],
-                                witnessCoefficientIndex:
-                                    randomnessCoefficientIndex,
-                            }),
-                            currentValue: rowSum,
-                            witness: numberVectorCoefficient({
-                                coefficientIndex: randomnessCoefficientIndex,
-                                vector: chunkWitness.encryptionRandomnessVector,
-                                vectorIndex: randomnessVectorIndex,
-                            }),
-                        });
-                    }
-                }
                 rowSum = positiveModulo(
                     rowSum +
+                        (secondCiphertextProduct[outputCoefficientIndex] ?? 0) +
                         numberPolynomialCoefficient({
                             coefficientIndex: outputCoefficientIndex,
                             polynomial: chunkWitness.secondNoisePolynomial,
@@ -264,7 +545,7 @@ const verifyStructuredReceiverEncryptionRowBatch = (input: {
 };
 
 export const buildBallotProofComponentLinearProofProjection = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentId: BallotProofExplicitComponentId;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
     readonly parameterProfileId: string;
@@ -383,22 +664,20 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         witnessVector: privateWitnessVectorCoefficients,
     });
 
-    const statementMatrixDigest = deriveStatementMatrixDigest(
+    const statementMatrixHash = deriveStatementMatrixHash(
         statementMatrixCoefficients,
     );
-    const targetVectorDigest = deriveTargetVectorDigest(
-        targetVectorCoefficients,
-    );
+    const targetVectorHash = deriveTargetVectorHash(targetVectorCoefficients);
     const statementPayload: Omit<
         BallotProofLinearProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: component.coefficientModulus,
         objectType: 'BallotProofLinearProofStatement',
@@ -406,16 +685,16 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         parameterProfileId: input.parameterProfileId,
         projectionCoverage: projectionCoverageForComponent(input.componentId),
         relation: linearProofRelation,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
         ringDegree: input.sourceRingDegree,
         statementColumns: sourceBackendColumnIndices.length,
         statementMatrixCoefficients,
-        statementMatrixDigest,
+        statementMatrixHash,
         statementRows: explicitRows.length,
         matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetVectorCoefficients,
-        targetVectorDigest,
+        targetVectorHash,
         witnessL2BoundSquared: input.witnessL2BoundSquared,
     };
 
@@ -423,7 +702,7 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
         componentId: input.componentId,
         linearStatement: {
             ...statementPayload,
-            statementDigest: deriveLinearStatementDigest(statementPayload),
+            statementHash: deriveLinearStatementHash(statementPayload),
         },
         privateWitnessVectorCoefficients,
         sourceBackendColumnIndices,
@@ -432,7 +711,7 @@ export const buildBallotProofComponentLinearProofProjection = (input: {
 };
 
 const buildStructuredShareCommitmentSparseStatement = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly component: BallotPrivacyBackendProofComponent;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
     readonly parameterProfileId: string;
@@ -515,18 +794,18 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
     }
     const statementPayload: Omit<
         BallotProofStructuredShareCommitmentProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: input.component.coefficientModulus,
         componentId: 'share-commitment-component',
-        matrixDigest: structuredRowBatch.matrixDigest,
+        matrixHash: structuredRowBatch.matrixHash,
         objectType: 'BallotProofStructuredShareCommitmentProofStatement',
         objectVersion: 1,
         parameterProfileId: input.parameterProfileId,
@@ -535,9 +814,9 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
         projectionCoverage: 'share-commitment-rows-only',
         receiverRows,
         relation: linearProofRelation,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
-        shareCommitmentProfileDigest:
-            input.loweredStatement.publicContext.shareCommitmentProfileDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
+        shareCommitmentProfileHash:
+            input.loweredStatement.publicContext.shareCommitmentProfileHash,
         shareVectorWidth: input.loweredStatement.shareVectorWidth,
         sourceBackendColumnIndices,
         sourceRingDegree: input.sourceRingDegree,
@@ -548,14 +827,14 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
         ),
         matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
-        targetVectorDigest: structuredRowBatch.targetVectorDigest,
+        targetVectorHash: structuredRowBatch.targetVectorHash,
         witnessL2BoundSquared: input.witnessL2BoundSquared,
     };
 
     return {
         ...statementPayload,
-        statementDigest:
-            deriveStructuredShareCommitmentStatementDigest(statementPayload),
+        statementHash:
+            deriveStructuredShareCommitmentStatementHash(statementPayload),
     };
 };
 

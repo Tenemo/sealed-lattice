@@ -1,14 +1,35 @@
 {
     "$schema": "https://turbo.build/schema.json",
-    "globalDependencies": [
-        "Cargo.lock",
-        "Cargo.toml",
-        "crates/**",
-        "tools/**"
-    ],
     "tasks": {
         "build": {
             "dependsOn": ["^build"],
+            "outputs": ["dist/**"]
+        },
+        "@sealed-lattice/wasm#build": {
+            "dependsOn": ["^build"],
+            "inputs": [
+                "$TURBO_DEFAULT$",
+                "../../Cargo.lock",
+                "../../Cargo.toml",
+                "../../crates/**",
+                "!../../crates/**/target/**",
+                "../../tools/ci/build-wasm-kernel.ts",
+                "../../tools/internal/**"
+            ],
+            "outputs": ["dist/**"]
+        },
+        "sealed-lattice#build": {
+            "dependsOn": ["^build"],
+            "inputs": [
+                "$TURBO_DEFAULT$",
+                "../../Cargo.lock",
+                "../../Cargo.toml",
+                "../../crates/**",
+                "!../../crates/**/target/**",
+                "../../tools/ci/build-sdk-bridge.ts",
+                "../../tools/ci/build-wasm-kernel.ts",
+                "../../tools/internal/**"
+            ],
             "outputs": ["dist/**"]
         },
         "check": {

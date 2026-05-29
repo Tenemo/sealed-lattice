@@ -1,11 +1,11 @@
 import {
-    deriveProtocolDigest,
+    deriveProtocolHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
     BallotPackageShell,
     BallotPackageWitness,
-    ProtocolDigest,
+    ProtocolHash,
     ProtocolSignatureEnvelope,
     PvssBallotAlgebraInput,
     PvssBallotRosterEntry,
@@ -15,8 +15,8 @@ import type {
 
 import {
     createRefusal,
-    defaultSignedRootContextDigest,
-    isProtocolDigestString,
+    defaultSignedRootContextHash,
+    isProtocolHashString,
     signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
@@ -34,26 +34,26 @@ import { deriveTestShareCommitmentWitness } from './test-share-commitments.js';
 
 type BallotPackageShellPayload = Omit<
     BallotPackageShell,
-    'ballotPackageDigest' | 'signature'
+    'ballotPackageHash' | 'signature'
 >;
 
-const deriveBallotPackageDigest = (
+const deriveBallotPackageHash = (
     ballotPackage: BallotPackageShellPayload,
-): ProtocolDigest =>
-    deriveProtocolDigest('BallotPackageDigest', {
-        ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
+): ProtocolHash =>
+    deriveProtocolHash('BallotPackageHash', {
+        ballotPolynomialSetHash: ballotPackage.ballotPolynomialSetHash,
         ceremonyId: ballotPackage.ceremonyId,
-        duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
-        electionManifestDigest: ballotPackage.electionManifestDigest,
+        duplicateBallotPolicyHash: ballotPackage.duplicateBallotPolicyHash,
+        electionManifestHash: ballotPackage.electionManifestHash,
         objectType: ballotPackage.objectType,
         objectVersion: ballotPackage.objectVersion,
         optionCount: ballotPackage.optionCount,
-        pollSpecDigest: ballotPackage.pollSpecDigest,
-        receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
+        pollSpecHash: ballotPackage.pollSpecHash,
+        receiverPayloadHashes: ballotPackage.receiverPayloadHashes,
         receiverShareCommitments: ballotPackage.receiverShareCommitments,
-        rosterDigest: ballotPackage.rosterDigest,
+        rosterHash: ballotPackage.rosterHash,
         shareVectorWidth: ballotPackage.shareVectorWidth,
-        thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
+        thresholdProfileHash: ballotPackage.thresholdProfileHash,
         voterIdentity: ballotPackage.voterIdentity,
         voterRosterPosition: ballotPackage.voterRosterPosition,
     });
@@ -61,7 +61,7 @@ const deriveBallotPackageDigest = (
 export const deriveTestBallotPackage = (
     input: PvssBallotAlgebraInput,
     createSignature: (
-        ballotPackageDigest: ProtocolDigest,
+        ballotPackageHash: ProtocolHash,
         unsignedBallotPackage: BallotPackageShellPayload,
     ) => ProtocolSignatureEnvelope,
 ): BallotPackageWitness => {
@@ -80,48 +80,43 @@ export const deriveTestBallotPackage = (
         deriveTestShareCommitmentWitness({
             context: input,
             receiverShareVector,
-            ballotPolynomialSetDigest: polynomialSet.ballotPolynomialSetDigest,
+            ballotPolynomialSetHash: polynomialSet.ballotPolynomialSetHash,
         }),
     );
     const receiverShareCommitments = commitmentPayloads.map(({ witness }) => ({
         receiverIdentity: witness.commitment.receiverIdentity,
         receiverRosterPosition: witness.commitment.receiverRosterPosition,
-        shareCommitmentDigest: witness.commitment.shareCommitmentDigest,
+        shareCommitmentHash: witness.commitment.shareCommitmentHash,
     }));
-    const receiverPayloadDigests = commitmentPayloads.map(({ payload }) => ({
+    const receiverPayloadHashes = commitmentPayloads.map(({ payload }) => ({
         receiverIdentity: payload.receiverIdentity,
         receiverRosterPosition: payload.receiverRosterPosition,
-        payloadDigest: payload.payloadDigest,
+        payloadHash: payload.payloadHash,
     }));
     const unsignedBallotPackage = {
         objectType: 'BallotPackage' as const,
         objectVersion: 1 as const,
         ceremonyId: input.ceremonyId,
-        electionManifestDigest: input.electionManifestDigest,
-        rosterDigest: input.rosterDigest,
-        pollSpecDigest: input.pollSpecDigest,
-        thresholdProfileDigest: input.thresholdProfileDigest,
-        duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
+        electionManifestHash: input.electionManifestHash,
+        rosterHash: input.rosterHash,
+        pollSpecHash: input.pollSpecHash,
+        thresholdProfileHash: input.thresholdProfileHash,
+        duplicateBallotPolicyHash: input.duplicateBallotPolicyHash,
         voterIdentity: input.voterIdentity,
         voterRosterPosition: input.voterRosterPosition,
         optionCount: input.pollSpec.options.length,
         shareVectorWidth: pvssBallotShareVectorWidth,
-        ballotPolynomialSetDigest: polynomialSet.ballotPolynomialSetDigest,
+        ballotPolynomialSetHash: polynomialSet.ballotPolynomialSetHash,
         receiverShareCommitments,
-        receiverPayloadDigests,
+        receiverPayloadHashes,
     };
-    const ballotPackageDigest = deriveBallotPackageDigest(
-        unsignedBallotPackage,
-    );
-    const signature = createSignature(
-        ballotPackageDigest,
-        unsignedBallotPackage,
-    );
+    const ballotPackageHash = deriveBallotPackageHash(unsignedBallotPackage);
+    const signature = createSignature(ballotPackageHash, unsignedBallotPackage);
 
     return {
         ballotPackage: {
             ...unsignedBallotPackage,
-            ballotPackageDigest,
+            ballotPackageHash,
             signature,
         },
         polynomialSet,
@@ -146,14 +141,14 @@ const collectReceiverReferenceRefusals = (input: {
     if (
         input.ballotPackage.receiverShareCommitments.length !==
             input.thresholdProfile.rosterSize ||
-        input.ballotPackage.receiverPayloadDigests.length !==
+        input.ballotPackage.receiverPayloadHashes.length !==
             input.thresholdProfile.rosterSize
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Ballot package must include one commitment and payload digest for every roster receiver.',
-                input.ballotPackage.ballotPackageDigest,
+                'Ballot package must include one commitment and payload hash for every roster receiver.',
+                input.ballotPackage.ballotPackageHash,
                 'BallotPackage',
             ),
         );
@@ -162,7 +157,7 @@ const collectReceiverReferenceRefusals = (input: {
     rosterEntries.forEach((entry, entryIndex) => {
         const commitment =
             input.ballotPackage.receiverShareCommitments[entryIndex];
-        const payload = input.ballotPackage.receiverPayloadDigests[entryIndex];
+        const payload = input.ballotPackage.receiverPayloadHashes[entryIndex];
 
         if (
             commitment?.receiverIdentity !== entry.participantIdentity ||
@@ -172,7 +167,7 @@ const collectReceiverReferenceRefusals = (input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     'Ballot package receiver commitments must match the frozen roster order.',
-                    input.ballotPackage.ballotPackageDigest,
+                    input.ballotPackage.ballotPackageHash,
                     'BallotPackage',
                 ),
             );
@@ -184,19 +179,19 @@ const collectReceiverReferenceRefusals = (input: {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
-                    'Ballot package receiver payload digests must match the frozen roster order.',
-                    input.ballotPackage.ballotPackageDigest,
+                    'Ballot package receiver payload Hashes must match the frozen roster order.',
+                    input.ballotPackage.ballotPackageHash,
                     'BallotPackage',
                 ),
             );
         }
         if (commitment !== undefined) {
-            if (!isProtocolDigestString(commitment.shareCommitmentDigest)) {
+            if (!isProtocolHashString(commitment.shareCommitmentHash)) {
                 refusedObjects.push(
                     createRefusal(
                         'BallotPackageInvalid',
-                        'Ballot package receiver commitments must bind canonical digest references.',
-                        input.ballotPackage.ballotPackageDigest,
+                        'Ballot package receiver commitments must bind canonical hash references.',
+                        input.ballotPackage.ballotPackageHash,
                         'BallotPackage',
                     ),
                 );
@@ -210,7 +205,7 @@ const collectReceiverReferenceRefusals = (input: {
                     createRefusal(
                         'BallotPackageInvalid',
                         'Ballot package receiver commitments must be unique.',
-                        input.ballotPackage.ballotPackageDigest,
+                        input.ballotPackage.ballotPackageHash,
                         'BallotPackage',
                     ),
                 );
@@ -218,12 +213,12 @@ const collectReceiverReferenceRefusals = (input: {
             commitmentKeys.add(commitmentKey);
         }
         if (payload !== undefined) {
-            if (!isProtocolDigestString(payload.payloadDigest)) {
+            if (!isProtocolHashString(payload.payloadHash)) {
                 refusedObjects.push(
                     createRefusal(
                         'BallotPackageInvalid',
-                        'Ballot package receiver payloads must bind canonical digest references.',
-                        input.ballotPackage.ballotPackageDigest,
+                        'Ballot package receiver payloads must bind canonical hash references.',
+                        input.ballotPackage.ballotPackageHash,
                         'BallotPackage',
                     ),
                 );
@@ -236,8 +231,8 @@ const collectReceiverReferenceRefusals = (input: {
                 refusedObjects.push(
                     createRefusal(
                         'BallotPackageInvalid',
-                        'Ballot package receiver payload digests must be unique.',
-                        input.ballotPackage.ballotPackageDigest,
+                        'Ballot package receiver payload Hashes must be unique.',
+                        input.ballotPackage.ballotPackageHash,
                         'BallotPackage',
                     ),
                 );
@@ -252,41 +247,41 @@ const collectReceiverReferenceRefusals = (input: {
 export const verifyBallotPackageShell = (input: {
     readonly ballotPackage: BallotPackageShell;
     readonly ceremonyId: string;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly duplicateBallotPolicyDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly duplicateBallotPolicyHash: ProtocolHash;
     readonly optionCount: number;
     readonly rosterEntries: readonly PvssBallotRosterEntry[];
     readonly thresholdProfile: ThresholdProfile;
 }): readonly RefusalRecord[] => {
     const { ballotPackage } = input;
     const refusedObjects: RefusalRecord[] = [];
-    const expectedDigest = deriveBallotPackageDigest({
+    const expectedHash = deriveBallotPackageHash({
         objectType: ballotPackage.objectType,
         objectVersion: ballotPackage.objectVersion,
         ceremonyId: ballotPackage.ceremonyId,
-        electionManifestDigest: ballotPackage.electionManifestDigest,
-        rosterDigest: ballotPackage.rosterDigest,
-        pollSpecDigest: ballotPackage.pollSpecDigest,
-        thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
-        duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
+        electionManifestHash: ballotPackage.electionManifestHash,
+        rosterHash: ballotPackage.rosterHash,
+        pollSpecHash: ballotPackage.pollSpecHash,
+        thresholdProfileHash: ballotPackage.thresholdProfileHash,
+        duplicateBallotPolicyHash: ballotPackage.duplicateBallotPolicyHash,
         voterIdentity: ballotPackage.voterIdentity,
         voterRosterPosition: ballotPackage.voterRosterPosition,
         optionCount: ballotPackage.optionCount,
         shareVectorWidth: ballotPackage.shareVectorWidth,
-        ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
+        ballotPolynomialSetHash: ballotPackage.ballotPolynomialSetHash,
         receiverShareCommitments: ballotPackage.receiverShareCommitments,
-        receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
+        receiverPayloadHashes: ballotPackage.receiverPayloadHashes,
     });
 
-    if (ballotPackage.ballotPackageDigest !== expectedDigest) {
+    if (ballotPackage.ballotPackageHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Ballot package digest does not match its canonical payload.',
-                ballotPackage.ballotPackageDigest,
+                'Ballot package hash does not match its canonical payload.',
+                ballotPackage.ballotPackageHash,
                 'BallotPackage',
             ),
         );
@@ -300,26 +295,26 @@ export const verifyBallotPackageShell = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot package object shape is not canonical.',
-                ballotPackage.ballotPackageDigest,
+                ballotPackage.ballotPackageHash,
                 'BallotPackage',
             ),
         );
     }
     if (
         ballotPackage.ceremonyId !== input.ceremonyId ||
-        ballotPackage.electionManifestDigest !== input.electionManifestDigest ||
-        ballotPackage.rosterDigest !== input.rosterDigest ||
-        ballotPackage.pollSpecDigest !== input.pollSpecDigest ||
-        ballotPackage.thresholdProfileDigest !== input.thresholdProfileDigest ||
-        ballotPackage.duplicateBallotPolicyDigest !==
-            input.duplicateBallotPolicyDigest ||
+        ballotPackage.electionManifestHash !== input.electionManifestHash ||
+        ballotPackage.rosterHash !== input.rosterHash ||
+        ballotPackage.pollSpecHash !== input.pollSpecHash ||
+        ballotPackage.thresholdProfileHash !== input.thresholdProfileHash ||
+        ballotPackage.duplicateBallotPolicyHash !==
+            input.duplicateBallotPolicyHash ||
         ballotPackage.optionCount !== input.optionCount
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot package context does not match the frozen election context.',
-                ballotPackage.ballotPackageDigest,
+                ballotPackage.ballotPackageHash,
                 'BallotPackage',
             ),
         );
@@ -336,7 +331,7 @@ export const verifyBallotPackageShell = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot package voter must match a frozen roster entry.',
-                ballotPackage.ballotPackageDigest,
+                ballotPackage.ballotPackageHash,
                 'BallotPackage',
             ),
         );
@@ -353,17 +348,17 @@ export const verifyBallotPackageShell = (input: {
 
     if (
         voterRosterEntry !== undefined &&
-        voterRosterEntry.signingPublicKeyDigest === undefined
+        voterRosterEntry.signingPublicKeyHash === undefined
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot package voter signature cannot be verified without a frozen roster signing key.',
-                ballotPackage.ballotPackageDigest,
+                ballotPackage.ballotPackageHash,
                 'BallotPackage',
             ),
         );
-    } else if (voterRosterEntry?.signingPublicKeyDigest !== undefined) {
+    } else if (voterRosterEntry?.signingPublicKeyHash !== undefined) {
         const signatureResult = verifySignedObjectSignature(
             ballotPackage.signature,
             {
@@ -372,14 +367,14 @@ export const verifyBallotPackageShell = (input: {
                 signerRole: 'Voter',
                 signerIdentity: ballotPackage.voterIdentity,
                 ceremonyId: ballotPackage.ceremonyId,
-                publicKeyDigest: voterRosterEntry.signingPublicKeyDigest,
-                manifestDigest: ballotPackage.electionManifestDigest,
-                objectRoot: ballotPackage.ballotPackageDigest,
-                boardHeadDigest: null,
+                publicKeyHash: voterRosterEntry.signingPublicKeyHash,
+                manifestHash: ballotPackage.electionManifestHash,
+                objectRoot: ballotPackage.ballotPackageHash,
+                boardHeadHash: null,
                 byteLength: signedObjectRootByteLength,
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
-                contextDigest: defaultSignedRootContextDigest,
+                contextHash: defaultSignedRootContextHash,
             },
         );
 

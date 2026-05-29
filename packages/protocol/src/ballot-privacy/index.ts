@@ -1,8 +1,8 @@
 export {
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
-    deriveBallotPrivacyProfileDigests,
-    deriveShareCommitmentMessageBoundCertDigest,
+    deriveBallotPrivacyProfileHashes,
+    deriveShareCommitmentMessageBoundCertHash,
     verifyShareCommitmentMessageBoundCert,
 } from './profiles.js';
 export {
@@ -17,16 +17,16 @@ export {
     createReceiverKeyProofShell,
     createReceiverPayloadShell,
     createShareCommitmentShell,
-    deriveClaimBearingBallotPackageDigest,
+    deriveClaimBearingBallotPackageHash,
     deriveBallotProofComponentProofRoot,
-    deriveBallotProofEncodingProfileDigest,
-    deriveBallotProofParameterSetDigest,
-    deriveBallotProofPublicRandomnessDigest,
-    deriveBallotPrivacyRosterProfileEvidenceDigest,
-    deriveProofBytesDigest,
-    deriveReceiverKeyProofEncodingProfileDigest,
-    deriveReceiverKeyProofParameterSetDigest,
-    deriveReceiverKeyProofPublicRandomnessDigest,
+    deriveBallotProofEncodingProfileHash,
+    deriveBallotProofParameterSetHash,
+    deriveBallotProofPublicRandomnessHash,
+    deriveBallotPrivacyRosterProfileEvidenceHash,
+    deriveProofBytesHash,
+    deriveReceiverKeyProofEncodingProfileHash,
+    deriveReceiverKeyProofParameterSetHash,
+    deriveReceiverKeyProofPublicRandomnessHash,
     describeBallotPrivacyProofBackend,
     verifyBallotProof,
     verifyClaimBearingBallotPackage,
@@ -42,5 +42,17 @@ export {
     verifyAggregateDerivationComponentStructure,
 } from './aggregate-derivation.js';
 export type { AggregateDerivationWitnessInput } from './aggregate-derivation.js';
+export {
+    createAggregateContributionFromBridgeProofRecord,
+    createAggregateReadyRecord,
+    deriveAggregateContributionHash,
+    deriveBridgeProofProfileHash,
+    deriveBridgeProofRecordHash,
+    deriveBridgeProofStatementHash,
+    deriveBridgeProofTargetContractHash,
+    selectFirstValidAggregateContributions,
+    verifyAggregateContributionStructure,
+    verifyAggregateReadyRecordStructure,
+} from './aggregate-bridge.js';
 export { compileBallotPrivacyRelation } from './relation-compiler.js';
 export type { BallotPrivacyRelationCompilerInput } from './relation-compiler.js';

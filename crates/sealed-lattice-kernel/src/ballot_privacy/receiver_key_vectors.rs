@@ -1,7 +1,10 @@
 use super::*;
 
+#[path = "receiver_key/vectors/backend_helpers.rs"]
 mod backend_helpers;
+#[path = "receiver_key/vectors/case_validation.rs"]
 mod case_validation;
+#[path = "receiver_key/vectors/public_matrix_derivation.rs"]
 mod public_matrix_derivation;
 
 pub(crate) use super::protocol_constants::{

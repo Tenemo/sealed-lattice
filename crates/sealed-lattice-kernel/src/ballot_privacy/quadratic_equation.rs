@@ -1,8 +1,9 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+#[cfg(test)]
+use super::linear_proof_rng::sample_linear_proof_uniform_u64_values;
 use super::{
-    linear_proof_rng::sample_linear_proof_uniform_u64_values, polynomial_ring::PolynomialRing,
-    sparse_polynomial_matrix::SparsePolynomialMatrix,
+    polynomial_ring::PolynomialRing, sparse_polynomial_matrix::SparsePolynomialMatrix,
     sparse_polynomial_vector::SparsePolynomialVector,
 };
 
@@ -213,6 +214,7 @@ impl LinearProofQuadraticEquation {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn accumulate_weighted_equations(
         &self,
         weighted_equations: &[WeightedLinearProofQuadraticEquation<'_>],
@@ -245,6 +247,7 @@ impl LinearProofQuadraticEquation {
         Ok(accumulated_equation)
     }
 
+    #[cfg(test)]
     pub(crate) fn accumulate_schwartz_zippel_pair_sets(
         primary_accumulators: &[Self],
         secondary_accumulators: &[Self],
@@ -321,6 +324,7 @@ impl LinearProofQuadraticEquation {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn accumulate_unweighted_equations(
         &self,
         equations: &[&LinearProofQuadraticEquation],
@@ -334,6 +338,7 @@ impl LinearProofQuadraticEquation {
         Ok(accumulated_equation)
     }
 
+    #[cfg(test)]
     pub(crate) fn add(&self, other: &Self) -> CanonicalResult<Self> {
         self.require_same_shape(other)?;
 
@@ -353,8 +358,9 @@ impl LinearProofQuadraticEquation {
         let ring = self.ring();
         let constant_term = match (&self.constant_term, &partial.constant_term) {
             (Some(accumulated_constant), Some(partial_constant)) => {
-                let scaled_partial_constant = ring.scale(scalar, partial_constant)?;
-                Some(ring.add(accumulated_constant, &scaled_partial_constant)?)
+                let mut combined_constant = accumulated_constant.clone();
+                ring.scaled_add_assign(&mut combined_constant, scalar, partial_constant)?;
+                Some(combined_constant)
             }
             (Some(accumulated_constant), None) => Some(accumulated_constant.clone()),
             (None, None) => None,
@@ -368,14 +374,15 @@ impl LinearProofQuadraticEquation {
         Ok(Self {
             quadratic_terms: self
                 .quadratic_terms
-                .add(&partial.quadratic_terms.scale(scalar)?)?,
+                .add_scaled(&partial.quadratic_terms, scalar)?,
             linear_terms: self
                 .linear_terms
-                .add(&partial.linear_terms.scale(scalar)?)?,
+                .add_scaled(&partial.linear_terms, scalar)?,
             constant_term,
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn scale(&self, scalar: u64) -> CanonicalResult<Self> {
         let ring = self.ring();
 
@@ -390,6 +397,7 @@ impl LinearProofQuadraticEquation {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn scale_by_polynomial(&self, polynomial: &[u64]) -> CanonicalResult<Self> {
         let ring = self.ring();
         ring.validate_coefficients(polynomial)?;
@@ -402,6 +410,44 @@ impl LinearProofQuadraticEquation {
                 .as_ref()
                 .map(|constant_term| ring.mul_negacyclic(polynomial, constant_term))
                 .transpose()?,
+        })
+    }
+
+    pub(crate) fn add_polynomial_scaled_partial(
+        &self,
+        partial: &Self,
+        polynomial: &[u64],
+    ) -> CanonicalResult<Self> {
+        self.require_same_shape(partial)?;
+        let ring = self.ring();
+        ring.validate_coefficients(polynomial)?;
+        let constant_term = match (&self.constant_term, &partial.constant_term) {
+            (Some(accumulated_constant), Some(partial_constant)) => {
+                let mut combined_constant = accumulated_constant.clone();
+                ring.mul_negacyclic_accumulate(
+                    &mut combined_constant,
+                    polynomial,
+                    partial_constant,
+                )?;
+                Some(combined_constant)
+            }
+            (Some(accumulated_constant), None) => Some(accumulated_constant.clone()),
+            (None, None) => None,
+            (None, Some(_)) => {
+                return Err(invalid_quadratic(
+                    "quadratic partial with a constant cannot be added to a constant-free accumulator",
+                ));
+            }
+        };
+
+        Ok(Self {
+            quadratic_terms: self
+                .quadratic_terms
+                .add_polynomial_scaled(&partial.quadratic_terms, polynomial)?,
+            linear_terms: self
+                .linear_terms
+                .add_polynomial_scaled(&partial.linear_terms, polynomial)?,
+            constant_term,
         })
     }
 
@@ -427,132 +473,14 @@ pub(crate) struct WeightedLinearProofQuadraticEquation<'equation> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct QuadraticAccumulatorPairs {
     pub(crate) primary_accumulators: Vec<LinearProofQuadraticEquation>,
     pub(crate) secondary_accumulators: Vec<LinearProofQuadraticEquation>,
     pub(crate) challenge_scalars_by_pair: Vec<Vec<u64>>,
 }
 
-pub(crate) fn validate_quadratic_helper_self_check() -> CanonicalResult<()> {
-    let ring = PolynomialRing::new(4, 17)?;
-    let first_equation = LinearProofQuadraticEquation::new(
-        SparsePolynomialMatrix::new(
-            ring,
-            4,
-            4,
-            vec![
-                super::sparse_polynomial_matrix::SparsePolynomialMatrixEntry::new(
-                    0,
-                    0,
-                    vec![1, 2, 3, 4],
-                ),
-                super::sparse_polynomial_matrix::SparsePolynomialMatrixEntry::new(
-                    0,
-                    1,
-                    vec![2, 0, 0, 0],
-                ),
-                super::sparse_polynomial_matrix::SparsePolynomialMatrixEntry::new(
-                    1,
-                    3,
-                    vec![3, 0, 0, 0],
-                ),
-            ],
-        )?,
-        SparsePolynomialVector::new(
-            ring,
-            4,
-            vec![
-                super::sparse_polynomial_vector::SparsePolynomialVectorEntry::new(
-                    0,
-                    vec![1, 1, 0, 0],
-                ),
-                super::sparse_polynomial_vector::SparsePolynomialVectorEntry::new(
-                    3,
-                    vec![2, 0, 0, 0],
-                ),
-            ],
-        )?,
-        Some(vec![1, 2, 0, 0]),
-    )?;
-    let second_equation = LinearProofQuadraticEquation::new(
-        SparsePolynomialMatrix::new(
-            ring,
-            4,
-            4,
-            vec![
-                super::sparse_polynomial_matrix::SparsePolynomialMatrixEntry::new(
-                    0,
-                    2,
-                    vec![4, 0, 0, 0],
-                ),
-                super::sparse_polynomial_matrix::SparsePolynomialMatrixEntry::new(
-                    2,
-                    2,
-                    vec![5, 0, 0, 0],
-                ),
-            ],
-        )?,
-        SparsePolynomialVector::new(
-            ring,
-            4,
-            vec![
-                super::sparse_polynomial_vector::SparsePolynomialVectorEntry::new(
-                    1,
-                    vec![3, 0, 0, 0],
-                ),
-                super::sparse_polynomial_vector::SparsePolynomialVectorEntry::new(
-                    2,
-                    vec![0, 4, 0, 0],
-                ),
-            ],
-        )?,
-        Some(vec![3, 0, 1, 0]),
-    )?;
-    let folded_equation = first_equation.schwartz_zippel_auto_fold_with(&second_equation)?;
-    if folded_equation.quadratic_terms().entries().len() != 7
-        || folded_equation.linear_terms().entries().len() != 4
-        || folded_equation
-            .constant_term()
-            .is_none_or(|constant_term| constant_term != [1, 1, 3, 16])
-    {
-        return Err(invalid_quadratic(
-            "quadratic auto-fold helper self-check did not match the expected formula",
-        ));
-    }
-    let unweighted_equation =
-        first_equation.accumulate_unweighted_equations(&[&second_equation])?;
-    if unweighted_equation
-        .constant_term()
-        .is_none_or(|constant_term| constant_term != [4, 2, 1, 0])
-    {
-        return Err(invalid_quadratic(
-            "quadratic unweighted accumulator self-check did not match the expected formula",
-        ));
-    }
-    let accumulator_pairs = LinearProofQuadraticEquation::accumulate_schwartz_zippel_pair_sets(
-        &[LinearProofQuadraticEquation::zero(ring, 4)?],
-        &[LinearProofQuadraticEquation::zero(ring, 4)?],
-        &[&first_equation, &second_equation],
-        &[9_u8; 32],
-        7,
-        5,
-    )?;
-    if accumulator_pairs.primary_accumulators.len() != 1
-        || accumulator_pairs.secondary_accumulators.len() != 1
-        || accumulator_pairs.challenge_scalars_by_pair.len() != 1
-        || accumulator_pairs.challenge_scalars_by_pair[0].len() != 4
-        || !accumulator_pairs.challenge_scalars_by_pair[0]
-            .iter()
-            .all(|challenge_scalar| *challenge_scalar < ring.modulus())
-    {
-        return Err(invalid_quadratic(
-            "quadratic Schwartz-Zippel challenge self-check did not match the demo sampler",
-        ));
-    }
-
-    Ok(())
-}
-
+#[cfg(test)]
 fn add_optional_constants(
     ring: PolynomialRing,
     left_constant: &Option<Vec<u64>>,
@@ -580,13 +508,10 @@ fn fold_constant_terms(
         ring.left_rotate_negacyclic(paired_constant_term, ring.degree() / 2)?;
     let automorphic_rotated_paired_constant_term =
         ring.left_rotate_negacyclic(&ring.automorphism(paired_constant_term)?, ring.degree() / 2)?;
-    let folded_sum = ring.add(
-        &ring.add(constant_term, &automorphic_constant_term)?,
-        &ring.add(
-            &rotated_paired_constant_term,
-            &automorphic_rotated_paired_constant_term,
-        )?,
-    )?;
+    let mut folded_sum = constant_term.to_vec();
+    ring.add_assign(&mut folded_sum, &automorphic_constant_term)?;
+    ring.add_assign(&mut folded_sum, &rotated_paired_constant_term)?;
+    ring.add_assign(&mut folded_sum, &automorphic_rotated_paired_constant_term)?;
 
     ring.scale(inverse_two, &folded_sum)
 }

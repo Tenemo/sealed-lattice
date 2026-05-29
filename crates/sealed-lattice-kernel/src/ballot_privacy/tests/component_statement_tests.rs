@@ -94,15 +94,15 @@ fn sparse_component_proof_statement_from_dense_statement(
 
     let sparse_matrix_entries_value = json!(sparse_matrix_entries);
     let target_entries_value = json!(target_entries);
-    let sparse_matrix_digest =
-        super::derive_sparse_statement_matrix_digest(&sparse_matrix_entries_value)
-            .expect("sparse matrix digest should derive");
-    let target_vector_digest = super::derive_sparse_target_vector_digest(&target_entries_value)
-        .expect("sparse target vector digest should derive");
+    let sparse_matrix_hash =
+        super::derive_sparse_statement_matrix_hash(&sparse_matrix_entries_value)
+            .expect("sparse matrix hash should derive");
+    let target_vector_hash = super::derive_sparse_target_vector_hash(&target_entries_value)
+        .expect("sparse target vector hash should derive");
     let source_backend_column_indices = (0..statement_columns).collect::<Vec<_>>();
     let sparse_statement_payload = json!({
-        "backendStatementDigest": dense_statement["backendStatementDigest"],
-        "ballotProofStatementDigest": dense_statement["ballotProofStatementDigest"],
+        "backendStatementHash": dense_statement["backendStatementHash"],
+        "ballotProofStatementHash": dense_statement["ballotProofStatementHash"],
         "coefficientModulus": dense_statement["coefficientModulus"],
         "componentId": component_id,
         "objectType": "BallotProofSparseComponentLinearProofStatement",
@@ -111,32 +111,29 @@ fn sparse_component_proof_statement_from_dense_statement(
         "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
         "projectionCoverage": "payload-plaintext-field-rows-only",
         "relation": dense_statement["relation"],
-        "relationStatementDigest": dense_statement["relationStatementDigest"],
+        "relationStatementHash": dense_statement["relationStatementHash"],
         "sourceBackendColumnIndices": source_backend_column_indices,
         "sourceRingDegree": dense_statement["ringDegree"],
         "matrixCoefficientRepresentation": matrix_coefficient_representation,
-        "sparseStatementMatrixDigest": sparse_matrix_digest,
+        "sparseStatementMatrixHash": sparse_matrix_hash,
         "sparseStatementMatrixEntries": sparse_matrix_entries_value,
         "sparseStatementTermCount": sparse_matrix_entries_value.as_array().expect("sparse matrix entries should be an array").len(),
         "statementColumns": dense_statement["statementColumns"],
         "statementRows": dense_statement["statementRows"],
         "targetCoefficientRepresentation": dense_statement["targetCoefficientRepresentation"],
-        "targetVectorDigest": target_vector_digest,
+        "targetVectorHash": target_vector_hash,
         "targetVectorEntries": target_entries_value,
         "targetVectorEntryCount": target_entries_value.as_array().expect("target entries should be an array").len(),
         "witnessL2BoundSquared": dense_statement["witnessL2BoundSquared"]
     });
-    let sparse_statement_digest =
-        super::derive_ballot_sparse_linear_statement_digest(&sparse_statement_payload)
-            .expect("sparse statement digest should derive");
+    let sparse_statement_hash =
+        super::derive_ballot_sparse_linear_statement_hash(&sparse_statement_payload)
+            .expect("sparse statement hash should derive");
     let mut sparse_statement = sparse_statement_payload;
     sparse_statement
         .as_object_mut()
         .expect("sparse statement should be an object")
-        .insert(
-            "statementDigest".to_string(),
-            json!(sparse_statement_digest),
-        );
+        .insert("statementHash".to_string(), json!(sparse_statement_hash));
 
     sparse_statement
 }
@@ -161,11 +158,11 @@ fn sparse_component_proof_input_for_vector(
         "proofStatement": sparse_statement,
         "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
         "publicRandomnessHex": vector_case["publicRandomnessHex"],
-        "statementDigest": dense_component_proof_input["statementDigest"]
+        "statementHash": dense_component_proof_input["statementHash"]
     })
 }
 
-fn sparse_statement_for_dense_compatibility_test(
+fn sparse_statement_for_dense_encoding_test(
     statement_rows: usize,
     statement_columns: usize,
     source_ring_degree: usize,
@@ -173,17 +170,17 @@ fn sparse_statement_for_dense_compatibility_test(
     matrix_entries_value: Value,
     target_entries_value: Value,
 ) -> Value {
-    let sparse_statement_matrix_digest =
-        super::derive_sparse_statement_matrix_digest(&matrix_entries_value)
-            .expect("sparse matrix digest should derive");
-    let target_vector_digest = super::derive_sparse_target_vector_digest(&target_entries_value)
-        .expect("sparse target digest should derive");
+    let sparse_statement_matrix_hash =
+        super::derive_sparse_statement_matrix_hash(&matrix_entries_value)
+            .expect("sparse matrix hash should derive");
+    let target_vector_hash = super::derive_sparse_target_vector_hash(&target_entries_value)
+        .expect("sparse target hash should derive");
     json!({
         "coefficientModulus": coefficient_modulus.to_string(),
         "objectType": "BallotProofSparseComponentLinearProofStatement",
         "objectVersion": 1,
         "sourceRingDegree": source_ring_degree,
-        "sparseStatementMatrixDigest": sparse_statement_matrix_digest,
+        "sparseStatementMatrixHash": sparse_statement_matrix_hash,
         "sparseStatementMatrixEntries": matrix_entries_value,
         "sparseStatementTermCount": matrix_entries_value
             .as_array()
@@ -191,7 +188,7 @@ fn sparse_statement_for_dense_compatibility_test(
             .len(),
         "statementColumns": statement_columns,
         "statementRows": statement_rows,
-        "targetVectorDigest": target_vector_digest,
+        "targetVectorHash": target_vector_hash,
         "targetVectorEntries": target_entries_value,
         "targetVectorEntryCount": target_entries_value
             .as_array()
@@ -202,7 +199,7 @@ fn sparse_statement_for_dense_compatibility_test(
 
 #[test]
 fn sparse_component_statement_parser_supports_polynomial_entries() {
-    let sparse_statement = sparse_statement_for_dense_compatibility_test(
+    let sparse_statement = sparse_statement_for_dense_encoding_test(
         2,
         2,
         4,
@@ -243,7 +240,7 @@ fn sparse_component_statement_parser_supports_polynomial_entries() {
 
 #[test]
 fn sparse_component_statement_parser_rejects_noncanonical_entries() {
-    let both_encodings_statement = sparse_statement_for_dense_compatibility_test(
+    let both_encodings_statement = sparse_statement_for_dense_encoding_test(
         1,
         1,
         4,
@@ -268,7 +265,7 @@ fn sparse_component_statement_parser_rejects_noncanonical_entries() {
             .contains("either constantCoefficient or polynomialCoefficients")
     );
 
-    let noncanonical_statement = sparse_statement_for_dense_compatibility_test(
+    let noncanonical_statement = sparse_statement_for_dense_encoding_test(
         1,
         1,
         4,
@@ -288,7 +285,7 @@ fn sparse_component_statement_parser_rejects_noncanonical_entries() {
     assert_eq!(noncanonical_error.code, "BallotPackageInvalid");
     assert!(noncanonical_error.message.contains("not canonical"));
 
-    let zero_entry_statement = sparse_statement_for_dense_compatibility_test(
+    let zero_entry_statement = sparse_statement_for_dense_encoding_test(
         1,
         1,
         4,
@@ -312,7 +309,7 @@ fn sparse_component_statement_parser_rejects_noncanonical_entries() {
 #[test]
 fn sparse_component_statement_large_shape_parses_without_dense_allocation() {
     let sparse_statement =
-        sparse_statement_for_dense_compatibility_test(1024, 1024, 64, 17, json!([]), json!([]));
+        sparse_statement_for_dense_encoding_test(1024, 1024, 64, 17, json!([]), json!([]));
     let parsed_sparse_statement =
         super::sparse_matrix_from_sparse_component_statement(&sparse_statement)
             .expect("large sparse statement should parse without dense allocation");
@@ -337,7 +334,7 @@ fn sparse_component_statement_large_shape_parses_without_dense_allocation() {
         "proofStatement": sparse_statement,
         "proofStatementFormat": "sparse-polynomial-matrix-linear-proof-v1",
         "publicRandomnessHex": "00".repeat(32),
-        "statementDigest": test_digest("large-sparse-statement")
+        "statementHash": test_hash("large-sparse-statement")
     });
     let component_verification = super::verify_component_linear_proof_bytes(
         "verifyBallotProof",
@@ -395,17 +392,17 @@ fn structured_receiver_encryption_statement_for_test(first_ciphertext_coefficien
         zero_polynomial.clone(),
     ];
     let mut statement = json!({
-        "backendStatementDigest": test_digest("structured-backend-statement"),
+        "backendStatementHash": test_hash("structured-backend-statement"),
         "coefficientModulus": "12289",
         "componentId": "receiver-encryption-component",
-        "componentStatementDigest": test_digest("structured-component-statement"),
-        "matrixDigest": test_digest("structured-matrix"),
+        "componentStatementHash": test_hash("structured-component-statement"),
+        "matrixHash": test_hash("structured-matrix"),
         "objectType": "BallotProofStructuredReceiverEncryptionProofStatement",
         "objectVersion": 1,
         "parameterProfileId": "receiver-encryption-structured-test-v1",
         "proofStatementFormat": "structured-module-lwe-linear-proof-v1",
         "proofSystemRingDegree": 64,
-        "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+        "receiverEncryptionProfileHash": test_hash("receiver-encryption-profile"),
         "receiverRows": [
             {
                 "ciphertextChunkCount": 1,
@@ -422,32 +419,32 @@ fn structured_receiver_encryption_statement_for_test(first_ciphertext_coefficien
                 ],
                 "plaintextBitLength": 0,
                 "publicKeyVector": zero_vector,
-                "publicMatrixSeedDigest": test_digest("receiver-public-matrix-seed"),
+                "publicMatrixSeedHash": test_hash("receiver-public-matrix-seed"),
                 "receiverIdentity": "receiver-1",
-                "receiverPayloadDigest": test_digest("receiver-payload"),
-                "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+                "receiverPayloadHash": test_hash("receiver-payload"),
+                "receiverPublicKeyHash": test_hash("receiver-public-key"),
                 "receiverRosterPosition": 1,
                 "rowCount": 1280,
                 "rowOffsetWithinStatement": 0
             }
         ],
         "relation": "A*w + t = 0",
-        "relationStatementDigest": test_digest("structured-relation-statement"),
+        "relationStatementHash": test_hash("structured-relation-statement"),
         "sourceBackendColumnIndices": (0..2304).collect::<Vec<_>>(),
         "sourceRingDegree": 256,
         "statementColumns": 2304,
         "statementRows": 1280,
         "targetCoefficientRepresentation": "canonicalUnsignedSourceModulus",
-        "targetVectorDigest": test_digest("structured-target"),
+        "targetVectorHash": test_hash("structured-target"),
         "witnessL2BoundSquared": "8192"
     });
-    let statement_digest =
-        super::derive_ballot_structured_receiver_encryption_statement_digest(&statement)
-            .expect("structured statement digest should derive");
+    let statement_hash =
+        super::derive_ballot_structured_receiver_encryption_statement_hash(&statement)
+            .expect("structured statement hash should derive");
     statement
         .as_object_mut()
         .expect("structured statement should be an object")
-        .insert("statementDigest".to_string(), json!(statement_digest));
+        .insert("statementHash".to_string(), json!(statement_hash));
 
     statement
 }
@@ -481,6 +478,23 @@ fn structured_receiver_encryption_statement_lowers_public_module_lwe_rows() {
     assert_eq!(
         parsed_changed_statement.target_vector_coefficients[0][0],
         12288
+    );
+}
+
+#[test]
+fn structured_receiver_encryption_statement_rejects_noncanonical_row_offsets() {
+    let mut statement = structured_receiver_encryption_statement_for_test(0);
+    statement["statementRows"] = json!(1281);
+    statement["receiverRows"][0]["rowOffsetWithinStatement"] = json!(1);
+
+    let error = match super::structured_receiver_encryption_statement_as_sparse(&statement) {
+        Ok(_) => panic!("receiver row offsets must be canonical and contiguous"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error.message.contains("canonical and contiguous"),
+        "unexpected structured receiver row error: {error:?}"
     );
 }
 
@@ -563,9 +577,9 @@ fn component_linear_proof_bytes_verify_dense_and_sparse_public_statements() {
         "sparse statement expansion should verify against the same proof bytes: {sparse_verification}"
     );
 
-    let mut sparse_input_with_stale_target_digest = sparse_proof_input.clone();
+    let mut sparse_input_with_stale_target_hash = sparse_proof_input.clone();
     {
-        let sparse_statement = sparse_input_with_stale_target_digest["proofStatement"]
+        let sparse_statement = sparse_input_with_stale_target_hash["proofStatement"]
             .as_object_mut()
             .expect("sparse proof statement should be an object");
         let target_entries = sparse_statement["targetVectorEntries"]
@@ -580,78 +594,76 @@ fn component_linear_proof_bytes_verify_dense_and_sparse_public_statements() {
             .expect("target entry should be an object")
             .insert("constantCoefficient".to_string(), json!(3));
     }
-    let stale_digest_verification = super::verify_component_linear_proof_bytes(
+    let stale_hash_verification = super::verify_component_linear_proof_bytes(
         "verifyBallotProof",
         sparse_component_id,
         &sparse_component_proof,
-        &sparse_input_with_stale_target_digest,
+        &sparse_input_with_stale_target_hash,
     );
 
-    assert_eq!(stale_digest_verification["ok"], false);
+    assert_eq!(stale_hash_verification["ok"], false);
     assert_eq!(
-        stale_digest_verification["refusedObjects"][0]["code"],
+        stale_hash_verification["refusedObjects"][0]["code"],
         "BallotPackageInvalid"
     );
     assert!(
-        stale_digest_verification["refusedObjects"][0]["message"]
+        stale_hash_verification["refusedObjects"][0]["message"]
             .as_str()
-            .expect("stale digest refusal should be a string")
-            .contains("target vector digest")
+            .expect("stale hash refusal should be a string")
+            .contains("target vector hash")
     );
 
-    let public_zero_component_id = "receiver-key-binding-component";
-    let public_zero_component_statement_digest =
-        json!(test_digest("receiver-key-binding-component-statement"));
+    let public_binding_check_component_id = "receiver-key-binding-component";
+    let public_zero_component_statement_hash =
+        json!(test_hash("receiver-key-binding-component-statement"));
     let public_zero_component_proof =
-        component_proof_record_for_vector(public_zero_component_id, "");
-    let public_zero_proof_input = component_proof_input_for_test(
-        public_zero_component_id,
-        &public_zero_component_statement_digest,
+        component_proof_record_for_vector(public_binding_check_component_id, "");
+    let public_binding_check_proof_input = component_proof_input_for_test(
+        public_binding_check_component_id,
+        &public_zero_component_statement_hash,
     );
-    let public_zero_verification = super::verify_component_linear_proof_bytes(
+    let public_binding_check_verification = super::verify_component_linear_proof_bytes(
         "verifyBallotProof",
-        public_zero_component_id,
+        public_binding_check_component_id,
         &public_zero_component_proof,
-        &public_zero_proof_input,
+        &public_binding_check_proof_input,
     );
 
-    assert_eq!(public_zero_verification["ok"], true);
+    assert_eq!(public_binding_check_verification["ok"], true);
     assert!(
-        public_zero_verification["statusLabels"]
+        public_binding_check_verification["statusLabels"]
             .as_array()
-            .expect("public-zero status labels should be an array")
-            .contains(&json!(
-                "BallotProofComponentPublicZeroWitnessBindingChecked"
-            ))
+            .expect("public binding check status labels should be an array")
+            .contains(&json!("BallotProofComponentPublicBindingCheckSatisfied"))
     );
 
-    let mut public_zero_input_with_proof_bytes = public_zero_proof_input;
-    public_zero_input_with_proof_bytes["proofBytesHex"] = json!("00");
-    let public_zero_rejection = super::verify_component_linear_proof_bytes(
+    let mut public_binding_check_input_with_proof_bytes = public_binding_check_proof_input;
+    public_binding_check_input_with_proof_bytes["proofBytesHex"] = json!("00");
+    let public_binding_check_rejection = super::verify_component_linear_proof_bytes(
         "verifyBallotProof",
-        public_zero_component_id,
+        public_binding_check_component_id,
         &public_zero_component_proof,
-        &public_zero_input_with_proof_bytes,
+        &public_binding_check_input_with_proof_bytes,
     );
 
-    assert_eq!(public_zero_rejection["ok"], false);
+    assert_eq!(public_binding_check_rejection["ok"], false);
     assert!(
-        public_zero_rejection["refusedObjects"][0]["message"]
+        public_binding_check_rejection["refusedObjects"][0]["message"]
             .as_str()
-            .expect("public-zero refusal message should be a string")
+            .expect("public binding check refusal message should be a string")
             .contains("must be empty")
     );
 
     let structured_component_id = "receiver-encryption-component";
-    let structured_component_statement_digest =
-        json!(test_digest("receiver-encryption-component-statement"));
+    let structured_component_statement_hash =
+        json!(test_hash("receiver-encryption-component-statement"));
     let structured_component_proof = component_proof_for_test(
         structured_component_id,
-        &structured_component_statement_digest,
+        &structured_component_statement_hash,
     );
     let structured_proof_input = component_proof_input_for_test(
         structured_component_id,
-        &structured_component_statement_digest,
+        &structured_component_statement_hash,
     );
     let structured_verification = super::verify_component_linear_proof_bytes(
         "verifyBallotProof",
@@ -694,15 +706,15 @@ fn component_linear_proof_bytes_verify_dense_and_sparse_public_statements() {
     );
 }
 
-pub(super) fn test_digest(label: &str) -> String {
-    super::derive_digest(
-        "ChallengeDomainDigest",
+pub(super) fn test_hash(label: &str) -> String {
+    super::derive_hash(
+        "ChallengeDomainHash",
         &json!({
             "label": label,
             "purpose": "ballot-component-bundle-test"
         }),
     )
-    .expect("test digest should derive")
+    .expect("test hash should derive")
 }
 
 pub(super) fn component_statement_for_test(
@@ -712,33 +724,33 @@ pub(super) fn component_statement_for_test(
     let component_payload = json!({
         "objectType": "BallotProofComponentStatement",
         "objectVersion": 1,
-        "backendStatementDigest": test_digest("backend-statement"),
-        "ballotProofStatementDigest": test_digest("ballot-proof-statement"),
+        "backendStatementHash": test_hash("backend-statement"),
+        "ballotProofStatementHash": test_hash("ballot-proof-statement"),
         "coefficientModulus": "65537",
-        "componentDigest": test_digest(&format!("{component_id}-component")),
+        "componentHash": test_hash(&format!("{component_id}-component")),
         "componentId": component_id,
-        "matrixDigest": test_digest(&format!("{component_id}-matrix")),
+        "matrixHash": test_hash(&format!("{component_id}-matrix")),
         "proofLoweringStatus": proof_lowering_status,
-        "relationStatementDigest": test_digest("relation-statement"),
-        "rowBatchMatrixDigests": [test_digest(&format!("{component_id}-row-matrix"))],
+        "relationStatementHash": test_hash("relation-statement"),
+        "rowBatchMatrixHashes": [test_hash(&format!("{component_id}-row-matrix"))],
         "rowBatchNames": [format!("{component_id}-rows")],
-        "rowBatchTargetVectorDigests": [test_digest(&format!("{component_id}-row-target"))],
+        "rowBatchTargetVectorHashes": [test_hash(&format!("{component_id}-row-target"))],
         "rowCount": 1,
         "rowKinds": ["EncodedScoreFieldRows"],
-        "targetVectorDigest": test_digest(&format!("{component_id}-target")),
+        "targetVectorHash": test_hash(&format!("{component_id}-target")),
         "variableColumnCount": 1,
         "variableColumnIndices": [0],
     });
-    let component_statement_digest =
-        super::derive_ballot_component_statement_digest(&component_payload)
-            .expect("component statement digest should derive");
+    let component_statement_hash =
+        super::derive_ballot_component_statement_hash(&component_payload)
+            .expect("component statement hash should derive");
     let mut component_statement = component_payload;
     component_statement
         .as_object_mut()
         .expect("component statement should be an object")
         .insert(
-            "componentStatementDigest".to_string(),
-            json!(component_statement_digest),
+            "componentStatementHash".to_string(),
+            json!(component_statement_hash),
         );
 
     component_statement
@@ -751,32 +763,32 @@ pub(super) fn component_bundle_for_test(
     let component_bundle_payload = json!({
         "objectType": "BallotProofComponentBundleStatement",
         "objectVersion": 1,
-        "backendStatementDigest": test_digest("backend-statement"),
-        "ballotProofStatementDigest": test_digest("ballot-proof-statement"),
+        "backendStatementHash": test_hash("backend-statement"),
+        "ballotProofStatementHash": test_hash("ballot-proof-statement"),
         "bundleCoverage": bundle_coverage,
         "componentStatements": component_statements,
         "relationLabel": "BallotPrivacyPvssRelation",
-        "relationStatementDigest": test_digest("relation-statement"),
+        "relationStatementHash": test_hash("relation-statement"),
         "requiredComponentIds": super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS,
     });
-    let component_bundle_statement_digest =
-        super::derive_ballot_component_bundle_statement_digest(&component_bundle_payload)
-            .expect("component bundle statement digest should derive");
+    let component_bundle_statement_hash =
+        super::derive_ballot_component_bundle_statement_hash(&component_bundle_payload)
+            .expect("component bundle statement hash should derive");
     let mut component_bundle = component_bundle_payload;
     component_bundle
         .as_object_mut()
         .expect("component bundle should be an object")
         .insert(
-            "componentBundleStatementDigest".to_string(),
-            json!(component_bundle_statement_digest),
+            "componentBundleStatementHash".to_string(),
+            json!(component_bundle_statement_hash),
         );
 
     component_bundle
 }
 
-pub(super) fn proof_bytes_digest_for_test(proof_bytes_hex: &str) -> String {
-    super::derive_digest(
-        "ProofBytesDigest",
+pub(super) fn proof_bytes_hash_for_test(proof_bytes_hex: &str) -> String {
+    super::derive_hash(
+        "ProofBytesHash",
         &json!({
             "objectType": "ProofBytes",
             "objectVersion": 1,
@@ -784,12 +796,12 @@ pub(super) fn proof_bytes_digest_for_test(proof_bytes_hex: &str) -> String {
             "proofSizeBytes": proof_bytes_hex.len() / 2,
         }),
     )
-    .expect("proof bytes digest should derive")
+    .expect("proof bytes hash should derive")
 }
 
 pub(super) fn component_proof_input_for_test(
     component_id: &str,
-    component_statement_digest: &Value,
+    component_statement_hash: &Value,
 ) -> Value {
     let component_index = super::REQUIRED_BALLOT_PROOF_COMPONENT_IDS
         .iter()
@@ -800,7 +812,7 @@ pub(super) fn component_proof_input_for_test(
     let proof_statement_format = if component_id == "receiver-encryption-component" {
         "structured-module-lwe-linear-proof-v1"
     } else if component_id == "receiver-key-binding-component" {
-        "public-zero-witness-binding-check-v1"
+        "public-binding-check-only-v1"
     } else if component_id == "score-and-shamir-field-component" {
         "dense-polynomial-matrix-linear-proof-v1"
     } else {
@@ -808,29 +820,29 @@ pub(super) fn component_proof_input_for_test(
     };
     let proof_statement = component_proof_statement_for_test(
         component_id,
-        component_statement_digest,
+        component_statement_hash,
         if proof_statement_format == "structured-module-lwe-linear-proof-v1"
-            || proof_statement_format == "public-zero-witness-binding-check-v1"
+            || proof_statement_format == "public-binding-check-only-v1"
         {
             None
         } else {
-            Some(test_digest(&format!("{component_id}-proof-statement")))
+            Some(test_hash(&format!("{component_id}-proof-statement")))
         },
         proof_statement_format,
     );
-    let component_proof_statement_digest =
-        super::string_field(&proof_statement, "componentProofStatementDigest")
-            .or_else(|| super::string_field(&proof_statement, "statementDigest"))
+    let component_proof_statement_hash =
+        super::string_field(&proof_statement, "componentProofStatementHash")
+            .or_else(|| super::string_field(&proof_statement, "statementHash"))
             .map(ToString::to_string)
-            .unwrap_or_else(|| test_digest(&format!("{component_id}-proof-statement")));
+            .unwrap_or_else(|| test_hash(&format!("{component_id}-proof-statement")));
 
     json!({
         "componentId": component_id,
-        "componentProofStatementDigest": component_proof_statement_digest,
-        "proofBytesHex": if proof_statement_format == "public-zero-witness-binding-check-v1" {
+        "componentProofStatementHash": component_proof_statement_hash,
+        "proofBytesHex": if proof_statement_format == "public-binding-check-only-v1" {
             "".to_string()
         } else {
-            test_digest(&format!("{component_id}-proof-bytes-material"))
+            test_hash(&format!("{component_id}-proof-bytes-material"))
         },
         "proofEncoding": {
             "profileId": "ballot-proof-component-encoding-v1",
@@ -843,6 +855,6 @@ pub(super) fn component_proof_input_for_test(
         "proofStatement": proof_statement,
         "proofStatementFormat": proof_statement_format,
         "publicRandomnessHex": public_randomness_byte.repeat(32),
-        "statementDigest": component_statement_digest,
+        "statementHash": component_statement_hash,
     })
 }

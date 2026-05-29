@@ -53,7 +53,7 @@ const verifyBallotProofComponentExplicitRows = (input: {
     let checkedRowCount = 0;
 
     for (const rowBatch of rowBatches) {
-        if (rowBatch.batchKind === 'DigestExpandedRows') {
+        if (rowBatch.batchKind === 'HashExpandedRows') {
             throw new Error(
                 `Proof component ${input.componentId} is not fully lowered to explicit rows.`,
             );

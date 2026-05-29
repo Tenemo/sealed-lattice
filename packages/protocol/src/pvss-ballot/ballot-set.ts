@@ -1,11 +1,11 @@
-import { canonicalJson, deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotPackageCandidate,
     CanonicalBallotSet,
     CanonicalBallotSetInput,
     CountedBallotPackage,
     InclusionProof,
-    ProtocolDigest,
+    ProtocolHash,
     RefusalRecord,
     RejectedBallotCandidate,
     SignedBoardHead,
@@ -32,75 +32,77 @@ import {
     validateRosterEntries,
 } from './common.js';
 
-const deriveBallotSetDigest = (input: {
+const deriveBallotSetHash = (input: {
     readonly base: CanonicalBallotSetInput;
     readonly countedBallots: readonly CountedBallotPackage[];
     readonly rejectedCandidates: readonly RejectedBallotCandidate[];
-}): ProtocolDigest =>
-    deriveProtocolDigest('BallotSetDigest', {
+}): ProtocolHash =>
+    deriveProtocolHash('BallotSetHash', {
         ceremonyId: input.base.ceremonyId,
-        closeRecordDigest: input.base.closeRecordDigest,
-        countedBallotPackageDigests: input.countedBallots.map(
-            (candidate) => candidate.ballotPackage.ballotPackageDigest,
+        closeRecordHash: input.base.closeRecordHash,
+        countedBallotPackageHashes: input.countedBallots.map(
+            (candidate) => candidate.ballotPackage.ballotPackageHash,
         ),
-        duplicateBallotPolicyDigest: input.base.duplicateBallotPolicyDigest,
-        electionManifestDigest: input.base.electionManifestDigest,
-        pollSpecDigest: input.base.pollSpecDigest,
-        includeRejectedCandidateSummariesInDigest:
-            input.base.includeRejectedCandidateSummariesInDigest === true,
+        duplicateBallotPolicyHash: input.base.duplicateBallotPolicyHash,
+        electionManifestHash: input.base.electionManifestHash,
+        pollSpecHash: input.base.pollSpecHash,
+        includeRejectedCandidateSummariesInHash:
+            input.base.includeRejectedCandidateSummariesInHash === true,
+        purpose: 'canonical-ballot-set-v1',
         rejectedCandidates:
-            input.base.includeRejectedCandidateSummariesInDigest === true
+            input.base.includeRejectedCandidateSummariesInHash === true
                 ? input.rejectedCandidates.map((candidate) => ({
-                      ballotPackageDigest: candidate.ballotPackageDigest,
+                      ballotPackageHash: candidate.ballotPackageHash,
                       refusalCodes: candidate.refusalCodes,
                       signedBoardOrder: candidate.signedBoardOrder ?? null,
                       voterIdentity: candidate.voterIdentity ?? null,
                   }))
                 : [],
-        rosterDigest: input.base.rosterDigest,
-        thresholdProfileDigest: input.base.thresholdProfileDigest,
-        votingClosedBoardHeadDigest: input.base.votingClosedBoardHeadDigest,
+        rosterHash: input.base.rosterHash,
+        thresholdProfileHash: input.base.thresholdProfileHash,
+        votingClosedBoardHeadHash: input.base.votingClosedBoardHeadHash,
     });
 
-export const deriveBallotSetDigestFromCanonicalSet = (
+export const deriveBallotSetHashFromCanonicalSet = (
     ballotSet: Pick<
         CanonicalBallotSet,
         | 'ceremonyId'
-        | 'closeRecordDigest'
+        | 'closeRecordHash'
         | 'countedBallots'
-        | 'duplicateBallotPolicyDigest'
-        | 'electionManifestDigest'
-        | 'includeRejectedCandidateSummariesInDigest'
-        | 'pollSpecDigest'
+        | 'duplicateBallotPolicyHash'
+        | 'electionManifestHash'
+        | 'includeRejectedCandidateSummariesInHash'
+        | 'pollSpecHash'
         | 'rejectedCandidates'
-        | 'rosterDigest'
-        | 'thresholdProfileDigest'
-        | 'votingClosedBoardHeadDigest'
+        | 'rosterHash'
+        | 'thresholdProfileHash'
+        | 'votingClosedBoardHeadHash'
     >,
-): ProtocolDigest =>
-    deriveProtocolDigest('BallotSetDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('BallotSetHash', {
         ceremonyId: ballotSet.ceremonyId,
-        closeRecordDigest: ballotSet.closeRecordDigest,
-        countedBallotPackageDigests: ballotSet.countedBallots.map(
-            (candidate) => candidate.ballotPackage.ballotPackageDigest,
+        closeRecordHash: ballotSet.closeRecordHash,
+        countedBallotPackageHashes: ballotSet.countedBallots.map(
+            (candidate) => candidate.ballotPackage.ballotPackageHash,
         ),
-        duplicateBallotPolicyDigest: ballotSet.duplicateBallotPolicyDigest,
-        electionManifestDigest: ballotSet.electionManifestDigest,
-        includeRejectedCandidateSummariesInDigest:
-            ballotSet.includeRejectedCandidateSummariesInDigest,
-        pollSpecDigest: ballotSet.pollSpecDigest,
+        duplicateBallotPolicyHash: ballotSet.duplicateBallotPolicyHash,
+        electionManifestHash: ballotSet.electionManifestHash,
+        includeRejectedCandidateSummariesInHash:
+            ballotSet.includeRejectedCandidateSummariesInHash,
+        pollSpecHash: ballotSet.pollSpecHash,
+        purpose: 'canonical-ballot-set-v1',
         rejectedCandidates:
-            ballotSet.includeRejectedCandidateSummariesInDigest === true
+            ballotSet.includeRejectedCandidateSummariesInHash === true
                 ? ballotSet.rejectedCandidates.map((candidate) => ({
-                      ballotPackageDigest: candidate.ballotPackageDigest,
+                      ballotPackageHash: candidate.ballotPackageHash,
                       refusalCodes: candidate.refusalCodes,
                       signedBoardOrder: candidate.signedBoardOrder ?? null,
                       voterIdentity: candidate.voterIdentity ?? null,
                   }))
                 : [],
-        rosterDigest: ballotSet.rosterDigest,
-        thresholdProfileDigest: ballotSet.thresholdProfileDigest,
-        votingClosedBoardHeadDigest: ballotSet.votingClosedBoardHeadDigest,
+        rosterHash: ballotSet.rosterHash,
+        thresholdProfileHash: ballotSet.thresholdProfileHash,
+        votingClosedBoardHeadHash: ballotSet.votingClosedBoardHeadHash,
     });
 
 const candidateSignedBoardOrder = (
@@ -134,12 +136,12 @@ const sortCandidateBallots = (
                 rightSignedBoardOrder,
             ) ||
             compareCanonicalStrings(
-                left.ballotPackage.ballotPackageDigest,
-                right.ballotPackage.ballotPackageDigest,
+                left.ballotPackage.ballotPackageHash,
+                right.ballotPackage.ballotPackageHash,
             ) ||
             compareCanonicalStrings(
-                left.inclusionProof.inclusionProofDigest,
-                right.inclusionProof.inclusionProofDigest,
+                left.inclusionProof.inclusionProofHash,
+                right.inclusionProof.inclusionProofHash,
             )
         );
     });
@@ -147,42 +149,42 @@ const sortCandidateBallots = (
 const findConflictingBoardPositionKeys = (
     candidateBallots: readonly BallotPackageCandidate[],
 ): ReadonlySet<string> => {
-    const digestsByBoardPosition = new Map<string, Set<ProtocolDigest>>();
+    const hashesByBoardPosition = new Map<string, Set<ProtocolHash>>();
 
     for (const candidate of candidateBallots) {
         const key = candidateBoardPositionKey(candidate);
-        const digests =
-            digestsByBoardPosition.get(key) ?? new Set<ProtocolDigest>();
+        const hashes =
+            hashesByBoardPosition.get(key) ?? new Set<ProtocolHash>();
 
-        digests.add(candidate.ballotPackage.ballotPackageDigest);
-        digestsByBoardPosition.set(key, digests);
+        hashes.add(candidate.ballotPackage.ballotPackageHash);
+        hashesByBoardPosition.set(key, hashes);
     }
 
     return new Set(
-        [...digestsByBoardPosition.entries()]
+        [...hashesByBoardPosition.entries()]
             .filter((entry) => entry[1].size > 1)
             .map(([key]) => key),
     );
 };
 
-const findConflictingBallotPackageDigests = (
+const findConflictingBallotPackageHashes = (
     candidateBallots: readonly BallotPackageCandidate[],
-): ReadonlySet<ProtocolDigest> => {
-    const shellsByDigest = new Map<ProtocolDigest, Set<string>>();
+): ReadonlySet<ProtocolHash> => {
+    const shellsByHash = new Map<ProtocolHash, Set<string>>();
 
     for (const candidate of candidateBallots) {
         const shells =
-            shellsByDigest.get(candidate.ballotPackage.ballotPackageDigest) ??
+            shellsByHash.get(candidate.ballotPackage.ballotPackageHash) ??
             new Set<string>();
 
         shells.add(canonicalJson(candidate.ballotPackage));
-        shellsByDigest.set(candidate.ballotPackage.ballotPackageDigest, shells);
+        shellsByHash.set(candidate.ballotPackage.ballotPackageHash, shells);
     }
 
     return new Set(
-        [...shellsByDigest.entries()]
+        [...shellsByHash.entries()]
             .filter((entry) => entry[1].size > 1)
-            .map(([digest]) => digest),
+            .map(([hash]) => hash),
     );
 };
 
@@ -190,7 +192,7 @@ const deriveRejectedCandidate = (
     candidate: BallotPackageCandidate,
     refusedObjects: readonly RefusalRecord[],
 ): RejectedBallotCandidate => ({
-    ballotPackageDigest: candidate.ballotPackage.ballotPackageDigest,
+    ballotPackageHash: candidate.ballotPackage.ballotPackageHash,
     voterIdentity: candidate.ballotPackage.voterIdentity,
     signedBoardOrder: candidateSignedBoardOrder(candidate),
     refusalCodes: refusedObjects.map((refusal) => refusal.code),
@@ -202,7 +204,7 @@ type CloseBoundCanonicalBallotSetInput = CanonicalBallotSetInput & {
 
 const validateSetInput = (
     input: CloseBoundCanonicalBallotSetInput,
-    headsByDigest: ReadonlyMap<ProtocolDigest, SignedBoardHead>,
+    headsByHash: ReadonlyMap<ProtocolHash, SignedBoardHead>,
 ): readonly RefusalRecord[] => {
     const closeRecordInclusionProof: InclusionProof =
         input.closeRecordInclusionProof;
@@ -219,34 +221,34 @@ const validateSetInput = (
             createRefusal(
                 'BallotSetInvalid',
                 'Ballot-set selection requires a canonical voting-close board order.',
-                input.closeRecordDigest,
+                input.closeRecordHash,
             ),
         );
     }
     if (
         input.boardEvidence.ceremonyId !== input.ceremonyId ||
         input.boardEvidence.signedBoardHeads.every(
-            (head) => head.headDigest !== input.votingClosedBoardHeadDigest,
+            (head) => head.headHash !== input.votingClosedBoardHeadHash,
         )
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotSetInvalid',
                 'Ballot-set selection requires board evidence for the voting-close head.',
-                input.votingClosedBoardHeadDigest,
+                input.votingClosedBoardHeadHash,
                 'BoardHead',
             ),
         );
     }
     refusedObjects.push(
-        ...verifyInclusionProof(closeRecordInclusionProof, headsByDigest),
+        ...verifyInclusionProof(closeRecordInclusionProof, headsByHash),
     );
     if (
         closeRecordInclusionProof.includedObjectType !== 'CloseRecord' ||
-        closeRecordInclusionProof.includedObjectDigest !==
-            input.closeRecordDigest ||
-        closeRecordInclusionProof.boardHeadDigest !==
-            input.votingClosedBoardHeadDigest ||
+        closeRecordInclusionProof.includedObjectHash !==
+            input.closeRecordHash ||
+        closeRecordInclusionProof.boardHeadHash !==
+            input.votingClosedBoardHeadHash ||
         closeRecordInclusionProof.boardSequence !==
             input.closeRecordBoardOrder.boardSequence ||
         closeRecordInclusionProof.boardPosition !==
@@ -256,7 +258,7 @@ const validateSetInput = (
             createRefusal(
                 'BallotSetInvalid',
                 'Ballot-set selection requires close-record inclusion evidence that binds the voting-close order.',
-                input.closeRecordDigest,
+                input.closeRecordHash,
                 'CloseRecord',
             ),
         );
@@ -269,20 +271,18 @@ const deriveCanonicalBallotSetUnchecked = (
     input: CanonicalBallotSetInput,
 ): CanonicalBallotSet => {
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
+    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
     const fatalRefusals: RefusalRecord[] = [
         ...boardResult.refusedObjects,
-        ...validateSetInput(input, headsByDigest),
+        ...validateSetInput(input, headsByHash),
     ];
-    const validCandidates: CountedBallotPackage[] = [];
     const rejectedCandidates: RejectedBallotCandidate[] = [];
-    const seenValidBallotPackageDigests = new Set<ProtocolDigest>();
+    const selectedByVoter = new Map<string, CountedBallotPackage>();
+    const seenValidBallotPackageHashes = new Set<ProtocolHash>();
     const conflictingBoardPositionKeys = findConflictingBoardPositionKeys(
         input.candidateBallots,
     );
-    const conflictingBallotPackageDigests = findConflictingBallotPackageDigests(
+    const conflictingBallotPackageHashes = findConflictingBallotPackageHashes(
         input.candidateBallots,
     );
 
@@ -296,39 +296,39 @@ const deriveCanonicalBallotSetUnchecked = (
                 createRefusal(
                     'ConflictingBallotPackage',
                     'Two non-identical ballot package candidates claim the same board position.',
-                    candidate.ballotPackage.ballotPackageDigest,
+                    candidate.ballotPackage.ballotPackageHash,
                     'BallotPackage',
                 ),
             );
         }
         if (
-            conflictingBallotPackageDigests.has(
-                candidate.ballotPackage.ballotPackageDigest,
+            conflictingBallotPackageHashes.has(
+                candidate.ballotPackage.ballotPackageHash,
             )
         ) {
             candidateRefusals.push(
                 createRefusal(
                     'ConflictingBallotPackage',
-                    'Two non-identical ballot package candidates claim the same package digest.',
-                    candidate.ballotPackage.ballotPackageDigest,
+                    'Two non-identical ballot package candidates claim the same package hash.',
+                    candidate.ballotPackage.ballotPackageHash,
                     'BallotPackage',
                 ),
             );
         }
 
         candidateRefusals.push(
-            ...verifyInclusionProof(candidate.inclusionProof, headsByDigest),
+            ...verifyInclusionProof(candidate.inclusionProof, headsByHash),
         );
         if (
             candidate.inclusionProof.includedObjectType !== 'BallotPackage' ||
-            candidate.inclusionProof.includedObjectDigest !==
-                candidate.ballotPackage.ballotPackageDigest
+            candidate.inclusionProof.includedObjectHash !==
+                candidate.ballotPackage.ballotPackageHash
         ) {
             candidateRefusals.push(
                 createRefusal(
                     'InclusionProofInvalid',
-                    'Ballot package inclusion proof must bind the ballot package digest.',
-                    candidate.inclusionProof.inclusionProofDigest,
+                    'Ballot package inclusion proof must bind the ballot package hash.',
+                    candidate.inclusionProof.inclusionProofHash,
                     'BallotPackage',
                 ),
             );
@@ -343,7 +343,7 @@ const deriveCanonicalBallotSetUnchecked = (
                 createRefusal(
                     'BallotPackageInvalid',
                     'Ballot package was not included before voting closed.',
-                    candidate.ballotPackage.ballotPackageDigest,
+                    candidate.ballotPackage.ballotPackageHash,
                     'BallotPackage',
                 ),
             );
@@ -352,11 +352,11 @@ const deriveCanonicalBallotSetUnchecked = (
             ...verifyBallotPackageShell({
                 ballotPackage: candidate.ballotPackage,
                 ceremonyId: input.ceremonyId,
-                electionManifestDigest: input.electionManifestDigest,
-                rosterDigest: input.rosterDigest,
-                pollSpecDigest: input.pollSpecDigest,
-                thresholdProfileDigest: input.thresholdProfileDigest,
-                duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
+                electionManifestHash: input.electionManifestHash,
+                rosterHash: input.rosterHash,
+                pollSpecHash: input.pollSpecHash,
+                thresholdProfileHash: input.thresholdProfileHash,
+                duplicateBallotPolicyHash: input.duplicateBallotPolicyHash,
                 optionCount: input.pollSpec.options.length,
                 rosterEntries: input.rosterEntries,
                 thresholdProfile: input.thresholdProfile,
@@ -370,36 +370,41 @@ const deriveCanonicalBallotSetUnchecked = (
             continue;
         }
         if (
-            seenValidBallotPackageDigests.has(
-                candidate.ballotPackage.ballotPackageDigest,
+            seenValidBallotPackageHashes.has(
+                candidate.ballotPackage.ballotPackageHash,
             )
         ) {
             continue;
         }
-        seenValidBallotPackageDigests.add(
-            candidate.ballotPackage.ballotPackageDigest,
+        seenValidBallotPackageHashes.add(
+            candidate.ballotPackage.ballotPackageHash,
         );
 
-        validCandidates.push({
+        const validCandidate = {
             ...candidate,
             signedBoardOrder,
-        });
+        };
+
+        if (selectedByVoter.has(candidate.ballotPackage.voterIdentity)) {
+            rejectedCandidates.push(
+                deriveRejectedCandidate(candidate, [
+                    createRefusal(
+                        'DuplicateBallotPackage',
+                        'Later valid ballot from the same voter is duplicate evidence and is not counted.',
+                        candidate.ballotPackage.ballotPackageHash,
+                        'BallotPackage',
+                    ),
+                ]),
+            );
+            continue;
+        }
+
+        selectedByVoter.set(
+            candidate.ballotPackage.voterIdentity,
+            validCandidate,
+        );
     }
 
-    const selectedByVoter = new Map<string, CountedBallotPackage>();
-    for (const candidate of validCandidates.sort(
-        (left, right) =>
-            compareSignedBoardOrder(
-                left.signedBoardOrder,
-                right.signedBoardOrder,
-            ) ||
-            compareCanonicalStrings(
-                left.ballotPackage.ballotPackageDigest,
-                right.ballotPackage.ballotPackageDigest,
-            ),
-    )) {
-        selectedByVoter.set(candidate.ballotPackage.voterIdentity, candidate);
-    }
     const countedBallots = [...selectedByVoter.values()].sort(
         (left, right) =>
             compareSignedBoardOrder(
@@ -407,13 +412,13 @@ const deriveCanonicalBallotSetUnchecked = (
                 right.signedBoardOrder,
             ) ||
             compareCanonicalStrings(
-                left.ballotPackage.ballotPackageDigest,
-                right.ballotPackage.ballotPackageDigest,
+                left.ballotPackage.ballotPackageHash,
+                right.ballotPackage.ballotPackageHash,
             ),
     );
     const ok = fatalRefusals.length === 0;
-    const ballotSetDigest = ok
-        ? deriveBallotSetDigest({
+    const ballotSetHash = ok
+        ? deriveBallotSetHash({
               base: input,
               countedBallots,
               rejectedCandidates,
@@ -423,31 +428,31 @@ const deriveCanonicalBallotSetUnchecked = (
     return {
         ok,
         statusLabels: boardResult.statusLabels,
-        acceptedDigests:
-            ballotSetDigest === undefined
+        acceptedHashes:
+            ballotSetHash === undefined
                 ? []
                 : uniqueStrings([
-                      ...boardResult.acceptedDigests,
-                      ballotSetDigest,
+                      ...boardResult.acceptedHashes,
+                      ballotSetHash,
                       ...countedBallots.map(
                           (candidate) =>
-                              candidate.ballotPackage.ballotPackageDigest,
+                              candidate.ballotPackage.ballotPackageHash,
                       ),
                   ]),
         refusedObjects: fatalRefusals,
         ceremonyId: input.ceremonyId,
-        electionManifestDigest: input.electionManifestDigest,
-        rosterDigest: input.rosterDigest,
-        pollSpecDigest: input.pollSpecDigest,
-        thresholdProfileDigest: input.thresholdProfileDigest,
-        duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
-        votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
-        closeRecordDigest: input.closeRecordDigest,
-        includeRejectedCandidateSummariesInDigest:
-            input.includeRejectedCandidateSummariesInDigest === true,
+        electionManifestHash: input.electionManifestHash,
+        rosterHash: input.rosterHash,
+        pollSpecHash: input.pollSpecHash,
+        thresholdProfileHash: input.thresholdProfileHash,
+        duplicateBallotPolicyHash: input.duplicateBallotPolicyHash,
+        votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
+        closeRecordHash: input.closeRecordHash,
+        includeRejectedCandidateSummariesInHash:
+            input.includeRejectedCandidateSummariesInHash === true,
         countedBallots,
         rejectedCandidates,
-        ballotSetDigest,
+        ballotSetHash,
     };
 };
 
@@ -460,7 +465,7 @@ export const deriveCanonicalBallotSet = (
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'BallotSetInvalid',
@@ -468,15 +473,15 @@ export const deriveCanonicalBallotSet = (
                 ),
             ],
             ceremonyId: input.ceremonyId,
-            electionManifestDigest: input.electionManifestDigest,
-            rosterDigest: input.rosterDigest,
-            pollSpecDigest: input.pollSpecDigest,
-            thresholdProfileDigest: input.thresholdProfileDigest,
-            duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
-            votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
-            closeRecordDigest: input.closeRecordDigest,
-            includeRejectedCandidateSummariesInDigest:
-                input.includeRejectedCandidateSummariesInDigest === true,
+            electionManifestHash: input.electionManifestHash,
+            rosterHash: input.rosterHash,
+            pollSpecHash: input.pollSpecHash,
+            thresholdProfileHash: input.thresholdProfileHash,
+            duplicateBallotPolicyHash: input.duplicateBallotPolicyHash,
+            votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
+            closeRecordHash: input.closeRecordHash,
+            includeRejectedCandidateSummariesInHash:
+                input.includeRejectedCandidateSummariesInHash === true,
             countedBallots: [],
             rejectedCandidates: [],
         };

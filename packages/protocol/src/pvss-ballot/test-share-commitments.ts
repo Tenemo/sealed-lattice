@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolDigest,
+    deriveProtocolHash,
     hash512Hex,
 } from '@sealed-lattice/crypto';
 import type {
@@ -25,44 +25,44 @@ import { assertCanonicalReceiverShareVector } from './receiver-shares.js';
 const textEncoder = new TextEncoder();
 const openingDerivationDomain =
     'sealed-lattice-internal/pvss-ballot-fixture-opening-v1';
-const protocolDigestPattern = /^[0-9a-f]{128}$/u;
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
-type PvssBallotDigestContext = Pick<
+type PvssBallotHashContext = Pick<
     PvssBallotAlgebraInput,
     | 'ceremonyId'
-    | 'duplicateBallotPolicyDigest'
-    | 'electionManifestDigest'
-    | 'pollSpecDigest'
-    | 'rosterDigest'
-    | 'thresholdProfileDigest'
+    | 'duplicateBallotPolicyHash'
+    | 'electionManifestHash'
+    | 'pollSpecHash'
+    | 'rosterHash'
+    | 'thresholdProfileHash'
     | 'voterIdentity'
     | 'voterRosterPosition'
 >;
 
-const deriveFieldElementFromDigest = (digestHex: string): FieldElement =>
-    Number(BigInt(`0x${digestHex}`) % BigInt(fieldModulus));
+const deriveFieldElementFromHash = (HASHHex: string): FieldElement =>
+    Number(BigInt(`0x${HASHHex}`) % BigInt(fieldModulus));
 
 const deriveOpeningFieldElement = (
     context: PvssBallotAlgebraInput,
     receiverShareVector: ReceiverShareVector,
     fieldIndex: number,
 ): FieldElement =>
-    deriveFieldElementFromDigest(
+    deriveFieldElementFromHash(
         hash512Hex(openingDerivationDomain, [
             textEncoder.encode(
                 canonicalJson({
                     ceremonyId: context.ceremonyId,
-                    duplicateBallotPolicyDigest:
-                        context.duplicateBallotPolicyDigest,
-                    electionManifestDigest: context.electionManifestDigest,
+                    duplicateBallotPolicyHash:
+                        context.duplicateBallotPolicyHash,
+                    electionManifestHash: context.electionManifestHash,
                     fieldIndex,
                     fixtureEntropy: context.fixtureEntropy,
-                    pollSpecDigest: context.pollSpecDigest,
+                    pollSpecHash: context.pollSpecHash,
                     receiverIdentity: receiverShareVector.receiverIdentity,
                     receiverRosterPosition:
                         receiverShareVector.receiverRosterPosition,
-                    rosterDigest: context.rosterDigest,
-                    thresholdProfileDigest: context.thresholdProfileDigest,
+                    rosterHash: context.rosterHash,
+                    thresholdProfileHash: context.thresholdProfileHash,
                     voterIdentity: context.voterIdentity,
                     voterRosterPosition: context.voterRosterPosition,
                 }),
@@ -70,43 +70,44 @@ const deriveOpeningFieldElement = (
         ]),
     );
 
-export const deriveTestShareCommitmentDigest = (input: {
-    readonly commitment: Omit<TestShareCommitment, 'shareCommitmentDigest'>;
-    readonly context: PvssBallotDigestContext;
-    readonly ballotPolynomialSetDigest: string;
+export const deriveTestShareCommitmentHash = (input: {
+    readonly commitment: Omit<TestShareCommitment, 'shareCommitmentHash'>;
+    readonly context: PvssBallotHashContext;
+    readonly ballotPolynomialSetHash: string;
 }): string =>
-    deriveProtocolDigest('ShareCommitmentDigest', {
-        ballotPolynomialSetDigest: input.ballotPolynomialSetDigest,
+    deriveProtocolHash('ShareCommitmentHash', {
+        ballotPolynomialSetHash: input.ballotPolynomialSetHash,
         ceremonyId: input.context.ceremonyId,
         commitmentValues: input.commitment.commitmentValues,
-        duplicateBallotPolicyDigest: input.context.duplicateBallotPolicyDigest,
-        electionManifestDigest: input.context.electionManifestDigest,
+        duplicateBallotPolicyHash: input.context.duplicateBallotPolicyHash,
+        electionManifestHash: input.context.electionManifestHash,
         objectType: input.commitment.objectType,
-        pollSpecDigest: input.context.pollSpecDigest,
-        rosterDigest: input.context.rosterDigest,
-        thresholdProfileDigest: input.context.thresholdProfileDigest,
+        pollSpecHash: input.context.pollSpecHash,
+        rosterHash: input.context.rosterHash,
+        thresholdProfileHash: input.context.thresholdProfileHash,
         receiverIdentity: input.commitment.receiverIdentity,
         receiverRosterPosition: input.commitment.receiverRosterPosition,
         voterIdentity: input.context.voterIdentity,
         voterRosterPosition: input.context.voterRosterPosition,
     });
 
-export const deriveTestReceiverShareOpeningPayloadDigest = (input: {
-    readonly context: PvssBallotDigestContext;
-    readonly payload: Omit<TestReceiverShareOpeningPayload, 'payloadDigest'>;
+export const deriveTestReceiverShareOpeningPayloadHash = (input: {
+    readonly context: PvssBallotHashContext;
+    readonly payload: Omit<TestReceiverShareOpeningPayload, 'payloadHash'>;
 }): string =>
-    deriveProtocolDigest('TestReceiverShareOpeningPayloadDigest', {
+    deriveProtocolHash('ChallengeDomainHash', {
         ceremonyId: input.context.ceremonyId,
-        duplicateBallotPolicyDigest: input.context.duplicateBallotPolicyDigest,
-        electionManifestDigest: input.context.electionManifestDigest,
+        duplicateBallotPolicyHash: input.context.duplicateBallotPolicyHash,
+        electionManifestHash: input.context.electionManifestHash,
         objectType: input.payload.objectType,
         openingVector: input.payload.openingVector,
-        pollSpecDigest: input.context.pollSpecDigest,
+        pollSpecHash: input.context.pollSpecHash,
+        purpose: 'test-receiver-share-opening-payload-v1',
         receiverIdentity: input.payload.receiverIdentity,
         receiverRosterPosition: input.payload.receiverRosterPosition,
-        rosterDigest: input.context.rosterDigest,
+        rosterHash: input.context.rosterHash,
         shareVector: input.payload.shareVector,
-        thresholdProfileDigest: input.context.thresholdProfileDigest,
+        thresholdProfileHash: input.context.thresholdProfileHash,
         voterIdentity: input.context.voterIdentity,
         voterRosterPosition: input.context.voterRosterPosition,
     });
@@ -114,7 +115,7 @@ export const deriveTestReceiverShareOpeningPayloadDigest = (input: {
 export const deriveTestShareCommitmentWitness = (input: {
     readonly context: PvssBallotAlgebraInput;
     readonly receiverShareVector: ReceiverShareVector;
-    readonly ballotPolynomialSetDigest: string;
+    readonly ballotPolynomialSetHash: string;
 }): {
     readonly payload: TestReceiverShareOpeningPayload;
     readonly witness: TestShareCommitmentWitness;
@@ -134,7 +135,7 @@ export const deriveTestShareCommitmentWitness = (input: {
         (fieldElement, fieldIndex) =>
             addFieldElements(fieldElement, openingVector[fieldIndex] ?? 0),
     );
-    const commitmentWithoutDigest = {
+    const commitmentWithoutHash = {
         objectType: 'TestShareCommitment' as const,
         receiverIdentity: input.receiverShareVector.receiverIdentity,
         receiverRosterPosition:
@@ -142,14 +143,14 @@ export const deriveTestShareCommitmentWitness = (input: {
         commitmentValues,
     };
     const commitment = {
-        ...commitmentWithoutDigest,
-        shareCommitmentDigest: deriveTestShareCommitmentDigest({
-            commitment: commitmentWithoutDigest,
+        ...commitmentWithoutHash,
+        shareCommitmentHash: deriveTestShareCommitmentHash({
+            commitment: commitmentWithoutHash,
             context: input.context,
-            ballotPolynomialSetDigest: input.ballotPolynomialSetDigest,
+            ballotPolynomialSetHash: input.ballotPolynomialSetHash,
         }),
     };
-    const payloadWithoutDigest = {
+    const payloadWithoutHash = {
         objectType: 'TestReceiverShareOpeningPayload' as const,
         receiverIdentity: input.receiverShareVector.receiverIdentity,
         receiverRosterPosition:
@@ -158,10 +159,10 @@ export const deriveTestShareCommitmentWitness = (input: {
         openingVector,
     };
     const payload = {
-        ...payloadWithoutDigest,
-        payloadDigest: deriveTestReceiverShareOpeningPayloadDigest({
+        ...payloadWithoutHash,
+        payloadHash: deriveTestReceiverShareOpeningPayloadHash({
             context: input.context,
-            payload: payloadWithoutDigest,
+            payload: payloadWithoutHash,
         }),
     };
 
@@ -180,7 +181,7 @@ export const verifyTestShareCommitmentOpening = (
 ): boolean => {
     if (
         witness.commitment.objectType !== 'TestShareCommitment' ||
-        !protocolDigestPattern.test(witness.commitment.shareCommitmentDigest) ||
+        !protocolHashPattern.test(witness.commitment.shareCommitmentHash) ||
         witness.openingVector.length !== pvssBallotShareVectorWidth ||
         witness.shareVector.length !== pvssBallotShareVectorWidth ||
         witness.commitment.commitmentValues.length !==

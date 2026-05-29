@@ -1,3 +1,2 @@
-pnpm run build
-pnpm run check:static
-pnpm run test:precommit
+pnpm run check
+pnpm exec vitest --project node --project browser-desktop --project browser-mobile --run

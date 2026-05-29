@@ -1,6 +1,6 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 import { type BallotPrivacyLoweredLinearRelationStatement } from '../relation-backend-lowering.js';
 import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
 
@@ -26,10 +26,10 @@ import {
     shareCommitmentOpeningDimension,
 } from './statement-contracts.js';
 import {
-    deriveSparseLinearStatementDigest,
-    deriveSparseStatementMatrixDigest,
-    deriveSparseTargetVectorDigest,
-} from './statement-digests.js';
+    deriveSparseLinearStatementHash,
+    deriveSparseStatementMatrixHash,
+    deriveSparseTargetVectorHash,
+} from './statement-hashes.js';
 import {
     componentById,
     explicitRowBatchesForComponent,
@@ -476,7 +476,7 @@ const packedFieldProjectionCoverage = (
 };
 
 export const buildPackedFieldSparseComponentLinearProofStatement = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentId:
         | 'score-and-shamir-field-component'
         | 'payload-plaintext-field-component';
@@ -540,21 +540,20 @@ export const buildPackedFieldSparseComponentLinearProofStatement = (input: {
               });
     const sparseStatementMatrixEntries = accumulator.matrixEntries();
     const targetVectorEntries = accumulator.targetEntries();
-    const sparseStatementMatrixDigest = deriveSparseStatementMatrixDigest(
+    const sparseStatementMatrixHash = deriveSparseStatementMatrixHash(
         sparseStatementMatrixEntries,
     );
-    const targetVectorDigest =
-        deriveSparseTargetVectorDigest(targetVectorEntries);
+    const targetVectorHash = deriveSparseTargetVectorHash(targetVectorEntries);
     const statementPayload: Omit<
         BallotProofSparseComponentLinearProofStatement,
-        'statementDigest'
+        'statementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: component.coefficientModulus,
         objectType: 'BallotProofSparseComponentLinearProofStatement',
@@ -563,11 +562,11 @@ export const buildPackedFieldSparseComponentLinearProofStatement = (input: {
         proofStatementFormat: 'sparse-polynomial-matrix-linear-proof-v1',
         projectionCoverage: packedFieldProjectionCoverage(input.componentId),
         relation: linearProofRelation,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
         sourceBackendColumnIndices: accumulator.sourceBackendColumnIndices(),
         sourceColumnPackings: accumulator.sourceColumnPackings(),
         sourceRingDegree: input.sourceRingDegree,
-        sparseStatementMatrixDigest,
+        sparseStatementMatrixHash,
         sparseStatementMatrixEntries,
         sparseStatementTermCount:
             sparseStatementMatrixEntries.length.toString(),
@@ -575,7 +574,7 @@ export const buildPackedFieldSparseComponentLinearProofStatement = (input: {
         statementRows,
         matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
         targetCoefficientRepresentation: 'centeredSignedSourceModulus',
-        targetVectorDigest,
+        targetVectorHash,
         targetVectorEntries,
         targetVectorEntryCount: targetVectorEntries.length.toString(),
         witnessL2BoundSquared: input.witnessL2BoundSquared,
@@ -583,6 +582,6 @@ export const buildPackedFieldSparseComponentLinearProofStatement = (input: {
 
     return {
         ...statementPayload,
-        statementDigest: deriveSparseLinearStatementDigest(statementPayload),
+        statementHash: deriveSparseLinearStatementHash(statementPayload),
     };
 };

@@ -10,7 +10,7 @@ export type {
     ReceiverEncryptionSecretState,
 } from './lattice-primitives/primitive-contracts.js';
 export {
-    deriveShareCommitmentBodyDigest,
+    deriveShareCommitmentBodyHash,
     createShareCommitmentPolynomialVector,
     addShareCommitmentPolynomialVectors,
     addShareCommitmentOpenings,

@@ -1,61 +1,48 @@
 import { pathToFileURL } from 'node:url';
 
 import {
+    type ActiveLocalRunLog,
+    createLocalRunLog,
+    currentProcessExitCode,
+    removeRunLogArguments,
+    runLogDisabledByArguments,
+} from './local-run-log.js';
+import {
     createPackageManagerCommand,
     resolvePackageManagerRunner,
-    runCommands,
+    runCommandsInSeries,
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
+import {
+    defaultProofBenchmarkLanes,
+    proofBenchmarkLaneDefinitions,
+    proofBenchmarkLaneValues,
+    type ProofBenchmarkLane,
+} from './test-lanes.js';
 
-type ProofBenchmarkLane = 'desktop' | 'mobile-throttled' | 'node';
-
-const defaultProofBenchmarkLanes: readonly ProofBenchmarkLane[] = [
-    'node',
-    'desktop',
-];
-
-const proofBenchmarkProjectByLane = {
-    desktop: 'browser-desktop-proof-benchmark',
-    'mobile-throttled': 'browser-mobile-throttled-proof-benchmark',
-    node: 'node-proof-benchmark',
-} as const;
-
-const mobileThrottleEnvironmentVariableName =
-    'VITE_SEALED_LATTICE_ENABLE_THROTTLED_MOBILE_BENCHMARK';
-
-const fullPowerBenchmarkEnvironment = (): NodeJS.ProcessEnv => {
-    const environment = { ...process.env };
-    delete environment[mobileThrottleEnvironmentVariableName];
-
-    return environment;
-};
+const isProofBenchmarkLane = (lane: string): lane is ProofBenchmarkLane =>
+    proofBenchmarkLaneValues.some((supportedLane) => supportedLane === lane);
 
 export const parseRequestedProofBenchmarkLanes = (
     commandLineArguments: readonly string[],
 ): readonly ProofBenchmarkLane[] => {
-    const lanes: ProofBenchmarkLane[] = [];
-
-    for (let argumentIndex = 0; argumentIndex < commandLineArguments.length; ) {
-        const argument = commandLineArguments[argumentIndex];
-        if (argument !== '--only') {
-            throw new Error(`Unknown proof benchmark argument: ${argument}`);
-        }
-
-        const lane = commandLineArguments[argumentIndex + 1];
-        if (
-            lane !== 'desktop' &&
-            lane !== 'mobile-throttled' &&
-            lane !== 'node'
-        ) {
-            throw new Error(`Unsupported proof benchmark lane: ${lane}`);
-        }
-
-        lanes.push(lane);
-        argumentIndex += 2;
+    if (commandLineArguments.length === 0) {
+        return defaultProofBenchmarkLanes;
+    }
+    if (
+        commandLineArguments.length !== 2 ||
+        commandLineArguments[0] !== '--only'
+    ) {
+        throw new Error('Usage: run-proof-benchmarks.ts [--only lane].');
     }
 
-    return lanes.length === 0 ? defaultProofBenchmarkLanes : lanes;
+    const lane = commandLineArguments[1];
+    if (lane === undefined || !isProofBenchmarkLane(lane)) {
+        throw new Error(`Unsupported proof benchmark lane: ${lane}`);
+    }
+
+    return [lane];
 };
 
 export const buildProofBenchmarkCommands = (
@@ -70,44 +57,73 @@ export const buildProofBenchmarkCommands = (
     const buildCommand = (
         description: string,
         commandArguments: readonly string[],
-        env: NodeJS.ProcessEnv = process.env,
+        logFileSlug: string,
     ): CommandInvocation =>
         createPackageManagerCommand(description, commandArguments, {
-            env,
+            logFileSlug,
             packageManagerRunner,
         });
 
     return [
-        buildCommand('Build workspace packages', ['run', 'build']),
-        ...lanes.map((lane) =>
-            buildCommand(
-                lane === 'mobile-throttled'
-                    ? 'Run manually throttled mobile Chromium proof benchmark'
-                    : `Run ${lane} proof benchmark`,
+        buildCommand('Build workspace packages', ['run', 'build'], 'build'),
+        ...lanes.map((lane) => {
+            const laneDefinition = proofBenchmarkLaneDefinitions[lane];
+
+            return buildCommand(
+                laneDefinition.commandDescription,
                 [
                     'exec',
                     'vitest',
                     '--project',
-                    proofBenchmarkProjectByLane[lane],
+                    laneDefinition.projectName,
                     '--run',
                 ],
-                lane === 'mobile-throttled'
-                    ? {
-                          ...process.env,
-                          [mobileThrottleEnvironmentVariableName]: '1',
-                      }
-                    : fullPowerBenchmarkEnvironment(),
-            ),
-        ),
+                laneDefinition.projectName,
+            );
+        }),
     ];
 };
 
-const main = (): void => {
-    process.exitCode = runCommands(
-        buildProofBenchmarkCommands({
-            lanes: parseRequestedProofBenchmarkLanes(process.argv.slice(2)),
-        }),
-    );
+export const runProofBenchmarkCommands = async (
+    invocations: readonly CommandInvocation[],
+    input: { readonly runLog?: ActiveLocalRunLog } = {},
+): Promise<number> => {
+    return runCommandsInSeries(invocations, { runLog: input.runLog });
+};
+
+const proofBenchmarkScriptNames: Record<ProofBenchmarkLane, string> = {
+    desktop: 'test:proof-benchmark:browser:desktop',
+    'mobile-throttled': 'test:proof-benchmark:browser:mobile:throttled',
+    node: 'test:proof-benchmark:node',
+};
+
+const proofBenchmarkScriptName = (
+    lanes: readonly ProofBenchmarkLane[],
+): string =>
+    lanes.length === 1
+        ? (proofBenchmarkScriptNames[lanes[0]] ?? 'test:proof-benchmark')
+        : 'test:proof-benchmark';
+
+const main = async (): Promise<void> => {
+    const rawArguments = process.argv.slice(2);
+    const commandArguments = removeRunLogArguments(rawArguments);
+    const lanes = parseRequestedProofBenchmarkLanes(commandArguments);
+    const runLog = runLogDisabledByArguments(rawArguments)
+        ? undefined
+        : await createLocalRunLog({
+              commandLineArguments: rawArguments,
+              lanes,
+              scriptName: proofBenchmarkScriptName(lanes),
+          });
+
+    try {
+        process.exitCode = await runProofBenchmarkCommands(
+            buildProofBenchmarkCommands({ lanes }),
+            { runLog },
+        );
+    } finally {
+        await runLog?.finish({ exitCode: currentProcessExitCode() });
+    }
 };
 
 const scriptEntryPoint = process.argv[1];
@@ -116,5 +132,5 @@ const isMainModule =
     import.meta.url === pathToFileURL(scriptEntryPoint).href;
 
 if (isMainModule) {
-    main();
+    void main();
 }

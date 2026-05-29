@@ -1,12 +1,10 @@
 import type { FieldElement, RefusalRecord } from '@sealed-lattice/types';
 
-import { createRefusal } from '../common/verification-helpers.js';
 import {
     assertCanonicalFieldElement,
     exponentiateFieldElement,
     fieldModulus,
-} from '../plaintext-oracle/field.js';
-
+} from './plaintext-oracle-helpers.js';
 import {
     ballotPrivacyScoreBucketCount,
     getBallotPrivacyEncodedShareVectorWidth,
@@ -19,6 +17,7 @@ import {
     ballotPrivacyMinimumOptionCount,
     ballotPrivacyMinimumUnsafeParticipantCount,
 } from './supported-dimensions.js';
+import { createRefusal } from './verification-helpers.js';
 
 const minimumScore = 1;
 const maximumScore = 10;

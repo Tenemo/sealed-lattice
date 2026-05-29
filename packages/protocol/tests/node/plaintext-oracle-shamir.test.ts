@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveThresholdProfile } from '../../src/lifecycle/thresholds';
-import {
-    deriveInterpolationCoefficientReport,
-    deriveWorstCaseInterpolationCoefficientReport,
-    evaluateShamirPolynomialForRoster,
-    interpolateShamirConstantTerm,
-    normalizeFieldElement,
-} from '../../src/plaintext-oracle/index';
-
 import {
     collectContributorPositionSets,
     createDeterministicPolynomial,
     selectSpreadContributorPositions,
     shamirVectors,
 } from './plaintext-oracle-test-vectors';
+
+import { deriveThresholdProfile } from '#packages/protocol/src/lifecycle/thresholds';
+import {
+    deriveInterpolationCoefficientReport,
+    deriveWorstCaseInterpolationCoefficientReport,
+    evaluateShamirPolynomialForRoster,
+    interpolateShamirConstantTerm,
+    normalizeFieldElement,
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext oracle Shamir and interpolation', () => {
     it('matches deterministic Shamir vectors and reconstructs the secret', () => {
@@ -43,7 +43,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         (rosterSize) => {
             const thresholdProfile = deriveThresholdProfile({
                 rosterSize,
-                unsafeMicroRosterAcknowledged: rosterSize < 20,
+                casualMicroRosterAcknowledged: rosterSize < 20,
             });
             const polynomial = createDeterministicPolynomial(
                 normalizeFieldElement(rosterSize * 19),
@@ -75,7 +75,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         (rosterSize) => {
             const thresholdProfile = deriveThresholdProfile({
                 rosterSize,
-                unsafeMicroRosterAcknowledged: true,
+                casualMicroRosterAcknowledged: true,
             });
             const secret = normalizeFieldElement(rosterSize * 23);
             const polynomial = createDeterministicPolynomial(
@@ -121,7 +121,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
             maxCenteredAbsCoefficient:
                 shamirVectors.selectedContributorReport
                     .maxCenteredAbsCoefficient,
-            reportDigest: shamirVectors.selectedContributorReport.reportDigest,
+            reportHash: shamirVectors.selectedContributorReport.reportHash,
         });
 
         const worstCaseReport = deriveWorstCaseInterpolationCoefficientReport({

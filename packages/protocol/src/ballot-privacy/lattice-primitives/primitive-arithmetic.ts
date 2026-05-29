@@ -1,6 +1,6 @@
 import type { ShareCommitmentProfile } from '@sealed-lattice/types';
 
-import { assertCanonicalFieldElement } from '../../plaintext-oracle/field.js';
+import { assertCanonicalFieldElement } from '../plaintext-oracle-helpers.js';
 import {
     receiverEncryptionModuleDegree,
     receiverEncryptionModuleRank,

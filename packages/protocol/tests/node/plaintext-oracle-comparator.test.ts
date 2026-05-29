@@ -1,13 +1,13 @@
 import type { ComparatorPolynomialSet } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import { comparatorPolynomialVectors } from './plaintext-oracle-test-vectors';
+
 import {
     deriveComparatorPolynomialSet,
     evaluateFieldPolynomial,
     normalizeFieldElement,
-} from '../../src/plaintext-oracle/index';
-
-import { comparatorPolynomialVectors } from './plaintext-oracle-test-vectors';
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext comparator polynomial oracle', () => {
     it('matches comparator polynomial vectors and evaluates boundary cases', () => {
@@ -16,7 +16,7 @@ describe('plaintext comparator polynomial oracle', () => {
         );
 
         expect(comparator).toMatchObject({
-            comparatorDigest: comparatorPolynomialVectors.comparatorDigest,
+            comparatorHash: comparatorPolynomialVectors.comparatorHash,
             domainMaximum: comparatorPolynomialVectors.domainMaximum,
             domainMinimum: comparatorPolynomialVectors.domainMinimum,
         });
@@ -85,9 +85,9 @@ describe('plaintext comparator polynomial oracle', () => {
         );
 
         expect(comparator).toMatchObject({
-            comparatorDigest:
+            comparatorHash:
                 comparatorPolynomialVectors.maximumRosterBoundaryCase
-                    .comparatorDigest,
+                    .comparatorHash,
             domainMaximum:
                 comparatorPolynomialVectors.maximumRosterBoundaryCase
                     .domainMaximum,

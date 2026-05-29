@@ -1,5 +1,5 @@
 import {
-    protocolDigestNamespaceValues,
+    protocolHashNamespaceValues,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -29,8 +29,7 @@ import {
     verifyRecoveryEpochUpdate,
     verifyRosterManifestTranscript,
     verifyTargetFinality,
-} from '../../src/index';
-
+} from '#packages/protocol/src/index';
 import boardFinalityJson from '#test-vectors/election-foundation/board-finality.json';
 import capabilityRefusalsJson from '#test-vectors/election-foundation/capability-refusals.json';
 import deterministicFixturesJson from '#test-vectors/election-foundation/deterministic-fixtures.json';
@@ -105,9 +104,9 @@ type BoardFinalityVectors = {
         readonly expectedRefusalCodes: readonly string[];
         readonly expectedEquivocatingWitnessCount?: number;
     }[];
-    readonly requiredDigestNamespaces: readonly string[];
+    readonly requiredHashNamespaces: readonly string[];
     readonly firstValidOrdering: FirstValidOrderingInput & {
-        readonly expectedOrderedObjectDigests: readonly string[];
+        readonly expectedOrderedObjectHashes: readonly string[];
     };
     readonly negativeFirstValidOrderings: readonly (FirstValidOrderingInput & {
         readonly caseName: string;
@@ -120,41 +119,41 @@ type DeterministicFixtureVectors = {
     readonly caseName: string;
     readonly signature: {
         readonly envelope: ProtocolSignatureEnvelope;
-        readonly expectedSignatureDigest: string;
+        readonly expectedSignatureHash: string;
         readonly expectedVerification: Pick<
             SignatureVerificationResult,
-            'acceptedDigests' | 'ok' | 'refusedObjects'
+            'acceptedHashes' | 'ok' | 'refusedObjects'
         >;
     };
     readonly board: {
         readonly input: BoardConsistencyInput;
         readonly expectedVerification: Pick<
             ReturnType<typeof verifyBoardConsistency>,
-            'acceptedDigests' | 'ok' | 'refusedObjects' | 'verifiedHeadDigests'
+            'acceptedHashes' | 'ok' | 'refusedObjects' | 'verifiedHeadHashes'
         >;
     };
     readonly rosterManifest: {
         readonly input: RosterManifestTranscriptInput;
         readonly expectedVerification: Pick<
             ReturnType<typeof verifyRosterManifestTranscript>,
-            | 'acceptedDigests'
-            | 'electionManifestDigest'
+            | 'acceptedHashes'
+            | 'electionManifestHash'
             | 'ok'
             | 'refusedObjects'
-            | 'rosterDigest'
+            | 'rosterHash'
         >;
     };
     readonly targetFinality: {
         readonly input: TargetFinalityVerificationInput;
         readonly expectedVerification: Pick<
             ReturnType<typeof verifyTargetFinality>,
-            | 'acceptedDigests'
+            | 'acceptedHashes'
             | 'equivocatingWitnessIdentities'
             | 'ok'
             | 'refusedObjects'
-            | 'targetFinalityCheckpointDigest'
-            | 'targetFinalityRecordDigest'
-            | 'targetProposalDigest'
+            | 'targetFinalityCheckpointHash'
+            | 'targetFinalityRecordHash'
+            | 'targetProposalHash'
             | 'validWitnessIdentities'
         >;
     };
@@ -162,7 +161,7 @@ type DeterministicFixtureVectors = {
         readonly input: RecoveryEpochVerificationInput;
         readonly expectedVerification: Pick<
             ReturnType<typeof verifyRecoveryEpochUpdate>,
-            'acceptedDigests' | 'ok' | 'refusedObjects' | 'updatedEntry'
+            'acceptedHashes' | 'ok' | 'refusedObjects' | 'updatedEntry'
         >;
     };
 };
@@ -176,14 +175,13 @@ const boardFinality = boardFinalityJson as unknown as BoardFinalityVectors;
 const deterministicFixtures =
     deterministicFixturesJson as unknown as DeterministicFixtureVectors;
 const currentBridgeAndEvaluatorNamespaces = [
-    'EncryptedAggregateBridgeDigest',
-    'EncryptedAggregateInputRoot',
+    'EncryptedAggregateBridgeHash',
     'EncryptedAggregateShareCiphertextRoot',
-    'EncryptedAggregateReconstructionDigest',
-    'BridgeWitnessPrivacyProfileDigest',
-    'ScoreBitDerivationCircuitDigest',
-    'ComparisonInputDerivationCircuitDigest',
-    'EncryptedComparisonInputDigest',
+    'EncryptedAggregateReconstructionHash',
+    'ScoreBitDerivationCircuitHash',
+    'EncryptedScoreBitInputHash',
+    'ComparisonInputDerivationCircuitHash',
+    'EncryptedComparisonInputHash',
 ] as const;
 
 describe('election foundation test vectors', () => {
@@ -199,13 +197,14 @@ describe('election foundation test vectors', () => {
     it('matches poll-spec validation vectors', () => {
         for (const vector of pollSpecs.cases) {
             const validation = validatePollSpec(vector.input);
+            const actualErrorCodes = validation.ok
+                ? undefined
+                : validation.errors.map((error) => error.code);
 
             expect(validation.ok, vector.caseName).toBe(vector.expectedOk);
-            if (!validation.ok) {
-                expect(validation.errors.map((error) => error.code)).toEqual(
-                    vector.expectedErrorCodes,
-                );
-            }
+            expect(actualErrorCodes, vector.caseName).toEqual(
+                vector.expectedErrorCodes,
+            );
         }
     });
 
@@ -273,21 +272,21 @@ describe('election foundation test vectors', () => {
             expectedRefusalCodes: ['BoardForkDetected'],
             expectedEquivocatingWitnessCount: 5,
         });
-        for (const namespace of boardFinality.requiredDigestNamespaces) {
-            expect(protocolDigestNamespaceValues).toContain(namespace);
+        for (const namespace of boardFinality.requiredHashNamespaces) {
+            expect(protocolHashNamespaceValues).toContain(namespace);
         }
-        expect(boardFinality.requiredDigestNamespaces).toEqual(
+        expect(boardFinality.requiredHashNamespaces).toEqual(
             expect.arrayContaining([...currentBridgeAndEvaluatorNamespaces]),
         );
 
-        const { expectedOrderedObjectDigests, ...orderingInput } =
+        const { expectedOrderedObjectHashes, ...orderingInput } =
             boardFinality.firstValidOrdering;
         const ordering = deriveValidatedFirstValidOrder(orderingInput);
 
         expect(ordering.ok).toBe(true);
         expect(
-            ordering.orderedObjects.map((object) => object.objectDigest),
-        ).toEqual(expectedOrderedObjectDigests);
+            ordering.orderedObjects.map((object) => object.objectHash),
+        ).toEqual(expectedOrderedObjectHashes);
 
         for (const vector of boardFinality.negativeFirstValidOrderings) {
             const result = deriveValidatedFirstValidOrder(vector);
@@ -305,8 +304,8 @@ describe('election foundation test vectors', () => {
         );
 
         const { envelope } = deterministicFixtures.signature;
-        expect(envelope.signatureDigest).toBe(
-            deterministicFixtures.signature.expectedSignatureDigest,
+        expect(envelope.signatureHash).toBe(
+            deterministicFixtures.signature.expectedSignatureHash,
         );
         expect(
             verifySignedObjectSignature(envelope, {
@@ -315,11 +314,11 @@ describe('election foundation test vectors', () => {
                 signerRole: envelope.signedRoot.signerRole,
                 signerIdentity: envelope.signedRoot.signerIdentity,
                 ceremonyId: envelope.signedRoot.ceremonyId,
-                publicKeyDigest: envelope.publicKeyDigest,
-                manifestDigest: envelope.signedRoot.manifestDigest,
+                publicKeyHash: envelope.publicKeyHash,
+                manifestHash: envelope.signedRoot.manifestHash,
                 objectRoot: envelope.signedRoot.objectRoot,
-                boardHeadDigest: envelope.signedRoot.boardHeadDigest,
-                contextDigest: envelope.signedRoot.contextDigest,
+                boardHeadHash: envelope.signedRoot.boardHeadHash,
+                contextHash: envelope.signedRoot.contextHash,
             }),
         ).toMatchObject(deterministicFixtures.signature.expectedVerification);
 
@@ -328,7 +327,7 @@ describe('election foundation test vectors', () => {
             StructuredProtocolVerificationResult,
             Pick<
                 StructuredProtocolVerificationResult,
-                'acceptedDigests' | 'ok' | 'refusedObjects'
+                'acceptedHashes' | 'ok' | 'refusedObjects'
             >,
         ][] = [
             [

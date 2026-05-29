@@ -2,13 +2,13 @@
 export const targetBoundShareSelectionProfileId =
     'target-bound-first-valid-share-selection-v1';
 
-/** KLLPS CPAD profile required by the target-bound decryption path. */
-export const cpadProfileId = 'KLLPS26-AsyncLagrangeTarget-CPAD-v1';
+/** CPAD profile required by the target-bound decryption path. */
+export const cpadProfileId = 'CPAD-BGV-AsyncThreshold-v1';
 
 /** Encrypted aggregate bridge profile required by accepted manifests. */
 export const encryptedAggregateBridgeProfileId = 'EncryptedAggregateBridge-v1';
 
-/** Passive BGV setup profile required by M8 trustee setup entries. */
+/** Passive BGV setup profile required by accepted manifests. */
 export const bgvPassiveSetupProfileId =
     'sealed-lattice-bgv-rns-passive-full-roster-setup-v1';
 
@@ -18,13 +18,13 @@ export const bridgeWitnessPrivacyProfileId = 'BridgeWitnessPrivacy-v1';
 /** Evaluation proof profile required by accepted manifests. */
 export const evaluationProofProfileId = 'PQEvalProof-STARK-BGVReplay-v1';
 
-/** Fully verified profile emitted by transcript-core fixtures. */
-export const fullyVerifiedProfileId =
-    'transcript-core-fully-verified-profile-v1';
+/** Fully verified result profile emitted by transcript-core fixtures. */
+export const fullyVerifiedResultProfileId =
+    'transcript-core-fully-verified-result-profile-v1';
 
-/** Development integration profile emitted by transcript-core fixtures. */
-export const developmentIntegrationProfileId =
-    'transcript-core-development-integration-profile-v1';
+/** Passive MHE prototype profile emitted by transcript-core fixtures. */
+export const passiveMhePrototypeProfileId =
+    'transcript-core-passive-mhe-prototype-profile-v1';
 
 /** Active malicious MHE profile emitted by transcript-core fixtures. */
 export const activeMaliciousMheProfileId =
@@ -39,7 +39,7 @@ export const noDecryptionProofProfileId =
 
 /** Threshold decryption profile required by accepted manifests. */
 export const thresholdDecryptionProfileId =
-    'BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1';
+    'BGV-RNS-AsyncThresholdDecryption-CPAD-v1';
 
 /** Evaluation noise profile required by accepted manifests. */
 export const evaluationNoiseProfileId = 'he-evaluation-noise-profile-v1';
@@ -64,7 +64,7 @@ export const aggregateDerivationProofProfileId =
 
 /** Aggregate derivation sparse proof parameter profile. */
 export const aggregateDerivationProofParameterProfileId =
-    'aggregate-derivation-linear-compatibility-v1';
+    'aggregate-derivation-linear-proof-parameter-v1';
 
 /** Aggregate derivation sparse proof encoding profile. */
 export const aggregateDerivationProofEncodingProfileId =

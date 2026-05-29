@@ -1,17 +1,4 @@
-import {
-    checkpointPayload,
-    checkpointRecord,
-    mandatoryProofBenchmarkCheckpointNames,
-    type ProofBenchmarkCheckpointStore,
-} from './ballot-privacy-proof-benchmark-checkpoints';
-import {
-    captureRuntimeMemorySnapshot,
-    type RuntimeMemorySnapshot,
-} from './ballot-privacy-proof-benchmark-memory';
-import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from './ballot-privacy-proof-record-generation-fixtures';
-import { runTimedTestStep, type TimedTestStepMetric } from './timed-test-steps';
-
-import { deriveProtocolDigest } from '#packages/crypto/src/index';
+import { deriveProtocolHash } from '#packages/crypto/src/index';
 import {
     aggregateWitnessFromReceiverPlaintext,
     buildAggregateDerivationProofInput,
@@ -36,7 +23,7 @@ import {
 } from '#packages/protocol/src/ballot-privacy/receiver-key-proof-parameters';
 import type {
     ClaimBearingBallotPackage,
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverEncryptionProfile,
     ReceiverEncryptionPublicKey,
     ShareCommitmentMessageBoundCert,
@@ -47,22 +34,34 @@ import type {
     BallotPrivacyReceiverKeyProofGeneration,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
+import {
+    checkpointPayload,
+    checkpointRecord,
+    mandatoryProofBenchmarkCheckpointNames,
+    type ProofBenchmarkCheckpointStore,
+} from '#tests/support/ballot-privacy-proof-benchmark-checkpoints';
+import {
+    captureRuntimeMemorySnapshot,
+    type RuntimeMemorySnapshot,
+} from '#tests/support/ballot-privacy-proof-benchmark-memory';
+import {
+    componentProofMetrics,
+    numberValue,
+    recordValue,
+    requireGenerationProofSize,
+    verifyMandatoryBallotProofBenchmarkShape,
+} from '#tests/support/ballot-privacy-proof-benchmarks/shape';
+import { createMandatoryProfileBallotProofRecordBenchmarkFixture } from '#tests/support/ballot-privacy-proof-record-generation-fixtures';
+import {
+    runTimedTestStep,
+    type TimedTestStepMetric,
+} from '#tests/support/timed-test-steps';
 
-type ComponentProofRecord = {
-    readonly componentId: string;
-    readonly proofSizeBytes: number;
-};
-
-type ComponentProofInput = {
-    readonly componentId: string;
-    readonly proofBytesHex: string;
-    readonly proofStatement?: Record<string, unknown>;
-    readonly proofStatementFormat: string;
-};
+export { verifyMandatoryBallotProofBenchmarkShape };
 
 type ReceiverEncryptionPublicKeyMaterialForBenchmark = {
     readonly publicKeyVector: readonly (readonly number[])[];
-    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly publicMatrixSeedHash: ProtocolHash;
 };
 
 export type RuntimeBenchmarkContext = {
@@ -156,8 +155,8 @@ export type ReceiverKeyProofBenchmarkInput = {
     readonly secretState: ReceiverEncryptionSecretState;
 };
 
-const digest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+const hash = (label: string): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         label,
         purpose: 'ballot-privacy-proof-benchmark',
     });
@@ -167,7 +166,7 @@ export const createReceiverKeyProofBenchmarkInput =
         const profileSet = createBallotPrivacyProfileSet();
         const receiverState = generateReceiverState({
             ceremonyId: 'ceremony-proof-benchmark',
-            manifestDigest: digest('manifest'),
+            manifestHash: hash('manifest'),
             randomnessSource: createFixtureRandomnessSource(
                 'receiver-key-proof-benchmark',
             ),
@@ -175,7 +174,7 @@ export const createReceiverKeyProofBenchmarkInput =
             receiverIdentity: 'receiver-1',
             receiverRosterPosition: 1,
             recoveryEpoch: 0,
-            rosterDigest: digest('roster'),
+            rosterHash: hash('roster'),
         });
 
         return {
@@ -221,244 +220,6 @@ const receiverKeyProofRecordForGeneration = (input: {
     });
 };
 
-const requireGenerationProofSize = (
-    generation: Pick<BallotPrivacyProofGeneration, 'proofSizeBytes'>,
-    label: string,
-): number => {
-    const proofSizeBytes = generation.proofSizeBytes;
-    if (
-        proofSizeBytes === undefined ||
-        !Number.isSafeInteger(proofSizeBytes) ||
-        proofSizeBytes < 0
-    ) {
-        throw new Error(`${label} did not report a canonical proof size.`);
-    }
-
-    return proofSizeBytes;
-};
-
-const proofByteLength = (proofBytesHex: string): number => {
-    if (!/^(?:[0-9a-f]{2})*$/u.test(proofBytesHex)) {
-        throw new Error('Proof bytes must be lowercase hexadecimal bytes.');
-    }
-
-    return proofBytesHex.length / 2;
-};
-
-const recordValue = (value: unknown): Record<string, unknown> | undefined =>
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : undefined;
-
-const numberValue = (value: unknown): number | undefined =>
-    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-        ? value
-        : undefined;
-
-const sourceBackendColumnCount = (
-    proofStatement: Record<string, unknown>,
-): number | undefined => {
-    const sourceBackendColumnIndices =
-        proofStatement.sourceBackendColumnIndices;
-    if (Array.isArray(sourceBackendColumnIndices)) {
-        return sourceBackendColumnIndices.length;
-    }
-
-    const sourceColumnPackings = proofStatement.sourceColumnPackings;
-    if (!Array.isArray(sourceColumnPackings)) {
-        return undefined;
-    }
-
-    const packings = sourceColumnPackings as readonly unknown[];
-
-    return packings.reduce<number>((columnCount, packing) => {
-        const packingRecord = recordValue(packing);
-        const bindings = packingRecord?.bindings;
-
-        return columnCount + (Array.isArray(bindings) ? bindings.length : 0);
-    }, 0);
-};
-
-const receiverRows = (
-    proofStatement: Record<string, unknown>,
-): readonly Record<string, unknown>[] => {
-    const rows = proofStatement.receiverRows;
-
-    return Array.isArray(rows)
-        ? rows.flatMap((row) => {
-              const rowRecord = recordValue(row);
-
-              return rowRecord === undefined ? [] : [rowRecord];
-          })
-        : [];
-};
-
-const receiverRowSum = (
-    rows: readonly Record<string, unknown>[],
-    fieldName: string,
-): number | undefined => {
-    if (rows.length === 0) {
-        return undefined;
-    }
-
-    return rows.reduce(
-        (sum, row) => sum + (numberValue(row[fieldName]) ?? 0),
-        0,
-    );
-};
-
-const firstReceiverRowNumber = (
-    rows: readonly Record<string, unknown>[],
-    fieldName: string,
-): number | undefined =>
-    rows.length === 0 ? undefined : numberValue(rows[0]?.[fieldName]);
-
-const componentProofMetrics = (
-    generation: BallotPrivacyProofGeneration,
-): readonly ComponentProofBenchmarkMetric[] => {
-    const componentProofBundle = recordValue(generation.componentProofBundle);
-    const componentProofRecords = Array.isArray(
-        componentProofBundle?.componentProofs,
-    )
-        ? (componentProofBundle.componentProofs.flatMap((componentProof) => {
-              const componentProofRecord = recordValue(componentProof);
-              const componentId = componentProofRecord?.componentId;
-              const proofSizeBytes = componentProofRecord?.proofSizeBytes;
-
-              return typeof componentId === 'string' &&
-                  typeof proofSizeBytes === 'number'
-                  ? [
-                        {
-                            componentId,
-                            proofSizeBytes,
-                        } satisfies ComponentProofRecord,
-                    ]
-                  : [];
-          }) satisfies ComponentProofRecord[])
-        : [];
-    const proofSizesByComponentId = new Map(
-        componentProofRecords.map((componentProof) => [
-            componentProof.componentId,
-            componentProof.proofSizeBytes,
-        ]),
-    );
-    const componentProofInputs = Array.isArray(generation.componentProofInputs)
-        ? (generation.componentProofInputs.flatMap((componentProofInput) => {
-              const proofInput = recordValue(componentProofInput);
-              const componentId = proofInput?.componentId;
-              const proofBytesHex = proofInput?.proofBytesHex;
-              const proofStatementFormat = proofInput?.proofStatementFormat;
-
-              return typeof componentId === 'string' &&
-                  typeof proofBytesHex === 'string' &&
-                  typeof proofStatementFormat === 'string'
-                  ? [
-                        {
-                            componentId,
-                            proofBytesHex,
-                            proofStatement:
-                                proofInput === undefined
-                                    ? undefined
-                                    : recordValue(proofInput.proofStatement),
-                            proofStatementFormat,
-                        } satisfies ComponentProofInput,
-                    ]
-                  : [];
-          }) satisfies ComponentProofInput[])
-        : [];
-
-    return componentProofInputs.map((proofInput) => {
-        const proofStatement = proofInput.proofStatement ?? {};
-        const rows = receiverRows(proofStatement);
-        const proofSizeBytes =
-            proofSizesByComponentId.get(proofInput.componentId) ??
-            proofByteLength(proofInput.proofBytesHex);
-        const sourceColumnPackings = proofStatement.sourceColumnPackings;
-
-        return {
-            backendSourceColumnCount: sourceBackendColumnCount(proofStatement),
-            ciphertextChunkCount: receiverRowSum(rows, 'ciphertextChunkCount'),
-            componentId: proofInput.componentId,
-            plaintextBitLength: firstReceiverRowNumber(
-                rows,
-                'plaintextBitLength',
-            ),
-            proofSizeBytes,
-            proofStatementFormat: proofInput.proofStatementFormat,
-            receiverCount: rows.length === 0 ? undefined : rows.length,
-            sourceColumnPackingCount: Array.isArray(sourceColumnPackings)
-                ? sourceColumnPackings.length
-                : undefined,
-            statementColumns: numberValue(proofStatement.statementColumns),
-            statementRows: numberValue(proofStatement.statementRows),
-        };
-    });
-};
-
-export const verifyMandatoryBallotProofBenchmarkShape = (
-    report: MandatoryBallotProofRecordBenchmarkReport,
-): void => {
-    const componentById = new Map(
-        report.componentProofs.map((componentProof) => [
-            componentProof.componentId,
-            componentProof,
-        ]),
-    );
-    const scoreComponent = componentById.get(
-        'score-and-shamir-field-component',
-    );
-    const payloadComponent = componentById.get(
-        'payload-plaintext-field-component',
-    );
-    const shareCommitmentComponent = componentById.get(
-        'share-commitment-component',
-    );
-    const receiverEncryptionComponent = componentById.get(
-        'receiver-encryption-component',
-    );
-    const receiverKeyBindingComponent = componentById.get(
-        'receiver-key-binding-component',
-    );
-
-    if (
-        scoreComponent?.statementRows !== 82 ||
-        scoreComponent.statementColumns !== 404 ||
-        scoreComponent.backendSourceColumnCount !== 10_340
-    ) {
-        throw new Error('Mandatory score/Shamir benchmark shape drifted.');
-    }
-    if (
-        payloadComponent?.statementRows !== 200 ||
-        payloadComponent.statementColumns !== 1_800 ||
-        payloadComponent.backendSourceColumnCount !== 101_520
-    ) {
-        throw new Error('Mandatory payload benchmark shape drifted.');
-    }
-    if (
-        shareCommitmentComponent?.statementRows !== 320 ||
-        shareCommitmentComponent.statementColumns !== 5_680 ||
-        shareCommitmentComponent.receiverCount !== 20
-    ) {
-        throw new Error('Mandatory share-commitment benchmark shape drifted.');
-    }
-    if (
-        receiverEncryptionComponent?.statementRows !== 1_800 ||
-        receiverEncryptionComponent.statementColumns !== 3_600 ||
-        receiverEncryptionComponent.receiverCount !== 20 ||
-        receiverEncryptionComponent.ciphertextChunkCount !== 360 ||
-        receiverEncryptionComponent.plaintextBitLength !== 4_508
-    ) {
-        throw new Error(
-            'Mandatory receiver-encryption benchmark shape drifted.',
-        );
-    }
-    if (receiverKeyBindingComponent?.proofSizeBytes !== 0) {
-        throw new Error(
-            'Mandatory receiver-key binding benchmark should remain public-zero.',
-        );
-    }
-};
-
 const buildBallotProofVerificationInput = (input: {
     readonly generation: BallotPrivacyProofGeneration;
     readonly request: ReturnType<
@@ -484,8 +245,7 @@ export const buildClaimBearingBallotPackageForBenchmark = (input: {
     readonly generation: BallotPrivacyProofGeneration;
 }): ClaimBearingBallotPackage =>
     ({
-        ballotPackageDigest:
-            input.fixture.request.statement.ballotPackageDigest,
+        ballotPackageHash: input.fixture.request.statement.ballotPackageHash,
         ballotProof: input.generation.ballotProof,
         ballotProofStatement: input.fixture.request.statement,
         componentBundleStatement:
@@ -551,70 +311,70 @@ const aggregateShareCommitmentMessageBoundCertForBenchmark = (
 const createAggregatePostCloseEvidenceForBenchmark = (input: {
     readonly ceremonyId: string;
     readonly contributorIdentity: string;
-    readonly electionManifestDigest: ProtocolDigest;
-    readonly rosterExternalAcceptanceDigest: ProtocolDigest;
-    readonly votingClosedBoardHeadDigest: ProtocolDigest;
+    readonly electionManifestHash: ProtocolHash;
+    readonly rosterExternalAcceptanceHash: ProtocolHash;
+    readonly votingClosedBoardHeadHash: ProtocolHash;
 }): {
     readonly closeRecord: Record<string, unknown>;
     readonly contributorActionContext: Record<string, unknown>;
-    readonly closeRecordDigest: ProtocolDigest;
-    readonly postVotingClosedContextDigest: ProtocolDigest;
+    readonly closeRecordHash: ProtocolHash;
+    readonly postVotingClosedContextHash: ProtocolHash;
 } => {
     const closeRecordPayload = {
         boardPosition: 0,
         boardSequence: 7,
         ceremonyId: input.ceremonyId,
         closeKind: 'VotingClosed',
-        closedBoardHeadDigest: input.votingClosedBoardHeadDigest,
-        electionManifestDigest: input.electionManifestDigest,
+        closedBoardHeadHash: input.votingClosedBoardHeadHash,
+        electionManifestHash: input.electionManifestHash,
         objectType: 'CloseRecord',
         objectVersion: 1,
         organizerIdentity: 'organizer-1',
     };
-    const closeRecordDigest = deriveProtocolDigest(
-        'CloseRecordDigest',
+    const closeRecordHash = deriveProtocolHash(
+        'CloseRecordHash',
         closeRecordPayload,
     );
-    const postVotingClosedContextDigest = deriveProtocolDigest(
-        'PostVotingClosedContextDigest',
+    const postVotingClosedContextHash = deriveProtocolHash(
+        'PostVotingClosedContextHash',
         {
             ceremonyId: input.ceremonyId,
-            closeRecordDigest,
-            electionManifestDigest: input.electionManifestDigest,
-            votingClosedBoardHeadDigest: input.votingClosedBoardHeadDigest,
+            closeRecordHash,
+            electionManifestHash: input.electionManifestHash,
+            votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
         },
     );
     const contributorActionContextPayload = {
-        acceptedRecoveryEpochUpdateDigest: null,
+        acceptedRecoveryEpochUpdateHash: null,
         actionSequence: 1,
-        boardHeadDigest: input.votingClosedBoardHeadDigest,
+        boardHeadHash: input.votingClosedBoardHeadHash,
         boardSequence: 7,
         ceremonyId: input.ceremonyId,
-        contextDigest: postVotingClosedContextDigest,
+        contextHash: postVotingClosedContextHash,
         deviceEpoch: 0,
-        electionManifestDigest: input.electionManifestDigest,
+        electionManifestHash: input.electionManifestHash,
         recoveryEpoch: 0,
-        recoveryPolicyDigest: digest('aggregate-recovery-policy'),
-        rosterExternalAcceptanceDigest: input.rosterExternalAcceptanceDigest,
+        recoveryPolicyHash: hash('aggregate-recovery-policy'),
+        rosterExternalAcceptanceHash: input.rosterExternalAcceptanceHash,
         signerIdentity: input.contributorIdentity,
     };
-    const contributorActionContextDigest = deriveProtocolDigest(
-        'ActionContextDigest',
+    const contributorActionContextHash = deriveProtocolHash(
+        'ActionContextHash',
         contributorActionContextPayload,
     );
 
     return {
         closeRecord: {
             ...closeRecordPayload,
-            closeRecordDigest,
-            postVotingClosedContextDigest,
+            closeRecordHash,
+            postVotingClosedContextHash,
         },
-        closeRecordDigest,
+        closeRecordHash,
         contributorActionContext: {
             ...contributorActionContextPayload,
-            actionContextDigest: contributorActionContextDigest,
+            actionContextHash: contributorActionContextHash,
         },
-        postVotingClosedContextDigest,
+        postVotingClosedContextHash,
     };
 };
 
@@ -818,12 +578,12 @@ export const runAggregateDerivationProofBenchmark = (input: {
             createAggregatePostCloseEvidenceForBenchmark({
                 ceremonyId: input.fixture.request.statement.ceremonyId,
                 contributorIdentity: 'receiver-1',
-                electionManifestDigest:
-                    input.fixture.request.statement.manifestDigest,
-                rosterExternalAcceptanceDigest:
+                electionManifestHash:
+                    input.fixture.request.statement.manifestHash,
+                rosterExternalAcceptanceHash:
                     input.fixture.request.statement
-                        .rosterExternalAcceptanceDigest,
-                votingClosedBoardHeadDigest: digest(
+                        .rosterExternalAcceptanceHash,
+                votingClosedBoardHeadHash: hash(
                     'aggregate-voting-closed-board-head',
                 ),
             }),
@@ -834,19 +594,18 @@ export const runAggregateDerivationProofBenchmark = (input: {
         () =>
             buildAggregateDerivationStatement({
                 ballotPackages: [input.ballotPackage],
-                closeRecordDigest: postCloseEvidence.closeRecordDigest,
-                contributorActionContextDigest: postCloseEvidence
-                    .contributorActionContext
-                    .actionContextDigest as ProtocolDigest,
+                closeRecordHash: postCloseEvidence.closeRecordHash,
+                contributorActionContextHash: postCloseEvidence
+                    .contributorActionContext.actionContextHash as ProtocolHash,
                 contributorIdentity: 'receiver-1',
-                contributorRosterExternalAcceptanceDigest:
+                contributorRosterExternalAcceptanceHash:
                     input.fixture.request.statement
-                        .rosterExternalAcceptanceDigest,
+                        .rosterExternalAcceptanceHash,
                 contributorRosterPosition: 1,
-                postVotingClosedContextDigest:
-                    postCloseEvidence.postVotingClosedContextDigest,
-                unsafeSmallRosterAcknowledged: false,
-                votingClosedBoardHeadDigest: digest(
+                postVotingClosedContextHash:
+                    postCloseEvidence.postVotingClosedContextHash,
+                casualMicroRosterAcknowledged: false,
+                votingClosedBoardHeadHash: hash(
                     'aggregate-voting-closed-board-head',
                 ),
             }),

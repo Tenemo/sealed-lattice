@@ -1,6 +1,6 @@
 import type {
     FieldElement,
-    ProtocolDigest,
+    ProtocolHash,
     TranscriptCoreAnalysis,
     TranscriptCoreFixtureVerification,
 } from '@sealed-lattice/types';
@@ -24,7 +24,7 @@ import type {
     BgvPassiveSetupVerification,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
-    BgvRnsProfileReport,
+    BgvRnsProfileDescription,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -32,6 +32,7 @@ import type {
 } from './kernel-contracts.js';
 import {
     componentProverRandomnessHexes,
+    suppliedOrFreshBridgeRandomness,
     suppliedOrFreshRandomnessHex,
 } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
@@ -71,7 +72,7 @@ export const createTranscriptCoreKernelLoader = (
             const deallocate = resolveNumberExport(
                 exports,
                 'sealed_lattice_deallocate',
-            ) as (pointer: number, length: number) => void;
+            );
             const transcriptCoreCommandWithLength = resolveNumberExport(
                 exports,
                 'sealed_lattice_transcript_core_command_with_length',
@@ -133,14 +134,12 @@ export const createTranscriptCoreKernelLoader = (
                         inputHex: input.inputHex,
                         chunkSize: input.chunkSize,
                     }).chunkRoot,
-                deriveProtocolDigest: (input): ProtocolDigest =>
-                    executeCommand<{ readonly protocolDigest: ProtocolDigest }>(
-                        {
-                            command: 'DeriveProtocolDigest',
-                            namespace: input.namespace,
-                            value: input.value,
-                        },
-                    ).protocolDigest,
+                deriveProtocolHash: (input): ProtocolHash =>
+                    executeCommand<{ readonly protocolHash: ProtocolHash }>({
+                        command: 'DeriveProtocolHash',
+                        namespace: input.namespace,
+                        value: input.value,
+                    }).protocolHash,
                 evaluatePlaintextComparison: (
                     input,
                 ): TranscriptCorePlaintextComparison =>
@@ -337,8 +336,6 @@ export const createTranscriptCoreKernelLoader = (
                         componentSecretStates: input.componentSecretStates,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyBallotProof: (input): BallotPrivacyKernelVerification =>
                     executeCommand<BallotPrivacyKernelVerification>({
@@ -358,8 +355,6 @@ export const createTranscriptCoreKernelLoader = (
                         statement: input.statement,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
                 verifyClaimBearingBallotPackage: (
                     input,
@@ -371,8 +366,6 @@ export const createTranscriptCoreKernelLoader = (
                             input.dynamicRosterProfileEvidence,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
                 generateAggregateDerivationProof: (
                     input,
@@ -397,11 +390,91 @@ export const createTranscriptCoreKernelLoader = (
                         countedBallotPackages: input.countedBallotPackages,
                         casualMicroRosterAcknowledged:
                             input.casualMicroRosterAcknowledged,
-                        unsafeSmallRosterAcknowledged:
-                            input.unsafeSmallRosterAcknowledged,
                     }),
-                describeBgvRnsProfile: (): BgvRnsProfileReport =>
-                    executeCommand<BgvRnsProfileReport>({
+                generateAggregateBridgeEncryption: (input) => {
+                    const proverRandomness = suppliedOrFreshBridgeRandomness(
+                        input.proverRandomnessHex,
+                        input.developmentRandomnessOverrideAcknowledged,
+                    );
+                    const encryptionRandomness =
+                        suppliedOrFreshBridgeRandomness(
+                            input.encryptionRandomnessSeedHex,
+                            input.developmentRandomnessOverrideAcknowledged,
+                        );
+
+                    return executeCommand({
+                        command: 'GenerateAggregateBridgeEncryption',
+                        aggregateSelectionPolicyHash:
+                            input.aggregateSelectionPolicyHash,
+                        aggregateDerivationComponent:
+                            input.aggregateDerivationComponent,
+                        aggregateWitness: input.aggregateWitness,
+                        bridgeWitnessPrivacyProfileHash:
+                            input.bridgeWitnessPrivacyProfileHash,
+                        heParamHash: input.heParamHash,
+                        setupPackage: input.setupPackage,
+                        proverRandomnessHex: proverRandomness.randomnessHex,
+                        proverRandomnessSource:
+                            proverRandomness.randomnessSource,
+                        encryptionRandomnessSeedHex:
+                            encryptionRandomness.randomnessHex,
+                        encryptionRandomnessSeedSource:
+                            encryptionRandomness.randomnessSource,
+                        developmentRandomnessOverrideAcknowledged:
+                            input.developmentRandomnessOverrideAcknowledged,
+                        includeCanonicalBytesHex:
+                            input.includeCanonicalBytesHex,
+                    });
+                },
+                evaluateAggregateBridgeRelation: (input) => {
+                    const proverRandomness = suppliedOrFreshBridgeRandomness(
+                        input.proverRandomnessHex,
+                        input.developmentRandomnessOverrideAcknowledged,
+                    );
+                    const encryptionRandomness =
+                        suppliedOrFreshBridgeRandomness(
+                            input.encryptionRandomnessSeedHex,
+                            input.developmentRandomnessOverrideAcknowledged,
+                        );
+
+                    return executeCommand({
+                        command: 'EvaluateAggregateBridgeRelation',
+                        aggregateSelectionPolicyHash:
+                            input.aggregateSelectionPolicyHash,
+                        aggregateDerivationComponent:
+                            input.aggregateDerivationComponent,
+                        aggregateWitness: input.aggregateWitness,
+                        bridgeEncryption: input.bridgeEncryption,
+                        bridgeWitnessPrivacyProfileHash:
+                            input.bridgeWitnessPrivacyProfileHash,
+                        heParamHash: input.heParamHash,
+                        setupPackage: input.setupPackage,
+                        proverRandomnessHex: proverRandomness.randomnessHex,
+                        proverRandomnessSource:
+                            proverRandomness.randomnessSource,
+                        encryptionRandomnessSeedHex:
+                            encryptionRandomness.randomnessHex,
+                        encryptionRandomnessSeedSource:
+                            encryptionRandomness.randomnessSource,
+                        developmentRandomnessOverrideAcknowledged:
+                            input.developmentRandomnessOverrideAcknowledged,
+                    });
+                },
+                verifyAggregateBridgeEncryption: (input) =>
+                    executeCommand({
+                        command: 'VerifyAggregateBridgeEncryption',
+                        aggregateSelectionPolicyHash:
+                            input.aggregateSelectionPolicyHash,
+                        aggregateDerivationComponent:
+                            input.aggregateDerivationComponent,
+                        bridgeEncryption: input.bridgeEncryption,
+                        bridgeWitnessPrivacyProfileHash:
+                            input.bridgeWitnessPrivacyProfileHash,
+                        heParamHash: input.heParamHash,
+                        setupPackage: input.setupPackage,
+                    }),
+                describeBgvRnsProfile: (): BgvRnsProfileDescription =>
+                    executeCommand<BgvRnsProfileDescription>({
                         command: 'DescribeBgvRnsProfile',
                     }),
                 describeBgvOperationRegistry: (): unknown =>
@@ -415,10 +488,6 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'ValidateBgvEvaluatorOperation',
                         operation: input.operation,
                     }),
-                generateBgvBackendReport: (): unknown =>
-                    executeCommand<unknown>({
-                        command: 'GenerateBgvBackendReport',
-                    }),
                 describeBgvPassiveSetupObjectModel: (): unknown =>
                     executeCommand<unknown>({
                         command: 'DescribeBgvPassiveSetupObjectModel',
@@ -427,9 +496,9 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BgvPassiveSetupPackage>({
                         command: 'GenerateBgvPassiveSetup',
                         ceremonyId: input.ceremonyId,
-                        manifestDigest: input.manifestDigest,
-                        rosterDigest: input.rosterDigest,
-                        thresholdProfileDigest: input.thresholdProfileDigest,
+                        manifestHash: input.manifestHash,
+                        rosterHash: input.rosterHash,
+                        thresholdProfileHash: input.thresholdProfileHash,
                         participants: input.participants,
                         setupSeed: input.setupSeed,
                     }),
@@ -437,13 +506,13 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BgvPassiveSetupVerification>({
                         command: 'VerifyBgvPassiveSetup',
                         setupPackage: input.setupPackage,
-                        expectedSetupPackageDigest:
-                            input.expectedSetupPackageDigest,
-                        expectedManifestDigest: input.expectedManifestDigest,
-                        expectedRosterDigest: input.expectedRosterDigest,
+                        expectedSetupPackageHash:
+                            input.expectedSetupPackageHash,
+                        expectedManifestHash: input.expectedManifestHash,
+                        expectedRosterHash: input.expectedRosterHash,
                         expectedCollectivePublicKeyRoot:
                             input.expectedCollectivePublicKeyRoot,
-                        expectedRotSetDigest: input.expectedRotSetDigest,
+                        expectedRotSetHash: input.expectedRotSetHash,
                         expectedEvaluationKeyRoot:
                             input.expectedEvaluationKeyRoot,
                     }),

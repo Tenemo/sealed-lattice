@@ -1,4 +1,4 @@
-// This file is one focused part of the split test suite.
+// This file is one targeted part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -57,12 +57,12 @@ describe('ballot privacy encoded relation vectors', () => {
         expect(miniCase.loweredStatement?.backendStatement).toMatchObject({
             backendStatementFormat: 'SparseSignedIntegerBackendStatement-v1',
             columnCount: 632,
-            digestExpandedRowCount: 9_984,
+            hashExpandedRowCount: 9_984,
             explicitRowCount: 328,
             rowCount: 10_312,
         });
         expect(
-            miniCase.loweredStatement?.backendStatement.backendStatementDigest,
+            miniCase.loweredStatement?.backendStatement.backendStatementHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
             miniCase.loweredStatement?.backendStatement.rowBatches,
@@ -93,21 +93,21 @@ describe('ballot privacy encoded relation vectors', () => {
                 expect.objectContaining({
                     coefficientModulus: '18446744069414584321',
                     componentId: 'share-commitment-component',
-                    proofLoweringStatus: 'digestExpandedRowsPending',
+                    proofLoweringStatus: 'HashExpandedRowsPending',
                     rowCount: 3_072,
                     rowKinds: ['ShareCommitmentEquation'],
                 }),
                 expect.objectContaining({
                     coefficientModulus: '12289',
                     componentId: 'receiver-encryption-component',
-                    proofLoweringStatus: 'digestExpandedRowsPending',
+                    proofLoweringStatus: 'HashExpandedRowsPending',
                     rowCount: 3_840,
                     rowKinds: ['ReceiverPayloadEncryptionEquation'],
                 }),
                 expect.objectContaining({
                     coefficientModulus: '12289',
                     componentId: 'receiver-key-binding-component',
-                    proofLoweringStatus: 'digestExpandedRowsPending',
+                    proofLoweringStatus: 'HashExpandedRowsPending',
                     rowCount: 3_072,
                     rowKinds: ['ReceiverKeyBinding'],
                     variableColumnCount: 0,
@@ -115,7 +115,7 @@ describe('ballot privacy encoded relation vectors', () => {
             ]),
         );
         expect(
-            miniCase.loweredStatement?.backendStatement.proofComponentsDigest,
+            miniCase.loweredStatement?.backendStatement.proofComponentsHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(miniCase.componentBundleStatement).toMatchObject({
             bundleCoverage: 'component-bundle-incomplete',
@@ -128,7 +128,7 @@ describe('ballot privacy encoded relation vectors', () => {
             ],
         });
         expect(
-            miniCase.componentBundleStatement?.componentBundleStatementDigest,
+            miniCase.componentBundleStatement?.componentBundleStatementHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
             miniCase.componentBundleStatement?.componentStatements.map(
@@ -161,7 +161,7 @@ describe('ballot privacy encoded relation vectors', () => {
                 .every(
                     (componentStatement) =>
                         componentStatement.proofLoweringStatus ===
-                        'digestExpandedRowsPending',
+                        'HashExpandedRowsPending',
                 ),
         ).toBe(true);
         expect(
@@ -182,11 +182,11 @@ describe('ballot privacy encoded relation vectors', () => {
         expect(
             miniCase.loweredStatement?.backendStatement.rowBatches[2],
         ).toMatchObject({
-            batchKind: 'DigestExpandedRows',
+            batchKind: 'HashExpandedRows',
             rowCount: 1_024,
             rowKind: 'ShareCommitmentEquation',
         });
-        expect(miniCase.loweredStatement?.relationStatementDigest).toMatch(
+        expect(miniCase.loweredStatement?.relationStatementHash).toMatch(
             /^[a-f0-9]{128}$/u,
         );
         expect(
@@ -306,7 +306,7 @@ describe('ballot privacy encoded relation vectors', () => {
             expectedOutcome: 'accept',
         });
         expect(explicitCommitmentCase.loweredStatementSummary).toMatchObject({
-            backendDigestExpandedRowCount: 6_912,
+            backendHashExpandedRowCount: 6_912,
             backendExplicitRowCount: 3_400,
             backendRowBatchCount: 9,
             backendRowCount: 10_312,
@@ -326,11 +326,11 @@ describe('ballot privacy encoded relation vectors', () => {
         });
         expect(
             explicitCommitmentCase.loweredStatementSummary
-                ?.relationStatementDigest,
+                ?.relationStatementHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
             explicitCommitmentCase.componentBundleSummary
-                ?.componentBundleStatementDigest,
+                ?.componentBundleStatementHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
             explicitCommitmentCase.loweredStatementSummary?.firstAlgebraicRow,
@@ -390,11 +390,11 @@ describe('ballot privacy encoded relation vectors', () => {
         );
         for (const projectionSummary of explicitCommitmentCase.componentProjectionSummaries ??
             []) {
-            expect(projectionSummary.linearStatementDigest).toMatch(
+            expect(projectionSummary.linearStatementHash).toMatch(
                 /^[a-f0-9]{128}$/u,
             );
-            expect(projectionSummary.matrixDigest).toMatch(/^[a-f0-9]{128}$/u);
-            expect(projectionSummary.targetVectorDigest).toMatch(
+            expect(projectionSummary.matrixHash).toMatch(/^[a-f0-9]{128}$/u);
+            expect(projectionSummary.targetVectorHash).toMatch(
                 /^[a-f0-9]{128}$/u,
             );
             expect(projectionSummary.ringDegree).toBe(1);

@@ -34,7 +34,7 @@
           "max": 10,
           "skippedOptionScore": 1
         },
-        "duplicateBallotPolicy": "LastValidBeforeVotingClosedCounts",
+        "duplicateBallotPolicy": "FirstValidBeforeVotingClosedCounts",
         "tiePolicy": "HigherScoreThenLowerOptionIndex"
       },
       "expectedOk": true

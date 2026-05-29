@@ -106,8 +106,8 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     }
     if serialize_bgv_object(object.object_kind, &object.components)? != bytes {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::FixtureMismatch,
-            "BGV canonical object does not reserialize byte-identically",
+            CanonicalErrorCode::InvalidFixture,
+            "BGV object is not canonical because it does not reserialize byte-identically",
         ));
     }
 
@@ -142,12 +142,12 @@ pub(crate) fn canonical_bytes_hash(canonical_bytes: &[u8]) -> String {
 }
 
 fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
-    append_string(output, &polynomial.profile_digest);
+    append_string(output, &polynomial.profile_hash);
     append_string(output, &polynomial.basis_id);
     append_varuint(output, polynomial.level as u64);
     append_varuint(output, polynomial.coefficient_count as u64);
     append_string(output, polynomial.domain.as_str());
-    append_string(output, &polynomial.layout_digest);
+    append_string(output, &polynomial.layout_hash);
     append_varuint(output, polynomial.moduli.len() as u64);
     for modulus in &polynomial.moduli {
         append_varuint(output, *modulus);
@@ -162,7 +162,7 @@ fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
 }
 
 fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolynomial> {
-    let profile_digest = reader.read_string()?;
+    let profile_hash = reader.read_string()?;
     let basis_id = reader.read_string()?;
     let level = usize::try_from(reader.read_varuint()?).map_err(|_| {
         CanonicalError::new(
@@ -188,7 +188,7 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
             "BGV polynomial domain is not supported",
         )
     })?;
-    let layout_digest = reader.read_string()?;
+    let layout_hash = reader.read_string()?;
     let modulus_count = read_bounded_count(reader, MAXIMUM_MODULUS_COUNT, "modulus")?;
     let mut moduli = Vec::with_capacity(modulus_count);
     for _ in 0..modulus_count {
@@ -223,12 +223,12 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
     }
 
     Ok(RnsPolynomial {
-        profile_digest,
+        profile_hash,
         basis_id,
         level,
         coefficient_count,
         domain,
-        layout_digest,
+        layout_hash,
         moduli,
         residues_by_modulus,
     })
@@ -318,8 +318,8 @@ mod tests {
         assert_eq!(parsed.object_kind, BgvObjectKind::Ciphertext);
         assert_eq!(parsed.components.len(), 2);
         assert_eq!(
-            parsed.components[0].layout_digest,
-            parsed.components[1].layout_digest
+            parsed.components[0].layout_hash,
+            parsed.components[1].layout_hash
         );
         assert_eq!(ciphertext_root(&canonical_bytes).len(), 128);
         assert!(serialize_bgv_object(BgvObjectKind::Ciphertext, &[left.polynomial]).is_err());
@@ -347,7 +347,7 @@ mod tests {
         append_varuint(&mut canonical_bytes, 1);
         append_string(&mut canonical_bytes, BgvObjectKind::Plaintext.as_str());
         append_varuint(&mut canonical_bytes, 1);
-        append_string(&mut canonical_bytes, "untrusted-profile-digest");
+        append_string(&mut canonical_bytes, "untrusted-profile-hash");
         append_string(&mut canonical_bytes, "untrusted-basis");
         append_varuint(&mut canonical_bytes, 0);
         append_varuint(&mut canonical_bytes, (POLYNOMIAL_DEGREE as u64) + 1);

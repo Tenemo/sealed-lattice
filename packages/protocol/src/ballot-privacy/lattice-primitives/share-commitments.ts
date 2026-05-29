@@ -1,13 +1,13 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
-    ProtocolDigest,
+    ProtocolHash,
     RefusalRecord,
     ShareCommitment,
     ShareCommitmentProfile,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import { createShareCommitmentShell } from '../objects.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     BallotPrivacyRandomnessSource,
@@ -144,10 +144,10 @@ const computeShareCommitmentVector = (
         expectedShareVectorWidth,
     );
     const messageMatrix = deriveShareCommitmentMessageMatrix(
-        shareCommitmentProfile.shareCommitmentProfileDigest,
+        shareCommitmentProfile.shareCommitmentProfileHash,
     );
     const randomnessMatrix = deriveShareCommitmentRandomnessMatrix(
-        shareCommitmentProfile.shareCommitmentProfileDigest,
+        shareCommitmentProfile.shareCommitmentProfileHash,
     );
 
     return messageMatrix.map((messageMatrixPolynomial, rowIndex) => {
@@ -190,13 +190,13 @@ const stringifyBigIntPolynomialVector = (
         polynomial.map((coefficient) => coefficient.toString()),
     );
 
-export const deriveShareCommitmentBodyDigest = (input: {
+export const deriveShareCommitmentBodyHash = (input: {
     readonly commitmentPolynomialVector: readonly (readonly string[])[];
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ShareCommitmentDigest', {
+    readonly shareCommitmentProfileHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('ShareCommitmentHash', {
         commitmentPolynomialVector: input.commitmentPolynomialVector,
-        profileDigest: input.shareCommitmentProfileDigest,
+        profileHash: input.shareCommitmentProfileHash,
     });
 
 export const createShareCommitmentPolynomialVector = (input: {
@@ -266,8 +266,8 @@ export const addShareCommitmentOpenings = (
 
 export const createShareCommitment = (input: {
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly receiverShareVector: readonly number[];
@@ -282,10 +282,10 @@ export const createShareCommitment = (input: {
             input.shareCommitmentProfile,
             {
                 ceremonyId: input.ceremonyId,
-                manifestDigest: input.manifestDigest,
+                manifestHash: input.manifestHash,
                 receiverIdentity: input.receiverIdentity,
                 receiverRosterPosition: input.receiverRosterPosition,
-                rosterDigest: input.rosterDigest,
+                rosterHash: input.rosterHash,
             },
         );
     const commitmentVector = computeShareCommitmentVector(
@@ -295,22 +295,22 @@ export const createShareCommitment = (input: {
     );
     const commitmentPolynomialVector =
         stringifyBigIntPolynomialVector(commitmentVector);
-    const commitmentBodyDigest = deriveShareCommitmentBodyDigest({
+    const commitmentBodyHash = deriveShareCommitmentBodyHash({
         commitmentPolynomialVector,
-        shareCommitmentProfileDigest:
-            input.shareCommitmentProfile.shareCommitmentProfileDigest,
+        shareCommitmentProfileHash:
+            input.shareCommitmentProfile.shareCommitmentProfileHash,
     });
     const shareCommitment = createShareCommitmentShell({
         ceremonyId: input.ceremonyId,
         commitmentPolynomialVector,
-        manifestDigest: input.manifestDigest,
-        rosterDigest: input.rosterDigest,
+        manifestHash: input.manifestHash,
+        rosterHash: input.rosterHash,
         receiverIdentity: input.receiverIdentity,
         receiverRosterPosition: input.receiverRosterPosition,
-        shareCommitmentProfileDigest:
-            input.shareCommitmentProfile.shareCommitmentProfileDigest,
+        shareCommitmentProfileHash:
+            input.shareCommitmentProfile.shareCommitmentProfileHash,
         shareVectorWidth: input.shareCommitmentProfile.shareVectorWidth,
-        commitmentBodyDigest,
+        commitmentBodyHash,
     });
 
     return {
@@ -322,8 +322,8 @@ export const createShareCommitment = (input: {
 
 export const verifyShareCommitmentWitness = (input: {
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
     readonly receiverShareVector: readonly number[];
@@ -334,25 +334,25 @@ export const verifyShareCommitmentWitness = (input: {
 }): readonly RefusalRecord[] => {
     const recomputedCommitment = createShareCommitment({
         ceremonyId: input.ceremonyId,
-        manifestDigest: input.manifestDigest,
+        manifestHash: input.manifestHash,
         opening: input.opening,
         receiverIdentity: input.receiverIdentity,
         receiverRosterPosition: input.receiverRosterPosition,
         receiverShareVector: input.receiverShareVector,
-        rosterDigest: input.rosterDigest,
+        rosterHash: input.rosterHash,
         shareCommitmentProfile: input.shareCommitmentProfile,
     });
     const refusedObjects: RefusalRecord[] = [];
 
     if (
-        recomputedCommitment.shareCommitment.shareCommitmentDigest !==
-        input.expectedShareCommitment.shareCommitmentDigest
+        recomputedCommitment.shareCommitment.shareCommitmentHash !==
+        input.expectedShareCommitment.shareCommitmentHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Share commitment witness does not open the expected commitment digest.',
-                input.expectedShareCommitment.shareCommitmentDigest,
+                'Share commitment witness does not open the expected commitment hash.',
+                input.expectedShareCommitment.shareCommitmentHash,
             ),
         );
     }
@@ -367,7 +367,7 @@ export const verifyShareCommitmentWitness = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Share commitment witness does not reproduce the expected commitment polynomial vector.',
-                input.expectedShareCommitment.shareCommitmentDigest,
+                input.expectedShareCommitment.shareCommitmentHash,
             ),
         );
     }

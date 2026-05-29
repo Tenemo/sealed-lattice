@@ -4,10 +4,10 @@ description: Set up pnpm, install Node from .nvmrc, and install dependencies
 runs:
     using: composite
     steps:
-        - uses: pnpm/action-setup@v5.0.0
+        - uses: pnpm/action-setup@b307475762933b98ed359c036b0e51f26b63b74b
           with:
               run_install: false
-        - uses: actions/setup-node@v6.3.0
+        - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
           with:
               node-version-file: .nvmrc
               cache: pnpm

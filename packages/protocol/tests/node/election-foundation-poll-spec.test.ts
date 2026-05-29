@@ -1,7 +1,7 @@
 import type { PollSpecInput } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { validatePollSpec } from '../../src/lifecycle/poll-spec';
+import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
 
 const createValidPollSpecInput = (
     overrides: Partial<PollSpecInput> = {},
@@ -36,7 +36,7 @@ describe('election foundation poll-spec validation', () => {
                     max: 10,
                     skippedOptionScore: 1,
                 },
-                duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+                duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
                 tiePolicy: 'HigherScoreThenLowerOptionIndex',
             }),
         );
@@ -49,7 +49,7 @@ describe('election foundation poll-spec validation', () => {
                     max: 10,
                     skippedOptionScore: 1,
                 },
-                duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+                duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
                 maxRosterSize: 50,
                 minRosterSize: 10,
                 rosterPolicy: 'OpenLinkPublicRoster',
@@ -76,7 +76,7 @@ describe('election foundation poll-spec validation', () => {
                     max: 10,
                     skippedOptionScore: 1,
                 },
-                duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+                duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
                 maxRosterSize: 50,
                 minRosterSize: 10,
                 rosterPolicy: 'OpenLinkPublicRoster',
@@ -202,17 +202,28 @@ describe('election foundation poll-spec validation', () => {
         );
     });
 
-    it('rejects empty and duplicate option labels by exact comparison', () => {
+    it('rejects empty and duplicate option labels after Unicode normalization', () => {
         expectErrorCodes(
             createValidPollSpecInput({
-                options: ['Alpha', '', 'Alpha', 'Alpha '],
+                options: [
+                    'Alpha',
+                    '',
+                    'Alpha',
+                    'Alpha ',
+                    'Cafe\u0301',
+                    'Caf\u00e9',
+                ],
                 topOptionCount: 1,
             }),
-            ['EmptyOptionLabel', 'DuplicateOptionLabel'],
+            [
+                'EmptyOptionLabel',
+                'DuplicateOptionLabel',
+                'DuplicateOptionLabel',
+            ],
         );
     });
 
-    it('accepts labels that differ only by trailing whitespace under exact comparison', () => {
+    it('accepts labels that differ only by trailing whitespace after normalization', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 options: ['Alpha', 'Alpha '],

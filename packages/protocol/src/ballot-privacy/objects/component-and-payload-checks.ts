@@ -7,7 +7,7 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import { collectSuppliedComponentProofStatementRefusals } from './ballot-proof-structure-checks.js';
 import type { BallotProofComponentProofVerificationInput } from './object-contracts.js';
@@ -15,24 +15,24 @@ import {
     allowedBallotProofComponentStatementFormats,
     componentProofBytesMustBeEmpty,
     componentProofStatementFormatIsExpected,
-    deriveBallotProofComponentProofBundleDigest,
-    deriveBallotProofComponentProofRecordDigest,
+    deriveBallotProofComponentProofBundleHash,
+    deriveBallotProofComponentProofRecordHash,
     deriveBallotProofComponentProofRoot,
-    deriveBallotProofEncodingProfileDigest,
-    deriveBallotProofParameterSetDigest,
-    deriveBallotProofPublicRandomnessDigest,
-    deriveProofBytesDigest,
+    deriveBallotProofEncodingProfileHash,
+    deriveBallotProofParameterSetHash,
+    deriveBallotProofPublicRandomnessHash,
+    deriveProofBytesHash,
     deriveReceiverPayloadCiphertextRoot,
-    deriveReceiverPayloadDigest,
+    deriveReceiverPayloadHash,
     hasOwnProperty,
     omitProperty,
     proofBytesHexAllowEmptyPattern,
     proofBytesHexPattern,
-    protocolDigestPattern,
+    protocolHashPattern,
     requiredBallotProofComponentIds,
     expectedComponentProofStatementFormatLabel,
 } from './object-contracts.js';
-import { digestForInvalidComponentInput } from './proof-shell-builders.js';
+import { hashForInvalidComponentInput } from './proof-shell-builders.js';
 
 function collectBallotProofComponentProofInputRefusals(input: {
     readonly ballotProof: BallotProofRecord;
@@ -40,14 +40,14 @@ function collectBallotProofComponentProofInputRefusals(input: {
     readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
 }): readonly RefusalRecord[] {
     const refusedObjects: RefusalRecord[] = [];
-    const proofRecordDigest = input.ballotProof.ballotProofRecordDigest;
+    const proofRecordHash = input.ballotProof.ballotProofRecordHash;
 
     if (input.componentProofInputs === undefined) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Full encoded-score ballot proof verification requires public proof inputs for every component proof.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
 
@@ -61,7 +61,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof component proof inputs must contain exactly the required components.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
     }
@@ -76,7 +76,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     'Ballot proof component proof inputs contain a duplicate component.',
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -98,7 +98,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof input for ${expectedComponentId} is missing.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
             continue;
@@ -108,32 +108,32 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof input for ${expectedComponentId} is not bound to the matching proof record.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
         if (
-            !protocolDigestPattern.test(
-                proofInput.componentProofStatementDigest ?? '',
+            !protocolHashPattern.test(
+                proofInput.componentProofStatementHash ?? '',
             )
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
-                    `Ballot proof component proof input for ${expectedComponentId} must be bound to a component proof statement digest.`,
-                    proofRecordDigest,
+                    `Ballot proof component proof input for ${expectedComponentId} must be bound to a component proof statement hash.`,
+                    proofRecordHash,
                 ),
             );
         }
         if (
-            proofInput.componentProofStatementDigest !==
-            componentProof.componentProofStatementDigest
+            proofInput.componentProofStatementHash !==
+            componentProof.componentProofStatementHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof statement for ${expectedComponentId} does not match the proof record.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -146,7 +146,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof statement format for ${expectedComponentId} is not supported.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -160,7 +160,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof statement format for ${expectedComponentId} must be ${expectedComponentProofStatementFormatLabel(expectedComponentId)}.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -174,8 +174,8 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 refusedObjects.push(
                     createRefusal(
                         'BallotPackageInvalid',
-                        `Ballot proof component proof bytes for ${expectedComponentId} must be empty for the public-zero witness binding check.`,
-                        proofRecordDigest,
+                        `Ballot proof component proof bytes for ${expectedComponentId} must be empty for the public binding check.`,
+                        proofRecordHash,
                     ),
                 );
             }
@@ -184,7 +184,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof bytes for ${expectedComponentId} must be non-empty lowercase hexadecimal bytes.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
             continue;
@@ -194,26 +194,25 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof bytes for ${expectedComponentId} must be lowercase hexadecimal bytes.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
             continue;
         }
-        const proofBytesDigest = deriveProofBytesDigest({
+        const proofBytesHash = deriveProofBytesHash({
             allowEmpty: proofBytesMustBeEmpty,
             proofBytesHex: proofInput.proofBytesHex,
         });
         const proofSizeBytes = proofInput.proofBytesHex.length / 2;
-        const proofEncodingProfileDigest =
-            deriveBallotProofEncodingProfileDigest({
-                proofEncoding: proofInput.proofEncoding,
-            });
-        const proofParameterSetDigest = deriveBallotProofParameterSetDigest({
+        const proofEncodingProfileHash = deriveBallotProofEncodingProfileHash({
+            proofEncoding: proofInput.proofEncoding,
+        });
+        const proofParameterSetHash = deriveBallotProofParameterSetHash({
             parameterSet: proofInput.proofParameterSet,
         });
-        const publicRandomnessDigest = (() => {
+        const publicRandomnessHash = (() => {
             try {
-                return deriveBallotProofPublicRandomnessDigest({
+                return deriveBallotProofPublicRandomnessHash({
                     publicRandomnessHex: proofInput.publicRandomnessHex,
                 });
             } catch {
@@ -226,70 +225,66 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof byte length for ${expectedComponentId} does not match the proof record.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
-        if (proofBytesDigest !== componentProof.proofBytesDigest) {
+        if (proofBytesHash !== componentProof.proofBytesHash) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
-                    `Ballot proof component proof bytes for ${expectedComponentId} do not match the proof record digest.`,
-                    proofRecordDigest,
+                    `Ballot proof component proof bytes for ${expectedComponentId} do not match the proof record hash.`,
+                    proofRecordHash,
                 ),
             );
         }
         if (
-            proofEncodingProfileDigest !==
-            componentProof.proofEncodingProfileDigest
+            proofEncodingProfileHash !== componentProof.proofEncodingProfileHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof encoding for ${expectedComponentId} does not match the proof record.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
-        if (
-            proofParameterSetDigest !== componentProof.proofParameterSetDigest
-        ) {
+        if (proofParameterSetHash !== componentProof.proofParameterSetHash) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof parameter set for ${expectedComponentId} does not match the proof record.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
-        if (publicRandomnessDigest === undefined) {
+        if (publicRandomnessHash === undefined) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component public randomness for ${expectedComponentId} must be 32 lowercase hexadecimal bytes.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         } else if (
-            publicRandomnessDigest !== componentProof.publicRandomnessDigest
+            publicRandomnessHash !== componentProof.publicRandomnessHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component public randomness for ${expectedComponentId} does not match the proof record.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
         if (
-            proofInput.statementDigest !==
-            componentProof.componentStatementDigest
+            proofInput.statementHash !== componentProof.componentStatementHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof input for ${expectedComponentId} is not bound to the component statement.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -298,35 +293,35 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof input for ${expectedComponentId} must supply its public proof statement object.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
         const expectedProofRoot = deriveBallotProofComponentProofRoot({
             componentId: expectedComponentId,
-            componentProofStatementDigest: protocolDigestPattern.test(
-                proofInput.componentProofStatementDigest ?? '',
+            componentProofStatementHash: protocolHashPattern.test(
+                proofInput.componentProofStatementHash ?? '',
             )
-                ? proofInput.componentProofStatementDigest
-                : digestForInvalidComponentInput(),
-            componentStatementDigest: componentProof.componentStatementDigest,
-            proofBytesDigest,
-            proofEncodingProfileDigest,
-            proofParameterSetDigest,
+                ? proofInput.componentProofStatementHash
+                : hashForInvalidComponentInput(),
+            componentStatementHash: componentProof.componentStatementHash,
+            proofBytesHash,
+            proofEncodingProfileHash,
+            proofParameterSetHash,
             proofStatementFormat: proofInput.proofStatementFormat,
-            publicRandomnessDigest:
-                publicRandomnessDigest ?? digestForInvalidComponentInput(),
-            statementDigest: proofInput.statementDigest,
+            publicRandomnessHash:
+                publicRandomnessHash ?? hashForInvalidComponentInput(),
+            statementHash: proofInput.statementHash,
         });
         if (
-            publicRandomnessDigest !== undefined &&
+            publicRandomnessHash !== undefined &&
             componentProof.proofRoot !== expectedProofRoot
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof root for ${expectedComponentId} does not match the supplied public proof input.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -335,7 +330,7 @@ function collectBallotProofComponentProofInputRefusals(input: {
                 componentProof,
                 expectedComponentId,
                 proofInput,
-                proofRecordDigest,
+                proofRecordHash,
             }),
         );
     }
@@ -350,19 +345,19 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
     readonly componentProofInputs?: readonly BallotProofComponentProofVerificationInput[];
 }): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const proofRecordDigest = input.ballotProof.ballotProofRecordDigest;
-    const componentProofBundleDigest =
-        input.componentProofBundle?.componentProofBundleDigest;
+    const proofRecordHash = input.ballotProof.ballotProofRecordHash;
+    const componentProofBundleHash =
+        input.componentProofBundle?.componentProofBundleHash;
 
     if (
-        input.ballotProof.componentProofBundleDigest !== undefined &&
+        input.ballotProof.componentProofBundleHash !== undefined &&
         input.componentProofBundle === undefined
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof record references a component proof bundle that was not supplied.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
 
@@ -370,13 +365,13 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
     }
     if (
         input.componentProofBundle !== undefined &&
-        input.ballotProof.componentProofBundleDigest === undefined
+        input.ballotProof.componentProofBundleHash === undefined
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Supplied component proof bundle is not bound by the ballot proof record.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
     }
@@ -393,10 +388,10 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
 
     const proofBundlePayload = omitProperty(
         input.componentProofBundle,
-        'componentProofBundleDigest',
+        'componentProofBundleHash',
     );
-    const expectedProofBundleDigest =
-        deriveBallotProofComponentProofBundleDigest(proofBundlePayload);
+    const expectedProofBundleHash =
+        deriveBallotProofComponentProofBundleHash(proofBundlePayload);
     const requiredComponentIdsMatch =
         input.componentProofBundle.requiredComponentIds.length ===
             requiredBallotProofComponentIds.length &&
@@ -411,20 +406,20 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
         input.componentProofBundle.objectVersion !== 1 ||
         input.componentProofBundle.bundleCoverage !==
             'full-encoded-score-ballot-relation' ||
-        !protocolDigestPattern.test(
-            input.componentProofBundle.componentProofBundleDigest,
+        !protocolHashPattern.test(
+            input.componentProofBundle.componentProofBundleHash,
         ) ||
-        !protocolDigestPattern.test(
-            input.componentProofBundle.componentBundleStatementDigest,
+        !protocolHashPattern.test(
+            input.componentProofBundle.componentBundleStatementHash,
         ) ||
-        !protocolDigestPattern.test(
-            input.componentProofBundle.backendStatementDigest,
+        !protocolHashPattern.test(
+            input.componentProofBundle.backendStatementHash,
         ) ||
-        !protocolDigestPattern.test(
-            input.componentProofBundle.relationStatementDigest,
+        !protocolHashPattern.test(
+            input.componentProofBundle.relationStatementHash,
         ) ||
-        !protocolDigestPattern.test(
-            input.componentProofBundle.ballotProofStatementDigest ?? '',
+        !protocolHashPattern.test(
+            input.componentProofBundle.ballotProofStatementHash ?? '',
         ) ||
         !requiredComponentIdsMatch
     ) {
@@ -432,56 +427,55 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof component proof bundle has an invalid canonical shape.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
     }
-    if (componentProofBundleDigest !== expectedProofBundleDigest) {
+    if (componentProofBundleHash !== expectedProofBundleHash) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Ballot proof component proof bundle digest does not match its canonical payload.',
-                proofRecordDigest,
+                'Ballot proof component proof bundle hash does not match its canonical payload.',
+                proofRecordHash,
             ),
         );
     }
     if (
-        input.ballotProof.componentProofBundleDigest !==
-        componentProofBundleDigest
+        input.ballotProof.componentProofBundleHash !== componentProofBundleHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof record is not bound to the supplied component proof bundle.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
     }
     if (
-        input.componentProofBundle.componentBundleStatementDigest !==
-            input.ballotProof.componentBundleStatementDigest ||
-        input.componentProofBundle.backendStatementDigest !==
-            input.ballotProof.backendStatementDigest ||
-        input.componentProofBundle.relationStatementDigest !==
-            input.ballotProof.relationStatementDigest
+        input.componentProofBundle.componentBundleStatementHash !==
+            input.ballotProof.componentBundleStatementHash ||
+        input.componentProofBundle.backendStatementHash !==
+            input.ballotProof.backendStatementHash ||
+        input.componentProofBundle.relationStatementHash !==
+            input.ballotProof.relationStatementHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof component proof bundle is not bound to the supplied proof statement roots.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
     }
     if (
-        input.componentProofBundle.ballotProofStatementDigest !==
-        input.statement.ballotProofStatementDigest
+        input.componentProofBundle.ballotProofStatementHash !==
+        input.statement.ballotProofStatementHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof component proof bundle is not bound to the supplied ballot proof statement.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
     }
@@ -493,7 +487,7 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Ballot proof component proof bundle must contain exactly the required component proofs.',
-                proofRecordDigest,
+                proofRecordHash,
             ),
         );
     }
@@ -516,7 +510,7 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     'Ballot proof component proof bundle contains a duplicate component proof.',
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -524,10 +518,10 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
 
         const componentProofPayload = omitProperty(
             componentProof,
-            'componentProofRecordDigest',
+            'componentProofRecordHash',
         );
-        const expectedComponentProofDigest =
-            deriveBallotProofComponentProofRecordDigest(componentProofPayload);
+        const expectedComponentProofHash =
+            deriveBallotProofComponentProofRecordHash(componentProofPayload);
         const proofSizeBytesIsValid =
             Number.isSafeInteger(componentProof.proofSizeBytes) &&
             (componentProofBytesMustBeEmpty(expectedComponentId)
@@ -539,34 +533,24 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
             componentProof.objectVersion !== 1 ||
             componentProof.componentId !== expectedComponentId ||
             componentProof.proofBackend !== 'LocalLinearLatticeRelation' ||
-            !protocolDigestPattern.test(
-                componentProof.componentProofRecordDigest,
+            !protocolHashPattern.test(
+                componentProof.componentProofRecordHash,
             ) ||
-            !protocolDigestPattern.test(
-                componentProof.componentStatementDigest,
+            !protocolHashPattern.test(componentProof.componentStatementHash) ||
+            !protocolHashPattern.test(componentProof.backendStatementHash) ||
+            !protocolHashPattern.test(componentProof.relationStatementHash) ||
+            !protocolHashPattern.test(componentProof.proofRoot) ||
+            !protocolHashPattern.test(componentProof.proofBytesHash) ||
+            !protocolHashPattern.test(
+                componentProof.proofEncodingProfileHash,
             ) ||
-            !protocolDigestPattern.test(
-                componentProof.backendStatementDigest,
+            !protocolHashPattern.test(componentProof.proofParameterSetHash) ||
+            !protocolHashPattern.test(componentProof.publicRandomnessHash) ||
+            !protocolHashPattern.test(
+                componentProof.componentProofStatementHash ?? '',
             ) ||
-            !protocolDigestPattern.test(
-                componentProof.relationStatementDigest,
-            ) ||
-            !protocolDigestPattern.test(componentProof.proofRoot) ||
-            !protocolDigestPattern.test(componentProof.proofBytesDigest) ||
-            !protocolDigestPattern.test(
-                componentProof.proofEncodingProfileDigest,
-            ) ||
-            !protocolDigestPattern.test(
-                componentProof.proofParameterSetDigest,
-            ) ||
-            !protocolDigestPattern.test(
-                componentProof.publicRandomnessDigest,
-            ) ||
-            !protocolDigestPattern.test(
-                componentProof.componentProofStatementDigest ?? '',
-            ) ||
-            !protocolDigestPattern.test(
-                componentProof.ballotProofStatementDigest ?? '',
+            !protocolHashPattern.test(
+                componentProof.ballotProofStatementHash ?? '',
             ) ||
             !proofSizeBytesIsValid
         ) {
@@ -574,45 +558,45 @@ const collectBallotProofComponentProofBundleRefusals = (input: {
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof for ${expectedComponentId} has an invalid canonical shape.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
         if (
-            componentProof.componentProofRecordDigest !==
-            expectedComponentProofDigest
+            componentProof.componentProofRecordHash !==
+            expectedComponentProofHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
-                    `Ballot proof component proof digest for ${expectedComponentId} does not match its canonical payload.`,
-                    proofRecordDigest,
+                    `Ballot proof component proof hash for ${expectedComponentId} does not match its canonical payload.`,
+                    proofRecordHash,
                 ),
             );
         }
         if (
-            componentProof.backendStatementDigest !==
-                input.componentProofBundle.backendStatementDigest ||
-            componentProof.relationStatementDigest !==
-                input.componentProofBundle.relationStatementDigest
+            componentProof.backendStatementHash !==
+                input.componentProofBundle.backendStatementHash ||
+            componentProof.relationStatementHash !==
+                input.componentProofBundle.relationStatementHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof for ${expectedComponentId} is not bound to the supplied relation and backend statement.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
         if (
-            componentProof.ballotProofStatementDigest !==
-            input.statement.ballotProofStatementDigest
+            componentProof.ballotProofStatementHash !==
+            input.statement.ballotProofStatementHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     `Ballot proof component proof for ${expectedComponentId} is not bound to the supplied ballot proof statement.`,
-                    proofRecordDigest,
+                    proofRecordHash,
                 ),
             );
         }
@@ -625,23 +609,22 @@ const collectReceiverPayloadStructuralRefusals = (
     payload: ReceiverPayload,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const payloadWithoutDigest = omitProperty(payload, 'receiverPayloadDigest');
+    const payloadWithoutHash = omitProperty(payload, 'receiverPayloadHash');
     const payloadWithoutRoots = omitProperty(
-        payloadWithoutDigest,
+        payloadWithoutHash,
         'receiverPayloadCiphertextRoot',
     );
     const expectedCiphertextRoot = deriveReceiverPayloadCiphertextRoot({
         ceremonyId: payload.ceremonyId,
-        ciphertextBodyDigest: payload.ciphertextBodyDigest,
-        manifestDigest: payload.manifestDigest,
-        payloadContextDigest: payload.payloadContextDigest,
-        receiverEncryptionProfileDigest:
-            payload.receiverEncryptionProfileDigest,
+        ciphertextBodyHash: payload.ciphertextBodyHash,
+        manifestHash: payload.manifestHash,
+        payloadContextHash: payload.payloadContextHash,
+        receiverEncryptionProfileHash: payload.receiverEncryptionProfileHash,
         receiverIdentity: payload.receiverIdentity,
-        receiverPublicKeyDigest: payload.receiverPublicKeyDigest,
+        receiverPublicKeyHash: payload.receiverPublicKeyHash,
         receiverRosterPosition: payload.receiverRosterPosition,
     });
-    const expectedPayloadDigest = deriveReceiverPayloadDigest({
+    const expectedPayloadHash = deriveReceiverPayloadHash({
         ...payloadWithoutRoots,
         receiverPayloadCiphertextRoot: payload.receiverPayloadCiphertextRoot,
     });
@@ -657,13 +640,13 @@ const collectReceiverPayloadStructuralRefusals = (
         payload.objectType !== 'ReceiverPayload' ||
         payload.objectVersion !== 1 ||
         payload.receiverPayloadCiphertextRoot !== expectedCiphertextRoot ||
-        payload.receiverPayloadDigest !== expectedPayloadDigest
+        payload.receiverPayloadHash !== expectedPayloadHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Receiver payload shell digest or shape is invalid.',
-                payload.receiverPayloadDigest,
+                'Receiver payload shell hash or shape is invalid.',
+                payload.receiverPayloadHash,
             ),
         );
     }
@@ -673,7 +656,7 @@ const collectReceiverPayloadStructuralRefusals = (
                 createRefusal(
                     'BallotPackageInvalid',
                     'Receiver payload shell must not expose witness material.',
-                    payload.receiverPayloadDigest,
+                    payload.receiverPayloadHash,
                 ),
             );
             break;

@@ -1,20 +1,8 @@
-import {
-    buildBallotProofComponentBundleStatement,
-    buildBallotProofComponentProofStatementPlans,
-    type BallotProofComponentProjectionWitness,
-} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
-import { lowerBallotPrivacyRelationToBackendStatement } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type {
-    BallotPrivacyLoweredLinearRelationStatement,
-    BallotPrivacyRelationBackendLoweringResult,
-    BallotPrivacyRelationBackendPublicContext,
-} from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
-import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
-
+import { mutatedMiniRelationInputs } from './case-relation-input-mutations.mjs';
 import {
     componentProjectionSummaries,
     componentProofReadinessManifests,
-    digest,
+    hash,
     explicitComponentVerificationSummaries,
     explicitReceiverEncryptionContextForRelation,
     mandatoryRelationInput,
@@ -22,19 +10,30 @@ import {
     projectionWitnessForRelationInput,
     proofReadinessSummary,
     publicContextForRoster,
-    singleOptionRelationInput,
     summarizeComponentBundle,
     summarizeStatement,
     traceDimensions,
-} from "./relation-fixtures-and-summaries.mjs";
-import { mutatedMiniRelationInputs } from "./case-relation-input-mutations.mjs";
-import type { EncodedBallotRelationVectorCase } from "./vector-case-types.mjs";
+} from './relation-fixtures-and-summaries.mjs';
+import type { EncodedBallotRelationVectorCase } from './vector-case-types.mjs';
+
+import {
+    buildBallotProofComponentBundleStatement,
+    buildBallotProofComponentProofStatementDescriptors,
+    type BallotProofComponentProjectionWitness,
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js';
+import { lowerBallotPrivacyRelationToBackendStatement } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering.js';
+import type {
+    BallotPrivacyLoweredLinearRelationStatement,
+    BallotPrivacyRelationBackendLoweringResult,
+    BallotPrivacyRelationBackendPublicContext,
+} from '#packages/protocol/src/ballot-privacy/relation-backend-lowering.js';
+import type { BallotPrivacyRelationCompilerInput } from '#packages/protocol/src/ballot-privacy/relation-compiler.js';
 
 const acceptingCase = (input: {
-    readonly baselineRelationStatementDigest?: string;
+    readonly baselineRelationStatementHash?: string;
     readonly caseName: string;
     readonly description: string;
-    readonly expectedDigestChanged?: true;
+    readonly expectedHashChanged?: true;
     readonly includeComponentProjectionSummaries?: boolean;
     readonly includeExplicitComponentVerificationSummaries?: boolean;
     readonly includeFullStatement: boolean;
@@ -50,12 +49,11 @@ const acceptingCase = (input: {
         });
     if (!result.ok) {
         throw new Error(
-            `${input.caseName} was expected to lower but refused: ${result.refusedObjects.map((refusal) => refusal.message).join("; ")}`,
+            `${input.caseName} was expected to lower but refused: ${result.refusedObjects.map((refusal) => refusal.message).join('; ')}`,
         );
     }
     const componentBundleStatement = buildBallotProofComponentBundleStatement({
-        ballotProofStatementDigest:
-            input.publicContext.ballotProofStatementDigest,
+        ballotProofStatementHash: input.publicContext.ballotProofStatementHash,
         loweredStatement: result.statement,
     });
     const proofReadinessManifests =
@@ -64,11 +62,11 @@ const acceptingCase = (input: {
                   loweredStatement: result.statement,
               })
             : undefined;
-    const componentProofStatementPlans =
+    const componentProofStatementDescriptors =
         input.includeExplicitComponentVerificationSummaries
-            ? buildBallotProofComponentProofStatementPlans({
-                  ballotProofStatementDigest:
-                      input.publicContext.ballotProofStatementDigest,
+            ? buildBallotProofComponentProofStatementDescriptors({
+                  ballotProofStatementHash:
+                      input.publicContext.ballotProofStatementHash,
                   componentBundleStatement,
                   loweredStatement: result.statement,
               })
@@ -92,7 +90,7 @@ const acceptingCase = (input: {
               })
             : undefined,
         componentProofReadinessManifests: proofReadinessManifests,
-        componentProofStatementPlans,
+        componentProofStatementDescriptors,
         explicitComponentVerificationSummaries:
             input.includeExplicitComponentVerificationSummaries
                 ? explicitComponentVerificationSummaries({
@@ -106,24 +104,23 @@ const acceptingCase = (input: {
                   })
                 : undefined,
         description: input.description,
-        expectedOutcome: "accept",
+        expectedOutcome: 'accept',
         loweredStatement: input.includeFullStatement
             ? result.statement
             : undefined,
         loweredStatementSummary: input.includeFullStatement
             ? undefined
             : summarizeStatement(result.statement),
-        mutation: input.mutation ?? "none",
+        mutation: input.mutation ?? 'none',
         proofReadinessSummary:
             proofReadinessManifests === undefined
                 ? undefined
                 : proofReadinessSummary(proofReadinessManifests),
         trace: {
-            baselineRelationStatementDigest:
-                input.baselineRelationStatementDigest,
-            expectedDigestChanged: input.expectedDigestChanged,
+            baselineRelationStatementHash: input.baselineRelationStatementHash,
+            expectedHashChanged: input.expectedHashChanged,
             ...traceDimensions(input.relationInput),
-            relationStatementDigest: result.statement.relationStatementDigest,
+            relationStatementHash: result.statement.relationStatementHash,
         },
     };
 };
@@ -148,7 +145,7 @@ const backendPreflightRejectingCase = (input: {
         });
     if (!result.ok) {
         throw new Error(
-            `${input.caseName} needs a compiler-accepted baseline but refused: ${result.refusedObjects.map((refusal) => refusal.message).join("; ")}`,
+            `${input.caseName} needs a compiler-accepted baseline but refused: ${result.refusedObjects.map((refusal) => refusal.message).join('; ')}`,
         );
     }
     const mutatedStatement = input.mutateStatement(cloneJson(result.statement));
@@ -157,29 +154,29 @@ const backendPreflightRejectingCase = (input: {
         caseName: input.caseName,
         compilerAccepted: true,
         description: input.description,
-        expectedOutcome: "reject",
+        expectedOutcome: 'reject',
         loweredStatement: mutatedStatement,
         mutation: input.mutation,
         trace: {
             ...traceDimensions(input.relationInput),
-            expectedLogicalRejectionLayer: "backend-statement-preflight",
+            expectedLogicalRejectionLayer: 'backend-statement-preflight',
         },
     };
 };
 
-const digestChangingPublicContextCases = (input: {
-    readonly baselineRelationStatementDigest: string;
+const hashChangingPublicContextCases = (input: {
+    readonly baselineRelationStatementHash: string;
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): readonly EncodedBallotRelationVectorCase[] => [
     acceptingCase({
-        baselineRelationStatementDigest: input.baselineRelationStatementDigest,
-        caseName: "wrong-share-commitment-target-changes-digest",
+        baselineRelationStatementHash: input.baselineRelationStatementHash,
+        caseName: 'wrong-share-commitment-target-changes-hash',
         description:
-            "A substituted share commitment target changes the lowered relation digest.",
-        expectedDigestChanged: true,
+            'A substituted share commitment target changes the lowered relation hash.',
+        expectedHashChanged: true,
         includeFullStatement: false,
-        mutation: "wrong-share-commitment-target",
+        mutation: 'wrong-share-commitment-target',
         publicContext: {
             ...input.publicContext,
             shareCommitments: input.publicContext.shareCommitments.map(
@@ -187,8 +184,8 @@ const digestChangingPublicContextCases = (input: {
                     shareCommitment.receiverRosterPosition === 2
                         ? {
                               ...shareCommitment,
-                              commitmentBodyDigest: digest(
-                                  "changed-share-commitment-body",
+                              commitmentBodyHash: hash(
+                                  'changed-share-commitment-body',
                               ),
                           }
                         : shareCommitment,
@@ -197,13 +194,13 @@ const digestChangingPublicContextCases = (input: {
         relationInput: input.relationInput,
     }),
     acceptingCase({
-        baselineRelationStatementDigest: input.baselineRelationStatementDigest,
-        caseName: "wrong-receiver-payload-target-changes-digest",
+        baselineRelationStatementHash: input.baselineRelationStatementHash,
+        caseName: 'wrong-receiver-payload-target-changes-hash',
         description:
-            "A substituted receiver payload ciphertext target changes the lowered relation digest.",
-        expectedDigestChanged: true,
+            'A substituted receiver payload ciphertext target changes the lowered relation hash.',
+        expectedHashChanged: true,
         includeFullStatement: false,
-        mutation: "wrong-receiver-payload-target",
+        mutation: 'wrong-receiver-payload-target',
         publicContext: {
             ...input.publicContext,
             receiverPayloads: input.publicContext.receiverPayloads.map(
@@ -211,8 +208,8 @@ const digestChangingPublicContextCases = (input: {
                     receiverPayload.receiverRosterPosition === 2
                         ? {
                               ...receiverPayload,
-                              ciphertextChunkDigest: digest(
-                                  "changed-receiver-payload-ciphertext-chunk",
+                              ciphertextChunkHash: hash(
+                                  'changed-receiver-payload-ciphertext-chunk',
                               ),
                           }
                         : receiverPayload,
@@ -221,13 +218,13 @@ const digestChangingPublicContextCases = (input: {
         relationInput: input.relationInput,
     }),
     acceptingCase({
-        baselineRelationStatementDigest: input.baselineRelationStatementDigest,
-        caseName: "wrong-receiver-key-target-changes-digest",
+        baselineRelationStatementHash: input.baselineRelationStatementHash,
+        caseName: 'wrong-receiver-key-target-changes-hash',
         description:
-            "A substituted receiver key target changes the lowered relation digest.",
-        expectedDigestChanged: true,
+            'A substituted receiver key target changes the lowered relation hash.',
+        expectedHashChanged: true,
         includeFullStatement: false,
-        mutation: "wrong-receiver-key-target",
+        mutation: 'wrong-receiver-key-target',
         publicContext: {
             ...input.publicContext,
             receiverPublicKeys: input.publicContext.receiverPublicKeys.map(
@@ -235,8 +232,8 @@ const digestChangingPublicContextCases = (input: {
                     receiverPublicKey.receiverRosterPosition === 2
                         ? {
                               ...receiverPublicKey,
-                              keyMaterialDigest: digest(
-                                  "changed-receiver-key-material",
+                              keyMaterialHash: hash(
+                                  'changed-receiver-key-material',
                               ),
                           }
                         : receiverPublicKey,
@@ -246,7 +243,7 @@ const digestChangingPublicContextCases = (input: {
     }),
 ];
 
-interface MutableBackendStatementView {
+type MutableBackendStatementView = {
     readonly proofComponents: {
         componentId: string;
     }[];
@@ -258,136 +255,136 @@ interface MutableBackendStatementView {
     }[];
     readonly variableColumns: { columnIndex: number }[];
     readonly bounds: { absoluteMaximum?: string }[];
-}
+};
 
 const backendPreflightMutationCases = (input: {
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }): readonly EncodedBallotRelationVectorCase[] => [
     backendPreflightRejectingCase({
-        caseName: "backend-matrix-row-mutation-rejects",
+        caseName: 'backend-matrix-row-mutation-rejects',
         description:
-            "A changed backend sparse matrix coefficient fails canonical preflight.",
+            'A changed backend sparse matrix coefficient fails canonical preflight.',
         mutateStatement: (statement) => {
             const backendStatement =
                 statement.backendStatement as unknown as MutableBackendStatementView;
             const firstExplicitRow = backendStatement.rowBatches[0]?.rows?.[0];
             if (firstExplicitRow === undefined) {
-                throw new Error("backend matrix mutation target is missing");
+                throw new Error('backend matrix mutation target is missing');
             }
-            firstExplicitRow.terms[0].coefficient = "2";
+            firstExplicitRow.terms[0].coefficient = '2';
 
             return statement;
         },
-        mutation: "backend-matrix-row",
+        mutation: 'backend-matrix-row',
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
     backendPreflightRejectingCase({
-        caseName: "backend-target-vector-mutation-rejects",
+        caseName: 'backend-target-vector-mutation-rejects',
         description:
-            "A changed backend target vector entry fails canonical preflight.",
+            'A changed backend target vector entry fails canonical preflight.',
         mutateStatement: (statement) => {
             const backendStatement =
                 statement.backendStatement as unknown as MutableBackendStatementView;
             const firstExplicitRow = backendStatement.rowBatches[0]?.rows?.[0];
             if (firstExplicitRow === undefined) {
-                throw new Error("backend target mutation target is missing");
+                throw new Error('backend target mutation target is missing');
             }
-            firstExplicitRow.target = "2";
+            firstExplicitRow.target = '2';
 
             return statement;
         },
-        mutation: "backend-target-vector",
+        mutation: 'backend-target-vector',
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
     backendPreflightRejectingCase({
-        caseName: "backend-bound-mutation-rejects",
-        description: "A changed backend bound fails canonical preflight.",
+        caseName: 'backend-bound-mutation-rejects',
+        description: 'A changed backend bound fails canonical preflight.',
         mutateStatement: (statement) => {
             const backendStatement =
                 statement.backendStatement as unknown as MutableBackendStatementView;
             const quotientBound = backendStatement.bounds.find((bound) =>
                 String(
                     (bound as { readonly boundName?: unknown }).boundName,
-                ).includes("shamir_quotients"),
+                ).includes('shamir_quotients'),
             );
             if (quotientBound === undefined) {
-                throw new Error("backend bound mutation target is missing");
+                throw new Error('backend bound mutation target is missing');
             }
-            quotientBound.absoluteMaximum = "1";
+            quotientBound.absoluteMaximum = '1';
 
             return statement;
         },
-        mutation: "backend-bound",
+        mutation: 'backend-bound',
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
     backendPreflightRejectingCase({
-        caseName: "backend-proof-component-mutation-rejects",
+        caseName: 'backend-proof-component-mutation-rejects',
         description:
-            "A changed backend proof-component assignment fails canonical preflight.",
+            'A changed backend proof-component assignment fails canonical preflight.',
         mutateStatement: (statement) => {
             const backendStatement =
                 statement.backendStatement as unknown as MutableBackendStatementView;
             const firstComponent = backendStatement.proofComponents[0];
             if (firstComponent === undefined) {
                 throw new Error(
-                    "backend proof component mutation target is missing",
+                    'backend proof component mutation target is missing',
                 );
             }
-            firstComponent.componentId = "receiver-key-binding-component";
+            firstComponent.componentId = 'receiver-key-binding-component';
 
             return statement;
         },
-        mutation: "backend-proof-component",
+        mutation: 'backend-proof-component',
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
     backendPreflightRejectingCase({
-        caseName: "backend-variable-order-mutation-rejects",
+        caseName: 'backend-variable-order-mutation-rejects',
         description:
-            "A changed backend variable-column order fails canonical preflight.",
+            'A changed backend variable-column order fails canonical preflight.',
         mutateStatement: (statement) => {
             const backendStatement =
                 statement.backendStatement as unknown as MutableBackendStatementView;
             if (backendStatement.variableColumns.length < 2) {
-                throw new Error("backend variable mutation target is missing");
+                throw new Error('backend variable mutation target is missing');
             }
             backendStatement.variableColumns[0].columnIndex = 1;
 
             return statement;
         },
-        mutation: "backend-variable-order",
+        mutation: 'backend-variable-order',
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
     backendPreflightRejectingCase({
-        caseName: "noncanonical-backend-coefficient-rejects",
+        caseName: 'noncanonical-backend-coefficient-rejects',
         description:
-            "A backend coefficient with a leading zero fails canonical preflight.",
+            'A backend coefficient with a leading zero fails canonical preflight.',
         mutateStatement: (statement) => {
             const backendStatement =
                 statement.backendStatement as unknown as MutableBackendStatementView;
             const firstExplicitRow = backendStatement.rowBatches[0]?.rows?.[0];
             if (firstExplicitRow === undefined) {
                 throw new Error(
-                    "backend coefficient mutation target is missing",
+                    'backend coefficient mutation target is missing',
                 );
             }
-            firstExplicitRow.terms[0].coefficient = "01";
+            firstExplicitRow.terms[0].coefficient = '01';
 
             return statement;
         },
-        mutation: "noncanonical-backend-coefficient",
+        mutation: 'noncanonical-backend-coefficient',
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
     backendPreflightRejectingCase({
-        caseName: "truncated-backend-statement-rejects",
+        caseName: 'truncated-backend-statement-rejects',
         description:
-            "A backend statement missing row batches fails canonical preflight.",
+            'A backend statement missing row batches fails canonical preflight.',
         mutateStatement: (statement) => {
             delete (
                 statement.backendStatement as unknown as {
@@ -397,7 +394,7 @@ const backendPreflightMutationCases = (input: {
 
             return statement;
         },
-        mutation: "truncated-backend-statement",
+        mutation: 'truncated-backend-statement',
         publicContext: input.publicContext,
         relationInput: input.relationInput,
     }),
@@ -423,14 +420,14 @@ const rejectingCase = (input: {
         caseName: input.caseName,
         compilerAccepted: false,
         description: input.description,
-        expectedOutcome: "reject",
+        expectedOutcome: 'reject',
         mutation: input.mutation,
         refusalMessages: result.refusedObjects.map(
             (refusal) => refusal.message,
         ),
         trace: {
             ...traceDimensions(input.relationInput),
-            expectedLogicalRejectionLayer: "relation-compiler",
+            expectedLogicalRejectionLayer: 'relation-compiler',
         },
     };
 };
@@ -438,10 +435,10 @@ const rejectingCase = (input: {
 export const buildEncodedBallotRelationVectorCases =
     (): EncodedBallotRelationVectorCase[] => {
         const miniInput = miniRelationInput();
-        const fullExplicitMiniInput = singleOptionRelationInput();
+        const fullExplicitMiniInput = miniRelationInput();
         const mandatoryInput = mandatoryRelationInput();
         const miniPublicContext = publicContextForRoster(miniInput, true);
-        const miniDigestExpandedPublicContext = publicContextForRoster(
+        const miniHashExpandedPublicContext = publicContextForRoster(
             miniInput,
             false,
         );
@@ -450,17 +447,17 @@ export const buildEncodedBallotRelationVectorCases =
             false,
         );
         const miniAcceptingCase = acceptingCase({
-            caseName: "mini-encoded-ballot-relation",
+            caseName: 'mini-encoded-ballot-relation',
             description:
-                "Mini encoded-score ballot relation with three receivers and two options.",
+                'Mini encoded-score ballot relation with three receivers and two options.',
             includeFullStatement: true,
-            publicContext: miniDigestExpandedPublicContext,
+            publicContext: miniHashExpandedPublicContext,
             relationInput: miniInput,
         });
         const miniExplicitShareCommitmentCase = acceptingCase({
-            caseName: "mini-encoded-ballot-share-commitment-explicit-relation",
+            caseName: 'mini-encoded-ballot-share-commitment-explicit-relation',
             description:
-                "Mini encoded-score ballot relation with explicit share commitment backend rows.",
+                'Mini encoded-score ballot relation with explicit share commitment backend rows.',
             includeComponentProjectionSummaries: true,
             includeFullStatement: false,
             publicContext: miniPublicContext,
@@ -469,9 +466,9 @@ export const buildEncodedBallotRelationVectorCases =
         const fullExplicitMiniContext =
             explicitReceiverEncryptionContextForRelation(fullExplicitMiniInput);
         const fullExplicitMiniCase = acceptingCase({
-            caseName: "mini-encoded-ballot-full-explicit-relation",
+            caseName: 'mini-encoded-ballot-full-explicit-relation',
             description:
-                "Mini encoded-score ballot relation with explicit share commitments, receiver ciphertext chunks, and receiver public keys for all five proof components.",
+                'Mini encoded-score ballot relation with explicit share commitments, receiver ciphertext chunks, and receiver public keys for all five proof components.',
             includeComponentProjectionSummaries: true,
             includeExplicitComponentVerificationSummaries: true,
             includeFullStatement: false,
@@ -479,27 +476,27 @@ export const buildEncodedBallotRelationVectorCases =
             publicContext: fullExplicitMiniContext.publicContext,
             relationInput: fullExplicitMiniInput,
         });
-        const miniBaselineDigest =
-            miniExplicitShareCommitmentCase.trace.relationStatementDigest ?? "";
+        const miniBaselineHash =
+            miniExplicitShareCommitmentCase.trace.relationStatementHash ?? '';
         const cases: EncodedBallotRelationVectorCase[] = [
             miniAcceptingCase,
             miniExplicitShareCommitmentCase,
             fullExplicitMiniCase,
             acceptingCase({
-                caseName: "mandatory-profile-encoded-ballot-relation",
+                caseName: 'mandatory-profile-encoded-ballot-relation',
                 description:
-                    "Mandatory encoded-score ballot relation shape with twenty receivers and twenty options.",
+                    'Mandatory encoded-score ballot relation shape with twenty receivers and twenty options.',
                 includeFullStatement: false,
                 publicContext: mandatoryPublicContext,
                 relationInput: mandatoryInput,
             }),
-            ...digestChangingPublicContextCases({
-                baselineRelationStatementDigest: miniBaselineDigest,
+            ...hashChangingPublicContextCases({
+                baselineRelationStatementHash: miniBaselineHash,
                 publicContext: miniPublicContext,
                 relationInput: miniInput,
             }),
             ...backendPreflightMutationCases({
-                publicContext: miniDigestExpandedPublicContext,
+                publicContext: miniHashExpandedPublicContext,
                 relationInput: miniInput,
             }),
             ...mutatedMiniRelationInputs(miniInput).map((mutationCase) =>

@@ -1,21 +1,21 @@
 import type {
     BallotProofComponentBundleStatement,
-    BallotProofComponentProofStatementPlan,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofComponentStatement,
-} from "#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js";
-import type { BallotPrivacyLoweredLinearRelationStatement } from "#packages/protocol/src/ballot-privacy/relation-backend-lowering.js";
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement.js';
+import type { BallotPrivacyLoweredLinearRelationStatement } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering.js';
 
-export interface EncodedBallotRelationVectorCase {
+export type EncodedBallotRelationVectorCase = {
     readonly caseName: string;
     readonly description: string;
     readonly mutation: string;
-    readonly expectedOutcome: "accept" | "reject";
+    readonly expectedOutcome: 'accept' | 'reject';
     readonly compilerAccepted: boolean;
     readonly componentProjectionSummaries?: readonly {
         readonly coefficientModulus: string;
         readonly componentId: string;
-        readonly linearStatementDigest: string;
-        readonly matrixDigest: string;
+        readonly linearStatementHash: string;
+        readonly matrixHash: string;
         readonly parameterProfileId: string;
         readonly projectionCoverage: string;
         readonly ringDegree: number;
@@ -23,7 +23,7 @@ export interface EncodedBallotRelationVectorCase {
         readonly sourceRowBatchNames: readonly string[];
         readonly statementColumns: number;
         readonly statementRows: number;
-        readonly targetVectorDigest: string;
+        readonly targetVectorHash: string;
         readonly witnessL2BoundSquared: string;
     }[];
     readonly componentProofReadinessManifests?: readonly {
@@ -31,29 +31,29 @@ export interface EncodedBallotRelationVectorCase {
         readonly componentId: string;
         readonly denseCoefficientCount: string | null;
         readonly denseMatrixOracleStatus:
-            | "available-for-small-field-component"
-            | "blocked-pending-sparse-proof-statement"
-            | "not-applicable-for-structured-component"
-            | "not-applicable-for-public-zero-witness-component";
-        readonly objectType: "BallotProofComponentProofReadinessManifest";
+            | 'available-for-small-field-component'
+            | 'blocked-pending-sparse-proof-statement'
+            | 'not-applicable-for-structured-component'
+            | 'not-applicable-for-public-binding-check-component';
+        readonly objectType: 'BallotProofComponentProofReadinessManifest';
         readonly objectVersion: 1;
         readonly proofLoweringStatus: string;
         readonly proofStatementFormat:
-            | "dense-polynomial-matrix-linear-proof-v1"
-            | "sparse-polynomial-matrix-linear-proof-v1"
-            | "structured-module-sis-share-commitment-v1"
-            | "structured-module-lwe-linear-proof-v1"
-            | "public-zero-witness-binding-check-v1";
+            | 'dense-polynomial-matrix-linear-proof-v1'
+            | 'sparse-polynomial-matrix-linear-proof-v1'
+            | 'structured-module-sis-share-commitment-v1'
+            | 'structured-module-lwe-linear-proof-v1'
+            | 'public-binding-check-only-v1';
         readonly recommendedSourceRingDegree: number | null;
         readonly rowBatchNames: readonly string[];
         readonly rowCount: number;
         readonly variableColumnCount: number;
     }[];
-    readonly componentProofStatementPlans?: readonly BallotProofComponentProofStatementPlan[];
+    readonly componentProofStatementDescriptors?: readonly BallotProofComponentProofStatementDescriptor[];
     readonly proofReadinessSummary?: {
         readonly denseMatrixOracleComponentCount: number;
         readonly fullComponentProofBytesAvailable: false;
-        readonly publicZeroWitnessComponentCount: number;
+        readonly publicBindingCheckComponentCount: number;
         readonly sparseOrStructuredComponentCount: number;
         readonly totalComponentCount: number;
     };
@@ -61,12 +61,12 @@ export interface EncodedBallotRelationVectorCase {
         readonly checkedRowBatchNames: readonly string[];
         readonly componentId: string;
         readonly rowCount: number;
-        readonly verificationStatus: "explicitRowsSatisfied";
+        readonly verificationStatus: 'explicitRowsSatisfied';
     }[];
     readonly componentBundleStatement?: BallotProofComponentBundleStatement;
     readonly componentBundleSummary?: {
         readonly bundleCoverage: string;
-        readonly componentBundleStatementDigest: string;
+        readonly componentBundleStatementHash: string;
         readonly componentCount: number;
         readonly explicitComponentCount: number;
         readonly firstComponentStatement: BallotProofComponentStatement;
@@ -78,12 +78,12 @@ export interface EncodedBallotRelationVectorCase {
     readonly loweredStatementSummary?: {
         readonly algebraicRowCount: number;
         readonly backendColumnCount: number;
-        readonly backendDigestExpandedRowCount: number;
+        readonly backendHashExpandedRowCount: number;
         readonly backendExplicitRowCount: number;
         readonly backendProofComponentCount: number;
         readonly backendRowBatchCount: number;
         readonly backendRowCount: number;
-        readonly backendStatementDigest: string;
+        readonly backendStatementHash: string;
         readonly backendStatementFormat: string;
         readonly boundCount: number;
         readonly encodedCoordinateCount: number;
@@ -99,7 +99,7 @@ export interface EncodedBallotRelationVectorCase {
         readonly lastLinearRow: unknown;
         readonly linearRowCount: number;
         readonly optionCount: number;
-        readonly relationStatementDigest: string;
+        readonly relationStatementHash: string;
         readonly relationStatementFormat: string;
         readonly rosterSize: number;
         readonly shareVectorWidth: number;
@@ -108,14 +108,14 @@ export interface EncodedBallotRelationVectorCase {
     readonly refusalMessages?: readonly string[];
     readonly trace: {
         readonly expectedLogicalRejectionLayer?:
-            | "relation-compiler"
-            | "backend-statement-preflight";
+            | 'relation-compiler'
+            | 'backend-statement-preflight';
         readonly optionCount: number;
         readonly rosterSize: number;
         readonly pvssThreshold: number;
         readonly shareVectorWidth: number;
-        readonly relationStatementDigest?: string;
-        readonly baselineRelationStatementDigest?: string;
-        readonly expectedDigestChanged?: true;
+        readonly relationStatementHash?: string;
+        readonly baselineRelationStatementHash?: string;
+        readonly expectedHashChanged?: true;
     };
-}
+};

@@ -1,4 +1,4 @@
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 import {
     ballotPrivacyEncodedCoordinatesPerOption,
     ballotPrivacyScoreBucketCount,
@@ -14,8 +14,8 @@ import type {
     VariableRegistry,
 } from './backend-contracts.js';
 import {
-    digestExpandedReceiverEncryptionNoiseVariableName,
-    digestExpandedReceiverEncryptionRandomnessVariableName,
+    hashExpandedReceiverEncryptionNoiseVariableName,
+    hashExpandedReceiverEncryptionRandomnessVariableName,
     receiverEncryptionFirstNoiseVariableName,
     receiverEncryptionModuleDegree,
     receiverEncryptionRandomnessVariableName,
@@ -275,25 +275,25 @@ const addReceiverEncryptionSecondNoiseVariable = (
         variableRole: 'ReceiverEncryptionSecondNoise',
     }).variableName;
 
-const addDigestExpandedReceiverEncryptionRandomnessVariable = (
+const addHashExpandedReceiverEncryptionRandomnessVariable = (
     registry: VariableRegistry,
     receiverRosterPosition: number,
 ): string =>
     registry.add({
         receiverRosterPosition,
-        variableName: digestExpandedReceiverEncryptionRandomnessVariableName(
+        variableName: hashExpandedReceiverEncryptionRandomnessVariableName(
             receiverRosterPosition,
         ),
         variableRole: 'ReceiverEncryptionRandomness',
     }).variableName;
 
-const addDigestExpandedReceiverEncryptionNoiseVariable = (
+const addHashExpandedReceiverEncryptionNoiseVariable = (
     registry: VariableRegistry,
     receiverRosterPosition: number,
 ): string =>
     registry.add({
         receiverRosterPosition,
-        variableName: digestExpandedReceiverEncryptionNoiseVariableName(
+        variableName: hashExpandedReceiverEncryptionNoiseVariableName(
             receiverRosterPosition,
         ),
         variableRole: 'ReceiverEncryptionNoise',
@@ -671,8 +671,8 @@ export {
     addReceiverEncryptionRandomnessVariable,
     addReceiverEncryptionFirstNoiseVariable,
     addReceiverEncryptionSecondNoiseVariable,
-    addDigestExpandedReceiverEncryptionRandomnessVariable,
-    addDigestExpandedReceiverEncryptionNoiseVariable,
+    addHashExpandedReceiverEncryptionRandomnessVariable,
+    addHashExpandedReceiverEncryptionNoiseVariable,
     buildMembershipRows,
     buildShamirRows,
     buildReceiverPayloadPlaintextBindingRows,

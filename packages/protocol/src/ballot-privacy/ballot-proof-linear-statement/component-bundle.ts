@@ -2,7 +2,7 @@ import type {
     BallotProofComponentId,
     BallotProofComponentProofBundle,
     BallotProofComponentProofRecord,
-    ProtocolDigest,
+    ProtocolHash,
 } from '@sealed-lattice/types';
 
 import {
@@ -14,13 +14,13 @@ import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js
 
 import {
     denseCoefficientCountForComponentProofStatement,
-    proofBytesAvailabilityForStatementFormat,
+    proofBackendRequirementForStatementFormat,
     proofStatementFormatForComponent,
     proofSystemRingDegreeForComponentProofStatement,
     rowBatchTermCount,
     sourceRingDegreeForComponentProofStatement,
     structuredReceiverEncryptionWitnessTermCounts,
-} from './component-proof-plan-policy.js';
+} from './component-proof-descriptor-policy.js';
 import {
     buildComponentStatement,
     rowBatchesForComponent,
@@ -32,7 +32,7 @@ import type {
     BallotProofComponentProjectionWitness,
     BallotProofComponentProofBundlePayload,
     BallotProofComponentProofRecordPayload,
-    BallotProofComponentProofStatementPlan,
+    BallotProofComponentProofStatementDescriptor,
     BallotProofComponentStatement,
     BallotProofExplicitComponentId,
     DensePolynomialMatrix,
@@ -40,19 +40,17 @@ import type {
 } from './statement-contracts.js';
 import {
     linearProofRelation,
-    positiveModulo,
     positiveModuloBigInt,
-    receiverEncryptionModulus,
     receiverOpeningRandomnessBitLength,
     receiverPayloadOpeningEncodingOffset,
     receiverShareRepresentativeBitLength,
 } from './statement-contracts.js';
 import {
-    deriveComponentBundleStatementDigest,
-    deriveComponentProofBundleDigest,
-    deriveComponentProofRecordDigest,
-    deriveComponentProofStatementDigest,
-} from './statement-digests.js';
+    deriveComponentBundleStatementHash,
+    deriveComponentProofBundleHash,
+    deriveComponentProofRecordHash,
+    deriveComponentProofStatementHash,
+} from './statement-hashes.js';
 import {
     centeredFieldRepresentative,
     componentById,
@@ -83,7 +81,7 @@ const resolveBundleCoverage = (
 };
 
 export const buildBallotProofComponentBundleStatement = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
 }): BallotProofComponentBundleStatement => {
     const statementComponentById = new Map(
@@ -99,8 +97,8 @@ export const buildBallotProofComponentBundleStatement = (input: {
                 ? []
                 : [
                       buildComponentStatement({
-                          ballotProofStatementDigest:
-                              input.ballotProofStatementDigest,
+                          ballotProofStatementHash:
+                              input.ballotProofStatementHash,
                           component,
                           loweredStatement: input.loweredStatement,
                       }),
@@ -109,36 +107,36 @@ export const buildBallotProofComponentBundleStatement = (input: {
     );
     const statementPayload: Omit<
         BallotProofComponentBundleStatement,
-        'componentBundleStatementDigest'
+        'componentBundleStatementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         bundleCoverage: resolveBundleCoverage(componentStatements),
         componentStatements,
         objectType: 'BallotProofComponentBundleStatement',
         objectVersion: 1,
         relationLabel: 'BallotPrivacyPvssRelation',
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
         requiredComponentIds: ballotPrivacyBackendProofComponentOrder,
     };
 
     return {
         ...statementPayload,
-        componentBundleStatementDigest:
-            deriveComponentBundleStatementDigest(statementPayload),
+        componentBundleStatementHash:
+            deriveComponentBundleStatementHash(statementPayload),
     };
 };
 
-const buildBallotProofComponentProofStatementPlan = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+const buildBallotProofComponentProofStatementDescriptor = (input: {
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentStatement: BallotProofComponentStatement;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
-}): BallotProofComponentProofStatementPlan => {
+}): BallotProofComponentProofStatementDescriptor => {
     const component = componentById({
         componentId: input.componentStatement.componentId,
         loweredStatement: input.loweredStatement,
@@ -193,41 +191,40 @@ const buildBallotProofComponentProofStatementPlan = (input: {
                   .toString()
             : null;
     const statementPayload: Omit<
-        BallotProofComponentProofStatementPlan,
-        'componentProofStatementDigest'
+        BallotProofComponentProofStatementDescriptor,
+        'componentProofStatementHash'
     > = {
-        backendStatementDigest:
-            input.loweredStatement.backendStatement.backendStatementDigest,
-        ...(input.ballotProofStatementDigest === undefined
+        backendStatementHash:
+            input.loweredStatement.backendStatement.backendStatementHash,
+        ...(input.ballotProofStatementHash === undefined
             ? {}
             : {
-                  ballotProofStatementDigest: input.ballotProofStatementDigest,
+                  ballotProofStatementHash: input.ballotProofStatementHash,
               }),
         coefficientModulus: component.coefficientModulus,
         componentId: component.componentId,
-        componentStatementDigest:
-            input.componentStatement.componentStatementDigest,
+        componentStatementHash: input.componentStatement.componentStatementHash,
         denseCoefficientCount: denseCoefficientCountForComponentProofStatement({
             rowCount: component.rowCount,
             sourceRingDegree,
             variableColumnCount: component.variableColumnCount,
         }),
-        matrixDigest: input.componentStatement.matrixDigest,
-        objectType: 'BallotProofComponentProofStatementPlan',
+        matrixHash: input.componentStatement.matrixHash,
+        objectType: 'BallotProofComponentProofStatementDescriptor',
         objectVersion: 1,
-        proofBytesAvailability:
-            proofBytesAvailabilityForStatementFormat(proofStatementFormat),
+        proofBackendRequirement:
+            proofBackendRequirementForStatementFormat(proofStatementFormat),
         proofLoweringStatus: component.proofLoweringStatus,
         proofStatementFormat,
         proofSystemRingDegree: proofSystemRingDegreeForComponentProofStatement(
             component.componentId,
         ),
         relation: linearProofRelation,
-        relationStatementDigest: input.loweredStatement.relationStatementDigest,
-        rowBatchMatrixDigests: input.componentStatement.rowBatchMatrixDigests,
+        relationStatementHash: input.loweredStatement.relationStatementHash,
+        rowBatchMatrixHashes: input.componentStatement.rowBatchMatrixHashes,
         rowBatchNames: component.rowBatchNames,
-        rowBatchTargetVectorDigests:
-            input.componentStatement.rowBatchTargetVectorDigests,
+        rowBatchTargetVectorHashes:
+            input.componentStatement.rowBatchTargetVectorHashes,
         rowBatchTermCounts,
         rowCount: component.rowCount,
         sparseTermCount,
@@ -247,38 +244,38 @@ const buildBallotProofComponentProofStatementPlan = (input: {
                   )
                 : null,
         structuredWitnessTermCount,
-        targetVectorDigest: input.componentStatement.targetVectorDigest,
+        targetVectorHash: input.componentStatement.targetVectorHash,
         variableColumnCount: component.variableColumnCount,
         variableColumnIndices: component.variableColumnIndices,
     };
 
     return {
         ...statementPayload,
-        componentProofStatementDigest:
-            deriveComponentProofStatementDigest(statementPayload),
+        componentProofStatementHash:
+            deriveComponentProofStatementHash(statementPayload),
     };
 };
 
-export const buildBallotProofComponentProofStatementPlans = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+export const buildBallotProofComponentProofStatementDescriptors = (input: {
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly componentBundleStatement: BallotProofComponentBundleStatement;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
-}): readonly BallotProofComponentProofStatementPlan[] => {
+}): readonly BallotProofComponentProofStatementDescriptor[] => {
     if (
-        input.componentBundleStatement.backendStatementDigest !==
-            input.loweredStatement.backendStatement.backendStatementDigest ||
-        input.componentBundleStatement.relationStatementDigest !==
-            input.loweredStatement.relationStatementDigest
+        input.componentBundleStatement.backendStatementHash !==
+            input.loweredStatement.backendStatement.backendStatementHash ||
+        input.componentBundleStatement.relationStatementHash !==
+            input.loweredStatement.relationStatementHash
     ) {
         throw new Error(
-            'Component proof statement plans require a bundle statement bound to the lowered relation.',
+            'Component proof statement descriptors require a bundle statement bound to the lowered relation.',
         );
     }
 
     return input.componentBundleStatement.componentStatements.map(
         (componentStatement) =>
-            buildBallotProofComponentProofStatementPlan({
-                ballotProofStatementDigest: input.ballotProofStatementDigest,
+            buildBallotProofComponentProofStatementDescriptor({
+                ballotProofStatementHash: input.ballotProofStatementHash,
                 componentStatement,
                 loweredStatement: input.loweredStatement,
             }),
@@ -286,41 +283,41 @@ export const buildBallotProofComponentProofStatementPlans = (input: {
 };
 
 export const createBallotProofComponentProofRecord = (input: {
-    readonly backendStatementDigest: ProtocolDigest;
-    readonly ballotProofStatementDigest: ProtocolDigest;
+    readonly backendStatementHash: ProtocolHash;
+    readonly ballotProofStatementHash: ProtocolHash;
     readonly componentId: BallotProofComponentId;
-    readonly componentProofStatementDigest: ProtocolDigest;
-    readonly componentStatementDigest: ProtocolDigest;
-    readonly proofBytesDigest: ProtocolDigest;
-    readonly proofEncodingProfileDigest: ProtocolDigest;
-    readonly proofParameterSetDigest: ProtocolDigest;
-    readonly proofRoot: ProtocolDigest;
+    readonly componentProofStatementHash: ProtocolHash;
+    readonly componentStatementHash: ProtocolHash;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofEncodingProfileHash: ProtocolHash;
+    readonly proofParameterSetHash: ProtocolHash;
+    readonly proofRoot: ProtocolHash;
     readonly proofSizeBytes: number;
-    readonly publicRandomnessDigest: ProtocolDigest;
-    readonly relationStatementDigest: ProtocolDigest;
+    readonly publicRandomnessHash: ProtocolHash;
+    readonly relationStatementHash: ProtocolHash;
 }): BallotProofComponentProofRecord => {
     const proofRecordPayload: BallotProofComponentProofRecordPayload = {
-        backendStatementDigest: input.backendStatementDigest,
-        ballotProofStatementDigest: input.ballotProofStatementDigest,
+        backendStatementHash: input.backendStatementHash,
+        ballotProofStatementHash: input.ballotProofStatementHash,
         componentId: input.componentId,
-        componentProofStatementDigest: input.componentProofStatementDigest,
-        componentStatementDigest: input.componentStatementDigest,
+        componentProofStatementHash: input.componentProofStatementHash,
+        componentStatementHash: input.componentStatementHash,
         objectType: 'BallotProofComponentProofRecord',
         objectVersion: 1,
         proofBackend: 'LocalLinearLatticeRelation',
-        proofBytesDigest: input.proofBytesDigest,
-        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
-        proofParameterSetDigest: input.proofParameterSetDigest,
+        proofBytesHash: input.proofBytesHash,
+        proofEncodingProfileHash: input.proofEncodingProfileHash,
+        proofParameterSetHash: input.proofParameterSetHash,
         proofRoot: input.proofRoot,
         proofSizeBytes: input.proofSizeBytes,
-        publicRandomnessDigest: input.publicRandomnessDigest,
-        relationStatementDigest: input.relationStatementDigest,
+        publicRandomnessHash: input.publicRandomnessHash,
+        relationStatementHash: input.relationStatementHash,
     };
 
     return {
         ...proofRecordPayload,
-        componentProofRecordDigest:
-            deriveComponentProofRecordDigest(proofRecordPayload),
+        componentProofRecordHash:
+            deriveComponentProofRecordHash(proofRecordPayload),
     };
 };
 
@@ -336,35 +333,33 @@ export const createBallotProofComponentProofBundle = (input: {
             'Component proof bundles require full encoded-score ballot relation coverage.',
         );
     }
-    if (
-        input.componentBundleStatement.ballotProofStatementDigest === undefined
-    ) {
+    if (input.componentBundleStatement.ballotProofStatementHash === undefined) {
         throw new Error(
-            'Component proof bundles require a ballot proof statement digest.',
+            'Component proof bundles require a ballot proof statement hash.',
         );
     }
 
     const proofBundlePayload: BallotProofComponentProofBundlePayload = {
-        backendStatementDigest:
-            input.componentBundleStatement.backendStatementDigest,
-        ballotProofStatementDigest:
-            input.componentBundleStatement.ballotProofStatementDigest,
+        backendStatementHash:
+            input.componentBundleStatement.backendStatementHash,
+        ballotProofStatementHash:
+            input.componentBundleStatement.ballotProofStatementHash,
         bundleCoverage: input.componentBundleStatement.bundleCoverage,
-        componentBundleStatementDigest:
-            input.componentBundleStatement.componentBundleStatementDigest,
+        componentBundleStatementHash:
+            input.componentBundleStatement.componentBundleStatementHash,
         componentProofs: input.componentProofs,
         objectType: 'BallotProofComponentProofBundle',
         objectVersion: 1,
-        relationStatementDigest:
-            input.componentBundleStatement.relationStatementDigest,
-        requiredComponentIds: input.componentBundleStatement
-            .requiredComponentIds as readonly BallotProofComponentId[],
+        relationStatementHash:
+            input.componentBundleStatement.relationStatementHash,
+        requiredComponentIds:
+            input.componentBundleStatement.requiredComponentIds,
     };
 
     return {
         ...proofBundlePayload,
-        componentProofBundleDigest:
-            deriveComponentProofBundleDigest(proofBundlePayload),
+        componentProofBundleHash:
+            deriveComponentProofBundleHash(proofBundlePayload),
     };
 };
 
@@ -529,16 +524,6 @@ const numberPolynomialCoefficient = (input: {
     return coefficient;
 };
 
-const addModularProduct = (input: {
-    readonly coefficient: number;
-    readonly currentValue: number;
-    readonly witness: number;
-}): number =>
-    positiveModulo(
-        input.currentValue + input.coefficient * input.witness,
-        receiverEncryptionModulus,
-    );
-
 export {
     assertProjectionSatisfiesRows,
     validateSourceRingDegree,
@@ -547,5 +532,4 @@ export {
     receiverPayloadPlaintextBits,
     numberVectorCoefficient,
     numberPolynomialCoefficient,
-    addModularProduct,
 };

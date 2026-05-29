@@ -2,7 +2,7 @@ use crate::{
     bgv::{
         base_conversion::lift_plaintext_coefficients_to_basis,
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, layout_digest},
+        profile::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, layout_hash},
         rns::RnsPolynomial,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -37,7 +37,7 @@ pub(crate) fn encode_batch_plaintext_slots(
         &coefficients_mod_plaintext,
         BgvBasisKind::Data,
         target_level,
-        layout_digest()?,
+        layout_hash()?,
     )?;
 
     Ok(EncodedBatchPlaintext {
@@ -61,6 +61,18 @@ pub(crate) fn decode_batch_plaintext_polynomial(
         .iter()
         .map(|coefficient| coefficient % PLAINTEXT_MODULUS)
         .collect::<Vec<_>>();
+    for (limb_index, limb) in polynomial.residues_by_modulus.iter().enumerate().skip(1) {
+        for (coefficient_index, coefficient) in limb.iter().enumerate() {
+            if coefficient % PLAINTEXT_MODULUS != coefficients_mod_plaintext[coefficient_index] {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!(
+                        "BGV plaintext limb {limb_index} coefficient {coefficient_index} is not a consistent plaintext lift",
+                    ),
+                ));
+            }
+        }
+    }
 
     forward_negacyclic_ntt(&coefficients_mod_plaintext, PLAINTEXT_MODULUS)
 }
@@ -103,5 +115,17 @@ mod tests {
         assert!(encode_batch_plaintext_slots(&[65_537], 0).is_err());
         assert!(encode_batch_plaintext_slots(&vec![0_u64; POLYNOMIAL_DEGREE + 1], 0).is_err());
         assert!(encode_batch_plaintext_slots(&[0], DATA_PRIMES.len()).is_err());
+    }
+
+    #[test]
+    fn decoder_rejects_inconsistent_plaintext_lift_limbs() {
+        let encoded = encode_batch_plaintext_slots(&[1, 2, 3], 1).expect("encode");
+        let mut mutated_polynomial = encoded.polynomial;
+        mutated_polynomial.residues_by_modulus[1][17] += 1;
+
+        let error = decode_batch_plaintext_polynomial(&mutated_polynomial)
+            .expect_err("inconsistent lift should reject");
+
+        assert!(error.message.contains("consistent plaintext lift"));
     }
 }

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-    pinSdkKernelDigestInLoaderSource,
+    pinKernelHashInLoaderSource,
     resolveOutputFilePath,
 } from '#tools/ci/build-wasm-kernel';
 
@@ -34,37 +34,49 @@ describe('WASM kernel build helpers', () => {
         ).toThrow('--out must resolve inside the repository');
     });
 
-    it('pins the built SDK loader digest from a generated build artifact', () => {
+    it('pins the built SDK loader hash from a generated build artifact', () => {
         const sourceText = [
             'const transcriptCoreKernelUrl = new URL("./sealed-lattice-kernel.wasm", import.meta.url);',
             'const packagedTranscriptCoreKernelNormalizedSha256Hex = undefined;',
             'export const loadTranscriptCoreKernel = createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, { expectedKernelSha256Hex: packagedTranscriptCoreKernelNormalizedSha256Hex });',
         ].join('\n');
-        const digest = 'a'.repeat(64);
+        const hash = 'a'.repeat(64);
 
-        expect(pinSdkKernelDigestInLoaderSource(sourceText, digest)).toContain(
-            `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${digest}';`,
+        expect(pinKernelHashInLoaderSource(sourceText, hash)).toContain(
+            [
+                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
+                `    '${hash}';`,
+            ].join('\n'),
         );
     });
 
-    it('updates an already pinned SDK loader digest and rejects missing assignments', () => {
-        const oldDigest = 'b'.repeat(64);
-        const newDigest = 'c'.repeat(64);
-        const sourceText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${oldDigest}';`;
+    it('updates an already pinned SDK loader hash and rejects missing assignments', () => {
+        const oldHash = 'b'.repeat(64);
+        const newHash = 'c'.repeat(64);
+        const sourceText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${oldHash}';`;
 
-        expect(pinSdkKernelDigestInLoaderSource(sourceText, newDigest)).toBe(
-            `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${newDigest}';`,
+        expect(pinKernelHashInLoaderSource(sourceText, newHash)).toBe(
+            [
+                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
+                `    '${newHash}';`,
+            ].join('\n'),
+        );
+        expect(pinKernelHashInLoaderSource(sourceText, oldHash)).toBe(
+            [
+                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
+                `    '${oldHash}';`,
+            ].join('\n'),
         );
         expect(() =>
-            pinSdkKernelDigestInLoaderSource(
+            pinKernelHashInLoaderSource(
                 'const unrelated = undefined;',
-                newDigest,
+                newHash,
             ),
         ).toThrow(
-            'Cannot pin the transcript-core kernel digest because packages/sdk/dist/kernel.js does not contain the expected digest assignment.',
+            'Cannot pin the transcript-core kernel hash because the loader file does not contain the expected hash assignment.',
         );
         expect(() =>
-            pinSdkKernelDigestInLoaderSource(sourceText, 'not-a-digest'),
-        ).toThrow('Cannot pin an invalid transcript-core kernel digest');
+            pinKernelHashInLoaderSource(sourceText, 'not-a-hash'),
+        ).toThrow('Cannot pin an invalid transcript-core kernel hash');
     });
 });

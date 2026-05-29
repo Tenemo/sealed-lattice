@@ -10,7 +10,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
     coefficients: &[u64],
     target_basis_kind: BgvBasisKind,
     target_level: usize,
-    layout_digest: String,
+    layout_hash: String,
 ) -> CanonicalResult<RnsPolynomial> {
     if coefficients
         .iter()
@@ -42,7 +42,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
     RnsPolynomial::coefficient_domain(
         target_basis_kind,
         target_level,
-        layout_digest,
+        layout_hash,
         residues_by_modulus,
     )
 }
@@ -92,28 +92,24 @@ pub(crate) fn convert_plaintext_lifted_basis(
             .collect::<Vec<_>>(),
         target_basis_kind,
         target_level,
-        source.layout_digest.clone(),
+        source.layout_hash.clone(),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{convert_plaintext_lifted_basis, lift_plaintext_coefficients_to_basis};
-    use crate::bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_digest};
+    use crate::bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_hash};
 
     #[test]
     fn base_conversion_lifts_plaintext_coefficients_to_selected_bases() {
         let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
         coefficients[0] = 65_536;
         coefficients[1] = 1;
-        let layout_digest = layout_digest().expect("layout digest");
-        let source = lift_plaintext_coefficients_to_basis(
-            &coefficients,
-            BgvBasisKind::Data,
-            0,
-            layout_digest,
-        )
-        .expect("data basis object");
+        let layout_hash = layout_hash().expect("layout hash");
+        let source =
+            lift_plaintext_coefficients_to_basis(&coefficients, BgvBasisKind::Data, 0, layout_hash)
+                .expect("data basis object");
         let converted = convert_plaintext_lifted_basis(&source, BgvBasisKind::Extended, 1)
             .expect("extended basis conversion");
 
@@ -129,7 +125,7 @@ mod tests {
             &coefficients,
             BgvBasisKind::Data,
             1,
-            layout_digest().expect("layout digest"),
+            layout_hash().expect("layout hash"),
         )
         .expect("data basis object");
         source.residues_by_modulus[1][0] = 8;
@@ -144,7 +140,7 @@ mod tests {
             &coefficients,
             BgvBasisKind::Data,
             1,
-            layout_digest().expect("layout digest"),
+            layout_hash().expect("layout hash"),
         )
         .expect("data basis object");
         source.residues_by_modulus[1][0] = 7 + 65_537;

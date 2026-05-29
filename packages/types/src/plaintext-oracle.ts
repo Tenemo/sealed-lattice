@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from './protocol-digest.js';
+import type { ProtocolHash } from './protocol-hash.js';
 
 /** Canonical element of `GF(65537)`, represented as an integer in `0..65536`. */
 export type FieldElement = number;
@@ -34,7 +34,7 @@ export type InterpolationCoefficientReport = {
     readonly coefficients: readonly LagrangeCoefficient[];
     readonly contributorRosterPositions: readonly number[];
     readonly maxCenteredAbsCoefficient: number;
-    readonly reportDigest: ProtocolDigest;
+    readonly reportHash: ProtocolHash;
     readonly rosterSize: number;
     readonly threshold: number;
 };
@@ -48,7 +48,7 @@ export type WorstCaseInterpolationCoefficientReport = {
     readonly maxCenteredL1CoefficientSum: number;
     readonly maxCenteredL1ContributorRosterPositions: readonly number[];
     readonly maxCenteredL1Coefficients: readonly LagrangeCoefficient[];
-    readonly reportDigest: ProtocolDigest;
+    readonly reportHash: ProtocolHash;
     readonly rosterSize: number;
     readonly threshold: number;
 };
@@ -73,8 +73,8 @@ export type PlaintextTally = {
     readonly maximumRosterSize: number;
     readonly normalizedBallots: readonly NormalizedPlaintextScoreBallot[];
     readonly optionTallies: readonly number[];
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly tallyDigest: ProtocolDigest;
+    readonly pollSpecHash: ProtocolHash;
+    readonly tallyHash: ProtocolHash;
     readonly tallyFieldElements: readonly FieldElement[];
 };
 
@@ -88,7 +88,7 @@ export type PlaintextTopKRankingEntry = {
 
 /** Comparator polynomials over the bounded tally-difference domain. */
 export type ComparatorPolynomialSet = {
-    readonly comparatorDigest: ProtocolDigest;
+    readonly comparatorHash: ProtocolHash;
     readonly domainMaximum: number;
     readonly domainMinimum: number;
     readonly equalCoefficients: readonly FieldElement[];
@@ -102,10 +102,10 @@ export type SparseTopKTargetLayoutId = 'WinnerRankTopK-v1';
 /** Plain sparse target expected from the later homomorphic top-k evaluator. */
 export type SparseTopKTarget = {
     readonly forbiddenSemanticSlots: readonly FieldElement[];
-    readonly layoutDigest: ProtocolDigest;
+    readonly layoutHash: ProtocolHash;
     readonly layoutId: SparseTopKTargetLayoutId;
     readonly optionCount: number;
-    readonly targetDigest: ProtocolDigest;
+    readonly targetHash: ProtocolHash;
     readonly targetIdSlots: readonly FieldElement[];
     readonly targetOrderSlots: readonly FieldElement[];
     readonly topOptionCount: number;
@@ -122,7 +122,7 @@ export type DecodedSparseTopKSelection = {
 export type PlaintextTopKOracle = {
     readonly comparatorDomainMaximum: number;
     readonly comparatorDomainMinimum: number;
-    readonly oracleDigest: ProtocolDigest;
+    readonly oracleHash: ProtocolHash;
     readonly ranking: readonly PlaintextTopKRankingEntry[];
     readonly sparseTarget: SparseTopKTarget;
     readonly tally: PlaintextTally;

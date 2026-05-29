@@ -1,5 +1,5 @@
 import type {
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverEncryptionPublicKey,
     ReceiverPayload,
     ShareCommitment,
@@ -27,13 +27,13 @@ export type ReceiverPayloadPlaintextWitness = {
     readonly receiverShareVector: readonly number[];
     readonly shareCommitmentOpening: ShareCommitmentOpeningWitness;
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly voterIdentityDigest: ProtocolDigest;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly voterIdentityHash: ProtocolHash;
     readonly receiverIdentity: string;
     readonly receiverRosterPosition: number;
-    readonly ballotPackageContextDigest: ProtocolDigest;
+    readonly ballotPackageContextHash: ProtocolHash;
 };
 
 export type ReceiverEncryptionSecretState = {
@@ -42,7 +42,7 @@ export type ReceiverEncryptionSecretState = {
 };
 
 export type ReceiverEncryptionPublicKeyMaterial = {
-    readonly publicMatrixSeedDigest: ProtocolDigest;
+    readonly publicMatrixSeedHash: ProtocolHash;
     readonly publicKeyVector: readonly (readonly number[])[];
 };
 

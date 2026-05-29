@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     InclusionProof,
@@ -8,42 +8,42 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    deriveBoardEntryMerklePath,
-    deriveBoardEntryDigest,
-    deriveBoardHeadDigest,
-    deriveBoardRootDigest,
-    deriveInclusionProofDigest,
-} from '../../src/board/index';
-import {
-    deriveTargetFinalityCheckpointDigest,
-    deriveTargetFinalityRecordDigest,
-    deriveTargetProposalDigest,
-    deriveWitnessCheckpointDigest,
-} from '../../src/finality/index';
-
-import {
-    boardPolicyDigest,
-    boardPublicKeyDigest,
+    boardPolicyHash,
+    boardPublicKeyHash,
     ceremonyId,
     createKeyFixture,
     createSignature,
-    defaultThresholdProfileDigest,
-    defaultTopKEvaluationRecordDigest,
+    defaultThresholdProfileHash,
+    defaultTopKEvaluationRecordHash,
     manifestOpaqueBindings,
-    targetFinalityPolicyDigest,
+    targetFinalityPolicyHash,
     witnessIdentities,
-    witnessPolicyDigest,
-    witnessPublicKeyDigests,
+    witnessPolicyHash,
+    witnessPublicKeyHashes,
 } from './election-foundation-fixture-constants';
+
+import {
+    deriveBoardEntryMerklePath,
+    deriveBoardEntryHash,
+    deriveBoardHeadHash,
+    deriveBoardRootHash,
+    deriveInclusionProofHash,
+} from '#packages/protocol/src/board/index';
+import {
+    deriveTargetFinalityCheckpointHash,
+    deriveTargetFinalityRecordHash,
+    deriveTargetProposalHash,
+    deriveWitnessCheckpointHash,
+} from '#packages/protocol/src/finality/index';
 
 export const createBoardHead = (
     boardSequence: number,
-    previousHeadDigest: string | null,
+    previousHeadHash: string | null,
     branchName = 'main',
-    boardEntryDigests?: readonly string[],
+    boardEntryHashes?: readonly string[],
 ): SignedBoardHead => {
-    const resolvedBoardEntryDigests = boardEntryDigests ?? [
-        deriveProtocolDigest('BoardEntryDigest', {
+    const resolvedBoardEntryHashes = boardEntryHashes ?? [
+        deriveProtocolHash('BoardEntryHash', {
             branchName,
             marker: 'empty-board-head',
             boardSequence,
@@ -52,31 +52,31 @@ export const createBoardHead = (
     const unsignedHead: SignedBoardHead = {
         objectType: 'BoardHead',
         objectVersion: 1,
-        headDigest: '',
+        headHash: '',
         ceremonyId,
         boardSequence,
-        boardRoot: deriveBoardRootDigest(resolvedBoardEntryDigests),
-        previousHeadDigest,
-        boardPolicyDigest,
+        boardRoot: deriveBoardRootHash(resolvedBoardEntryHashes),
+        previousHeadHash,
+        boardPolicyHash,
         signature: createSignature(
             'BoardHead',
             'Board',
             'board',
-            boardPublicKeyDigest,
+            boardPublicKeyHash,
             'placeholder',
         ),
     };
-    const headDigest = deriveBoardHeadDigest(unsignedHead);
+    const headHash = deriveBoardHeadHash(unsignedHead);
 
     return {
         ...unsignedHead,
-        headDigest,
+        headHash,
         signature: createSignature(
             'BoardHead',
             'Board',
             'board',
-            boardPublicKeyDigest,
-            headDigest,
+            boardPublicKeyHash,
+            headHash,
         ),
     };
 };
@@ -84,52 +84,52 @@ export const createBoardHead = (
 export const createInclusionProof = (
     head: SignedBoardHead,
     includedObjectType: InclusionProof['includedObjectType'],
-    includedObjectDigest: string,
+    includedObjectHash: string,
     boardPosition = 0,
-    boardEntryDigests?: readonly string[],
+    boardEntryHashes?: readonly string[],
 ): InclusionProof => {
-    const boardEntryDigest = deriveBoardEntryDigest({
+    const boardEntryHash = deriveBoardEntryHash({
         boardPosition,
-        includedObjectDigest,
+        includedObjectHash,
         includedObjectType,
     });
-    const resolvedBoardEntryDigests =
-        boardEntryDigests ??
+    const resolvedBoardEntryHashes =
+        boardEntryHashes ??
         Array.from({ length: boardPosition + 1 }, (_, index) =>
             index === boardPosition
-                ? boardEntryDigest
-                : deriveProtocolDigest('BoardEntryDigest', {
+                ? boardEntryHash
+                : deriveProtocolHash('BoardEntryHash', {
                       filler: index,
-                      headDigest: head.headDigest,
+                      headHash: head.headHash,
                   }),
         );
     const payload = {
-        boardHeadDigest: head.headDigest,
+        boardHeadHash: head.headHash,
         boardSequence: head.boardSequence,
         boardPosition,
         includedObjectType,
-        includedObjectDigest,
-        boardEntryDigest,
-        boardRoot: deriveBoardRootDigest(resolvedBoardEntryDigests),
-        boardEntryCount: resolvedBoardEntryDigests.length,
+        includedObjectHash,
+        boardEntryHash,
+        boardRoot: deriveBoardRootHash(resolvedBoardEntryHashes),
+        boardEntryCount: resolvedBoardEntryHashes.length,
         boardEntryMerklePath: deriveBoardEntryMerklePath(
-            resolvedBoardEntryDigests,
+            resolvedBoardEntryHashes,
             boardPosition,
         ),
     };
 
     return {
         ...payload,
-        inclusionProofDigest: deriveInclusionProofDigest(payload),
+        inclusionProofHash: deriveInclusionProofHash(payload),
     };
 };
 
 export const createBoardHeadWithObjects = (
     boardSequence: number,
-    previousHeadDigest: string | null,
+    previousHeadHash: string | null,
     objects: readonly {
         readonly objectType: InclusionProof['includedObjectType'];
-        readonly objectDigest: string;
+        readonly objectHash: string;
         readonly boardPosition: number;
     }[],
     branchName = 'main',
@@ -141,7 +141,7 @@ export const createBoardHeadWithObjects = (
         0,
         ...objects.map((object) => object.boardPosition),
     );
-    const boardEntryDigests = Array.from(
+    const boardEntryHashes = Array.from(
         { length: maximumBoardPosition + 1 },
         (_, boardPosition) => {
             const object = objects.find(
@@ -149,31 +149,31 @@ export const createBoardHeadWithObjects = (
             );
 
             return object === undefined
-                ? deriveProtocolDigest('BoardEntryDigest', {
+                ? deriveProtocolHash('BoardEntryHash', {
                       filler: boardPosition,
                       branchName,
                       boardSequence,
                   })
-                : deriveBoardEntryDigest({
+                : deriveBoardEntryHash({
                       boardPosition: object.boardPosition,
-                      includedObjectDigest: object.objectDigest,
+                      includedObjectHash: object.objectHash,
                       includedObjectType: object.objectType,
                   });
         },
     );
     const head = createBoardHead(
         boardSequence,
-        previousHeadDigest,
+        previousHeadHash,
         branchName,
-        boardEntryDigests,
+        boardEntryHashes,
     );
     const inclusionProofs = objects.map((object) =>
         createInclusionProof(
             head,
             object.objectType,
-            object.objectDigest,
+            object.objectHash,
             object.boardPosition,
-            boardEntryDigests,
+            boardEntryHashes,
         ),
     );
 
@@ -182,17 +182,17 @@ export const createBoardHeadWithObjects = (
 
 export const createTargetProposalHead = (
     boardSequence: number,
-    previousHeadDigest: string | null,
+    previousHeadHash: string | null,
     branchName = 'main',
-    topKEvaluationRecordDigest = defaultTopKEvaluationRecordDigest,
+    topKEvaluationRecordHash = defaultTopKEvaluationRecordHash,
 ): SignedBoardHead =>
     createBoardHeadWithObjects(
         boardSequence,
-        previousHeadDigest,
+        previousHeadHash,
         [
             {
                 objectType: 'TopKEvaluationRecord',
-                objectDigest: topKEvaluationRecordDigest,
+                objectHash: topKEvaluationRecordHash,
                 boardPosition: 0,
             },
         ],
@@ -201,20 +201,20 @@ export const createTargetProposalHead = (
 
 export const createWitnessCheckpoint = (
     witnessIdentity: string,
-    finalizedBoardHeadDigest: string,
-    targetProposalDigest = deriveProtocolDigest('TargetProposalDigest', {
-        finalizedBoardHeadDigest,
+    finalizedBoardHeadHash: string,
+    targetProposalHash = deriveProtocolHash('TargetProposalHash', {
+        finalizedBoardHeadHash,
         witnessIdentity,
     }),
-    targetFinalityCheckpointDigest = deriveProtocolDigest(
-        'TargetFinalityCheckpointDigest',
+    targetFinalityCheckpointHash = deriveProtocolHash(
+        'TargetFinalityCheckpointHash',
         {
-            finalizedBoardHeadDigest,
-            targetProposalDigest,
+            finalizedBoardHeadHash,
+            targetProposalHash,
             witnessIdentity,
         },
     ),
-    electionManifestDigest: string | null = null,
+    electionManifestHash: string | null = null,
     overrides: Partial<WitnessCheckpoint> = {},
 ): WitnessCheckpoint => {
     const checkpointPayload = {
@@ -222,29 +222,29 @@ export const createWitnessCheckpoint = (
         objectVersion: 1,
         ceremonyId,
         targetFinalityScope: 'target',
-        targetProposalDigest,
-        targetFinalityCheckpointDigest,
-        witnessPolicyDigest,
-        targetFinalityPolicyDigest,
+        targetProposalHash,
+        targetFinalityCheckpointHash,
+        witnessPolicyHash,
+        targetFinalityPolicyHash,
         witnessIdentity,
         ...overrides,
-    } satisfies Omit<WitnessCheckpoint, 'checkpointDigest' | 'signature'>;
-    const checkpointDigest = deriveWitnessCheckpointDigest(checkpointPayload);
+    } satisfies Omit<WitnessCheckpoint, 'checkpointHash' | 'signature'>;
+    const checkpointHash = deriveWitnessCheckpointHash(checkpointPayload);
 
     return {
         ...checkpointPayload,
-        checkpointDigest,
+        checkpointHash,
         signature: createSignature(
             'WitnessCheckpoint',
             'Witness',
             witnessIdentity,
-            witnessPublicKeyDigests[witnessIdentity] ??
+            witnessPublicKeyHashes[witnessIdentity] ??
                 createKeyFixture(`unknown-witness:${witnessIdentity}`)
-                    .publicKeyDigest,
-            checkpointDigest,
+                    .publicKeyHash,
+            checkpointHash,
             {
-                boardHeadDigest: finalizedBoardHeadDigest,
-                manifestDigest: electionManifestDigest,
+                boardHeadHash: finalizedBoardHeadHash,
+                manifestHash: electionManifestHash,
             },
         ),
     };
@@ -252,71 +252,74 @@ export const createWitnessCheckpoint = (
 
 export const createTargetFinalityRecord = (
     finalizedHead: SignedBoardHead,
-    topKEvaluationRecordDigest = defaultTopKEvaluationRecordDigest,
+    topKEvaluationRecordHash = defaultTopKEvaluationRecordHash,
     witnessCount = 5,
 ): TargetFinalityRecord => {
     const proposalPayload = {
         ceremonyId,
-        electionManifestDigest: deriveProtocolDigest('ElectionManifestDigest', {
+        electionManifestHash: deriveProtocolHash('ElectionManifestHash', {
             ceremonyId,
             marker: 'default-manifest',
         }),
-        thresholdProfileDigest: defaultThresholdProfileDigest,
-        evaluationContextDigest: deriveProtocolDigest(
-            'EvaluationContextDigest',
-            { ceremonyId, marker: 'top-k-evaluation' },
-        ),
-        topKEvaluationRecordDigest,
-        topKCiphertextDigest: deriveProtocolDigest('CiphertextRoot', {
+        thresholdProfileHash: defaultThresholdProfileHash,
+        evaluationContextHash: deriveProtocolHash('EvaluationContextHash', {
+            ceremonyId,
+            marker: 'top-k-evaluation',
+        }),
+        topKEvaluationRecordHash,
+        topKCiphertextHash: deriveProtocolHash('CiphertextRoot', {
             ceremonyId,
             marker: 'c-top-k',
         }),
-        publicSlotMaskDigest: deriveProtocolDigest('PublicSlotMaskDigest', {
-            ceremonyId,
-            marker: 'top-k-mask',
+        publicSlotMaskHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: {
+                ceremonyId,
+                marker: 'top-k-mask',
+            },
+            purpose: 'fixture-public-slot-mask-v1',
         }),
-        targetCiphertextDigest: deriveProtocolDigest('CiphertextRoot', {
+        targetCiphertextHash: deriveProtocolHash('CiphertextRoot', {
             ceremonyId,
             marker: 'c-target',
         }),
-        targetLayoutDigest: deriveProtocolDigest('TargetLayoutDigest', {
+        targetLayoutHash: deriveProtocolHash('TargetLayoutHash', {
             layout: 'WinnerRankTopK-v1',
         }),
-        evaluationProofProfileDigest:
-            manifestOpaqueBindings.evaluationProofProfileDigest,
-        targetFinalityPolicyDigest,
+        evaluationProofProfileHash:
+            manifestOpaqueBindings.evaluationProofProfileHash,
+        targetFinalityPolicyHash,
     };
-    const targetProposalDigest = deriveTargetProposalDigest(proposalPayload);
+    const targetProposalHash = deriveTargetProposalHash(proposalPayload);
     const targetFinalityCheckpointPayload = {
         ...proposalPayload,
-        targetProposalDigest,
+        targetProposalHash,
         objectType: 'TargetFinalityCheckpoint',
         objectVersion: 1,
-        boardPolicyDigest,
-        finalizedBoardHeadDigest: finalizedHead.headDigest,
-        witnessPolicyDigest,
+        boardPolicyHash,
+        finalizedBoardHeadHash: finalizedHead.headHash,
+        witnessPolicyHash,
     } as const;
-    const targetFinalityCheckpointDigest = deriveTargetFinalityCheckpointDigest(
+    const targetFinalityCheckpointHash = deriveTargetFinalityCheckpointHash(
         targetFinalityCheckpointPayload,
     );
     const targetFinalityCheckpoint = {
         ...targetFinalityCheckpointPayload,
-        targetFinalityCheckpointDigest,
+        targetFinalityCheckpointHash,
     };
     const inclusionProof = createInclusionProof(
         finalizedHead,
         'TopKEvaluationRecord',
-        topKEvaluationRecordDigest,
+        topKEvaluationRecordHash,
     );
     const witnessCheckpoints = witnessIdentities
         .slice(0, witnessCount)
         .map((witnessIdentity) =>
             createWitnessCheckpoint(
                 witnessIdentity,
-                finalizedHead.headDigest,
-                targetProposalDigest,
-                targetFinalityCheckpointDigest,
-                proposalPayload.electionManifestDigest,
+                finalizedHead.headHash,
+                targetProposalHash,
+                targetFinalityCheckpointHash,
+                proposalPayload.electionManifestHash,
             ),
         );
     const payload = {
@@ -324,17 +327,17 @@ export const createTargetFinalityRecord = (
         objectVersion: 1,
         ceremonyId,
         targetFinalityScope: 'target',
-        targetProposalDigest,
+        targetProposalHash,
         targetFinalityCheckpoint,
-        witnessPolicyDigest,
-        targetFinalityPolicyDigest,
+        witnessPolicyHash,
+        targetFinalityPolicyHash,
         inclusionProof,
         witnessCheckpoints,
-    } satisfies Omit<TargetFinalityRecord, 'targetFinalityRecordDigest'>;
+    } satisfies Omit<TargetFinalityRecord, 'targetFinalityRecordHash'>;
 
     return {
         ...payload,
-        targetFinalityRecordDigest: deriveTargetFinalityRecordDigest(payload),
+        targetFinalityRecordHash: deriveTargetFinalityRecordHash(payload),
     };
 };
 
@@ -342,7 +345,7 @@ export const createBoardEvidence = (
     heads: readonly SignedBoardHead[],
 ): BoardConsistencyInput => ({
     ceremonyId,
-    boardPolicyDigest,
+    boardPolicyHash,
     signedBoardHeads: heads,
-    expectedBoardPublicKeyDigest: boardPublicKeyDigest,
+    expectedBoardPublicKeyHash: boardPublicKeyHash,
 });

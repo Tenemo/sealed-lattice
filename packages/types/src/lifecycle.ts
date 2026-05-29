@@ -1,15 +1,17 @@
-import type { ProtocolDigest } from './protocol-digest.js';
+import type { ProtocolHash } from './protocol-hash.js';
 import type { MheSecurityClosure } from './transcript-core.js';
 
 /** Result claim labels used after decryption and verification complete. */
-export type ResultClaimLabel = 'fullyVerified';
+export type ResultClaimLabel =
+    | 'fullyVerified'
+    | 'resultLocallyReplayedAuditable';
 
 /** Evaluation proof state represented in lifecycle labels. */
 export type EvaluationProofMode =
     | 'evaluationProofPending'
     | 'evaluationProofVerified'
-    | 'rejectedEvaluationProof'
-    | 'rejectedEvaluationProofProfile';
+    | 'evaluationProofRejected'
+    | 'evaluationProofProfileRejected';
 
 /** Backend corruption model used when deriving threshold profiles. */
 export type HeBackendCorruptionModel =
@@ -19,7 +21,7 @@ export type HeBackendCorruptionModel =
     | {
           readonly kind: 'CertifiedCustom';
           readonly backendCorruptionBound: number;
-          readonly certificateDigest: string;
+          readonly certificateHash: string;
       };
 
 /** How target-bound share selection filters invalid decryption shares. */
@@ -34,9 +36,9 @@ export type DecryptionShareSelectionRule =
 /** Certified target-bound decryption share-selection profile. */
 export type TargetBoundShareSelectionProfile = {
     readonly profileId: string;
-    readonly certificateDigest: string;
+    readonly certificateHash: string;
     readonly cpadProfileId: string;
-    readonly targetBasisDigest: ProtocolDigest;
+    readonly targetBasisHash: ProtocolHash;
     readonly decryptionShareQuorum: number;
     readonly minimumSharesForInterpolation: number;
     readonly minimumArrivalsForRobustDecode: number;
@@ -49,10 +51,8 @@ export type ThresholdProfileInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
     readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
-    readonly dynamicRosterProfileCertificateDigest?: ProtocolDigest;
+    readonly dynamicRosterProfileCertificateHash?: ProtocolHash;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
-    readonly unsafeMicroRosterAcknowledged?: boolean;
 };
 
 /** Roster profile classification for the derived threshold parameters. */
@@ -82,7 +82,7 @@ export type ThresholdProfile = {
     readonly rosterProfileKind: RosterProfileKind;
     readonly claimBoundary: ThresholdProfileClaimBoundary;
     readonly claimBearing: boolean;
-    readonly dynamicRosterProfileCertificateDigest: ProtocolDigest | null;
+    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
     readonly structuralCorruptionBound: number;
     readonly backendCorruptionBound: number;
     readonly privacyCorruptionBound: number;
@@ -108,7 +108,9 @@ export type ScoreDomain = {
 };
 
 /** Duplicate ballot policy currently supported by the public facade. */
-export type DuplicateBallotPolicy = 'LastValidBeforeVotingClosedCounts';
+export type DuplicateBallotPolicy =
+    | 'FirstValidBeforeVotingClosedCounts'
+    | 'LastValidBeforeVotingClosedCounts';
 
 /** Tie-breaking policy currently supported by the public facade. */
 export type TiePolicy = 'HigherScoreThenLowerOptionIndex';
@@ -161,16 +163,16 @@ export type PollSpec = {
 export type FrozenRosterProfile = {
     readonly objectType: 'FrozenRosterProfile';
     readonly objectVersion: 1;
-    readonly thresholdProfileDigest: ProtocolDigest;
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly pollSpecHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
     readonly rosterSize: number;
     readonly rosterPolicy: RosterPolicy;
     readonly thresholdProfileFamily: ThresholdProfileFamily;
     readonly smallRosterPolicy: SmallRosterPolicy;
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
-    readonly dynamicRosterProfileCertificateDigest: ProtocolDigest | null;
+    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
     readonly thresholdProfile: ThresholdProfile;
 };
 
@@ -236,52 +238,51 @@ export type LifecycleState =
 
 /** Primary non-failure status label shown for lifecycle progress. */
 export type PrimaryStatusLabel =
+    | 'aggregateBridgeVerified'
+    | 'aggregateReady'
+    | 'ballotSubmitted'
+    | 'cpadProfileVerified'
+    | 'evaluationProofVerified'
+    | 'forkDetected'
+    | 'outsideClaim'
     | 'pending'
     | 'rosterFrozen'
-    | 'ballotSubmitted'
     | 'targetAccepted'
-    | 'evaluationProofVerified'
-    | 'cpadProfileVerified'
-    | 'fullyVerified'
-    | 'forkDetected'
-    | 'outsideClaim';
+    | 'topKEvaluated'
+    | 'fullyVerified';
 
 /** Failure status label shown when transcript or profile checks cannot proceed. */
 export type FailureStatusLabel =
-    | 'boardForkSuspected'
+    | 'aggregateThresholdNotReached'
     | 'boardEvidencePublished'
+    | 'boardForkSuspected'
     | 'forkDetected'
-    | 'witnessEquivocationEvidence'
-    | 'missingTargetFinality'
-    | 'setupIncomplete'
-    | 'turnoutFloorNotReached'
     | 'missingAggregateContributions'
     | 'missingDecryptionShares'
+    | 'missingTargetFinality'
+    | 'outsideMeasuredRuntimeProfile'
+    | 'rejectedBoardFinalityProfile'
+    | 'rejectedBridgeBenchmarkReport'
     | 'rejectedBridgeProof'
-    | 'rejectedEvaluationProof'
-    | 'rejectedEvaluationProofProfile'
-    | 'rejectedTarget'
+    | 'setupIncomplete'
+    | 'turnoutFloorNotReached'
     | 'unsupportedBackendProfile'
     | 'unsupportedBgvProfile'
     | 'unsupportedKllpsCpadProfile'
-    | 'rejectedEvaluationKeySizeProfile'
-    | 'outsideMeasuredRuntimeProfile'
-    | 'rejectedLocalReplayDiagnostic'
-    | 'rejectedBridgeBenchmarkReport'
-    | 'rejectedBoardFinalityProfile';
+    | 'witnessEquivocationEvidence';
 
 /** Mode or caveat status label attached to lifecycle outputs. */
 export type ModeStatusLabel =
+    | 'activeMaliciousClosure'
     | 'casualMicroRoster'
-    | 'developmentIntegration'
     | 'evaluationProofClosure'
     | 'kllpsCpadClosure'
-    | 'activeMaliciousClosure'
-    | 'measuredRuntimeProfile'
-    | 'longRunningCryptographicCheck'
+    | 'localReplayFailed'
     | 'localReplayMatched'
     | 'localReplayUnavailable'
-    | 'localReplayFailed';
+    | 'longRunningCryptographicCheck'
+    | 'measuredRuntimeProfile'
+    | 'passiveMhePrototype';
 
 /** Allowed lifecycle transition edge. */
 export type LifecycleTransition = {
@@ -301,7 +302,6 @@ export type LifecycleLabelInput = {
     readonly evaluationLocallyReplayed?: boolean;
     readonly localReplayDiagnosticVerified?: boolean;
     readonly localReplayUnavailable?: boolean;
-    readonly aggregateInputsBridgeVerified?: boolean;
     readonly witnessEquivocationEvidence?: boolean;
     readonly targetFinalityNotReached?: boolean;
     readonly bridgeProofRejected?: boolean;
@@ -315,6 +315,7 @@ export type LifecycleLabelInput = {
     readonly outsideMeasuredRuntimeProfile?: boolean;
     readonly measuredRuntimeProfile?: boolean;
     readonly longRunningCryptographicCheck?: boolean;
+    readonly runtimeClaimGatePassed?: boolean;
     readonly bridgeBenchmarkReportPresent?: boolean;
     readonly bridgeProverCertificatePresent?: boolean;
     readonly evaluationProofCertificatePresent?: boolean;
@@ -325,7 +326,6 @@ export type LifecycleLabelInput = {
     readonly kllpsCpadClosureApplied?: boolean;
     readonly activeMaliciousClosureApplied?: boolean;
     readonly decodedResultLayoutVerified?: boolean;
-    readonly runtimeClaimGatePassed?: boolean;
 };
 
 /** Derived lifecycle labels for device-facing status presentation. */
@@ -349,6 +349,7 @@ export type ProtocolAction =
     | 'SubmitVote'
     | 'CloseVoting'
     | 'DeriveAggregateContribution'
+    | 'CreateBridgeProof'
     | 'VerifyBridgeProof'
     | 'VerifyTranscript'
     | 'VerifyEvaluationProof'
@@ -378,8 +379,8 @@ export type CapabilityContext = {
     readonly lifecycleState: LifecycleState;
     readonly thresholdProfile: ThresholdProfile;
     readonly pollSpecValid: boolean;
-    readonly finalRosterDigest?: ProtocolDigest;
-    readonly frozenRosterProfileDigest?: ProtocolDigest;
+    readonly finalRosterHash?: ProtocolHash;
+    readonly frozenRosterProfileHash?: ProtocolHash;
     readonly receiverKeyCoverageComplete?: boolean;
     readonly trusteeSetupComplete?: boolean;
     readonly ballotProofProfileFrozen?: boolean;
@@ -387,8 +388,8 @@ export type CapabilityContext = {
     readonly targetOutputLayoutFrozen?: boolean;
     readonly kllpsCpadProfileReferencePresent?: boolean;
     readonly localRosterAccepted?: boolean;
-    readonly rosterExternalAcceptanceDigest?: ProtocolDigest;
-    readonly actionContextRosterExternalAcceptanceDigest?: ProtocolDigest | null;
+    readonly rosterExternalAcceptanceHash?: ProtocolHash;
+    readonly actionContextRosterExternalAcceptanceHash?: ProtocolHash | null;
     readonly setupCompleteCount?: number;
     readonly turnoutCount?: number;
     readonly decryptionShareCount?: number;
@@ -397,7 +398,9 @@ export type CapabilityContext = {
     readonly evaluationProofVerified?: boolean;
     readonly cpadProfileVerified?: boolean;
     readonly localReplaySucceeded?: boolean;
+    readonly browserSupported?: boolean;
     readonly runtimeProfileSupported?: boolean;
+    readonly storageQuotaSufficient?: boolean;
     readonly bridgeBenchmarkReportPresent?: boolean;
     readonly bridgeProverCertificatePresent?: boolean;
     readonly evaluationProofCertificatePresent?: boolean;
@@ -405,7 +408,7 @@ export type CapabilityContext = {
     readonly kllpsCpadCertificatePresent?: boolean;
     readonly thresholdDecryptionCertificatePresent?: boolean;
     readonly evaluationProofClosureApplied?: boolean;
-    readonly kllpsCpadClosureApplied?: boolean;
+    readonly cpadClosureApplied?: boolean;
     readonly activeMaliciousClosureApplied?: boolean;
     readonly recoveryState?: RecoveryState;
 };
@@ -417,24 +420,32 @@ export type RefusalReason =
     | 'PollSpecInvalid'
     | 'ProfileNotClaimBearing'
     | 'LocalRosterNotAccepted'
-    | 'RosterExternalAcceptanceDigestMissing'
-    | 'RosterExternalAcceptanceDigestMismatch'
+    | 'RosterExternalAcceptanceHashMissing'
+    | 'RosterExternalAcceptanceHashMismatch'
     | 'setupIncomplete'
+    | 'SetupIncomplete'
     | 'turnoutFloorNotReached'
-    | 'missingAggregateContributions'
+    | 'TurnoutBelowReleaseFloor'
+    | 'AggregateThresholdNotReached'
     | 'EvaluationProofMissing'
-    | 'rejectedEvaluationProof'
+    | 'EvaluationProofRejected'
     | 'LocalReplayNotVerified'
     | 'TargetFinalityCheckpointMissing'
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'
     | 'KllpsCpadProfileNotVerified'
+    | 'CPADProfileNotVerified'
+    | 'UnsupportedBrowserContext'
     | 'OutsideMeasuredRuntimeProfile'
-    | 'MissingBridgeBenchmarkReport'
+    | 'UnsupportedMobileProfile'
+    | 'InsufficientStorageQuota'
+    | 'MissingBridgeMobileCertificate'
     | 'MissingBridgeProverCertificate'
     | 'MissingEvaluationProofCertificate'
     | 'MissingOneShotDecryptionProofCertificate'
+    | 'MissingBridgeBenchmarkReport'
     | 'MissingKllpsCpadCertificate'
+    | 'MissingCPADCertificate'
     | 'MissingThresholdDecryptionCertificate'
     | 'ThresholdDecryptionProfileNotCertified'
     | 'ClaimClosureMissing'

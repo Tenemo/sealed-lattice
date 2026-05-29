@@ -4,13 +4,16 @@ import type {
     PrimaryStatusLabel,
 } from './lifecycle.js';
 import type { DecodedSparseTopKSelection } from './plaintext-oracle.js';
-import type { ProtocolDigest } from './protocol-digest.js';
+import type { ProtocolHash } from './protocol-hash.js';
 
-/** Canonical object type covered by protocol digest and verification helpers. */
+/** Canonical object type covered by protocol hash and verification helpers. */
 export type ProtocolObjectType =
+    | 'AggregateContribution'
+    | 'AggregateReadyRecord'
     | 'ActionContext'
     | 'BallotPackage'
     | 'BoardHead'
+    | 'BridgeProofRecord'
     | 'CastReceipt'
     | 'CloseRecord'
     | 'ElectionManifest'
@@ -33,6 +36,7 @@ export type ProtocolObjectType =
 
 /** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
+    | 'AggregateContribution'
     | 'BallotPackage'
     | 'BoardHead'
     | 'CastReceipt'
@@ -68,7 +72,7 @@ export type MlDsaSignatureProfile = {
     readonly mode: MlDsaSignatureMode;
     readonly providerName: string;
     readonly providerVersion: string;
-    readonly providerBuildDigest: ProtocolDigest;
+    readonly providerBuildHash: ProtocolHash;
     readonly fips204Version: string;
     readonly errataStatus: string;
     readonly contextString: string;
@@ -80,26 +84,26 @@ export type CanonicalSignedRootObject = {
     readonly objectType: SignedObjectType;
     readonly objectVersion: number;
     readonly ceremonyId: string;
-    readonly manifestDigest: ProtocolDigest | null;
-    readonly boardHeadDigest: ProtocolDigest | null;
-    readonly objectRoot: ProtocolDigest | null;
-    readonly chunkMerkleRoot: ProtocolDigest | null;
+    readonly manifestHash: ProtocolHash | null;
+    readonly boardHeadHash: ProtocolHash | null;
+    readonly objectRoot: ProtocolHash | null;
+    readonly chunkMerkleRoot: ProtocolHash | null;
     readonly byteLength: number;
     readonly signerRole: SignerRole;
     readonly signerIdentity: string;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
-    readonly contextDigest: ProtocolDigest;
+    readonly contextHash: ProtocolHash;
 };
 
 /** Signature envelope attached to signed protocol objects. */
 export type ProtocolSignatureEnvelope = {
     readonly profile: MlDsaSignatureProfile;
-    readonly publicKeyDigest: ProtocolDigest;
+    readonly publicKeyHash: ProtocolHash;
     readonly publicKeyBytesHex: string;
     readonly signedRoot: CanonicalSignedRootObject;
     readonly signatureBytesHex: string;
-    readonly signatureDigest: ProtocolDigest;
+    readonly signatureHash: ProtocolHash;
 };
 
 /** Unified status label emitted by protocol verification helpers. */
@@ -137,7 +141,7 @@ export type ProtocolRefusalCode =
     | 'InvalidSignature'
     | 'InvalidSignedRoot'
     | 'LateRegistration'
-    | 'ManifestDigestMismatch'
+    | 'ManifestHashMismatch'
     | 'MissingReceiverKeyRegistration'
     | 'MissingTrusteeSetupEntry'
     | 'OperationUnavailable'
@@ -146,7 +150,7 @@ export type ProtocolRefusalCode =
     | 'RecoveryUpdateInvalid'
     | 'RecoveryUpdateStale'
     | 'LocalReplayRecordInvalid'
-    | 'RosterDigestMismatch'
+    | 'RosterHashMismatch'
     | 'RosterExternalAcceptanceInvalid'
     | 'ShamirInputInvalid'
     | 'SparseTargetInvalid'
@@ -169,17 +173,17 @@ export type ProtocolRefusalCode =
 export type RefusalRecord = {
     readonly code: ProtocolRefusalCode;
     readonly message: string;
-    readonly objectDigest?: ProtocolDigest;
+    readonly objectHash?: ProtocolHash;
     readonly objectType?: ProtocolObjectType | SignedObjectType;
 };
 
 /** Evidence that a board witness or backend published conflicting heads. */
 export type ConflictingHeadEvidence = {
-    readonly evidenceDigest: ProtocolDigest;
+    readonly evidenceHash: ProtocolHash;
     readonly ceremonyId: string;
-    readonly boardPolicyDigest: ProtocolDigest;
-    readonly leftBoardHeadDigest: ProtocolDigest;
-    readonly rightBoardHeadDigest: ProtocolDigest;
+    readonly boardPolicyHash: ProtocolHash;
+    readonly leftBoardHeadHash: ProtocolHash;
+    readonly rightBoardHeadHash: ProtocolHash;
     readonly targetFinalityScope?: string;
     readonly equivocatingWitnessIdentities?: readonly string[];
 };
@@ -188,7 +192,7 @@ export type ConflictingHeadEvidence = {
 export type StructuredProtocolVerificationResult = {
     readonly ok: boolean;
     readonly statusLabels: readonly ProtocolVerificationStatusLabel[];
-    readonly acceptedDigests: readonly ProtocolDigest[];
+    readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence?: ConflictingHeadEvidence;
     readonly unresolvedReason?: string | null;
@@ -207,5 +211,5 @@ export type SignatureVerificationResult = StructuredProtocolVerificationResult;
 export type SparseTopKTargetDecoding = StructuredProtocolVerificationResult & {
     readonly decodedSelections: readonly DecodedSparseTopKSelection[];
     readonly selectedOptionOrdinals: readonly number[];
-    readonly targetDigest?: ProtocolDigest;
+    readonly targetHash?: ProtocolHash;
 };

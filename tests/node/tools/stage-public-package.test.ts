@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -53,7 +54,7 @@ const writeFixtureProject = async (projectRoot: string): Promise<void> => {
             {
                 name: 'sealed-lattice',
                 version: '0.0.0',
-                files: ['dist', 'README.md', 'LICENSE', 'public-surface.json'],
+                files: ['dist', 'README.md', 'LICENSE'],
                 scripts: {
                     build: 'pnpm run build',
                 },
@@ -72,11 +73,6 @@ const writeFixtureProject = async (projectRoot: string): Promise<void> => {
         'utf8',
     );
     await writeFile(
-        path.join(publicPackageDirectory, 'public-surface.json'),
-        '{"runtimeExports":[]}\n',
-        'utf8',
-    );
-    await writeFile(
         path.join(publicPackageDirectory, 'dist', 'index.js'),
         'export {};\n',
         'utf8',
@@ -90,7 +86,27 @@ afterEach(async () => {
 });
 
 describe('public package staging', () => {
-    it('stages the package with the root README and without changing the SDK README', async () => {
+    it('parses staging CLI arguments', () => {
+        expect(
+            parseStagePublicPackageArguments([
+                '--out',
+                'package-dir',
+                '--project-root',
+                'project-dir',
+            ]),
+        ).toEqual({
+            destinationPath: 'package-dir',
+            projectRoot: 'project-dir',
+        });
+        expect(() => parseStagePublicPackageArguments([])).toThrow(
+            'Usage: node ./tools/ci/stage-public-package.mjs --out <directory> [--project-root <directory>]',
+        );
+        expect(() => parseStagePublicPackageArguments(['--out'])).toThrow(
+            '--out requires a value.',
+        );
+    });
+
+    it('stages public package files from the SDK package and root README', async () => {
         const projectRoot = await createTemporaryRoot();
         await writeFixtureProject(projectRoot);
         const destinationPath = path.join(projectRoot, 'staged-package');
@@ -103,14 +119,23 @@ describe('public package staging', () => {
             '# Root readme\n\nThis is the public package readme.\n',
         );
         await expect(
+            readFile(path.join(destinationPath, 'dist', 'index.js'), 'utf8'),
+        ).resolves.toBe('export {};\n');
+        await expect(
             readFile(
                 path.join(projectRoot, 'packages', 'sdk', 'README.md'),
                 'utf8',
             ),
         ).resolves.toBe('# SDK readme\n\nThis stays package-local.\n');
-        await expect(
-            readFile(path.join(destinationPath, 'dist', 'index.js'), 'utf8'),
-        ).resolves.toBe('export {};\n');
+    });
+
+    it('sanitizes staged package metadata', async () => {
+        const projectRoot = await createTemporaryRoot();
+        await writeFixtureProject(projectRoot);
+        const destinationPath = path.join(projectRoot, 'staged-package');
+
+        await stagePublicPackage({ destinationPath, projectRoot });
+
         await expect(
             readFile(path.join(destinationPath, 'package.json'), 'utf8').then(
                 (contents) => JSON.parse(contents) as Record<string, unknown>,
@@ -128,6 +153,43 @@ describe('public package staging', () => {
         ).resolves.toMatchObject({
             description: 'Root public package description.',
         });
+    });
+
+    it('stages public package files through the CLI used by CI', async () => {
+        const projectRoot = await createTemporaryRoot();
+        await writeFixtureProject(projectRoot);
+        const destinationPath = path.join(projectRoot, 'staged-package');
+        const result = spawnSync(
+            process.execPath,
+            [
+                path.resolve('tools/ci/stage-public-package.mjs'),
+                '--out',
+                destinationPath,
+                '--project-root',
+                projectRoot,
+            ],
+            {
+                cwd: path.resolve('.'),
+                encoding: 'utf8',
+            },
+        );
+
+        expect(result.stderr).toBe('');
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain('Staged public package:');
+        await expect(
+            readFile(path.join(destinationPath, 'package.json'), 'utf8').then(
+                (contents) => JSON.parse(contents) as Record<string, unknown>,
+            ),
+        ).resolves.toMatchObject({
+            name: 'sealed-lattice',
+            description: 'Root public package description.',
+        });
+        await expect(
+            readFile(path.join(destinationPath, 'README.md'), 'utf8'),
+        ).resolves.toBe(
+            '# Root readme\n\nThis is the public package readme.\n',
+        );
     });
 
     it('sanitizes package metadata that only belongs to the workspace build', () => {
@@ -177,12 +239,18 @@ describe('public package staging', () => {
         ).rejects.toThrow('Root package.json must define package description.');
     });
 
-    it('rejects missing and empty staging destinations', () => {
-        expect(() => parseStagePublicPackageArguments([])).toThrow(
-            'Public package staging requires --out',
-        );
-        expect(() => parseStagePublicPackageArguments(['--out'])).toThrow(
-            'Public package staging requires --out',
+    it('rejects empty staging destinations', async () => {
+        let thrownError: unknown;
+
+        try {
+            await stagePublicPackage({ destinationPath: '' });
+        } catch (error) {
+            thrownError = error;
+        }
+
+        expect(thrownError).toBeInstanceOf(Error);
+        expect((thrownError as Error).message).toBe(
+            'Public package staging requires a destination path.',
         );
     });
 

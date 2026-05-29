@@ -1,8 +1,3 @@
-import {
-    loadTranscriptCoreKernel,
-    type TranscriptCoreKernel,
-} from '../../../src/index';
-
 import type { NamedFixture } from './shared.js';
 import {
     ballotFieldLinearProofBackendVectors,
@@ -10,6 +5,11 @@ import {
     expandBallotFieldLinearProofVectorCase,
     findFixture,
 } from './shared.js';
+
+import {
+    loadTranscriptCoreKernel,
+    type TranscriptCoreKernel,
+} from '#packages/wasm/src/index';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -41,11 +41,11 @@ type EncodedScoreFieldBallotProofRecordFixture = {
     ) => JsonRecord;
     readonly createComponentProofStatement: (input: {
         readonly componentId: string;
-        readonly componentProofStatementDigest?: string;
-        readonly componentStatementDigest: string;
+        readonly componentProofStatementHash?: string;
+        readonly componentStatementHash: string;
         readonly proofStatementFormat: string;
     }) => JsonRecord;
-    readonly digest: (label: string) => string;
+    readonly hash: (label: string) => string;
     readonly incompleteComponentBundleStatement: JsonRecord;
     readonly kernel: TranscriptCoreKernel;
     readonly mutatedBallotProof: JsonRecord;
@@ -83,20 +83,20 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
         const proofBytesHex = String(validProofCase.proofHex);
         const publicRandomnessHex = String(validProofCase.publicRandomnessHex);
         const proofSizeBytes = proofBytesHex.length / 2;
-        const digest = (label: string): string =>
-            kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+        const hash = (label: string): string =>
+            kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     label,
                     purpose:
                         'encoded-score-field-ballot-proof-record-wasm-test',
                 },
             });
-        const deriveProofBytesDigestForTest = (
+        const deriveProofBytesHashForTest = (
             proofBytesHexForTest: string,
         ): string =>
-            kernel.deriveProtocolDigest({
-                namespace: 'ProofBytesDigest',
+            kernel.deriveProtocolHash({
+                namespace: 'ProofBytesHash',
                 value: {
                     objectType: 'ProofBytes',
                     objectVersion: 1,
@@ -104,31 +104,31 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                     proofSizeBytes: proofBytesHexForTest.length / 2,
                 },
             });
-        const deriveBallotProofEncodingDigestForTest = (
+        const deriveBallotProofEncodingHashForTest = (
             proofEncoding: unknown,
         ): string =>
-            kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     proofEncoding,
                     purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
                 },
             });
-        const deriveBallotProofParameterSetDigestForTest = (
+        const deriveBallotProofParameterSetHashForTest = (
             parameterSet: unknown,
         ): string =>
-            kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     parameterSet,
                     purpose: 'ballot-proof-linear-proof-parameter-set-v1',
                 },
             });
-        const deriveBallotProofPublicRandomnessDigestForTest = (
+        const deriveBallotProofPublicRandomnessHashForTest = (
             componentPublicRandomnessHex: string,
         ): string =>
-            kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     publicRandomnessHex: componentPublicRandomnessHex,
                     purpose: 'ballot-proof-linear-proof-public-randomness-v1',
@@ -147,44 +147,42 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 },
             );
             const statementPayload = {
-                actionContextDigest: digest('action-context'),
-                aggregateInputEncodingProfileDigest: digest(
+                actionContextHash: hash('action-context'),
+                aggregateInputEncodingProfileHash: hash(
                     'aggregate-input-encoding-profile',
                 ),
-                ballotPackageDigest: digest('ballot-package'),
-                ballotProofProfileDigest: digest('ballot-proof-profile'),
-                ballotScoreEncodingProfileDigest: digest(
+                ballotPackageHash: hash('ballot-package'),
+                ballotProofProfileHash: hash('ballot-proof-profile'),
+                ballotScoreEncodingProfileHash: hash(
                     'ballot-score-encoding-profile',
                 ),
-                ballotShareLayoutProfileDigest: digest(
+                ballotShareLayoutProfileHash: hash(
                     'ballot-share-layout-profile',
                 ),
                 ceremonyId: 'ceremony-encoded-score-field-ballot-proof-record',
-                challengeDomainDigest: digest('challenge-domain'),
-                duplicateBallotPolicyDigest: digest('duplicate-policy'),
-                encodedAggregateLayoutDigest: digest(
-                    'encoded-aggregate-layout',
-                ),
-                encodedShareVectorLayoutDigest: digest(
+                challengeDomainHash: hash('challenge-domain'),
+                duplicateBallotPolicyHash: hash('duplicate-policy'),
+                encodedAggregateLayoutHash: hash('encoded-aggregate-layout'),
+                encodedShareVectorLayoutHash: hash(
                     'encoded-share-vector-layout',
                 ),
-                manifestDigest: digest('manifest'),
+                manifestHash: hash('manifest'),
                 objectType: 'BallotProofStatement',
                 objectVersion: 1,
                 optionCount: 20,
-                pollSpecDigest: digest('poll-spec'),
-                receiverEncryptionProfileDigest: digest(
+                pollSpecHash: hash('poll-spec'),
+                receiverEncryptionProfileHash: hash(
                     'receiver-encryption-profile',
                 ),
-                receiverKeyProofRoot: digest('receiver-key-proof-root'),
-                receiverKeyRoot: digest('receiver-key-root'),
+                receiverKeyProofRoot: hash('receiver-key-proof-root'),
+                receiverKeyRoot: hash('receiver-key-root'),
                 receiverPayloads: receiverReferences.map(
                     (receiverReference) => ({
                         ...receiverReference,
-                        receiverPayloadCiphertextRoot: digest(
+                        receiverPayloadCiphertextRoot: hash(
                             `receiver-ciphertext-${receiverReference.receiverRosterPosition}`,
                         ),
-                        receiverPayloadDigest: digest(
+                        receiverPayloadHash: hash(
                             `receiver-payload-${receiverReference.receiverRosterPosition}`,
                         ),
                     }),
@@ -192,44 +190,40 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 receiverPublicKeys: receiverReferences.map(
                     (receiverReference) => ({
                         ...receiverReference,
-                        receiverPublicKeyDigest: digest(
+                        receiverPublicKeyHash: hash(
                             `receiver-public-key-${receiverReference.receiverRosterPosition}`,
                         ),
                     }),
                 ),
-                rosterDigest: digest('roster'),
-                rosterExternalAcceptanceDigest: digest('external-acceptance'),
-                scoreDomainDigest: digest('score-domain'),
-                scoreMembershipProfileDigest: digest(
-                    'score-membership-profile',
-                ),
-                shareCommitmentMessageBoundCertDigest: digest(
+                rosterHash: hash('roster'),
+                rosterExternalAcceptanceHash: hash('external-acceptance'),
+                scoreDomainHash: hash('score-domain'),
+                scoreMembershipProfileHash: hash('score-membership-profile'),
+                shareCommitmentMessageBoundCertHash: hash(
                     'share-commitment-bound-cert',
                 ),
-                shareCommitmentProfileDigest: digest(
-                    'share-commitment-profile',
-                ),
+                shareCommitmentProfileHash: hash('share-commitment-profile'),
                 shareCommitments: receiverReferences.map(
                     (receiverReference) => ({
                         ...receiverReference,
-                        shareCommitmentDigest: digest(
+                        shareCommitmentHash: hash(
                             `share-commitment-${receiverReference.receiverRosterPosition}`,
                         ),
                     }),
                 ),
                 shareVectorWidth: 220,
-                thresholdProfileDigest: digest('threshold-profile'),
-                tiePolicyDigest: digest('tie-policy'),
+                thresholdProfileHash: hash('threshold-profile'),
+                tiePolicyHash: hash('tie-policy'),
                 topOptionCount: 3,
-                voterIdentityDigest: digest('voter-1'),
+                voterIdentityHash: hash('voter-1'),
                 voterRosterPosition: 1,
-                voterSigningKeyDigest: digest('voter-signing-key'),
+                voterSigningKeyHash: hash('voter-signing-key'),
             };
 
             return {
                 ...statementPayload,
-                ballotProofStatementDigest: kernel.deriveProtocolDigest({
-                    namespace: 'BallotProofStatementDigest',
+                ballotProofStatementHash: kernel.deriveProtocolHash({
+                    namespace: 'BallotProofStatementHash',
                     value: statementPayload,
                 }),
             };
@@ -246,13 +240,12 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 ...cloneJsonValue(
                     ballotFieldLinearProofBackendVectors.linearStatement,
                 ),
-                ballotProofStatementDigest:
-                    statement.ballotProofStatementDigest,
+                ballotProofStatementHash: statement.ballotProofStatementHash,
                 matrixCoefficientRepresentation:
                     vectorCase.matrixCoefficientRepresentation,
                 statementMatrixCoefficients,
-                statementMatrixDigest: kernel.deriveProtocolDigest({
-                    namespace: 'ChallengeDomainDigest',
+                statementMatrixHash: kernel.deriveProtocolHash({
+                    namespace: 'ChallengeDomainHash',
                     value: {
                         purpose: 'ballot-proof-linear-statement-matrix-v1',
                         statementMatrixCoefficients,
@@ -261,20 +254,20 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 targetCoefficientRepresentation:
                     vectorCase.targetCoefficientRepresentation,
                 targetVectorCoefficients,
-                targetVectorDigest: kernel.deriveProtocolDigest({
-                    namespace: 'ChallengeDomainDigest',
+                targetVectorHash: kernel.deriveProtocolHash({
+                    namespace: 'ChallengeDomainHash',
                     value: {
                         purpose: 'ballot-proof-linear-target-vector-v1',
                         targetVectorCoefficients,
                     },
                 }),
             } as Record<string, unknown>;
-            delete linearStatementPayload.statementDigest;
+            delete linearStatementPayload.statementHash;
 
             return {
                 ...linearStatementPayload,
-                statementDigest: kernel.deriveProtocolDigest({
-                    namespace: 'ChallengeDomainDigest',
+                statementHash: kernel.deriveProtocolHash({
+                    namespace: 'ChallengeDomainHash',
                     value: {
                         payload: linearStatementPayload,
                         purpose: 'ballot-proof-linear-proof-statement-v1',
@@ -288,8 +281,8 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
             componentBundleStatement?: Record<string, unknown>,
             componentProofBundle?: Record<string, unknown>,
         ): Record<string, unknown> => {
-            const proofBytesDigest = kernel.deriveProtocolDigest({
-                namespace: 'ProofBytesDigest',
+            const proofBytesHash = kernel.deriveProtocolHash({
+                namespace: 'ProofBytesHash',
                 value: {
                     objectType: 'ProofBytes',
                     objectVersion: 1,
@@ -297,118 +290,116 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                     proofSizeBytes,
                 },
             });
-            const proofEncodingProfileDigest = kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            const proofEncodingProfileHash = kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     proofEncoding: validProofCase.proofEncoding,
                     purpose: 'ballot-proof-linear-proof-encoding-profile-v1',
                 },
             });
-            const proofParameterSetDigest = kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            const proofParameterSetHash = kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     parameterSet: validProofCase.parameterSet,
                     purpose: 'ballot-proof-linear-proof-parameter-set-v1',
                 },
             });
-            const publicRandomnessDigest = kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            const publicRandomnessHash = kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     publicRandomnessHex,
                     purpose: 'ballot-proof-linear-proof-public-randomness-v1',
                 },
             });
-            const proofRoot = kernel.deriveProtocolDigest({
-                namespace: 'BallotProofRecordDigest',
+            const proofRoot = kernel.deriveProtocolHash({
+                namespace: 'BallotProofRecordHash',
                 value: {
-                    linearStatementDigest: linearStatement.statementDigest,
-                    proofBytesDigest,
-                    proofEncodingProfileDigest,
-                    proofParameterSetDigest,
-                    publicRandomnessDigest,
+                    linearStatementHash: linearStatement.statementHash,
+                    proofBytesHash,
+                    proofEncodingProfileHash,
+                    proofParameterSetHash,
+                    publicRandomnessHash,
                     purpose: 'ballot-proof-linear-proof-record-root-v1',
                 },
             });
             const proofPayloadWithoutChallenge = {
-                backendStatementDigest: linearStatement.backendStatementDigest,
-                ballotProofProfileDigest: statement.ballotProofProfileDigest,
-                ballotProofStatementDigest:
-                    statement.ballotProofStatementDigest,
+                backendStatementHash: linearStatement.backendStatementHash,
+                ballotProofProfileHash: statement.ballotProofProfileHash,
+                ballotProofStatementHash: statement.ballotProofStatementHash,
                 ...(componentBundleStatement === undefined
                     ? {}
                     : {
-                          componentBundleStatementDigest:
-                              componentBundleStatement.componentBundleStatementDigest,
+                          componentBundleStatementHash:
+                              componentBundleStatement.componentBundleStatementHash,
                       }),
                 ...(componentProofBundle === undefined
                     ? {}
                     : {
-                          componentProofBundleDigest:
-                              componentProofBundle.componentProofBundleDigest,
+                          componentProofBundleHash:
+                              componentProofBundle.componentProofBundleHash,
                       }),
-                linearStatementDigest: linearStatement.statementDigest,
+                linearStatementHash: linearStatement.statementHash,
                 objectType: 'BallotProofRecord',
                 objectVersion: 1,
                 proofBackend: 'LocalLinearLatticeRelation',
-                proofBytesDigest,
-                proofEncodingProfileDigest,
-                proofParameterSetDigest,
+                proofBytesHash,
+                proofEncodingProfileHash,
+                proofParameterSetHash,
                 proofRoot,
                 proofSizeBytes,
-                publicRandomnessDigest,
-                relationStatementDigest:
-                    linearStatement.relationStatementDigest,
-                statementMatrixDigest: linearStatement.statementMatrixDigest,
-                targetVectorDigest: linearStatement.targetVectorDigest,
+                publicRandomnessHash,
+                relationStatementHash: linearStatement.relationStatementHash,
+                statementMatrixHash: linearStatement.statementMatrixHash,
+                targetVectorHash: linearStatement.targetVectorHash,
             };
-            const challengeDigest = kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            const challengeHash = kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
-                    backendStatementDigest:
-                        proofPayloadWithoutChallenge.backendStatementDigest,
-                    ballotProofStatementDigest:
-                        statement.ballotProofStatementDigest,
-                    challengeDomainDigest: statement.challengeDomainDigest,
+                    backendStatementHash:
+                        proofPayloadWithoutChallenge.backendStatementHash,
+                    ballotProofStatementHash:
+                        statement.ballotProofStatementHash,
+                    challengeDomainHash: statement.challengeDomainHash,
                     ...(componentBundleStatement === undefined
                         ? {}
                         : {
-                              componentBundleStatementDigest:
-                                  componentBundleStatement.componentBundleStatementDigest,
+                              componentBundleStatementHash:
+                                  componentBundleStatement.componentBundleStatementHash,
                           }),
                     ...(componentProofBundle === undefined
                         ? {}
                         : {
-                              componentProofBundleDigest:
-                                  componentProofBundle.componentProofBundleDigest,
+                              componentProofBundleHash:
+                                  componentProofBundle.componentProofBundleHash,
                           }),
-                    linearStatementDigest:
-                        proofPayloadWithoutChallenge.linearStatementDigest,
-                    proofBytesDigest:
-                        proofPayloadWithoutChallenge.proofBytesDigest,
-                    proofEncodingProfileDigest:
-                        proofPayloadWithoutChallenge.proofEncodingProfileDigest,
-                    proofParameterSetDigest:
-                        proofPayloadWithoutChallenge.proofParameterSetDigest,
+                    linearStatementHash:
+                        proofPayloadWithoutChallenge.linearStatementHash,
+                    proofBytesHash: proofPayloadWithoutChallenge.proofBytesHash,
+                    proofEncodingProfileHash:
+                        proofPayloadWithoutChallenge.proofEncodingProfileHash,
+                    proofParameterSetHash:
+                        proofPayloadWithoutChallenge.proofParameterSetHash,
                     proofRoot: proofPayloadWithoutChallenge.proofRoot,
-                    publicRandomnessDigest:
-                        proofPayloadWithoutChallenge.publicRandomnessDigest,
-                    relationStatementDigest:
-                        proofPayloadWithoutChallenge.relationStatementDigest,
-                    statementMatrixDigest:
-                        proofPayloadWithoutChallenge.statementMatrixDigest,
-                    targetVectorDigest:
-                        proofPayloadWithoutChallenge.targetVectorDigest,
+                    publicRandomnessHash:
+                        proofPayloadWithoutChallenge.publicRandomnessHash,
+                    relationStatementHash:
+                        proofPayloadWithoutChallenge.relationStatementHash,
+                    statementMatrixHash:
+                        proofPayloadWithoutChallenge.statementMatrixHash,
+                    targetVectorHash:
+                        proofPayloadWithoutChallenge.targetVectorHash,
+                    purpose: 'ballot-proof-challenge-v1',
                 },
             });
             const proofPayload = {
                 ...proofPayloadWithoutChallenge,
-                challengeDigest,
+                challengeHash,
             };
 
             return {
                 ...proofPayload,
-                ballotProofRecordDigest: kernel.deriveProtocolDigest({
-                    namespace: 'BallotProofRecordDigest',
+                ballotProofRecordHash: kernel.deriveProtocolHash({
+                    namespace: 'BallotProofRecordHash',
                     value: proofPayload,
                 }),
             };
@@ -428,34 +419,30 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
             proofLoweringStatus: string,
         ): Record<string, unknown> => {
             const componentPayload = {
-                backendStatementDigest: linearStatement.backendStatementDigest,
-                ballotProofStatementDigest:
-                    statement.ballotProofStatementDigest,
+                backendStatementHash: linearStatement.backendStatementHash,
+                ballotProofStatementHash: statement.ballotProofStatementHash,
                 coefficientModulus: '65537',
-                componentDigest: digest(`${componentId}-component`),
+                componentHash: hash(`${componentId}-component`),
                 componentId,
-                matrixDigest: digest(`${componentId}-matrix`),
+                matrixHash: hash(`${componentId}-matrix`),
                 objectType: 'BallotProofComponentStatement',
                 objectVersion: 1,
                 proofLoweringStatus,
-                relationStatementDigest:
-                    linearStatement.relationStatementDigest,
-                rowBatchMatrixDigests: [digest(`${componentId}-row-matrix`)],
+                relationStatementHash: linearStatement.relationStatementHash,
+                rowBatchMatrixHashes: [hash(`${componentId}-row-matrix`)],
                 rowBatchNames: [`${componentId}-rows`],
-                rowBatchTargetVectorDigests: [
-                    digest(`${componentId}-row-target`),
-                ],
+                rowBatchTargetVectorHashes: [hash(`${componentId}-row-target`)],
                 rowCount: 1,
                 rowKinds: ['EncodedScoreFieldRows'],
-                targetVectorDigest: digest(`${componentId}-target`),
+                targetVectorHash: hash(`${componentId}-target`),
                 variableColumnCount: 1,
                 variableColumnIndices: [componentIndex],
             };
 
             return {
                 ...componentPayload,
-                componentStatementDigest: kernel.deriveProtocolDigest({
-                    namespace: 'ChallengeDomainDigest',
+                componentStatementHash: kernel.deriveProtocolHash({
+                    namespace: 'ChallengeDomainHash',
                     value: {
                         payload: componentPayload,
                         purpose: 'ballot-proof-component-statement-v1',
@@ -477,13 +464,12 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                         componentIndex,
                         options.fullCoverage === true || componentIndex === 0
                             ? 'explicitRowsAvailable'
-                            : 'digestExpandedRowsPending',
+                            : 'HashExpandedRowsPending',
                     ),
             );
             const componentBundlePayload = {
-                backendStatementDigest: linearStatement.backendStatementDigest,
-                ballotProofStatementDigest:
-                    statement.ballotProofStatementDigest,
+                backendStatementHash: linearStatement.backendStatementHash,
+                ballotProofStatementHash: statement.ballotProofStatementHash,
                 bundleCoverage:
                     options.fullCoverage === true
                         ? 'full-encoded-score-ballot-relation'
@@ -492,15 +478,14 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 objectType: 'BallotProofComponentBundleStatement',
                 objectVersion: 1,
                 relationLabel: 'BallotPrivacyPvssRelation',
-                relationStatementDigest:
-                    linearStatement.relationStatementDigest,
+                relationStatementHash: linearStatement.relationStatementHash,
                 requiredComponentIds: componentIds,
             };
 
             return {
                 ...componentBundlePayload,
-                componentBundleStatementDigest: kernel.deriveProtocolDigest({
-                    namespace: 'ChallengeDomainDigest',
+                componentBundleStatementHash: kernel.deriveProtocolHash({
+                    namespace: 'ChallengeDomainHash',
                     value: {
                         payload: componentBundlePayload,
                         purpose: 'ballot-proof-component-bundle-statement-v1',
@@ -510,8 +495,8 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
         };
         const createComponentProofStatement = (input: {
             readonly componentId: string;
-            readonly componentProofStatementDigest?: string;
-            readonly componentStatementDigest: string;
+            readonly componentProofStatementHash?: string;
+            readonly componentStatementHash: string;
             readonly proofStatementFormat: string;
         }): Record<string, unknown> => {
             if (
@@ -520,7 +505,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
             ) {
                 const statementPayload = {
                     componentId: input.componentId,
-                    componentStatementDigest: input.componentStatementDigest,
+                    componentStatementHash: input.componentStatementHash,
                     objectType: 'BallotProofLinearProofStatement',
                     objectVersion: 1,
                     proofStatementFormat: input.proofStatementFormat,
@@ -528,8 +513,8 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
 
                 return {
                     ...statementPayload,
-                    statementDigest: kernel.deriveProtocolDigest({
-                        namespace: 'ChallengeDomainDigest',
+                    statementHash: kernel.deriveProtocolHash({
+                        namespace: 'ChallengeDomainHash',
                         value: {
                             payload: statementPayload,
                             purpose: 'ballot-proof-linear-proof-statement-v1',
@@ -543,7 +528,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
             ) {
                 const statementPayload = {
                     componentId: input.componentId,
-                    componentStatementDigest: input.componentStatementDigest,
+                    componentStatementHash: input.componentStatementHash,
                     objectType:
                         'BallotProofSparseComponentLinearProofStatement',
                     objectVersion: 1,
@@ -552,8 +537,8 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
 
                 return {
                     ...statementPayload,
-                    statementDigest: kernel.deriveProtocolDigest({
-                        namespace: 'ChallengeDomainDigest',
+                    statementHash: kernel.deriveProtocolHash({
+                        namespace: 'ChallengeDomainHash',
                         value: {
                             payload: statementPayload,
                             purpose:
@@ -563,7 +548,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 };
             }
             const statementPayload = {
-                backendStatementDigest: digest(`${input.componentId}-backend`),
+                backendStatementHash: hash(`${input.componentId}-backend`),
                 coefficientModulus:
                     input.componentId === 'share-commitment-component'
                         ? '18446744069414584321'
@@ -574,20 +559,20 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                           ? '65537'
                           : '12289',
                 componentId: input.componentId,
-                componentStatementDigest: input.componentStatementDigest,
+                componentStatementHash: input.componentStatementHash,
                 denseCoefficientCount:
                     input.proofStatementFormat ===
                     'structured-module-lwe-linear-proof-v1'
                         ? '1024'
                         : null,
-                matrixDigest: digest(`${input.componentId}-matrix`),
-                objectType: 'BallotProofComponentProofStatementPlan',
+                matrixHash: hash(`${input.componentId}-matrix`),
+                objectType: 'BallotProofComponentProofStatementDescriptor',
                 objectVersion: 1,
-                proofBytesAvailability:
+                proofBackendRequirement:
                     input.proofStatementFormat ===
                     'structured-module-lwe-linear-proof-v1'
-                        ? 'requires-structured-proof-statement'
-                        : 'public-zero-witness-binding-check',
+                        ? 'structured-proof-statement-required'
+                        : 'public-binding-check-only',
                 proofLoweringStatus: 'explicitRowsAvailable',
                 proofStatementFormat: input.proofStatementFormat,
                 proofSystemRingDegree:
@@ -596,20 +581,16 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                         ? 64
                         : null,
                 relation: 'A*w + t = 0',
-                relationStatementDigest: digest(
-                    `${input.componentId}-relation`,
-                ),
-                rowBatchMatrixDigests: [
-                    digest(`${input.componentId}-row-matrix`),
-                ],
+                relationStatementHash: hash(`${input.componentId}-relation`),
+                rowBatchMatrixHashes: [hash(`${input.componentId}-row-matrix`)],
                 rowBatchNames: [
                     input.proofStatementFormat ===
                     'structured-module-lwe-linear-proof-v1'
                         ? 'receiver_payload_encryption_equation_rows'
                         : 'receiver_key_binding_rows',
                 ],
-                rowBatchTargetVectorDigests: [
-                    digest(`${input.componentId}-row-target`),
+                rowBatchTargetVectorHashes: [
+                    hash(`${input.componentId}-row-target`),
                 ],
                 rowBatchTermCounts: [
                     input.proofStatementFormat ===
@@ -639,7 +620,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                     'structured-module-lwe-linear-proof-v1'
                         ? '1024'
                         : null,
-                targetVectorDigest: digest(`${input.componentId}-target`),
+                targetVectorHash: hash(`${input.componentId}-target`),
                 variableColumnCount:
                     input.proofStatementFormat ===
                     'structured-module-lwe-linear-proof-v1'
@@ -654,21 +635,21 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
 
             return {
                 ...statementPayload,
-                componentProofStatementDigest:
-                    input.componentProofStatementDigest ??
-                    kernel.deriveProtocolDigest({
-                        namespace: 'ChallengeDomainDigest',
+                componentProofStatementHash:
+                    input.componentProofStatementHash ??
+                    kernel.deriveProtocolHash({
+                        namespace: 'ChallengeDomainHash',
                         value: {
                             payload: statementPayload,
                             purpose:
-                                'ballot-proof-component-proof-statement-plan-v1',
+                                'ballot-proof-component-proof-statement-descriptor-v1',
                         },
                     }),
             };
         };
         const createComponentProofInput = (
             componentId: string,
-            componentStatementDigest: string,
+            componentStatementHash: string,
         ): Record<string, unknown> => {
             const componentIndex = componentIds.indexOf(componentId);
             const publicRandomnessByte = (componentIndex + 1)
@@ -678,40 +659,38 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 componentId === 'receiver-encryption-component'
                     ? 'structured-module-lwe-linear-proof-v1'
                     : componentId === 'receiver-key-binding-component'
-                      ? 'public-zero-witness-binding-check-v1'
+                      ? 'public-binding-check-only-v1'
                       : componentId === 'score-and-shamir-field-component'
                         ? 'dense-polynomial-matrix-linear-proof-v1'
                         : 'sparse-polynomial-matrix-linear-proof-v1';
-            const componentProofStatementDigest = digest(
+            const componentProofStatementHash = hash(
                 `${componentId}-proof-statement`,
             );
             const proofStatement = createComponentProofStatement({
                 componentId,
-                componentProofStatementDigest:
+                componentProofStatementHash:
                     proofStatementFormat ===
                         'structured-module-lwe-linear-proof-v1' ||
-                    proofStatementFormat ===
-                        'public-zero-witness-binding-check-v1'
+                    proofStatementFormat === 'public-binding-check-only-v1'
                         ? undefined
-                        : componentProofStatementDigest,
-                componentStatementDigest,
+                        : componentProofStatementHash,
+                componentStatementHash,
                 proofStatementFormat,
             });
-            const suppliedComponentProofStatementDigest =
-                proofStatement.componentProofStatementDigest;
-            const boundComponentProofStatementDigest =
-                typeof suppliedComponentProofStatementDigest === 'string'
-                    ? suppliedComponentProofStatementDigest
-                    : componentProofStatementDigest;
+            const suppliedComponentProofStatementHash =
+                proofStatement.componentProofStatementHash;
+            const boundComponentProofStatementHash =
+                typeof suppliedComponentProofStatementHash === 'string'
+                    ? suppliedComponentProofStatementHash
+                    : componentProofStatementHash;
             const componentProofBytesHex =
-                proofStatementFormat === 'public-zero-witness-binding-check-v1'
+                proofStatementFormat === 'public-binding-check-only-v1'
                     ? ''
-                    : digest(`${componentId}-proof-bytes-material`);
+                    : hash(`${componentId}-proof-bytes-material`);
 
             return {
                 componentId,
-                componentProofStatementDigest:
-                    boundComponentProofStatementDigest,
+                componentProofStatementHash: boundComponentProofStatementHash,
                 proofBytesHex: componentProofBytesHex,
                 proofEncoding: {
                     profileId: 'ballot-proof-component-encoding-v1',
@@ -724,7 +703,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
                 proofStatement,
                 proofStatementFormat,
                 publicRandomnessHex: publicRandomnessByte.repeat(32),
-                statementDigest: componentStatementDigest,
+                statementHash: componentStatementHash,
             };
         };
         const createComponentProofRecord = (
@@ -735,69 +714,66 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
         ): Record<string, unknown> => {
             const componentProofInput = createComponentProofInput(
                 componentId,
-                String(componentStatement.componentStatementDigest),
+                String(componentStatement.componentStatementHash),
             );
-            const proofBytesDigest = deriveProofBytesDigestForTest(
+            const proofBytesHash = deriveProofBytesHashForTest(
                 String(componentProofInput.proofBytesHex),
             );
-            const proofEncodingProfileDigest =
-                deriveBallotProofEncodingDigestForTest(
+            const proofEncodingProfileHash =
+                deriveBallotProofEncodingHashForTest(
                     componentProofInput.proofEncoding,
                 );
-            const proofParameterSetDigest =
-                deriveBallotProofParameterSetDigestForTest(
+            const proofParameterSetHash =
+                deriveBallotProofParameterSetHashForTest(
                     componentProofInput.proofParameterSet,
                 );
-            const publicRandomnessDigest =
-                deriveBallotProofPublicRandomnessDigestForTest(
+            const publicRandomnessHash =
+                deriveBallotProofPublicRandomnessHashForTest(
                     String(componentProofInput.publicRandomnessHex),
                 );
-            const proofRoot = kernel.deriveProtocolDigest({
-                namespace: 'ChallengeDomainDigest',
+            const proofRoot = kernel.deriveProtocolHash({
+                namespace: 'ChallengeDomainHash',
                 value: {
                     componentId,
-                    componentProofStatementDigest:
-                        componentProofInput.componentProofStatementDigest,
-                    componentStatementDigest:
-                        componentStatement.componentStatementDigest,
-                    proofBytesDigest,
-                    proofEncodingProfileDigest,
-                    proofParameterSetDigest,
+                    componentProofStatementHash:
+                        componentProofInput.componentProofStatementHash,
+                    componentStatementHash:
+                        componentStatement.componentStatementHash,
+                    proofBytesHash,
+                    proofEncodingProfileHash,
+                    proofParameterSetHash,
                     proofStatementFormat:
                         componentProofInput.proofStatementFormat,
-                    publicRandomnessDigest,
+                    publicRandomnessHash,
                     purpose: 'ballot-proof-component-proof-root-v1',
-                    statementDigest:
-                        componentStatement.componentStatementDigest,
+                    statementHash: componentStatement.componentStatementHash,
                 },
             });
             const proofRecordPayload = {
-                backendStatementDigest: linearStatement.backendStatementDigest,
-                ballotProofStatementDigest:
-                    statement.ballotProofStatementDigest,
+                backendStatementHash: linearStatement.backendStatementHash,
+                ballotProofStatementHash: statement.ballotProofStatementHash,
                 componentId,
-                componentProofStatementDigest:
-                    componentProofInput.componentProofStatementDigest,
-                componentStatementDigest:
-                    componentStatement.componentStatementDigest,
+                componentProofStatementHash:
+                    componentProofInput.componentProofStatementHash,
+                componentStatementHash:
+                    componentStatement.componentStatementHash,
                 objectType: 'BallotProofComponentProofRecord',
                 objectVersion: 1,
                 proofBackend: 'LocalLinearLatticeRelation',
-                proofBytesDigest,
-                proofEncodingProfileDigest,
-                proofParameterSetDigest,
+                proofBytesHash,
+                proofEncodingProfileHash,
+                proofParameterSetHash,
                 proofRoot,
                 proofSizeBytes:
                     String(componentProofInput.proofBytesHex).length / 2,
-                publicRandomnessDigest,
-                relationStatementDigest:
-                    linearStatement.relationStatementDigest,
+                publicRandomnessHash,
+                relationStatementHash: linearStatement.relationStatementHash,
             };
 
             return {
                 ...proofRecordPayload,
-                componentProofRecordDigest: kernel.deriveProtocolDigest({
-                    namespace: 'ChallengeDomainDigest',
+                componentProofRecordHash: kernel.deriveProtocolHash({
+                    namespace: 'ChallengeDomainHash',
                     value: {
                         payload: proofRecordPayload,
                         purpose: 'ballot-proof-component-proof-record-v1',
@@ -811,7 +787,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
             componentProofs.map((componentProof) =>
                 createComponentProofInput(
                     String(componentProof.componentId),
-                    String(componentProof.componentStatementDigest),
+                    String(componentProof.componentStatementHash),
                 ),
             );
         const createComponentProofBundle = (
@@ -819,25 +795,25 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
             componentProofs: readonly Record<string, unknown>[],
         ): Record<string, unknown> => {
             const proofBundlePayload = {
-                backendStatementDigest:
-                    componentBundleStatement.backendStatementDigest,
-                ballotProofStatementDigest:
-                    componentBundleStatement.ballotProofStatementDigest,
+                backendStatementHash:
+                    componentBundleStatement.backendStatementHash,
+                ballotProofStatementHash:
+                    componentBundleStatement.ballotProofStatementHash,
                 bundleCoverage: componentBundleStatement.bundleCoverage,
-                componentBundleStatementDigest:
-                    componentBundleStatement.componentBundleStatementDigest,
+                componentBundleStatementHash:
+                    componentBundleStatement.componentBundleStatementHash,
                 componentProofs,
                 objectType: 'BallotProofComponentProofBundle',
                 objectVersion: 1,
-                relationStatementDigest:
-                    componentBundleStatement.relationStatementDigest,
+                relationStatementHash:
+                    componentBundleStatement.relationStatementHash,
                 requiredComponentIds: componentIds,
             };
 
             return {
                 ...proofBundlePayload,
-                componentProofBundleDigest: kernel.deriveProtocolDigest({
-                    namespace: 'ChallengeDomainDigest',
+                componentProofBundleHash: kernel.deriveProtocolHash({
+                    namespace: 'ChallengeDomainHash',
                     value: {
                         payload: proofBundlePayload,
                         purpose: 'ballot-proof-component-proof-bundle-v1',
@@ -878,7 +854,7 @@ export const createEncodedScoreFieldBallotProofRecordFixture =
             createComponentProofInputs,
             createComponentProofRecord,
             createComponentProofStatement,
-            digest,
+            hash,
             incompleteComponentBundleStatement,
             kernel,
             mutatedBallotProof,

@@ -1,6 +1,8 @@
 import type { FieldElement } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import { fieldVectors } from './plaintext-oracle-test-vectors';
+
 import {
     addFieldElements,
     decodeFieldElement,
@@ -10,9 +12,7 @@ import {
     invertFieldElement,
     multiplyFieldElements,
     subtractFieldElements,
-} from '../../src/plaintext-oracle/index';
-
-import { fieldVectors } from './plaintext-oracle-test-vectors';
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext oracle field arithmetic', () => {
     it('matches canonical field encoding and inverse vectors', () => {
@@ -48,15 +48,20 @@ describe('plaintext oracle field arithmetic', () => {
                     subtractFieldElements(addFieldElements(left, right), right),
                 ).toBe(left);
             }
+        }
 
-            if (left !== 0) {
-                expect(
-                    multiplyFieldElements(left, invertFieldElement(left)),
-                ).toBe(1);
-                expect(exponentiateFieldElement(left, fieldModulus - 1)).toBe(
-                    1,
-                );
-            }
+        for (const nonzeroElement of examples.filter(
+            (example) => example !== 0,
+        )) {
+            expect(
+                multiplyFieldElements(
+                    nonzeroElement,
+                    invertFieldElement(nonzeroElement),
+                ),
+            ).toBe(1);
+            expect(
+                exponentiateFieldElement(nonzeroElement, fieldModulus - 1),
+            ).toBe(1);
         }
     });
 

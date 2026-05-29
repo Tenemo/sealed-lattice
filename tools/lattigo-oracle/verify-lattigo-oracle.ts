@@ -1,10 +1,13 @@
+// Requires Docker. Verifies the pinned Lattigo reference metadata, archive,
+// Dockerfile, and oracle command Hashes, then builds and runs the pinned
+// development-only Docker oracle against the committed canonical RNS fixtures.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { deriveProtocolDigest } from '#packages/crypto/src/index';
+import { deriveProtocolHash } from '#packages/crypto/src/index';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const pinnedReferencePath = path.join(
@@ -26,11 +29,11 @@ type PinnedReference = {
     readonly archiveSha256: string;
     readonly claimBoundary: string;
     readonly containerBaseImage: string;
-    readonly containerBaseImageDigest: string;
+    readonly containerBaseImageHash: string;
     readonly goToolchain: string;
     readonly localCheckoutPath: string;
-    readonly oracleCommandDigest: string;
-    readonly oracleDockerfileDigest: string;
+    readonly oracleCommandHash: string;
+    readonly oracleDockerfileHash: string;
     readonly pinnedCommit: string;
     readonly pinnedCommitDate: string;
     readonly pinnedCommitUrl: string;
@@ -41,12 +44,12 @@ type PinnedReference = {
     readonly schemaVersion: number;
 };
 
-export type ReferenceOracleDigestBindings = {
-    readonly referenceOracleCommitDigest: string;
-    readonly referenceOracleContainerDigest: string;
-    readonly referenceOracleCommandDigest: string;
+export type ReferenceOracleHashBindings = {
+    readonly referenceOracleCommitHash: string;
+    readonly referenceOracleContainerHash: string;
+    readonly referenceOracleCommandHash: string;
     readonly referenceOracleVectorRoot: string;
-    readonly referenceOracleProfileDigest: string;
+    readonly referenceOracleProfileHash: string;
     readonly records: {
         readonly commitRecord: unknown;
         readonly containerRecord: unknown;
@@ -83,14 +86,14 @@ const sha256OracleCommandInputs = (
 export const loadPinnedReference = async (): Promise<PinnedReference> =>
     JSON.parse(await readFile(pinnedReferencePath, 'utf8')) as PinnedReference;
 
-export const assertPinnedDigest = (
+export const assertPinnedHash = (
     label: string,
-    actualDigest: string,
-    expectedDigest: string,
+    actualHash: string,
+    expectedHash: string,
 ): void => {
-    if (actualDigest !== expectedDigest) {
+    if (actualHash !== expectedHash) {
         throw new Error(
-            `The pinned Lattigo ${label} digest changed: actual ${actualDigest}, expected ${expectedDigest}. Review the oracle change before updating tools/lattigo-oracle/pinned-reference.json.`,
+            `The pinned Lattigo ${label} hash changed: actual ${actualHash}, expected ${expectedHash}. Review the oracle change before updating tools/lattigo-oracle/pinned-reference.json.`,
         );
     }
 };
@@ -161,7 +164,7 @@ export const verifyPinnedReferenceMetadata = (
         );
     }
 
-    const expectedBaseImageReference = `${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageDigest}`;
+    const expectedBaseImageReference = `${pinnedReference.containerBaseImage}@${pinnedReference.containerBaseImageHash}`;
     const dockerfileFirstLine = dockerfile.split(/\r?\n/u)[0];
     if (dockerfileFirstLine !== `FROM ${expectedBaseImageReference}`) {
         throw new Error(
@@ -186,7 +189,7 @@ export const verifyPinnedReferenceMetadata = (
     );
     if (!archiveChecksumCommandPattern.test(dockerfile)) {
         throw new Error(
-            'The Lattigo oracle Dockerfile must verify the pinned archive SHA-256 digest with sha256sum -c against the pinned archive path.',
+            'The Lattigo oracle Dockerfile must verify the pinned archive SHA-256 hash with sha256sum -c against the pinned archive path.',
         );
     }
     if (dockerfile.includes(`COPY ${pinnedReference.localCheckoutPath}`)) {
@@ -205,11 +208,11 @@ export const verifyPinnedReferenceMetadata = (
     }
 };
 
-export const buildReferenceOracleDigestBindings = (
+export const buildReferenceOracleHashBindings = (
     pinnedReference: PinnedReference,
-    commandDigest: string,
-    dockerfileDigest: string,
-): ReferenceOracleDigestBindings => {
+    commandHash: string,
+    dockerfileHash: string,
+): ReferenceOracleHashBindings => {
     const commitRecord = {
         referenceName: pinnedReference.referenceName,
         repository: pinnedReference.repository,
@@ -222,14 +225,14 @@ export const buildReferenceOracleDigestBindings = (
     const containerRecord = {
         referenceName: pinnedReference.referenceName,
         containerBaseImage: pinnedReference.containerBaseImage,
-        containerBaseImageDigest: pinnedReference.containerBaseImageDigest,
+        containerBaseImageHash: pinnedReference.containerBaseImageHash,
         goToolchain: pinnedReference.goToolchain,
-        oracleDockerfileDigest: dockerfileDigest,
+        oracleDockerfileHash: dockerfileHash,
         protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
     };
     const commandRecord = {
         referenceName: pinnedReference.referenceName,
-        oracleCommandDigest: commandDigest,
+        oracleCommandHash: commandHash,
         commandInputRelativePaths: oracleCommandInputRelativePaths,
         runtimeUse: pinnedReference.runtimeUse,
         protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
@@ -252,26 +255,29 @@ export const buildReferenceOracleDigestBindings = (
     };
 
     return {
-        referenceOracleCommitDigest: deriveProtocolDigest(
-            'ReferenceOracleCommitDigest',
-            commitRecord,
+        referenceOracleCommitHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: commitRecord,
+            purpose: 'lattigo-reference-oracle-commit-v1',
+        }),
+        referenceOracleContainerHash: deriveProtocolHash(
+            'ChallengeDomainHash',
+            {
+                payload: containerRecord,
+                purpose: 'lattigo-reference-oracle-container-v1',
+            },
         ),
-        referenceOracleContainerDigest: deriveProtocolDigest(
-            'ReferenceOracleContainerDigest',
-            containerRecord,
-        ),
-        referenceOracleCommandDigest: deriveProtocolDigest(
-            'ReferenceOracleCommandDigest',
-            commandRecord,
-        ),
-        referenceOracleVectorRoot: deriveProtocolDigest(
-            'ReferenceOracleVectorRoot',
-            vectorRecord,
-        ),
-        referenceOracleProfileDigest: deriveProtocolDigest(
-            'ReferenceOracleProfileDigest',
-            profileRecord,
-        ),
+        referenceOracleCommandHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: commandRecord,
+            purpose: 'lattigo-reference-oracle-command-v1',
+        }),
+        referenceOracleVectorRoot: deriveProtocolHash('ChallengeDomainHash', {
+            payload: vectorRecord,
+            purpose: 'lattigo-reference-oracle-vector-root-v1',
+        }),
+        referenceOracleProfileHash: deriveProtocolHash('ChallengeDomainHash', {
+            payload: profileRecord,
+            purpose: 'lattigo-reference-oracle-profile-v1',
+        }),
         records: {
             commitRecord,
             containerRecord,
@@ -285,9 +291,9 @@ export const buildReferenceOracleDigestBindings = (
 export const verifyPinnedReference = async (): Promise<{
     readonly archivePresent: boolean;
     readonly checkoutPresent: boolean;
-    readonly commandDigest: string;
-    readonly dockerfileDigest: string;
-    readonly referenceOracleDigestBindings: ReferenceOracleDigestBindings;
+    readonly commandHash: string;
+    readonly dockerfileHash: string;
+    readonly referenceOracleHashBindings: ReferenceOracleHashBindings;
 }> => {
     const pinnedReference = await loadPinnedReference();
     if (pinnedReference.runtimeUse !== 'forbidden') {
@@ -311,13 +317,9 @@ export const verifyPinnedReference = async (): Promise<{
     );
     let archivePresent = false;
     try {
-        const archiveDigest = await sha256File(archiveAbsolutePath);
+        const archiveHash = await sha256File(archiveAbsolutePath);
         archivePresent = true;
-        assertPinnedDigest(
-            'archive',
-            archiveDigest,
-            pinnedReference.archiveSha256,
-        );
+        assertPinnedHash('archive', archiveHash, pinnedReference.archiveSha256);
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
             throw error;
@@ -353,35 +355,35 @@ export const verifyPinnedReference = async (): Promise<{
     }
 
     verifyPinnedReferenceMetadata(pinnedReference, goModule, dockerfile);
-    const commandDigest = sha256OracleCommandInputs(commandInputs);
-    const dockerfileDigest = sha256Text(dockerfile);
-    assertPinnedDigest(
+    const commandHash = sha256OracleCommandInputs(commandInputs);
+    const dockerfileHash = sha256Text(dockerfile);
+    assertPinnedHash(
         'oracle command',
-        commandDigest,
-        pinnedReference.oracleCommandDigest,
+        commandHash,
+        pinnedReference.oracleCommandHash,
     );
-    assertPinnedDigest(
+    assertPinnedHash(
         'oracle Dockerfile',
-        dockerfileDigest,
-        pinnedReference.oracleDockerfileDigest,
+        dockerfileHash,
+        pinnedReference.oracleDockerfileHash,
     );
 
     return {
         archivePresent,
         checkoutPresent,
-        commandDigest,
-        dockerfileDigest,
-        referenceOracleDigestBindings: buildReferenceOracleDigestBindings(
+        commandHash,
+        dockerfileHash,
+        referenceOracleHashBindings: buildReferenceOracleHashBindings(
             pinnedReference,
-            commandDigest,
-            dockerfileDigest,
+            commandHash,
+            dockerfileHash,
         ),
     };
 };
 
 const runDockerOracle = async (): Promise<void> => {
     await new Promise<void>((resolve, reject) => {
-        const imageName = 'sealed-lattice-lattigo-oracle:m7';
+        const imageName = 'sealed-lattice-lattigo-oracle:bgv-rns';
         const build = spawn(
             'docker',
             [
@@ -412,7 +414,7 @@ const runDockerOracle = async (): Promise<void> => {
     await new Promise<void>((resolve, reject) => {
         const run = spawn(
             'docker',
-            ['run', '--rm', 'sealed-lattice-lattigo-oracle:m7'],
+            ['run', '--rm', 'sealed-lattice-lattigo-oracle:bgv-rns'],
             {
                 cwd: repoRoot,
                 stdio: 'inherit',
@@ -438,18 +440,14 @@ const main = async (): Promise<void> => {
             {
                 ok: true,
                 ...report,
-                dockerOracleRun:
-                    process.env.SEALED_LATTICE_RUN_LATTIGO_DOCKER_ORACLE ===
-                    '1',
+                dockerOracleRun: true,
             },
             null,
             2,
         ),
     );
 
-    if (process.env.SEALED_LATTICE_RUN_LATTIGO_DOCKER_ORACLE === '1') {
-        await runDockerOracle();
-    }
+    await runDockerOracle();
 };
 
 const scriptEntryPoint = process.argv[1];

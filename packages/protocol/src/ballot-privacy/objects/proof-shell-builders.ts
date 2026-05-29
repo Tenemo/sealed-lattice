@@ -1,9 +1,9 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotPrivacyVerification,
     BallotProofRecord,
     BallotProofStatement,
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverKeyProof,
     ReceiverKeyProofRootEvidence,
     ReceiverPayload,
@@ -11,8 +11,8 @@ import type {
     ShareCommitment,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import { getBallotPrivacyEncodedShareVectorWidth } from '../protocol-parameters.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     BallotProofRecordPayload,
@@ -26,20 +26,20 @@ import type {
 import {
     collectReceiverReferenceRefusals,
     createReceiverReferenceKey,
-    deriveBallotProofChallengeDigest,
-    deriveBallotProofRecordDigest,
-    deriveBallotProofStatementDigest,
-    deriveProofBytesDigest,
+    deriveBallotProofChallengeHash,
+    deriveBallotProofRecordHash,
+    deriveBallotProofStatementHash,
+    deriveProofBytesHash,
     deriveReceiverKeyProofRoot,
-    deriveReceiverKeyProofRootEvidenceDigest,
+    deriveReceiverKeyProofRootEvidenceHash,
     deriveReceiverPayloadCiphertextRoot,
-    deriveReceiverPayloadDigest,
-    deriveShareCommitmentDigest,
+    deriveReceiverPayloadHash,
+    deriveShareCommitmentHash,
     describeBallotPrivacyProofBackend,
     isUnknownObject,
     omitProperty,
     proofBytesHexPattern,
-    protocolDigestPattern,
+    protocolHashPattern,
     unavailableProofBackendMessage,
 } from './object-contracts.js';
 
@@ -48,13 +48,13 @@ export const createReceiverPayloadShell = (
 ): ReceiverPayload => {
     const ciphertextRoot = deriveReceiverPayloadCiphertextRoot({
         ceremonyId: input.ceremonyId,
-        manifestDigest: input.manifestDigest,
-        payloadContextDigest: input.payloadContextDigest,
-        receiverEncryptionProfileDigest: input.receiverEncryptionProfileDigest,
+        manifestHash: input.manifestHash,
+        payloadContextHash: input.payloadContextHash,
+        receiverEncryptionProfileHash: input.receiverEncryptionProfileHash,
         receiverIdentity: input.receiverIdentity,
-        receiverPublicKeyDigest: input.receiverPublicKeyDigest,
+        receiverPublicKeyHash: input.receiverPublicKeyHash,
         receiverRosterPosition: input.receiverRosterPosition,
-        ciphertextBodyDigest: input.ciphertextBodyDigest,
+        ciphertextBodyHash: input.ciphertextBodyHash,
     });
     const receiverPayloadPayload: ReceiverPayloadPayload = {
         objectType: 'ReceiverPayload',
@@ -65,9 +65,7 @@ export const createReceiverPayloadShell = (
 
     return {
         ...receiverPayloadPayload,
-        receiverPayloadDigest: deriveReceiverPayloadDigest(
-            receiverPayloadPayload,
-        ),
+        receiverPayloadHash: deriveReceiverPayloadHash(receiverPayloadPayload),
     };
 };
 
@@ -82,39 +80,31 @@ export const createShareCommitmentShell = (
 
     return {
         ...shareCommitmentPayload,
-        shareCommitmentDigest: deriveShareCommitmentDigest(
-            shareCommitmentPayload,
-        ),
+        shareCommitmentHash: deriveShareCommitmentHash(shareCommitmentPayload),
     };
 };
 
 export const buildBallotProofStatement = (
     input: BallotProofStatementInput,
 ): BallotProofStatement => {
-    const challengeDomainDigest = deriveProtocolDigest(
-        'ChallengeDomainDigest',
-        {
-            ballotProofProfileDigest: input.ballotProofProfileDigest,
-            aggregateInputEncodingProfileDigest:
-                input.aggregateInputEncodingProfileDigest,
-            challengeDomainLabel:
-                input.challengeDomainLabel ??
-                'sealed.vote/v1/ballot-proof/challenge',
-            ballotScoreEncodingProfileDigest:
-                input.ballotScoreEncodingProfileDigest,
-            ballotShareLayoutProfileDigest:
-                input.ballotShareLayoutProfileDigest,
-            encodedAggregateLayoutDigest: input.encodedAggregateLayoutDigest,
-            encodedShareVectorLayoutDigest:
-                input.encodedShareVectorLayoutDigest,
-            receiverEncryptionProfileDigest:
-                input.receiverEncryptionProfileDigest,
-            scoreMembershipProfileDigest: input.scoreMembershipProfileDigest,
-            shareCommitmentMessageBoundCertDigest:
-                input.shareCommitmentMessageBoundCertDigest,
-            shareCommitmentProfileDigest: input.shareCommitmentProfileDigest,
-        },
-    );
+    const challengeDomainHash = deriveProtocolHash('ChallengeDomainHash', {
+        ballotProofProfileHash: input.ballotProofProfileHash,
+        aggregateInputEncodingProfileHash:
+            input.aggregateInputEncodingProfileHash,
+        challengeDomainLabel:
+            input.challengeDomainLabel ??
+            'sealed.vote/v1/ballot-proof/challenge',
+        ballotScoreEncodingProfileHash: input.ballotScoreEncodingProfileHash,
+        ballotShareLayoutProfileHash: input.ballotShareLayoutProfileHash,
+        encodedAggregateLayoutHash: input.encodedAggregateLayoutHash,
+        encodedShareVectorLayoutHash: input.encodedShareVectorLayoutHash,
+        purpose: 'ballot-proof-statement-challenge-domain-v1',
+        receiverEncryptionProfileHash: input.receiverEncryptionProfileHash,
+        scoreMembershipProfileHash: input.scoreMembershipProfileHash,
+        shareCommitmentMessageBoundCertHash:
+            input.shareCommitmentMessageBoundCertHash,
+        shareCommitmentProfileHash: input.shareCommitmentProfileHash,
+    });
     const shareVectorWidth = getBallotPrivacyEncodedShareVectorWidth(
         input.optionCount,
     );
@@ -122,144 +112,142 @@ export const buildBallotProofStatement = (
         objectType: 'BallotProofStatement',
         objectVersion: 1,
         ceremonyId: input.ceremonyId,
-        manifestDigest: input.manifestDigest,
-        rosterDigest: input.rosterDigest,
-        pollSpecDigest: input.pollSpecDigest,
-        thresholdProfileDigest: input.thresholdProfileDigest,
-        duplicateBallotPolicyDigest: input.duplicateBallotPolicyDigest,
-        scoreDomainDigest: input.scoreDomainDigest,
-        tiePolicyDigest: input.tiePolicyDigest,
+        manifestHash: input.manifestHash,
+        rosterHash: input.rosterHash,
+        pollSpecHash: input.pollSpecHash,
+        thresholdProfileHash: input.thresholdProfileHash,
+        duplicateBallotPolicyHash: input.duplicateBallotPolicyHash,
+        scoreDomainHash: input.scoreDomainHash,
+        tiePolicyHash: input.tiePolicyHash,
         topOptionCount: input.topOptionCount,
         optionCount: input.optionCount,
         shareVectorWidth,
-        voterIdentityDigest: input.voterIdentityDigest,
+        voterIdentityHash: input.voterIdentityHash,
         voterRosterPosition: input.voterRosterPosition,
-        voterSigningKeyDigest: input.voterSigningKeyDigest,
-        actionContextDigest: input.actionContextDigest,
-        rosterExternalAcceptanceDigest: input.rosterExternalAcceptanceDigest,
+        voterSigningKeyHash: input.voterSigningKeyHash,
+        actionContextHash: input.actionContextHash,
+        rosterExternalAcceptanceHash: input.rosterExternalAcceptanceHash,
         receiverKeyRoot: input.receiverKeyRoot,
         receiverKeyProofRoot: input.receiverKeyProofRoot,
         receiverPublicKeys: input.receiverPublicKeys,
         receiverPayloads: input.receiverPayloads,
         shareCommitments: input.shareCommitments,
-        shareCommitmentProfileDigest: input.shareCommitmentProfileDigest,
-        receiverEncryptionProfileDigest: input.receiverEncryptionProfileDigest,
-        ballotProofProfileDigest: input.ballotProofProfileDigest,
-        scoreMembershipProfileDigest: input.scoreMembershipProfileDigest,
-        ballotScoreEncodingProfileDigest:
-            input.ballotScoreEncodingProfileDigest,
-        ballotShareLayoutProfileDigest: input.ballotShareLayoutProfileDigest,
-        aggregateInputEncodingProfileDigest:
-            input.aggregateInputEncodingProfileDigest,
-        encodedShareVectorLayoutDigest: input.encodedShareVectorLayoutDigest,
-        encodedAggregateLayoutDigest: input.encodedAggregateLayoutDigest,
-        shareCommitmentMessageBoundCertDigest:
-            input.shareCommitmentMessageBoundCertDigest,
-        ballotPackageDigest: input.ballotPackageDigest,
-        challengeDomainDigest,
+        shareCommitmentProfileHash: input.shareCommitmentProfileHash,
+        receiverEncryptionProfileHash: input.receiverEncryptionProfileHash,
+        ballotProofProfileHash: input.ballotProofProfileHash,
+        scoreMembershipProfileHash: input.scoreMembershipProfileHash,
+        ballotScoreEncodingProfileHash: input.ballotScoreEncodingProfileHash,
+        ballotShareLayoutProfileHash: input.ballotShareLayoutProfileHash,
+        aggregateInputEncodingProfileHash:
+            input.aggregateInputEncodingProfileHash,
+        encodedShareVectorLayoutHash: input.encodedShareVectorLayoutHash,
+        encodedAggregateLayoutHash: input.encodedAggregateLayoutHash,
+        shareCommitmentMessageBoundCertHash:
+            input.shareCommitmentMessageBoundCertHash,
+        ballotPackageHash: input.ballotPackageHash,
+        challengeDomainHash,
     };
 
     return {
         ...statementPayload,
-        ballotProofStatementDigest:
-            deriveBallotProofStatementDigest(statementPayload),
+        ballotProofStatementHash:
+            deriveBallotProofStatementHash(statementPayload),
     };
 };
 
 export const createBallotProofRecordShell = (input: {
     readonly statement: BallotProofStatement;
-    readonly backendStatementDigest?: ProtocolDigest;
-    readonly componentBundleStatementDigest?: ProtocolDigest;
-    readonly componentProofBundleDigest?: ProtocolDigest;
-    readonly relationStatementDigest: ProtocolDigest;
-    readonly linearStatementDigest?: ProtocolDigest;
-    readonly statementMatrixDigest?: ProtocolDigest;
-    readonly targetVectorDigest?: ProtocolDigest;
-    readonly proofRoot: ProtocolDigest;
-    readonly proofBytesDigest: ProtocolDigest;
-    readonly proofEncodingProfileDigest?: ProtocolDigest;
-    readonly proofParameterSetDigest?: ProtocolDigest;
+    readonly backendStatementHash?: ProtocolHash;
+    readonly componentBundleStatementHash?: ProtocolHash;
+    readonly componentProofBundleHash?: ProtocolHash;
+    readonly relationStatementHash: ProtocolHash;
+    readonly linearStatementHash?: ProtocolHash;
+    readonly statementMatrixHash?: ProtocolHash;
+    readonly targetVectorHash?: ProtocolHash;
+    readonly proofRoot: ProtocolHash;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofEncodingProfileHash?: ProtocolHash;
+    readonly proofParameterSetHash?: ProtocolHash;
     readonly proofSizeBytes: number;
-    readonly publicRandomnessDigest?: ProtocolDigest;
+    readonly publicRandomnessHash?: ProtocolHash;
 }): BallotProofRecord => {
-    const challengeDigest = deriveBallotProofChallengeDigest({
+    const challengeHash = deriveBallotProofChallengeHash({
         statement: input.statement,
-        backendStatementDigest: input.backendStatementDigest,
-        componentBundleStatementDigest: input.componentBundleStatementDigest,
-        componentProofBundleDigest: input.componentProofBundleDigest,
-        relationStatementDigest: input.relationStatementDigest,
-        linearStatementDigest: input.linearStatementDigest,
-        statementMatrixDigest: input.statementMatrixDigest,
-        targetVectorDigest: input.targetVectorDigest,
+        backendStatementHash: input.backendStatementHash,
+        componentBundleStatementHash: input.componentBundleStatementHash,
+        componentProofBundleHash: input.componentProofBundleHash,
+        relationStatementHash: input.relationStatementHash,
+        linearStatementHash: input.linearStatementHash,
+        statementMatrixHash: input.statementMatrixHash,
+        targetVectorHash: input.targetVectorHash,
         proofRoot: input.proofRoot,
-        proofBytesDigest: input.proofBytesDigest,
-        proofEncodingProfileDigest: input.proofEncodingProfileDigest,
-        proofParameterSetDigest: input.proofParameterSetDigest,
-        publicRandomnessDigest: input.publicRandomnessDigest,
+        proofBytesHash: input.proofBytesHash,
+        proofEncodingProfileHash: input.proofEncodingProfileHash,
+        proofParameterSetHash: input.proofParameterSetHash,
+        publicRandomnessHash: input.publicRandomnessHash,
     });
     const proofRecordPayload: BallotProofRecordPayload = {
         objectType: 'BallotProofRecord',
         objectVersion: 1,
-        ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
-        ...(input.backendStatementDigest === undefined
+        ballotProofStatementHash: input.statement.ballotProofStatementHash,
+        ...(input.backendStatementHash === undefined
             ? {}
-            : { backendStatementDigest: input.backendStatementDigest }),
-        ...(input.componentBundleStatementDigest === undefined
-            ? {}
-            : {
-                  componentBundleStatementDigest:
-                      input.componentBundleStatementDigest,
-              }),
-        ...(input.componentProofBundleDigest === undefined
+            : { backendStatementHash: input.backendStatementHash }),
+        ...(input.componentBundleStatementHash === undefined
             ? {}
             : {
-                  componentProofBundleDigest: input.componentProofBundleDigest,
+                  componentBundleStatementHash:
+                      input.componentBundleStatementHash,
               }),
-        relationStatementDigest: input.relationStatementDigest,
-        ...(input.linearStatementDigest === undefined
+        ...(input.componentProofBundleHash === undefined
             ? {}
-            : { linearStatementDigest: input.linearStatementDigest }),
-        ...(input.statementMatrixDigest === undefined
+            : {
+                  componentProofBundleHash: input.componentProofBundleHash,
+              }),
+        relationStatementHash: input.relationStatementHash,
+        ...(input.linearStatementHash === undefined
             ? {}
-            : { statementMatrixDigest: input.statementMatrixDigest }),
-        ...(input.targetVectorDigest === undefined
+            : { linearStatementHash: input.linearStatementHash }),
+        ...(input.statementMatrixHash === undefined
             ? {}
-            : { targetVectorDigest: input.targetVectorDigest }),
-        ballotProofProfileDigest: input.statement.ballotProofProfileDigest,
+            : { statementMatrixHash: input.statementMatrixHash }),
+        ...(input.targetVectorHash === undefined
+            ? {}
+            : { targetVectorHash: input.targetVectorHash }),
+        ballotProofProfileHash: input.statement.ballotProofProfileHash,
         proofBackend: 'LocalLinearLatticeRelation',
-        challengeDigest,
+        challengeHash,
         proofRoot: input.proofRoot,
-        proofBytesDigest: input.proofBytesDigest,
-        ...(input.proofEncodingProfileDigest === undefined
+        proofBytesHash: input.proofBytesHash,
+        ...(input.proofEncodingProfileHash === undefined
             ? {}
             : {
-                  proofEncodingProfileDigest: input.proofEncodingProfileDigest,
+                  proofEncodingProfileHash: input.proofEncodingProfileHash,
               }),
-        ...(input.proofParameterSetDigest === undefined
+        ...(input.proofParameterSetHash === undefined
             ? {}
-            : { proofParameterSetDigest: input.proofParameterSetDigest }),
+            : { proofParameterSetHash: input.proofParameterSetHash }),
         proofSizeBytes: input.proofSizeBytes,
-        ...(input.publicRandomnessDigest === undefined
+        ...(input.publicRandomnessHash === undefined
             ? {}
-            : { publicRandomnessDigest: input.publicRandomnessDigest }),
+            : { publicRandomnessHash: input.publicRandomnessHash }),
     };
 
     return {
         ...proofRecordPayload,
-        ballotProofRecordDigest:
-            deriveBallotProofRecordDigest(proofRecordPayload),
+        ballotProofRecordHash: deriveBallotProofRecordHash(proofRecordPayload),
     };
 };
 
 const createUnavailableProofBackendVerification = (
     operation: string,
-    objectDigest?: ProtocolDigest,
+    objectHash?: ProtocolHash,
 ): BallotPrivacyVerification => {
     const refusedObjects: RefusalRecord[] = [
         createRefusal(
             'OperationUnavailable',
             `${operation}: ${unavailableProofBackendMessage}`,
-            objectDigest,
+            objectHash,
         ),
     ];
 
@@ -268,7 +256,7 @@ const createUnavailableProofBackendVerification = (
         backendAvailable: false,
         backendStatus: describeBallotPrivacyProofBackend(),
         statusLabels: [],
-        acceptedDigests: [],
+        acceptedHashes: [],
         refusedObjects,
         unresolvedReason: 'OperationUnavailable',
     };
@@ -281,13 +269,13 @@ const createBallotPrivacyStructuralRejection = (
     backendAvailable: false,
     backendStatus: describeBallotPrivacyProofBackend(),
     statusLabels: [],
-    acceptedDigests: [],
+    acceptedHashes: [],
     refusedObjects,
     unresolvedReason: refusedObjects[0]?.code ?? 'BallotPackageInvalid',
 });
 
-const digestForInvalidComponentInput = (): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+const hashForInvalidComponentInput = (): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         purpose: 'invalid-ballot-proof-component-input-v1',
     });
 
@@ -308,29 +296,23 @@ const collectReceiverKeyProofStructuralRefusals = (
         receiverKeyProof.objectType !== 'ReceiverKeyProof' ||
         receiverKeyProof.objectVersion !== 1 ||
         receiverKeyProof.proofBackend !== 'LocalLinearLatticeRelation' ||
-        !protocolDigestPattern.test(receiverKeyProof.proofRoot) ||
-        (receiverKeyProof.backendStatementDigest !== undefined &&
-            !protocolDigestPattern.test(
-                receiverKeyProof.backendStatementDigest,
+        !protocolHashPattern.test(receiverKeyProof.proofRoot) ||
+        (receiverKeyProof.backendStatementHash !== undefined &&
+            !protocolHashPattern.test(receiverKeyProof.backendStatementHash)) ||
+        (receiverKeyProof.linearStatementHash !== undefined &&
+            !protocolHashPattern.test(receiverKeyProof.linearStatementHash)) ||
+        (receiverKeyProof.proofBytesHash !== undefined &&
+            !protocolHashPattern.test(receiverKeyProof.proofBytesHash)) ||
+        (receiverKeyProof.proofEncodingProfileHash !== undefined &&
+            !protocolHashPattern.test(
+                receiverKeyProof.proofEncodingProfileHash,
             )) ||
-        (receiverKeyProof.linearStatementDigest !== undefined &&
-            !protocolDigestPattern.test(
-                receiverKeyProof.linearStatementDigest,
+        (receiverKeyProof.proofParameterSetHash !== undefined &&
+            !protocolHashPattern.test(
+                receiverKeyProof.proofParameterSetHash,
             )) ||
-        (receiverKeyProof.proofBytesDigest !== undefined &&
-            !protocolDigestPattern.test(receiverKeyProof.proofBytesDigest)) ||
-        (receiverKeyProof.proofEncodingProfileDigest !== undefined &&
-            !protocolDigestPattern.test(
-                receiverKeyProof.proofEncodingProfileDigest,
-            )) ||
-        (receiverKeyProof.proofParameterSetDigest !== undefined &&
-            !protocolDigestPattern.test(
-                receiverKeyProof.proofParameterSetDigest,
-            )) ||
-        (receiverKeyProof.publicRandomnessDigest !== undefined &&
-            !protocolDigestPattern.test(
-                receiverKeyProof.publicRandomnessDigest,
-            )) ||
+        (receiverKeyProof.publicRandomnessHash !== undefined &&
+            !protocolHashPattern.test(receiverKeyProof.publicRandomnessHash)) ||
         (receiverKeyProof.proofSizeBytes !== undefined &&
             (!Number.isSafeInteger(receiverKeyProof.proofSizeBytes) ||
                 receiverKeyProof.proofSizeBytes <= 0))
@@ -344,12 +326,12 @@ const collectReceiverKeyProofStructuralRefusals = (
         );
     }
     const proofMetadataFieldNames = [
-        'linearStatementDigest',
-        'proofBytesDigest',
-        'proofEncodingProfileDigest',
-        'proofParameterSetDigest',
+        'linearStatementHash',
+        'proofBytesHash',
+        'proofEncodingProfileHash',
+        'proofParameterSetHash',
         'proofSizeBytes',
-        'publicRandomnessDigest',
+        'publicRandomnessHash',
     ] as const;
     const presentProofMetadataFieldCount = proofMetadataFieldNames.filter(
         (fieldName) => receiverKeyProof[fieldName] !== undefined,
@@ -367,7 +349,7 @@ const collectReceiverKeyProofStructuralRefusals = (
         );
     }
     if (proofBytesHex !== undefined) {
-        if (receiverKeyProof.proofBytesDigest === undefined) {
+        if (receiverKeyProof.proofBytesHash === undefined) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
@@ -385,7 +367,7 @@ const collectReceiverKeyProofStructuralRefusals = (
             );
         } else {
             const proofSizeBytes = proofBytesHex.length / 2;
-            const proofBytesDigest = deriveProofBytesDigest({
+            const proofBytesHash = deriveProofBytesHash({
                 proofBytesHex,
             });
             if (proofSizeBytes !== receiverKeyProof.proofSizeBytes) {
@@ -397,11 +379,11 @@ const collectReceiverKeyProofStructuralRefusals = (
                     ),
                 );
             }
-            if (proofBytesDigest !== receiverKeyProof.proofBytesDigest) {
+            if (proofBytesHash !== receiverKeyProof.proofBytesHash) {
                 refusedObjects.push(
                     createRefusal(
                         'BallotPackageInvalid',
-                        'Receiver key proof bytes do not match the proof record digest.',
+                        'Receiver key proof bytes do not match the proof record hash.',
                         receiverKeyProof.receiverKeyProofRoot,
                     ),
                 );
@@ -441,10 +423,10 @@ const collectReceiverKeyProofRootEvidenceStructuralRefusals = (
     const refusedObjects: RefusalRecord[] = [];
     const evidencePayload = omitProperty(
         evidence,
-        'receiverKeyProofRootEvidenceDigest',
+        'receiverKeyProofRootEvidenceHash',
     );
-    const expectedEvidenceDigest =
-        deriveReceiverKeyProofRootEvidenceDigest(evidencePayload);
+    const expectedEvidenceHash =
+        deriveReceiverKeyProofRootEvidenceHash(evidencePayload);
     const statementReceiverKeyReferences = new Map(
         statement.receiverPublicKeys.map((receiverKeyReference) => [
             createReceiverReferenceKey(receiverKeyReference),
@@ -456,11 +438,9 @@ const collectReceiverKeyProofRootEvidenceStructuralRefusals = (
         evidence.objectType !== 'ReceiverKeyProofRootEvidence' ||
         evidence.objectVersion !== 1 ||
         evidence.evidenceStatus !== 'ReceiverKeyProofRootAccepted' ||
-        !protocolDigestPattern.test(
-            evidence.receiverKeyProofRootEvidenceDigest,
-        ) ||
-        !protocolDigestPattern.test(evidence.receiverKeyRoot) ||
-        !protocolDigestPattern.test(evidence.receiverKeyProofRoot) ||
+        !protocolHashPattern.test(evidence.receiverKeyProofRootEvidenceHash) ||
+        !protocolHashPattern.test(evidence.receiverKeyRoot) ||
+        !protocolHashPattern.test(evidence.receiverKeyProofRoot) ||
         !Number.isSafeInteger(evidence.acceptedReceiverKeyProofCount) ||
         evidence.acceptedReceiverKeyProofCount <= 0
     ) {
@@ -468,32 +448,30 @@ const collectReceiverKeyProofRootEvidenceStructuralRefusals = (
             createRefusal(
                 'BallotPackageInvalid',
                 'Receiver-key proof root evidence has an invalid canonical shape.',
-                evidence.receiverKeyProofRootEvidenceDigest,
+                evidence.receiverKeyProofRootEvidenceHash,
             ),
         );
     }
-    if (
-        evidence.receiverKeyProofRootEvidenceDigest !== expectedEvidenceDigest
-    ) {
+    if (evidence.receiverKeyProofRootEvidenceHash !== expectedEvidenceHash) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Receiver-key proof root evidence digest does not match its canonical payload.',
-                evidence.receiverKeyProofRootEvidenceDigest,
+                'Receiver-key proof root evidence hash does not match its canonical payload.',
+                evidence.receiverKeyProofRootEvidenceHash,
             ),
         );
     }
     refusedObjects.push(
         ...collectReceiverReferenceRefusals({
             label: 'Receiver-key proof root evidence receiver-key references',
-            objectDigest: evidence.receiverKeyProofRootEvidenceDigest,
+            objectHash: evidence.receiverKeyProofRootEvidenceHash,
             references: evidence.receiverPublicKeys,
         }),
     );
     if (
         evidence.ceremonyId !== statement.ceremonyId ||
-        evidence.manifestDigest !== statement.manifestDigest ||
-        evidence.rosterDigest !== statement.rosterDigest ||
+        evidence.manifestHash !== statement.manifestHash ||
+        evidence.rosterHash !== statement.rosterHash ||
         evidence.receiverKeyRoot !== statement.receiverKeyRoot ||
         evidence.receiverKeyProofRoot !== statement.receiverKeyProofRoot ||
         evidence.receiverPublicKeys.length !==
@@ -505,7 +483,7 @@ const collectReceiverKeyProofRootEvidenceStructuralRefusals = (
             createRefusal(
                 'BallotPackageInvalid',
                 'Receiver-key proof root evidence is not bound to the ballot proof statement receiver set.',
-                evidence.receiverKeyProofRootEvidenceDigest,
+                evidence.receiverKeyProofRootEvidenceHash,
             ),
         );
     }
@@ -515,14 +493,14 @@ const collectReceiverKeyProofRootEvidenceStructuralRefusals = (
                 createReceiverReferenceKey(receiverKeyReference),
             );
         if (
-            statementReceiverKeyReference?.receiverPublicKeyDigest !==
-            receiverKeyReference.receiverPublicKeyDigest
+            statementReceiverKeyReference?.receiverPublicKeyHash !==
+            receiverKeyReference.receiverPublicKeyHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     'Receiver-key proof root evidence includes a receiver key outside the ballot proof statement.',
-                    evidence.receiverKeyProofRootEvidenceDigest,
+                    evidence.receiverKeyProofRootEvidenceHash,
                 ),
             );
         }
@@ -534,7 +512,7 @@ const collectReceiverKeyProofRootEvidenceStructuralRefusals = (
 export {
     createUnavailableProofBackendVerification,
     createBallotPrivacyStructuralRejection,
-    digestForInvalidComponentInput,
+    hashForInvalidComponentInput,
     collectReceiverKeyProofStructuralRefusals,
     collectReceiverKeyProofRootEvidenceStructuralRefusals,
 };

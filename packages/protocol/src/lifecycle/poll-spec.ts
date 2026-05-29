@@ -1,10 +1,10 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     DuplicateBallotPolicy,
     PollSpec,
     PollSpecValidation,
     PollSpecValidationError,
-    ProtocolDigest,
+    ProtocolHash,
     RosterPolicy,
     ScoreDomain,
     SmallRosterPolicy,
@@ -94,8 +94,8 @@ const isSupportedSmallRosterPolicy = (
 const normalizeRosterBound = (value: unknown, defaultValue: number): number =>
     typeof value === 'number' ? value : defaultValue;
 
-export const derivePollSpecDigest = (pollSpec: PollSpec): ProtocolDigest =>
-    deriveProtocolDigest('PollSpecDigest', {
+export const derivePollSpecHash = (pollSpec: PollSpec): ProtocolHash =>
+    deriveProtocolHash('PollSpecHash', {
         duplicateBallotPolicy: pollSpec.duplicateBallotPolicy,
         maxRosterSize: pollSpec.maxRosterSize,
         minRosterSize: pollSpec.minRosterSize,
@@ -172,16 +172,18 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             });
             return;
         }
-        if (optionLabels.has(optionLabel)) {
+        const normalizedOptionLabel = optionLabel.normalize('NFC');
+        if (optionLabels.has(normalizedOptionLabel)) {
             addError(errors, {
                 code: 'DuplicateOptionLabel',
                 field: `options[${optionIndex}]`,
-                message: 'option labels must be unique by exact comparison.',
+                message:
+                    'option labels must be unique after Unicode NFC normalization.',
             });
         }
 
-        optionLabels.add(optionLabel);
-        normalizedOptions.push(optionLabel);
+        optionLabels.add(normalizedOptionLabel);
+        normalizedOptions.push(normalizedOptionLabel);
     });
 
     if (
@@ -211,7 +213,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             code: 'UnsupportedDuplicateBallotPolicy',
             field: 'duplicateBallotPolicy',
             message:
-                'duplicateBallotPolicy must be LastValidBeforeVotingClosedCounts.',
+                'duplicateBallotPolicy must be FirstValidBeforeVotingClosedCounts.',
         });
     }
     if (tiePolicy !== undefined && tiePolicy !== defaultTiePolicy) {

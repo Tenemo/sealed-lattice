@@ -4,13 +4,13 @@ use super::codec::{
 };
 use super::types::{
     ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, ENVELOPE_VERSION, FIELD_SEQUENCE,
-    FIELD_STATUS, FIELD_TITLE, FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE, MAGIC,
+    FIELD_STATUS, FIELD_TITLE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE, MAGIC,
     TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION,
 };
 use crate::encoding::{append_string, append_varuint};
 
 pub fn mutate_field_order_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 2);
@@ -23,7 +23,7 @@ pub fn mutate_field_order_fixture() -> String {
 }
 
 pub fn mutate_duplicate_field_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 2);
@@ -36,8 +36,7 @@ pub fn mutate_duplicate_field_fixture() -> String {
 }
 
 pub fn mutate_unknown_field_fixture() -> String {
-    let mut object =
-        canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.tags.clear();
     let mut bytes = serialize_transcript_core_object(&object);
     let field_count_offset = header_length_before_field_count(&object);
@@ -49,7 +48,7 @@ pub fn mutate_unknown_field_fixture() -> String {
 }
 
 pub fn mutate_invalid_enum_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 1);
@@ -60,7 +59,7 @@ pub fn mutate_invalid_enum_fixture() -> String {
 }
 
 pub fn mutate_non_canonical_varuint_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     bytes.extend([0x81, 0x00]);
@@ -79,7 +78,7 @@ pub fn mutate_non_canonical_varuint_fixture() -> String {
 }
 
 pub fn mutate_malformed_length_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
@@ -94,7 +93,7 @@ pub fn mutate_malformed_length_fixture() -> String {
 }
 
 pub fn mutate_trailing_bytes_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = serialize_transcript_core_object(&object);
     bytes.push(0);
 
@@ -102,16 +101,14 @@ pub fn mutate_trailing_bytes_fixture() -> String {
 }
 
 pub fn mutate_invalid_profile_fixture() -> String {
-    let mut object =
-        canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.base_claim_profile_id = "transcript-core-unknown-base-claim-profile".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_unknown_evaluation_profile_fixture() -> String {
-    let mut object =
-        canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.evaluation_proof_profile_id =
         "transcript-core-unknown-evaluation-proof-profile".to_string();
 
@@ -166,31 +163,28 @@ pub fn mutate_unknown_mhe_security_closure_fixture() -> String {
     append_varuint(&mut bytes, ENVELOPE_VERSION);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, BaseClaimProfile::FullyVerified.code());
+    append_varuint(&mut bytes, BaseClaimProfile::FullyVerifiedResult.code());
     append_varuint(&mut bytes, 99);
 
     encode_hex(&bytes)
 }
 
 pub fn mutate_base_claim_profile_mismatch_fixture() -> String {
-    let mut object =
-        canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.base_claim_profile_id = "transcript-core-unknown-base-claim-profile-v1".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_mhe_security_profile_mismatch_fixture() -> String {
-    let mut object =
-        canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.mhe_security_profile_id = ACTIVE_MALICIOUS_MHE_PROFILE_ID.to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_wrong_evaluation_profile_fixture() -> String {
-    let mut object =
-        canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.evaluation_proof_profile_id =
         "transcript-core-wrong-evaluation-proof-profile".to_string();
 
@@ -198,15 +192,14 @@ pub fn mutate_wrong_evaluation_profile_fixture() -> String {
 }
 
 pub fn mutate_fully_verified_missing_evaluation_profile_fixture() -> String {
-    let mut object =
-        canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     object.evaluation_proof_profile_id = String::new();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
 pub fn mutate_missing_field_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 0);
@@ -215,7 +208,7 @@ pub fn mutate_missing_field_fixture() -> String {
 }
 
 pub fn mutate_invalid_utf8_fixture() -> String {
-    let object = canonical_transcript_core_object(FULLY_VERIFIED_DEVELOPMENT_INTEGRATION_PROFILE);
+    let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, &object);
     append_varuint(&mut bytes, 1);

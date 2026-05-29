@@ -4,162 +4,138 @@ import {
     buildCoverageBadge,
     colorForCoverage,
     createCoverageArtifacts,
-    defaultRequiredCoverageEntryPaths,
-    getTotalLinesMetric,
     normalizeCoverageKey,
-    normalizeCoverageSummary,
+    totalLineMetric,
     validateCoverageScope,
     type CoverageEntry,
-    type CoverageMetric,
     type CoverageSummary,
-} from '#tools/generate-coverage-badge';
+} from '#tools/ci/generate-coverage-badge';
 
-const createMetric = (pct: number): CoverageMetric => ({
-    covered: 0,
-    pct,
-    skipped: 0,
-    total: 0,
+const coverageEntry = (linePercent: number): CoverageEntry => ({
+    lines: {
+        covered: linePercent,
+        pct: linePercent,
+        skipped: 0,
+        total: 100,
+    },
 });
 
-const createEntry = (pct: number): CoverageEntry => ({
-    lines: createMetric(pct),
+const coverageSummaryWithEntries = (
+    entries: Readonly<Record<string, CoverageEntry>>,
+    totalLinePercent = 57.84,
+): CoverageSummary => ({
+    total: coverageEntry(totalLinePercent),
+    ...entries,
 });
 
-describe('coverage badge generator', () => {
-    it.each([
-        [95, 'brightgreen'],
-        [94.9, 'green'],
-        [90, 'green'],
-        [89.9, 'yellowgreen'],
-        [80, 'yellowgreen'],
-        [79.9, 'yellow'],
-        [70, 'yellow'],
-        [69.9, 'orange'],
-        [60, 'orange'],
-        [59.9, 'red'],
-    ])('maps %d%% coverage to %s', (percent, expectedColor) => {
-        expect(colorForCoverage(percent)).toBe(expectedColor);
+describe('coverage badge generation', () => {
+    it('uses Shields colors at the documented threshold boundaries', () => {
+        expect(colorForCoverage(100)).toBe('brightgreen');
+        expect(colorForCoverage(95)).toBe('brightgreen');
+        expect(colorForCoverage(94.99)).toBe('green');
+        expect(colorForCoverage(90)).toBe('green');
+        expect(colorForCoverage(89.99)).toBe('yellowgreen');
+        expect(colorForCoverage(80)).toBe('yellowgreen');
+        expect(colorForCoverage(79.99)).toBe('yellow');
+        expect(colorForCoverage(70)).toBe('yellow');
+        expect(colorForCoverage(69.99)).toBe('orange');
+        expect(colorForCoverage(60)).toBe('orange');
+        expect(colorForCoverage(59.99)).toBe('red');
     });
 
-    it('normalizes absolute coverage keys under the repo root', () => {
+    it('normalizes absolute and Windows coverage keys to repository-relative keys', () => {
         expect(
             normalizeCoverageKey(
-                'C:\\Repo\\sealed-lattice\\src\\crypto.ts',
-                'C:\\Repo\\sealed-lattice',
+                'C:\\repo\\sealed-lattice\\packages\\sdk\\src\\index.ts',
+                'C:\\repo\\sealed-lattice',
             ),
-        ).toBe('src/crypto.ts');
+        ).toBe('packages/sdk/src/index.ts');
         expect(
             normalizeCoverageKey(
-                '/repo/sealed-lattice/src/crypto.ts',
-                '/repo/sealed-lattice/',
+                '/repo/sealed-lattice/tools/ci/check-package-boundaries.ts',
+                '/repo/sealed-lattice',
             ),
-        ).toBe('src/crypto.ts');
-        expect(
-            normalizeCoverageKey(
-                'c:/repo/sealed-lattice/tests/file.test.ts',
-                'C:\\Repo\\sealed-lattice',
-            ),
-        ).toBe('tests/file.test.ts');
-        expect(normalizeCoverageKey('total', 'C:\\Repo\\sealed-lattice')).toBe(
+        ).toBe('tools/ci/check-package-boundaries.ts');
+        expect(normalizeCoverageKey('total', '/repo/sealed-lattice')).toBe(
             'total',
         );
-        expect(
-            normalizeCoverageKey(
-                '../outside/file.ts',
-                'C:\\Repo\\sealed-lattice',
-            ),
-        ).toBe('../outside/file.ts');
     });
 
-    it('sorts normalized summaries with total first', () => {
-        const summary: CoverageSummary = {
-            'C:\\Repo\\sealed-lattice\\src\\z.ts': createEntry(12),
-            total: createEntry(91),
-            'c:/repo/sealed-lattice/src/a.ts': createEntry(85),
-            '../outside.ts': createEntry(30),
-        };
+    it('builds deterministic badge and normalized summary artifacts', () => {
+        const projectRoot = 'C:\\repo\\sealed-lattice';
+        const rawSummary = coverageSummaryWithEntries({
+            'C:\\repo\\sealed-lattice\\packages\\sdk\\src\\index.ts':
+                coverageEntry(91.2),
+            'C:\\repo\\sealed-lattice\\tools\\ci\\check-package-boundaries.ts':
+                coverageEntry(75),
+        });
 
-        const normalized = normalizeCoverageSummary(
-            summary,
-            'C:\\Repo\\sealed-lattice',
+        const { badge, summary } = createCoverageArtifacts(
+            rawSummary,
+            projectRoot,
+            {
+                requiredEntryPaths: [
+                    'packages/sdk/src/index.ts',
+                    'tools/ci/check-package-boundaries.ts',
+                ],
+            },
         );
 
-        expect(Object.keys(normalized)).toEqual([
+        expect(badge).toEqual({
+            schemaVersion: 1,
+            label: 'node source coverage',
+            message: '57.8%',
+            color: 'red',
+        });
+        expect(Object.keys(summary)).toEqual([
             'total',
-            '../outside.ts',
-            'src/a.ts',
-            'src/z.ts',
+            'packages/sdk/src/index.ts',
+            'tools/ci/check-package-boundaries.ts',
         ]);
-        expect(normalized['src/a.ts']).toBe(
-            summary['c:/repo/sealed-lattice/src/a.ts'],
-        );
     });
 
-    it('throws when total coverage metrics are missing', () => {
-        expect(() => getTotalLinesMetric({})).toThrow(
-            'Coverage summary is missing total metrics',
-        );
-        expect(() => getTotalLinesMetric({ total: {} })).toThrow(
-            'Coverage summary is missing total.lines metrics',
-        );
-    });
-
-    it('builds a rounded badge from total line coverage', () => {
-        expect(
-            buildCoverageBadge({
+    it('rejects missing total metrics and missing required source entries', () => {
+        expect(() => totalLineMetric({})).toThrow(/missing total metrics/u);
+        expect(() =>
+            totalLineMetric({
                 total: {
-                    lines: createMetric(89.96),
-                    statements: createMetric(10),
+                    statements: {
+                        covered: 1,
+                        pct: 100,
+                        skipped: 0,
+                        total: 1,
+                    },
                 },
             }),
-        ).toEqual({
-            color: 'green',
-            label: 'node source coverage',
-            message: '90%',
-            schemaVersion: 1,
-        });
-    });
+        ).toThrow(/missing total\.lines/u);
 
-    it('creates normalized coverage artifacts for publishing', () => {
-        const { badge, summary } = createCoverageArtifacts(
-            {
-                'C:\\Repo\\sealed-lattice\\src\\index.ts': createEntry(50),
-                total: createEntry(96.4),
-            },
-            'C:\\Repo\\sealed-lattice',
-            { requiredEntryPaths: [] },
-        );
-
-        expect(Object.keys(summary)).toEqual(['total', 'src/index.ts']);
-        expect(summary['src/index.ts']).toEqual(createEntry(50));
-        expect(badge).toEqual({
-            color: 'brightgreen',
-            label: 'node source coverage',
-            message: '96.4%',
-            schemaVersion: 1,
-        });
-    });
-
-    it('rejects summaries that do not cover the expected source scope', () => {
         expect(() =>
-            validateCoverageScope({
-                total: createEntry(100),
-                'packages/sdk/src/index.ts': createEntry(100),
-            }),
-        ).toThrow(
-            'Coverage summary is missing required source entries: packages/crypto/src/canonical-json.ts',
-        );
+            validateCoverageScope(
+                coverageSummaryWithEntries({
+                    'packages/sdk/src/index.ts': coverageEntry(100),
+                }),
+                [
+                    'packages/sdk/src/index.ts',
+                    'tools/ci/stage-public-package.mjs',
+                ],
+            ),
+        ).toThrow(/tools\/ci\/stage-public-package\.mjs/u);
     });
 
-    it('accepts summaries that include every required source entry', () => {
-        const summary: CoverageSummary = {
-            total: createEntry(100),
-        };
-
-        for (const requiredEntryPath of defaultRequiredCoverageEntryPaths) {
-            summary[requiredEntryPath] = createEntry(100);
-        }
-
-        expect(() => validateCoverageScope(summary)).not.toThrow();
+    it('formats whole-number and rounded decimal percentages', () => {
+        expect(buildCoverageBadge(coverageSummaryWithEntries({}, 60))).toEqual({
+            schemaVersion: 1,
+            label: 'node source coverage',
+            message: '60%',
+            color: 'orange',
+        });
+        expect(
+            buildCoverageBadge(coverageSummaryWithEntries({}, 79.96)),
+        ).toEqual({
+            schemaVersion: 1,
+            label: 'node source coverage',
+            message: '80%',
+            color: 'yellowgreen',
+        });
     });
 });

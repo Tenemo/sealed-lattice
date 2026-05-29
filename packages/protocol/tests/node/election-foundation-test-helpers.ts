@@ -2,58 +2,58 @@ export {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    deriveProtocolDigest,
-    deriveProtocolSignatureDigest,
+    deriveProtocolHash,
+    deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 export {
-    deriveActionContextDigest,
-    deriveRecoveryEpochUpdateDigest,
+    deriveActionContextHash,
+    deriveRecoveryEpochUpdateHash,
     isActionCurrentForRecoveryEpoch,
     verifyRecoveryEpochUpdate,
-} from '../../src/recovery/index';
+} from '#packages/protocol/src/recovery/index';
 export {
     deriveBoardEntryMerklePath,
-    deriveBoardEntryDigest,
-    deriveBoardHeadDigest,
-    deriveBoardRootDigest,
-    deriveConflictingHeadEvidenceDigest,
-    deriveInclusionProofDigest,
+    deriveBoardEntryHash,
+    deriveBoardHeadHash,
+    deriveBoardRootHash,
+    deriveConflictingHeadEvidenceHash,
+    deriveInclusionProofHash,
     verifyBoardConsistency,
-} from '../../src/board/index';
+} from '#packages/protocol/src/board/index';
 export {
-    deriveCastReceiptDigest,
-    deriveCloseRecordDigest,
-    derivePostVotingClosedContextDigest,
+    deriveCastReceiptHash,
+    deriveCloseRecordHash,
+    derivePostVotingClosedContextHash,
     verifyCastReceiptShell,
     verifyCloseRecordShell,
-} from '../../src/closing/index';
+} from '#packages/protocol/src/closing/index';
 export {
-    deriveElectionManifestDigest,
-    deriveReceiverKeyRegistrationDigest,
-    deriveRegistrationEntryDigest,
-    deriveRosterDigest,
-    deriveTrusteeSetupEntryDigest,
+    deriveElectionManifestHash,
+    deriveReceiverKeyRegistrationHash,
+    deriveRegistrationEntryHash,
+    deriveRosterHash,
+    deriveTrusteeSetupEntryHash,
     verifyRosterManifestTranscript,
-} from '../../src/roster/index';
+} from '#packages/protocol/src/roster/index';
 export {
-    deriveTargetFinalityCheckpointDigest,
-    deriveTargetFinalityPolicyDigest,
-    deriveTargetFinalityRecordDigest,
-    deriveTargetProposalDigest,
-    deriveWitnessCheckpointDigest,
-    deriveWitnessPolicyDigest,
+    deriveTargetFinalityCheckpointHash,
+    deriveTargetFinalityPolicyHash,
+    deriveTargetFinalityRecordHash,
+    deriveTargetProposalHash,
+    deriveWitnessCheckpointHash,
+    deriveWitnessPolicyHash,
     verifyTargetFinality,
-} from '../../src/finality/index';
-export { deriveValidatedFirstValidOrder } from '../../src/ordering/index';
+} from '#packages/protocol/src/finality/index';
+export { deriveValidatedFirstValidOrder } from '#packages/protocol/src/ordering/index';
 export {
-    deriveLocalReplayRecordDigest,
-    deriveTargetAcceptedRecordDigest,
-    deriveTopKDecryptionShareDigest,
+    deriveLocalReplayRecordHash,
+    deriveTargetAcceptedRecordHash,
+    deriveTopKDecryptionShareHash,
     verifyLocalReplayRecordShell,
     verifyTargetAcceptedRecordShell,
     verifyTopKDecryptionShareShell,
-} from '../../src/target-acceptance/index';
+} from '#packages/protocol/src/target-acceptance/index';
 export type {
     ActionContext,
     BoardConsistencyInput,
@@ -66,7 +66,7 @@ export type {
     InclusionProof,
     LocalReplayRecord,
     ManifestOpaqueBindings,
-    ManifestPolicyDigests,
+    ManifestPolicyHashes,
     ProtocolSignatureEnvelope,
     ReceiverKeyRegistration,
     RecoveryEpochMapEntry,

@@ -1,26 +1,23 @@
 {
-  "files": [],
-  "references": [
-    {
-      "path": "./packages/sdk"
-    },
-    {
-      "path": "./packages/types"
-    },
-    {
-      "path": "./packages/protocol"
-    },
-    {
-      "path": "./packages/crypto"
-    },
-    {
-      "path": "./packages/wasm"
-    },
-    {
-      "path": "./packages/testkit"
-    },
-    {
-      "path": "./tsconfig.tools.json"
-    }
-  ]
+    "files": [],
+    "references": [
+        {
+            "path": "./packages/sdk"
+        },
+        {
+            "path": "./packages/types"
+        },
+        {
+            "path": "./packages/protocol"
+        },
+        {
+            "path": "./packages/crypto"
+        },
+        {
+            "path": "./packages/wasm"
+        },
+        {
+            "path": "./tsconfig.tools.json"
+        }
+    ]
 }

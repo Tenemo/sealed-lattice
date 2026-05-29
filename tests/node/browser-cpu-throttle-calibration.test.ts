@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     calibrateCpuThrottleRate,
     midTierMobileBenchmarkScore,
-} from '../support/browser-cpu-throttle-calibration';
+} from '#tests/support/browser-cpu-throttle-calibration';
 
 describe('Browser CPU throttle calibration', () => {
     it('calibrates a predictable host score to the target mobile score', async () => {

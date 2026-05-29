@@ -9,6 +9,7 @@ import { chromium, type ConsoleMessage, type Page } from 'playwright';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const docsDistRoot = path.resolve(repoRoot, 'docs', 'dist');
 const host = '127.0.0.1';
+
 const normalizeBasePath = (value: string | undefined): string => {
     const trimmed = (value ?? '/').trim();
 
@@ -18,10 +19,12 @@ const normalizeBasePath = (value: string | undefined): string => {
 
     return `/${trimmed.replace(/^\/+|\/+$/gu, '')}`;
 };
+
 const docsBasePath = normalizeBasePath(
     process.env.DOCS_BASE_PATH ??
         (process.env.GITHUB_ACTIONS === 'true' ? '/sealed-lattice' : '/'),
 );
+
 const routesToCheck = [
     '/',
     '/guides/getting-started/',
@@ -29,10 +32,13 @@ const routesToCheck = [
     '/api/',
     '/api/reference/sealed-lattice/',
 ] as const;
+
 const viewportsToCheck = [
+    { height: 740, name: 'narrow mobile', width: 320 },
     { height: 844, name: 'mobile', width: 390 },
     { height: 900, name: 'tablet', width: 768 },
     { height: 900, name: 'desktop', width: 1280 },
+    { height: 1080, name: 'wide desktop', width: 1920 },
 ] as const;
 
 const contentTypes = new Map([
@@ -309,14 +315,16 @@ const verifyRoute = async (
         await requireVisibleElement(page, 'main', route);
         await requireVisibleElement(page, 'a[href]', route);
         await verifyViewportFit(page, route, viewportName);
+        const isDesktopViewport =
+            viewportName === 'desktop' || viewportName === 'wide desktop';
         await verifyThemeToggle(
             page,
             route,
-            viewportName === 'desktop',
-            viewportName === 'desktop' && route === '/',
+            isDesktopViewport,
+            isDesktopViewport && route === '/',
         );
 
-        if (viewportName === 'desktop') {
+        if (isDesktopViewport) {
             await verifyDesktopRails(page, route);
         }
         if (consoleErrors.length > 0 || pageErrors.length > 0) {

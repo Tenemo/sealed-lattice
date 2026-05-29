@@ -1,14 +1,18 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+#[cfg(test)]
+use super::linear_proof_public_parameters::DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH;
+#[cfg(test)]
+use super::tbox_relations::{
+    linear_proof_tbox_proof_ring, linear_proof_tbox_quadratic_many_dimension,
+};
 use super::{
-    linear_proof_public_parameters::DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH,
     linear_proof_rng::sample_linear_proof_uniform_u64_values,
     polynomial_ring::PolynomialRing,
     quadratic_equation::LinearProofQuadraticEquation,
     tbox_relations::{
         TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH, TBOX_QUADRATIC_MANY_MESSAGE_LENGTH,
-        TboxRelationAccumulatorSet, constant_polynomial, linear_proof_tbox_proof_ring,
-        linear_proof_tbox_quadratic_many_dimension,
+        TboxRelationAccumulatorSet, constant_polynomial,
     },
 };
 
@@ -67,6 +71,7 @@ pub(crate) fn build_many_quadratic_equations(
     Ok(many_quadratic_equations)
 }
 
+#[cfg(test)]
 pub(crate) fn fold_default_many_quadratic_equations(
     equations: &[LinearProofQuadraticEquation],
     challenge_seed: &[u8; 32],
@@ -109,8 +114,8 @@ pub(crate) fn fold_many_quadratic_equations(
                 invalid_many_quadratic("many-quadratic challenge index does not fit in u64")
             })?,
         )?;
-        let scaled_equation = equation.scale_by_polynomial(&challenge_polynomial)?;
-        folded_equation = folded_equation.add(&scaled_equation)?;
+        folded_equation =
+            folded_equation.add_polynomial_scaled_partial(equation, &challenge_polynomial)?;
         challenge_polynomials.push(challenge_polynomial);
     }
 
@@ -120,6 +125,7 @@ pub(crate) fn fold_many_quadratic_equations(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn validate_many_quadratic_self_check() -> CanonicalResult<()> {
     let proof_ring = linear_proof_tbox_proof_ring()?;
     let first_equation = LinearProofQuadraticEquation::zero(

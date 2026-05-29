@@ -1,14 +1,13 @@
 /** Claim profile label attached to transcript-core fixtures and results. */
-export type BaseClaimProfile = 'fullyVerified';
+export type BaseClaimProfile = 'FullyVerifiedResult';
 
 /** High-level malicious security closure claimed by transcript-core fixtures. */
-export type MheSecurityClosure = 'developmentIntegration' | 'ActiveMalicious';
+export type TranscriptCoreMheSecurityClosure =
+    | 'PassiveMHEPrototype'
+    | 'ActiveMalicious';
 
-/**
- * Alias retained for backward compatibility with consumers that read
- * the transcript-core fixture shape. Prefer {@link MheSecurityClosure}.
- */
-export type TranscriptCoreMheSecurityClosure = MheSecurityClosure;
+/** Public lifecycle alias for the transcript-core MHE security closure label. */
+export type MheSecurityClosure = TranscriptCoreMheSecurityClosure;
 
 /** Successful transcript-core status label returned by fixture verification. */
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
@@ -52,7 +51,7 @@ export type CanonicalError = {
     readonly message: string;
 };
 
-/** Golden transcript-core fixture with expected canonical digests and labels. */
+/** Golden transcript-core fixture with expected canonical hashes and labels. */
 export type GoldenTranscriptCoreFixture = {
     readonly kind: 'golden-transcript-core';
     readonly fixtureVersion: 1;
@@ -61,7 +60,7 @@ export type GoldenTranscriptCoreFixture = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityClosure: MheSecurityClosure;
+    readonly mheSecurityClosure: TranscriptCoreMheSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
@@ -101,7 +100,7 @@ export type TranscriptCoreAnalysis = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityClosure: MheSecurityClosure;
+    readonly mheSecurityClosure: TranscriptCoreMheSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;

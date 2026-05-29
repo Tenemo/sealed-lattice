@@ -8,13 +8,12 @@ import type {
 } from '@sealed-lattice/types';
 import { expect } from 'vitest';
 
-import { validatePollSpec } from '../../src/lifecycle/poll-spec';
+import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
 import {
     createShamirPolynomial,
-    deriveSparseTopKTargetDigest,
+    deriveSparseTopKTargetHash,
     normalizeFieldElement,
-} from '../../src/plaintext-oracle/index';
-
+} from '#packages/protocol/src/plaintext-oracle/index';
 import comparatorPolynomialVectorsJson from '#test-vectors/plaintext-oracle/comparator-polynomials.json';
 import fieldVectorsJson from '#test-vectors/plaintext-oracle/field.json';
 import shamirVectorsJson from '#test-vectors/plaintext-oracle/shamir.json';
@@ -42,7 +41,7 @@ type ShamirVectors = {
         readonly maxCenteredAbsContributorRosterPositions: readonly number[];
         readonly maxCenteredL1CoefficientSum: number;
         readonly maxCenteredL1ContributorRosterPositions: readonly number[];
-        readonly reportDigest: string;
+        readonly reportHash: string;
         readonly rosterSize: number;
         readonly threshold: number;
     };
@@ -56,7 +55,7 @@ type ShamirVectors = {
             readonly rosterPosition: number;
         }[];
         readonly maxCenteredAbsCoefficient: number;
-        readonly reportDigest: string;
+        readonly reportHash: string;
     };
     readonly selectedContributorRosterPositions: readonly number[];
     readonly shares: readonly ShamirSharePoint[];
@@ -65,18 +64,18 @@ type ShamirVectors = {
 type TopKVectors = {
     readonly ballots: readonly PlaintextScoreBallotInput[];
     readonly expected: {
-        readonly oracleDigest: string;
+        readonly oracleHash: string;
         readonly optionTallies: readonly number[];
         readonly rankingOptionOrdinals: readonly number[];
         readonly selectedOptionOrdinals: readonly number[];
-        readonly tallyDigest: string;
+        readonly tallyHash: string;
         readonly tallyFieldElements: readonly FieldElement[];
         readonly targetIdSlots: readonly FieldElement[];
         readonly targetOrderSlots: readonly FieldElement[];
     };
     readonly fullTieCase: {
         readonly ballots: readonly PlaintextScoreBallotInput[];
-        readonly expectedOracleDigest: string;
+        readonly expectedOracleHash: string;
         readonly expectedRankingOptionOrdinals: readonly number[];
         readonly expectedTargetIdSlots: readonly FieldElement[];
         readonly expectedTargetOrderSlots: readonly FieldElement[];
@@ -85,9 +84,9 @@ type TopKVectors = {
     readonly maximumNoWrapCase: {
         readonly ballotCount: number;
         readonly expectedMaximumTally: number;
-        readonly expectedOracleDigest: string;
+        readonly expectedOracleHash: string;
         readonly expectedRankingOptionOrdinals: readonly number[];
-        readonly expectedTallyDigest: string;
+        readonly expectedTallyHash: string;
         readonly expectedTargetIdSlots: readonly FieldElement[];
         readonly expectedTargetOrderSlots: readonly FieldElement[];
         readonly pollSpecInput: PollSpecInput;
@@ -99,10 +98,10 @@ type TopKVectors = {
     readonly topOneClearWinnerCase: {
         readonly ballots: readonly PlaintextScoreBallotInput[];
         readonly expectedOptionTallies: readonly number[];
-        readonly expectedOracleDigest: string;
+        readonly expectedOracleHash: string;
         readonly expectedRankingOptionOrdinals: readonly number[];
         readonly expectedSelectedOptionOrdinals: readonly number[];
-        readonly expectedTallyDigest: string;
+        readonly expectedTallyHash: string;
         readonly expectedTargetIdSlots: readonly FieldElement[];
         readonly expectedTargetOrderSlots: readonly FieldElement[];
         readonly pollSpecInput: PollSpecInput;
@@ -111,15 +110,15 @@ type TopKVectors = {
 
 type SparseTargetVectors = {
     readonly expectedSelectedOptionOrdinals: readonly number[];
-    readonly layoutDigest: string;
+    readonly layoutHash: string;
     readonly layoutId: 'WinnerRankTopK-v1';
     readonly schemaVersion: 1;
     readonly target: SparseTopKTarget;
-    readonly targetDigest: string;
+    readonly targetHash: string;
 };
 
 type ComparatorPolynomialVectors = {
-    readonly comparatorDigest: string;
+    readonly comparatorHash: string;
     readonly domainMaximum: number;
     readonly domainMinimum: number;
     readonly equalCoefficientCount: number;
@@ -134,7 +133,7 @@ type ComparatorPolynomialVectors = {
     readonly lastEqualCoefficients: readonly FieldElement[];
     readonly lastGreaterThanCoefficients: readonly FieldElement[];
     readonly maximumRosterBoundaryCase: {
-        readonly comparatorDigest: string;
+        readonly comparatorHash: string;
         readonly domainMaximum: number;
         readonly domainMinimum: number;
         readonly equalCoefficientCount: number;
@@ -242,12 +241,12 @@ export const createDeterministicPolynomial = (
 
 export const mutateSparseTarget = (
     target: SparseTopKTarget,
-    overrides: Partial<Omit<SparseTopKTarget, 'targetDigest'>>,
+    overrides: Partial<Omit<SparseTopKTarget, 'targetHash'>>,
 ): SparseTopKTarget => {
-    const targetWithoutDigest = {
+    const targetWithoutHash = {
         forbiddenSemanticSlots:
             overrides.forbiddenSemanticSlots ?? target.forbiddenSemanticSlots,
-        layoutDigest: overrides.layoutDigest ?? target.layoutDigest,
+        layoutHash: overrides.layoutHash ?? target.layoutHash,
         layoutId: overrides.layoutId ?? target.layoutId,
         optionCount: overrides.optionCount ?? target.optionCount,
         targetIdSlots: overrides.targetIdSlots ?? target.targetIdSlots,
@@ -256,7 +255,7 @@ export const mutateSparseTarget = (
     };
 
     return {
-        ...targetWithoutDigest,
-        targetDigest: deriveSparseTopKTargetDigest(targetWithoutDigest),
+        ...targetWithoutHash,
+        targetHash: deriveSparseTopKTargetHash(targetWithoutHash),
     };
 };

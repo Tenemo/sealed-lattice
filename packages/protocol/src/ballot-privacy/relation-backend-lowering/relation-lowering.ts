@@ -1,7 +1,7 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 import { getBallotPrivacyEncodedShareVectorWidth } from '../protocol-parameters.js';
 import {
     compileBallotPrivacyRelation,
@@ -25,7 +25,7 @@ import {
     receiverEncryptionShortVectorInfinityNormBound,
     receiverOpeningRandomnessBitLength,
     receiverShareRepresentativeBitLength,
-    relationStatementDigestPurpose,
+    relationStatementHashPurpose,
     relationStatementFormat,
     shareCommitmentModuleDegree,
     shareCommitmentModuleRank,
@@ -34,7 +34,7 @@ import {
     shareCommitmentOpeningInfinityNormBound,
 } from './backend-contracts.js';
 import {
-    deriveAlgebraicTargetDigest,
+    deriveAlgebraicTargetHash,
     referencesByReceiver,
 } from './backend-row-helpers.js';
 import {
@@ -51,8 +51,8 @@ import {
     receiverShareVariableNames,
 } from './backend-variable-names.js';
 import {
-    addDigestExpandedReceiverEncryptionNoiseVariable,
-    addDigestExpandedReceiverEncryptionRandomnessVariable,
+    addHashExpandedReceiverEncryptionNoiseVariable,
+    addHashExpandedReceiverEncryptionRandomnessVariable,
     buildMembershipRows,
     buildReceiverPayloadPlaintextBindingRows,
     buildReceiverPayloadPlaintextBitDecompositionRows,
@@ -108,56 +108,56 @@ const buildAlgebraicRows = (
                 receiverRosterPosition,
             );
         const shareCommitmentPublicInputs = {
-            commitmentBodyDigest:
-                shareCommitment?.commitmentBodyDigest ??
-                shareCommitment?.shareCommitmentDigest ??
-                input.publicContext.shareCommitmentProfileDigest,
-            commitmentPolynomialVectorDigest:
-                shareCommitment?.commitmentPolynomialVectorDigest ??
-                shareCommitment?.shareCommitmentDigest ??
-                input.publicContext.shareCommitmentProfileDigest,
-            shareCommitmentDigest:
-                shareCommitment?.shareCommitmentDigest ??
-                input.publicContext.shareCommitmentProfileDigest,
-            shareCommitmentProfileDigest:
-                input.publicContext.shareCommitmentProfileDigest,
+            commitmentBodyHash:
+                shareCommitment?.commitmentBodyHash ??
+                shareCommitment?.shareCommitmentHash ??
+                input.publicContext.shareCommitmentProfileHash,
+            commitmentPolynomialVectorHash:
+                shareCommitment?.commitmentPolynomialVectorHash ??
+                shareCommitment?.shareCommitmentHash ??
+                input.publicContext.shareCommitmentProfileHash,
+            shareCommitmentHash:
+                shareCommitment?.shareCommitmentHash ??
+                input.publicContext.shareCommitmentProfileHash,
+            shareCommitmentProfileHash:
+                input.publicContext.shareCommitmentProfileHash,
         };
         const receiverPayloadPublicInputs = {
-            ciphertextBodyDigest:
-                receiverPayload?.ciphertextBodyDigest ??
-                receiverPayload?.receiverPayloadDigest ??
-                input.publicContext.receiverEncryptionProfileDigest,
-            ciphertextChunkDigest:
-                receiverPayload?.ciphertextChunkDigest ??
+            ciphertextBodyHash:
+                receiverPayload?.ciphertextBodyHash ??
+                receiverPayload?.receiverPayloadHash ??
+                input.publicContext.receiverEncryptionProfileHash,
+            ciphertextChunkHash:
+                receiverPayload?.ciphertextChunkHash ??
                 receiverPayload?.receiverPayloadCiphertextRoot ??
-                input.publicContext.receiverEncryptionProfileDigest,
+                input.publicContext.receiverEncryptionProfileHash,
             receiverPayloadCiphertextRoot:
                 receiverPayload?.receiverPayloadCiphertextRoot ??
-                input.publicContext.receiverEncryptionProfileDigest,
-            receiverPayloadDigest:
-                receiverPayload?.receiverPayloadDigest ??
-                input.publicContext.receiverEncryptionProfileDigest,
+                input.publicContext.receiverEncryptionProfileHash,
+            receiverPayloadHash:
+                receiverPayload?.receiverPayloadHash ??
+                input.publicContext.receiverEncryptionProfileHash,
         };
         const receiverKeyPublicInputs = {
-            keyMaterialDigest:
-                publicKey?.keyMaterialDigest ??
-                publicKey?.receiverPublicKeyDigest ??
+            keyMaterialHash:
+                publicKey?.keyMaterialHash ??
+                publicKey?.receiverPublicKeyHash ??
                 input.publicContext.receiverKeyRoot,
-            publicMatrixSeedDigest:
-                publicKey?.publicMatrixSeedDigest ??
-                publicKey?.receiverPublicKeyDigest ??
+            publicMatrixSeedHash:
+                publicKey?.publicMatrixSeedHash ??
+                publicKey?.receiverPublicKeyHash ??
                 input.publicContext.receiverKeyRoot,
             receiverKeyProofRoot: input.publicContext.receiverKeyProofRoot,
             receiverKeyRoot: input.publicContext.receiverKeyRoot,
-            receiverPublicKeyDigest:
-                publicKey?.receiverPublicKeyDigest ??
+            receiverPublicKeyHash:
+                publicKey?.receiverPublicKeyHash ??
                 input.publicContext.receiverKeyRoot,
         };
         const ciphertextChunkCount =
             resolveCiphertextChunkCount(receiverPayload);
         const hasExplicitReceiverEncryptionRows =
             publicKey?.publicKeyVector !== undefined &&
-            publicKey.publicMatrixSeedDigest !== undefined &&
+            publicKey.publicMatrixSeedHash !== undefined &&
             receiverPayload?.ciphertextChunks !== undefined;
         const plaintextBitLength =
             receiverPayload?.plaintextBitLength ??
@@ -185,11 +185,11 @@ const buildAlgebraicRows = (
                       ciphertextChunkCount,
                   )
             : [
-                  addDigestExpandedReceiverEncryptionRandomnessVariable(
+                  addHashExpandedReceiverEncryptionRandomnessVariable(
                       registry,
                       receiverRosterPosition,
                   ),
-                  addDigestExpandedReceiverEncryptionNoiseVariable(
+                  addHashExpandedReceiverEncryptionNoiseVariable(
                       registry,
                       receiverRosterPosition,
                   ),
@@ -199,7 +199,7 @@ const buildAlgebraicRows = (
             equationCount:
                 shareCommitmentModuleRank * shareCommitmentModuleDegree,
             modulus: shareCommitmentModulus,
-            publicInputDigests: shareCommitmentPublicInputs,
+            publicInputHashes: shareCommitmentPublicInputs,
             receiverIdentity: receiver.receiverIdentity,
             receiverRosterPosition,
             rowKind: 'ShareCommitmentEquation',
@@ -210,7 +210,7 @@ const buildAlgebraicRows = (
                       shareCommitmentPolynomialVector:
                           shareCommitment.commitmentPolynomialVector,
                   }),
-            targetDigest: deriveAlgebraicTargetDigest(
+            targetHash: deriveAlgebraicTargetHash(
                 'ballot-privacy-share-commitment-equation-target-v1',
                 {
                     receiverIdentity: receiver.receiverIdentity,
@@ -226,7 +226,7 @@ const buildAlgebraicRows = (
                 (receiverEncryptionModuleRank + 1) *
                 receiverEncryptionModuleDegree,
             modulus: receiverEncryptionModulus,
-            publicInputDigests: {
+            publicInputHashes: {
                 ...receiverPayloadPublicInputs,
                 ...receiverKeyPublicInputs,
             },
@@ -234,7 +234,7 @@ const buildAlgebraicRows = (
             receiverRosterPosition,
             rowKind: 'ReceiverPayloadEncryptionEquation',
             rowName: `receiver_${receiverRosterPosition}_receiver_payload_encryption_equation`,
-            targetDigest: deriveAlgebraicTargetDigest(
+            targetHash: deriveAlgebraicTargetHash(
                 'ballot-privacy-receiver-payload-encryption-equation-target-v1',
                 {
                     ciphertextChunkCount,
@@ -255,12 +255,12 @@ const buildAlgebraicRows = (
             equationCount:
                 receiverEncryptionModuleRank * receiverEncryptionModuleDegree,
             modulus: receiverEncryptionModulus,
-            publicInputDigests: receiverKeyPublicInputs,
+            publicInputHashes: receiverKeyPublicInputs,
             receiverIdentity: receiver.receiverIdentity,
             receiverRosterPosition,
             rowKind: 'ReceiverKeyBinding',
             rowName: `receiver_${receiverRosterPosition}_receiver_key_binding`,
-            targetDigest: deriveAlgebraicTargetDigest(
+            targetHash: deriveAlgebraicTargetHash(
                 'ballot-privacy-receiver-key-binding-target-v1',
                 {
                     receiverIdentity: receiver.receiverIdentity,
@@ -423,14 +423,14 @@ const buildBounds = (
     return bounds;
 };
 
-const deriveRelationStatementDigest = (
+const deriveRelationStatementHash = (
     statementPayload: Omit<
         BallotPrivacyLoweredLinearRelationStatement,
-        'relationStatementDigest'
+        'relationStatementHash'
     >,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
-        purpose: relationStatementDigestPurpose,
+): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
+        purpose: relationStatementHashPurpose,
         statementPayload,
     });
 
@@ -479,14 +479,14 @@ export const lowerBallotPrivacyRelationToBackendStatement = (input: {
         pvssThreshold: relationCompilation.pvssThreshold,
         receivers: input.relationInput.receivers,
         rosterSize: relationCompilation.rosterSize,
-        shareCommitmentProfileDigest:
-            input.publicContext.shareCommitmentProfileDigest,
+        shareCommitmentProfileHash:
+            input.publicContext.shareCommitmentProfileHash,
         shareVectorWidth: relationCompilation.shareVectorWidth,
         variables,
     });
     const statementPayload: Omit<
         BallotPrivacyLoweredLinearRelationStatement,
-        'relationStatementDigest'
+        'relationStatementHash'
     > = {
         algebraicRows,
         backendStatement,
@@ -510,8 +510,8 @@ export const lowerBallotPrivacyRelationToBackendStatement = (input: {
         ok: true,
         statement: {
             ...statementPayload,
-            relationStatementDigest:
-                deriveRelationStatementDigest(statementPayload),
+            relationStatementHash:
+                deriveRelationStatementHash(statementPayload),
         },
     };
 };

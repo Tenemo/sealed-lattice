@@ -1,11 +1,11 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { fieldModulus } from '../../plaintext-oracle/field.js';
 import {
     deriveShareCommitmentMessageMatrix,
     deriveShareCommitmentRandomnessMatrix,
 } from '../lattice-primitives.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 
 import type {
     BallotPrivacyAlgebraicRelationRow,
@@ -19,8 +19,8 @@ import type {
     ReceiverReference,
 } from './backend-contracts.js';
 import {
-    explicitBackendMatrixDigestPurpose,
-    explicitBackendTargetVectorDigestPurpose,
+    explicitBackendMatrixHashPurpose,
+    explicitBackendTargetVectorHashPurpose,
     receiverEncryptionFirstNoisePolynomialVariableName,
     receiverEncryptionModuleDegree,
     receiverEncryptionModuleRank,
@@ -47,11 +47,11 @@ const referencesByReceiver = <Reference extends ReceiverReference>(
         ]),
     );
 
-const deriveAlgebraicTargetDigest = (
+const deriveAlgebraicTargetHash = (
     purpose: string,
     payload: unknown,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         payload,
         purpose,
     });
@@ -107,11 +107,8 @@ const parseShareCommitmentPolynomialVector = (input: {
     );
 };
 
-const deriveBackendDigest = (
-    purpose: string,
-    payload: unknown,
-): ProtocolDigest =>
-    deriveProtocolDigest('ChallengeDomainDigest', {
+const deriveBackendHash = (purpose: string, payload: unknown): ProtocolHash =>
+    deriveProtocolHash('ChallengeDomainHash', {
         payload,
         purpose,
     });
@@ -268,7 +265,7 @@ const buildExplicitSparseRowBatch = (input: {
     return {
         batchKind: 'ExplicitSparseRows',
         batchName: input.batchName,
-        matrixDigest: deriveBackendDigest(explicitBackendMatrixDigestPurpose, {
+        matrixHash: deriveBackendHash(explicitBackendMatrixHashPurpose, {
             rows: rows.map(({ rowIndex, rowKind, rowName, terms }) => ({
                 rowIndex,
                 rowKind,
@@ -281,8 +278,8 @@ const buildExplicitSparseRowBatch = (input: {
         rowKind: input.rowKind,
         rowOffset: input.rowOffset,
         rows,
-        targetVectorDigest: deriveBackendDigest(
-            explicitBackendTargetVectorDigestPurpose,
+        targetVectorHash: deriveBackendHash(
+            explicitBackendTargetVectorHashPurpose,
             {
                 targets: rows.map(({ rowIndex, rowKind, rowName, target }) => ({
                     rowIndex,
@@ -402,13 +399,13 @@ const buildShareCommitmentEquationRows = (input: {
     readonly columnLookup: ReadonlyMap<string, number>;
     readonly shareCommitmentRows: readonly BallotPrivacyAlgebraicRelationRow[];
     readonly shareVectorWidth: number;
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareCommitmentProfileHash: ProtocolHash;
 }): readonly BallotPrivacyBackendStatementExplicitRow[] => {
     const messageMatrix = deriveShareCommitmentMessageMatrix(
-        input.shareCommitmentProfileDigest,
+        input.shareCommitmentProfileHash,
     );
     const randomnessMatrix = deriveShareCommitmentRandomnessMatrix(
-        input.shareCommitmentProfileDigest,
+        input.shareCommitmentProfileHash,
     );
     const rows: BallotPrivacyBackendStatementExplicitRow[] = [];
 
@@ -505,9 +502,9 @@ const buildShareCommitmentEquationRows = (input: {
 
 export {
     referencesByReceiver,
-    deriveAlgebraicTargetDigest,
+    deriveAlgebraicTargetHash,
     decimalString,
-    deriveBackendDigest,
+    deriveBackendHash,
     createVariableColumnLookup,
     requireColumnIndex,
     backendVariableColumns,

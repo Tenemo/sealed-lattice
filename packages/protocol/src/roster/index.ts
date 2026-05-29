@@ -1,9 +1,9 @@
 export {
-    deriveElectionManifestDigest,
-    deriveReceiverKeyRegistrationDigest,
-    deriveRegistrationEntryDigest,
-    deriveRosterDigest,
-    deriveTrusteeSetupEntryDigest,
-} from './digests.js';
+    deriveElectionManifestHash,
+    deriveReceiverKeyRegistrationHash,
+    deriveRegistrationEntryHash,
+    deriveRosterHash,
+    deriveTrusteeSetupEntryHash,
+} from './hashes.js';
 export { verifyRosterExternalAcceptance } from './object-validation.js';
 export { verifyRosterManifestTranscript } from './verification.js';

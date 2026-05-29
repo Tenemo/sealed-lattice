@@ -5,14 +5,14 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import {
-    decodeSparseTopKTarget,
-    deriveSparseTopKTarget,
-} from '../../src/plaintext-oracle/index';
-
-import {
     mutateSparseTarget,
     sparseTargetVectors,
 } from './plaintext-oracle-test-vectors';
+
+import {
+    decodeSparseTopKTarget,
+    deriveSparseTopKTarget,
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('sparse target decoder oracle', () => {
     const validRanking = [
@@ -39,12 +39,12 @@ describe('sparse target decoder oracle', () => {
     it('decodes the WinnerRankTopK-v1 target vector', () => {
         expect(sparseTargetVectors.layoutId).toBe('WinnerRankTopK-v1');
         const decoding = decodeSparseTopKTarget({
-            expectedLayoutDigest: sparseTargetVectors.layoutDigest,
+            expectedLayoutHash: sparseTargetVectors.layoutHash,
             target: sparseTargetVectors.target,
         });
 
         expect(decoding.ok).toBe(true);
-        expect(decoding.targetDigest).toBe(sparseTargetVectors.targetDigest);
+        expect(decoding.targetHash).toBe(sparseTargetVectors.targetHash);
         expect(decoding.selectedOptionOrdinals).toEqual(
             sparseTargetVectors.expectedSelectedOptionOrdinals,
         );
@@ -157,10 +157,10 @@ describe('sparse target decoder oracle', () => {
     ])('rejects malformed sparse target: $caseName', ({ overrides }) => {
         const mutatedTarget = mutateSparseTarget(
             sparseTargetVectors.target,
-            overrides as Partial<Omit<SparseTopKTarget, 'targetDigest'>>,
+            overrides,
         );
         const decoding = decodeSparseTopKTarget({
-            expectedLayoutDigest: sparseTargetVectors.layoutDigest,
+            expectedLayoutHash: sparseTargetVectors.layoutHash,
             target: mutatedTarget,
         });
 
@@ -172,9 +172,9 @@ describe('sparse target decoder oracle', () => {
         );
     });
 
-    it('rejects a target under the wrong layout digest even when the payload is self-consistent', () => {
+    it('rejects a target under the wrong layout hash even when the payload is self-consistent', () => {
         const decoding = decodeSparseTopKTarget({
-            expectedLayoutDigest: 'wrong-layout-digest',
+            expectedLayoutHash: 'wrong-layout-hash',
             target: sparseTargetVectors.target,
         });
 
@@ -192,7 +192,7 @@ describe('sparse target decoder oracle', () => {
             optionCount: Number.NaN,
         } satisfies SparseTopKTarget;
         const decoding = decodeSparseTopKTarget({
-            expectedLayoutDigest: sparseTargetVectors.layoutDigest,
+            expectedLayoutHash: sparseTargetVectors.layoutHash,
             target: malformedTarget,
         });
 

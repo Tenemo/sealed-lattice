@@ -4,7 +4,7 @@ use super::proof_record_generation_tests::{
 };
 use super::*;
 use crate::ballot_privacy::{
-    linear_proof_parameters::{
+    linear_proof::parameters::{
         receiver_key_linear_parameter_contract, receiver_key_linear_proof_encoding_contract,
     },
     polynomial_ring::PolynomialRing,
@@ -58,28 +58,28 @@ fn receiver_key_prover_preflight_fixture() -> (Value, Value, Value, Value) {
     let linear_statement_payload = json!({
         "ceremonyId": "ceremony-receiver-key-prover-preflight",
         "coefficientModulus": "12289",
-        "keyMaterialDigest": test_digest("receiver-key-material"),
-        "manifestDigest": test_digest("manifest"),
+        "keyMaterialHash": test_hash("receiver-key-material"),
+        "manifestHash": test_hash("manifest"),
         "objectType": "ReceiverKeyLinearProofStatement",
         "objectVersion": 1,
-        "publicMatrixSeedDigest": test_digest("receiver-matrix-seed"),
-        "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+        "publicMatrixSeedHash": test_hash("receiver-matrix-seed"),
+        "receiverEncryptionProfileHash": test_hash("receiver-encryption-profile"),
         "receiverIdentity": "receiver-1",
-        "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+        "receiverPublicKeyHash": test_hash("receiver-public-key"),
         "receiverRosterPosition": 1,
         "recoveryEpoch": 0,
         "relation": "A*w + t = 0",
         "ringDegree": 256,
-        "rosterDigest": test_digest("roster"),
+        "rosterHash": test_hash("roster"),
         "sourceRing": "Z_q[X]/(X^256 + 1)",
         "statementColumns": 8,
         "statementMatrixCoefficients": statement_matrix,
-        "statementMatrixDigest": test_digest("statement-matrix"),
+        "statementMatrixHash": test_hash("statement-matrix"),
         "statementProfileId": "receiver-key-linear-module-lwe-statement-v1",
         "statementRows": 4,
         "targetCoefficientRepresentation": "centeredSignedSourceModulus",
         "targetVectorCoefficients": target_vector,
-        "targetVectorDigest": test_digest("target-vector"),
+        "targetVectorHash": test_hash("target-vector"),
         "witnessInfinityNormBound": 2,
         "witnessL2BoundSquared": "8192",
         "witnessVectorLayout": [
@@ -93,17 +93,14 @@ fn receiver_key_prover_preflight_fixture() -> (Value, Value, Value, Value) {
             "receiver error polynomial 3"
         ]
     });
-    let linear_statement_digest =
-        super::derive_receiver_key_linear_statement_digest(&linear_statement_payload)
-            .expect("linear statement digest should derive");
+    let linear_statement_hash =
+        super::derive_receiver_key_linear_statement_hash(&linear_statement_payload)
+            .expect("linear statement hash should derive");
     let mut linear_statement = linear_statement_payload;
     linear_statement
         .as_object_mut()
         .expect("linear statement should be an object")
-        .insert(
-            "statementDigest".to_string(),
-            json!(linear_statement_digest),
-        );
+        .insert("statementHash".to_string(), json!(linear_statement_hash));
     let secret_state = json!({
         "secretVector": witness[..4].to_vec(),
         "errorVector": witness[4..].to_vec()
@@ -192,31 +189,31 @@ fn receiver_key_proof_generation_preflight_checks_source_and_proof_ring_witness(
             .contains("source witness")
     );
 
-    let mut compatibility_parameter_set = parameter_set;
-    compatibility_parameter_set
+    let mut unsupported_parameter_set = parameter_set;
+    unsupported_parameter_set
         .as_object_mut()
         .expect("parameter set should be an object")
         .insert(
             "profileId".to_string(),
-            json!("receiver-key-linear-module-lwe-compatibility-v1"),
+            json!("receiver-key-linear-module-lwe-unsupported-v1"),
         );
-    let compatibility_rejection =
+    let unsupported_rejection =
         super::prepare_receiver_key_proof_generation_from_command_request(&json!({
             "linearStatement": linear_statement,
-            "parameterSet": compatibility_parameter_set,
+            "parameterSet": unsupported_parameter_set,
             "proofEncoding": proof_encoding,
             "publicRandomnessHex": "00".repeat(32),
             "secretState": wrong_secret_state,
             "proverRandomnessHex": "09".repeat(32)
         }));
 
-    assert_eq!(compatibility_rejection["ok"], false);
+    assert_eq!(unsupported_rejection["ok"], false);
     assert_eq!(
-        compatibility_rejection["unresolvedReason"],
+        unsupported_rejection["unresolvedReason"],
         json!("BallotPackageInvalid")
     );
     assert!(
-        compatibility_rejection["refusedObjects"][0]["message"]
+        unsupported_rejection["refusedObjects"][0]["message"]
             .as_str()
             .expect("refusal message should be a string")
             .contains("production receiver-key parameter profile")
@@ -264,42 +261,42 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
             "expectedProofSizeBytes".to_string(),
             json!(proof_size_bytes),
         );
-    let test_digest = |label: &str| {
-        super::derive_digest(
-            "ChallengeDomainDigest",
+    let test_hash = |label: &str| {
+        super::derive_hash(
+            "ChallengeDomainHash",
             &json!({
                 "label": label,
                 "purpose": "receiver-key-proof-record-native-test"
             }),
         )
-        .expect("test digest should derive")
+        .expect("test hash should derive")
     };
     let create_linear_statement = |target_vector_coefficients: Value| {
         let statement_payload = json!({
             "ceremonyId": "ceremony-receiver-key-proof-record",
             "coefficientModulus": "12289",
-            "keyMaterialDigest": test_digest("receiver-key-material"),
-            "manifestDigest": test_digest("manifest"),
+            "keyMaterialHash": test_hash("receiver-key-material"),
+            "manifestHash": test_hash("manifest"),
             "objectType": "ReceiverKeyLinearProofStatement",
             "objectVersion": 1,
-            "publicMatrixSeedDigest": test_digest("receiver-matrix-seed"),
-            "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+            "publicMatrixSeedHash": test_hash("receiver-matrix-seed"),
+            "receiverEncryptionProfileHash": test_hash("receiver-encryption-profile"),
             "receiverIdentity": "receiver-1",
-            "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+            "receiverPublicKeyHash": test_hash("receiver-public-key"),
             "receiverRosterPosition": 1,
             "recoveryEpoch": 0,
             "relation": "A*w + t = 0",
             "ringDegree": 256,
-            "rosterDigest": test_digest("roster"),
+            "rosterHash": test_hash("roster"),
             "sourceRing": "Z_q[X]/(X^256 + 1)",
             "statementColumns": 8,
             "statementMatrixCoefficients": valid_case["statementMatrixCoefficients"].clone(),
-            "statementMatrixDigest": test_digest("statement-matrix"),
+            "statementMatrixHash": test_hash("statement-matrix"),
             "statementProfileId": "receiver-key-linear-module-lwe-statement-v1",
             "statementRows": 4,
             "targetCoefficientRepresentation": "centeredSignedSourceModulus",
             "targetVectorCoefficients": target_vector_coefficients,
-            "targetVectorDigest": test_digest("target-vector"),
+            "targetVectorHash": test_hash("target-vector"),
             "witnessInfinityNormBound": 2,
             "witnessL2BoundSquared": "8192",
             "witnessVectorLayout": [
@@ -313,27 +310,27 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
                 "receiver error polynomial 3"
             ]
         });
-        let statement_digest = super::derive_digest(
-            "ChallengeDomainDigest",
+        let statement_hash = super::derive_hash(
+            "ChallengeDomainHash",
             &json!({
                 "payload": statement_payload,
                 "purpose": "receiver-key-linear-proof-statement-v1"
             }),
         )
-        .expect("linear statement digest should derive");
+        .expect("linear statement hash should derive");
         let mut statement = statement_payload;
         statement
             .as_object_mut()
             .expect("linear statement should be an object")
-            .insert("statementDigest".to_string(), json!(statement_digest));
+            .insert("statementHash".to_string(), json!(statement_hash));
 
         statement
     };
     let create_receiver_key_proof = |linear_statement: &Value,
                                      parameter_set: &Value,
                                      proof_encoding: &Value| {
-        let proof_bytes_digest = super::derive_digest(
-            "ProofBytesDigest",
+        let proof_bytes_hash = super::derive_hash(
+            "ProofBytesHash",
             &json!({
                 "objectType": "ProofBytes",
                 "objectVersion": 1,
@@ -341,53 +338,53 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
                 "proofSizeBytes": proof_size_bytes
             }),
         )
-        .expect("proof bytes digest should derive");
-        let proof_encoding_profile_digest =
-            super::derive_receiver_key_proof_encoding_profile_digest(proof_encoding)
-                .expect("proof encoding profile digest should derive");
-        let proof_parameter_set_digest =
-            super::derive_receiver_key_proof_parameter_set_digest(parameter_set)
-                .expect("proof parameter set digest should derive");
-        let public_randomness_digest =
-            super::derive_receiver_key_public_randomness_digest(public_randomness_hex)
-                .expect("public randomness digest should derive");
-        let linear_statement_digest = linear_statement["statementDigest"]
+        .expect("proof bytes hash should derive");
+        let proof_encoding_profile_hash =
+            super::derive_receiver_key_proof_encoding_profile_hash(proof_encoding)
+                .expect("proof encoding profile hash should derive");
+        let proof_parameter_set_hash =
+            super::derive_receiver_key_proof_parameter_set_hash(parameter_set)
+                .expect("proof parameter set hash should derive");
+        let public_randomness_hash =
+            super::derive_receiver_key_public_randomness_hash(public_randomness_hex)
+                .expect("public randomness hash should derive");
+        let linear_statement_hash = linear_statement["statementHash"]
             .as_str()
-            .expect("linear statement digest should be a string");
-        let proof_root = super::derive_digest(
+            .expect("linear statement hash should be a string");
+        let proof_root = super::derive_hash(
             "ReceiverKeyProofRoot",
             &json!({
-                "linearStatementDigest": linear_statement_digest,
-                "proofBytesDigest": proof_bytes_digest,
-                "proofEncodingProfileDigest": proof_encoding_profile_digest,
-                "proofParameterSetDigest": proof_parameter_set_digest,
-                "publicRandomnessDigest": public_randomness_digest,
+                "linearStatementHash": linear_statement_hash,
+                "proofBytesHash": proof_bytes_hash,
+                "proofEncodingProfileHash": proof_encoding_profile_hash,
+                "proofParameterSetHash": proof_parameter_set_hash,
+                "publicRandomnessHash": public_randomness_hash,
                 "purpose": "receiver-key-linear-proof-record-root-v1"
             }),
         )
         .expect("proof root should derive");
         let proof_payload = json!({
-            "backendStatementDigest": test_digest("backend-statement"),
+            "backendStatementHash": test_hash("backend-statement"),
             "ceremonyId": "ceremony-receiver-key-proof-record",
-            "linearStatementDigest": linear_statement_digest,
-            "manifestDigest": test_digest("manifest"),
+            "linearStatementHash": linear_statement_hash,
+            "manifestHash": test_hash("manifest"),
             "objectType": "ReceiverKeyProof",
             "objectVersion": 1,
             "proofBackend": "LocalLinearLatticeRelation",
-            "proofBytesDigest": proof_bytes_digest,
-            "proofEncodingProfileDigest": proof_encoding_profile_digest,
-            "proofParameterSetDigest": proof_parameter_set_digest,
+            "proofBytesHash": proof_bytes_hash,
+            "proofEncodingProfileHash": proof_encoding_profile_hash,
+            "proofParameterSetHash": proof_parameter_set_hash,
             "proofRoot": proof_root,
             "proofSizeBytes": proof_size_bytes,
-            "publicRandomnessDigest": public_randomness_digest,
-            "receiverEncryptionProfileDigest": test_digest("receiver-encryption-profile"),
+            "publicRandomnessHash": public_randomness_hash,
+            "receiverEncryptionProfileHash": test_hash("receiver-encryption-profile"),
             "receiverIdentity": "receiver-1",
-            "receiverPublicKeyDigest": test_digest("receiver-public-key"),
+            "receiverPublicKeyHash": test_hash("receiver-public-key"),
             "receiverRosterPosition": 1,
             "recoveryEpoch": 0,
-            "rosterDigest": test_digest("roster")
+            "rosterHash": test_hash("roster")
         });
-        let receiver_key_proof_root = super::derive_digest("ReceiverKeyProofRoot", &proof_payload)
+        let receiver_key_proof_root = super::derive_hash("ReceiverKeyProofRoot", &proof_payload)
             .expect("receiver key proof root should derive");
         let mut receiver_key_proof = proof_payload;
         receiver_key_proof
@@ -451,7 +448,7 @@ fn proof_byte_bearing_receiver_key_record_verifies_against_linear_backend() {
         .expect("parameter set should be an object")
         .insert(
             "profileId".to_string(),
-            json!("receiver-key-linear-module-lwe-compatibility-v1"),
+            json!("receiver-key-linear-module-lwe-unsupported-v1"),
         );
     let wrong_parameter_verification =
         super::verify_receiver_key_proof_from_command_request(&json!({

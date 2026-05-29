@@ -6,20 +6,20 @@ type EncodedRelationVectorCase = {
     readonly compilerAccepted: boolean;
     readonly componentBundleStatement?: {
         readonly bundleCoverage: string;
-        readonly componentBundleStatementDigest: string;
+        readonly componentBundleStatementHash: string;
         readonly componentStatements: readonly {
             readonly componentId: string;
-            readonly componentStatementDigest: string;
+            readonly componentStatementHash: string;
             readonly proofLoweringStatus: string;
-            readonly rowBatchMatrixDigests: readonly string[];
+            readonly rowBatchMatrixHashes: readonly string[];
             readonly rowBatchNames: readonly string[];
-            readonly rowBatchTargetVectorDigests: readonly string[];
+            readonly rowBatchTargetVectorHashes: readonly string[];
         }[];
         readonly requiredComponentIds: readonly string[];
     };
     readonly componentBundleSummary?: {
         readonly bundleCoverage: string;
-        readonly componentBundleStatementDigest: string;
+        readonly componentBundleStatementHash: string;
         readonly componentCount: number;
         readonly explicitComponentCount: number;
         readonly firstComponentStatement: {
@@ -36,8 +36,8 @@ type EncodedRelationVectorCase = {
     readonly componentProjectionSummaries?: readonly {
         readonly coefficientModulus: string;
         readonly componentId: string;
-        readonly linearStatementDigest: string;
-        readonly matrixDigest: string;
+        readonly linearStatementHash: string;
+        readonly matrixHash: string;
         readonly parameterProfileId: string;
         readonly projectionCoverage: string;
         readonly ringDegree: number;
@@ -45,7 +45,7 @@ type EncodedRelationVectorCase = {
         readonly sourceRowBatchNames: readonly string[];
         readonly statementColumns: number;
         readonly statementRows: number;
-        readonly targetVectorDigest: string;
+        readonly targetVectorHash: string;
         readonly witnessL2BoundSquared: string;
     }[];
     readonly componentProofReadinessManifests?: readonly {
@@ -56,7 +56,7 @@ type EncodedRelationVectorCase = {
             | 'available-for-small-field-component'
             | 'blocked-pending-sparse-proof-statement'
             | 'not-applicable-for-structured-component'
-            | 'not-applicable-for-public-zero-witness-component';
+            | 'not-applicable-for-public-binding-check-component';
         readonly objectType: 'BallotProofComponentProofReadinessManifest';
         readonly objectVersion: 1;
         readonly proofLoweringStatus: string;
@@ -64,29 +64,29 @@ type EncodedRelationVectorCase = {
             | 'dense-polynomial-matrix-linear-proof-v1'
             | 'sparse-polynomial-matrix-linear-proof-v1'
             | 'structured-module-lwe-linear-proof-v1'
-            | 'public-zero-witness-binding-check-v1';
+            | 'public-binding-check-only-v1';
         readonly recommendedSourceRingDegree: number | null;
         readonly rowBatchNames: readonly string[];
         readonly rowCount: number;
         readonly variableColumnCount: number;
     }[];
-    readonly componentProofStatementPlans?: readonly {
+    readonly componentProofStatementDescriptors?: readonly {
         readonly coefficientModulus: string;
         readonly componentId: string;
-        readonly componentProofStatementDigest: string;
+        readonly componentProofStatementHash: string;
         readonly denseCoefficientCount: string | null;
-        readonly objectType: 'BallotProofComponentProofStatementPlan';
+        readonly objectType: 'BallotProofComponentProofStatementDescriptor';
         readonly objectVersion: 1;
-        readonly proofBytesAvailability:
-            | 'available-for-small-dense-oracle'
-            | 'requires-sparse-proof-statement'
-            | 'requires-structured-proof-statement'
-            | 'public-zero-witness-binding-check';
+        readonly proofBackendRequirement:
+            | 'dense-proof-bytes-available-lab-only'
+            | 'sparse-proof-statement-required'
+            | 'structured-proof-statement-required'
+            | 'public-binding-check-only';
         readonly proofStatementFormat:
             | 'dense-polynomial-matrix-linear-proof-v1'
             | 'sparse-polynomial-matrix-linear-proof-v1'
             | 'structured-module-lwe-linear-proof-v1'
-            | 'public-zero-witness-binding-check-v1';
+            | 'public-binding-check-only-v1';
         readonly proofSystemRingDegree: number | null;
         readonly rowBatchNames: readonly string[];
         readonly rowBatchTermCounts: readonly string[];
@@ -101,7 +101,7 @@ type EncodedRelationVectorCase = {
     readonly proofReadinessSummary?: {
         readonly denseMatrixOracleComponentCount: number;
         readonly fullComponentProofBytesAvailable: false;
-        readonly publicZeroWitnessComponentCount: number;
+        readonly publicBindingCheckComponentCount: number;
         readonly sparseOrStructuredComponentCount: number;
         readonly totalComponentCount: number;
     };
@@ -116,15 +116,15 @@ type EncodedRelationVectorCase = {
         readonly algebraicRows: readonly {
             readonly equationCount: number;
             readonly rowKind: string;
-            readonly targetDigest: string;
+            readonly targetHash: string;
             readonly variableNames: readonly string[];
         }[];
         readonly backendStatement: {
-            readonly backendStatementDigest: string;
+            readonly backendStatementHash: string;
             readonly backendStatementFormat: string;
             readonly bounds: readonly unknown[];
             readonly columnCount: number;
-            readonly digestExpandedRowCount: number;
+            readonly hashExpandedRowCount: number;
             readonly explicitRowCount: number;
             readonly proofComponents: readonly {
                 readonly componentId: string;
@@ -134,10 +134,10 @@ type EncodedRelationVectorCase = {
                 readonly rowKinds: readonly string[];
                 readonly variableColumnCount: number;
             }[];
-            readonly proofComponentsDigest: string;
+            readonly proofComponentsHash: string;
             readonly rowBatches: readonly {
                 readonly batchKind: string;
-                readonly matrixDigest: string;
+                readonly matrixHash: string;
                 readonly rowCount: number;
                 readonly rowKind: string;
                 readonly rowOffset: number;
@@ -149,7 +149,7 @@ type EncodedRelationVectorCase = {
                         readonly variableName: string;
                     }[];
                 }[];
-                readonly targetVectorDigest: string;
+                readonly targetVectorHash: string;
             }[];
             readonly rowCount: number;
         };
@@ -163,7 +163,7 @@ type EncodedRelationVectorCase = {
             }[];
         }[];
         readonly optionCount: number;
-        readonly relationStatementDigest: string;
+        readonly relationStatementHash: string;
         readonly relationStatementFormat: string;
         readonly rosterSize: number;
         readonly shareVectorWidth: number;
@@ -172,12 +172,12 @@ type EncodedRelationVectorCase = {
     readonly loweredStatementSummary?: {
         readonly algebraicRowCount: number;
         readonly backendColumnCount: number;
-        readonly backendDigestExpandedRowCount: number;
+        readonly backendHashExpandedRowCount: number;
         readonly backendExplicitRowCount: number;
         readonly backendProofComponentCount: number;
         readonly backendRowBatchCount: number;
         readonly backendRowCount: number;
-        readonly backendStatementDigest: string;
+        readonly backendStatementHash: string;
         readonly backendStatementFormat: string;
         readonly boundCount: number;
         readonly encodedCoordinateCount: number;
@@ -223,7 +223,7 @@ type EncodedRelationVectorCase = {
         };
         readonly linearRowCount: number;
         readonly optionCount: number;
-        readonly relationStatementDigest: string;
+        readonly relationStatementHash: string;
         readonly relationStatementFormat: string;
         readonly rosterSize: number;
         readonly shareVectorWidth: number;
@@ -231,12 +231,12 @@ type EncodedRelationVectorCase = {
     };
     readonly refusalMessages?: readonly string[];
     readonly trace: {
-        readonly baselineRelationStatementDigest?: string;
-        readonly expectedDigestChanged?: true;
+        readonly baselineRelationStatementHash?: string;
+        readonly expectedHashChanged?: true;
         readonly expectedLogicalRejectionLayer?:
             | 'relation-compiler'
             | 'backend-statement-preflight';
-        readonly relationStatementDigest?: string;
+        readonly relationStatementHash?: string;
     };
 };
 

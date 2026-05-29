@@ -1,40 +1,25 @@
 import { pathToFileURL } from 'node:url';
 
 import {
+    createLocalRunLog,
+    currentProcessExitCode,
+    removeRunLogArguments,
+    runLogDisabledByArguments,
+} from './local-run-log.js';
+import {
     createPackageManagerCommand,
     resolvePackageManagerRunner,
-    runCommands,
+    runCommandsInParallel,
+    runCommandsInSeries,
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
-
-export const nodeTestLaneValues = [
-    'fast',
-    'relation-heavy',
-    'proof-input-heavy',
-    'kernel-remaining',
-    'kernel-aggregate',
-] as const;
-
-export type NodeTestLane = (typeof nodeTestLaneValues)[number];
-
-const defaultNodeTestLanes = nodeTestLaneValues;
-
-const nodeTestLaneProjectNames = {
-    fast: 'node',
-    'relation-heavy': 'node-relation-heavy',
-    'proof-input-heavy': 'node-proof-input-heavy',
-    'kernel-remaining': 'node-kernel-remaining',
-    'kernel-aggregate': 'node-kernel-aggregate',
-} as const satisfies Record<NodeTestLane, string>;
-
-const nodeTestLaneDescriptions = {
-    fast: 'Run fast Node tests',
-    'relation-heavy': 'Run relation-heavy Node tests',
-    'proof-input-heavy': 'Run proof-input-heavy Node tests',
-    'kernel-remaining': 'Run remaining heavy Node kernel tests',
-    'kernel-aggregate': 'Run aggregate heavy Node kernel tests',
-} as const satisfies Record<NodeTestLane, string>;
+import {
+    defaultNodeTestLanes,
+    nodeTestLaneDefinitions,
+    nodeTestLaneValues,
+    type NodeTestLane,
+} from './test-lanes.js';
 
 const isNodeTestLane = (lane: string): lane is NodeTestLane =>
     nodeTestLaneValues.some((supportedLane) => supportedLane === lane);
@@ -46,28 +31,25 @@ export const parseRequestedNodeTestLanes = (
         return defaultNodeTestLanes;
     }
     if (commandArguments.length !== 2 || commandArguments[0] !== '--only') {
-        throw new Error('Usage: run-node-tests.ts [--only lane[,lane...]].');
+        throw new Error('Usage: run-node-tests.ts [--only lane].');
     }
 
-    const requestedLanes = commandArguments[1]
+    const requestedLaneList = commandArguments[1]
         ?.split(',')
         .map((lane) => lane.trim())
         .filter((lane) => lane.length > 0);
-    if (requestedLanes === undefined || requestedLanes.length === 0) {
+    if (requestedLaneList === undefined || requestedLaneList.length === 0) {
         throw new Error('At least one Node test lane is required.');
     }
-
-    const uniqueLanes: NodeTestLane[] = [];
-    for (const requestedLane of requestedLanes) {
+    const requestedLanes: NodeTestLane[] = [];
+    for (const requestedLane of requestedLaneList) {
         if (!isNodeTestLane(requestedLane)) {
             throw new Error(`Unsupported Node test lane: ${requestedLane}`);
         }
-        if (!uniqueLanes.includes(requestedLane)) {
-            uniqueLanes.push(requestedLane);
-        }
+        requestedLanes.push(requestedLane);
     }
 
-    return uniqueLanes;
+    return requestedLanes;
 };
 
 export const buildNodeTestCommands = (
@@ -79,30 +61,79 @@ export const buildNodeTestCommands = (
     const packageManagerRunner =
         input.packageManagerRunner ?? resolvePackageManagerRunner();
     const lanes = input.lanes ?? defaultNodeTestLanes;
-    const buildCommand = (lane: NodeTestLane): CommandInvocation =>
-        createPackageManagerCommand(
-            nodeTestLaneDescriptions[lane],
+    const buildCommand = (lane: NodeTestLane): CommandInvocation => {
+        const laneDefinition = nodeTestLaneDefinitions[lane];
+
+        return createPackageManagerCommand(
+            laneDefinition.commandDescription,
             [
                 'exec',
                 'vitest',
                 '--project',
-                nodeTestLaneProjectNames[lane],
+                laneDefinition.projectName,
                 '--run',
             ],
             {
+                logFileSlug: laneDefinition.projectName,
                 packageManagerRunner,
             },
         );
+    };
 
     return lanes.map((lane) => buildCommand(lane));
 };
 
-const main = (): void => {
-    process.exitCode = runCommands(
-        buildNodeTestCommands({
-            lanes: parseRequestedNodeTestLanes(process.argv.slice(2)),
-        }),
-    );
+const buildWorkspaceBuildCommand = (
+    packageManagerRunner: PackageManagerRunner,
+): CommandInvocation =>
+    createPackageManagerCommand('Build workspace packages', ['run', 'build'], {
+        logFileSlug: 'build',
+        packageManagerRunner,
+    });
+
+const nodeTestScriptName = (lanes: readonly NodeTestLane[]): string =>
+    lanes.length === 1 ? `test:node:${lanes[0]}` : 'test:node';
+
+const nodeTestRunShouldLog = (
+    lanes: readonly NodeTestLane[],
+    commandArguments: readonly string[],
+): boolean =>
+    !runLogDisabledByArguments(commandArguments) &&
+    lanes.some((lane) => lane !== 'fast');
+
+const main = async (): Promise<void> => {
+    const rawArguments = process.argv.slice(2);
+    const commandArguments = removeRunLogArguments(rawArguments);
+    const lanes = parseRequestedNodeTestLanes(commandArguments);
+    const packageManagerRunner = resolvePackageManagerRunner();
+    const runLog = nodeTestRunShouldLog(lanes, rawArguments)
+        ? await createLocalRunLog({
+              commandLineArguments: rawArguments,
+              lanes,
+              scriptName: nodeTestScriptName(lanes),
+          })
+        : undefined;
+
+    try {
+        const buildExitCode = await runCommandsInSeries(
+            [buildWorkspaceBuildCommand(packageManagerRunner)],
+            { runLog },
+        );
+        if (buildExitCode !== 0) {
+            process.exitCode = buildExitCode;
+
+            return;
+        }
+        process.exitCode = await runCommandsInParallel(
+            buildNodeTestCommands({
+                lanes,
+                packageManagerRunner,
+            }),
+            { runLog },
+        );
+    } finally {
+        await runLog?.finish({ exitCode: currentProcessExitCode() });
+    }
 };
 
 const scriptEntryPoint = process.argv[1];
@@ -111,5 +142,5 @@ const isMainModule =
     import.meta.url === pathToFileURL(scriptEntryPoint).href;
 
 if (isMainModule) {
-    main();
+    void main();
 }

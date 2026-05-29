@@ -1,6 +1,6 @@
 ---
 title: sealed-lattice
-description: Documentation for the sealed-lattice workspace, transcript-core verifier, safe election foundation, and ballot privacy verification APIs.
+description: Documentation for the sealed-lattice public verification package.
 template: splash
 editUrl: false
 head:
@@ -8,40 +8,40 @@ head:
       content: sealed-lattice
 hero:
     title: sealed-lattice
-    tagline: transcript-core, election foundation, and ballot privacy verification. The package boundary and Rust/WASM verification path are stable while ballot generation, aggregation, evaluation, and decryption APIs remain future implementation.
+    tagline: Verification helpers for post-quantum threshold voting artifacts in Node and browsers.
     image:
         html: |
             <div class="landing-hero-panel">
               <div class="landing-hero-panel__card">
-                <p class="landing-hero-panel__eyebrow">Current boundary</p>
-                <h2 class="landing-hero-panel__title">transcript-core first</h2>
+                <p class="landing-hero-panel__eyebrow">Public package</p>
+                <h2 class="landing-hero-panel__title">verify voting artifacts</h2>
                 <ol class="landing-hero-panel__list">
-                  <li>Use <code>sealed-lattice</code> as the only public package name.</li>
-                  <li>Use transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs.</li>
-                  <li>Develop inside the private workspace packages.</li>
-                  <li>Verify the Rust/WASM proof path before later protocol layers land.</li>
+                  <li>Install <code>sealed-lattice</code>.</li>
+                  <li>Validate poll definitions and derive threshold profiles.</li>
+                  <li>Verify board, roster, receipt, transcript, and ballot privacy proof evidence.</li>
+                  <li>Keep production election use out of scope until the missing voting workflow is complete and audited.</li>
                 </ol>
               </div>
               <div class="landing-hero-panel__facts">
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Published package</span>
-                  <strong>One public name</strong>
-                  <small><code>sealed-lattice</code></small>
+                  <span class="landing-hero-panel__label">Runtime</span>
+                  <strong>Node and browsers</strong>
+                  <small>ES modules with bundled WASM verification</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Runtime surface</span>
-                  <strong>transcript-core, foundation, and proof verification</strong>
-                  <small>Safe verification helpers only</small>
+                  <span class="landing-hero-panel__label">Current use</span>
+                  <strong>public evidence verification</strong>
+                  <small>Polls, boards, rosters, receipts, transcripts, and proof records</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Internal packages</span>
-                  <strong>Five private shells</strong>
-                  <small>types, protocol, crypto, wasm, and testkit</small>
+                  <span class="landing-hero-panel__label">Package</span>
+                  <strong><code>sealed-lattice</code></strong>
+                  <small>One supported npm import path</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Native verification path</span>
-                  <strong>Rust crate plus WASM loader</strong>
-                  <small>Transcript and ballot privacy commands</small>
+                  <span class="landing-hero-panel__label">Status</span>
+                  <strong>not production-audited</strong>
+                  <small>Use for development and verification tooling</small>
                 </div>
               </div>
             </div>
@@ -50,11 +50,11 @@ hero:
           link: ./guides/getting-started/
           icon: right-arrow
           variant: primary
-        - text: Workspace layout
-          link: ./guides/workspace-layout/
-          variant: secondary
         - text: Browse the API reference
           link: ./api/
+          variant: secondary
+        - text: Read safety boundaries
+          link: ./guides/security-and-non-goals/
           variant: minimal
 ---
 
@@ -62,54 +62,73 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
 
 <section class="landing-section not-content">
   <div class="landing-section__header">
-    <h2>What ships today</h2>
+    <h2>What you can use today</h2>
     <p>
-      The repo is a private workspace with one published package, five private
-      internal packages, and one Rust crate that proves the WASM path.
+      The published package focuses on verification of public election artifacts
+      that already have structured evidence.
     </p>
   </div>
 
   <div class="landing-split-grid">
-    <Card title="Public boundary">
+    <Card title="Election foundation checks">
       <div class="landing-card-copy">
         <p>
-          <code>sealed-lattice</code> remains the only public npm name, and its
-          current runtime facade exposes transcript-core fixture verification
-          plus threshold, lifecycle, poll specification, capability, board,
-          finality, roster-manifest, cast/close, first-valid, recovery, and
-          ballot privacy verification helpers.
+          Validate poll specifications, derive threshold and roster profiles,
+          evaluate lifecycle transitions, and check whether protocol actions are
+          currently allowed.
         </p>
         <p>
-          That keeps packaging, docs, release flow, and smoke checks stable
-          without publishing ballot generation, casting, aggregation, semantic
-          target acceptance, or decryption APIs.
+          Verify board consistency, cast receipts, close records, target
+          finality, roster manifests, recovery epochs, and first-valid ordering.
         </p>
       </div>
     </Card>
 
-    <Card title="Internal workspace">
+    <Card title="Proof-backed verification">
       <div class="landing-card-copy">
         <p>
-          The private workspace packages are split by responsibility: shared
-          types, protocol, crypto, wasm, and testkit.
+          Verify transcript-core fixtures and supported ballot privacy evidence
+          through the bundled Rust/WASM verifier.
         </p>
         <p>
-          The Rust transcript-core, ballot privacy proof backend, and internal
-          WASM loader prove the browser and Node verification path before later
-          aggregate and evaluator layers land.
+          Receiver-key proofs, ballot proof records, claim-bearing ballot
+          packages, and aggregate derivation components return structured
+          acceptance and refusal results.
         </p>
       </div>
     </Card>
-
   </div>
 </section>
 
 <section class="landing-section not-content">
   <div class="landing-section__header">
-    <h2>Read the current contract</h2>
+    <h2>Use the package</h2>
     <p>
-      Start with the current public boundary, then move into the workspace and
-      development guides.
+      Start with installation and the public root import. Reserved complete
+      protocol entry points fail closed until the matching protocol layer exists.
+    </p>
+  </div>
+
+  <div class="landing-steps-shell">
+    <Steps>
+      1. **Install the package.**
+         Use `npm install sealed-lattice` or `pnpm add sealed-lattice`.
+      2. **Import from the root.**
+         Use `sealed-lattice` for the supported public API.
+      3. **Verify structured evidence.**
+         Pass poll, board, roster, transcript, receipt, or proof records to the matching verification helper.
+      4. **Keep the current limits explicit.**
+         Ballot generation, casting, aggregation, tally evaluation, and production decryption are not available yet.
+    </Steps>
+  </div>
+</section>
+
+<section class="landing-section not-content">
+  <div class="landing-section__header">
+    <h2>Read next</h2>
+    <p>
+      Use the guides and generated reference to confirm the current package
+      behavior before integrating it.
     </p>
   </div>
 
@@ -117,89 +136,22 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="Get started"
       href="./guides/getting-started/"
-      description="See what the public package does today and what it intentionally does not expose yet."
-    />
-    <LinkCard
-      title="Workspace layout"
-      href="./guides/workspace-layout/"
-      description="Read the package split, ownership boundaries, and current dependency rules."
-    />
-    <LinkCard
-      title="Development workflow"
-      href="./guides/development-workflow/"
-      description="Run the workspace checks, browser matrix, docs generation, smoke checks, vector verification, and Rust/WASM build path."
-    />
-    <LinkCard
-      title="Security and non-goals"
-      href="./guides/security-and-non-goals/"
-      description="Keep the current claim boundary explicit before protocol and crypto APIs are added."
+      description="Install the package, validate a poll, and see the current verification helpers."
     />
     <LinkCard
       title="API reference"
       href="./api/"
-      description="Confirm the current transcript-core, election foundation, and ballot privacy verification surface."
+      description="Browse the generated reference for exported functions and types."
     />
     <LinkCard
-      title="Protocol spec"
-      href="./spec/"
-      description="Read the stable package and process rules for the current release boundary."
+      title="Security and non-goals"
+      href="./guides/security-and-non-goals/"
+      description="Read what the current package does and does not claim."
+    />
+    <LinkCard
+      title="Development workflow"
+      href="./guides/development-workflow/"
+      description="Run the local checks, docs build, browser matrix, and package smoke tests."
     />
   </CardGrid>
-</section>
-
-<section class="landing-section not-content">
-  <div class="landing-section__header">
-    <h2>Follow the current boundary</h2>
-    <p>
-      The supported path is short and explicit while the real protocol work is
-      still incomplete.
-    </p>
-  </div>
-
-  <div class="landing-steps-shell">
-    <Steps>
-      1. **Install the public package name.**
-         Use `sealed-lattice` as the only supported public import path.
-      2. **Use the safe public helpers.**
-         The package exposes safe fixture verification, election foundation helpers, receiver-key proof verification, ballot proof-record verification, and proof-byte-bearing scoped relation package verification.
-      3. **Develop inside the workspace packages.**
-         Use the private packages for shared types, protocol, crypto, wasm, and testkit work.
-      4. **Keep the Rust/WASM path verified.**
-         The transcript-core and ballot privacy proof backend must continue to build natively and load in Node and browsers.
-    </Steps>
-  </div>
-</section>
-
-<section class="landing-section not-content">
-  <div class="landing-section__header">
-    <h2>Boundary summary</h2>
-    <p>
-      The workspace boundary is stable without pretending that the wider
-      protocol-facing API already exists.
-    </p>
-  </div>
-
-  <div class="landing-split-grid">
-    <Card title="Guaranteed now">
-      <ul>
-        <li>Private workspace packages with explicit ownership boundaries.</li>
-        <li>Package-boundary checks against deep imports and illegal internal dependencies.</li>
-        <li>Node, browser, docs, vector, pack smoke, and release verification.</li>
-        <li>Rust transcript-core build plus pinned SDK WASM loading path.</li>
-        <li>Election foundation threshold, lifecycle, poll specification, capability, board/finality, signed fixture, first-valid, and recovery vectors.</li>
-        <li>Verification-oriented receiver-key proof, ballot proof-record, and proof-byte-bearing scoped relation package APIs.</li>
-      </ul>
-    </Card>
-
-    <Card title="Not published yet">
-      <ul>
-        <li>Ballot generation, casting, aggregation, or tally APIs.</li>
-        <li>Crypto provider wrappers or proof construction APIs.</li>
-        <li>Local replay record, target-accepted-record, or decryption-share shell helpers.</li>
-        <li>Semantic local replay, target acceptance, or decryption APIs.</li>
-        <li>Any public subpaths beyond the root package name.</li>
-      </ul>
-    </Card>
-
-  </div>
 </section>

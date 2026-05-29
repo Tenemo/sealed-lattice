@@ -1,15 +1,15 @@
 use crate::ballot_privacy::{
-    linear_proof_parameters::{
+    linear_proof::parameters::{
         LinearProofParameterSet, encoded_score_field_linear_proof_encoding_contract,
     },
-    linear_proof_profile_constants::{
+    linear_proof::profile_constants::{
         GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED,
         GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
     },
 };
 use serde_json::{Value, json};
 
-use super::component_statement_tests::test_digest;
+use super::component_statement_tests::test_hash;
 
 #[derive(Default)]
 pub(super) struct BallotProofBackendInputParts<'a> {
@@ -37,7 +37,7 @@ pub(super) fn ballot_proof_backend_inputs<'a>(
         proof_encoding: parts.proof_encoding,
         public_randomness_hex: parts.public_randomness_hex,
         component_proof_verification_mode: super::ComponentProofVerificationMode::VerifyBackend,
-        unsafe_small_roster_acknowledged: false,
+        casual_micro_roster_acknowledged: false,
     }
 }
 
@@ -265,7 +265,7 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
         * (super::SHARE_COMMITMENT_MODULE_DEGREE / 64)
         + 1;
     let parameter_set = LinearProofParameterSet {
-        profile_id: "share-commitment-linear-compatibility-v1".to_string(),
+        profile_id: "share-commitment-linear-proof-parameter-v1".to_string(),
         source: "sealed-lattice/linear-proof/structured-share-component-test-parameters-v1"
             .to_string(),
         relation: "A*w + t = 0".to_string(),
@@ -283,12 +283,12 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
     let mut statement_payload = json!({
         "objectType": "BallotProofStructuredShareCommitmentProofStatement",
         "objectVersion": 1,
-        "backendStatementDigest": test_digest("structured-share-backend"),
-        "ballotProofStatementDigest": test_digest("structured-share-ballot-statement"),
+        "backendStatementHash": test_hash("structured-share-backend"),
+        "ballotProofStatementHash": test_hash("structured-share-ballot-statement"),
         "coefficientModulus": super::SHARE_COMMITMENT_MODULUS.to_string(),
         "componentId": "share-commitment-component",
-        "matrixDigest": test_digest("structured-share-matrix"),
-        "parameterProfileId": "share-commitment-linear-compatibility-v1",
+        "matrixHash": test_hash("structured-share-matrix"),
+        "parameterProfileId": "share-commitment-linear-proof-parameter-v1",
         "proofStatementFormat": super::STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT,
         "proofSystemRingDegree": 64,
         "projectionCoverage": "share-commitment-rows-only",
@@ -302,8 +302,8 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
             }
         ],
         "relation": "A*w + t = 0",
-        "relationStatementDigest": test_digest("structured-share-relation"),
-        "shareCommitmentProfileDigest": test_digest("structured-share-profile"),
+        "relationStatementHash": test_hash("structured-share-relation"),
+        "shareCommitmentProfileHash": test_hash("structured-share-profile"),
         "shareVectorWidth": 1,
         "sourceBackendColumnIndices": (0..(super::SHARE_COMMITMENT_OPENING_DIMENSION + 1)).collect::<Vec<_>>(),
         "sourceRingDegree": super::SHARE_COMMITMENT_MODULE_DEGREE,
@@ -311,16 +311,16 @@ fn structured_share_commitment_component_generation_uses_compact_statement() {
         "statementRows": super::SHARE_COMMITMENT_MODULE_RANK,
         "matrixCoefficientRepresentation": "centeredSignedSourceModulus",
         "targetCoefficientRepresentation": "centeredSignedSourceModulus",
-        "targetVectorDigest": test_digest("structured-share-target"),
+        "targetVectorHash": test_hash("structured-share-target"),
         "witnessL2BoundSquared": "1048576"
     });
-    let statement_digest =
-        super::derive_ballot_structured_share_commitment_statement_digest(&statement_payload)
-            .expect("structured share statement digest should derive");
+    let statement_hash =
+        super::derive_ballot_structured_share_commitment_statement_hash(&statement_payload)
+            .expect("structured share statement hash should derive");
     statement_payload
         .as_object_mut()
         .expect("structured share statement should be an object")
-        .insert("statementDigest".to_string(), json!(statement_digest));
+        .insert("statementHash".to_string(), json!(statement_hash));
     let parameter_set_value =
         serde_json::to_value(&parameter_set).expect("parameter set should serialize");
     let proof_encoding_value =

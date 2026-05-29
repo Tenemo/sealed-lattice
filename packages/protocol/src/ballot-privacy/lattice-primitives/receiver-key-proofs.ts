@@ -5,13 +5,12 @@ import type {
     RefusalRecord,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
 import {
     createReceiverKeyProofShell,
-    deriveProofBytesDigest,
-    deriveReceiverKeyProofEncodingProfileDigest,
-    deriveReceiverKeyProofParameterSetDigest,
-    deriveReceiverKeyProofPublicRandomnessDigest,
+    deriveProofBytesHash,
+    deriveReceiverKeyProofEncodingProfileHash,
+    deriveReceiverKeyProofParameterSetHash,
+    deriveReceiverKeyProofPublicRandomnessHash,
 } from '../objects.js';
 import { createReceiverKeyProofBackendStatement } from '../receiver-key-backend-statement.js';
 import {
@@ -23,6 +22,7 @@ import {
     createReceiverKeyLinearProofParameterSet,
     type ReceiverKeyProofMaterial,
 } from '../receiver-key-proof-parameters.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import type {
     ReceiverEncryptionPublicKeyMaterial,
@@ -31,10 +31,10 @@ import type {
 import { canonicalEqual } from './primitive-contracts.js';
 import {
     deriveExpectedReceiverPublicKeyMaterial,
-    deriveReceiverKeyMaterialDigest,
+    deriveReceiverKeyMaterialHash,
     deriveReceiverKeyProofBytesRoot,
     deriveReceiverKeyProofRoot,
-    deriveReceiverMatrixSeedDigest,
+    deriveReceiverMatrixSeedHash,
     validateReceiverPublicKeyMaterial,
     validateReceiverSecretState,
 } from './receiver-keys.js';
@@ -42,11 +42,11 @@ import {
 const validateReceiverKeyProofMaterialContracts = (
     proofMaterial: ReceiverKeyProofMaterial,
 ): number => {
-    const proofBytesDigest = deriveProofBytesDigest({
+    const proofBytesHash = deriveProofBytesHash({
         proofBytesHex: proofMaterial.proofBytesHex,
     });
-    void proofBytesDigest;
-    deriveReceiverKeyProofPublicRandomnessDigest({
+    void proofBytesHash;
+    deriveReceiverKeyProofPublicRandomnessHash({
         publicRandomnessHex: proofMaterial.publicRandomnessHex,
     });
     const proofSizeBytes = proofMaterial.proofBytesHex.length / 2;
@@ -94,67 +94,65 @@ export const verifyReceiverKeyWitness = (input: {
                 error instanceof Error
                     ? error.message
                     : 'Receiver key witness is malformed.',
-                input.receiverPublicKey.receiverPublicKeyDigest,
+                input.receiverPublicKey.receiverPublicKeyHash,
             ),
         );
 
         return refusedObjects;
     }
 
-    const expectedPublicMatrixSeedDigest = deriveReceiverMatrixSeedDigest({
+    const expectedPublicMatrixSeedHash = deriveReceiverMatrixSeedHash({
         ceremonyId: input.receiverPublicKey.ceremonyId,
-        manifestDigest: input.receiverPublicKey.manifestDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        manifestHash: input.receiverPublicKey.manifestHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
         receiverIdentity: input.receiverPublicKey.receiverIdentity,
         receiverRosterPosition: input.receiverPublicKey.receiverRosterPosition,
         recoveryEpoch: input.receiverPublicKey.recoveryEpoch,
-        rosterDigest: input.receiverPublicKey.rosterDigest,
+        rosterHash: input.receiverPublicKey.rosterHash,
     });
     const expectedPublicKeyMaterial = deriveExpectedReceiverPublicKeyMaterial({
-        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
+        publicMatrixSeedHash: input.publicKeyMaterial.publicMatrixSeedHash,
         receiverEncryptionProfile: input.receiverEncryptionProfile,
         secretState: input.secretState,
     });
-    const expectedKeyMaterialDigest = deriveReceiverKeyMaterialDigest({
+    const expectedKeyMaterialHash = deriveReceiverKeyMaterialHash({
         publicKeyVector: input.publicKeyMaterial.publicKeyVector,
-        publicMatrixSeedDigest: input.publicKeyMaterial.publicMatrixSeedDigest,
-        receiverEncryptionProfileDigest:
-            input.receiverEncryptionProfile.receiverEncryptionProfileDigest,
+        publicMatrixSeedHash: input.publicKeyMaterial.publicMatrixSeedHash,
+        receiverEncryptionProfileHash:
+            input.receiverEncryptionProfile.receiverEncryptionProfileHash,
     });
 
     if (
-        input.receiverPublicKey.receiverEncryptionProfileDigest !==
-        input.receiverEncryptionProfile.receiverEncryptionProfileDigest
+        input.receiverPublicKey.receiverEncryptionProfileHash !==
+        input.receiverEncryptionProfile.receiverEncryptionProfileHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Receiver key witness is not bound to the receiver encryption profile.',
-                input.receiverPublicKey.receiverPublicKeyDigest,
+                input.receiverPublicKey.receiverPublicKeyHash,
             ),
         );
     }
     if (
-        input.publicKeyMaterial.publicMatrixSeedDigest !==
-        expectedPublicMatrixSeedDigest
+        input.publicKeyMaterial.publicMatrixSeedHash !==
+        expectedPublicMatrixSeedHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Receiver key witness public matrix seed is not roster-bound.',
-                input.receiverPublicKey.receiverPublicKeyDigest,
+                input.receiverPublicKey.receiverPublicKeyHash,
             ),
         );
     }
-    if (
-        input.receiverPublicKey.keyMaterialDigest !== expectedKeyMaterialDigest
-    ) {
+    if (input.receiverPublicKey.keyMaterialHash !== expectedKeyMaterialHash) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
                 'Receiver key witness public key material does not match the frozen receiver key.',
-                input.receiverPublicKey.receiverPublicKeyDigest,
+                input.receiverPublicKey.receiverPublicKeyHash,
             ),
         );
     }
@@ -168,7 +166,7 @@ export const verifyReceiverKeyWitness = (input: {
             createRefusal(
                 'BallotPackageInvalid',
                 'Receiver key witness does not satisfy the frozen receiver-key equation.',
-                input.receiverPublicKey.receiverPublicKeyDigest,
+                input.receiverPublicKey.receiverPublicKeyHash,
             ),
         );
     }
@@ -213,77 +211,74 @@ export const createReceiverKeyProof = (input: {
                       validateReceiverKeyProofMaterialContracts(
                           input.proofMaterial,
                       );
-                  const proofBytesDigest = deriveProofBytesDigest({
+                  const proofBytesHash = deriveProofBytesHash({
                       proofBytesHex: input.proofMaterial.proofBytesHex,
                   });
-                  const proofEncodingProfileDigest =
-                      deriveReceiverKeyProofEncodingProfileDigest({
+                  const proofEncodingProfileHash =
+                      deriveReceiverKeyProofEncodingProfileHash({
                           proofEncoding: input.proofMaterial.proofEncoding,
                       });
-                  const proofParameterSetDigest =
-                      deriveReceiverKeyProofParameterSetDigest({
+                  const proofParameterSetHash =
+                      deriveReceiverKeyProofParameterSetHash({
                           parameterSet: input.proofMaterial.proofParameterSet,
                       });
-                  const publicRandomnessDigest =
-                      deriveReceiverKeyProofPublicRandomnessDigest({
+                  const publicRandomnessHash =
+                      deriveReceiverKeyProofPublicRandomnessHash({
                           publicRandomnessHex:
                               input.proofMaterial.publicRandomnessHex,
                       });
 
                   return {
-                      backendStatementDigest:
-                          backendStatement.backendStatementDigest,
-                      linearStatementDigest: linearStatement.statementDigest,
-                      proofBytesDigest,
-                      proofEncodingProfileDigest,
-                      proofParameterSetDigest,
+                      backendStatementHash:
+                          backendStatement.backendStatementHash,
+                      linearStatementHash: linearStatement.statementHash,
+                      proofBytesHash,
+                      proofEncodingProfileHash,
+                      proofParameterSetHash,
                       proofRoot: deriveReceiverKeyProofBytesRoot({
-                          linearStatementDigest:
-                              linearStatement.statementDigest,
-                          proofBytesDigest,
-                          proofEncodingProfileDigest,
-                          proofParameterSetDigest,
-                          publicRandomnessDigest,
+                          linearStatementHash: linearStatement.statementHash,
+                          proofBytesHash,
+                          proofEncodingProfileHash,
+                          proofParameterSetHash,
+                          publicRandomnessHash,
                       }),
                       proofSizeBytes,
-                      publicRandomnessDigest,
+                      publicRandomnessHash,
                   };
               })();
 
     return createReceiverKeyProofShell({
         ceremonyId: input.receiverPublicKey.ceremonyId,
-        manifestDigest: input.receiverPublicKey.manifestDigest,
+        manifestHash: input.receiverPublicKey.manifestHash,
         proofBackend: 'LocalLinearLatticeRelation',
         proofRoot:
             proofMaterialFields?.proofRoot ??
             deriveReceiverKeyProofRoot({
                 ...input,
-                backendStatementDigest: backendStatement.backendStatementDigest,
-                linearStatementDigest: linearStatement.statementDigest,
+                backendStatementHash: backendStatement.backendStatementHash,
+                linearStatementHash: linearStatement.statementHash,
             }),
         ...(proofMaterialFields === undefined
             ? {}
             : {
-                  backendStatementDigest:
-                      proofMaterialFields.backendStatementDigest,
-                  linearStatementDigest:
-                      proofMaterialFields.linearStatementDigest,
-                  proofBytesDigest: proofMaterialFields.proofBytesDigest,
-                  proofEncodingProfileDigest:
-                      proofMaterialFields.proofEncodingProfileDigest,
-                  proofParameterSetDigest:
-                      proofMaterialFields.proofParameterSetDigest,
+                  backendStatementHash:
+                      proofMaterialFields.backendStatementHash,
+                  linearStatementHash: proofMaterialFields.linearStatementHash,
+                  proofBytesHash: proofMaterialFields.proofBytesHash,
+                  proofEncodingProfileHash:
+                      proofMaterialFields.proofEncodingProfileHash,
+                  proofParameterSetHash:
+                      proofMaterialFields.proofParameterSetHash,
                   proofSizeBytes: proofMaterialFields.proofSizeBytes,
-                  publicRandomnessDigest:
-                      proofMaterialFields.publicRandomnessDigest,
+                  publicRandomnessHash:
+                      proofMaterialFields.publicRandomnessHash,
               }),
-        receiverEncryptionProfileDigest:
-            input.receiverPublicKey.receiverEncryptionProfileDigest,
+        receiverEncryptionProfileHash:
+            input.receiverPublicKey.receiverEncryptionProfileHash,
         receiverIdentity: input.receiverPublicKey.receiverIdentity,
-        receiverPublicKeyDigest:
-            input.receiverPublicKey.receiverPublicKeyDigest,
+        receiverPublicKeyHash: input.receiverPublicKey.receiverPublicKeyHash,
         receiverRosterPosition: input.receiverPublicKey.receiverRosterPosition,
         recoveryEpoch: input.receiverPublicKey.recoveryEpoch,
-        rosterDigest: input.receiverPublicKey.rosterDigest,
+        rosterHash: input.receiverPublicKey.rosterHash,
     });
 };

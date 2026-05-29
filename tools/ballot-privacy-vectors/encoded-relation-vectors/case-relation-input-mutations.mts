@@ -1,6 +1,6 @@
-import type { BallotPrivacyRelationCompilerInput } from "#packages/protocol/src/ballot-privacy/relation-compiler.js";
+import { oneHotScore } from './relation-fixtures-and-summaries.mjs';
 
-import { oneHotScore } from "./relation-fixtures-and-summaries.mjs";
+import type { BallotPrivacyRelationCompilerInput } from '#packages/protocol/src/ballot-privacy/relation-compiler.js';
 
 export const mutatedMiniRelationInputs = (
     baseInput: BallotPrivacyRelationCompilerInput,
@@ -11,9 +11,9 @@ export const mutatedMiniRelationInputs = (
     readonly relationInput: BallotPrivacyRelationCompilerInput;
 }[] => [
     {
-        caseName: "score-zero-rejects",
-        description: "Score zero fails the frozen score-domain relation.",
-        mutation: "score-0",
+        caseName: 'score-zero-rejects',
+        description: 'Score zero fails the frozen score-domain relation.',
+        mutation: 'score-0',
         relationInput: {
             ...baseInput,
             normalizedScores: [0, 3],
@@ -21,9 +21,9 @@ export const mutatedMiniRelationInputs = (
         },
     },
     {
-        caseName: "score-eleven-rejects",
-        description: "Score eleven fails the frozen score-domain relation.",
-        mutation: "score-11",
+        caseName: 'score-eleven-rejects',
+        description: 'Score eleven fails the frozen score-domain relation.',
+        mutation: 'score-11',
         relationInput: {
             ...baseInput,
             normalizedScores: [11, 3],
@@ -31,9 +31,9 @@ export const mutatedMiniRelationInputs = (
         },
     },
     {
-        caseName: "malformed-one-hot-rejects",
-        description: "Two active bucket entries fail one-hot membership.",
-        mutation: "two-active-buckets",
+        caseName: 'malformed-one-hot-rejects',
+        description: 'Two active bucket entries fail one-hot membership.',
+        mutation: 'two-active-buckets',
         relationInput: {
             ...baseInput,
             scoreOneHotWitnesses: [
@@ -43,10 +43,10 @@ export const mutatedMiniRelationInputs = (
         },
     },
     {
-        caseName: "signed-cancellation-one-hot-rejects",
+        caseName: 'signed-cancellation-one-hot-rejects',
         description:
-            "Signed cancellation fails boolean one-hot membership even when a linear reconstruction can be made to look small.",
-        mutation: "signed-cancellation",
+            'Signed cancellation fails boolean one-hot membership even when a linear reconstruction can be made to look small.',
+        mutation: 'signed-cancellation',
         relationInput: {
             ...baseInput,
             scoreOneHotWitnesses: [
@@ -56,9 +56,9 @@ export const mutatedMiniRelationInputs = (
         },
     },
     {
-        caseName: "wrong-quotient-rejects",
-        description: "A mutated receiver share fails the quotient equation.",
-        mutation: "wrong-quotient",
+        caseName: 'wrong-quotient-rejects',
+        description: 'A mutated receiver share fails the quotient equation.',
+        mutation: 'wrong-quotient',
         relationInput: {
             ...baseInput,
             receivers: baseInput.receivers.map((receiver) =>
@@ -77,10 +77,10 @@ export const mutatedMiniRelationInputs = (
         },
     },
     {
-        caseName: "wrong-degree-rejects",
+        caseName: 'wrong-degree-rejects',
         description:
-            "A coefficient row with degree equal to the threshold fails.",
-        mutation: "wrong-degree",
+            'A coefficient row with degree equal to the threshold fails.',
+        mutation: 'wrong-degree',
         relationInput: {
             ...baseInput,
             encodedCoordinateShamirCoefficients: [
@@ -90,19 +90,19 @@ export const mutatedMiniRelationInputs = (
         },
     },
     {
-        caseName: "omitted-receiver-rejects",
-        description: "Omitting one receiver fails coverage.",
-        mutation: "omitted-receiver",
+        caseName: 'omitted-receiver-rejects',
+        description: 'Omitting one receiver fails coverage.',
+        mutation: 'omitted-receiver',
         relationInput: {
             ...baseInput,
             receivers: baseInput.receivers.slice(0, 2),
         },
     },
     {
-        caseName: "duplicate-receiver-rejects",
+        caseName: 'duplicate-receiver-rejects',
         description:
-            "Duplicating a receiver roster position fails receiver coverage.",
-        mutation: "duplicate-receiver",
+            'Duplicating a receiver roster position fails receiver coverage.',
+        mutation: 'duplicate-receiver',
         relationInput: {
             ...baseInput,
             receivers: [
@@ -116,9 +116,9 @@ export const mutatedMiniRelationInputs = (
         },
     },
     {
-        caseName: "nonzero-padding-rejects",
-        description: "Nonzero share-vector padding fails closed.",
-        mutation: "nonzero-padding",
+        caseName: 'nonzero-padding-rejects',
+        description: 'Nonzero share-vector padding fails closed.',
+        mutation: 'nonzero-padding',
         relationInput: {
             ...baseInput,
             receivers: baseInput.receivers.map((receiver) =>

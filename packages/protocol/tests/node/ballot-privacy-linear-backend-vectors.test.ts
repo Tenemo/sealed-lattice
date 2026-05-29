@@ -24,12 +24,12 @@ type LinearProofBackendVectorCase = {
         readonly sealedLatticePreflightTranscript?: {
             readonly domain: string;
             readonly hash: string;
-            readonly parameterDigest: string;
-            readonly statementDigest: string;
-            readonly targetDigest: string;
-            readonly proofDigest: string;
-            readonly publicRandomnessDigest: string;
-            readonly preflightTranscriptDigest: string;
+            readonly parameterHash: string;
+            readonly statementHash: string;
+            readonly targetHash: string;
+            readonly proofHash: string;
+            readonly publicRandomnessHash: string;
+            readonly preflightTranscriptHash: string;
         };
         readonly decodedProofFieldLengths?: {
             readonly fullProofBytes: number;
@@ -161,7 +161,7 @@ const forbiddenPublicVectorKeys = new Set([
     'secret',
     'witness',
 ]);
-const lowercaseShake128DigestPattern = /^[a-f0-9]{64}$/u;
+const lowercaseShake128HashPattern = /^[a-f0-9]{64}$/u;
 
 const collectObjectKeys = (value: unknown, keys: Set<string>): void => {
     if (Array.isArray(value)) {
@@ -266,20 +266,25 @@ describe('ballot privacy linear proof backend vectors', () => {
             'truncated-proof',
         ]);
 
-        for (const vectorCase of linearProofBackendVectors.cases) {
-            if (expectedRejectedByUpstream.has(vectorCase.caseName)) {
-                expect(vectorCase.trace).toMatchObject({
-                    upstreamVerifierAccepted: false,
-                });
-            }
-        }
+        const upstreamAcceptanceByCaseName = new Map(
+            linearProofBackendVectors.cases.map((vectorCase) => [
+                vectorCase.caseName,
+                vectorCase.trace?.upstreamVerifierAccepted,
+            ]),
+        );
+
+        expect(
+            [...expectedRejectedByUpstream].map((caseName) =>
+                upstreamAcceptanceByCaseName.get(caseName),
+            ),
+        ).toEqual([...expectedRejectedByUpstream].map(() => false));
     });
 
     it('records a sealed-lattice preflight transcript for public vector binding', () => {
         const validCase = linearProofBackendVectors.cases.find(
             (vectorCase) => vectorCase.caseName === 'valid-small-linear-proof',
         );
-        const casesWithChangedPreflightDigest = [
+        const casesWithChangedPreflightHash = [
             'mutated-statement-matrix',
             'mutated-target-vector',
             'mutated-proof-byte',
@@ -296,41 +301,41 @@ describe('ballot privacy linear proof backend vectors', () => {
         });
         const validPreflightTranscript =
             validCase?.trace?.sealedLatticePreflightTranscript;
-        expect(validPreflightTranscript?.parameterDigest).toMatch(
-            lowercaseShake128DigestPattern,
+        expect(validPreflightTranscript?.parameterHash).toMatch(
+            lowercaseShake128HashPattern,
         );
-        expect(validPreflightTranscript?.statementDigest).toMatch(
-            lowercaseShake128DigestPattern,
+        expect(validPreflightTranscript?.statementHash).toMatch(
+            lowercaseShake128HashPattern,
         );
-        expect(validPreflightTranscript?.targetDigest).toMatch(
-            lowercaseShake128DigestPattern,
+        expect(validPreflightTranscript?.targetHash).toMatch(
+            lowercaseShake128HashPattern,
         );
-        expect(validPreflightTranscript?.proofDigest).toMatch(
-            lowercaseShake128DigestPattern,
+        expect(validPreflightTranscript?.proofHash).toMatch(
+            lowercaseShake128HashPattern,
         );
-        expect(validPreflightTranscript?.publicRandomnessDigest).toMatch(
-            lowercaseShake128DigestPattern,
+        expect(validPreflightTranscript?.publicRandomnessHash).toMatch(
+            lowercaseShake128HashPattern,
         );
-        expect(validPreflightTranscript?.preflightTranscriptDigest).toMatch(
-            lowercaseShake128DigestPattern,
+        expect(validPreflightTranscript?.preflightTranscriptHash).toMatch(
+            lowercaseShake128HashPattern,
         );
 
-        const validPreflightDigest =
-            validPreflightTranscript?.preflightTranscriptDigest;
-        expect(validPreflightDigest).toBeDefined();
-        for (const caseName of casesWithChangedPreflightDigest) {
+        const validPreflightHash =
+            validPreflightTranscript?.preflightTranscriptHash;
+        expect(validPreflightHash).toBeDefined();
+        for (const caseName of casesWithChangedPreflightHash) {
             const mutatedCase = linearProofBackendVectors.cases.find(
                 (vectorCase) => vectorCase.caseName === caseName,
             );
 
             expect(
                 mutatedCase?.trace?.sealedLatticePreflightTranscript
-                    ?.preflightTranscriptDigest,
-            ).toMatch(lowercaseShake128DigestPattern);
+                    ?.preflightTranscriptHash,
+            ).toMatch(lowercaseShake128HashPattern);
             expect(
                 mutatedCase?.trace?.sealedLatticePreflightTranscript
-                    ?.preflightTranscriptDigest,
-            ).not.toBe(validPreflightDigest);
+                    ?.preflightTranscriptHash,
+            ).not.toBe(validPreflightHash);
         }
     });
 
@@ -377,15 +382,14 @@ describe('ballot privacy linear proof backend vectors', () => {
             'infinityResponseVector',
         ]);
         const fields = validCase?.trace?.decodedProofFieldLengths?.fields ?? [];
-        for (const [fieldIndex, field] of fields.entries()) {
+        for (const field of fields) {
             expect(field.bitLength).toBeGreaterThan(0);
-            if (fieldIndex > 0) {
-                expect(field.bitOffset).toBe(
-                    fields[fieldIndex - 1]?.bitOffset +
-                        (fields[fieldIndex - 1]?.bitLength ?? 0),
-                );
-            }
         }
+        expect(fields.slice(1).map((field) => field.bitOffset)).toEqual(
+            fields
+                .slice(0, -1)
+                .map((field) => field.bitOffset + field.bitLength),
+        );
     });
 
     it('records receiver-key upstream oracle provenance without treating it as production closure', () => {
@@ -511,7 +515,7 @@ describe('ballot privacy linear proof backend vectors', () => {
             (vectorCase) =>
                 vectorCase.caseName === 'valid-receiver-key-linear-proof',
         );
-        const casesWithChangedPreflightDigest = [
+        const casesWithChangedPreflightHash = [
             'mutated-receiver-key-statement-matrix',
             'mutated-receiver-key-target-vector',
             'mutated-receiver-key-proof-byte',
@@ -526,23 +530,23 @@ describe('ballot privacy linear proof backend vectors', () => {
             domain: 'sealed.vote/internal/linear-proof-preflight-v1',
             hash: 'SHAKE128-256',
         });
-        const validPreflightDigest =
+        const validPreflightHash =
             validCase?.trace?.sealedLatticePreflightTranscript
-                ?.preflightTranscriptDigest;
-        expect(validPreflightDigest).toMatch(lowercaseShake128DigestPattern);
-        for (const caseName of casesWithChangedPreflightDigest) {
+                ?.preflightTranscriptHash;
+        expect(validPreflightHash).toMatch(lowercaseShake128HashPattern);
+        for (const caseName of casesWithChangedPreflightHash) {
             const mutatedCase = receiverKeyLinearProofBackendVectors.cases.find(
                 (vectorCase) => vectorCase.caseName === caseName,
             );
 
             expect(
                 mutatedCase?.trace?.sealedLatticePreflightTranscript
-                    ?.preflightTranscriptDigest,
-            ).toMatch(lowercaseShake128DigestPattern);
+                    ?.preflightTranscriptHash,
+            ).toMatch(lowercaseShake128HashPattern);
             expect(
                 mutatedCase?.trace?.sealedLatticePreflightTranscript
-                    ?.preflightTranscriptDigest,
-            ).not.toBe(validPreflightDigest);
+                    ?.preflightTranscriptHash,
+            ).not.toBe(validPreflightHash);
         }
     });
 
@@ -606,7 +610,7 @@ describe('ballot privacy linear proof backend vectors', () => {
             {
                 coefficientModulus: 65_537,
                 expectedProofSizeBytes: 46_417,
-                profileId: 'encoded-score-field-linear-compatibility-v1',
+                profileId: 'encoded-score-field-linear-proof-parameter-v1',
                 ringDegree: 64,
                 statementColumns: 176,
                 statementRows: 70,
@@ -740,13 +744,17 @@ describe('ballot privacy linear proof backend vectors', () => {
             'euclideanResponseVector',
             'infinityResponseVector',
         ]);
-        for (const vectorCase of ballotFieldLinearProofBackendVectors.cases) {
-            if (rejectedByUpstream.has(vectorCase.caseName)) {
-                expect(vectorCase.trace).toMatchObject({
-                    upstreamVerifierAccepted: false,
-                });
-            }
-        }
+        const ballotFieldAcceptanceByCaseName = new Map(
+            ballotFieldLinearProofBackendVectors.cases.map((vectorCase) => [
+                vectorCase.caseName,
+                vectorCase.trace.upstreamVerifierAccepted,
+            ]),
+        );
+        expect(
+            [...rejectedByUpstream].map((caseName) =>
+                ballotFieldAcceptanceByCaseName.get(caseName),
+            ),
+        ).toEqual([...rejectedByUpstream].map(() => false));
         expect(extendedProofCase?.trace).toMatchObject({
             expectedLogicalRejectionLayer: 'proof-decoder',
             upstreamVerifierAccepted: true,

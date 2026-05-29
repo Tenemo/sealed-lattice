@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    decodeSparseTopKTarget,
-    derivePlaintextTopKOracle,
-} from '../../src/plaintext-oracle/index';
-
-import {
     assertValidPollSpec,
     topKVectors,
 } from './plaintext-oracle-test-vectors';
+
+import {
+    decodeSparseTopKTarget,
+    derivePlaintextTopKOracle,
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext tally and top-k oracle', () => {
     it('matches deterministic top-k vectors including skipped-score normalization', () => {
@@ -30,7 +30,7 @@ describe('plaintext tally and top-k oracle', () => {
         );
         expect(
             decodeSparseTopKTarget({
-                expectedLayoutDigest: oracle.sparseTarget.layoutDigest,
+                expectedLayoutHash: oracle.sparseTarget.layoutHash,
                 target: oracle.sparseTarget,
             }).selectedOptionOrdinals,
         ).toEqual(topKVectors.expected.selectedOptionOrdinals);
@@ -40,8 +40,8 @@ describe('plaintext tally and top-k oracle', () => {
         expect(oracle.sparseTarget.targetOrderSlots).toEqual(
             topKVectors.expected.targetOrderSlots,
         );
-        expect(oracle.tally.tallyDigest).toBe(topKVectors.expected.tallyDigest);
-        expect(oracle.oracleDigest).toBe(topKVectors.expected.oracleDigest);
+        expect(oracle.tally.tallyHash).toBe(topKVectors.expected.tallyHash);
+        expect(oracle.oracleHash).toBe(topKVectors.expected.oracleHash);
     });
 
     it('uses lower option index as the full-ranking tie breaker', () => {
@@ -63,8 +63,8 @@ describe('plaintext tally and top-k oracle', () => {
         expect(oracle.sparseTarget.targetOrderSlots).toEqual(
             topKVectors.fullTieCase.expectedTargetOrderSlots,
         );
-        expect(oracle.oracleDigest).toBe(
-            topKVectors.fullTieCase.expectedOracleDigest,
+        expect(oracle.oracleHash).toBe(
+            topKVectors.fullTieCase.expectedOracleHash,
         );
     });
 
@@ -78,7 +78,7 @@ describe('plaintext tally and top-k oracle', () => {
             pollSpec: pollSpec.normalized,
         });
         const decoding = decodeSparseTopKTarget({
-            expectedLayoutDigest: oracle.sparseTarget.layoutDigest,
+            expectedLayoutHash: oracle.sparseTarget.layoutHash,
             target: oracle.sparseTarget,
         });
 
@@ -98,11 +98,11 @@ describe('plaintext tally and top-k oracle', () => {
         expect(oracle.sparseTarget.targetOrderSlots).toEqual(
             topKVectors.topOneClearWinnerCase.expectedTargetOrderSlots,
         );
-        expect(oracle.tally.tallyDigest).toBe(
-            topKVectors.topOneClearWinnerCase.expectedTallyDigest,
+        expect(oracle.tally.tallyHash).toBe(
+            topKVectors.topOneClearWinnerCase.expectedTallyHash,
         );
-        expect(oracle.oracleDigest).toBe(
-            topKVectors.topOneClearWinnerCase.expectedOracleDigest,
+        expect(oracle.oracleHash).toBe(
+            topKVectors.topOneClearWinnerCase.expectedOracleHash,
         );
     });
 
@@ -146,7 +146,7 @@ describe('plaintext tally and top-k oracle', () => {
                 pollSpec: pollSpec.normalized,
             });
             const decoding = decodeSparseTopKTarget({
-                expectedLayoutDigest: oracle.sparseTarget.layoutDigest,
+                expectedLayoutHash: oracle.sparseTarget.layoutHash,
                 target: oracle.sparseTarget,
             });
             const expectedSelectedOrdinals = oracle.ranking
@@ -212,11 +212,11 @@ describe('plaintext tally and top-k oracle', () => {
         expect(oracle.sparseTarget.targetOrderSlots).toEqual(
             topKVectors.maximumNoWrapCase.expectedTargetOrderSlots,
         );
-        expect(oracle.tally.tallyDigest).toBe(
-            topKVectors.maximumNoWrapCase.expectedTallyDigest,
+        expect(oracle.tally.tallyHash).toBe(
+            topKVectors.maximumNoWrapCase.expectedTallyHash,
         );
-        expect(oracle.oracleDigest).toBe(
-            topKVectors.maximumNoWrapCase.expectedOracleDigest,
+        expect(oracle.oracleHash).toBe(
+            topKVectors.maximumNoWrapCase.expectedOracleHash,
         );
     });
 

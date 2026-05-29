@@ -1,4 +1,4 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { type BallotPrivacyLoweredLinearRelationStatement } from '../relation-backend-lowering.js';
 import type { BallotPrivacyRelationCompilerInput } from '../relation-compiler.js';
@@ -25,7 +25,7 @@ import {
     linearProofRelation,
     receiverEncryptionModuleRank,
 } from './statement-contracts.js';
-import { deriveStructuredReceiverEncryptionStatementDigest } from './statement-digests.js';
+import { deriveStructuredReceiverEncryptionStatementHash } from './statement-hashes.js';
 import { witnessValueForVariable } from './statement-witness-values.js';
 import {
     componentById,
@@ -37,7 +37,7 @@ import {
 
 export const buildBallotProofStructuredReceiverEncryptionProofStatement =
     (input: {
-        readonly ballotProofStatementDigest?: ProtocolDigest;
+        readonly ballotProofStatementHash?: ProtocolHash;
         readonly componentStatement: BallotProofComponentStatement;
         readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
         readonly parameterProfileId: string;
@@ -109,7 +109,7 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
                 const receiverPayload = payloadsByReceiver.get(receiverKey);
                 if (
                     publicKey?.publicKeyVector === undefined ||
-                    publicKey.publicMatrixSeedDigest === undefined ||
+                    publicKey.publicMatrixSeedHash === undefined ||
                     receiverPayload?.ciphertextChunks === undefined
                 ) {
                     throw new Error(
@@ -165,11 +165,10 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
                     ciphertextChunks,
                     plaintextBitLength: receiverRow.plaintextBitLength,
                     publicKeyVector: publicKey.publicKeyVector,
-                    publicMatrixSeedDigest: publicKey.publicMatrixSeedDigest,
+                    publicMatrixSeedHash: publicKey.publicMatrixSeedHash,
                     receiverIdentity: receiverRow.receiverIdentity,
-                    receiverPayloadDigest: receiverRow.receiverPayloadDigest,
-                    receiverPublicKeyDigest:
-                        receiverRow.receiverPublicKeyDigest,
+                    receiverPayloadHash: receiverRow.receiverPayloadHash,
+                    receiverPublicKeyHash: receiverRow.receiverPublicKeyHash,
                     receiverRosterPosition: receiverRow.receiverRosterPosition,
                     rowCount,
                     rowOffsetWithinStatement,
@@ -178,47 +177,45 @@ export const buildBallotProofStructuredReceiverEncryptionProofStatement =
         );
         const statementPayload: Omit<
             BallotProofStructuredReceiverEncryptionProofStatement,
-            'statementDigest'
+            'statementHash'
         > = {
-            backendStatementDigest:
-                input.loweredStatement.backendStatement.backendStatementDigest,
-            ...(input.ballotProofStatementDigest === undefined
+            backendStatementHash:
+                input.loweredStatement.backendStatement.backendStatementHash,
+            ...(input.ballotProofStatementHash === undefined
                 ? {}
                 : {
-                      ballotProofStatementDigest:
-                          input.ballotProofStatementDigest,
+                      ballotProofStatementHash: input.ballotProofStatementHash,
                   }),
             coefficientModulus: component.coefficientModulus,
             componentId: 'receiver-encryption-component',
-            componentStatementDigest:
-                input.componentStatement.componentStatementDigest,
-            matrixDigest: input.componentStatement.matrixDigest,
+            componentStatementHash:
+                input.componentStatement.componentStatementHash,
+            matrixHash: input.componentStatement.matrixHash,
             objectType: 'BallotProofStructuredReceiverEncryptionProofStatement',
             objectVersion: 1,
             parameterProfileId: input.parameterProfileId,
             proofStatementFormat: 'structured-module-lwe-linear-proof-v1',
             proofSystemRingDegree: 64,
-            receiverEncryptionProfileDigest:
+            receiverEncryptionProfileHash:
                 input.loweredStatement.publicContext
-                    .receiverEncryptionProfileDigest,
+                    .receiverEncryptionProfileHash,
             receiverRows,
             relation: linearProofRelation,
-            relationStatementDigest:
-                input.loweredStatement.relationStatementDigest,
+            relationStatementHash: input.loweredStatement.relationStatementHash,
             sourceBackendColumnIndices,
             sourceRingDegree: 256,
             statementColumns: nextPolynomialColumnIndex,
             statementRows: nextPolynomialRowOffset,
             matrixCoefficientRepresentation: 'centeredSignedSourceModulus',
             targetCoefficientRepresentation: 'centeredSignedSourceModulus',
-            targetVectorDigest: input.componentStatement.targetVectorDigest,
+            targetVectorHash: input.componentStatement.targetVectorHash,
             witnessL2BoundSquared: input.witnessL2BoundSquared,
         };
 
         return {
             ...statementPayload,
-            statementDigest:
-                deriveStructuredReceiverEncryptionStatementDigest(
+            statementHash:
+                deriveStructuredReceiverEncryptionStatementHash(
                     statementPayload,
                 ),
         };
@@ -327,7 +324,7 @@ const secretStateForExplicitSparseStatement = (input: {
 };
 
 export const buildEncodedScoreFieldLinearProofProjection = (input: {
-    readonly ballotProofStatementDigest?: ProtocolDigest;
+    readonly ballotProofStatementHash?: ProtocolHash;
     readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
     readonly parameterProfileId: string;
     readonly relationInput: BallotPrivacyRelationCompilerInput;

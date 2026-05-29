@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::{
     fixtures::{TranscriptCoreFixture, verify_fixture},
-    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, derive_protocol_digest, hash512_hex},
+    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, derive_protocol_hash, hash512_hex},
     ring::{
         MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
         interpolate_shamir_constant_term,
@@ -297,7 +297,7 @@ enum TranscriptCoreCommand {
     AnalyzeCanonicalObject,
     ComputeChunkRoot,
     HashRaw,
-    DeriveProtocolDigest,
+    DeriveProtocolHash,
     InterpolateShamirConstantTerm,
     EvaluatePlaintextComparison,
     VerifyFixture,
@@ -315,10 +315,12 @@ enum TranscriptCoreCommand {
     VerifyClaimBearingBallotPackage,
     GenerateAggregateDerivationProof,
     VerifyAggregateDerivationProof,
+    GenerateAggregateBridgeEncryption,
+    VerifyAggregateBridgeEncryption,
+    EvaluateAggregateBridgeRelation,
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
     ValidateBgvEvaluatorOperation,
-    GenerateBgvBackendReport,
     DescribeBgvPassiveSetupObjectModel,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
@@ -438,7 +440,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
                 "hash512": hash512_hex("transcript-core/raw", &[&bytes]),
             }))
         }
-        TranscriptCoreCommand::DeriveProtocolDigest => {
+        TranscriptCoreCommand::DeriveProtocolHash => {
             let namespace = read_string_field(&request, "namespace")?;
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
@@ -448,7 +450,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
             })?;
 
             Ok(json!({
-                "protocolDigest": derive_protocol_digest(namespace, value)?,
+                "protocolHash": derive_protocol_hash(namespace, value)?,
             }))
         }
         TranscriptCoreCommand::InterpolateShamirConstantTerm => {
@@ -498,13 +500,15 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::VerifyBallotProof
         | TranscriptCoreCommand::VerifyClaimBearingBallotPackage
         | TranscriptCoreCommand::GenerateAggregateDerivationProof
-        | TranscriptCoreCommand::VerifyAggregateDerivationProof => {
+        | TranscriptCoreCommand::VerifyAggregateDerivationProof
+        | TranscriptCoreCommand::GenerateAggregateBridgeEncryption
+        | TranscriptCoreCommand::VerifyAggregateBridgeEncryption
+        | TranscriptCoreCommand::EvaluateAggregateBridgeRelation => {
             run_ballot_privacy_command(command, &request)
         }
         TranscriptCoreCommand::DescribeBgvRnsProfile
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
-        | TranscriptCoreCommand::GenerateBgvBackendReport
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
@@ -585,20 +589,16 @@ fn run_ballot_privacy_command(
                     "ballotPackage is required",
                 )
             })?;
-            let unsafe_small_roster_acknowledged = request
-                .get("unsafeSmallRosterAcknowledged")
+            let casual_micro_roster_acknowledged = request
+                .get("casualMicroRosterAcknowledged")
                 .and_then(Value::as_bool)
-                == Some(true)
-                || request
-                    .get("casualMicroRosterAcknowledged")
-                    .and_then(Value::as_bool)
-                    == Some(true);
+                == Some(true);
             let dynamic_roster_profile_evidence = request.get("dynamicRosterProfileEvidence");
 
             Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package(
                 ballot_package,
                 dynamic_roster_profile_evidence,
-                unsafe_small_roster_acknowledged,
+                casual_micro_roster_acknowledged,
             ))
         }
         TranscriptCoreCommand::GenerateAggregateDerivationProof => Ok(
@@ -608,6 +608,17 @@ fn run_ballot_privacy_command(
         ),
         TranscriptCoreCommand::VerifyAggregateDerivationProof => Ok(
             crate::ballot_privacy::verify_aggregate_derivation_proof_from_command_request(request),
+        ),
+        TranscriptCoreCommand::GenerateAggregateBridgeEncryption => Ok(
+            crate::ballot_privacy::generate_aggregate_bridge_encryption_from_command_request(
+                request,
+            ),
+        ),
+        TranscriptCoreCommand::VerifyAggregateBridgeEncryption => Ok(
+            crate::ballot_privacy::verify_aggregate_bridge_encryption_from_command_request(request),
+        ),
+        TranscriptCoreCommand::EvaluateAggregateBridgeRelation => Ok(
+            crate::ballot_privacy::evaluate_aggregate_bridge_relation_from_command_request(request),
         ),
         _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
     }
@@ -622,13 +633,7 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::describe_bgv_operation_registry()
         }
         TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "validateBgvEvaluatorOperation",
-                crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request),
-            ))
-        }
-        TranscriptCoreCommand::GenerateBgvBackendReport => {
-            crate::bgv::commands::generate_bgv_backend_report()
+            crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
         }
         TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
             crate::bgv::commands::describe_bgv_passive_setup_object_model()
@@ -640,42 +645,22 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
         }
         TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "encodeBgvBatchPlaintext",
-                crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request),
-            ))
+            crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)
         }
         TranscriptCoreCommand::ValidateBgvPlaintextObject => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "validateBgvPlaintextObject",
-                crate::bgv::commands::validate_bgv_plaintext_from_request(request),
-            ))
+            crate::bgv::commands::validate_bgv_plaintext_from_request(request)
         }
         TranscriptCoreCommand::ValidateBgvCiphertextObject => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "validateBgvCiphertextObject",
-                crate::bgv::commands::validate_bgv_ciphertext_from_request(request),
-            ))
+            crate::bgv::commands::validate_bgv_ciphertext_from_request(request)
         }
         TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "generateBgvCiphertextConventionFixture",
-                crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(
-                    request,
-                ),
-            ))
+            crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(request)
         }
         TranscriptCoreCommand::GenerateBgvBaseConversionFixture => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "generateBgvBaseConversionFixture",
-                crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request),
-            ))
+            crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request)
         }
         TranscriptCoreCommand::AnalyzeBgvCanonicalObject => {
-            Ok(crate::bgv::commands::bgv_input_result(
-                "analyzeBgvCanonicalObject",
-                crate::bgv::commands::analyze_bgv_canonical_object_from_request(request),
-            ))
+            crate::bgv::commands::analyze_bgv_canonical_object_from_request(request)
         }
         TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
             Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
@@ -827,11 +812,11 @@ mod tests {
     }
 
     #[test]
-    fn command_derives_protocol_digest_with_kernel_canonical_json() {
+    fn command_derives_protocol_hash_with_kernel_canonical_json() {
         let response = super::run_transcript_core_command_inner(
             serde_json::json!({
-                "command": "DeriveProtocolDigest",
-                "namespace": "PollSpecDigest",
+                "command": "DeriveProtocolHash",
+                "namespace": "PollSpecHash",
                 "value": {
                     "poll": "main"
                 }
@@ -839,11 +824,11 @@ mod tests {
             .to_string()
             .as_bytes(),
         )
-        .expect("protocol digest command should succeed");
+        .expect("protocol hash command should succeed");
 
         assert_eq!(
-            response["protocolDigest"],
-            "423c71de65abadb5adc05d9b6b704252420bb738af888c62614c8afc53a2be808662585305e76738b23e4f20154f8779e3827c0c8f313455d84675924f4a2c83"
+            response["protocolHash"],
+            "43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4"
         );
     }
 

@@ -1,26 +1,5 @@
 import type { BallotProofStatement } from '@sealed-lattice/types';
 
-import {
-    buildBallotProofComponentBundleStatement,
-    buildBallotProofComponentLinearProofProjection,
-    buildBallotProofComponentProofStatementPlans,
-    buildBallotProofRecordGenerationRequest,
-    buildBallotProofSparseComponentLinearProofStatement,
-    buildBallotProofStructuredReceiverEncryptionProofStatement,
-    buildEncodedScoreFieldLinearProofProjection,
-    buildPackedFieldSparseComponentLinearProofStatement,
-    type BallotProofComponentProjectionWitness,
-    type BallotProofRecordGenerationProofContracts,
-    type BallotProofRecordGenerationRandomness,
-} from '../../../src/ballot-privacy/ballot-proof-linear-statement';
-import { type BallotPrivacyRelationCompilerInput } from '../../../src/ballot-privacy/index';
-import {
-    ballotPrivacyBackendProofComponentOrder,
-    lowerBallotPrivacyRelationToBackendStatement,
-    type BallotPrivacyBackendProofComponentId,
-    type BallotPrivacyRelationBackendPublicContext,
-} from '../../../src/ballot-privacy/relation-backend-lowering';
-
 import type {
     BallotProofRecordGenerationFixture,
     BallotProofRecordGenerationFixtureOptions,
@@ -36,8 +15,30 @@ import {
     mandatoryProfileRelationInput,
     publicContextAndProjectionWitness,
     receiverKeyProofRootEvidence,
+    variantRelationInput,
 } from './fixture-inputs.js';
 
+import {
+    buildBallotProofComponentBundleStatement,
+    buildBallotProofComponentLinearProofProjection,
+    buildBallotProofComponentProofStatementDescriptors,
+    buildBallotProofRecordGenerationRequest,
+    buildBallotProofSparseComponentLinearProofStatement,
+    buildBallotProofStructuredReceiverEncryptionProofStatement,
+    buildEncodedScoreFieldLinearProofProjection,
+    buildPackedFieldSparseComponentLinearProofStatement,
+    type BallotProofComponentProjectionWitness,
+    type BallotProofRecordGenerationProofContracts,
+    type BallotProofRecordGenerationRandomness,
+} from '#packages/protocol/src/ballot-privacy/ballot-proof-linear-statement';
+import { type BallotPrivacyRelationCompilerInput } from '#packages/protocol/src/ballot-privacy/index';
+import {
+    ballotPrivacyBackendProofComponentOrder,
+    lowerBallotPrivacyRelationToBackendStatement,
+    type BallotPrivacyBackendProofComponentId,
+    type BallotPrivacyLoweredLinearRelationStatement,
+    type BallotPrivacyRelationBackendPublicContext,
+} from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
 import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
 
 const createProofEncoding = (input: {
@@ -86,14 +87,14 @@ const componentParameterProfileIds: Readonly<
     Record<BallotPrivacyBackendProofComponentId, string>
 > = {
     'payload-plaintext-field-component':
-        'payload-plaintext-field-linear-compatibility-v1',
+        'payload-plaintext-field-linear-proof-parameter-v1',
     'receiver-encryption-component':
-        'receiver-encryption-linear-compatibility-v1',
+        'receiver-encryption-linear-proof-parameter-v1',
     'receiver-key-binding-component':
-        'receiver-key-binding-linear-compatibility-v1',
+        'receiver-key-binding-linear-proof-parameter-v1',
     'score-and-shamir-field-component':
-        'encoded-score-field-linear-compatibility-v1',
-    'share-commitment-component': 'share-commitment-linear-compatibility-v1',
+        'encoded-score-field-linear-proof-parameter-v1',
+    'share-commitment-component': 'share-commitment-linear-proof-parameter-v1',
 };
 
 const componentEncodingProfileIds: Readonly<
@@ -115,7 +116,21 @@ const componentProofContracts = (input: {
     readonly publicContext: BallotPrivacyRelationBackendPublicContext;
     readonly relationInput: BallotPrivacyRelationCompilerInput;
     readonly statement: BallotProofStatement;
-}): BallotProofRecordGenerationProofContracts => {
+}): {
+    readonly preparedLowering: {
+        readonly componentBundleStatement: ReturnType<
+            typeof buildBallotProofComponentBundleStatement
+        >;
+        readonly componentProofStatements?: Readonly<
+            Partial<Record<BallotPrivacyBackendProofComponentId, unknown>>
+        >;
+        readonly componentStatementDescriptors: ReturnType<
+            typeof buildBallotProofComponentProofStatementDescriptors
+        >;
+        readonly loweredStatement: BallotPrivacyLoweredLinearRelationStatement;
+    };
+    readonly proofContracts: BallotProofRecordGenerationProofContracts;
+} => {
     const loweringResult = lowerBallotPrivacyRelationToBackendStatement({
         publicContext: input.publicContext,
         relationInput: input.relationInput,
@@ -124,14 +139,15 @@ const componentProofContracts = (input: {
         throw new Error('Fixture relation should lower.');
     }
     const componentBundleStatement = buildBallotProofComponentBundleStatement({
-        ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
+        ballotProofStatementHash: input.statement.ballotProofStatementHash,
         loweredStatement: loweringResult.statement,
     });
-    const componentPlans = buildBallotProofComponentProofStatementPlans({
-        ballotProofStatementDigest: input.statement.ballotProofStatementDigest,
-        componentBundleStatement,
-        loweredStatement: loweringResult.statement,
-    });
+    const componentDescriptors =
+        buildBallotProofComponentProofStatementDescriptors({
+            ballotProofStatementHash: input.statement.ballotProofStatementHash,
+            componentBundleStatement,
+            loweredStatement: loweringResult.statement,
+        });
     const componentStatementById = new Map(
         componentBundleStatement.componentStatements.map(
             (componentStatement) => [
@@ -140,10 +156,10 @@ const componentProofContracts = (input: {
             ],
         ),
     );
-    const componentPlanById = new Map(
-        componentPlans.map((componentPlan) => [
-            componentPlan.componentId,
-            componentPlan,
+    const componentDescriptorById = new Map(
+        componentDescriptors.map((componentDescriptor) => [
+            componentDescriptor.componentId,
+            componentDescriptor,
         ]),
     );
     const proofEncodings = {} as Record<
@@ -154,6 +170,9 @@ const componentProofContracts = (input: {
         BallotPrivacyBackendProofComponentId,
         ProofParameterSet
     >;
+    const componentProofStatements: Partial<
+        Record<BallotPrivacyBackendProofComponentId, unknown>
+    > = {};
     const putContract = (
         componentId: BallotPrivacyBackendProofComponentId,
         inputContract: {
@@ -182,19 +201,18 @@ const componentProofContracts = (input: {
             source: `sealed-lattice/linear-proof/${componentId}-encoding-v1`,
         });
     };
-    const scoreComponentPlan = componentPlanById.get(
+    const scoreComponentDescriptor = componentDescriptorById.get(
         'score-and-shamir-field-component',
     );
-    if (scoreComponentPlan === undefined) {
-        throw new Error('Score/Shamir component plan should exist.');
+    if (scoreComponentDescriptor === undefined) {
+        throw new Error('Score/Shamir component descriptor should exist.');
     }
     if (
-        scoreComponentPlan.proofStatementFormat !==
+        scoreComponentDescriptor.proofStatementFormat !==
         'sparse-polynomial-matrix-linear-proof-v1'
     ) {
         const scoreProjection = buildEncodedScoreFieldLinearProofProjection({
-            ballotProofStatementDigest:
-                input.statement.ballotProofStatementDigest,
+            ballotProofStatementHash: input.statement.ballotProofStatementHash,
             loweredStatement: loweringResult.statement,
             parameterProfileId:
                 componentParameterProfileIds[
@@ -217,8 +235,8 @@ const componentProofContracts = (input: {
     } else {
         const scoreSparseStatement =
             buildPackedFieldSparseComponentLinearProofStatement({
-                ballotProofStatementDigest:
-                    input.statement.ballotProofStatementDigest,
+                ballotProofStatementHash:
+                    input.statement.ballotProofStatementHash,
                 componentId: 'score-and-shamir-field-component',
                 loweredStatement: loweringResult.statement,
                 parameterProfileId:
@@ -229,6 +247,8 @@ const componentProofContracts = (input: {
                 sourceRingDegree: 64,
                 witnessL2BoundSquared: '65536',
             });
+        componentProofStatements['score-and-shamir-field-component'] =
+            scoreSparseStatement;
         putContract('score-and-shamir-field-component', {
             coefficientModulus: scoreSparseStatement.coefficientModulus,
             ringDegree: scoreSparseStatement.sourceRingDegree,
@@ -252,8 +272,8 @@ const componentProofContracts = (input: {
             componentId === 'payload-plaintext-field-component' &&
             input.relationInput.optionCount > 1
                 ? buildPackedFieldSparseComponentLinearProofStatement({
-                      ballotProofStatementDigest:
-                          input.statement.ballotProofStatementDigest,
+                      ballotProofStatementHash:
+                          input.statement.ballotProofStatementHash,
                       componentId,
                       loweredStatement: loweringResult.statement,
                       parameterProfileId:
@@ -263,8 +283,8 @@ const componentProofContracts = (input: {
                       witnessL2BoundSquared,
                   })
                 : buildBallotProofSparseComponentLinearProofStatement({
-                      ballotProofStatementDigest:
-                          input.statement.ballotProofStatementDigest,
+                      ballotProofStatementHash:
+                          input.statement.ballotProofStatementHash,
                       componentId,
                       loweredStatement: loweringResult.statement,
                       parameterProfileId:
@@ -272,10 +292,11 @@ const componentProofContracts = (input: {
                       sourceRingDegree: ringDegree,
                       witnessL2BoundSquared,
                   });
+        componentProofStatements[componentId] = sparseStatement;
         if (input.relationInput.optionCount === 1) {
             buildBallotProofComponentLinearProofProjection({
-                ballotProofStatementDigest:
-                    input.statement.ballotProofStatementDigest,
+                ballotProofStatementHash:
+                    input.statement.ballotProofStatementHash,
                 componentId,
                 loweredStatement: loweringResult.statement,
                 parameterProfileId: componentParameterProfileIds[componentId],
@@ -297,8 +318,7 @@ const componentProofContracts = (input: {
     }
     const receiverEncryptionStatement =
         buildBallotProofStructuredReceiverEncryptionProofStatement({
-            ballotProofStatementDigest:
-                input.statement.ballotProofStatementDigest,
+            ballotProofStatementHash: input.statement.ballotProofStatementHash,
             componentStatement:
                 componentStatementById.get('receiver-encryption-component') ??
                 (() => {
@@ -311,6 +331,8 @@ const componentProofContracts = (input: {
                 componentParameterProfileIds['receiver-encryption-component'],
             witnessL2BoundSquared: '65536',
         });
+    componentProofStatements['receiver-encryption-component'] =
+        receiverEncryptionStatement;
     putContract('receiver-encryption-component', {
         coefficientModulus: receiverEncryptionStatement.coefficientModulus,
         ringDegree: receiverEncryptionStatement.sourceRingDegree,
@@ -320,14 +342,14 @@ const componentProofContracts = (input: {
             receiverEncryptionStatement.witnessL2BoundSquared,
         ),
     });
-    const receiverKeyPlan = componentPlanById.get(
+    const receiverKeyDescriptor = componentDescriptorById.get(
         'receiver-key-binding-component',
     );
-    if (receiverKeyPlan === undefined) {
-        throw new Error('Receiver-key component plan should exist.');
+    if (receiverKeyDescriptor === undefined) {
+        throw new Error('Receiver-key component descriptor should exist.');
     }
     putContract('receiver-key-binding-component', {
-        coefficientModulus: receiverKeyPlan.coefficientModulus,
+        coefficientModulus: receiverKeyDescriptor.coefficientModulus,
         ringDegree: 64,
         statementColumns: 1,
         statementRows: 1,
@@ -335,22 +357,31 @@ const componentProofContracts = (input: {
     });
 
     return {
-        ballotProofEncoding: createProofEncoding({
-            profileId: 'full-encoded-score-ballot-linear-proof-encoding-v1',
-            shortResponseVectorLength: 2,
-            source: 'sealed-lattice/linear-proof/full-ballot-binding-encoding-v1',
-        }),
-        ballotProofParameterSet: createParameterSet({
-            coefficientModulus: '65537',
-            profileId: 'full-encoded-score-ballot-linear-compatibility-v1',
-            ringDegree: 64,
-            source: 'sealed-lattice/linear-proof/full-ballot-binding-parameters-v1',
-            statementColumns: 1,
-            statementRows: 1,
-            witnessL2BoundSquared: 65_536,
-        }),
-        componentProofEncodings: proofEncodings,
-        componentProofParameterSets: proofParameterSets,
+        preparedLowering: {
+            componentBundleStatement,
+            componentProofStatements,
+            componentStatementDescriptors: componentDescriptors,
+            loweredStatement: loweringResult.statement,
+        },
+        proofContracts: {
+            ballotProofEncoding: createProofEncoding({
+                profileId: 'full-encoded-score-ballot-linear-proof-encoding-v1',
+                shortResponseVectorLength: 2,
+                source: 'sealed-lattice/linear-proof/full-ballot-binding-encoding-v1',
+            }),
+            ballotProofParameterSet: createParameterSet({
+                coefficientModulus: '65537',
+                profileId:
+                    'full-encoded-score-ballot-linear-proof-parameter-v1',
+                ringDegree: 64,
+                source: 'sealed-lattice/linear-proof/full-ballot-binding-parameters-v1',
+                statementColumns: 1,
+                statementRows: 1,
+                witnessL2BoundSquared: 65_536,
+            }),
+            componentProofEncodings: proofEncodings,
+            componentProofParameterSets: proofParameterSets,
+        },
     };
 };
 
@@ -397,17 +428,19 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
     });
     const publicContext = {
         ...contextWithoutStatement,
-        ballotProofStatementDigest: statement.ballotProofStatementDigest,
+        ballotProofStatementHash: statement.ballotProofStatementHash,
     };
-    const proofContracts = componentProofContracts({
+    const proofContractBuild = componentProofContracts({
         projectionWitness,
         publicContext,
         relationInput,
         statement,
     });
+    const proofContracts = proofContractBuild.proofContracts;
     const randomness = deterministicRandomness();
     const request = {
         ...buildBallotProofRecordGenerationRequest({
+            preparedLowering: proofContractBuild.preparedLowering,
             proofContracts,
             projectionWitness,
             publicContext,
@@ -420,12 +453,6 @@ const createBallotProofRecordGenerationFixtureWithOptions = (
             : {
                   casualMicroRosterAcknowledged:
                       options.casualMicroRosterAcknowledged,
-              }),
-        ...(options.unsafeSmallRosterAcknowledged === undefined
-            ? {}
-            : {
-                  unsafeSmallRosterAcknowledged:
-                      options.unsafeSmallRosterAcknowledged,
               }),
     };
 
@@ -457,7 +484,6 @@ export const createMicroRosterBallotProofRecordGenerationFixture = (
         casualMicroRosterAcknowledged: true,
         relationInput: casualMicroRosterRelationInput(rosterSize),
         topOptionCount: 2,
-        unsafeSmallRosterAcknowledged: true,
     });
 
 export const createBallotProofRecordGenerationFixture =
@@ -470,6 +496,16 @@ export const createMandatoryProfileBallotProofRecordGenerationFixture =
             relationInput: mandatoryProfileRelationInput(),
             topOptionCount: 20,
         });
+
+export const createVariantBallotProofRecordGenerationFixture = (input: {
+    readonly optionCount: number;
+    readonly rosterSize: number;
+}): BallotProofRecordGenerationFixture =>
+    createBallotProofRecordGenerationFixtureWithOptions({
+        casualMicroRosterAcknowledged: input.rosterSize < 10 ? true : undefined,
+        relationInput: variantRelationInput(input),
+        topOptionCount: input.optionCount,
+    });
 
 export const createMandatoryProfileBallotProofRecordBenchmarkFixture =
     (): BallotProofRecordGenerationFixture =>

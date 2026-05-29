@@ -21,26 +21,16 @@ docs/public/coverage-summary.json
 docs/src/content/docs/api/reference/
 .vitest-attachments/
 **/__screenshots__/
+.lighthouseci/
 
 # Miscellaneous
 .DS_Store
 __pycache__/
 
 # Temporary files
-temp-preview-*.txt
+logs/
 temp/
-temp.*
-temp-*
-temp_*
-tmp/
-tmp.*
-tmp-*
-.tmp-*
-.tmp_*
-.tmp.*
+temp.txt
 
 # env
 .env
-
-# External references
-reference-documents/

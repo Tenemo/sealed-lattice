@@ -12,7 +12,7 @@ import {
 } from '../plaintext-oracle/field.js';
 import { evaluateShamirPolynomialForRoster } from '../plaintext-oracle/shamir.js';
 
-import { deriveBallotPolynomialSetDigest } from './ballot-polynomials.js';
+import { deriveBallotPolynomialSetHash } from './ballot-polynomials.js';
 import {
     pvssBallotShareVectorWidth,
     requireNoRefusals,
@@ -45,17 +45,17 @@ export const deriveReceiverShareVectors = (input: {
             'Receiver share vectors require the threshold profile used by the ballot polynomial set.',
         );
     }
-    const recomputedPolynomialSetDigest = deriveBallotPolynomialSetDigest({
+    const recomputedPolynomialSetHash = deriveBallotPolynomialSetHash({
         normalizedBallot: input.polynomialSet.normalizedBallot,
         optionPolynomials: input.polynomialSet.optionPolynomials,
         pvssThreshold: input.polynomialSet.pvssThreshold,
     });
     if (
-        input.polynomialSet.ballotPolynomialSetDigest !==
-        recomputedPolynomialSetDigest
+        input.polynomialSet.ballotPolynomialSetHash !==
+        recomputedPolynomialSetHash
     ) {
         throw new RangeError(
-            'Receiver share vectors require a canonical ballot polynomial set digest.',
+            'Receiver share vectors require a canonical ballot polynomial set hash.',
         );
     }
 

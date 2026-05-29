@@ -73,12 +73,12 @@ fn relabel_package_verification(
 pub fn verify_claim_bearing_ballot_package(
     ballot_package: &Value,
     dynamic_roster_profile_evidence: Option<&Value>,
-    unsafe_small_roster_acknowledged: bool,
+    casual_micro_roster_acknowledged: bool,
 ) -> Value {
     let refused_objects = collect_claim_bearing_package_refusals(
         ballot_package,
         dynamic_roster_profile_evidence,
-        unsafe_small_roster_acknowledged,
+        casual_micro_roster_acknowledged,
     );
     if !refused_objects.is_empty() {
         return structural_rejection("verifyClaimBearingBallotPackage", refused_objects);
@@ -190,7 +190,7 @@ pub fn verify_claim_bearing_ballot_package(
             proof_encoding,
             public_randomness_hex,
             component_proof_verification_mode: ComponentProofVerificationMode::VerifyBackend,
-            unsafe_small_roster_acknowledged,
+            casual_micro_roster_acknowledged,
         },
     );
 

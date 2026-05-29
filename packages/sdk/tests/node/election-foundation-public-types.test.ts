@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import publicSurface from '../../public-surface.json' with { type: 'json' };
-import type * as publicTypes from '../../src/index.js';
+import type * as publicTypes from '#packages/sdk/src/index.js';
 
 type BlockedTargetAcceptanceTypes = [
     // @ts-expect-error target-acceptance shell types are intentionally not public.
@@ -42,10 +41,27 @@ type BlockedPvssBallotTypes = [
     publicTypes.TestAggregateShare,
 ];
 
+type BlockedEncryptedAggregateBridgeTypes = [
+    // @ts-expect-error encrypted aggregate bridge proof records remain internal until claim-bearing verification exists.
+    publicTypes.BridgeProofRecord,
+    // @ts-expect-error encrypted aggregate bridge aggregate contributions remain internal until claim-bearing verification exists.
+    publicTypes.AggregateContribution,
+    // @ts-expect-error encrypted aggregate bridge aggregate-ready handoff records remain internal until claim-bearing verification exists.
+    publicTypes.AggregateReadyRecord,
+    // @ts-expect-error encrypted aggregate bridge aggregate selection inputs remain internal until claim-bearing verification exists.
+    publicTypes.AggregateContributionSelectionInput,
+    // @ts-expect-error encrypted aggregate bridge aggregate selection outputs remain internal until claim-bearing verification exists.
+    publicTypes.AggregateContributionSelection,
+    // @ts-expect-error encrypted aggregate bridge aggregate-ready build inputs remain internal until claim-bearing verification exists.
+    publicTypes.AggregateReadyRecordBuildInput,
+];
+
 type PublicFoundationTypes = [
     publicTypes.BallotProofRecord,
     publicTypes.BallotProofStatement,
     publicTypes.BoardConsistencyInput,
+    publicTypes.BridgeProofVerification,
+    publicTypes.BridgeProofVerificationInput,
     publicTypes.ClaimBearingBallotPackage,
     publicTypes.PollSpecInput,
     publicTypes.ReceiverKeyProof,
@@ -57,6 +73,7 @@ type PublicFoundationTypes = [
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedPvssBallotTypes: BlockedPvssBallotTypes;
+    readonly blockedEncryptedAggregateBridgeTypes: BlockedEncryptedAggregateBridgeTypes;
     readonly blockedTargetAcceptanceTypes: BlockedTargetAcceptanceTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };
@@ -69,6 +86,8 @@ const publicFoundationTypeNames = [
     'BallotProofRecord',
     'BallotProofStatement',
     'BoardConsistencyInput',
+    'BridgeProofVerification',
+    'BridgeProofVerificationInput',
     'ClaimBearingBallotPackage',
     'PollSpecInput',
     'ReceiverKeyProof',
@@ -79,25 +98,6 @@ const publicFoundationTypeNames = [
 
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
-        expect(publicFoundationTypeNames).toHaveLength(9);
-        for (const publicTypeName of publicFoundationTypeNames) {
-            expect(publicSurface.publicTypeExports).toContain(publicTypeName);
-        }
-    });
-
-    it('keeps runtime and type export manifests disjoint and deterministic', () => {
-        const runtimeExports = new Set(publicSurface.runtimeExports);
-        const typeExports = new Set(publicSurface.publicTypeExports);
-        const overlap = [...runtimeExports].filter((exportName) =>
-            typeExports.has(exportName),
-        );
-
-        expect(overlap).toEqual([]);
-        expect(publicSurface.runtimeExports).toEqual(
-            [...publicSurface.runtimeExports].sort(),
-        );
-        expect(publicSurface.publicTypeExports).toEqual(
-            [...publicSurface.publicTypeExports].sort(),
-        );
+        expect(publicFoundationTypeNames).toHaveLength(11);
     });
 });

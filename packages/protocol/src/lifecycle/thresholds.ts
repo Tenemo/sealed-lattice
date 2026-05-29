@@ -1,8 +1,8 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     FrozenRosterProfile,
     PollSpec,
-    ProtocolDigest,
+    ProtocolHash,
     TargetBoundShareSelectionProfile,
     DecryptionShareFilteringMode,
     DecryptionShareSelectionRule,
@@ -15,7 +15,7 @@ import type {
 
 import { isNonNegativeInteger } from '../common/verification-helpers.js';
 
-import { derivePollSpecDigest } from './poll-spec.js';
+import { derivePollSpecHash } from './poll-spec.js';
 import {
     targetBoundShareSelectionProfileId,
     cpadProfileId,
@@ -26,12 +26,12 @@ import {
     strictLessThanOneThirdModel,
 } from './profiles.js';
 
-const protocolDigestPattern = /^[0-9a-f]{128}$/u;
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
-const normalizeDynamicRosterProfileCertificateDigest = (
-    digest: ProtocolDigest | undefined,
-): ProtocolDigest | null =>
-    digest !== undefined && protocolDigestPattern.test(digest) ? digest : null;
+const normalizeDynamicRosterProfileCertificateHash = (
+    hash: ProtocolHash | undefined,
+): ProtocolHash | null =>
+    hash !== undefined && protocolHashPattern.test(hash) ? hash : null;
 
 const normalizeBackendCorruptionModel = (
     rosterSize: number,
@@ -55,14 +55,14 @@ const normalizeBackendCorruptionModel = (
             'Certified HE backend corruption bound must be less than rosterSize.',
         );
     }
-    if (model.certificateDigest.length === 0) {
-        throw new Error('Certified HE backend profile requires a digest.');
+    if (model.certificateHash.length === 0) {
+        throw new Error('Certified HE backend profile requires a hash.');
     }
 
     return {
         kind: 'CertifiedCustom',
         backendCorruptionBound: model.backendCorruptionBound,
-        certificateDigest: model.certificateDigest,
+        certificateHash: model.certificateHash,
     };
 };
 
@@ -91,9 +91,9 @@ const normalizeTargetBoundShareSelectionProfile = (
             'Target-bound share-selection profile uses an unsupported ID.',
         );
     }
-    if (profile.certificateDigest.trim().length === 0) {
+    if (profile.certificateHash.trim().length === 0) {
         throw new Error(
-            'Target-bound share-selection profile requires a certificate digest.',
+            'Target-bound share-selection profile requires a certificate hash.',
         );
     }
     if (profile.cpadProfileId !== cpadProfileId) {
@@ -101,9 +101,9 @@ const normalizeTargetBoundShareSelectionProfile = (
             'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
         );
     }
-    if (profile.targetBasisDigest.trim().length === 0) {
+    if (profile.targetBasisHash.trim().length === 0) {
         throw new Error(
-            'Target-bound share-selection profile requires a target-basis digest.',
+            'Target-bound share-selection profile requires a target-basis hash.',
         );
     }
     if (!isNonNegativeInteger(profile.decryptionShareQuorum)) {
@@ -172,9 +172,9 @@ const normalizeTargetBoundShareSelectionProfile = (
 
     return {
         profileId: profile.profileId,
-        certificateDigest: profile.certificateDigest,
+        certificateHash: profile.certificateHash,
         cpadProfileId: profile.cpadProfileId,
-        targetBasisDigest: profile.targetBasisDigest,
+        targetBasisHash: profile.targetBasisHash,
         decryptionShareQuorum: profile.decryptionShareQuorum,
         minimumSharesForInterpolation: profile.minimumSharesForInterpolation,
         minimumArrivalsForRobustDecode: profile.minimumArrivalsForRobustDecode,
@@ -189,7 +189,7 @@ const deriveRosterProfile = (
 ): {
     readonly claimBoundary: ThresholdProfile['claimBoundary'];
     readonly claimBearing: boolean;
-    readonly dynamicRosterProfileCertificateDigest: ProtocolDigest | null;
+    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
     readonly rosterProfileKind: RosterProfileKind;
     readonly warnings: readonly ThresholdWarning[];
 } => {
@@ -202,17 +202,13 @@ const deriveRosterProfile = (
     if (rosterSize > maximumSupportedRosterSize) {
         throw new RangeError('Roster size must be at most 50.');
     }
-    const dynamicRosterProfileCertificateDigest =
-        normalizeDynamicRosterProfileCertificateDigest(
-            input.dynamicRosterProfileCertificateDigest,
+    const dynamicRosterProfileCertificateHash =
+        normalizeDynamicRosterProfileCertificateHash(
+            input.dynamicRosterProfileCertificateHash,
         );
 
     if (rosterSize < minimumDynamicRosterSize) {
-        if (
-            input.casualMicroRosterAcknowledged !== true &&
-            input.unsafeSmallRosterAcknowledged !== true &&
-            input.unsafeMicroRosterAcknowledged !== true
-        ) {
+        if (input.casualMicroRosterAcknowledged !== true) {
             throw new Error(
                 'Casual micro-roster profiles require explicit acknowledgement.',
             );
@@ -221,7 +217,7 @@ const deriveRosterProfile = (
         return {
             claimBoundary: 'CasualMicroRoster',
             claimBearing: false,
-            dynamicRosterProfileCertificateDigest: null,
+            dynamicRosterProfileCertificateHash: null,
             rosterProfileKind: 'CasualMicroRoster',
             warnings: ['CasualMicroRoster'],
         };
@@ -230,16 +226,16 @@ const deriveRosterProfile = (
         return {
             claimBoundary: 'MandatoryBenchmark',
             claimBearing: true,
-            dynamicRosterProfileCertificateDigest: null,
+            dynamicRosterProfileCertificateHash: null,
             rosterProfileKind: 'MandatoryBenchmarkRoster',
             warnings: [],
         };
     }
-    if (dynamicRosterProfileCertificateDigest !== null) {
+    if (dynamicRosterProfileCertificateHash !== null) {
         return {
             claimBoundary: 'DynamicRosterCertificate',
             claimBearing: true,
-            dynamicRosterProfileCertificateDigest,
+            dynamicRosterProfileCertificateHash,
             rosterProfileKind: 'SupportedDynamicRosterRange',
             warnings: [],
         };
@@ -248,7 +244,7 @@ const deriveRosterProfile = (
     return {
         claimBoundary: 'DynamicRosterCertificateMissing',
         claimBearing: false,
-        dynamicRosterProfileCertificateDigest: null,
+        dynamicRosterProfileCertificateHash: null,
         rosterProfileKind: 'UncertifiedDynamicRoster',
         warnings: ['DynamicRosterProfileCertificateRequired'],
     };
@@ -309,8 +305,8 @@ export const deriveThresholdProfile = (
         rosterProfileKind: rosterProfile.rosterProfileKind,
         claimBoundary: rosterProfile.claimBoundary,
         claimBearing: rosterProfile.claimBearing,
-        dynamicRosterProfileCertificateDigest:
-            rosterProfile.dynamicRosterProfileCertificateDigest,
+        dynamicRosterProfileCertificateHash:
+            rosterProfile.dynamicRosterProfileCertificateHash,
         structuralCorruptionBound,
         backendCorruptionBound,
         privacyCorruptionBound,
@@ -329,17 +325,17 @@ export const deriveThresholdProfile = (
     };
 };
 
-export const deriveThresholdProfileDigest = (input: {
-    readonly pollSpecDigest: ProtocolDigest;
-    readonly rosterDigest: ProtocolDigest;
+export const deriveThresholdProfileHash = (input: {
+    readonly pollSpecHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
     readonly thresholdProfile: ThresholdProfile;
     readonly rosterPolicy: PollSpec['rosterPolicy'];
     readonly thresholdProfileFamily: PollSpec['thresholdProfileFamily'];
     readonly smallRosterPolicy: PollSpec['smallRosterPolicy'];
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
-}): ProtocolDigest =>
-    deriveProtocolDigest('ThresholdProfileDigest', {
+}): ProtocolHash =>
+    deriveProtocolHash('ThresholdProfileHash', {
         activeFaultBound: input.thresholdProfile.activeFaultBound,
         aggregateContributionQuorum:
             input.thresholdProfile.aggregateContributionQuorum,
@@ -351,16 +347,16 @@ export const deriveThresholdProfileDigest = (input: {
             input.thresholdProfile.decryptionCorruptionBound,
         decryptionShareQuorum: input.thresholdProfile.decryptionShareQuorum,
         decryptionThreshold: input.thresholdProfile.decryptionThreshold,
-        dynamicRosterProfileCertificateDigest:
-            input.thresholdProfile.dynamicRosterProfileCertificateDigest,
+        dynamicRosterProfileCertificateHash:
+            input.thresholdProfile.dynamicRosterProfileCertificateHash,
         maxRosterSize: input.maxRosterSize,
         maximumRaceShares: input.thresholdProfile.maximumRaceShares,
         minRosterSize: input.minRosterSize,
-        pollSpecDigest: input.pollSpecDigest,
+        pollSpecHash: input.pollSpecHash,
         privacyCorruptionBound: input.thresholdProfile.privacyCorruptionBound,
         pvssThreshold: input.thresholdProfile.pvssThreshold,
         releaseQuorum: input.thresholdProfile.releaseQuorum,
-        rosterDigest: input.rosterDigest,
+        rosterHash: input.rosterHash,
         rosterPolicy: input.rosterPolicy,
         rosterProfileKind: input.thresholdProfile.rosterProfileKind,
         rosterSize: input.thresholdProfile.rosterSize,
@@ -376,16 +372,16 @@ export const deriveThresholdProfileDigest = (input: {
 
 export const deriveFrozenRosterProfile = (input: {
     readonly pollSpec: PollSpec;
-    readonly rosterDigest: ProtocolDigest;
+    readonly rosterHash: ProtocolHash;
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
     readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
-    readonly dynamicRosterProfileCertificateDigest?: ProtocolDigest;
+    readonly dynamicRosterProfileCertificateHash?: ProtocolHash;
 }): FrozenRosterProfile => {
     const { pollSpec, rosterSize } = input;
-    const dynamicRosterProfileCertificateDigest =
-        normalizeDynamicRosterProfileCertificateDigest(
-            input.dynamicRosterProfileCertificateDigest,
+    const dynamicRosterProfileCertificateHash =
+        normalizeDynamicRosterProfileCertificateHash(
+            input.dynamicRosterProfileCertificateHash,
         );
 
     if (
@@ -407,7 +403,7 @@ export const deriveFrozenRosterProfile = (input: {
     if (
         rosterSize >= minimumDynamicRosterSize &&
         rosterSize !== mandatoryBenchmarkRosterSize &&
-        dynamicRosterProfileCertificateDigest === null
+        dynamicRosterProfileCertificateHash === null
     ) {
         throw new Error(
             'Dynamic claim-bearing roster profiles require parameter certificate coverage for the frozen roster size.',
@@ -417,18 +413,18 @@ export const deriveFrozenRosterProfile = (input: {
     const thresholdProfile = deriveThresholdProfile({
         rosterSize,
         casualMicroRosterAcknowledged: rosterSize < minimumDynamicRosterSize,
-        dynamicRosterProfileCertificateDigest:
-            dynamicRosterProfileCertificateDigest ?? undefined,
+        dynamicRosterProfileCertificateHash:
+            dynamicRosterProfileCertificateHash ?? undefined,
         heBackendCorruptionModel: input.heBackendCorruptionModel,
         targetBoundShareSelectionProfile:
             input.targetBoundShareSelectionProfile,
     });
-    const pollSpecDigest = derivePollSpecDigest(pollSpec);
-    const thresholdProfileDigest = deriveThresholdProfileDigest({
+    const pollSpecHash = derivePollSpecHash(pollSpec);
+    const thresholdProfileHash = deriveThresholdProfileHash({
         maxRosterSize: pollSpec.maxRosterSize,
         minRosterSize: pollSpec.minRosterSize,
-        pollSpecDigest,
-        rosterDigest: input.rosterDigest,
+        pollSpecHash,
+        rosterHash: input.rosterHash,
         rosterPolicy: pollSpec.rosterPolicy,
         smallRosterPolicy: pollSpec.smallRosterPolicy,
         thresholdProfile,
@@ -438,17 +434,17 @@ export const deriveFrozenRosterProfile = (input: {
     return {
         objectType: 'FrozenRosterProfile',
         objectVersion: 1,
-        thresholdProfileDigest,
-        pollSpecDigest,
-        rosterDigest: input.rosterDigest,
+        thresholdProfileHash,
+        pollSpecHash,
+        rosterHash: input.rosterHash,
         rosterSize,
         rosterPolicy: pollSpec.rosterPolicy,
         thresholdProfileFamily: pollSpec.thresholdProfileFamily,
         smallRosterPolicy: pollSpec.smallRosterPolicy,
         minRosterSize: pollSpec.minRosterSize,
         maxRosterSize: pollSpec.maxRosterSize,
-        dynamicRosterProfileCertificateDigest:
-            thresholdProfile.dynamicRosterProfileCertificateDigest,
+        dynamicRosterProfileCertificateHash:
+            thresholdProfile.dynamicRosterProfileCertificateHash,
         thresholdProfile,
     };
 };

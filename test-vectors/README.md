@@ -4,7 +4,7 @@ This directory stores deterministic test vectors and the manifest used to verify
 
 ## Files
 
-- `manifest.json`: canonical file list and SHA-256 digests for committed vector files
+- `manifest.json`: canonical file list and SHA-256 Hashes for committed vector files
 - `README.md`: usage notes for contributors
 
 ## Commands

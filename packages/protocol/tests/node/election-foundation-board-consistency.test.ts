@@ -9,10 +9,10 @@ import {
     type SignedBoardHead,
     type TargetFinalityRecord,
     boardKeyFixture,
-    boardPolicyDigest,
-    boardPublicKeyDigest,
+    boardPolicyHash,
+    boardPublicKeyHash,
     ceremonyId,
-    contextDigest,
+    contextHash,
     createBoardEvidence,
     createBoardHead,
     createBoardHeadWithObjects,
@@ -25,10 +25,10 @@ import {
     createSignature,
     createTargetFinalityRecord,
     createTargetProposalHead,
-    deriveConflictingHeadEvidenceDigest,
-    deriveInclusionProofDigest,
-    deriveProtocolDigest,
-    getParticipantSigningPublicKeyDigest,
+    deriveConflictingHeadEvidenceHash,
+    deriveInclusionProofHash,
+    deriveProtocolHash,
+    getParticipantSigningPublicKeyHash,
     profile,
     replaceSignatureBytes,
     replaceSignatureProfile,
@@ -40,26 +40,27 @@ import {
     verifySignedObjectSignature,
     verifyTargetFinality,
     witnessPolicy,
-    witnessPublicKeyDigests,
+    witnessPublicKeyHashes,
 } from './election-foundation-test-helpers';
 
 describe('board consistency', () => {
     it('accepts an honest board chain with inclusion evidence', () => {
         const head0 = createBoardHead(0, null);
-        const head1 = createBoardHead(1, head0.headDigest);
-        const topKEvaluationRecordDigest = deriveProtocolDigest(
-            'TopKEvaluationRecordDigest',
+        const head1 = createBoardHead(1, head0.headHash);
+        const topKEvaluationRecordHash = deriveProtocolHash(
+            'ChallengeDomainHash',
             {
-                proposal: 'target',
+                payload: { proposal: 'target' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
             },
         );
         const { head: head2, inclusionProofs } = createBoardHeadWithObjects(
             2,
-            head1.headDigest,
+            head1.headHash,
             [
                 {
                     objectType: 'TopKEvaluationRecord',
-                    objectDigest: topKEvaluationRecordDigest,
+                    objectHash: topKEvaluationRecordHash,
                     boardPosition: 2,
                 },
             ],
@@ -72,33 +73,33 @@ describe('board consistency', () => {
             consistencyProofs: [
                 {
                     proofType: 'SignedHeadChain',
-                    fromBoardHeadDigest: head0.headDigest,
-                    toBoardHeadDigest: head2.headDigest,
+                    fromBoardHeadHash: head0.headHash,
+                    toBoardHeadHash: head2.headHash,
                     signedBoardHeads: [head0, head1, head2],
                 },
             ],
         });
 
         expect(result.ok).toBe(true);
-        expect(inclusionProof.boardEntryDigests).toBeUndefined();
+        expect(inclusionProof.boardEntryHashes).toBeUndefined();
         expect(inclusionProof.boardEntryCount).toBe(3);
         expect(inclusionProof.boardEntryMerklePath).toHaveLength(1);
-        expect(result.verifiedHeadDigests).toEqual([
-            head0.headDigest,
-            head1.headDigest,
-            head2.headDigest,
+        expect(result.verifiedHeadHashes).toEqual([
+            head0.headHash,
+            head1.headHash,
+            head2.headHash,
         ]);
-        expect(result.acceptedDigests).toContain(
-            inclusionProof.inclusionProofDigest,
+        expect(result.acceptedHashes).toContain(
+            inclusionProof.inclusionProofHash,
         );
     });
 
     it('rejects board evidence without a trusted expected board key', () => {
         const head0 = createBoardHead(0, null);
-        const { expectedBoardPublicKeyDigest, ...untrustedBoardEvidence } =
+        const { expectedBoardPublicKeyHash, ...untrustedBoardEvidence } =
             createBoardEvidence([head0]);
 
-        expect(expectedBoardPublicKeyDigest).toBe(boardPublicKeyDigest);
+        expect(expectedBoardPublicKeyHash).toBe(boardPublicKeyHash);
         expect(
             verifyBoardConsistency(
                 untrustedBoardEvidence as unknown as BoardConsistencyInput,
@@ -112,17 +113,20 @@ describe('board consistency', () => {
 
     it('rejects a board-entry Merkle path with a substituted sibling', () => {
         const head0 = createBoardHead(0, null);
-        const topKEvaluationRecordDigest = deriveProtocolDigest(
-            'TopKEvaluationRecordDigest',
-            { proposal: 'target' },
+        const topKEvaluationRecordHash = deriveProtocolHash(
+            'ChallengeDomainHash',
+            {
+                payload: { proposal: 'target' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
+            },
         );
         const { head, inclusionProofs } = createBoardHeadWithObjects(
             1,
-            head0.headDigest,
+            head0.headHash,
             [
                 {
                     objectType: 'TopKEvaluationRecord',
-                    objectDigest: topKEvaluationRecordDigest,
+                    objectHash: topKEvaluationRecordHash,
                     boardPosition: 2,
                 },
             ],
@@ -136,20 +140,17 @@ describe('board consistency', () => {
                 pathStepIndex === 0
                     ? {
                           ...pathStep,
-                          siblingDigest: deriveProtocolDigest(
-                              'BoardEntryDigest',
-                              {
-                                  pathStepIndex,
-                                  tampered: true,
-                              },
-                          ),
+                          siblingHash: deriveProtocolHash('BoardEntryHash', {
+                              pathStepIndex,
+                              tampered: true,
+                          }),
                       }
                     : pathStep,
             ),
         };
         const tamperedProof = {
             ...tamperedPayload,
-            inclusionProofDigest: deriveInclusionProofDigest(tamperedPayload),
+            inclusionProofHash: deriveInclusionProofHash(tamperedPayload),
         };
 
         expect(
@@ -166,12 +167,13 @@ describe('board consistency', () => {
 
     it('rejects fabricated inclusion and non-ancestor consistency evidence', () => {
         const head0 = createBoardHead(0, null);
-        const head1 = createBoardHead(1, head0.headDigest);
+        const head1 = createBoardHead(1, head0.headHash);
         const fabricatedInclusionProof = createInclusionProof(
             head1,
             'TopKEvaluationRecord',
-            deriveProtocolDigest('TopKEvaluationRecordDigest', {
-                proposal: 'not-in-head',
+            deriveProtocolHash('ChallengeDomainHash', {
+                payload: { proposal: 'not-in-head' },
+                purpose: 'fixture-top-k-evaluation-record-v1',
             }),
         );
 
@@ -192,8 +194,8 @@ describe('board consistency', () => {
                 consistencyProofs: [
                     {
                         proofType: 'SignedHeadChain',
-                        fromBoardHeadDigest: head1.headDigest,
-                        toBoardHeadDigest: head0.headDigest,
+                        fromBoardHeadHash: head1.headHash,
+                        toBoardHeadHash: head0.headHash,
                         signedBoardHeads: [head0, head1],
                     },
                 ],
@@ -207,24 +209,24 @@ describe('board consistency', () => {
 
     it('rejects hidden prefixes, forks, and signature substitution', () => {
         const head0 = createBoardHead(0, null);
-        const head1 = createBoardHead(1, head0.headDigest);
+        const head1 = createBoardHead(1, head0.headHash);
         const nonGenesisRestart = createBoardHead(5, null);
-        const skippedSequence = createBoardHead(3, head1.headDigest);
+        const skippedSequence = createBoardHead(3, head1.headHash);
         const orphan = createBoardHead(
             2,
-            deriveProtocolDigest('BoardHeadDigest', {
+            deriveProtocolHash('BoardHeadHash', {
                 hidden: true,
             }),
         );
-        const fork = createBoardHead(1, head0.headDigest, 'fork');
+        const fork = createBoardHead(1, head0.headHash, 'fork');
         const wrongRoleSignatureHead = {
             ...head1,
             signature: createSignature(
                 'BoardHead',
                 'Witness',
                 'board',
-                boardPublicKeyDigest,
-                head1.headDigest,
+                boardPublicKeyHash,
+                head1.headHash,
             ),
         };
 
@@ -257,7 +259,7 @@ describe('board consistency', () => {
             createBoardEvidence([head0, head1, fork]),
         );
 
-        expect(forkedBoardResult.acceptedDigests).toEqual([]);
+        expect(forkedBoardResult.acceptedHashes).toEqual([]);
         expect(forkedBoardResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'BoardForkDetected' }),
@@ -276,23 +278,23 @@ describe('board consistency', () => {
 
     it('rejects malformed supplied fork evidence and malformed ML-DSA signatures', () => {
         const head0 = createBoardHead(0, null);
-        const head1 = createBoardHead(1, head0.headDigest);
+        const head1 = createBoardHead(1, head0.headHash);
         const compatibleEvidencePayload = {
             ceremonyId,
-            boardPolicyDigest,
-            leftBoardHeadDigest: head0.headDigest,
-            rightBoardHeadDigest: head1.headDigest,
+            boardPolicyHash,
+            leftBoardHeadHash: head0.headHash,
+            rightBoardHeadHash: head1.headHash,
         };
-        const wrongDigestForkEvidence = {
+        const wrongHashForkEvidence = {
             ...compatibleEvidencePayload,
-            evidenceDigest: deriveProtocolDigest(
-                'ConflictingHeadEvidenceDigest',
-                { wrong: true },
-            ),
+            evidenceHash: deriveProtocolHash('ChallengeDomainHash', {
+                payload: { wrong: true },
+                purpose: 'fixture-wrong-conflicting-head-evidence-v1',
+            }),
         };
         const compatibleForkEvidence = {
             ...compatibleEvidencePayload,
-            evidenceDigest: deriveConflictingHeadEvidenceDigest(
+            evidenceHash: deriveConflictingHeadEvidenceHash(
                 compatibleEvidencePayload,
             ),
         };
@@ -316,7 +318,7 @@ describe('board consistency', () => {
             signature: createProtocolSignatureFixture({
                 profile,
                 publicKeyBytesHex: replacementKey.publicKeyBytesHex,
-                publicKeyDigest: replacementKey.publicKeyDigest,
+                publicKeyHash: replacementKey.publicKeyHash,
                 secretKeyBytesHex: replacementKey.secretKeyBytesHex,
                 signedRoot: head1.signature.signedRoot,
             }),
@@ -328,11 +330,11 @@ describe('board consistency', () => {
                     mode: 'HashMLDSA',
                 }),
                 publicKeyBytesHex: boardKeyFixture.publicKeyBytesHex,
-                publicKeyDigest: boardPublicKeyDigest,
+                publicKeyHash: boardPublicKeyHash,
                 secretKeyBytesHex: boardKeyFixture.secretKeyBytesHex,
                 signedRoot: {
                     ...head1.signature.signedRoot,
-                    objectRoot: head1.headDigest,
+                    objectRoot: head1.headHash,
                 },
             }),
         };
@@ -342,8 +344,8 @@ describe('board consistency', () => {
                 'BoardHead',
                 'Board',
                 'board',
-                boardPublicKeyDigest,
-                head1.headDigest,
+                boardPublicKeyHash,
+                head1.headHash,
                 { ceremonyId: 'ceremony-other' },
             ),
         };
@@ -354,7 +356,7 @@ describe('board consistency', () => {
                     contextString: 'sealed-lattice:wrong-context',
                 }),
                 publicKeyBytesHex: boardKeyFixture.publicKeyBytesHex,
-                publicKeyDigest: boardPublicKeyDigest,
+                publicKeyHash: boardPublicKeyHash,
                 secretKeyBytesHex: boardKeyFixture.secretKeyBytesHex,
                 signedRoot: head1.signature.signedRoot,
             }),
@@ -372,7 +374,7 @@ describe('board consistency', () => {
         expect(
             verifyBoardConsistency({
                 ...createBoardEvidence([head0, head1]),
-                conflictingHeadEvidence: [wrongDigestForkEvidence],
+                conflictingHeadEvidence: [wrongHashForkEvidence],
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -456,7 +458,7 @@ describe('board consistency', () => {
 
     it('rejects signed roots missing required envelope fields', () => {
         const head0 = createBoardHead(0, null);
-        const head1 = createBoardHead(1, head0.headDigest);
+        const head1 = createBoardHead(1, head0.headHash);
         const createHeadWithSignedRoot = (
             signedRoot: CanonicalSignedRootObject,
         ): SignedBoardHead => ({
@@ -464,7 +466,7 @@ describe('board consistency', () => {
             signature: createProtocolSignatureFixture({
                 profile,
                 publicKeyBytesHex: boardKeyFixture.publicKeyBytesHex,
-                publicKeyDigest: boardPublicKeyDigest,
+                publicKeyHash: boardPublicKeyHash,
                 secretKeyBytesHex: boardKeyFixture.secretKeyBytesHex,
                 signedRoot,
             }),
@@ -480,10 +482,10 @@ describe('board consistency', () => {
             return signedRoot as CanonicalSignedRootObject;
         };
         const malformedHeads = [
-            createHeadWithSignedRoot(omitSignedRootField('manifestDigest')),
-            createHeadWithSignedRoot(omitSignedRootField('boardHeadDigest')),
+            createHeadWithSignedRoot(omitSignedRootField('manifestHash')),
+            createHeadWithSignedRoot(omitSignedRootField('boardHeadHash')),
             createHeadWithSignedRoot(omitSignedRootField('byteLength')),
-            createHeadWithSignedRoot(omitSignedRootField('contextDigest')),
+            createHeadWithSignedRoot(omitSignedRootField('contextHash')),
             createHeadWithSignedRoot({
                 ...head1.signature.signedRoot,
                 objectRoot: null,
@@ -491,7 +493,7 @@ describe('board consistency', () => {
             }),
             createHeadWithSignedRoot({
                 ...head1.signature.signedRoot,
-                chunkMerkleRoot: deriveProtocolDigest('BoardRootDigest', {
+                chunkMerkleRoot: deriveProtocolHash('BoardRootHash', {
                     chunkRoot: 'ambiguous',
                 }),
             }),
@@ -512,7 +514,7 @@ describe('board consistency', () => {
 
     it('returns structured refusals for malformed JavaScript verifier inputs', () => {
         const head0 = createBoardHead(0, null);
-        const targetHead = createTargetProposalHead(1, head0.headDigest);
+        const targetHead = createTargetProposalHead(1, head0.headHash);
         const targetRecord = createTargetFinalityRecord(targetHead);
         const malformedBoardHead = { ...head0 } as Record<string, unknown>;
         const malformedSignature = {
@@ -523,23 +525,22 @@ describe('board consistency', () => {
             ...targetRecord,
             witnessCheckpoints: undefined,
         } as unknown as TargetFinalityRecord;
-        const castReceiptDigest = deriveProtocolDigest('CastReceiptDigest', {
+        const castReceiptHash = deriveProtocolHash('CastReceiptHash', {
             malformed: 'receipt',
         });
         const castReceipt = {
             objectType: 'CastReceipt',
             objectVersion: 1,
-            castReceiptDigest,
+            castReceiptHash,
             ceremonyId,
-            electionManifestDigest: deriveProtocolDigest(
-                'ElectionManifestDigest',
-                { manifest: 'cast' },
-            ),
+            electionManifestHash: deriveProtocolHash('ElectionManifestHash', {
+                manifest: 'cast',
+            }),
             voterIdentity: 'participant-1',
-            ballotPackageDigest: deriveProtocolDigest('BallotPackageDigest', {
+            ballotPackageHash: deriveProtocolHash('BallotPackageHash', {
                 ballot: 'participant-1',
             }),
-            contextDigest,
+            contextHash,
             boardSequence: head0.boardSequence,
             boardPosition: 0,
             recoveryEpoch: 0,
@@ -548,8 +549,8 @@ describe('board consistency', () => {
                 'CastReceipt',
                 'Voter',
                 'participant-1',
-                getParticipantSigningPublicKeyDigest('participant-1'),
-                castReceiptDigest,
+                getParticipantSigningPublicKeyHash('participant-1'),
+                castReceiptHash,
             ),
         } satisfies CastReceipt;
         const malformedCastReceipt = {
@@ -568,15 +569,25 @@ describe('board consistency', () => {
         const expectFailClosed = (
             verifier: () => {
                 readonly ok: boolean;
-                readonly refusedObjects: readonly { readonly code: string }[];
+                readonly refusedObjects: readonly {
+                    readonly code: string;
+                    readonly message?: string;
+                }[];
             },
             expectedCode: string,
-        ): void => {
+        ): {
+            readonly ok: boolean;
+            readonly refusedObjects: readonly {
+                readonly code: string;
+                readonly message?: string;
+            }[];
+        } => {
             let result:
                 | {
                       readonly ok: boolean;
                       readonly refusedObjects: readonly {
                           readonly code: string;
+                          readonly message?: string;
                       }[];
                   }
                 | undefined;
@@ -590,10 +601,15 @@ describe('board consistency', () => {
                     expect.objectContaining({ code: expectedCode }),
                 ]),
             );
+            if (result === undefined) {
+                throw new Error('Verifier did not return a result.');
+            }
+
+            return result;
         };
 
-        delete malformedBoardHead.previousHeadDigest;
-        expectFailClosed(
+        delete malformedBoardHead.previousHeadHash;
+        const malformedBoardResult = expectFailClosed(
             () =>
                 verifyBoardConsistency(
                     createBoardEvidence([
@@ -601,6 +617,9 @@ describe('board consistency', () => {
                     ]),
                 ),
             'BoardConsistencyFailure',
+        );
+        expect(malformedBoardResult.refusedObjects[0]?.message).toContain(
+            'Diagnostic:',
         );
         expectFailClosed(
             () => verifySignedObjectSignature(malformedSignature),
@@ -613,7 +632,7 @@ describe('board consistency', () => {
                     record: malformedTargetRecord,
                     targetFinalityPolicy,
                     witnessPolicy,
-                    witnessPublicKeyDigests,
+                    witnessPublicKeyHashes,
                 }),
             'TargetFinalityPolicyMismatch',
         );
@@ -625,12 +644,12 @@ describe('board consistency', () => {
                     receiptInclusionProof: createInclusionProof(
                         head0,
                         'CastReceipt',
-                        castReceiptDigest,
+                        castReceiptHash,
                     ),
-                    expectedElectionManifestDigest:
-                        castReceipt.electionManifestDigest,
-                    expectedVoterPublicKeyDigest:
-                        getParticipantSigningPublicKeyDigest('participant-1'),
+                    expectedElectionManifestHash:
+                        castReceipt.electionManifestHash,
+                    expectedVoterPublicKeyHash:
+                        getParticipantSigningPublicKeyHash('participant-1'),
                 }),
             'CastReceiptInvalid',
         );
@@ -643,7 +662,7 @@ describe('board consistency', () => {
                         ...malformedRosterInput.registrationEntries.slice(1),
                     ],
                 }),
-            'RosterDigestMismatch',
+            'RosterHashMismatch',
         );
     });
 });

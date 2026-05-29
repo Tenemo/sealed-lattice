@@ -1,5 +1,5 @@
 // Shared ballot privacy object fixtures.
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotProofComponentId,
     BallotProofComponentProofBundle,
@@ -7,7 +7,7 @@ import type {
     BallotProofReceiverPublicKeyReference,
     BallotProofShareCommitmentReference,
     BallotProofStatement,
-    ProtocolDigest,
+    ProtocolHash,
     ReceiverKeyProofRootEvidence,
     ReceiverPayload,
     ShareCommitment,
@@ -23,17 +23,17 @@ import {
     createShareCommitmentMessageBoundCert,
     createShareCommitmentShell,
     deriveBallotProofComponentProofRoot,
-    deriveBallotProofEncodingProfileDigest,
-    deriveBallotProofParameterSetDigest,
-    deriveBallotProofPublicRandomnessDigest,
-    deriveClaimBearingBallotPackageDigest,
-    deriveProofBytesDigest,
+    deriveBallotProofEncodingProfileHash,
+    deriveBallotProofParameterSetHash,
+    deriveBallotProofPublicRandomnessHash,
+    deriveClaimBearingBallotPackageHash,
+    deriveProofBytesHash,
     verifyClaimBearingBallotPackage,
     type BallotProofComponentProofVerificationInput,
-} from '../../../src/ballot-privacy/index';
+} from '#packages/protocol/src/ballot-privacy/index';
 
-const digest = (label: string): ProtocolDigest =>
-    deriveProtocolDigest('ActionContextDigest', { label });
+const hash = (label: string): ProtocolHash =>
+    deriveProtocolHash('ActionContextHash', { label });
 
 const defaultParticipantCount = 20;
 
@@ -46,7 +46,7 @@ const createReceiverPublicKeyReferences = (
         return {
             receiverIdentity: `receiver-${receiverRosterPosition}`,
             receiverRosterPosition,
-            receiverPublicKeyDigest: digest(
+            receiverPublicKeyHash: hash(
                 `receiver-public-key-${receiverRosterPosition}`,
             ),
         };
@@ -61,10 +61,10 @@ const createReceiverPayloadReferences = (
         receiverIdentity: receiverPublicKeyReference.receiverIdentity,
         receiverRosterPosition:
             receiverPublicKeyReference.receiverRosterPosition,
-        receiverPayloadDigest: digest(
+        receiverPayloadHash: hash(
             `receiver-payload-${receiverPublicKeyReference.receiverRosterPosition}`,
         ),
-        receiverPayloadCiphertextRoot: digest(
+        receiverPayloadCiphertextRoot: hash(
             `receiver-ciphertext-${receiverPublicKeyReference.receiverRosterPosition}`,
         ),
     }));
@@ -78,7 +78,7 @@ const createShareCommitmentReferences = (
         receiverIdentity: receiverPublicKeyReference.receiverIdentity,
         receiverRosterPosition:
             receiverPublicKeyReference.receiverRosterPosition,
-        shareCommitmentDigest: digest(
+        shareCommitmentHash: hash(
             `share-commitment-${receiverPublicKeyReference.receiverRosterPosition}`,
         ),
     }));
@@ -115,59 +115,57 @@ const createStatement = (
 
     return buildBallotProofStatement({
         ceremonyId: 'ceremony-1',
-        manifestDigest: digest('manifest'),
-        rosterDigest: digest('roster'),
-        pollSpecDigest: digest('poll-spec'),
-        thresholdProfileDigest: digest('threshold-profile'),
-        duplicateBallotPolicyDigest: digest('duplicate-policy'),
-        scoreDomainDigest: digest('score-domain'),
-        tiePolicyDigest: digest('tie-policy'),
+        manifestHash: hash('manifest'),
+        rosterHash: hash('roster'),
+        pollSpecHash: hash('poll-spec'),
+        thresholdProfileHash: hash('threshold-profile'),
+        duplicateBallotPolicyHash: hash('duplicate-policy'),
+        scoreDomainHash: hash('score-domain'),
+        tiePolicyHash: hash('tie-policy'),
         topOptionCount: 3,
         optionCount: 20,
-        voterIdentityDigest: digest('voter-1'),
+        voterIdentityHash: hash('voter-1'),
         voterRosterPosition: 1,
-        voterSigningKeyDigest: digest('voter-signing-key'),
-        actionContextDigest: digest('action-context'),
-        rosterExternalAcceptanceDigest: digest('external-acceptance'),
-        receiverKeyRoot: digest('receiver-key-root'),
-        receiverKeyProofRoot: digest('receiver-key-proof-root'),
+        voterSigningKeyHash: hash('voter-signing-key'),
+        actionContextHash: hash('action-context'),
+        rosterExternalAcceptanceHash: hash('external-acceptance'),
+        receiverKeyRoot: hash('receiver-key-root'),
+        receiverKeyProofRoot: hash('receiver-key-proof-root'),
         receiverPublicKeys,
         receiverPayloads: createReceiverPayloadReferences(receiverPublicKeys),
         shareCommitments: createShareCommitmentReferences(receiverPublicKeys),
-        shareCommitmentProfileDigest:
-            profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
-        receiverEncryptionProfileDigest:
-            profileSet.receiverEncryptionProfile
-                .receiverEncryptionProfileDigest,
-        ballotProofProfileDigest:
-            profileSet.ballotProofProfile.ballotProofProfileDigest,
-        scoreMembershipProfileDigest:
-            profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
-        ballotScoreEncodingProfileDigest:
+        shareCommitmentProfileHash:
+            profileSet.shareCommitmentProfile.shareCommitmentProfileHash,
+        receiverEncryptionProfileHash:
+            profileSet.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        ballotProofProfileHash:
+            profileSet.ballotProofProfile.ballotProofProfileHash,
+        scoreMembershipProfileHash:
+            profileSet.scoreMembershipProfile.scoreMembershipProfileHash,
+        ballotScoreEncodingProfileHash:
             profileSet.ballotScoreEncodingProfile
-                .ballotScoreEncodingProfileDigest,
-        ballotShareLayoutProfileDigest:
-            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
-        aggregateInputEncodingProfileDigest:
+                .ballotScoreEncodingProfileHash,
+        ballotShareLayoutProfileHash:
+            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileHash,
+        aggregateInputEncodingProfileHash:
             profileSet.aggregateInputEncodingProfile
-                .aggregateInputEncodingProfileDigest,
-        encodedShareVectorLayoutDigest:
+                .aggregateInputEncodingProfileHash,
+        encodedShareVectorLayoutHash:
             profileSet.encodedShareVectorLayoutProfile
-                .encodedShareVectorLayoutDigest,
-        encodedAggregateLayoutDigest:
-            profileSet.encodedAggregateLayoutProfile
-                .encodedAggregateLayoutDigest,
-        shareCommitmentMessageBoundCertDigest:
-            boundCertificate.shareCommitmentMessageBoundCertDigest,
-        ballotPackageDigest: digest('ballot-package'),
+                .encodedShareVectorLayoutHash,
+        encodedAggregateLayoutHash:
+            profileSet.encodedAggregateLayoutProfile.encodedAggregateLayoutHash,
+        shareCommitmentMessageBoundCertHash:
+            boundCertificate.shareCommitmentMessageBoundCertHash,
+        ballotPackageHash: hash('ballot-package'),
         ...overrides,
     });
 };
 
 function createComponentProofStatementFixture(input: {
     readonly componentId: BallotProofComponentId;
-    readonly componentProofStatementDigest?: ProtocolDigest;
-    readonly componentStatementDigest: ProtocolDigest;
+    readonly componentProofStatementHash?: ProtocolHash;
+    readonly componentStatementHash: ProtocolHash;
     readonly proofStatementFormat: BallotProofComponentProofVerificationInput['proofStatementFormat'];
 }): unknown {
     if (
@@ -175,7 +173,7 @@ function createComponentProofStatementFixture(input: {
     ) {
         const statementPayload = {
             componentId: input.componentId,
-            componentStatementDigest: input.componentStatementDigest,
+            componentStatementHash: input.componentStatementHash,
             objectType: 'BallotProofLinearProofStatement',
             objectVersion: 1,
             proofStatementFormat: input.proofStatementFormat,
@@ -183,7 +181,7 @@ function createComponentProofStatementFixture(input: {
 
         return {
             ...statementPayload,
-            statementDigest: deriveProtocolDigest('ChallengeDomainDigest', {
+            statementHash: deriveProtocolHash('ChallengeDomainHash', {
                 payload: statementPayload,
                 purpose: 'ballot-proof-linear-proof-statement-v1',
             }),
@@ -195,7 +193,7 @@ function createComponentProofStatementFixture(input: {
     ) {
         const statementPayload = {
             componentId: input.componentId,
-            componentStatementDigest: input.componentStatementDigest,
+            componentStatementHash: input.componentStatementHash,
             objectType: 'BallotProofSparseComponentLinearProofStatement',
             objectVersion: 1,
             proofStatementFormat: input.proofStatementFormat,
@@ -203,14 +201,14 @@ function createComponentProofStatementFixture(input: {
 
         return {
             ...statementPayload,
-            statementDigest: deriveProtocolDigest('ChallengeDomainDigest', {
+            statementHash: deriveProtocolHash('ChallengeDomainHash', {
                 payload: statementPayload,
                 purpose: 'ballot-proof-sparse-linear-proof-statement-v1',
             }),
         };
     }
     const statementPayload = {
-        backendStatementDigest: digest(`${input.componentId}-backend`),
+        backendStatementHash: hash(`${input.componentId}-backend`),
         coefficientModulus:
             input.componentId === 'share-commitment-component'
                 ? '18446744069414584321'
@@ -219,23 +217,23 @@ function createComponentProofStatementFixture(input: {
                   ? '65537'
                   : '12289',
         componentId: input.componentId,
-        componentStatementDigest: input.componentStatementDigest,
+        componentStatementHash: input.componentStatementHash,
         denseCoefficientCount:
             input.proofStatementFormat ===
             'structured-module-lwe-linear-proof-v1'
                 ? '1024'
                 : null,
-        matrixDigest: digest(`${input.componentId}-matrix`),
-        objectType: 'BallotProofComponentProofStatementPlan',
+        matrixHash: hash(`${input.componentId}-matrix`),
+        objectType: 'BallotProofComponentProofStatementDescriptor',
         objectVersion: 1,
-        proofBytesAvailability:
+        proofBackendRequirement:
             input.proofStatementFormat ===
             'structured-module-lwe-linear-proof-v1'
-                ? 'requires-structured-proof-statement'
+                ? 'structured-proof-statement-required'
                 : input.proofStatementFormat ===
                     'structured-module-sis-share-commitment-v1'
-                  ? 'requires-sparse-proof-statement'
-                  : 'public-zero-witness-binding-check',
+                  ? 'sparse-proof-statement-required'
+                  : 'public-binding-check-only',
         proofLoweringStatus: 'explicitRowsAvailable',
         proofStatementFormat: input.proofStatementFormat,
         proofSystemRingDegree:
@@ -244,8 +242,8 @@ function createComponentProofStatementFixture(input: {
                 ? 64
                 : null,
         relation: 'A*w + t = 0',
-        relationStatementDigest: digest(`${input.componentId}-relation`),
-        rowBatchMatrixDigests: [digest(`${input.componentId}-row-matrix`)],
+        relationStatementHash: hash(`${input.componentId}-relation`),
+        rowBatchMatrixHashes: [hash(`${input.componentId}-row-matrix`)],
         rowBatchNames: [
             input.proofStatementFormat ===
             'structured-module-lwe-linear-proof-v1'
@@ -255,9 +253,7 @@ function createComponentProofStatementFixture(input: {
                   ? 'share_commitment_equation_rows'
                   : 'receiver_key_binding_rows',
         ],
-        rowBatchTargetVectorDigests: [
-            digest(`${input.componentId}-row-target`),
-        ],
+        rowBatchTargetVectorHashes: [hash(`${input.componentId}-row-target`)],
         rowBatchTermCounts: [
             input.proofStatementFormat ===
                 'structured-module-lwe-linear-proof-v1' ||
@@ -288,7 +284,7 @@ function createComponentProofStatementFixture(input: {
             'structured-module-lwe-linear-proof-v1'
                 ? '1024'
                 : null,
-        targetVectorDigest: digest(`${input.componentId}-target`),
+        targetVectorHash: hash(`${input.componentId}-target`),
         variableColumnCount:
             input.proofStatementFormat ===
             'structured-module-lwe-linear-proof-v1'
@@ -303,18 +299,18 @@ function createComponentProofStatementFixture(input: {
 
     return {
         ...statementPayload,
-        componentProofStatementDigest:
-            input.componentProofStatementDigest ??
-            deriveProtocolDigest('ChallengeDomainDigest', {
+        componentProofStatementHash:
+            input.componentProofStatementHash ??
+            deriveProtocolHash('ChallengeDomainHash', {
                 payload: statementPayload,
-                purpose: 'ballot-proof-component-proof-statement-plan-v1',
+                purpose: 'ballot-proof-component-proof-statement-descriptor-v1',
             }),
     };
 }
 
 function createComponentProofVerificationInputFixture(
     componentId: BallotProofComponentId,
-    statementDigest = digest(`${componentId}-statement`),
+    statementHash = hash(`${componentId}-statement`),
 ): BallotProofComponentProofVerificationInput {
     const componentIndex = requiredComponentIds.indexOf(componentId);
     const randomnessByte = (componentIndex + 1).toString(16).padStart(2, '0');
@@ -324,40 +320,38 @@ function createComponentProofVerificationInputFixture(
             : componentId === 'share-commitment-component'
               ? 'structured-module-sis-share-commitment-v1'
               : componentId === 'receiver-key-binding-component'
-                ? 'public-zero-witness-binding-check-v1'
+                ? 'public-binding-check-only-v1'
                 : componentId === 'score-and-shamir-field-component'
                   ? 'dense-polynomial-matrix-linear-proof-v1'
                   : 'sparse-polynomial-matrix-linear-proof-v1';
-    const componentProofStatementDigest = digest(
-        `${componentId}-proof-statement`,
-    );
+    const componentProofStatementHash = hash(`${componentId}-proof-statement`);
     const proofStatement = createComponentProofStatementFixture({
         componentId,
-        componentProofStatementDigest:
+        componentProofStatementHash:
             proofStatementFormat ===
                 'structured-module-sis-share-commitment-v1' ||
             proofStatementFormat === 'structured-module-lwe-linear-proof-v1' ||
-            proofStatementFormat === 'public-zero-witness-binding-check-v1'
+            proofStatementFormat === 'public-binding-check-only-v1'
                 ? undefined
-                : componentProofStatementDigest,
-        componentStatementDigest: statementDigest,
+                : componentProofStatementHash,
+        componentStatementHash: statementHash,
         proofStatementFormat,
     }) as {
-        readonly componentProofStatementDigest?: ProtocolDigest;
-        readonly statementDigest?: ProtocolDigest;
+        readonly componentProofStatementHash?: ProtocolHash;
+        readonly statementHash?: ProtocolHash;
     };
-    const boundComponentProofStatementDigest =
-        proofStatement.componentProofStatementDigest ??
-        proofStatement.statementDigest ??
-        componentProofStatementDigest;
+    const boundComponentProofStatementHash =
+        proofStatement.componentProofStatementHash ??
+        proofStatement.statementHash ??
+        componentProofStatementHash;
     const proofBytesHex =
-        proofStatementFormat === 'public-zero-witness-binding-check-v1'
+        proofStatementFormat === 'public-binding-check-only-v1'
             ? ''
-            : digest(`${componentId}-proof-bytes-material`);
+            : hash(`${componentId}-proof-bytes-material`);
 
     return {
         componentId,
-        componentProofStatementDigest: boundComponentProofStatementDigest,
+        componentProofStatementHash: boundComponentProofStatementHash,
         proofBytesHex,
         proofEncoding: {
             profileId: 'ballot-proof-component-encoding-v1',
@@ -370,7 +364,7 @@ function createComponentProofVerificationInputFixture(
         proofStatement,
         proofStatementFormat,
         publicRandomnessHex: randomnessByte.repeat(32),
-        statementDigest,
+        statementHash,
     };
 }
 
@@ -378,67 +372,65 @@ const createComponentProofBundleFixture = (
     statement: BallotProofStatement,
     componentIds: readonly BallotProofComponentId[] = requiredComponentIds,
 ): BallotProofComponentProofBundle => {
-    const backendStatementDigest = digest('component-backend-statement');
-    const relationStatementDigest = digest('component-relation-statement');
+    const backendStatementHash = hash('component-backend-statement');
+    const relationStatementHash = hash('component-relation-statement');
     const componentProofs = componentIds.map((componentId) => {
         const proofInput = createComponentProofVerificationInputFixture(
             componentId,
-            digest(`${componentId}-statement`),
+            hash(`${componentId}-statement`),
         );
-        const proofBytesDigest = deriveProofBytesDigest({
+        const proofBytesHash = deriveProofBytesHash({
             allowEmpty:
                 proofInput.proofStatementFormat ===
-                'public-zero-witness-binding-check-v1',
+                'public-binding-check-only-v1',
             proofBytesHex: proofInput.proofBytesHex,
         });
-        const proofEncodingProfileDigest =
-            deriveBallotProofEncodingProfileDigest({
-                proofEncoding: proofInput.proofEncoding,
-            });
-        const proofParameterSetDigest = deriveBallotProofParameterSetDigest({
+        const proofEncodingProfileHash = deriveBallotProofEncodingProfileHash({
+            proofEncoding: proofInput.proofEncoding,
+        });
+        const proofParameterSetHash = deriveBallotProofParameterSetHash({
             parameterSet: proofInput.proofParameterSet,
         });
-        const publicRandomnessDigest = deriveBallotProofPublicRandomnessDigest({
+        const publicRandomnessHash = deriveBallotProofPublicRandomnessHash({
             publicRandomnessHex: proofInput.publicRandomnessHex,
         });
 
         return createBallotProofComponentProofRecord({
-            backendStatementDigest,
-            ballotProofStatementDigest: statement.ballotProofStatementDigest,
+            backendStatementHash,
+            ballotProofStatementHash: statement.ballotProofStatementHash,
             componentId,
-            componentProofStatementDigest:
-                proofInput.componentProofStatementDigest,
-            componentStatementDigest: proofInput.statementDigest,
-            proofBytesDigest,
-            proofEncodingProfileDigest,
-            proofParameterSetDigest,
+            componentProofStatementHash: proofInput.componentProofStatementHash,
+            componentStatementHash: proofInput.statementHash,
+            proofBytesHash,
+            proofEncodingProfileHash,
+            proofParameterSetHash,
             proofRoot: deriveBallotProofComponentProofRoot({
                 componentId,
-                componentProofStatementDigest:
-                    proofInput.componentProofStatementDigest,
-                componentStatementDigest: proofInput.statementDigest,
-                proofBytesDigest,
-                proofEncodingProfileDigest,
-                proofParameterSetDigest,
+                componentProofStatementHash:
+                    proofInput.componentProofStatementHash,
+                componentStatementHash: proofInput.statementHash,
+                proofBytesHash,
+                proofEncodingProfileHash,
+                proofParameterSetHash,
                 proofStatementFormat: proofInput.proofStatementFormat,
-                publicRandomnessDigest,
-                statementDigest: proofInput.statementDigest,
+                publicRandomnessHash,
+                statementHash: proofInput.statementHash,
             }),
             proofSizeBytes: proofInput.proofBytesHex.length / 2,
-            publicRandomnessDigest,
-            relationStatementDigest,
+            publicRandomnessHash,
+            relationStatementHash,
         });
     });
     const componentBundleStatement = {
-        backendStatementDigest,
-        ballotProofStatementDigest: statement.ballotProofStatementDigest,
+        backendStatementHash,
+        ballotProofStatementHash: statement.ballotProofStatementHash,
         bundleCoverage: 'full-encoded-score-ballot-relation' as const,
-        componentBundleStatementDigest: digest('component-bundle-statement'),
+        componentBundleStatementHash: hash('component-bundle-statement'),
         componentStatements: [],
         objectType: 'BallotProofComponentBundleStatement' as const,
         objectVersion: 1 as const,
         relationLabel: 'BallotPrivacyPvssRelation' as const,
-        relationStatementDigest,
+        relationStatementHash,
         requiredComponentIds,
     } satisfies Parameters<
         typeof createBallotProofComponentProofBundle
@@ -456,7 +448,7 @@ const createComponentProofVerificationInputsFixture = (
     componentProofBundle.componentProofs.map((componentProof) =>
         createComponentProofVerificationInputFixture(
             componentProof.componentId,
-            componentProof.componentStatementDigest,
+            componentProof.componentStatementHash,
         ),
     );
 
@@ -484,41 +476,41 @@ const createStructurallyBoundObjects = (
         (receiverPublicKeyReference) =>
             createReceiverPayloadShell({
                 ceremonyId: 'ceremony-1',
-                ciphertextBodyDigest: digest(
+                ciphertextBodyHash: hash(
                     `ciphertext-body-${receiverPublicKeyReference.receiverRosterPosition}`,
                 ),
-                manifestDigest: digest('manifest'),
-                payloadContextDigest: digest(
+                manifestHash: hash('manifest'),
+                payloadContextHash: hash(
                     `payload-context-${receiverPublicKeyReference.receiverRosterPosition}`,
                 ),
-                pollSpecDigest: digest('poll-spec'),
-                receiverEncryptionProfileDigest:
+                pollSpecHash: hash('poll-spec'),
+                receiverEncryptionProfileHash:
                     profileSet.receiverEncryptionProfile
-                        .receiverEncryptionProfileDigest,
+                        .receiverEncryptionProfileHash,
                 receiverIdentity: receiverPublicKeyReference.receiverIdentity,
-                receiverPublicKeyDigest:
-                    receiverPublicKeyReference.receiverPublicKeyDigest,
+                receiverPublicKeyHash:
+                    receiverPublicKeyReference.receiverPublicKeyHash,
                 receiverRosterPosition:
                     receiverPublicKeyReference.receiverRosterPosition,
-                rosterDigest: digest('roster'),
-                voterIdentityDigest: digest('voter-1'),
+                rosterHash: hash('roster'),
+                voterIdentityHash: hash('voter-1'),
             }),
     );
     const shareCommitments = receiverPublicKeyReferences.map(
         (receiverPublicKeyReference) =>
             createShareCommitmentShell({
                 ceremonyId: 'ceremony-1',
-                commitmentBodyDigest: digest(
+                commitmentBodyHash: hash(
                     `commitment-body-${receiverPublicKeyReference.receiverRosterPosition}`,
                 ),
-                manifestDigest: digest('manifest'),
+                manifestHash: hash('manifest'),
                 receiverIdentity: receiverPublicKeyReference.receiverIdentity,
                 receiverRosterPosition:
                     receiverPublicKeyReference.receiverRosterPosition,
-                rosterDigest: digest('roster'),
-                shareCommitmentProfileDigest:
+                rosterHash: hash('roster'),
+                shareCommitmentProfileHash:
                     profileSet.shareCommitmentProfile
-                        .shareCommitmentProfileDigest,
+                        .shareCommitmentProfileHash,
                 shareVectorWidth:
                     profileSet.shareCommitmentProfile.shareVectorWidth,
             }),
@@ -527,74 +519,72 @@ const createStructurallyBoundObjects = (
         acceptedReceiverKeyProofCount: receiverPublicKeyReferences.length,
         ceremonyId: 'ceremony-1',
         evidenceStatus: 'ReceiverKeyProofRootAccepted',
-        manifestDigest: digest('manifest'),
-        receiverKeyProofRoot: digest('receiver-key-proof-root'),
-        receiverKeyRoot: digest('receiver-key-root'),
+        manifestHash: hash('manifest'),
+        receiverKeyProofRoot: hash('receiver-key-proof-root'),
+        receiverKeyRoot: hash('receiver-key-root'),
         receiverPublicKeys: receiverPublicKeyReferences,
-        rosterDigest: digest('roster'),
+        rosterHash: hash('roster'),
     });
     const statementInput = {
         ceremonyId: 'ceremony-1',
-        manifestDigest: digest('manifest'),
-        rosterDigest: digest('roster'),
-        pollSpecDigest: digest('poll-spec'),
-        thresholdProfileDigest: digest('threshold-profile'),
-        duplicateBallotPolicyDigest: digest('duplicate-policy'),
-        scoreDomainDigest: digest('score-domain'),
-        tiePolicyDigest: digest('tie-policy'),
+        manifestHash: hash('manifest'),
+        rosterHash: hash('roster'),
+        pollSpecHash: hash('poll-spec'),
+        thresholdProfileHash: hash('threshold-profile'),
+        duplicateBallotPolicyHash: hash('duplicate-policy'),
+        scoreDomainHash: hash('score-domain'),
+        tiePolicyHash: hash('tie-policy'),
         topOptionCount: 3,
         optionCount,
-        voterIdentityDigest: digest('voter-1'),
+        voterIdentityHash: hash('voter-1'),
         voterRosterPosition: 1,
-        voterSigningKeyDigest: digest('voter-signing-key'),
-        actionContextDigest: digest('action-context'),
-        rosterExternalAcceptanceDigest: digest('external-acceptance'),
-        receiverKeyRoot: digest('receiver-key-root'),
-        receiverKeyProofRoot: digest('receiver-key-proof-root'),
+        voterSigningKeyHash: hash('voter-signing-key'),
+        actionContextHash: hash('action-context'),
+        rosterExternalAcceptanceHash: hash('external-acceptance'),
+        receiverKeyRoot: hash('receiver-key-root'),
+        receiverKeyProofRoot: hash('receiver-key-proof-root'),
         receiverPublicKeys: receiverPublicKeyReferences,
         receiverPayloads: receiverPayloads.map((receiverPayload) => ({
             receiverIdentity: receiverPayload.receiverIdentity,
             receiverPayloadCiphertextRoot:
                 receiverPayload.receiverPayloadCiphertextRoot,
-            receiverPayloadDigest: receiverPayload.receiverPayloadDigest,
+            receiverPayloadHash: receiverPayload.receiverPayloadHash,
             receiverRosterPosition: receiverPayload.receiverRosterPosition,
         })),
         shareCommitments: shareCommitments.map((shareCommitment) => ({
             receiverIdentity: shareCommitment.receiverIdentity,
             receiverRosterPosition: shareCommitment.receiverRosterPosition,
-            shareCommitmentDigest: shareCommitment.shareCommitmentDigest,
+            shareCommitmentHash: shareCommitment.shareCommitmentHash,
         })),
-        shareCommitmentProfileDigest:
-            profileSet.shareCommitmentProfile.shareCommitmentProfileDigest,
-        receiverEncryptionProfileDigest:
-            profileSet.receiverEncryptionProfile
-                .receiverEncryptionProfileDigest,
-        ballotProofProfileDigest:
-            profileSet.ballotProofProfile.ballotProofProfileDigest,
-        scoreMembershipProfileDigest:
-            profileSet.scoreMembershipProfile.scoreMembershipProfileDigest,
-        ballotScoreEncodingProfileDigest:
+        shareCommitmentProfileHash:
+            profileSet.shareCommitmentProfile.shareCommitmentProfileHash,
+        receiverEncryptionProfileHash:
+            profileSet.receiverEncryptionProfile.receiverEncryptionProfileHash,
+        ballotProofProfileHash:
+            profileSet.ballotProofProfile.ballotProofProfileHash,
+        scoreMembershipProfileHash:
+            profileSet.scoreMembershipProfile.scoreMembershipProfileHash,
+        ballotScoreEncodingProfileHash:
             profileSet.ballotScoreEncodingProfile
-                .ballotScoreEncodingProfileDigest,
-        ballotShareLayoutProfileDigest:
-            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileDigest,
-        aggregateInputEncodingProfileDigest:
+                .ballotScoreEncodingProfileHash,
+        ballotShareLayoutProfileHash:
+            profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileHash,
+        aggregateInputEncodingProfileHash:
             profileSet.aggregateInputEncodingProfile
-                .aggregateInputEncodingProfileDigest,
-        encodedShareVectorLayoutDigest:
+                .aggregateInputEncodingProfileHash,
+        encodedShareVectorLayoutHash:
             profileSet.encodedShareVectorLayoutProfile
-                .encodedShareVectorLayoutDigest,
-        encodedAggregateLayoutDigest:
-            profileSet.encodedAggregateLayoutProfile
-                .encodedAggregateLayoutDigest,
-        shareCommitmentMessageBoundCertDigest:
-            boundCertificate.shareCommitmentMessageBoundCertDigest,
+                .encodedShareVectorLayoutHash,
+        encodedAggregateLayoutHash:
+            profileSet.encodedAggregateLayoutProfile.encodedAggregateLayoutHash,
+        shareCommitmentMessageBoundCertHash:
+            boundCertificate.shareCommitmentMessageBoundCertHash,
     };
     const placeholderStatement = buildBallotProofStatement({
         ...statementInput,
-        ballotPackageDigest: digest('ballot-package-placeholder'),
+        ballotPackageHash: hash('ballot-package-placeholder'),
     });
-    const ballotPackageDigest = deriveClaimBearingBallotPackageDigest({
+    const ballotPackageHash = deriveClaimBearingBallotPackageHash({
         ballotProofStatement: placeholderStatement,
         receiverKeyProofRootEvidence,
         receiverPayloads,
@@ -602,7 +592,7 @@ const createStructurallyBoundObjects = (
     });
     const statement = buildBallotProofStatement({
         ...statementInput,
-        ballotPackageDigest,
+        ballotPackageHash,
     });
 
     return {
@@ -614,7 +604,7 @@ const createStructurallyBoundObjects = (
 };
 
 export {
-    digest,
+    hash,
     requiredComponentIds,
     createStatement,
     createComponentProofStatementFixture,

@@ -15,12 +15,14 @@ import {
     type BallotPrivacyReceiverKeyProofGeneration,
     type BallotPrivacyReceiverKeyProofGenerationPreparation,
     type BallotPrivacyReceiverKeyVectorVerification,
+    type AggregateBridgeEncryptionGeneration,
+    type AggregateBridgeEncryptionVerification,
     type BgvBaseConversionFixture,
     type BgvBatchPlaintextEncoding,
     type BgvCiphertextConventionFixture,
     type BgvObjectValidation,
     type BgvReferenceOracleRejection,
-    type BgvRnsProfileReport,
+    type BgvRnsProfileDescription,
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
@@ -31,6 +33,8 @@ const transcriptCoreKernelUrl = new URL(
     '../dist/sealed-lattice-kernel.wasm',
     import.meta.url,
 );
+const packagedTranscriptCoreKernelNormalizedSha256Hex =
+    '7dd797112619ce5dc677d693fbc913748b3a619a9e28f25bcc537b42c2c54998';
 
 export {
     canonicalErrorCodes,
@@ -47,12 +51,14 @@ export type {
     BallotPrivacyReceiverKeyProofGeneration,
     BallotPrivacyReceiverKeyProofGenerationPreparation,
     BallotPrivacyReceiverKeyVectorVerification,
+    AggregateBridgeEncryptionGeneration,
+    AggregateBridgeEncryptionVerification,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
     BgvObjectValidation,
     BgvReferenceOracleRejection,
-    BgvRnsProfileReport,
+    BgvRnsProfileDescription,
     TranscriptCoreKernelLoaderOptions,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
@@ -60,7 +66,8 @@ export type {
 
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
-        allowUnpinnedKernel: true,
+        expectedKernelSha256Hex:
+            packagedTranscriptCoreKernelNormalizedSha256Hex,
     });
 
 export const verifyTranscriptCoreFixture = async (

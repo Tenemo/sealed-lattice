@@ -2,6 +2,7 @@ import {
     activeMaliciousMheProfileId,
     cpadProfileId,
     evaluationProofProfileId,
+    passiveMhePrototypeProfileId,
     targetBoundShareSelectionProfileId,
     thresholdDecryptionProfileId,
     type LifecycleLabelInput,
@@ -13,7 +14,7 @@ import {
     deriveLifecycleLabels,
     deriveThresholdProfile,
     isValidLifecycleTransition,
-} from '../../src/index';
+} from '#packages/protocol/src/index';
 
 const expectValidPath = (states: readonly LifecycleState[]): void => {
     for (let index = 0; index < states.length - 1; index += 1) {
@@ -28,9 +29,9 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
 
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
-    certificateDigest: 'target-bound-certificate-digest',
+    certificateHash: 'target-bound-certificate-hash',
     cpadProfileId,
-    targetBasisDigest: 'target-basis-digest',
+    targetBasisHash: 'target-basis-hash',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
     minimumArrivalsForRobustDecode: 9,
@@ -38,7 +39,7 @@ const targetBoundShareSelectionProfile = {
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
 
-const dynamicRosterProfileCertificateDigest = 'a'.repeat(128);
+const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
 const uncertifiedThresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const thresholdProfile = deriveThresholdProfile({
     rosterSize: 20,
@@ -200,37 +201,6 @@ describe('election foundation lifecycle', () => {
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
     });
 
-    it('does not emit removed pre-v63 formal lifecycle labels', () => {
-        const labels = deriveLifecycleLabels(
-            fullyVerifiedLabelInput({
-                evaluationLocallyReplayed: true,
-                localReplayDiagnosticVerified: false,
-            }),
-        );
-        const serializedLabels = JSON.stringify(labels);
-
-        for (const removedLabel of [
-            ['Unsafe', 'MicroRoster'],
-            ['MicroRoster', 'HighLeakage'],
-            ['SmallRoster', 'Uncertified'],
-            ['Roster', 'ExternallyAccepted'],
-            ['Result', 'LocallyReplayedAuditable'],
-            ['ReplayOnly', 'AuditedResult'],
-            ['PassiveMHE', 'Prototype'],
-            ['SupportedPhone', 'Certified'],
-            ['MobileReplay', 'Cert'],
-            ['Un', 'resolved'],
-            ['ProofCheckpoint', 'Restored'],
-            ['UnsupportedLowResource', 'Device'],
-            ['ForegroundProofGeneration', 'Required'],
-        ]) {
-            expect(serializedLabels).not.toContain(removedLabel.join(''));
-        }
-        expect(labels.modes).toEqual(
-            expect.arrayContaining(['localReplayMatched', 'localReplayFailed']),
-        );
-    });
-
     it.each([3, 4, 5, 6, 7, 8, 9])(
         'marks roster size %d as casual while preserving dynamic result claim gates',
         (rosterSize) => {
@@ -239,7 +209,7 @@ describe('election foundation lifecycle', () => {
                 rosterSize,
             });
             const dynamicProfile = deriveThresholdProfile({
-                dynamicRosterProfileCertificateDigest,
+                dynamicRosterProfileCertificateHash,
                 rosterSize: 16,
                 targetBoundShareSelectionProfile,
             });
@@ -255,7 +225,7 @@ describe('election foundation lifecycle', () => {
             );
             const passiveLabels = deriveLifecycleLabels(
                 fullyVerifiedLabelInput({
-                    mheSecurityClosure: 'developmentIntegration',
+                    mheSecurityClosure: 'PassiveMHEPrototype',
                     activeMaliciousClosureApplied: false,
                 }),
             );
@@ -264,7 +234,7 @@ describe('election foundation lifecycle', () => {
             expect(casualLabels.resultClaimLabels).toEqual([]);
             expect(dynamicLabels.resultClaimLabels).toEqual(['fullyVerified']);
             expect(passiveLabels.primary).toEqual(['pending']);
-            expect(passiveLabels.modes).toContain('developmentIntegration');
+            expect(passiveLabels.modes).toContain('passiveMhePrototype');
         },
     );
 
@@ -274,6 +244,7 @@ describe('election foundation lifecycle', () => {
             thresholdProfile,
             mheSecurityClosure: 'ActiveMalicious',
             securityProfileIds: [
+                passiveMhePrototypeProfileId,
                 evaluationProofProfileId,
                 thresholdDecryptionProfileId,
                 activeMaliciousMheProfileId,
@@ -297,9 +268,9 @@ describe('election foundation lifecycle', () => {
                 'evaluationProofClosure',
                 'kllpsCpadClosure',
                 'activeMaliciousClosure',
+                'passiveMhePrototype',
             ]),
         );
-        expect(labels.modes).not.toContain('developmentIntegration');
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
     });
 
@@ -308,7 +279,6 @@ describe('election foundation lifecycle', () => {
             lifecycleState: 'evaluationProofPending',
             thresholdProfile,
             localRosterAccepted: true,
-            aggregateInputsBridgeVerified: true,
             bridgeProofRejected: true,
             witnessEquivocationEvidence: true,
             targetFinalityNotReached: true,

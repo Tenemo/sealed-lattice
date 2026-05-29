@@ -1,6 +1,6 @@
-import type { ProtocolDigest } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { fieldModulus } from '../../plaintext-oracle/field.js';
+import { fieldModulus } from '../plaintext-oracle-helpers.js';
 
 import type {
     BallotPrivacyAlgebraicRelationRow,
@@ -15,10 +15,10 @@ import type {
     ReceiverReference,
 } from './backend-contracts.js';
 import {
-    digestExpandedBackendMatrixDigestPurpose,
-    digestExpandedBackendTargetVectorDigestPurpose,
-    explicitBackendMatrixDigestPurpose,
-    explicitBackendTargetVectorDigestPurpose,
+    hashExpandedBackendMatrixHashPurpose,
+    hashExpandedBackendTargetVectorHashPurpose,
+    explicitBackendMatrixHashPurpose,
+    explicitBackendTargetVectorHashPurpose,
     receiverEncryptionFirstNoiseVariableName,
     receiverEncryptionModuleDegree,
     receiverEncryptionModuleRank,
@@ -31,14 +31,14 @@ import {
     shareCommitmentModuleRank,
     shareCommitmentModulus,
     shareCommitmentOpeningDimension,
-    structuredShareCommitmentBackendMatrixDigestPurpose,
-    structuredShareCommitmentBackendTargetVectorDigestPurpose,
+    structuredShareCommitmentBackendMatrixHashPurpose,
+    structuredShareCommitmentBackendTargetVectorHashPurpose,
 } from './backend-contracts.js';
 import {
     backendTermsForLinearRow,
     compactReceiverEncryptionWitnessVariableColumns,
     decimalString,
-    deriveBackendDigest,
+    deriveBackendHash,
     referencesByReceiver,
     requireColumnIndex,
     validateReceiverPayloadCiphertextChunks,
@@ -71,7 +71,7 @@ const buildExplicitShareCommitmentRowBatch = (input: {
     return {
         batchKind: 'ExplicitSparseRows',
         batchName: 'share_commitment_equation_rows',
-        matrixDigest: deriveBackendDigest(explicitBackendMatrixDigestPurpose, {
+        matrixHash: deriveBackendHash(explicitBackendMatrixHashPurpose, {
             rows: input.rows.map(({ rowIndex, rowKind, rowName, terms }) => ({
                 rowIndex,
                 rowKind,
@@ -84,8 +84,8 @@ const buildExplicitShareCommitmentRowBatch = (input: {
         rowKind: 'ShareCommitmentEquationRows',
         rowOffset: input.rowOffset,
         rows: input.rows,
-        targetVectorDigest: deriveBackendDigest(
-            explicitBackendTargetVectorDigestPurpose,
+        targetVectorHash: deriveBackendHash(
+            explicitBackendTargetVectorHashPurpose,
             {
                 targets: input.rows.map(
                     ({ rowIndex, rowKind, rowName, target }) => ({
@@ -120,7 +120,7 @@ const shouldUseCompactReceiverEncryptionWitnessColumns = (input: {
 const buildStructuredShareCommitmentRowBatch = (input: {
     readonly columnLookup: ReadonlyMap<string, number>;
     readonly rowOffset: number;
-    readonly shareCommitmentProfileDigest: ProtocolDigest;
+    readonly shareCommitmentProfileHash: ProtocolHash;
     readonly shareCommitmentRows: readonly BallotPrivacyAlgebraicRelationRow[];
     readonly shareVectorWidth: number;
 }): BallotPrivacyBackendStatementRowBatch => {
@@ -136,18 +136,18 @@ const buildStructuredShareCommitmentRowBatch = (input: {
             }
 
             return {
-                commitmentBodyDigest:
-                    shareCommitmentRow.publicInputDigests.commitmentBodyDigest,
-                commitmentPolynomialVectorDigest:
-                    shareCommitmentRow.publicInputDigests
-                        .commitmentPolynomialVectorDigest,
+                commitmentBodyHash:
+                    shareCommitmentRow.publicInputHashes.commitmentBodyHash,
+                commitmentPolynomialVectorHash:
+                    shareCommitmentRow.publicInputHashes
+                        .commitmentPolynomialVectorHash,
                 receiverIdentity: shareCommitmentRow.receiverIdentity,
                 receiverRosterPosition:
                     shareCommitmentRow.receiverRosterPosition,
                 rowCount: shareCommitmentModuleRank,
                 rowOffsetWithinBatch: receiverIndex * shareCommitmentModuleRank,
-                shareCommitmentDigest:
-                    shareCommitmentRow.publicInputDigests.shareCommitmentDigest,
+                shareCommitmentHash:
+                    shareCommitmentRow.publicInputHashes.shareCommitmentHash,
             };
         },
     );
@@ -178,16 +178,15 @@ const buildStructuredShareCommitmentRowBatch = (input: {
     return {
         batchKind: 'StructuredModuleSisShareCommitmentRows',
         batchName: 'share_commitment_equation_rows',
-        matrixDigest: deriveBackendDigest(
-            structuredShareCommitmentBackendMatrixDigestPurpose,
+        matrixHash: deriveBackendHash(
+            structuredShareCommitmentBackendMatrixHashPurpose,
             {
                 matrixDerivation:
-                    'share-commitment-profile-digest-expanded-polynomial-matrix',
+                    'share-commitment-profile-hash-expanded-polynomial-matrix',
                 rowCount:
                     input.shareCommitmentRows.length *
                     shareCommitmentModuleRank,
-                shareCommitmentProfileDigest:
-                    input.shareCommitmentProfileDigest,
+                shareCommitmentProfileHash: input.shareCommitmentProfileHash,
                 shareCommitmentRows,
                 shareVectorWidth: input.shareVectorWidth,
                 variableColumnIndices,
@@ -198,8 +197,8 @@ const buildStructuredShareCommitmentRowBatch = (input: {
         rowKind: 'ShareCommitmentEquationRows',
         rowOffset: input.rowOffset,
         shareCommitmentRows,
-        targetVectorDigest: deriveBackendDigest(
-            structuredShareCommitmentBackendTargetVectorDigestPurpose,
+        targetVectorHash: deriveBackendHash(
+            structuredShareCommitmentBackendTargetVectorHashPurpose,
             {
                 targetRows,
             },
@@ -232,7 +231,7 @@ const buildExplicitBackendRowBatch = (input: {
     return {
         batchKind: 'ExplicitSparseRows',
         batchName: input.batchName,
-        matrixDigest: deriveBackendDigest(explicitBackendMatrixDigestPurpose, {
+        matrixHash: deriveBackendHash(explicitBackendMatrixHashPurpose, {
             rows: input.rows.map(({ rowIndex, rowKind, rowName, terms }) => ({
                 rowIndex,
                 rowKind,
@@ -245,8 +244,8 @@ const buildExplicitBackendRowBatch = (input: {
         rowKind: input.rowKind,
         rowOffset: input.rowOffset,
         rows: input.rows,
-        targetVectorDigest: deriveBackendDigest(
-            explicitBackendTargetVectorDigestPurpose,
+        targetVectorHash: deriveBackendHash(
+            explicitBackendTargetVectorHashPurpose,
             {
                 targets: input.rows.map(
                     ({ rowIndex, rowKind, rowName, target }) => ({
@@ -394,7 +393,7 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
         const receiverPayload = payloadsByReceiver.get(receiverKey);
         if (
             publicKey?.publicKeyVector === undefined ||
-            publicKey.publicMatrixSeedDigest === undefined ||
+            publicKey.publicMatrixSeedHash === undefined ||
             receiverPayload?.ciphertextChunks === undefined
         ) {
             continue;
@@ -464,8 +463,8 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
             ciphertextChunkCount: receiverPayload.ciphertextChunks.length,
             plaintextBitLength,
             receiverIdentity: receiver.receiverIdentity,
-            receiverPayloadDigest: receiverPayload.receiverPayloadDigest,
-            receiverPublicKeyDigest: publicKey.receiverPublicKeyDigest,
+            receiverPayloadHash: receiverPayload.receiverPayloadHash,
+            receiverPublicKeyHash: publicKey.receiverPublicKeyHash,
             receiverRosterPosition: receiver.receiverRosterPosition,
             rowCount,
             rowOffsetWithinBatch,
@@ -479,9 +478,9 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
     const sortedVariableColumnIndices = [
         ...new Set(variableColumnIndices),
     ].sort((leftColumn, rightColumn) => leftColumn - rightColumn);
-    const digestPayload = {
-        receiverEncryptionProfileDigest:
-            input.publicContext.receiverEncryptionProfileDigest,
+    const hashPayload = {
+        receiverEncryptionProfileHash:
+            input.publicContext.receiverEncryptionProfileHash,
         receiverRows,
         variableColumnIndices: sortedVariableColumnIndices,
     };
@@ -491,35 +490,32 @@ const buildReceiverPayloadEncryptionRowBatch = (input: {
         rowBatch: {
             batchKind: 'StructuredModuleLweReceiverEncryptionRows',
             batchName: 'receiver_payload_encryption_equation_rows',
-            matrixDigest: deriveBackendDigest(
-                explicitBackendMatrixDigestPurpose,
-                {
-                    ...digestPayload,
-                    matrixKind: 'module-lwe-receiver-encryption-rows',
-                },
-            ),
+            matrixHash: deriveBackendHash(explicitBackendMatrixHashPurpose, {
+                ...hashPayload,
+                matrixKind: 'module-lwe-receiver-encryption-rows',
+            }),
             modulus: decimalString(receiverEncryptionModulus),
             receiverRows,
             rowCount: rowOffsetWithinBatch,
             rowKind: 'ReceiverPayloadEncryptionEquationRows',
             rowOffset: input.rowOffset,
-            targetVectorDigest: deriveBackendDigest(
-                explicitBackendTargetVectorDigestPurpose,
+            targetVectorHash: deriveBackendHash(
+                explicitBackendTargetVectorHashPurpose,
                 {
                     ciphertextChunks: input.publicContext.receiverPayloads.map(
                         (receiverPayload) => ({
-                            ciphertextChunkDigest:
-                                receiverPayload.ciphertextChunkDigest,
+                            ciphertextChunkHash:
+                                receiverPayload.ciphertextChunkHash,
                             receiverIdentity: receiverPayload.receiverIdentity,
                             receiverPayloadCiphertextRoot:
                                 receiverPayload.receiverPayloadCiphertextRoot,
-                            receiverPayloadDigest:
-                                receiverPayload.receiverPayloadDigest,
+                            receiverPayloadHash:
+                                receiverPayload.receiverPayloadHash,
                             receiverRosterPosition:
                                 receiverPayload.receiverRosterPosition,
                         }),
                     ),
-                    ...digestPayload,
+                    ...hashPayload,
                     targetKind:
                         'module-lwe-receiver-encryption-ciphertext-rows',
                 },
@@ -544,7 +540,7 @@ const buildReceiverKeyBindingRows = (input: {
         );
         if (
             publicKey?.publicKeyVector === undefined ||
-            publicKey.publicMatrixSeedDigest === undefined
+            publicKey.publicMatrixSeedHash === undefined
         ) {
             continue;
         }
@@ -577,7 +573,7 @@ const buildReceiverKeyBindingRows = (input: {
     return rows;
 };
 
-const buildDigestExpandedRowBatch = (input: {
+const buildHashExpandedRowBatch = (input: {
     readonly algebraicRow: BallotPrivacyAlgebraicRelationRow;
     readonly columnLookup: ReadonlyMap<string, number>;
     readonly rowOffset: number;
@@ -590,37 +586,37 @@ const buildDigestExpandedRowBatch = (input: {
     const expansionPayload = {
         coefficientExpansionDomain,
         modulus: decimalString(input.algebraicRow.modulus),
-        publicInputDigests: input.algebraicRow.publicInputDigests,
+        publicInputHashes: input.algebraicRow.publicInputHashes,
         receiverIdentity: input.algebraicRow.receiverIdentity,
         receiverRosterPosition: input.algebraicRow.receiverRosterPosition,
         rowCount: input.algebraicRow.equationCount,
         rowKind: input.algebraicRow.rowKind,
         sourceAlgebraicRowName: input.algebraicRow.rowName,
-        targetDigest: input.algebraicRow.targetDigest,
+        targetHash: input.algebraicRow.targetHash,
         targetExpansionDomain,
         variableColumnIndices,
     };
 
     return {
-        batchKind: 'DigestExpandedRows',
+        batchKind: 'HashExpandedRows',
         batchName: `${input.algebraicRow.rowName}_backend_rows`,
         coefficientExpansionDomain,
-        matrixDigest: deriveBackendDigest(
-            digestExpandedBackendMatrixDigestPurpose,
+        matrixHash: deriveBackendHash(
+            hashExpandedBackendMatrixHashPurpose,
             expansionPayload,
         ),
         modulus: decimalString(input.algebraicRow.modulus),
-        publicInputDigests: input.algebraicRow.publicInputDigests,
+        publicInputHashes: input.algebraicRow.publicInputHashes,
         receiverIdentity: input.algebraicRow.receiverIdentity,
         receiverRosterPosition: input.algebraicRow.receiverRosterPosition,
         rowCount: input.algebraicRow.equationCount,
         rowKind: input.algebraicRow.rowKind,
         rowOffset: input.rowOffset,
         sourceAlgebraicRowName: input.algebraicRow.rowName,
-        targetDigest: input.algebraicRow.targetDigest,
+        targetHash: input.algebraicRow.targetHash,
         targetExpansionDomain,
-        targetVectorDigest: deriveBackendDigest(
-            digestExpandedBackendTargetVectorDigestPurpose,
+        targetVectorHash: deriveBackendHash(
+            hashExpandedBackendTargetVectorHashPurpose,
             expansionPayload,
         ),
         variableColumnIndices,
@@ -667,6 +663,6 @@ export {
     buildReceiverPayloadPlaintextBitDecompositionRowBatch,
     buildReceiverPayloadEncryptionRowBatch,
     buildReceiverKeyBindingRows,
-    buildDigestExpandedRowBatch,
+    buildHashExpandedRowBatch,
     buildBackendBounds,
 };

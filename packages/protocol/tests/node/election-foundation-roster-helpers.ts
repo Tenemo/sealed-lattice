@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     FrozenRosterProfile,
@@ -10,19 +10,6 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    derivePollSpecDigest,
-    validatePollSpec,
-} from '../../src/lifecycle/poll-spec';
-import { deriveFrozenRosterProfile } from '../../src/lifecycle/thresholds';
-import {
-    deriveElectionManifestDigest,
-    deriveReceiverKeyRegistrationDigest,
-    deriveRegistrationEntryDigest,
-    deriveRosterDigest,
-    deriveTrusteeSetupEntryDigest,
-} from '../../src/roster/index';
-
-import {
     createBoardEvidence,
     createBoardHead,
     createBoardHeadWithObjects,
@@ -30,15 +17,28 @@ import {
 import {
     ceremonyId,
     createSignature,
-    getParticipantSigningPublicKeyDigest,
+    getParticipantSigningPublicKeyHash,
     manifestOpaqueBindings,
-    manifestPolicyDigests,
-    organizerPublicKeyDigest,
+    manifestPolicyHashes,
+    organizerPublicKeyHash,
 } from './election-foundation-fixture-constants';
+
+import {
+    derivePollSpecHash,
+    validatePollSpec,
+} from '#packages/protocol/src/lifecycle/poll-spec';
+import { deriveFrozenRosterProfile } from '#packages/protocol/src/lifecycle/thresholds';
+import {
+    deriveElectionManifestHash,
+    deriveReceiverKeyRegistrationHash,
+    deriveRegistrationEntryHash,
+    deriveRosterHash,
+    deriveTrusteeSetupEntryHash,
+} from '#packages/protocol/src/roster/index';
 
 export const createRosterPollSpec = (): PollSpec => {
     const validation = validatePollSpec({
-        duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
+        duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
         maxRosterSize: 50,
         minRosterSize: 3,
         options: ['Option A', 'Option B', 'Option C'],
@@ -63,19 +63,19 @@ const createFrozenRosterProfile = (
     pollSpec: PollSpec,
     registrations: readonly RegistrationEntry[],
 ): FrozenRosterProfile => {
-    const rosterDigest = deriveRosterDigest(registrations);
+    const rosterHash = deriveRosterHash(registrations);
     const rosterSize = registrations.length;
 
     return deriveFrozenRosterProfile({
-        dynamicRosterProfileCertificateDigest:
+        dynamicRosterProfileCertificateHash:
             rosterSize >= 10 && rosterSize !== 20
-                ? deriveProtocolDigest('ThresholdProfileDigest', {
+                ? deriveProtocolHash('ThresholdProfileHash', {
                       certificate: 'dynamic-roster-profile',
                       rosterSize,
                   })
                 : undefined,
         pollSpec,
-        rosterDigest,
+        rosterHash,
         rosterSize,
     });
 };
@@ -85,33 +85,30 @@ export const createRegistrationEntry = (
     boardSequence: number,
     boardPosition: number,
 ): RegistrationEntry => {
-    const signingPublicKeyDigest =
-        getParticipantSigningPublicKeyDigest(participantIdentity);
+    const signingPublicKeyHash =
+        getParticipantSigningPublicKeyHash(participantIdentity);
     const payload = {
         objectType: 'RegistrationEntry',
         objectVersion: 1,
         ceremonyId,
         participantIdentity,
-        signingPublicKeyDigest,
+        signingPublicKeyHash,
         boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
-    } satisfies Omit<
-        RegistrationEntry,
-        'registrationEntryDigest' | 'signature'
-    >;
-    const registrationEntryDigest = deriveRegistrationEntryDigest(payload);
+    } satisfies Omit<RegistrationEntry, 'registrationEntryHash' | 'signature'>;
+    const registrationEntryHash = deriveRegistrationEntryHash(payload);
 
     return {
         ...payload,
-        registrationEntryDigest,
+        registrationEntryHash,
         signature: createSignature(
             'RegistrationEntry',
             'Participant',
             participantIdentity,
-            signingPublicKeyDigest,
-            registrationEntryDigest,
+            signingPublicKeyHash,
+            registrationEntryHash,
         ),
     };
 };
@@ -121,15 +118,18 @@ export const createReceiverKeyRegistration = (
     boardSequence: number,
     boardPosition: number,
 ): ReceiverKeyRegistration => {
-    const signingPublicKeyDigest =
-        getParticipantSigningPublicKeyDigest(participantIdentity);
+    const signingPublicKeyHash =
+        getParticipantSigningPublicKeyHash(participantIdentity);
     const payload = {
         objectType: 'ReceiverKeyRegistration',
         objectVersion: 1,
         ceremonyId,
         participantIdentity,
-        receiverKeyRoot: deriveProtocolDigest('EncryptedEnvelopeRoot', {
-            participantIdentity,
+        receiverKeyRoot: deriveProtocolHash('ChallengeDomainHash', {
+            payload: {
+                participantIdentity,
+            },
+            purpose: 'fixture-receiver-key-root-v1',
         }),
         boardSequence,
         boardPosition,
@@ -137,20 +137,20 @@ export const createReceiverKeyRegistration = (
         deviceEpoch: 0,
     } satisfies Omit<
         ReceiverKeyRegistration,
-        'receiverKeyRegistrationDigest' | 'signature'
+        'receiverKeyRegistrationHash' | 'signature'
     >;
-    const receiverKeyRegistrationDigest =
-        deriveReceiverKeyRegistrationDigest(payload);
+    const receiverKeyRegistrationHash =
+        deriveReceiverKeyRegistrationHash(payload);
 
     return {
         ...payload,
-        receiverKeyRegistrationDigest,
+        receiverKeyRegistrationHash,
         signature: createSignature(
             'ReceiverKeyRegistration',
             'Participant',
             participantIdentity,
-            signingPublicKeyDigest,
-            receiverKeyRegistrationDigest,
+            signingPublicKeyHash,
+            receiverKeyRegistrationHash,
         ),
     };
 };
@@ -160,8 +160,8 @@ export const createTrusteeSetupEntry = (
     boardSequence: number,
     boardPosition: number,
 ): TrusteeSetupEntry => {
-    const signingPublicKeyDigest =
-        getParticipantSigningPublicKeyDigest(trusteeIdentity);
+    const signingPublicKeyHash =
+        getParticipantSigningPublicKeyHash(trusteeIdentity);
     const payload = {
         objectType: 'TrusteeSetupEntry',
         objectVersion: 1,
@@ -170,27 +170,24 @@ export const createTrusteeSetupEntry = (
         thresholdDecryptionProfileId:
             manifestOpaqueBindings.thresholdDecryptionProfileId,
         trusteeIdentity,
-        trusteeSetupRoot: deriveProtocolDigest(
-            'ParticipantBgvSetupRecordDigest',
+        trusteeSetupRoot: deriveProtocolHash('ParticipantBgvSetupRecordHash', {
+            trusteeIdentity,
+        }),
+        bgvProfileHash: manifestOpaqueBindings.bgvProfileHash,
+        rustBgvBackendProfileHash:
+            manifestOpaqueBindings.rustBgvBackendProfileHash,
+        participantSetupRecordHash: deriveProtocolHash(
+            'ParticipantBgvSetupRecordHash',
             {
                 trusteeIdentity,
             },
         ),
-        bgvProfileDigest: manifestOpaqueBindings.bgvProfileDigest,
-        rustBgvBackendProfileDigest:
-            manifestOpaqueBindings.rustBgvBackendProfileDigest,
-        participantSetupRecordDigest: deriveProtocolDigest(
-            'ParticipantBgvSetupRecordDigest',
-            {
-                trusteeIdentity,
-            },
-        ),
-        publicKeyShareRoot: deriveProtocolDigest('PublicKeyShareRoot', {
+        publicKeyShareRoot: deriveProtocolHash('PublicKeyShareRoot', {
             trusteeIdentity,
         }),
         collectivePublicKeyRoot: manifestOpaqueBindings.collectivePublicKeyRoot,
-        trusteeThresholdVerificationKeyDigest: deriveProtocolDigest(
-            'TrusteeThresholdVerificationKeyDigest',
+        trusteeThresholdVerificationKeyHash: deriveProtocolHash(
+            'TrusteeThresholdVerificationKeyHash',
             {
                 trusteeIdentity,
             },
@@ -198,26 +195,23 @@ export const createTrusteeSetupEntry = (
         thresholdShareVerificationKeyRoot:
             manifestOpaqueBindings.thresholdShareVerificationKeyRoot,
         evaluationKeyRoot: manifestOpaqueBindings.evaluationKeyRoot,
-        rotSetDigest: manifestOpaqueBindings.rotSetDigest,
+        rotSetHash: manifestOpaqueBindings.rotSetHash,
         boardSequence,
         boardPosition,
         recoveryEpoch: 0,
         deviceEpoch: 0,
-    } satisfies Omit<
-        TrusteeSetupEntry,
-        'trusteeSetupEntryDigest' | 'signature'
-    >;
-    const trusteeSetupEntryDigest = deriveTrusteeSetupEntryDigest(payload);
+    } satisfies Omit<TrusteeSetupEntry, 'trusteeSetupEntryHash' | 'signature'>;
+    const trusteeSetupEntryHash = deriveTrusteeSetupEntryHash(payload);
 
     return {
         ...payload,
-        trusteeSetupEntryDigest,
+        trusteeSetupEntryHash,
         signature: createSignature(
             'TrusteeSetupEntry',
             'Trustee',
             trusteeIdentity,
-            signingPublicKeyDigest,
-            trusteeSetupEntryDigest,
+            signingPublicKeyHash,
+            trusteeSetupEntryHash,
         ),
     };
 };
@@ -227,12 +221,12 @@ export const createElectionManifest = (
     overrides: Partial<ElectionManifest> = {},
 ): ElectionManifest => {
     const pollSpec = createRosterPollSpec();
-    const rosterDigest = deriveRosterDigest(registrations);
-    const thresholdProfileDigest =
+    const rosterHash = deriveRosterHash(registrations);
+    const thresholdProfileHash =
         registrations.length >= 3
             ? createFrozenRosterProfile(pollSpec, registrations)
-                  .thresholdProfileDigest
-            : deriveProtocolDigest('ThresholdProfileDigest', {
+                  .thresholdProfileHash
+            : deriveProtocolHash('ThresholdProfileHash', {
                   fixture: 'below-minimum-roster',
                   rosterSize: registrations.length,
               });
@@ -240,26 +234,26 @@ export const createElectionManifest = (
         objectType: 'ElectionManifest',
         objectVersion: 1,
         ceremonyId,
-        pollSpecDigest: derivePollSpecDigest(pollSpec),
-        rosterDigest,
-        thresholdProfileDigest,
-        manifestPolicyDigests,
+        pollSpecHash: derivePollSpecHash(pollSpec),
+        rosterHash,
+        thresholdProfileHash,
+        manifestPolicyHashes,
         manifestOpaqueBindings,
         boardSequence: 3,
         boardPosition: 0,
         ...overrides,
-    } satisfies Omit<ElectionManifest, 'electionManifestDigest' | 'signature'>;
-    const electionManifestDigest = deriveElectionManifestDigest(payload);
+    } satisfies Omit<ElectionManifest, 'electionManifestHash' | 'signature'>;
+    const electionManifestHash = deriveElectionManifestHash(payload);
 
     return {
         ...payload,
-        electionManifestDigest,
+        electionManifestHash,
         signature: createSignature(
             'ElectionManifest',
             'Organizer',
             'organizer',
-            organizerPublicKeyDigest,
-            electionManifestDigest,
+            organizerPublicKeyHash,
+            electionManifestHash,
         ),
     };
 };
@@ -294,24 +288,24 @@ export const createRosterManifestTranscriptInput = (
     const setupObjects = [
         ...rosterRegistrations.map((entry) => ({
             objectType: 'RegistrationEntry' as const,
-            objectDigest: entry.registrationEntryDigest,
+            objectHash: entry.registrationEntryHash,
             boardPosition: entry.boardPosition,
         })),
         ...receiverKeyRegistrations.map((entry) => ({
             objectType: 'ReceiverKeyRegistration' as const,
-            objectDigest: entry.receiverKeyRegistrationDigest,
+            objectHash: entry.receiverKeyRegistrationHash,
             boardPosition: entry.boardPosition,
         })),
         ...trusteeSetupEntries.map((entry) => ({
             objectType: 'TrusteeSetupEntry' as const,
-            objectDigest: entry.trusteeSetupEntryDigest,
+            objectHash: entry.trusteeSetupEntryHash,
             boardPosition: entry.boardPosition,
         })),
     ];
     const genesisHead = createBoardHead(0, null);
     const { head: setupHead, inclusionProofs: setupInclusionProofs } =
-        createBoardHeadWithObjects(1, genesisHead.headDigest, setupObjects);
-    const freezeHead = createBoardHead(2, setupHead.headDigest);
+        createBoardHeadWithObjects(1, genesisHead.headHash, setupObjects);
+    const freezeHead = createBoardHead(2, setupHead.headHash);
     const pollSpec = createRosterPollSpec();
     const frozenRosterProfile = createFrozenRosterProfile(
         pollSpec,
@@ -322,10 +316,10 @@ export const createRosterManifestTranscriptInput = (
         manifestOverrides,
     );
     const { head: manifestHead, inclusionProofs: manifestInclusionProofs } =
-        createBoardHeadWithObjects(3, freezeHead.headDigest, [
+        createBoardHeadWithObjects(3, freezeHead.headHash, [
             {
                 objectType: 'ElectionManifest',
-                objectDigest: manifest.electionManifestDigest,
+                objectHash: manifest.electionManifestHash,
                 boardPosition: manifest.boardPosition,
             },
         ]);
@@ -333,24 +327,22 @@ export const createRosterManifestTranscriptInput = (
         (entry) =>
             setupInclusionProofs.find(
                 (proof) =>
-                    proof.includedObjectDigest ===
-                    entry.registrationEntryDigest,
+                    proof.includedObjectHash === entry.registrationEntryHash,
             ) ?? setupInclusionProofs[0],
     );
     const receiverKeyRegistrationInclusionProofs = receiverKeyRegistrations.map(
         (entry) =>
             setupInclusionProofs.find(
                 (proof) =>
-                    proof.includedObjectDigest ===
-                    entry.receiverKeyRegistrationDigest,
+                    proof.includedObjectHash ===
+                    entry.receiverKeyRegistrationHash,
             ) ?? setupInclusionProofs[0],
     );
     const trusteeSetupInclusionProofs = trusteeSetupEntries.map(
         (entry) =>
             setupInclusionProofs.find(
                 (proof) =>
-                    proof.includedObjectDigest ===
-                    entry.trusteeSetupEntryDigest,
+                    proof.includedObjectHash === entry.trusteeSetupEntryHash,
             ) ?? setupInclusionProofs[0],
     );
 
@@ -371,7 +363,7 @@ export const createRosterManifestTranscriptInput = (
         pollSpec,
         frozenRosterProfile,
         electionManifest: manifest,
-        organizerPublicKeyDigest,
+        organizerPublicKeyHash,
         organizerIdentity: 'organizer',
         rosterFreezeBoardSequence: 2,
         manifestInclusionProof: manifestInclusionProofs[0],

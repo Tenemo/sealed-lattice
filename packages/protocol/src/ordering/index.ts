@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
@@ -11,6 +11,7 @@ import {
     createRefusal,
     isNonNegativeInteger,
     uniqueStrings,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
 const defaultMaxPerIdentity = 1;
@@ -22,13 +23,13 @@ const compareCandidates = (
     left.boardSequence - right.boardSequence ||
     left.boardPosition - right.boardPosition ||
     left.actionSequence - right.actionSequence ||
-    compareCanonicalStrings(left.objectDigest, right.objectDigest);
+    compareCanonicalStrings(left.objectHash, right.objectHash);
 
 const candidateConflictKey = (candidate: ValidatedFirstValidObject): string =>
     [
         candidate.signerIdentity,
         candidate.objectType,
-        candidate.contextDigest,
+        candidate.contextHash,
     ].join('\u0000');
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -38,24 +39,24 @@ const validateFirstValidObjectShape = (
     candidate: ValidatedFirstValidObject,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
-    const objectDigest = isNonEmptyString(candidate.objectDigest)
-        ? candidate.objectDigest
+    const objectHash = isNonEmptyString(candidate.objectHash)
+        ? candidate.objectHash
         : undefined;
     const objectType = isNonEmptyString(candidate.objectType)
         ? candidate.objectType
         : undefined;
 
     if (
-        !isNonEmptyString(candidate.objectDigest) ||
+        !isNonEmptyString(candidate.objectHash) ||
         !isNonEmptyString(candidate.objectType) ||
         !isNonEmptyString(candidate.signerIdentity) ||
-        !isNonEmptyString(candidate.contextDigest)
+        !isNonEmptyString(candidate.contextHash)
     ) {
         refusedObjects.push(
             createRefusal(
                 'FirstValidPolicyMismatch',
                 'First-valid object string fields must be non-empty canonical strings.',
-                objectDigest,
+                objectHash,
                 objectType,
             ),
         );
@@ -71,7 +72,7 @@ const validateFirstValidObjectShape = (
             createRefusal(
                 'FirstValidPolicyMismatch',
                 'First-valid object sequence and epoch fields must be non-negative safe integers.',
-                objectDigest,
+                objectHash,
                 objectType,
             ),
         );
@@ -81,7 +82,7 @@ const validateFirstValidObjectShape = (
             createRefusal(
                 'FirstValidPolicyMismatch',
                 'First-valid object retransmission flag must be boolean.',
-                objectDigest,
+                objectHash,
                 objectType,
             ),
         );
@@ -115,19 +116,20 @@ const isCurrentRecoveryEpoch = (
     );
 };
 
-const deriveFirstValidOrderDigest = (
+const deriveFirstValidOrderHash = (
     input: Pick<
         FirstValidOrderingInput,
-        'requiredContextDigest' | 'selectionPolicyDigest'
+        'requiredContextHash' | 'selectionPolicyHash'
     >,
     orderedCandidates: readonly ValidatedFirstValidObject[],
 ): string =>
-    deriveProtocolDigest('FirstValidOrderDigest', {
-        orderedObjectDigests: orderedCandidates.map(
-            (candidate) => candidate.objectDigest,
+    deriveProtocolHash('FirstValidOrderHash', {
+        orderedObjectHashes: orderedCandidates.map(
+            (candidate) => candidate.objectHash,
         ),
-        requiredContextDigest: input.requiredContextDigest,
-        selectionPolicyDigest: input.selectionPolicyDigest,
+        purpose: 'first-valid-order-v1',
+        requiredContextHash: input.requiredContextHash,
+        selectionPolicyHash: input.selectionPolicyHash,
     });
 
 const deriveValidatedFirstValidOrderUnchecked = (
@@ -135,15 +137,15 @@ const deriveValidatedFirstValidOrderUnchecked = (
 ): FirstValidOrderingVerification => {
     const refusedObjects: RefusalRecord[] = [];
     const deduplicatedCandidates: ValidatedFirstValidObject[] = [];
-    const seenObjectDigests = new Set<string>();
+    const seenObjectHashes = new Set<string>();
     const seenConflictKeys = new Map<string, ValidatedFirstValidObject>();
 
-    if (input.selectionPolicyDigest !== input.expectedSelectionPolicyDigest) {
+    if (input.selectionPolicyHash !== input.expectedSelectionPolicyHash) {
         refusedObjects.push(
             createRefusal(
                 'FirstValidPolicyMismatch',
-                'First-valid ordering requires the manifest-bound selection policy digest.',
-                input.selectionPolicyDigest,
+                'First-valid ordering requires the manifest-bound selection policy hash.',
+                input.selectionPolicyHash,
             ),
         );
     }
@@ -158,12 +160,12 @@ const deriveValidatedFirstValidOrderUnchecked = (
         const recoveryEntry =
             input.currentRecoveryEpochMap[candidate.signerIdentity];
 
-        if (candidate.contextDigest !== input.requiredContextDigest) {
+        if (candidate.contextHash !== input.requiredContextHash) {
             refusedObjects.push(
                 createRefusal(
                     'FirstValidContextMismatch',
-                    'First-valid object context digest does not match the required context.',
-                    candidate.objectDigest,
+                    'First-valid object context hash does not match the required context.',
+                    candidate.objectHash,
                     candidate.objectType,
                 ),
             );
@@ -174,7 +176,7 @@ const deriveValidatedFirstValidOrderUnchecked = (
                 createRefusal(
                     'UnknownRecoveryEpoch',
                     'First-valid object signer has no current recovery-epoch state.',
-                    candidate.objectDigest,
+                    candidate.objectHash,
                     candidate.objectType,
                 ),
             );
@@ -185,7 +187,7 @@ const deriveValidatedFirstValidOrderUnchecked = (
                 createRefusal(
                     'StaleRecoveryEpoch',
                     'First-valid object uses a stale recovery or device epoch.',
-                    candidate.objectDigest,
+                    candidate.objectHash,
                     candidate.objectType,
                 ),
             );
@@ -196,13 +198,13 @@ const deriveValidatedFirstValidOrderUnchecked = (
         const earlierCandidate = seenConflictKeys.get(conflictKey);
         if (
             earlierCandidate !== undefined &&
-            earlierCandidate.objectDigest !== candidate.objectDigest
+            earlierCandidate.objectHash !== candidate.objectHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'ConflictingFirstValidObject',
                     'Same identity posted non-identical first-valid objects for the same context.',
-                    candidate.objectDigest,
+                    candidate.objectHash,
                     candidate.objectType,
                 ),
             );
@@ -210,13 +212,13 @@ const deriveValidatedFirstValidOrderUnchecked = (
         }
         seenConflictKeys.set(conflictKey, candidate);
 
-        if (seenObjectDigests.has(candidate.objectDigest)) {
+        if (seenObjectHashes.has(candidate.objectHash)) {
             if (!candidate.isByteIdenticalRetransmission) {
                 refusedObjects.push(
                     createRefusal(
                         'DuplicateFirstValidObject',
                         'Duplicate first-valid object was not marked as byte-identical retransmission.',
-                        candidate.objectDigest,
+                        candidate.objectHash,
                         candidate.objectType,
                     ),
                 );
@@ -224,7 +226,7 @@ const deriveValidatedFirstValidOrderUnchecked = (
             continue;
         }
 
-        seenObjectDigests.add(candidate.objectDigest);
+        seenObjectHashes.add(candidate.objectHash);
         deduplicatedCandidates.push(candidate);
     }
 
@@ -234,7 +236,7 @@ const deriveValidatedFirstValidOrderUnchecked = (
             createRefusal(
                 'FirstValidPolicyMismatch',
                 'First-valid ordering requires a positive maxPerIdentity value.',
-                input.selectionPolicyDigest,
+                input.selectionPolicyHash,
             ),
         );
     }
@@ -251,7 +253,7 @@ const deriveValidatedFirstValidOrderUnchecked = (
             countByIdentity.set(candidate.signerIdentity, currentCount + 1);
             return true;
         });
-    const firstValidOrderDigest = deriveFirstValidOrderDigest(
+    const firstValidOrderHash = deriveFirstValidOrderHash(
         input,
         orderedCandidates,
     );
@@ -259,13 +261,13 @@ const deriveValidatedFirstValidOrderUnchecked = (
     return {
         ok: refusedObjects.length === 0,
         statusLabels: [],
-        acceptedDigests: uniqueStrings([
-            firstValidOrderDigest,
-            ...orderedCandidates.map((candidate) => candidate.objectDigest),
+        acceptedHashes: uniqueStrings([
+            firstValidOrderHash,
+            ...orderedCandidates.map((candidate) => candidate.objectHash),
         ]),
         refusedObjects,
-        firstValidOrderDigest:
-            refusedObjects.length === 0 ? firstValidOrderDigest : undefined,
+        firstValidOrderHash:
+            refusedObjects.length === 0 ? firstValidOrderHash : undefined,
         orderedObjects: orderedCandidates,
     };
 };
@@ -275,15 +277,18 @@ export const deriveValidatedFirstValidOrder = (
 ): FirstValidOrderingVerification => {
     try {
         return deriveValidatedFirstValidOrderUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'FirstValidPolicyMismatch',
-                    'First-valid ordering input could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'First-valid ordering input could not be canonicalized or validated.',
+                        error,
+                    ),
                 ),
             ],
             orderedObjects: [],

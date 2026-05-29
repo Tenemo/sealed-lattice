@@ -103,8 +103,8 @@ impl PolynomialMatrix {
             for column_index in 0..self.columns {
                 let matrix_entry = &self.entries[row_index * self.columns + column_index];
                 let vector_entry = &vector.entries()[column_index];
-                let product = self.ring.mul_negacyclic(matrix_entry, vector_entry)?;
-                row_sum = self.ring.add(&row_sum, &product)?;
+                self.ring
+                    .mul_negacyclic_accumulate(&mut row_sum, matrix_entry, vector_entry)?;
             }
             output_entries.push(row_sum);
         }
@@ -117,9 +117,10 @@ impl PolynomialMatrix {
         witness: &PolynomialVector,
         target: &PolynomialVector,
     ) -> CanonicalResult<PolynomialVector> {
-        let product = self.multiply_vector(witness)?;
+        let mut product = self.multiply_vector(witness)?;
+        product.add_assign(target)?;
 
-        product.add(target)
+        Ok(product)
     }
 }
 

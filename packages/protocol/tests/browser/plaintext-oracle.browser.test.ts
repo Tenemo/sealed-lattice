@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { validatePollSpec } from '../../src/lifecycle/poll-spec';
+import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
 import {
     decodeSparseTopKTarget,
     derivePlaintextTopKOracle,
-} from '../../src/plaintext-oracle/index';
+} from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext oracle in browsers', () => {
     it('derives and decodes a deterministic sparse top-k target without native helpers', () => {
@@ -30,7 +30,7 @@ describe('plaintext oracle in browsers', () => {
             pollSpec: pollSpec.normalized,
         });
         const decoding = decodeSparseTopKTarget({
-            expectedLayoutDigest: oracle.sparseTarget.layoutDigest,
+            expectedLayoutHash: oracle.sparseTarget.layoutHash,
             target: oracle.sparseTarget,
         });
 

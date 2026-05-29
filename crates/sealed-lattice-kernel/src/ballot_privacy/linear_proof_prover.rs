@@ -32,8 +32,17 @@ use super::{
     },
 };
 
+pub(super) use super::{
+    linear_proof_parameters as parameters, linear_proof_public_parameters as public_parameters,
+    linear_proof_rng as rng, linear_proof_statement as statement,
+    linear_proof_transcript as transcript, sparse_linear_proof_statement as sparse_statement,
+};
+
+#[path = "linear_proof/prover/prover_preparation.rs"]
 mod prover_preparation;
+#[path = "linear_proof/prover/quadratic_witness.rs"]
 mod quadratic_witness;
+#[path = "linear_proof/prover/tbox_witness.rs"]
 mod tbox_witness;
 
 pub(crate) use prover_preparation::*;
@@ -41,4 +50,5 @@ use quadratic_witness::*;
 pub(crate) use tbox_witness::*;
 
 #[cfg(test)]
+#[path = "linear_proof/prover/proof_generation_tests.rs"]
 mod proof_generation_tests;

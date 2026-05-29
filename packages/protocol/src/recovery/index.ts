@@ -1,11 +1,11 @@
 import {
-    deriveProtocolDigest,
+    deriveProtocolHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
-    ProtocolDigest,
+    ProtocolHash,
     RecoveryEpochUpdate,
     RecoveryEpochVerification,
     RecoveryEpochVerificationInput,
@@ -19,54 +19,52 @@ import {
 import {
     buildBoardHeadMap,
     createRefusal,
-    defaultSignedRootContextDigest,
+    defaultSignedRootContextHash,
     isNonNegativeInteger,
     signedObjectRootByteLength,
+    verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
-export const deriveActionContextDigest = (
+export const deriveActionContextHash = (
     actionContext: Omit<
         ActionCurrentForRecoveryEpochInput['actionContext'],
-        'actionContextDigest'
+        'actionContextHash'
     >,
-): ProtocolDigest =>
-    deriveProtocolDigest('ActionContextDigest', {
-        acceptedRecoveryEpochUpdateDigest:
-            actionContext.acceptedRecoveryEpochUpdateDigest,
+): ProtocolHash =>
+    deriveProtocolHash('ActionContextHash', {
+        acceptedRecoveryEpochUpdateHash:
+            actionContext.acceptedRecoveryEpochUpdateHash,
         actionSequence: actionContext.actionSequence,
-        boardHeadDigest: actionContext.boardHeadDigest,
+        boardHeadHash: actionContext.boardHeadHash,
         boardSequence: actionContext.boardSequence,
         ceremonyId: actionContext.ceremonyId,
-        contextDigest: actionContext.contextDigest,
+        contextHash: actionContext.contextHash,
         deviceEpoch: actionContext.deviceEpoch,
-        electionManifestDigest: actionContext.electionManifestDigest,
+        electionManifestHash: actionContext.electionManifestHash,
         recoveryEpoch: actionContext.recoveryEpoch,
-        recoveryPolicyDigest: actionContext.recoveryPolicyDigest,
-        rosterExternalAcceptanceDigest:
-            actionContext.rosterExternalAcceptanceDigest,
+        recoveryPolicyHash: actionContext.recoveryPolicyHash,
+        rosterExternalAcceptanceHash:
+            actionContext.rosterExternalAcceptanceHash,
         signerIdentity: actionContext.signerIdentity,
     });
 
-export const deriveRecoveryEpochUpdateDigest = (
-    update: Omit<
-        RecoveryEpochUpdate,
-        'recoveryEpochUpdateDigest' | 'signature'
-    >,
-): ProtocolDigest =>
-    deriveProtocolDigest('RecoveryEpochUpdateDigest', {
-        boardHeadDigest: update.boardHeadDigest,
+export const deriveRecoveryEpochUpdateHash = (
+    update: Omit<RecoveryEpochUpdate, 'recoveryEpochUpdateHash' | 'signature'>,
+): ProtocolHash =>
+    deriveProtocolHash('RecoveryEpochUpdateHash', {
+        boardHeadHash: update.boardHeadHash,
         ceremonyId: update.ceremonyId,
         newDeviceEpoch: update.newDeviceEpoch,
         newRecoveryEpoch: update.newRecoveryEpoch,
-        newSigningPublicKeyDigest: update.newSigningPublicKeyDigest,
+        newSigningPublicKeyHash: update.newSigningPublicKeyHash,
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
         objectVersion: update.objectVersion,
         oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
-        recoveryPolicyDigest: update.recoveryPolicyDigest,
-        recoveryRootPublicKeyDigest: update.recoveryRootPublicKeyDigest,
+        recoveryPolicyHash: update.recoveryPolicyHash,
+        recoveryRootPublicKeyHash: update.recoveryRootPublicKeyHash,
         restoredFrozenReceiverStateCommitment:
             update.restoredFrozenReceiverStateCommitment,
         signerIdentity: update.signerIdentity,
@@ -75,32 +73,30 @@ export const deriveRecoveryEpochUpdateDigest = (
 const isActionCurrentForRecoveryEpochUnchecked = (
     input: ActionCurrentForRecoveryEpochInput,
 ): ActionCurrentForRecoveryEpochResult => {
-    const expectedActionContextDigest = deriveActionContextDigest({
+    const expectedActionContextHash = deriveActionContextHash({
         actionSequence: input.actionContext.actionSequence,
-        boardHeadDigest: input.actionContext.boardHeadDigest,
+        boardHeadHash: input.actionContext.boardHeadHash,
         boardSequence: input.actionContext.boardSequence,
         ceremonyId: input.actionContext.ceremonyId,
-        contextDigest: input.actionContext.contextDigest,
+        contextHash: input.actionContext.contextHash,
         deviceEpoch: input.actionContext.deviceEpoch,
-        electionManifestDigest: input.actionContext.electionManifestDigest,
+        electionManifestHash: input.actionContext.electionManifestHash,
         recoveryEpoch: input.actionContext.recoveryEpoch,
-        recoveryPolicyDigest: input.actionContext.recoveryPolicyDigest,
-        rosterExternalAcceptanceDigest:
-            input.actionContext.rosterExternalAcceptanceDigest,
-        acceptedRecoveryEpochUpdateDigest:
-            input.actionContext.acceptedRecoveryEpochUpdateDigest,
+        recoveryPolicyHash: input.actionContext.recoveryPolicyHash,
+        rosterExternalAcceptanceHash:
+            input.actionContext.rosterExternalAcceptanceHash,
+        acceptedRecoveryEpochUpdateHash:
+            input.actionContext.acceptedRecoveryEpochUpdateHash,
         signerIdentity: input.actionContext.signerIdentity,
     });
     const refusedObjects: RefusalRecord[] = [];
 
-    if (
-        input.actionContext.actionContextDigest !== expectedActionContextDigest
-    ) {
+    if (input.actionContext.actionContextHash !== expectedActionContextHash) {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
-                'Action context digest does not match its canonical payload.',
-                input.actionContext.actionContextDigest,
+                'Action context hash does not match its canonical payload.',
+                input.actionContext.actionContextHash,
                 'ActionContext',
             ),
         );
@@ -113,7 +109,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
             createRefusal(
                 'StaleRecoveryEpoch',
                 'Action context signer does not match the supplied recovery epoch state.',
-                input.actionContext.actionContextDigest,
+                input.actionContext.actionContextHash,
                 'ActionContext',
             ),
         );
@@ -128,21 +124,21 @@ const isActionCurrentForRecoveryEpochUnchecked = (
             createRefusal(
                 'InvalidSignedRoot',
                 'Action context sequence and epoch fields must be non-negative integers.',
-                input.actionContext.actionContextDigest,
+                input.actionContext.actionContextHash,
                 'ActionContext',
             ),
         );
     }
     if (
-        input.expectedRosterExternalAcceptanceDigest !== undefined &&
-        input.actionContext.rosterExternalAcceptanceDigest !==
-            input.expectedRosterExternalAcceptanceDigest
+        input.expectedRosterExternalAcceptanceHash !== undefined &&
+        input.actionContext.rosterExternalAcceptanceHash !==
+            input.expectedRosterExternalAcceptanceHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'RosterExternalAcceptanceInvalid',
-                'Action context must bind the expected local roster external acceptance digest.',
-                input.actionContext.actionContextDigest,
+                'Action context must bind the expected local roster external acceptance hash.',
+                input.actionContext.actionContextHash,
                 'ActionContext',
             ),
         );
@@ -156,7 +152,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         return {
             ok: refusedObjects.length === 0,
             statusLabels: [],
-            acceptedDigests: [input.actionContext.actionContextDigest],
+            acceptedHashes: [input.actionContext.actionContextHash],
             refusedObjects,
         };
     }
@@ -172,7 +168,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         return {
             ok: refusedObjects.length === 0,
             statusLabels: [],
-            acceptedDigests: [input.actionContext.actionContextDigest],
+            acceptedHashes: [input.actionContext.actionContextHash],
             refusedObjects,
         };
     }
@@ -181,7 +177,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         createRefusal(
             'StaleRecoveryEpoch',
             'Action context is not current for the supplied recovery epoch.',
-            input.actionContext.actionContextDigest,
+            input.actionContext.actionContextHash,
             'ActionContext',
         ),
     );
@@ -189,7 +185,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
     return {
         ok: false,
         statusLabels: [],
-        acceptedDigests: [],
+        acceptedHashes: [],
         refusedObjects,
     };
 };
@@ -199,15 +195,18 @@ export const isActionCurrentForRecoveryEpoch = (
 ): ActionCurrentForRecoveryEpochResult => {
     try {
         return isActionCurrentForRecoveryEpochUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'InvalidSignedRoot',
-                    'Action recovery context could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Action recovery context could not be canonicalized or validated.',
+                        error,
+                    ),
                     undefined,
                     'ActionContext',
                 ),
@@ -221,38 +220,36 @@ const verifyRecoveryEpochUpdateUnchecked = (
 ): RecoveryEpochVerification => {
     const { update, currentEntry } = input;
     const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByDigest = buildBoardHeadMap(
-        input.boardEvidence.signedBoardHeads,
-    );
-    const updateInclusionHead = headsByDigest.get(
-        input.updateInclusionProof.boardHeadDigest,
+    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
+    const updateInclusionHead = headsByHash.get(
+        input.updateInclusionProof.boardHeadHash,
     );
     const refusedObjects: RefusalRecord[] = [...boardResult.refusedObjects];
-    const expectedDigest = deriveRecoveryEpochUpdateDigest({
-        boardHeadDigest: update.boardHeadDigest,
+    const expectedHash = deriveRecoveryEpochUpdateHash({
+        boardHeadHash: update.boardHeadHash,
         ceremonyId: update.ceremonyId,
         newDeviceEpoch: update.newDeviceEpoch,
         newRecoveryEpoch: update.newRecoveryEpoch,
-        newSigningPublicKeyDigest: update.newSigningPublicKeyDigest,
+        newSigningPublicKeyHash: update.newSigningPublicKeyHash,
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
         objectVersion: update.objectVersion,
         oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
-        recoveryPolicyDigest: update.recoveryPolicyDigest,
-        recoveryRootPublicKeyDigest: update.recoveryRootPublicKeyDigest,
+        recoveryPolicyHash: update.recoveryPolicyHash,
+        recoveryRootPublicKeyHash: update.recoveryRootPublicKeyHash,
         restoredFrozenReceiverStateCommitment:
             update.restoredFrozenReceiverStateCommitment,
         signerIdentity: update.signerIdentity,
     });
 
-    if (update.recoveryEpochUpdateDigest !== expectedDigest) {
+    if (update.recoveryEpochUpdateHash !== expectedHash) {
         refusedObjects.push(
             createRefusal(
                 'RecoveryUpdateInvalid',
-                'Recovery epoch update digest does not match its canonical payload.',
-                update.recoveryEpochUpdateDigest,
+                'Recovery epoch update hash does not match its canonical payload.',
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
@@ -269,7 +266,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
             createRefusal(
                 'RecoveryUpdateInvalid',
                 'Recovery epoch update object shape is not canonical.',
-                update.recoveryEpochUpdateDigest,
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
@@ -279,7 +276,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
             createRefusal(
                 'WrongCeremony',
                 'Recovery epoch update ceremony does not match the supplied board evidence.',
-                update.recoveryEpochUpdateDigest,
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
@@ -293,30 +290,30 @@ const verifyRecoveryEpochUpdateUnchecked = (
             createRefusal(
                 'RecoveryUpdateStale',
                 'Recovery epoch update does not extend the current recovery state.',
-                update.recoveryEpochUpdateDigest,
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
     }
-    if (update.recoveryPolicyDigest !== input.expectedRecoveryPolicyDigest) {
+    if (update.recoveryPolicyHash !== input.expectedRecoveryPolicyHash) {
         refusedObjects.push(
             createRefusal(
                 'RecoveryUpdateInvalid',
-                'Recovery epoch update does not bind the expected recovery policy digest.',
-                update.recoveryEpochUpdateDigest,
+                'Recovery epoch update does not bind the expected recovery policy hash.',
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
     }
     if (
-        update.recoveryRootPublicKeyDigest !==
-        input.expectedRecoveryRootPublicKeyDigest
+        update.recoveryRootPublicKeyHash !==
+        input.expectedRecoveryRootPublicKeyHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'WrongPublicKey',
                 'Recovery epoch update must be signed by the expected recovery root.',
-                update.recoveryEpochUpdateDigest,
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
@@ -330,22 +327,22 @@ const verifyRecoveryEpochUpdateUnchecked = (
             createRefusal(
                 'RecoveryUpdateInvalid',
                 'Recovery epoch update must advance recovery and device epochs by one.',
-                update.recoveryEpochUpdateDigest,
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
     }
     if (
-        update.newSigningPublicKeyDigest.length === 0 ||
+        update.newSigningPublicKeyHash.length === 0 ||
         update.restoredFrozenReceiverStateCommitment.length === 0 ||
         update.newTrusteeSetupCommitment.length === 0 ||
-        update.recoveryPolicyDigest.length === 0
+        update.recoveryPolicyHash.length === 0
     ) {
         refusedObjects.push(
             createRefusal(
                 'RecoveryUpdateInvalid',
                 'Recovery epoch update must bind new signing, receiver-state, trustee-setup, and recovery-policy commitments.',
-                update.recoveryEpochUpdateDigest,
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
@@ -353,14 +350,14 @@ const verifyRecoveryEpochUpdateUnchecked = (
     if (
         input.updateInclusionProof.includedObjectType !==
             'RecoveryEpochUpdate' ||
-        input.updateInclusionProof.includedObjectDigest !==
-            update.recoveryEpochUpdateDigest
+        input.updateInclusionProof.includedObjectHash !==
+            update.recoveryEpochUpdateHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'InclusionProofInvalid',
                 'Recovery epoch update inclusion proof does not bind the update.',
-                input.updateInclusionProof.inclusionProofDigest,
+                input.updateInclusionProof.inclusionProofHash,
                 'RecoveryEpochUpdate',
             ),
         );
@@ -368,29 +365,29 @@ const verifyRecoveryEpochUpdateUnchecked = (
     if (
         input.updateInclusionProof.boardSequence !==
             update.oldActionCutoffBoardSequence ||
-        updateInclusionHead?.previousHeadDigest !== update.boardHeadDigest
+        updateInclusionHead?.previousHeadHash !== update.boardHeadHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'RecoveryUpdateInvalid',
                 'Recovery epoch update inclusion must extend the signed recovery context head at the old-action cutoff.',
-                update.recoveryEpochUpdateDigest,
+                update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),
         );
     }
-    if (!headsByDigest.has(update.boardHeadDigest)) {
+    if (!headsByHash.has(update.boardHeadHash)) {
         refusedObjects.push(
             createRefusal(
                 'UnknownBoardHead',
                 'Recovery epoch update binds an unknown signed board head.',
-                update.boardHeadDigest,
+                update.boardHeadHash,
                 'BoardHead',
             ),
         );
     }
     refusedObjects.push(
-        ...verifyInclusionProof(input.updateInclusionProof, headsByDigest),
+        ...verifyInclusionProof(input.updateInclusionProof, headsByHash),
     );
     for (const conflictingUpdate of input.conflictingUpdates ?? []) {
         if (
@@ -399,14 +396,14 @@ const verifyRecoveryEpochUpdateUnchecked = (
                 update.previousRecoveryEpoch &&
             conflictingUpdate.previousDeviceEpoch ===
                 update.previousDeviceEpoch &&
-            conflictingUpdate.recoveryEpochUpdateDigest !==
-                update.recoveryEpochUpdateDigest
+            conflictingUpdate.recoveryEpochUpdateHash !==
+                update.recoveryEpochUpdateHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'RecoveryUpdateConflict',
                     'Supplied evidence contains conflicting recovery updates for the same prior epoch.',
-                    conflictingUpdate.recoveryEpochUpdateDigest,
+                    conflictingUpdate.recoveryEpochUpdateHash,
                     'RecoveryEpochUpdate',
                 ),
             );
@@ -419,26 +416,26 @@ const verifyRecoveryEpochUpdateUnchecked = (
         signerRole: 'RecoveryRoot',
         signerIdentity: update.signerIdentity,
         ceremonyId: update.ceremonyId,
-        manifestDigest: null,
-        objectRoot: update.recoveryEpochUpdateDigest,
-        boardHeadDigest: update.boardHeadDigest,
+        manifestHash: null,
+        objectRoot: update.recoveryEpochUpdateHash,
+        boardHeadHash: update.boardHeadHash,
         byteLength: signedObjectRootByteLength,
         recoveryEpoch: update.previousRecoveryEpoch,
         deviceEpoch: update.previousDeviceEpoch,
-        contextDigest: defaultSignedRootContextDigest,
-        publicKeyDigest: input.expectedRecoveryRootPublicKeyDigest,
+        contextHash: defaultSignedRootContextHash,
+        publicKeyHash: input.expectedRecoveryRootPublicKeyHash,
     });
     refusedObjects.push(...signatureResult.refusedObjects);
 
     return {
         ok: refusedObjects.length === 0,
         statusLabels: boardResult.statusLabels,
-        acceptedDigests:
+        acceptedHashes:
             refusedObjects.length === 0
                 ? [
-                      ...boardResult.acceptedDigests,
-                      update.recoveryEpochUpdateDigest,
-                      input.updateInclusionProof.inclusionProofDigest,
+                      ...boardResult.acceptedHashes,
+                      update.recoveryEpochUpdateHash,
+                      input.updateInclusionProof.inclusionProofHash,
                   ]
                 : [],
         refusedObjects,
@@ -461,15 +458,18 @@ export const verifyRecoveryEpochUpdate = (
 ): RecoveryEpochVerification => {
     try {
         return verifyRecoveryEpochUpdateUnchecked(input);
-    } catch {
+    } catch (error) {
         return {
             ok: false,
             statusLabels: [],
-            acceptedDigests: [],
+            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'RecoveryUpdateInvalid',
-                    'Recovery epoch update evidence could not be canonicalized or validated.',
+                    verificationExceptionMessage(
+                        'Recovery epoch update evidence could not be canonicalized or validated.',
+                        error,
+                    ),
                     undefined,
                     'RecoveryEpochUpdate',
                 ),

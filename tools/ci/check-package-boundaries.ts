@@ -1,388 +1,436 @@
-import { promises as fs } from 'node:fs';
+import { promises as fileSystem } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
-import {
-    ScriptKind,
-    ScriptTarget,
-    SyntaxKind,
-    createSourceFile,
-    forEachChild,
-    isCallExpression,
-    isExportDeclaration,
-    isImportDeclaration,
-    isImportTypeNode,
-    isLiteralTypeNode,
-    isStringLiteral,
-    type Node,
-    type StringLiteral,
-} from 'typescript';
 
 import {
     collectFiles,
     isWithinDirectory,
     toPosixPath,
-} from '../internal/files.js';
+} from '#tools/internal/files.js';
+import { extractModuleSpecifiers } from '#tools/internal/module-specifiers.js';
 
-const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const packagesRoot = path.resolve(repoRoot, 'packages');
-const codeFilePattern = /\.(?:cts|mts|ts|tsx|js|mjs)$/u;
-
-export type WorkspacePackage = {
-    directoryPath: string;
-    internalDependencies: readonly string[];
-    name: string;
+type WorkspacePackage = {
+    readonly directoryPath: string;
+    readonly name: string;
+    readonly sourceDirectoryPath: string;
 };
 
-export type ImportObservation = {
-    filePath: string;
-    packageName: string;
-    specifier: string;
+type BoundaryViolation = {
+    readonly filePath: string;
+    readonly message: string;
 };
 
-export const allowedInternalDependencyMap = {
-    'sealed-lattice': [
-        '@sealed-lattice/types',
+const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
+const packagesDirectoryPath = path.resolve(workspaceRoot, 'packages');
+const testVectorsDirectoryPath = path.resolve(workspaceRoot, 'test-vectors');
+const testsDirectoryPath = path.resolve(workspaceRoot, 'tests');
+const testSupportDirectoryPath = path.resolve(testsDirectoryPath, 'support');
+const toolsDirectoryPath = path.resolve(workspaceRoot, 'tools');
+const typedocToolsDirectoryPath = path.resolve(
+    workspaceRoot,
+    'docs',
+    'typedoc',
+);
+const packageSourceExtensions = ['.ts', '.tsx', '.mts', '.cts'] as const;
+const repositoryImportPolicyExtensions = [
+    '.ts',
+    '.tsx',
+    '.mts',
+    '.cts',
+    '.js',
+    '.mjs',
+    '.cjs',
+] as const;
+const repositoryPrivateAliasPrefixes = [
+    '#packages/',
+    '#tests/',
+    '#tools/',
+    '#test-vectors/',
+] as const;
+
+const allowedWorkspaceImportsByPackageName = new Map<
+    string,
+    ReadonlySet<string>
+>([
+    ['@sealed-lattice/types', new Set()],
+    ['@sealed-lattice/crypto', new Set(['@sealed-lattice/types'])],
+    ['@sealed-lattice/wasm', new Set(['@sealed-lattice/types'])],
+    [
         '@sealed-lattice/protocol',
-        '@sealed-lattice/crypto',
-        '@sealed-lattice/wasm',
+        new Set(['@sealed-lattice/crypto', '@sealed-lattice/types']),
     ],
-    '@sealed-lattice/types': [],
-    '@sealed-lattice/protocol': [
-        '@sealed-lattice/crypto',
-        '@sealed-lattice/types',
-    ],
-    '@sealed-lattice/crypto': ['@sealed-lattice/types'],
-    '@sealed-lattice/wasm': ['@sealed-lattice/types'],
-    '@sealed-lattice/testkit': [
+    [
         'sealed-lattice',
-        '@sealed-lattice/types',
-        '@sealed-lattice/crypto',
-        '@sealed-lattice/wasm',
+        new Set([
+            '@sealed-lattice/crypto',
+            '@sealed-lattice/protocol',
+            '@sealed-lattice/types',
+            '@sealed-lattice/wasm',
+        ]),
     ],
-} as const satisfies Record<string, readonly string[]>;
+]);
 
-type PackageJsonShape = {
-    dependencies?: Record<string, string>;
-    devDependencies?: Record<string, string>;
-    name: string;
-    optionalDependencies?: Record<string, string>;
-    peerDependencies?: Record<string, string>;
-};
+const readJsonFile = async (filePath: string): Promise<unknown> =>
+    JSON.parse(await fileSystem.readFile(filePath, 'utf8')) as unknown;
 
-export const collectInternalDependencies = (
-    packageJson: PackageJsonShape,
-    workspacePackageNames: readonly string[],
-): string[] => {
-    const dependencyNames = new Set<string>([
-        ...Object.keys(packageJson.dependencies ?? {}),
-        ...Object.keys(packageJson.devDependencies ?? {}),
-        ...Object.keys(packageJson.optionalDependencies ?? {}),
-        ...Object.keys(packageJson.peerDependencies ?? {}),
-    ]);
+const readWorkspacePackages = async (): Promise<
+    readonly WorkspacePackage[]
+> => {
+    const packageDirectories = await fileSystem.readdir(packagesDirectoryPath, {
+        withFileTypes: true,
+    });
+    const packages: WorkspacePackage[] = [];
 
-    return [...dependencyNames]
-        .filter((dependencyName) =>
-            workspacePackageNames.includes(dependencyName),
-        )
-        .sort();
-};
+    for (const packageDirectory of packageDirectories) {
+        if (!packageDirectory.isDirectory()) {
+            continue;
+        }
 
-const collectImportSpecifierLiterals = (
-    sourceText: string,
-): readonly StringLiteral[] => {
-    const sourceFile = createSourceFile(
-        'package-boundary-source.tsx',
-        sourceText,
-        ScriptTarget.Latest,
-        true,
-        ScriptKind.TSX,
-    );
-    const specifiers: StringLiteral[] = [];
-
-    const visit = (node: Node): void => {
+        const directoryPath = path.resolve(
+            packagesDirectoryPath,
+            packageDirectory.name,
+        );
+        const packageJson = await readJsonFile(
+            path.resolve(directoryPath, 'package.json'),
+        );
         if (
-            isImportDeclaration(node) &&
-            isStringLiteral(node.moduleSpecifier)
+            typeof packageJson !== 'object' ||
+            packageJson === null ||
+            !('name' in packageJson) ||
+            typeof packageJson.name !== 'string'
         ) {
-            specifiers.push(node.moduleSpecifier);
-        } else if (
-            isExportDeclaration(node) &&
-            node.moduleSpecifier !== undefined &&
-            isStringLiteral(node.moduleSpecifier)
-        ) {
-            specifiers.push(node.moduleSpecifier);
-        } else if (
-            isCallExpression(node) &&
-            node.expression.kind === SyntaxKind.ImportKeyword
-        ) {
-            const [moduleSpecifier] = node.arguments;
-            if (
-                moduleSpecifier !== undefined &&
-                isStringLiteral(moduleSpecifier)
-            ) {
-                specifiers.push(moduleSpecifier);
-            }
-        } else if (isImportTypeNode(node)) {
-            const importTypeArgument = node.argument;
-            if (
-                isLiteralTypeNode(importTypeArgument) &&
-                isStringLiteral(importTypeArgument.literal)
-            ) {
-                specifiers.push(importTypeArgument.literal);
-            }
-        }
-
-        forEachChild(node, visit);
-    };
-
-    visit(sourceFile);
-
-    return specifiers;
-};
-
-export const extractImportSpecifiers = (sourceText: string): string[] => {
-    const specifiers = new Set<string>();
-
-    for (const moduleSpecifier of collectImportSpecifierLiterals(sourceText)) {
-        specifiers.add(moduleSpecifier.text);
-    }
-
-    return [...specifiers];
-};
-
-export const validateDeclaredInternalDependencies = (
-    workspacePackages: readonly WorkspacePackage[],
-): string[] => {
-    const failures: string[] = [];
-
-    for (const workspacePackage of workspacePackages) {
-        const allowedDependencies: string[] = [
-            ...(allowedInternalDependencyMap[
-                workspacePackage.name as keyof typeof allowedInternalDependencyMap
-            ] ?? []),
-        ];
-
-        for (const dependencyName of workspacePackage.internalDependencies) {
-            if (!allowedDependencies.includes(dependencyName)) {
-                failures.push(
-                    `${workspacePackage.name} declares forbidden internal dependency ${dependencyName}`,
-                );
-            }
-        }
-    }
-
-    return failures;
-};
-
-export const findDependencyCycleFailures = (
-    workspacePackages: readonly WorkspacePackage[],
-): string[] => {
-    const dependencyMap = new Map(
-        workspacePackages.map((workspacePackage) => [
-            workspacePackage.name,
-            workspacePackage.internalDependencies,
-        ]),
-    );
-    const visited = new Set<string>();
-    const activeStack: string[] = [];
-    const reportedCycles = new Set<string>();
-
-    const visitPackage = (packageName: string): void => {
-        if (activeStack.includes(packageName)) {
-            const cycleStartIndex = activeStack.indexOf(packageName);
-            const cyclePath = [
-                ...activeStack.slice(cycleStartIndex),
-                packageName,
-            ];
-            reportedCycles.add(cyclePath.join(' -> '));
-            return;
-        }
-
-        if (visited.has(packageName)) {
-            return;
-        }
-
-        visited.add(packageName);
-        activeStack.push(packageName);
-
-        /* v8 ignore next */
-        for (const dependencyName of dependencyMap.get(packageName) ?? []) {
-            visitPackage(dependencyName);
-        }
-
-        activeStack.pop();
-    };
-
-    for (const workspacePackage of workspacePackages) {
-        visitPackage(workspacePackage.name);
-    }
-
-    return [...reportedCycles].sort();
-};
-
-export const validateImportBoundaries = (
-    workspacePackages: readonly WorkspacePackage[],
-    importObservations: readonly ImportObservation[],
-): string[] => {
-    const failures: string[] = [];
-    const workspacePackageNames = workspacePackages.map(
-        (workspacePackage) => workspacePackage.name,
-    );
-    const workspacePackageNameSet = new Set(workspacePackageNames);
-    const workspacePackageByName = new Map(
-        workspacePackages.map((workspacePackage) => [
-            workspacePackage.name,
-            workspacePackage,
-        ]),
-    );
-
-    for (const importObservation of importObservations) {
-        const sourcePackage = workspacePackageByName.get(
-            importObservation.packageName,
-        );
-        if (sourcePackage === undefined) {
-            continue;
-        }
-
-        for (const workspacePackageName of workspacePackageNames) {
-            if (
-                importObservation.specifier.startsWith(
-                    `${workspacePackageName}/`,
-                )
-            ) {
-                failures.push(
-                    `${importObservation.packageName} deep-imports ${importObservation.specifier} from ${toPosixPath(path.relative(repoRoot, importObservation.filePath))}`,
-                );
-                break;
-            }
-        }
-
-        if (workspacePackageNameSet.has(importObservation.specifier)) {
-            const targetPackage = workspacePackageByName.get(
-                importObservation.specifier,
-            );
-            if (targetPackage?.name === sourcePackage.name) {
-                continue;
-            }
-            if (
-                targetPackage !== undefined &&
-                !sourcePackage.internalDependencies.includes(targetPackage.name)
-            ) {
-                failures.push(
-                    `${importObservation.packageName} imports undeclared internal package ${targetPackage.name} from ${path.relative(repoRoot, importObservation.filePath).replace(/\\/g, '/')}`,
-                );
-            }
-            continue;
-        }
-
-        if (!importObservation.specifier.startsWith('.')) {
-            continue;
-        }
-
-        const resolvedTargetPath = path.resolve(
-            path.dirname(importObservation.filePath),
-            importObservation.specifier,
-        );
-        const targetPackage = workspacePackages.find((workspacePackage) =>
-            isWithinDirectory(
-                workspacePackage.directoryPath,
-                resolvedTargetPath,
-            ),
-        );
-
-        if (
-            targetPackage !== undefined &&
-            targetPackage.name !== importObservation.packageName
-        ) {
-            failures.push(
-                `${importObservation.packageName} uses cross-package relative import ${importObservation.specifier} from ${toPosixPath(path.relative(repoRoot, importObservation.filePath))} into ${targetPackage.name}`,
+            throw new Error(
+                `${toPosixPath(path.relative(workspaceRoot, directoryPath))}/package.json must define a package name.`,
             );
         }
+
+        packages.push({
+            directoryPath,
+            name: packageJson.name,
+            sourceDirectoryPath: path.resolve(directoryPath, 'src'),
+        });
     }
 
-    return failures;
+    return packages.sort((left, right) => left.name.localeCompare(right.name));
 };
 
-/* v8 ignore start */
-const collectCodeFiles = async (directoryPath: string): Promise<string[]> => {
-    return collectFiles(directoryPath, {
-        allowMissing: true,
-        fileNamePattern: codeFilePattern,
+const findWorkspacePackageBySpecifier = (
+    moduleSpecifier: string,
+    workspacePackages: readonly WorkspacePackage[],
+): WorkspacePackage | undefined =>
+    workspacePackages.find(
+        (workspacePackage) =>
+            moduleSpecifier === workspacePackage.name ||
+            moduleSpecifier.startsWith(`${workspacePackage.name}/`),
+    );
+
+const packageSourcePath = (
+    workspacePackage: WorkspacePackage,
+    filePath: string,
+): string =>
+    toPosixPath(path.relative(workspacePackage.sourceDirectoryPath, filePath));
+
+const workspacePath = (filePath: string): string =>
+    toPosixPath(path.relative(workspaceRoot, filePath));
+
+const pushViolation = (
+    violations: BoundaryViolation[],
+    workspacePackage: WorkspacePackage,
+    filePath: string,
+    message: string,
+): void => {
+    violations.push({
+        filePath: `${workspacePackage.name}:${packageSourcePath(workspacePackage, filePath)}`,
+        message,
     });
 };
 
-const loadWorkspacePackages = async (): Promise<WorkspacePackage[]> => {
-    const entries = await fs.readdir(packagesRoot, { withFileTypes: true });
-    const packageJsonPaths = entries
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => path.join(packagesRoot, entry.name, 'package.json'));
-    const packageJsonContents = await Promise.all(
-        packageJsonPaths.map(async (packageJsonPath) => ({
-            directoryPath: path.dirname(packageJsonPath),
-            packageJson: JSON.parse(
-                await fs.readFile(packageJsonPath, 'utf8'),
-            ) as PackageJsonShape,
-        })),
-    );
-    const workspacePackageNames = packageJsonContents.map(
-        ({ packageJson }) => packageJson.name,
-    );
-
-    return packageJsonContents.map(({ directoryPath, packageJson }) => ({
-        directoryPath,
-        internalDependencies: collectInternalDependencies(
-            packageJson,
-            workspacePackageNames,
-        ),
-        name: packageJson.name,
-    }));
+const pushFileViolation = (
+    violations: BoundaryViolation[],
+    filePath: string,
+    message: string,
+): void => {
+    violations.push({
+        filePath: workspacePath(filePath),
+        message,
+    });
 };
 
-const collectImportObservations = async (
+const isRelativeModuleSpecifier = (moduleSpecifier: string): boolean =>
+    moduleSpecifier.startsWith('./') || moduleSpecifier.startsWith('../');
+
+const isRepositoryPrivateAlias = (moduleSpecifier: string): boolean =>
+    repositoryPrivateAliasPrefixes.some((prefix) =>
+        moduleSpecifier.startsWith(prefix),
+    );
+
+const checkRelativeSpecifier = (input: {
+    readonly filePath: string;
+    readonly moduleSpecifier: string;
+    readonly violations: BoundaryViolation[];
+    readonly workspacePackage: WorkspacePackage;
+}): void => {
+    const resolvedImportPath = path.resolve(
+        path.dirname(input.filePath),
+        input.moduleSpecifier,
+    );
+    if (
+        !isWithinDirectory(
+            input.workspacePackage.directoryPath,
+            resolvedImportPath,
+        )
+    ) {
+        pushViolation(
+            input.violations,
+            input.workspacePackage,
+            input.filePath,
+            `relative import crosses the package boundary: ${input.moduleSpecifier}`,
+        );
+    }
+};
+
+const checkWorkspacePackageSpecifier = (input: {
+    readonly filePath: string;
+    readonly moduleSpecifier: string;
+    readonly violations: BoundaryViolation[];
+    readonly workspacePackage: WorkspacePackage;
+    readonly workspacePackages: readonly WorkspacePackage[];
+}): void => {
+    const importedPackage = findWorkspacePackageBySpecifier(
+        input.moduleSpecifier,
+        input.workspacePackages,
+    );
+    if (importedPackage === undefined) {
+        return;
+    }
+
+    if (input.moduleSpecifier !== importedPackage.name) {
+        pushViolation(
+            input.violations,
+            input.workspacePackage,
+            input.filePath,
+            `workspace package imports must use package entry points, not deep imports: ${input.moduleSpecifier}`,
+        );
+    }
+
+    if (importedPackage.name === input.workspacePackage.name) {
+        return;
+    }
+
+    const allowedImports = allowedWorkspaceImportsByPackageName.get(
+        input.workspacePackage.name,
+    );
+    if (allowedImports?.has(importedPackage.name) === true) {
+        return;
+    }
+
+    pushViolation(
+        input.violations,
+        input.workspacePackage,
+        input.filePath,
+        `${input.workspacePackage.name} must not import ${importedPackage.name}`,
+    );
+};
+
+const checkModuleSpecifier = (input: {
+    readonly filePath: string;
+    readonly moduleSpecifier: string;
+    readonly violations: BoundaryViolation[];
+    readonly workspacePackage: WorkspacePackage;
+    readonly workspacePackages: readonly WorkspacePackage[];
+}): void => {
+    if (isRepositoryPrivateAlias(input.moduleSpecifier)) {
+        pushViolation(
+            input.violations,
+            input.workspacePackage,
+            input.filePath,
+            `package runtime source must not use repo-private aliases: ${input.moduleSpecifier}`,
+        );
+        return;
+    }
+
+    if (isRelativeModuleSpecifier(input.moduleSpecifier)) {
+        checkRelativeSpecifier(input);
+        return;
+    }
+
+    checkWorkspacePackageSpecifier(input);
+};
+
+const packageSourceAliasForTarget = (
+    targetPath: string,
     workspacePackages: readonly WorkspacePackage[],
-): Promise<ImportObservation[]> => {
-    const importObservations: ImportObservation[] = [];
+): string | undefined => {
+    const targetPackage = workspacePackages.find((workspacePackage) =>
+        isWithinDirectory(workspacePackage.sourceDirectoryPath, targetPath),
+    );
+    if (targetPackage === undefined) {
+        return undefined;
+    }
+
+    const packageDirectoryName = path.basename(targetPackage.directoryPath);
+    const packageSourceRelativePath = toPosixPath(
+        path.relative(targetPackage.sourceDirectoryPath, targetPath),
+    );
+
+    return `#packages/${packageDirectoryName}/src/${packageSourceRelativePath}`;
+};
+
+const repositoryAliasForTarget = (
+    filePath: string,
+    moduleSpecifier: string,
+    workspacePackages: readonly WorkspacePackage[],
+): string | undefined => {
+    if (!isRelativeModuleSpecifier(moduleSpecifier)) {
+        return undefined;
+    }
+
+    const targetPath = path.resolve(path.dirname(filePath), moduleSpecifier);
+    const packageSourceAlias = packageSourceAliasForTarget(
+        targetPath,
+        workspacePackages,
+    );
+    if (packageSourceAlias !== undefined) {
+        return packageSourceAlias;
+    }
+
+    if (isWithinDirectory(testVectorsDirectoryPath, targetPath)) {
+        return `#test-vectors/${toPosixPath(path.relative(testVectorsDirectoryPath, targetPath))}`;
+    }
+
+    const fileIsInTestSupport = isWithinDirectory(
+        testSupportDirectoryPath,
+        filePath,
+    );
+    if (
+        !fileIsInTestSupport &&
+        isWithinDirectory(testSupportDirectoryPath, targetPath)
+    ) {
+        return `#tests/${toPosixPath(path.relative(testsDirectoryPath, targetPath))}`;
+    }
+
+    const fileIsInTools = isWithinDirectory(toolsDirectoryPath, filePath);
+    const targetIsInTools = isWithinDirectory(toolsDirectoryPath, targetPath);
+    if (!targetIsInTools) {
+        return undefined;
+    }
+
+    if (!fileIsInTools) {
+        return `#tools/${toPosixPath(path.relative(toolsDirectoryPath, targetPath))}`;
+    }
+
+    const [fileToolArea] = toPosixPath(
+        path.relative(toolsDirectoryPath, filePath),
+    ).split('/');
+    const [targetToolArea] = toPosixPath(
+        path.relative(toolsDirectoryPath, targetPath),
+    ).split('/');
+
+    return moduleSpecifier.startsWith('../') && fileToolArea !== targetToolArea
+        ? `#tools/${toPosixPath(path.relative(toolsDirectoryPath, targetPath))}`
+        : undefined;
+};
+
+const collectRepositoryImportPolicyFiles = async (
+    workspacePackages: readonly WorkspacePackage[],
+): Promise<readonly string[]> => {
+    const filePaths = new Set<string>();
+    const addFiles = async (directoryPath: string): Promise<void> => {
+        const files = await collectFiles(directoryPath, {
+            allowMissing: true,
+            extensions: repositoryImportPolicyExtensions,
+        });
+        for (const filePath of files) {
+            filePaths.add(filePath);
+        }
+    };
 
     for (const workspacePackage of workspacePackages) {
-        const codeFiles = [
-            ...(await collectCodeFiles(
-                path.join(workspacePackage.directoryPath, 'src'),
-            )),
-            ...(await collectCodeFiles(
-                path.join(workspacePackage.directoryPath, 'tests'),
-            )),
-        ];
+        await addFiles(path.resolve(workspacePackage.directoryPath, 'tests'));
+    }
 
-        for (const filePath of codeFiles) {
-            const sourceText = await fs.readFile(filePath, 'utf8');
-            for (const specifier of extractImportSpecifiers(sourceText)) {
-                importObservations.push({
+    await addFiles(testsDirectoryPath);
+    await addFiles(toolsDirectoryPath);
+    await addFiles(typedocToolsDirectoryPath);
+
+    return [...filePaths].sort();
+};
+
+const checkRepositoryImportPolicy = async (
+    workspacePackages: readonly WorkspacePackage[],
+    violations: BoundaryViolation[],
+): Promise<void> => {
+    const files = await collectRepositoryImportPolicyFiles(workspacePackages);
+
+    for (const filePath of files) {
+        const sourceText = await fileSystem.readFile(filePath, 'utf8');
+        for (const moduleSpecifier of extractModuleSpecifiers(
+            sourceText,
+            filePath,
+        )) {
+            const alias = repositoryAliasForTarget(
+                filePath,
+                moduleSpecifier,
+                workspacePackages,
+            );
+            if (alias === undefined) {
+                continue;
+            }
+
+            pushFileViolation(
+                violations,
+                filePath,
+                `test and tooling imports that cross repository boundaries must use ${alias} instead of ${moduleSpecifier}`,
+            );
+        }
+    }
+};
+
+export const checkPackageBoundaries = async (): Promise<
+    readonly BoundaryViolation[]
+> => {
+    const workspacePackages = await readWorkspacePackages();
+    const violations: BoundaryViolation[] = [];
+
+    for (const workspacePackage of workspacePackages) {
+        const sourceFiles = await collectFiles(
+            workspacePackage.sourceDirectoryPath,
+            {
+                extensions: packageSourceExtensions,
+            },
+        );
+
+        for (const filePath of sourceFiles) {
+            const sourceText = await fileSystem.readFile(filePath, 'utf8');
+            for (const moduleSpecifier of extractModuleSpecifiers(
+                sourceText,
+                filePath,
+            )) {
+                checkModuleSpecifier({
                     filePath,
-                    packageName: workspacePackage.name,
-                    specifier,
+                    moduleSpecifier,
+                    violations,
+                    workspacePackage,
+                    workspacePackages,
                 });
             }
         }
     }
 
-    return importObservations;
+    await checkRepositoryImportPolicy(workspacePackages, violations);
+
+    return violations;
 };
 
 const main = async (): Promise<void> => {
-    const workspacePackages = await loadWorkspacePackages();
-    const importObservations =
-        await collectImportObservations(workspacePackages);
-    const failures = [
-        ...validateDeclaredInternalDependencies(workspacePackages),
-        ...findDependencyCycleFailures(workspacePackages).map(
-            (cyclePath) => `Dependency cycle detected: ${cyclePath}`,
-        ),
-        ...validateImportBoundaries(workspacePackages, importObservations),
-    ];
-
-    if (failures.length > 0) {
-        throw new Error(failures.join('\n'));
+    const violations = await checkPackageBoundaries();
+    if (violations.length > 0) {
+        console.error('Package boundary verification failed:');
+        for (const violation of violations) {
+            console.error(`- ${violation.filePath}: ${violation.message}`);
+        }
+        process.exitCode = 1;
+        return;
     }
 
     console.log('Package boundary verification passed.');
@@ -396,4 +444,3 @@ const isMainModule =
 if (isMainModule) {
     void main();
 }
-/* v8 ignore stop */

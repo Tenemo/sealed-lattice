@@ -1,4 +1,4 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     BallotPrivacyVerification,
     BallotProofComponentProofBundle,
@@ -9,7 +9,7 @@ import type {
     ShareCommitment,
 } from '@sealed-lattice/types';
 
-import { createRefusal } from '../../common/verification-helpers.js';
+import { createRefusal } from '../verification-helpers.js';
 
 import { collectBallotProofStructuralRefusals } from './ballot-proof-structure-checks.js';
 import {
@@ -22,8 +22,8 @@ import type {
 } from './object-contracts.js';
 import {
     createReceiverReferenceKey,
-    deriveClaimBearingBallotPackageDigest,
-    deriveShareCommitmentDigest,
+    deriveClaimBearingBallotPackageHash,
+    deriveShareCommitmentHash,
     hasOwnProperty,
     isUnknownObject,
     omitProperty,
@@ -44,9 +44,9 @@ const collectShareCommitmentStructuralRefusals = (
     const refusedObjects: RefusalRecord[] = [];
     const shareCommitmentPayload = omitProperty(
         shareCommitment,
-        'shareCommitmentDigest',
+        'shareCommitmentHash',
     );
-    const expectedShareCommitmentDigest = deriveShareCommitmentDigest(
+    const expectedShareCommitmentHash = deriveShareCommitmentHash(
         shareCommitmentPayload,
     );
 
@@ -55,13 +55,13 @@ const collectShareCommitmentStructuralRefusals = (
         shareCommitment.objectVersion !== 1 ||
         !Number.isSafeInteger(shareCommitment.shareVectorWidth) ||
         shareCommitment.shareVectorWidth <= 0 ||
-        shareCommitment.shareCommitmentDigest !== expectedShareCommitmentDigest
+        shareCommitment.shareCommitmentHash !== expectedShareCommitmentHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Share commitment shell digest or shape is invalid.',
-                shareCommitment.shareCommitmentDigest,
+                'Share commitment shell hash or shape is invalid.',
+                shareCommitment.shareCommitmentHash,
             ),
         );
     }
@@ -82,24 +82,23 @@ const collectShareCommitmentStructuralRefusals = (
                         return BigInt(coefficient) < shareCommitmentModulus;
                     }),
             );
-        const expectedCommitmentBodyDigest = deriveProtocolDigest(
-            'ShareCommitmentDigest',
+        const expectedCommitmentBodyHash = deriveProtocolHash(
+            'ShareCommitmentHash',
             {
                 commitmentPolynomialVector,
-                profileDigest: shareCommitment.shareCommitmentProfileDigest,
+                profileHash: shareCommitment.shareCommitmentProfileHash,
             },
         );
 
         if (
             !vectorShapeIsValid ||
-            shareCommitment.commitmentBodyDigest !==
-                expectedCommitmentBodyDigest
+            shareCommitment.commitmentBodyHash !== expectedCommitmentBodyHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
-                    'Share commitment polynomial vector is malformed or not bound to the commitment body digest.',
-                    shareCommitment.shareCommitmentDigest,
+                    'Share commitment polynomial vector is malformed or not bound to the commitment body hash.',
+                    shareCommitment.shareCommitmentHash,
                 ),
             );
         }
@@ -113,7 +112,7 @@ const collectShareCommitmentStructuralRefusals = (
             createRefusal(
                 'BallotPackageInvalid',
                 'Share commitment shell must not expose witness material.',
-                shareCommitment.shareCommitmentDigest,
+                shareCommitment.shareCommitmentHash,
             ),
         );
     }
@@ -125,7 +124,6 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
     ballotPackage: ScopedRelationBearingBallotPackageVerificationShell,
     options: {
         readonly casualMicroRosterAcknowledged?: boolean;
-        readonly unsafeSmallRosterAcknowledged?: boolean;
     } = {},
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [
@@ -139,8 +137,6 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
                 claimBearingPackage: true,
                 dynamicRosterProfileEvidence:
                     ballotPackage.dynamicRosterProfileEvidence,
-                unsafeSmallRosterAcknowledged:
-                    options.unsafeSmallRosterAcknowledged,
             },
         ),
         ...collectReceiverKeyProofRootEvidenceStructuralRefusals(
@@ -173,10 +169,10 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
             commitmentReference,
         ]),
     );
-    const expectedPackageDigest = isUnknownObject(
+    const expectedPackageHash = isUnknownObject(
         ballotPackage.receiverKeyProofRootEvidence,
     )
-        ? deriveClaimBearingBallotPackageDigest({
+        ? deriveClaimBearingBallotPackageHash({
               ballotProofStatement: statement,
               receiverKeyProofRootEvidence:
                   ballotPackage.receiverKeyProofRootEvidence,
@@ -188,15 +184,15 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
     if (
         ballotPackage.objectType !== 'ClaimBearingBallotPackage' ||
         ballotPackage.objectVersion !== 1 ||
-        ballotPackage.ballotPackageDigest !== statement.ballotPackageDigest ||
-        expectedPackageDigest === undefined ||
-        ballotPackage.ballotPackageDigest !== expectedPackageDigest
+        ballotPackage.ballotPackageHash !== statement.ballotPackageHash ||
+        expectedPackageHash === undefined ||
+        ballotPackage.ballotPackageHash !== expectedPackageHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'BallotPackageInvalid',
-                'Claim-bearing ballot package shell digest or shape is invalid.',
-                ballotPackage.ballotPackageDigest,
+                'Claim-bearing ballot package shell hash or shape is invalid.',
+                ballotPackage.ballotPackageHash,
             ),
         );
     }
@@ -208,7 +204,7 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
             createRefusal(
                 'BallotPackageInvalid',
                 'Claim-bearing ballot package verification requires the public ballot proof bytes when a component proof bundle is supplied.',
-                ballotPackage.ballotPackageDigest,
+                ballotPackage.ballotPackageHash,
             ),
         );
     }
@@ -220,7 +216,7 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
             createRefusal(
                 'BallotPackageInvalid',
                 'Claim-bearing ballot package must include every receiver payload referenced by the statement.',
-                ballotPackage.ballotPackageDigest,
+                ballotPackage.ballotPackageHash,
             ),
         );
     }
@@ -232,7 +228,7 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
             createRefusal(
                 'BallotPackageInvalid',
                 'Claim-bearing ballot package must include every share commitment referenced by the statement.',
-                ballotPackage.ballotPackageDigest,
+                ballotPackage.ballotPackageHash,
             ),
         );
     }
@@ -247,8 +243,8 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
         const receiverKeyReference =
             statementReceiverKeyReferences.get(receiverReferenceKey);
         if (
-            payloadReference?.receiverPayloadDigest !==
-                receiverPayload.receiverPayloadDigest ||
+            payloadReference?.receiverPayloadHash !==
+                receiverPayload.receiverPayloadHash ||
             payloadReference.receiverPayloadCiphertextRoot !==
                 receiverPayload.receiverPayloadCiphertextRoot
         ) {
@@ -256,27 +252,26 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
                 createRefusal(
                     'BallotPackageInvalid',
                     'Receiver payload shell is not bound to the ballot proof statement reference.',
-                    receiverPayload.receiverPayloadDigest,
+                    receiverPayload.receiverPayloadHash,
                 ),
             );
         }
         if (
-            receiverKeyReference?.receiverPublicKeyDigest !==
-                receiverPayload.receiverPublicKeyDigest ||
+            receiverKeyReference?.receiverPublicKeyHash !==
+                receiverPayload.receiverPublicKeyHash ||
             receiverPayload.ceremonyId !== statement.ceremonyId ||
-            receiverPayload.manifestDigest !== statement.manifestDigest ||
-            receiverPayload.rosterDigest !== statement.rosterDigest ||
-            receiverPayload.pollSpecDigest !== statement.pollSpecDigest ||
-            receiverPayload.voterIdentityDigest !==
-                statement.voterIdentityDigest ||
-            receiverPayload.receiverEncryptionProfileDigest !==
-                statement.receiverEncryptionProfileDigest
+            receiverPayload.manifestHash !== statement.manifestHash ||
+            receiverPayload.rosterHash !== statement.rosterHash ||
+            receiverPayload.pollSpecHash !== statement.pollSpecHash ||
+            receiverPayload.voterIdentityHash !== statement.voterIdentityHash ||
+            receiverPayload.receiverEncryptionProfileHash !==
+                statement.receiverEncryptionProfileHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     'Receiver payload shell is not bound to the statement context or receiver key.',
-                    receiverPayload.receiverPayloadDigest,
+                    receiverPayload.receiverPayloadHash,
                 ),
             );
         }
@@ -292,14 +287,14 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
         const receiverKeyReference =
             statementReceiverKeyReferences.get(receiverReferenceKey);
         if (
-            commitmentReference?.shareCommitmentDigest !==
-            shareCommitment.shareCommitmentDigest
+            commitmentReference?.shareCommitmentHash !==
+            shareCommitment.shareCommitmentHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     'Share commitment shell is not bound to the ballot proof statement reference.',
-                    shareCommitment.shareCommitmentDigest,
+                    shareCommitment.shareCommitmentHash,
                 ),
             );
         }
@@ -309,17 +304,17 @@ const collectScopedRelationBearingPackageStructuralRefusals = (
             receiverKeyReference?.receiverRosterPosition !==
                 shareCommitment.receiverRosterPosition ||
             shareCommitment.ceremonyId !== statement.ceremonyId ||
-            shareCommitment.manifestDigest !== statement.manifestDigest ||
-            shareCommitment.rosterDigest !== statement.rosterDigest ||
+            shareCommitment.manifestHash !== statement.manifestHash ||
+            shareCommitment.rosterHash !== statement.rosterHash ||
             shareCommitment.shareVectorWidth !== statement.shareVectorWidth ||
-            shareCommitment.shareCommitmentProfileDigest !==
-                statement.shareCommitmentProfileDigest
+            shareCommitment.shareCommitmentProfileHash !==
+                statement.shareCommitmentProfileHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'BallotPackageInvalid',
                     'Share commitment shell is not bound to the statement context or receiver set.',
-                    shareCommitment.shareCommitmentDigest,
+                    shareCommitment.shareCommitmentHash,
                 ),
             );
         }
@@ -354,7 +349,6 @@ export const verifyBallotProof = (input: {
     readonly dynamicRosterProfileEvidence?: ScopedRelationBearingBallotPackageVerificationShell['dynamicRosterProfileEvidence'];
     readonly proofBytesHex?: string;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
 }): BallotPrivacyVerification => {
     const structuralRefusals = [
         ...collectBallotProofStructuralRefusals(
@@ -366,8 +360,6 @@ export const verifyBallotProof = (input: {
                     input.casualMicroRosterAcknowledged,
                 dynamicRosterProfileEvidence:
                     input.dynamicRosterProfileEvidence,
-                unsafeSmallRosterAcknowledged:
-                    input.unsafeSmallRosterAcknowledged,
             },
         ),
         ...collectBallotProofComponentProofBundleRefusals({
@@ -383,20 +375,19 @@ export const verifyBallotProof = (input: {
     if (input.componentProofBundle !== undefined) {
         return createUnavailableProofBackendVerification(
             'verifyBallotProof',
-            input.ballotProof.ballotProofRecordDigest,
+            input.ballotProof.ballotProofRecordHash,
         );
     }
 
     return createUnavailableProofBackendVerification(
         'verifyBallotProof',
-        input.ballotProof.ballotProofRecordDigest,
+        input.ballotProof.ballotProofRecordHash,
     );
 };
 
 export const verifyClaimBearingBallotPackage = (input: {
     readonly ballotPackage: ScopedRelationBearingBallotPackageVerificationShell;
     readonly casualMicroRosterAcknowledged?: boolean;
-    readonly unsafeSmallRosterAcknowledged?: boolean;
 }): BallotPrivacyVerification => {
     const structuralRefusals =
         collectScopedRelationBearingPackageStructuralRefusals(
@@ -404,8 +395,6 @@ export const verifyClaimBearingBallotPackage = (input: {
             {
                 casualMicroRosterAcknowledged:
                     input.casualMicroRosterAcknowledged,
-                unsafeSmallRosterAcknowledged:
-                    input.unsafeSmallRosterAcknowledged,
             },
         );
     if (structuralRefusals.length > 0) {
@@ -414,12 +403,12 @@ export const verifyClaimBearingBallotPackage = (input: {
     if (input.ballotPackage.componentProofBundle !== undefined) {
         return createUnavailableProofBackendVerification(
             'verifyClaimBearingBallotPackage',
-            input.ballotPackage.ballotPackageDigest,
+            input.ballotPackage.ballotPackageHash,
         );
     }
 
     return createUnavailableProofBackendVerification(
         'verifyClaimBearingBallotPackage',
-        input.ballotPackage.ballotPackageDigest,
+        input.ballotPackage.ballotPackageHash,
     );
 };

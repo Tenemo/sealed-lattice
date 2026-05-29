@@ -1,349 +1,43 @@
-import { deriveProtocolDigest } from '@sealed-lattice/crypto';
-import type {
-    BallotPackageCandidate,
-    BallotPackageShell,
-    BallotPackageWitness,
-    CanonicalBallotSetInput,
-    PollSpec,
-    TestAggregateShare,
-} from '@sealed-lattice/types';
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import type { BallotPackageWitness } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { derivePollSpecDigest } from '../../src/lifecycle/poll-spec';
-import { deriveFrozenRosterProfile } from '../../src/lifecycle/thresholds';
-import { derivePlaintextTopKOracle } from '../../src/plaintext-oracle/index';
-import { deriveBallotPolynomialSetDigest } from '../../src/pvss-ballot/ballot-polynomials';
+import {
+    ceremonyId,
+    manifestPolicyHashes,
+} from './election-foundation-fixture-constants';
+import {
+    aggregateSharesVector,
+    ballotAlgebraVector,
+    canonicalBallotSetVector,
+    createBallotSetInput,
+    createBallotWitness,
+    electionManifestHash,
+    incrementFieldElement,
+    mutateBallotPackage,
+    pollSpec,
+    pollSpecHash,
+    reHashAggregateShareForTest,
+    resignBallotPackageForTest,
+    rosterHash,
+    rosterEntries,
+    stripAggregateShareCommitmentHashForTest,
+    stripBallotPackageSignatureForTest,
+    thresholdProfile,
+    thresholdProfileHash,
+} from './pvss-ballot-algebra/fixtures.js';
+
+import { derivePlaintextTopKOracle } from '#packages/protocol/src/plaintext-oracle/index';
+import { deriveBallotPolynomialSetHash } from '#packages/protocol/src/pvss-ballot/ballot-polynomials';
 import {
     deriveCanonicalBallotSet,
     deriveTestAggregateShares,
-    deriveTestBallotPackage,
     reconstructAggregateTallyFromShares,
     verifyBallotPackageShell,
     verifyTestAggregateShareOpening,
     verifyTestShareCommitmentOpening,
-} from '../../src/pvss-ballot/index';
-import { deriveReceiverShareVectors } from '../../src/pvss-ballot/receiver-shares';
-
-import {
-    createBoardEvidence,
-    createBoardHead,
-    createBoardHeadWithObjects,
-} from './election-foundation-board-helpers';
-import {
-    ceremonyId,
-    getParticipantSigningPublicKeyDigest,
-    manifestPolicyDigests,
-    createSignature,
-} from './election-foundation-fixture-constants';
-
-import aggregateSharesVectorJson from '#test-vectors/pvss-ballot/aggregate-shares.json' with { type: 'json' };
-import ballotAlgebraVectorJson from '#test-vectors/pvss-ballot/ballot-algebra.json' with { type: 'json' };
-import canonicalBallotSetVectorJson from '#test-vectors/pvss-ballot/canonical-ballot-set.json' with { type: 'json' };
-
-const pollSpec = {
-    pollId: 'pvss-ballot-poll',
-    question: 'Select the priorities',
-    options: ['Alpha', 'Beta', 'Gamma', 'Delta'],
-    topOptionCount: 2,
-    scoreDomain: {
-        min: 1,
-        max: 10,
-        skippedOptionScore: 1,
-    },
-    duplicateBallotPolicy: 'LastValidBeforeVotingClosedCounts',
-    maxRosterSize: 50,
-    minRosterSize: 10,
-    rosterPolicy: 'OpenLinkPublicRoster',
-    smallRosterPolicy: 'ForbidMicroRoster',
-    thresholdProfileFamily: 'BalancedDefault',
-    tiePolicy: 'HigherScoreThenLowerOptionIndex',
-} as const satisfies PollSpec;
-
-const rosterEntries = Array.from({ length: 20 }, (_unused, rosterIndex) => {
-    const participantIdentity = `participant-${String(rosterIndex + 1)}`;
-
-    return {
-        participantIdentity,
-        rosterPosition: rosterIndex + 1,
-        signingPublicKeyDigest:
-            getParticipantSigningPublicKeyDigest(participantIdentity),
-    };
-});
-const pollSpecDigest = derivePollSpecDigest(pollSpec);
-const rosterDigest = deriveProtocolDigest('RosterDigest', { rosterEntries });
-const frozenRosterProfile = deriveFrozenRosterProfile({
-    pollSpec,
-    rosterDigest,
-    rosterSize: rosterEntries.length,
-});
-const thresholdProfile = frozenRosterProfile.thresholdProfile;
-const thresholdProfileDigest = frozenRosterProfile.thresholdProfileDigest;
-const electionManifestDigest = deriveProtocolDigest('ElectionManifestDigest', {
-    ceremonyId,
-    pollSpecDigest,
-    rosterDigest,
-    thresholdProfileDigest,
-});
-const closeRecordDigest = deriveProtocolDigest('CloseRecordDigest', {
-    ceremonyId,
-    closeKind: 'VotingClosed',
-});
-const ballotAlgebraVector = ballotAlgebraVectorJson as {
-    readonly ballotPackageDigest: string;
-    readonly ballotPolynomialSetDigest: string;
-    readonly firstReceiverPayloadDigest: string;
-    readonly firstReceiverShareVector: readonly number[];
-    readonly firstShareCommitmentDigest: string;
-    readonly normalizedScores: readonly number[];
-    readonly schemaVersion: 1;
-};
-const canonicalBallotSetVector = canonicalBallotSetVectorJson as {
-    readonly ballotSetDigest: string;
-    readonly countedBallotPackageDigests: readonly string[];
-    readonly rejectedCandidates: readonly unknown[];
-    readonly schemaVersion: 1;
-};
-const aggregateSharesVector = aggregateSharesVectorJson as {
-    readonly ballotSetDigest: string;
-    readonly firstAggregateShareCommitmentDigest: string;
-    readonly firstAggregateShareVector: readonly number[];
-    readonly reconstructedTally: readonly number[];
-    readonly schemaVersion: 1;
-};
-
-const createBallotWitness = (
-    voterRosterPosition: number,
-    scores: readonly (number | undefined)[],
-    fixtureEntropy = `entropy-${String(voterRosterPosition)}`,
-): BallotPackageWitness => {
-    const voterIdentity = `participant-${String(voterRosterPosition)}`;
-    const publicKeyDigest = getParticipantSigningPublicKeyDigest(voterIdentity);
-
-    return deriveTestBallotPackage(
-        {
-            ceremonyId,
-            voterIdentity,
-            voterRosterPosition,
-            electionManifestDigest,
-            rosterDigest,
-            pollSpecDigest,
-            duplicateBallotPolicyDigest:
-                manifestPolicyDigests.duplicateBallotPolicyDigest,
-            thresholdProfileDigest,
-            pollSpec,
-            thresholdProfile,
-            rosterEntries,
-            scoreBallot: {
-                voterIdentity,
-                scores,
-            },
-            fixtureEntropy,
-        },
-        (ballotPackageDigest) =>
-            createSignature(
-                'BallotPackage',
-                'Voter',
-                voterIdentity,
-                publicKeyDigest,
-                ballotPackageDigest,
-                {
-                    manifestDigest: electionManifestDigest,
-                    boardHeadDigest: null,
-                },
-            ),
-    );
-};
-
-const createBallotSetInput = (
-    witnesses: readonly BallotPackageWitness[],
-    afterCloseWitnesses: readonly BallotPackageWitness[] = [],
-): CanonicalBallotSetInput => {
-    const genesisHead = createBoardHead(0, null, 'vector-genesis');
-    const ballotHeadWithProofs = createBoardHeadWithObjects(
-        1,
-        genesisHead.headDigest,
-        witnesses.map((witness, boardPosition) => ({
-            objectType: 'BallotPackage' as const,
-            objectDigest: witness.ballotPackage.ballotPackageDigest,
-            boardPosition,
-        })),
-        'vector-ballots',
-    );
-    const closeHeadWithProofs = createBoardHeadWithObjects(
-        2,
-        ballotHeadWithProofs.head.headDigest,
-        [
-            {
-                objectType: 'CloseRecord' as const,
-                objectDigest: closeRecordDigest,
-                boardPosition: 0,
-            },
-        ],
-        'vector-close',
-    );
-    const closeHead = closeHeadWithProofs.head;
-    const lateHeadWithProofs = createBoardHeadWithObjects(
-        3,
-        closeHead.headDigest,
-        afterCloseWitnesses.map((witness, boardPosition) => ({
-            objectType: 'BallotPackage' as const,
-            objectDigest: witness.ballotPackage.ballotPackageDigest,
-            boardPosition,
-        })),
-        'vector-late',
-    );
-    const candidateBallots: BallotPackageCandidate[] = [
-        ...witnesses.map((witness, witnessIndex) => ({
-            ballotPackage: witness.ballotPackage,
-            inclusionProof: ballotHeadWithProofs.inclusionProofs[witnessIndex],
-        })),
-        ...afterCloseWitnesses.map((witness, witnessIndex) => ({
-            ballotPackage: witness.ballotPackage,
-            inclusionProof: lateHeadWithProofs.inclusionProofs[witnessIndex],
-        })),
-    ];
-
-    return {
-        boardEvidence: createBoardEvidence([
-            genesisHead,
-            ballotHeadWithProofs.head,
-            closeHead,
-            lateHeadWithProofs.head,
-        ]),
-        ceremonyId,
-        electionManifestDigest,
-        rosterDigest,
-        pollSpecDigest,
-        thresholdProfileDigest,
-        duplicateBallotPolicyDigest:
-            manifestPolicyDigests.duplicateBallotPolicyDigest,
-        pollSpec,
-        thresholdProfile,
-        rosterEntries,
-        votingClosedBoardHeadDigest: closeHead.headDigest,
-        closeRecordDigest,
-        closeRecordBoardOrder: {
-            boardSequence: 2,
-            boardPosition: 0,
-        },
-        closeRecordInclusionProof: closeHeadWithProofs.inclusionProofs[0],
-        candidateBallots,
-        includeRejectedCandidateSummariesInDigest: true,
-    };
-};
-
-const mutateBallotPackage = (
-    ballotPackage: BallotPackageShell,
-    overrides: Partial<BallotPackageShell>,
-): BallotPackageShell => ({
-    ...ballotPackage,
-    ...overrides,
-});
-
-const deriveBallotPackageDigestForTest = (
-    ballotPackage: Omit<
-        BallotPackageShell,
-        'ballotPackageDigest' | 'signature'
-    >,
-): string =>
-    deriveProtocolDigest('BallotPackageDigest', {
-        ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
-        ceremonyId: ballotPackage.ceremonyId,
-        duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
-        electionManifestDigest: ballotPackage.electionManifestDigest,
-        objectType: ballotPackage.objectType,
-        objectVersion: ballotPackage.objectVersion,
-        optionCount: ballotPackage.optionCount,
-        pollSpecDigest: ballotPackage.pollSpecDigest,
-        receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
-        receiverShareCommitments: ballotPackage.receiverShareCommitments,
-        rosterDigest: ballotPackage.rosterDigest,
-        shareVectorWidth: ballotPackage.shareVectorWidth,
-        thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
-        voterIdentity: ballotPackage.voterIdentity,
-        voterRosterPosition: ballotPackage.voterRosterPosition,
-    });
-
-const stripBallotPackageSignatureForTest = (
-    ballotPackage: BallotPackageShell,
-): Omit<BallotPackageShell, 'ballotPackageDigest' | 'signature'> => ({
-    objectType: ballotPackage.objectType,
-    objectVersion: ballotPackage.objectVersion,
-    ceremonyId: ballotPackage.ceremonyId,
-    electionManifestDigest: ballotPackage.electionManifestDigest,
-    rosterDigest: ballotPackage.rosterDigest,
-    pollSpecDigest: ballotPackage.pollSpecDigest,
-    thresholdProfileDigest: ballotPackage.thresholdProfileDigest,
-    duplicateBallotPolicyDigest: ballotPackage.duplicateBallotPolicyDigest,
-    voterIdentity: ballotPackage.voterIdentity,
-    voterRosterPosition: ballotPackage.voterRosterPosition,
-    optionCount: ballotPackage.optionCount,
-    shareVectorWidth: ballotPackage.shareVectorWidth,
-    ballotPolynomialSetDigest: ballotPackage.ballotPolynomialSetDigest,
-    receiverShareCommitments: ballotPackage.receiverShareCommitments,
-    receiverPayloadDigests: ballotPackage.receiverPayloadDigests,
-});
-
-const resignBallotPackageForTest = (
-    ballotPackage: Omit<
-        BallotPackageShell,
-        'ballotPackageDigest' | 'signature'
-    >,
-): BallotPackageShell => {
-    const ballotPackageDigest = deriveBallotPackageDigestForTest(ballotPackage);
-
-    return {
-        ...ballotPackage,
-        ballotPackageDigest,
-        signature: createSignature(
-            'BallotPackage',
-            'Voter',
-            ballotPackage.voterIdentity,
-            getParticipantSigningPublicKeyDigest(ballotPackage.voterIdentity),
-            ballotPackageDigest,
-            {
-                manifestDigest: ballotPackage.electionManifestDigest,
-                boardHeadDigest: null,
-            },
-        ),
-    };
-};
-
-const deriveAggregateShareCommitmentDigestForTest = (
-    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'>,
-): string =>
-    deriveProtocolDigest('AggregateShareCommitmentDigest', {
-        aggregateCommitmentValues: aggregateShare.aggregateCommitmentValues,
-        aggregateShareVector: aggregateShare.aggregateShareVector,
-        ballotSetDigest: aggregateShare.ballotSetDigest,
-        objectType: aggregateShare.objectType,
-        shareVectorWidth: aggregateShare.shareVectorWidth,
-        trusteeIdentity: aggregateShare.trusteeIdentity,
-        trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
-    });
-
-const rehashAggregateShareForTest = (
-    aggregateShare: Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'>,
-): TestAggregateShare => ({
-    ...aggregateShare,
-    aggregateShareCommitmentDigest:
-        deriveAggregateShareCommitmentDigestForTest(aggregateShare),
-});
-
-const stripAggregateShareCommitmentDigestForTest = (
-    aggregateShare: TestAggregateShare,
-): Omit<TestAggregateShare, 'aggregateShareCommitmentDigest'> => ({
-    objectType: aggregateShare.objectType,
-    ballotSetDigest: aggregateShare.ballotSetDigest,
-    trusteeIdentity: aggregateShare.trusteeIdentity,
-    trusteeRosterPosition: aggregateShare.trusteeRosterPosition,
-    shareVectorWidth: aggregateShare.shareVectorWidth,
-    aggregateShareVector: aggregateShare.aggregateShareVector,
-    aggregateCommitmentValues: aggregateShare.aggregateCommitmentValues,
-});
-
-const incrementFieldElement = (fieldElement: number): number =>
-    (fieldElement + 1) % 65_537;
+} from '#packages/protocol/src/pvss-ballot/index';
+import { deriveReceiverShareVectors } from '#packages/protocol/src/pvss-ballot/receiver-shares';
 
 describe('internal PVSS ballot algebra', () => {
     it('derives deterministic receiver shares and test commitments for one ballot', () => {
@@ -356,11 +50,11 @@ describe('internal PVSS ballot algebra', () => {
         expect(witness.polynomialSet.normalizedBallot.scores).toEqual([
             10, 1, 7, 1,
         ]);
-        expect(witness.ballotPackage.ballotPackageDigest).toBe(
-            ballotAlgebraVector.ballotPackageDigest,
+        expect(witness.ballotPackage.ballotPackageHash).toBe(
+            ballotAlgebraVector.ballotPackageHash,
         );
-        expect(witness.polynomialSet.ballotPolynomialSetDigest).toBe(
-            ballotAlgebraVector.ballotPolynomialSetDigest,
+        expect(witness.polynomialSet.ballotPolynomialSetHash).toBe(
+            ballotAlgebraVector.ballotPolynomialSetHash,
         );
         expect(witness.polynomialSet.normalizedBallot.scores).toEqual(
             ballotAlgebraVector.normalizedScores,
@@ -379,11 +73,10 @@ describe('internal PVSS ballot algebra', () => {
             ballotAlgebraVector.firstReceiverShareVector,
         );
         expect(
-            witness.shareCommitmentWitnesses[0].commitment
-                .shareCommitmentDigest,
-        ).toBe(ballotAlgebraVector.firstShareCommitmentDigest);
-        expect(witness.receiverPayloads[0].payloadDigest).toBe(
-            ballotAlgebraVector.firstReceiverPayloadDigest,
+            witness.shareCommitmentWitnesses[0].commitment.shareCommitmentHash,
+        ).toBe(ballotAlgebraVector.firstShareCommitmentHash);
+        expect(witness.receiverPayloads[0].payloadHash).toBe(
+            ballotAlgebraVector.firstReceiverPayloadHash,
         );
         expect(
             witness.shareCommitmentWitnesses.every((commitmentWitness) =>
@@ -394,12 +87,12 @@ describe('internal PVSS ballot algebra', () => {
             verifyBallotPackageShell({
                 ballotPackage: witness.ballotPackage,
                 ceremonyId,
-                electionManifestDigest,
-                rosterDigest,
-                pollSpecDigest,
-                thresholdProfileDigest,
-                duplicateBallotPolicyDigest:
-                    manifestPolicyDigests.duplicateBallotPolicyDigest,
+                electionManifestHash,
+                rosterHash,
+                pollSpecHash,
+                thresholdProfileHash,
+                duplicateBallotPolicyHash:
+                    manifestPolicyHashes.duplicateBallotPolicyHash,
                 optionCount: pollSpec.options.length,
                 rosterEntries,
                 thresholdProfile,
@@ -417,7 +110,7 @@ describe('internal PVSS ballot algebra', () => {
         ).toThrow('Scores must be integers');
     });
 
-    it('rejects malformed test helper witnesses and digest references', () => {
+    it('rejects malformed test helper witnesses and hash references', () => {
         const witness = createBallotWitness(1, [1, 2, 3, 4], 'guarded');
         const commitmentWitness = witness.shareCommitmentWitnesses[0];
         const unsignedMalformedPackage = {
@@ -428,17 +121,17 @@ describe('internal PVSS ballot algebra', () => {
                         commitmentIndex === 0
                             ? {
                                   ...commitment,
-                                  shareCommitmentDigest: 'not-a-digest',
+                                  shareCommitmentHash: 'not-a-hash',
                               }
                             : commitment,
                 ),
-            receiverPayloadDigests:
-                witness.ballotPackage.receiverPayloadDigests.map(
+            receiverPayloadHashes:
+                witness.ballotPackage.receiverPayloadHashes.map(
                     (payload, payloadIndex) =>
                         payloadIndex === 0
                             ? {
                                   ...payload,
-                                  payloadDigest: 'not-a-digest',
+                                  payloadHash: 'not-a-hash',
                               }
                             : payload,
                 ),
@@ -458,9 +151,9 @@ describe('internal PVSS ballot algebra', () => {
                         : optionPolynomial,
             ),
         };
-        const malformedPolynomialSetWithDigest = {
+        const malformedPolynomialSetWithHash = {
             ...malformedPolynomialSet,
-            ballotPolynomialSetDigest: deriveBallotPolynomialSetDigest({
+            ballotPolynomialSetHash: deriveBallotPolynomialSetHash({
                 normalizedBallot: malformedPolynomialSet.normalizedBallot,
                 optionPolynomials: malformedPolynomialSet.optionPolynomials,
                 pvssThreshold: malformedPolynomialSet.pvssThreshold,
@@ -484,7 +177,7 @@ describe('internal PVSS ballot algebra', () => {
                 ...commitmentWitness,
                 commitment: {
                     ...commitmentWitness.commitment,
-                    shareCommitmentDigest: 'not-a-digest',
+                    shareCommitmentHash: 'not-a-hash',
                 },
             }),
         ).toBe(false);
@@ -492,12 +185,12 @@ describe('internal PVSS ballot algebra', () => {
             verifyBallotPackageShell({
                 ballotPackage: malformedPackage,
                 ceremonyId,
-                electionManifestDigest,
-                rosterDigest,
-                pollSpecDigest,
-                thresholdProfileDigest,
-                duplicateBallotPolicyDigest:
-                    manifestPolicyDigests.duplicateBallotPolicyDigest,
+                electionManifestHash,
+                rosterHash,
+                pollSpecHash,
+                thresholdProfileHash,
+                duplicateBallotPolicyHash:
+                    manifestPolicyHashes.duplicateBallotPolicyHash,
                 optionCount: pollSpec.options.length,
                 rosterEntries,
                 thresholdProfile,
@@ -507,31 +200,31 @@ describe('internal PVSS ballot algebra', () => {
             deriveReceiverShareVectors({
                 polynomialSet: {
                     ...witness.polynomialSet,
-                    ballotPolynomialSetDigest: deriveProtocolDigest(
-                        'BallotPolynomialSetDigest',
+                    ballotPolynomialSetHash: deriveProtocolHash(
+                        'BallotPolynomialSetHash',
                         { stale: true },
                     ),
                 },
                 rosterEntries,
                 thresholdProfile,
             }),
-        ).toThrow('canonical ballot polynomial set digest');
+        ).toThrow('canonical ballot polynomial set hash');
         expect(() =>
             deriveReceiverShareVectors({
-                polynomialSet: malformedPolynomialSetWithDigest,
+                polynomialSet: malformedPolynomialSetWithHash,
                 rosterEntries,
                 thresholdProfile,
             }),
         ).toThrow('canonical option polynomial slots');
     });
 
-    it('selects the last valid ballot before close and records invalid or late candidates', () => {
+    it('selects the first valid ballot before close and records invalid, duplicate, or late candidates', () => {
         const first = createBallotWitness(1, [1, 2, 3, 4], 'first');
-        const replacement = createBallotWitness(1, [9, 8, 7, 6], 'replacement');
+        const duplicate = createBallotWitness(1, [9, 8, 7, 6], 'duplicate');
         const invalidLater = createBallotWitness(2, [4, 4, 4, 4], 'invalid');
         const late = createBallotWitness(3, [5, 5, 5, 5], 'late');
         const invalidShell = mutateBallotPackage(invalidLater.ballotPackage, {
-            rosterDigest: deriveProtocolDigest('RosterDigest', {
+            rosterHash: deriveProtocolHash('RosterHash', {
                 marker: 'wrong-roster',
             }),
         });
@@ -539,7 +232,7 @@ describe('internal PVSS ballot algebra', () => {
             createBallotSetInput(
                 [
                     first,
-                    replacement,
+                    duplicate,
                     {
                         ...invalidLater,
                         ballotPackage: invalidShell,
@@ -552,35 +245,39 @@ describe('internal PVSS ballot algebra', () => {
         expect(ballotSet.ok).toBe(true);
         expect(
             ballotSet.countedBallots.map(
-                (candidate) => candidate.ballotPackage.ballotPackageDigest,
+                (candidate) => candidate.ballotPackage.ballotPackageHash,
             ),
-        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
+        ).toEqual([first.ballotPackage.ballotPackageHash]);
+        const duplicateRejection = ballotSet.rejectedCandidates.find(
+            (candidate) =>
+                candidate.ballotPackageHash ===
+                duplicate.ballotPackage.ballotPackageHash,
+        );
         const invalidLaterRejection = ballotSet.rejectedCandidates.find(
             (candidate) =>
-                candidate.ballotPackageDigest ===
-                invalidLater.ballotPackage.ballotPackageDigest,
+                candidate.ballotPackageHash ===
+                invalidLater.ballotPackage.ballotPackageHash,
         );
         const lateRejection = ballotSet.rejectedCandidates.find(
             (candidate) =>
-                candidate.ballotPackageDigest ===
-                late.ballotPackage.ballotPackageDigest,
+                candidate.ballotPackageHash ===
+                late.ballotPackage.ballotPackageHash,
         );
 
+        expect(duplicateRejection?.refusalCodes).toContain(
+            'DuplicateBallotPackage',
+        );
         expect(invalidLaterRejection?.refusalCodes).toContain(
             'BallotPackageInvalid',
         );
         expect(lateRejection?.refusalCodes).toContain('BallotPackageInvalid');
-        expect(ballotSet.ballotSetDigest).toMatch(/^[a-f0-9]{128}$/u);
+        expect(ballotSet.ballotSetHash).toMatch(/^[a-f0-9]{128}$/u);
     });
 
     it('deduplicates retransmitted packages in canonical board order', () => {
         const first = createBallotWitness(1, [1, 2, 3, 4], 'first');
-        const replacement = createBallotWitness(1, [9, 8, 7, 6], 'replacement');
-        const ballotSetInput = createBallotSetInput([
-            first,
-            replacement,
-            first,
-        ]);
+        const duplicate = createBallotWitness(1, [9, 8, 7, 6], 'duplicate');
+        const ballotSetInput = createBallotSetInput([first, duplicate, first]);
         const shuffledBallotSetInput = {
             ...ballotSetInput,
             candidateBallots: [
@@ -596,16 +293,16 @@ describe('internal PVSS ballot algebra', () => {
         expect(shuffledResult.ok).toBe(true);
         expect(
             boardOrderResult.countedBallots.map(
-                (candidate) => candidate.ballotPackage.ballotPackageDigest,
+                (candidate) => candidate.ballotPackage.ballotPackageHash,
             ),
-        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
+        ).toEqual([first.ballotPackage.ballotPackageHash]);
         expect(
             shuffledResult.countedBallots.map(
-                (candidate) => candidate.ballotPackage.ballotPackageDigest,
+                (candidate) => candidate.ballotPackage.ballotPackageHash,
             ),
-        ).toEqual([replacement.ballotPackage.ballotPackageDigest]);
-        expect(shuffledResult.ballotSetDigest).toBe(
-            boardOrderResult.ballotSetDigest,
+        ).toEqual([first.ballotPackage.ballotPackageHash]);
+        expect(shuffledResult.ballotSetHash).toBe(
+            boardOrderResult.ballotSetHash,
         );
     });
 
@@ -621,7 +318,7 @@ describe('internal PVSS ballot algebra', () => {
         });
 
         expect(ballotSet.ok).toBe(false);
-        expect(ballotSet.ballotSetDigest).toBeUndefined();
+        expect(ballotSet.ballotSetHash).toBeUndefined();
         expect(
             ballotSet.refusedObjects.map((refusal) => refusal.code),
         ).toContain('BallotSetInvalid');
@@ -647,7 +344,7 @@ describe('internal PVSS ballot algebra', () => {
                 rosterEntries,
                 thresholdProfile,
             }),
-        ).toThrow('canonical ballot-set digest');
+        ).toThrow('canonical ballot-set hash');
         const aggregateShareSet = deriveTestAggregateShares({
             ballotSet,
             ballotWitnesses: [...witnesses].reverse(),
@@ -659,7 +356,7 @@ describe('internal PVSS ballot algebra', () => {
             .map((witness) => witness.aggregateShare);
         const reconstructedTally = reconstructAggregateTallyFromShares({
             aggregateShares: selectedAggregateShares,
-            ballotSetDigest: aggregateShareSet.ballotSetDigest,
+            ballotSetHash: aggregateShareSet.ballotSetHash,
             optionCount: pollSpec.options.length,
             thresholdProfile,
         });
@@ -672,24 +369,24 @@ describe('internal PVSS ballot algebra', () => {
         });
 
         expect(ballotSet.countedBallots).toHaveLength(witnesses.length);
-        expect(ballotSet.ballotSetDigest).toBe(
-            canonicalBallotSetVector.ballotSetDigest,
+        expect(ballotSet.ballotSetHash).toBe(
+            canonicalBallotSetVector.ballotSetHash,
         );
         expect(
             ballotSet.countedBallots.map(
-                (candidate) => candidate.ballotPackage.ballotPackageDigest,
+                (candidate) => candidate.ballotPackage.ballotPackageHash,
             ),
-        ).toEqual(canonicalBallotSetVector.countedBallotPackageDigests);
+        ).toEqual(canonicalBallotSetVector.countedBallotPackageHashes);
         expect(ballotSet.rejectedCandidates).toEqual(
             canonicalBallotSetVector.rejectedCandidates,
         );
-        expect(aggregateShareSet.ballotSetDigest).toBe(
-            aggregateSharesVector.ballotSetDigest,
+        expect(aggregateShareSet.ballotSetHash).toBe(
+            aggregateSharesVector.ballotSetHash,
         );
         expect(
             aggregateShareSet.aggregateShares[0].aggregateShare
-                .aggregateShareCommitmentDigest,
-        ).toBe(aggregateSharesVector.firstAggregateShareCommitmentDigest);
+                .aggregateShareCommitmentHash,
+        ).toBe(aggregateSharesVector.firstAggregateShareCommitmentHash);
         expect(
             aggregateShareSet.aggregateShares[0].aggregateShare
                 .aggregateShareVector,
@@ -733,8 +430,8 @@ describe('internal PVSS ballot algebra', () => {
                         if (aggregateShareIndex !== 0) {
                             return aggregateShare;
                         }
-                        return rehashAggregateShareForTest({
-                            ...stripAggregateShareCommitmentDigestForTest(
+                        return reHashAggregateShareForTest({
+                            ...stripAggregateShareCommitmentHashForTest(
                                 aggregateShare,
                             ),
                             trusteeRosterPosition: 999,
@@ -748,8 +445,9 @@ describe('internal PVSS ballot algebra', () => {
         expect(() =>
             reconstructAggregateTallyFromShares({
                 aggregateShares: selectedAggregateShares,
-                ballotSetDigest: deriveProtocolDigest('BallotSetDigest', {
+                ballotSetHash: deriveProtocolHash('BallotSetHash', {
                     marker: 'wrong-ballot-set',
+                    purpose: 'pvss-ballot-algebra-test-ballot-set-v1',
                 }),
                 optionCount: pollSpec.options.length,
                 thresholdProfile,
@@ -762,14 +460,15 @@ describe('internal PVSS ballot algebra', () => {
                         if (aggregateShareIndex !== 0) {
                             return aggregateShare;
                         }
-                        return rehashAggregateShareForTest({
-                            ...stripAggregateShareCommitmentDigestForTest(
+                        return reHashAggregateShareForTest({
+                            ...stripAggregateShareCommitmentHashForTest(
                                 aggregateShare,
                             ),
-                            ballotSetDigest: deriveProtocolDigest(
-                                'BallotSetDigest',
-                                { marker: 'mixed-ballot-set' },
-                            ),
+                            ballotSetHash: deriveProtocolHash('BallotSetHash', {
+                                marker: 'mixed-ballot-set',
+                                purpose:
+                                    'pvss-ballot-algebra-test-ballot-set-v1',
+                            }),
                         });
                     },
                 ),
@@ -784,8 +483,8 @@ describe('internal PVSS ballot algebra', () => {
                         if (aggregateShareIndex !== 0) {
                             return aggregateShare;
                         }
-                        return rehashAggregateShareForTest({
-                            ...stripAggregateShareCommitmentDigestForTest(
+                        return reHashAggregateShareForTest({
+                            ...stripAggregateShareCommitmentHashForTest(
                                 aggregateShare,
                             ),
                             aggregateShareVector:
@@ -811,10 +510,14 @@ describe('internal PVSS ballot algebra', () => {
                         aggregateShareIndex === 0
                             ? {
                                   ...aggregateShare,
-                                  aggregateShareCommitmentDigest:
-                                      deriveProtocolDigest(
-                                          'AggregateShareCommitmentDigest',
-                                          { marker: 'stale' },
+                                  aggregateShareCommitmentHash:
+                                      deriveProtocolHash(
+                                          'AggregateShareCommitmentHash',
+                                          {
+                                              marker: 'stale',
+                                              purpose:
+                                                  'pvss-test-aggregate-share-commitment-v1',
+                                          },
                                       ),
                               }
                             : aggregateShare,
@@ -903,12 +606,12 @@ describe('internal PVSS ballot algebra', () => {
                     optionCount: 5,
                 }),
                 ceremonyId,
-                electionManifestDigest,
-                rosterDigest,
-                pollSpecDigest,
-                thresholdProfileDigest,
-                duplicateBallotPolicyDigest:
-                    manifestPolicyDigests.duplicateBallotPolicyDigest,
+                electionManifestHash,
+                rosterHash,
+                pollSpecHash,
+                thresholdProfileHash,
+                duplicateBallotPolicyHash:
+                    manifestPolicyHashes.duplicateBallotPolicyHash,
                 optionCount: pollSpec.options.length,
                 rosterEntries,
                 thresholdProfile,
@@ -922,12 +625,12 @@ describe('internal PVSS ballot algebra', () => {
                     ].reverse(),
                 }),
                 ceremonyId,
-                electionManifestDigest,
-                rosterDigest,
-                pollSpecDigest,
-                thresholdProfileDigest,
-                duplicateBallotPolicyDigest:
-                    manifestPolicyDigests.duplicateBallotPolicyDigest,
+                electionManifestHash,
+                rosterHash,
+                pollSpecHash,
+                thresholdProfileHash,
+                duplicateBallotPolicyHash:
+                    manifestPolicyHashes.duplicateBallotPolicyHash,
                 optionCount: pollSpec.options.length,
                 rosterEntries,
                 thresholdProfile,
@@ -937,12 +640,12 @@ describe('internal PVSS ballot algebra', () => {
             verifyBallotPackageShell({
                 ballotPackage: witness.ballotPackage,
                 ceremonyId,
-                electionManifestDigest,
-                rosterDigest,
-                pollSpecDigest,
-                thresholdProfileDigest,
-                duplicateBallotPolicyDigest:
-                    manifestPolicyDigests.duplicateBallotPolicyDigest,
+                electionManifestHash,
+                rosterHash,
+                pollSpecHash,
+                thresholdProfileHash,
+                duplicateBallotPolicyHash:
+                    manifestPolicyHashes.duplicateBallotPolicyHash,
                 optionCount: pollSpec.options.length,
                 rosterEntries: rosterEntries.map(
                     ({ participantIdentity, rosterPosition }) => ({
