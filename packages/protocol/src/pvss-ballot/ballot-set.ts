@@ -146,6 +146,8 @@ const sortCandidateBallots = (
         );
     });
 
+// Equivocation detector: a single board position (boardSequence,boardPosition)
+// that maps to two or more distinct ballot-package hashes.
 const findConflictingBoardPositionKeys = (
     candidateBallots: readonly BallotPackageCandidate[],
 ): ReadonlySet<string> => {
@@ -167,6 +169,8 @@ const findConflictingBoardPositionKeys = (
     );
 };
 
+// Equivocation detector: one ballot-package hash that resolves to two or more
+// distinct canonical package shells (same hash claimed for different content).
 const findConflictingBallotPackageHashes = (
     candidateBallots: readonly BallotPackageCandidate[],
 ): ReadonlySet<ProtocolHash> => {
@@ -286,6 +290,10 @@ const deriveCanonicalBallotSetUnchecked = (
         input.candidateBallots,
     );
 
+    // Duplicate policy "first valid before voting closed counts": iterate in
+    // canonical board order, and for each voter keep only the first valid
+    // ballot; later valid ballots from the same voter are recorded as
+    // duplicate-not-counted. The canonical ordering makes this deterministic.
     for (const candidate of sortCandidateBallots(input.candidateBallots)) {
         const candidateRefusals: RefusalRecord[] = [];
         const signedBoardOrder = candidateSignedBoardOrder(candidate);

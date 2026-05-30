@@ -444,6 +444,10 @@ export const deriveTestAggregateShares = (input: {
             let aggregateOpeningVector = zeroShareVector();
             let aggregateCommitmentValues = zeroShareVector();
 
+            // Additive homomorphism: sum this trustee's per-ballot share,
+            // opening, and commitment vectors across all counted ballots. The
+            // sum of shares at a fixed roster position is a share of the summed
+            // secret (the tally), which reconstruction later interpolates.
             for (const witness of countedWitnesses) {
                 const share = witness.receiverShareVectors.find(
                     (candidate) =>
@@ -670,6 +674,8 @@ export const reconstructAggregateTallyFromShares = (input: {
                     `aggregate share field ${String(fieldIndex)}`,
                 ),
         );
+        // Slots beyond the real option count must be zero padding, so padding
+        // cannot smuggle a nonzero value into the interpolated reconstruction.
         if (
             aggregateShare.aggregateShareVector
                 .slice(input.optionCount)

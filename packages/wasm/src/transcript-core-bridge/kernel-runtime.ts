@@ -21,6 +21,9 @@ import {
     wasmHeaderByteLength,
 } from './kernel-contracts.js';
 
+// Excludes WASM custom sections (debug / producers / name) from the integrity hash:
+// they vary by toolchain but do not affect execution, so dropping them keeps the
+// hash reproducible across build environments.
 const stripWasmCustomSectionsForHash = (bytes: Uint8Array): Uint8Array => {
     if (!hasWasmHeader(bytes)) {
         return bytes;
@@ -261,6 +264,8 @@ const copyFromKernelMemory = (
     return Uint8Array.from(new Uint8Array(memory.buffer, pointer, length));
 };
 
+// The kernel writes the response byte length as a little-endian u32 into this
+// caller-allocated 4-byte cell (separate from the returned data pointer); read it back.
 const readKernelOutputLength = (
     memory: WebAssembly.Memory,
     pointer: number,
@@ -325,6 +330,10 @@ const runKernelCommand = <T>(
 
         return parseKernelResponse<T>(outputBytes);
     } finally {
+        // The kernel may alias the input buffer as the output or otherwise reuse
+        // pointers, so each distinct region is freed exactly once: the equality
+        // guards below skip a dealloc whose pointer coincides with an already-freed
+        // region, preventing a double free.
         if (outputPointer !== 0) {
             deallocate(outputPointer, outputLength);
         }

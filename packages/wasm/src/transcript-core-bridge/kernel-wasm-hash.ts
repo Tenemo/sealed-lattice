@@ -1,7 +1,10 @@
+// wasm32 `usize` is 4 bytes; used to read/allocate the LE u32 output-length cell.
 export const wasm32UsizeByteLength = 4;
 
+// 8 bytes = the `\0asm` magic (4) plus the version word (4) at the module start.
 export const wasmHeaderByteLength = 8;
 
+// Section id 0 is the WASM custom-section id (debug / producers / name sections).
 export const wasmCustomSectionId = 0;
 
 export const sha256HexPattern = /^[a-f0-9]{64}$/u;
@@ -16,6 +19,9 @@ export const bytesToHex = (bytes: Uint8Array): string =>
 const isPrintableAscii = (byte: number): boolean =>
     byte >= 0x20 && byte <= 0x7e;
 
+// Neutralizes machine-specific absolute paths baked into the WASM so the integrity
+// hash is reproducible across build hosts (mirrors --remap-path-prefix in
+// build-wasm-kernel.ts).
 const normalizeRustSourcePathForHash = (sourcePath: string): string => {
     const forwardSlashSourcePath = sourcePath.replace(/\\/gu, '/');
     const cargoRegistrySourcePath = forwardSlashSourcePath.replace(
@@ -29,10 +35,14 @@ const normalizeRustSourcePathForHash = (sourcePath: string): string => {
     );
 };
 
+// Only normalizes NUL-delimited printable-ASCII chunks containing `.rs`; any chunk
+// with non-printable bytes (i.e. binary) is returned untouched so normalization can
+// never corrupt the module's executable sections.
 const normalizeHashChunk = (chunk: Uint8Array): Uint8Array => {
     if (chunk.length === 0) {
         return chunk;
     }
+    // 0x2e is '.'; skip chunks with no dot since they cannot contain a `.rs` path.
     if (!chunk.includes(0x2e)) {
         return chunk;
     }
@@ -101,6 +111,9 @@ export const hasWasmHeader = (bytes: Uint8Array): boolean =>
     bytes[6] === 0x00 &&
     bytes[7] === 0x00;
 
+// Canonical LEB128 reader for WASM section lengths: rejects encodings longer than
+// 5 bytes, a 5th byte with bits above bit 32 set, or any value exceeding 2^32-1, so
+// overlong / overflowing section lengths cannot be accepted.
 export const readWasmVarUint32 = (
     bytes: Uint8Array,
     startOffset: number,

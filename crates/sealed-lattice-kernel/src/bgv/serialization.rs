@@ -13,7 +13,9 @@ use crate::{
 
 const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object-v1";
 const CANONICAL_OBJECT_VERSION: u64 = 1;
+// Max polynomial components in a BGV object: a degree-2 ciphertext has 3.
 const MAXIMUM_COMPONENT_COUNT: usize = 3;
+// Max RNS limbs: 16 data primes + 1 special prime (the extended basis).
 const MAXIMUM_MODULUS_COUNT: usize = 17;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +106,8 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     for component in &object.components {
         component.validate()?;
     }
+    // Canonicalize-by-round-trip: re-serialize the parsed object and require the
+    // bytes to match exactly, rejecting any non-canonical input encoding.
     if serialize_bgv_object(object.object_kind, &object.components)? != bytes {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

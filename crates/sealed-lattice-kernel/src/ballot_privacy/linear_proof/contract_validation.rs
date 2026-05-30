@@ -324,6 +324,9 @@ pub(crate) fn derive_full_relation_binding_hash(
     )
 }
 
+// Derives a nonzero binder scalar in [1, 127] from the first 16 hex chars
+// (64 bits) of the relation binding hash: 1 + value % 127 (127 =
+// FULL_BALLOT_BINDING_SCALAR_COUNT).
 pub(crate) fn binding_scalar_from_hash(relation_binding_hash: &str) -> Option<u64> {
     let prefix = relation_binding_hash.get(..16)?;
     u64::from_str_radix(prefix, 16)
@@ -384,6 +387,8 @@ fn full_ballot_binding_matrix_and_target_are_derived(
     let Some(first_matrix_row) = statement_matrix.first().and_then(Value::as_array) else {
         return false;
     };
+    // With matrix entry = 1 and target = q - s (q = 65537, s = binding_scalar),
+    // the relation A*w + t = 0 becomes 1*w + (q - s) = 0, i.e. w = s (mod q).
     let target_constant = FULL_BALLOT_BINDING_COEFFICIENT_MODULUS - binding_scalar;
 
     statement_matrix.len() == 1
@@ -452,6 +457,9 @@ fn collect_encoding_contract_refusals(
         expected_proof_size_bytes == Some(0)
     };
 
+    // Frozen encoding literals mirroring the generated LaZer profile; these must
+    // stay identical to encoded_score_field_linear_proof_encoding_contract in
+    // linear_proof_parameters.rs (provenance: linear_proof_profile_constants.rs).
     if string_field(proof_encoding, "profileId") != Some(expectation.encoding_profile_id)
         || string_field(proof_encoding, "source") != Some(expectation.encoding_source)
         || unsigned_integer_field(proof_encoding, "ringDegree") != Some(64)

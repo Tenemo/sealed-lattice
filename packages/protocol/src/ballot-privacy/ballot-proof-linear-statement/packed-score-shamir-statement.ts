@@ -177,6 +177,10 @@ const buildPackedScoreAndShamirFieldStatement = (input: {
         }
     }
 
+    // optionIndex packing: 11 = coordinates-per-option (so optionIndex*11 + bucket is the
+    // encoded coordinate). A single matrix row packs all options at once by placing each
+    // option's contribution at a distinct monomial degree (monomialDegree = optionIndex)
+    // of one ring element.
     for (
         let optionIndex = 0;
         optionIndex < input.relationInput.optionCount;
@@ -230,6 +234,8 @@ const buildPackedScoreAndShamirFieldStatement = (input: {
         });
     }
 
+    // Reserves row 0 = one-hot-sum and row 1 = scalar-score consistency (built above),
+    // so the per-receiver Shamir evaluation rows start at index 2.
     const shamirRowOffset = 2;
     for (const [
         receiverIndex,

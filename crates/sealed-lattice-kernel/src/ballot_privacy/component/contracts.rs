@@ -14,6 +14,8 @@ pub(crate) const RECEIVER_KEY_PROOF_PARAMETER_PROFILE_ID: &str =
 pub(crate) const RECEIVER_KEY_PROOF_ENCODING_PROFILE_ID: &str =
     "receiver-key-linear-proof-encoding-v1";
 pub(crate) const COMPONENT_BUNDLE_INCOMPLETE_COVERAGE: &str = "component-bundle-incomplete";
+// Canonical, load-bearing order: componentProofs arrays are matched positionally against this
+// list (see proof_statement_checks), so it must mirror the prover's component emission order.
 pub(crate) const REQUIRED_BALLOT_PROOF_COMPONENT_IDS: &[&str] = &[
     "score-and-shamir-field-component",
     "payload-plaintext-field-component",
@@ -37,11 +39,14 @@ pub(crate) const STRUCTURED_SHARE_COMMITMENT_PROOF_STATEMENT_FORMAT: &str =
 pub(crate) const STRUCTURED_RECEIVER_ENCRYPTION_PROOF_STATEMENT_FORMAT: &str =
     "structured-module-lwe-linear-proof-v1";
 pub(crate) const PUBLIC_BINDING_CHECK_PROOF_STATEMENT_FORMAT: &str = "public-binding-check-only-v1";
+// Above this short-response length a sparse component is a production-sized field statement and
+// must use the structured proof path; generic sparse generation is refused (see generation_core).
 pub(crate) const MAX_GENERIC_SPARSE_COMPONENT_SHORT_RESPONSE_VECTOR_LENGTH: usize = 4_096;
 pub(crate) const AVAILABLE_DENSE_PROOF_BYTES: &str = "dense-proof-bytes-available-lab-only";
 pub(crate) const REQUIRES_SPARSE_PROOF_STATEMENT: &str = "sparse-proof-statement-required";
 pub(crate) const REQUIRES_STRUCTURED_PROOF_STATEMENT: &str = "structured-proof-statement-required";
 pub(crate) const PUBLIC_BINDING_CHECK_ONLY: &str = "public-binding-check-only";
+// Module-SIS commitment shape: rank-4 commitment over a degree-256 ring with a 64-wide opening.
 pub(crate) const SHARE_COMMITMENT_MODULE_RANK: usize = 4;
 pub(crate) const SHARE_COMMITMENT_MODULE_DEGREE: usize = 256;
 pub(crate) const SHARE_COMMITMENT_OPENING_DIMENSION: usize = 64;

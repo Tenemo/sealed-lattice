@@ -20,6 +20,9 @@ def shake128_bytes_hex(*parts: bytes) -> str:
 
 
 def shake128_framed_bytes_hex(*parts: tuple[str, bytes]) -> str:
+    # Length-framed domain separation: each part's label and bytes are prefixed with
+    # their length as an 8-byte little-endian count before being absorbed, so the
+    # transcript binding is canonical (no ambiguity from concatenated parts).
     hash = hashlib.shake_128()
     for label, part in parts:
         label_bytes = label.encode("utf-8")
@@ -87,6 +90,8 @@ def ceil_divide(dividend: int, divisor: int) -> int:
 
 
 class ProofBitReader:
+    # Python mirror of LaZer's Rust bit coder: proofs are bit-packed LSB-first within
+    # each byte (read_bit takes bit `bit_offset % 8` of the current byte).
     def __init__(self, proof: bytes) -> None:
         self.proof = proof
         self.bit_offset = 0
@@ -109,6 +114,9 @@ class ProofBitReader:
         return value
 
     def finish(self) -> None:
+        # Canonical termination: the proof ends with a single 1 bit followed by
+        # zero padding to the byte boundary. Validate that the remaining bits of the
+        # current byte are exactly (1 << bit_index) and that no further bytes follow.
         if self.bit_offset >= len(self.proof) * 8:
             raise ValueError("proof encoding has no terminal padding bit")
 
@@ -144,6 +152,8 @@ def decode_hint_polynomial_vector(
     vector_length: int,
     ring_degree: int,
 ) -> None:
+    # Mirrors LaZer's hint encoding: 2 leading bits per coefficient, and only the
+    # `1,1` prefix is followed by a unary run (read 0-bits until a terminating 1).
     for _ in range(vector_length * ring_degree):
         first_bit = reader.read_bit()
         second_bit = reader.read_bit()
@@ -159,6 +169,8 @@ def decode_gaussian_polynomial_vector(
     ring_degree: int,
     log2_standard_deviation: int,
 ) -> None:
+    # Mirrors LaZer's Gaussian encoding: a unary prefix (read 1-bits until a 0)
+    # followed by log2(sigma)+1 little-endian tail bits per coefficient.
     binary_tail_bit_length = log2_standard_deviation + 1
     for _ in range(vector_length * ring_degree):
         while reader.read_bit() == 1:

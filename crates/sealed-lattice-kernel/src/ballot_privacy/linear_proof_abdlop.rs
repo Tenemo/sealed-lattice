@@ -51,6 +51,9 @@ pub fn validate_abdlop_linear_opening(
         decoded_proof.compressed_commitment_vector().to_vec(),
     )?;
 
+    // ABDLOP opening check: recovery_input = A1*z_short + A2*z_rand
+    // - (2^shift * c) * compressed_commitment. For an honest proof this leaves only
+    // the decompression remainder, recovered as high bits below.
     let mut recovery_input = public_parameters
         .commitment_key_matrix
         .multiply_vector(&short_response_vector)?;

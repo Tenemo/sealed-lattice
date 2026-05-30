@@ -37,6 +37,11 @@ export const defaultThresholdProfileFamily =
 export const defaultSmallRosterPolicy =
     'ForbidMicroRoster' as const satisfies SmallRosterPolicy;
 
+// Roster-size landmarks:
+//  3  - absolute minimum supported roster.
+//  10 - threshold at/above which a profile becomes claim-bearing.
+//  20 - the mandatory benchmark roster size.
+//  50 - hard maximum supported roster.
 export const minimumSupportedRosterSize = 3;
 export const minimumDynamicRosterSize = 10;
 export const mandatoryBenchmarkRosterSize = 20;

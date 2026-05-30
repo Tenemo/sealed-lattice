@@ -14,6 +14,9 @@ pub const DEFAULT_LINEAR_PROOF_COEFFICIENT_MODULUS: u64 = 36_028_797_018_964_597
 pub const DEFAULT_LINEAR_PROOF_COEFFICIENT_BIT_LENGTH: usize = 56;
 pub const TBOX_SHORT_MESSAGE_LENGTH: usize = 33;
 
+// Distinct Fiat-Shamir domain separators for the three ABDLOP matrices (A1, A2,
+// message), absorbed via compose_linear_proof_matrix_domain. They must differ:
+// equal domains would make two matrices collide and break the binding.
 const LINEAR_PROOF_ABDLOP_COMMITMENT_KEY_DOMAIN: u32 = 0;
 const LINEAR_PROOF_ABDLOP_OPENING_KEY_DOMAIN: u32 = 1;
 const LINEAR_PROOF_ABDLOP_MESSAGE_KEY_DOMAIN: u32 = 2;
@@ -116,6 +119,9 @@ pub fn expand_linear_proof_uniform_polynomial_matrix(
     PolynomialMatrix::new(ring, row_count, column_count, entries)
 }
 
+// Pack the matrix domain and entry index into one u64 sampler counter: domain in
+// the high 32 bits, entry index in the low 32 bits. The split bounds entry_count
+// to u32::MAX (enforced by the caller's overflow check).
 fn compose_linear_proof_matrix_domain(matrix_domain_separator: u32, entry_index: u32) -> u64 {
     (u64::from(matrix_domain_separator) << 32) | u64::from(entry_index)
 }

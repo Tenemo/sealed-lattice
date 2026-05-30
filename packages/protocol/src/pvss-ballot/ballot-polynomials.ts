@@ -27,6 +27,10 @@ const textEncoder = new TextEncoder();
 const coefficientDerivationDomain =
     'sealed-lattice-internal/pvss-ballot-fixture-coefficient-v1';
 
+// TEST/FIXTURE-ONLY deterministic secret sharing: real ballots would draw the
+// non-constant coefficients from fresh randomness. `hash % modulus` has a slight
+// modulo bias (2^512 is not a multiple of 65537); acceptable only because these
+// are reproducible fixtures, not live secrets.
 const deriveFieldElementFromHash = (hashHex: string): FieldElement => {
     const hashValue = BigInt(`0x${hashHex}`);
 
@@ -105,6 +109,10 @@ export const deriveBallotPolynomialSet = (
     );
     const optionPolynomials = normalizedBallot.scores.map(
         (score, optionIndex) => {
+            // One Shamir polynomial per option: constant term = the score, with
+            // (pvssThreshold - 1) non-constant coefficients, so the polynomial
+            // has degree pvssThreshold - 1 and any `threshold` shares
+            // reconstruct the score.
             const coefficients = Array.from(
                 { length: input.thresholdProfile.pvssThreshold - 1 },
                 (_unused, coefficientIndex) =>

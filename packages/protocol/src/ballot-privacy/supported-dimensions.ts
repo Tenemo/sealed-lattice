@@ -76,6 +76,10 @@ export const collectBallotPrivacyDimensionRefusals = (input: {
                 input.objectHash,
             ),
         );
+        // Three security tiers by participant count: 3-9 needs an explicit
+        // casualMicroRosterAcknowledged (or refuses if claim-bearing); >=10 is the
+        // claim-bearing safe tier; exactly 20 (mandatory profile) skips dynamic-roster
+        // evidence, while any other >=10 count requires roster-profile certificate evidence.
     } else if (
         input.participantCount < ballotPrivacyMinimumSafeParticipantCount
     ) {

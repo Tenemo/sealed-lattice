@@ -33,8 +33,6 @@ const transcriptCoreKernelUrl = new URL(
     '../dist/sealed-lattice-kernel.wasm',
     import.meta.url,
 );
-const packagedTranscriptCoreKernelNormalizedSha256Hex =
-    '940068ff9b2f7b6f3728953a25163245d801c8fb7e322e51d645c68b51282032';
 
 export {
     canonicalErrorCodes,
@@ -64,10 +62,14 @@ export type {
     TranscriptCorePlaintextComparison,
 };
 
+// This private, never-published workspace loader is dev- and test-only scaffolding: it
+// loads the freshly built dist kernel with the explicit unpinned opt-in so committed
+// source never has to track a build-derived hash. The published integrity gate lives in
+// the SDK instead — packages/sdk/src/kernel.ts pins the normalized WASM hash into its
+// built dist/kernel.js, and tools/ci/verify-packed-package.ts enforces it at pack time.
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
-        expectedKernelSha256Hex:
-            packagedTranscriptCoreKernelNormalizedSha256Hex,
+        allowUnpinnedKernel: true,
     });
 
 export const verifyTranscriptCoreFixture = async (

@@ -44,6 +44,10 @@ pub(crate) fn build_many_quadratic_equations(
             "tbox accumulator evaluation dimension is not compatible with the many-quadratic layout",
         ));
     }
+    // TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH = 9 and
+    // TBOX_QUADRATIC_MANY_MESSAGE_LENGTH = 11 are the fixed TBOX message-slot
+    // counts; the many-quadratic layout re-pads the evaluation dimension to the
+    // wider many-message dimension.
     let short_response_message_length =
         evaluation_dimension / 2 - TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH;
     let many_quadratic_dimension =
@@ -54,6 +58,9 @@ pub(crate) fn build_many_quadratic_equations(
     for hash_mask_index in 0..TBOX_HASH_MASK_POLYNOMIALS {
         let expanded_equation =
             folded_tbox_equations[hash_mask_index].resize_dimension(many_quadratic_dimension)?;
+        // Subtract the committed mask polynomial and add a unit linear term at
+        // the mask's reserved column: this ties each folded equation to its
+        // committed mask polynomial.
         let linked_equation = expanded_equation
             .sub_constant_polynomial(&hash_mask_vector[hash_mask_index])?
             .add_linear_polynomial_term(
@@ -175,6 +182,8 @@ fn validate_linear_proof_hash_mask_vector(
         // The fixed LaZer-style TBOX profile requires zero at the two
         // automorphism fixed positions used by the current degree-64 proof
         // ring. Generalizing the proof ring shape must revisit this invariant.
+        // Positions 0 and degree/2 are the sigma-fixed coordinates; see the
+        // auto-fold in quadratic_equation.rs (schwartz_zippel_auto_fold_with).
         if hash_mask_polynomial[0] != 0 || hash_mask_polynomial[proof_ring.degree() / 2] != 0 {
             return Err(invalid_many_quadratic(
                 "hash-mask polynomial constant and half-degree coefficients must be zero",

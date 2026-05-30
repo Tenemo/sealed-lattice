@@ -10,11 +10,15 @@ const BGV_RANDOMNESS_BOUND_PROOF_MODEL: &str = "fiat-shamir-same-response-suppor
 const BGV_RANDOMNESS_SUPPORT: &str = "balanced-ternary-coefficients-minus-one-to-one";
 const BGV_ERROR_SUPPORT: &str = "centered-binomial-eta2-coefficients-minus-two-to-two";
 const BGV_BOUND_SUPPORT_CHECK_MODEL: &str = "coefficientwise-support-expansion-v1";
+// Vanishing polynomials whose roots are exactly the legal support: x(x-1)(x+1) vanishes on
+// the ternary {-1,0,1} randomizer support; x(x-2)(x-1)(x+1)(x+2) on the CBD-eta2 {-2..2} errors.
 const RANDOMIZER_SUPPORT_POLYNOMIAL: &str = "x*(x-1)*(x+1)";
 const ERROR_SUPPORT_POLYNOMIAL: &str = "x*(x-2)*(x-1)*(x+1)*(x+2)";
 const RANDOMIZER_EXPANSION_COEFFICIENT_COUNT: usize = 3;
 const ERROR_EXPANSION_COEFFICIENT_COUNT: usize = 5;
 const BGV_BOUND_SUPPORT_MODULUS_COUNT: usize = DATA_PRIMES.len();
+// 6 bytes = 48 bits holds any residue mod a <2^48 data prime; boundedness is checked
+// independently in every RNS limb (one support polynomial per data prime).
 const BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH: usize = 6;
 
 pub(super) struct BridgeBgvRandomnessBoundCommitmentInput<'value> {
@@ -428,6 +432,8 @@ fn validate_bgv_bound_commitment_shell(
             "encrypted aggregate bridge BGV boundedness commitment shell is not supported",
         ));
     }
+    // Only coefficientwise checks are sound here: a single out-of-support coefficient must not
+    // be maskable by weighted batching, so any weightModel field is rejected.
     if commitment.get("weightModel").is_some() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
@@ -575,6 +581,9 @@ impl BgvSupportKind {
     }
 }
 
+// Coefficients (in powers of the challenge c) of support(mask + c*witness): the response is the
+// homomorphic opening mask + c*witness. Literals 3 / 5,10,15,4 are the binomial-expansion terms
+// of x^3-x and x^5-5x^3+4x; the verifier recombines these as sum(commitment * c^k).
 fn support_expansion_coefficients(
     support_kind: BgvSupportKind,
     mask: u64,
@@ -627,6 +636,9 @@ fn support_expansion_coefficients(
     })
 }
 
+// Degree-homogenized support polynomial evaluated at the response (value) with c as the
+// homogenizing variable: x^3-x -> x^3 - x*c^2, x^5-5x^3+4x -> x^5 - 5x^3*c^2 + 4x*c^4. Equals the
+// recombined sum(commitment * c^k), certifying each coefficient lies in support.
 fn support_polynomial_value(
     support_kind: BgvSupportKind,
     value: u64,

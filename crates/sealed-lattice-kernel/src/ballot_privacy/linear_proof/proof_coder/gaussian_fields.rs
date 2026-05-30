@@ -1,5 +1,7 @@
 use super::*;
 
+// 2^20 cap on the unary prefix: a decode-bomb / malleability guard so a crafted
+// proof cannot force an unbounded unary run.
 const MAXIMUM_GAUSSIAN_UNARY_RUN_LENGTH: i64 = 1_048_576;
 pub(super) fn decode_gaussian_polynomial_vector(
     reader: &mut ProofBitReader,
@@ -7,6 +9,10 @@ pub(super) fn decode_gaussian_polynomial_vector(
     ring_degree: usize,
     log2_standard_deviation: usize,
 ) -> CanonicalResult<Vec<Vec<i64>>> {
+    // LaZer Gaussian coder: each coefficient is a unary "high part" (run of 1s
+    // ended by a 0) plus a (log2 stddev + 1)-bit signed "low part". The high
+    // part zig-zags (even run -> -(run/2), odd run -> (run+1)/2) and the value
+    // is scale*high + low, where scale = 2^(log2 stddev + 1).
     let binary_tail_bit_length = log2_standard_deviation
         .checked_add(1)
         .ok_or_else(|| invalid_proof("gaussian coder tail bit length overflowed"))?;

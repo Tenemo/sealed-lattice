@@ -25,6 +25,9 @@ import {
 } from './field.js';
 import { deriveSparseTopKTarget } from './sparse-target.js';
 
+// The score domain is frozen at 1..10. Tallies must stay below fieldModulus
+// (enforced by the no-wrap bound in derivePlaintextTally) for the homomorphic
+// tally to be sound.
 const supportedScores = new Set<number>([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
 const toPlaintextScore = (score: unknown): PlaintextScore => {
@@ -172,6 +175,8 @@ const derivePlaintextTopKRanking = (
             rank,
         }));
 
+// Multiplies a polynomial by the linear factor (x - root); used together with
+// interpolateFieldPolynomial below to build the Newton basis terms.
 const multiplyPolynomialByLinearTerm = (
     coefficients: readonly FieldElement[],
     root: FieldElement,
@@ -202,6 +207,8 @@ const interpolateFieldPolynomial = (
         throw new RangeError('Polynomial interpolation requires points.');
     }
 
+    // Newton form: build the divided-difference table in place, then expand it
+    // into monomial coefficients via the Newton basis terms.
     const dividedDifferences = points.map((point) => point.y);
 
     for (let order = 1; order < points.length; order += 1) {
@@ -271,6 +278,9 @@ export const deriveComparatorPolynomialSet = (
         throw new RangeError('Comparator roster size must be in 1..50.');
     }
 
+    // Domain [-9n, 9n]: the max signed tally difference between two options is
+    // the score spread (10 - 1 = 9) times n voters, so this range covers every
+    // reachable score gap the comparator circuit must decide.
     const domainMinimum = -9 * rosterSize;
     const domainMaximum = 9 * rosterSize;
     const points = Array.from(

@@ -62,6 +62,9 @@ export const deriveUniformBigInt = (
     payload: unknown,
     modulus: bigint,
 ): bigint => {
+    // Rejection sampling to avoid modulo bias when expanding a hash into a uniform
+    // field/ring element: discard 64-bit words >= 2^64 - (2^64 mod modulus), so the
+    // accepted range is an exact multiple of `modulus`.
     const rejectionLimit =
         unsignedWordModulus - (unsignedWordModulus % modulus);
     let blockCounter = 0;
@@ -125,6 +128,9 @@ export const resolveRandomBytes = (
     return bytes;
 };
 
+// CBD_2 centered-binomial sampler for Module-LWE secret/error/noise: popcount(low 2
+// bits) - popcount(high 2 bits) of a 4-bit nibble, giving output in -2..+2. nibbleOffset
+// 0 vs 4 yields two samples per byte.
 const sampleCenteredBinomialCoefficient = (
     byteValue: number,
     nibbleOffset: number,

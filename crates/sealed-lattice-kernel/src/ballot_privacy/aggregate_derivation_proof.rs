@@ -26,9 +26,12 @@ const AGGREGATE_DERIVATION_PROOF_ENCODING_PROFILE_ID: &str =
     "aggregate-derivation-linear-proof-encoding-v1";
 const AGGREGATE_DERIVATION_PROOF_STATEMENT_FORMAT: &str =
     "sparse-polynomial-matrix-linear-proof-v1";
+// Two-ring lowering: the native degree-256 source ring is embedded into the degree-64 proof
+// ring (256/64 = 4 proof polynomials per source polynomial).
 const AGGREGATE_DERIVATION_SOURCE_RING_DEGREE: usize = 256;
 const AGGREGATE_DERIVATION_PROOF_RING_DEGREE: usize = 64;
 const AGGREGATE_DERIVATION_WITNESS_L2_BOUND_SQUARED: u128 = 3_000_000_000_000_000;
+// ~46-bit proof modulus; 3 challenge repetitions give ~46*3 = 138 soundness bits.
 const AGGREGATE_DERIVATION_PROOF_MODULUS: u64 = 70_368_744_177_829;
 const AGGREGATE_DERIVATION_CHALLENGE_REPETITION_COUNT: usize = 3;
 const AGGREGATE_DERIVATION_CHALLENGE_SOUNDNESS_BITS: u64 = 138;
@@ -417,6 +420,9 @@ pub(crate) fn check_aggregate_derivation_witness_relation(
         })?;
     let mut reduced_field_vector = Vec::with_capacity(aggregate_integer_share_vector.len());
     let mut quotient_vector = Vec::with_capacity(aggregate_integer_share_vector.len());
+    // Canonical "integer equation + explicit quotient" decomposition: prove each integer aggregate
+    // coordinate splits as share = quotient*q + reduced within certified bounds, so the later field
+    // reduction is faithful (no modular wraparound). Both bound checks fail closed.
     for share_coordinate in aggregate_integer_share_vector {
         if *share_coordinate > maximum_aggregate_integer {
             return Err(invalid_preflight(

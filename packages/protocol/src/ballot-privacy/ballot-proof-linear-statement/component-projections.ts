@@ -61,6 +61,11 @@ import {
     zeroPolynomial,
 } from './witness-accessors.js';
 
+// HAND-ROLLED NEGACYCLIC NTT for fast receiver-encryption row checks. To multiply in
+// Z_12289[X]/(X^256+1), each operand is zero-padded to length 512 and run through a
+// length-512 cyclic NTT (primitive-root search, bit-reversal, twiddles, inverse scaling
+// below). The *2 is the negacyclic->cyclic embedding: a length-2*degree cyclic product
+// folds back to the degree-256 negacyclic result (see negacyclicProductFromTransformed...).
 const receiverEncryptionTransformLength = receiverEncryptionModuleDegree * 2;
 const transformedReceiverEncryptionPublicMatrixCache = new Map<
     string,
@@ -271,6 +276,9 @@ const addTransformedProduct = (input: {
     }
 };
 
+// Folds the length-512 cyclic product back into the degree-256 negacyclic result:
+// acc[i] - acc[i+degree]. The high half is subtracted because those coefficients
+// correspond to X^256.. terms, and X^256 = -1 in this ring.
 const negacyclicProductFromTransformedAccumulator = (
     transformedAccumulator: number[],
 ): number[] => {
@@ -764,6 +772,9 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
                     'Structured share-commitment proof statement received a malformed commitment polynomial vector.',
                 );
             }
+            // Maps the degree-256 commitment ring onto the degree-64 proof ring: each
+            // commitment-ring row splits into shareCommitmentModuleDegree/sourceRingDegree
+            // proof-ring rows.
             const rowSplitFactor =
                 shareCommitmentModuleDegree / input.sourceRingDegree;
             const rowCount = shareCommitmentRow.rowCount * rowSplitFactor;
@@ -779,6 +790,8 @@ const buildStructuredShareCommitmentSparseStatement = (input: {
             };
         },
     );
+    // Each receiver contributes shareVectorWidth share columns + 64 opening columns,
+    // so the structured source-column count must equal receivers * (width + 64).
     if (
         sourceBackendColumnIndices.length !==
         receiverRows.length * (input.loweredStatement.shareVectorWidth + 64)

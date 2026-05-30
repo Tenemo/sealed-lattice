@@ -53,6 +53,8 @@ const multiplyNumberPolynomials = (
             rightCoefficientIndex < degree;
             rightCoefficientIndex += 1
         ) {
+            // Schoolbook negacyclic multiplication in Z_q[X]/(X^degree+1): products with
+            // total degree >= `degree` wrap around and negate, because X^degree = -1.
             const rawIndex = leftCoefficientIndex + rightCoefficientIndex;
             const outputIndex = rawIndex % degree;
             const sign = rawIndex >= degree ? -1 : 1;
@@ -86,6 +88,7 @@ export const multiplyBigIntPolynomials = (
             rightCoefficientIndex < degree;
             rightCoefficientIndex += 1
         ) {
+            // Negacyclic wraparound (X^degree = -1), bigint variant of the above.
             const rawIndex = leftCoefficientIndex + rightCoefficientIndex;
             const outputIndex = rawIndex % degree;
             const sign = rawIndex >= degree ? -1n : 1n;

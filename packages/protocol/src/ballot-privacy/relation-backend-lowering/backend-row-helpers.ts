@@ -61,6 +61,8 @@ const decimalString = (value: bigint | number | string): string =>
 
 const shareCommitmentBigIntModulus = BigInt(shareCommitmentModulus);
 
+// Forces a canonical non-negative Goldilocks representative ((v % q) + q) % q,
+// since v may be negative after the X^256 = -1 wraparound negation below.
 const canonicalShareCommitmentCoefficient = (value: bigint): string => {
     const reducedValue =
         ((value % shareCommitmentBigIntModulus) +
@@ -293,6 +295,10 @@ const buildExplicitSparseRowBatch = (input: {
     };
 };
 
+// Expands a polynomial multiplication in Z_q[X]/(X^256+1) into a scalar coefficient
+// matrix. A share at coordinate s contributes msg[out-s] to output coefficient `out`;
+// when out < s the contributing term has wrapped past X^256, so the X^256 = -1 rule
+// negates msg[degree+out-s].
 const shareCommitmentMessageCoefficient = (input: {
     readonly messageMatrixPolynomial: readonly bigint[];
     readonly outputCoefficientIndex: number;

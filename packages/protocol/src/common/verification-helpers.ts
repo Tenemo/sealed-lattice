@@ -22,6 +22,9 @@ export const createRefusal = (
 
 const maximumVerificationDiagnosticLength = 240;
 
+// Diagnostics surfaced to callers are sanitized (control chars -> spaces,
+// runs collapsed) and length-capped at 240 to avoid log injection and
+// unbounded error text leaking out of a verifier.
 const sanitizeVerificationDiagnostic = (value: string): string =>
     Array.from(value, (character) => {
         const codePoint = character.codePointAt(0) ?? 0;
@@ -33,6 +36,10 @@ const sanitizeVerificationDiagnostic = (value: string): string =>
         .trim()
         .slice(0, maximumVerificationDiagnosticLength);
 
+// Verifier contract (repo-wide): a public `verifyX`/`deriveX` runs an inner
+// `…Unchecked` and wraps it in try/catch, converting any thrown error into a
+// structured refusal via this helper, so public verifiers never throw to the
+// caller — failures always come back as a RefusalRecord, never an exception.
 export const verificationExceptionMessage = (
     summary: string,
     error: unknown,
@@ -60,6 +67,7 @@ export const defaultSignedRootContextHash = deriveProtocolHash(
     { context: 'default' },
 );
 
+// Fixed 64-byte (512-bit) length every signed object root must declare.
 export const signedObjectRootByteLength = 64;
 
 export const isProtocolHashString = (value: unknown): value is string =>

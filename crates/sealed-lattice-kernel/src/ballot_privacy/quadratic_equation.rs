@@ -35,6 +35,8 @@ impl LinearProofQuadraticEquation {
                 "quadratic equation matrix and vector rings do not match",
             ));
         }
+        // Upper-diagonal is the canonical form of the symmetric quadratic form:
+        // lower-triangle entries would double-count the w_i*w_j cross terms.
         if !quadratic_terms.is_upper_diagonal() {
             return Err(invalid_quadratic(
                 "quadratic equation matrix must be upper-diagonal",
@@ -150,6 +152,10 @@ impl LinearProofQuadraticEquation {
         )
     }
 
+    // Folds two quadratic relations into one sigma-stable equation:
+    // self + sigma(self) + X^{d/2}*paired + X^{d/2}*sigma(paired), all times 1/2.
+    // sigma is the X -> X^{-1} automorphism; X^{d/2} is left_rotate by half_degree.
+    // The folded constant term carries the proof value (see fold_constant_terms).
     pub(crate) fn schwartz_zippel_auto_fold_with(
         &self,
         paired_equation: &Self,
@@ -523,6 +529,7 @@ fn inverse_two_modulus(ring: PolynomialRing) -> CanonicalResult<u64> {
         ));
     }
 
+    // For odd q, (q+1)/2 = q.div_ceil(2) is the modular inverse of 2 mod q.
     Ok(ring.modulus().div_ceil(2))
 }
 

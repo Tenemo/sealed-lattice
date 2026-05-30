@@ -16,6 +16,8 @@ use super::{
     transcript::shake128_32,
 };
 
+// Target vector is 11 message rows + 1 external-target row (the 12th slot). The
+// extra row holds the external target that the slicing below splits off.
 pub(super) const QUADRATIC_TARGET_VECTOR_LENGTH: usize = 12;
 pub(super) const QUADRATIC_MESSAGE_LENGTH: usize = 11;
 
@@ -159,6 +161,8 @@ pub(crate) fn validate_quadratic_challenge(
         ));
     }
 
+    // Dilithium UseHint-style safety bound: 2*||hint||_inf <= decompression_modulus
+    // prevents hint aliasing/wraparound in the high-bit decompression recovery.
     let hint_infinity_norm = signed_polynomial_infinity_norm(decoded_proof.hint_vector())?;
     if hint_infinity_norm
         .checked_mul(2)
@@ -288,6 +292,9 @@ pub(super) struct QuadraticVerifierPolynomialInput<'input> {
     target_commitment_vector: &'input PolynomialVector,
 }
 
+// Reconstructs the verifier's expected garbage polynomial. The challenge is
+// applied twice (two mul_negacyclic passes) so the constant/linear/quadratic
+// terms land at the c^2/c^1/c^0 grading of the folded quadratic check.
 pub(super) fn recover_quadratic_equation_verifier_polynomial(
     input: QuadraticVerifierPolynomialInput<'_>,
 ) -> CanonicalResult<Vec<u64>> {

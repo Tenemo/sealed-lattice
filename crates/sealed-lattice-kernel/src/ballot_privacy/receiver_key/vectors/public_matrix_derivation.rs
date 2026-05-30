@@ -11,6 +11,8 @@ use crate::hashing::{derive_protocol_hash, hash512};
 const RECEIVER_PUBLIC_MATRIX_EXPANSION_DOMAIN: &str =
     "sealed.vote/internal/receiver-encryption/public-matrix-v1";
 
+// The target vector stores -b, so negating each coefficient (q - t) mod q recovers the actual
+// public key b that keyMaterialHash commits to; the recomputed hash must then match.
 pub(super) fn validate_key_material_hash_from_target(
     linear_statement: &Map<String, Value>,
     target_vector: &[Vec<u64>],
@@ -151,6 +153,9 @@ fn derive_receiver_public_matrix_number(
     }
 }
 
+// Hot-path hand-serialization that MUST byte-match canonical_json of the equivalent nested object
+// (guarded by two tests below). Any field-order or whitespace drift would fork the derived public
+// matrix from every other implementation.
 fn receiver_public_matrix_coefficient_payload(
     block_counter: u64,
     coefficient_index: u64,

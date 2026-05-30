@@ -259,7 +259,11 @@ export const deriveThresholdProfile = (
         rosterSize,
         input.heBackendCorruptionModel,
     );
+    // floor(n/3): tolerate up to a third corrupt (BFT-style 1/3 corruption
+    // bound).
     const structuralCorruptionBound = Math.floor(rosterSize / 3);
+    // Strict model uses floor((n-1)/3): the largest f with n > 3f, i.e. a hard
+    // strictly-less-than-one-third backend bound.
     const backendCorruptionBound =
         backendCorruptionModel.kind === 'StrictLessThanOneThird'
             ? Math.floor((rosterSize - 1) / 3)
@@ -269,7 +273,10 @@ export const deriveThresholdProfile = (
         backendCorruptionBound,
     );
     const decryptionCorruptionBound = privacyCorruptionBound;
+    // floor(n/5): active (Byzantine-fault) tolerance, the 1/5 active-fault bound.
     const activeFaultBound = Math.floor(rosterSize / 5);
+    // +1 over the privacy corruption bound = reconstruction threshold: one more
+    // share than an adversary can hold is needed to reconstruct a secret.
     const pvssThreshold = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
     const targetBoundShareSelectionProfile =
@@ -278,6 +285,8 @@ export const deriveThresholdProfile = (
             decryptionThreshold,
             input.targetBoundShareSelectionProfile,
         );
+    // 2/3 turnout floor: ceil(2n/3) but never fewer than a hard floor of 10,
+    // and never more than the roster itself (min with n for small rosters).
     const releaseQuorum = Math.min(
         rosterSize,
         Math.max(10, Math.ceil((2 * rosterSize) / 3)),

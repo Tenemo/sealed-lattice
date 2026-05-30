@@ -120,9 +120,13 @@ fn shared_witness_layout_value(
     let aggregate_integer_share_coordinate_count = aggregate_reduced_coordinate_count;
     let commitment_opening_coordinate_count = SHARE_COMMITMENT_OPENING_DIMENSION as u64;
     let plaintext_coefficient_count = polynomial_degree;
+    // Pinned 0: this layout carries no separate plaintext-encoding quotient block.
     let plaintext_encoding_quotient_count = 0_u64;
     let encryption_randomizer_coefficient_count = polynomial_degree;
     let encryption_error_coefficient_count = ciphertext_component_count * polynomial_degree;
+    // Single shared response vector = concatenation of all witness blocks: integer share coords,
+    // commitment opening, reduced + quotient aggregate coords, plaintext coefficients (+0 quotient),
+    // encryption randomizer, and the two-component encryption error coefficients.
     let shared_response_scalar_count = aggregate_integer_share_coordinate_count
         + commitment_opening_coordinate_count
         + aggregate_reduced_coordinate_count
@@ -145,6 +149,9 @@ fn shared_witness_layout_value(
         "plaintextEncodingQuotientCount": plaintext_encoding_quotient_count,
         "encryptionRandomizerCoefficientCount": encryption_randomizer_coefficient_count,
         "encryptionErrorCoefficientCount": encryption_error_coefficient_count,
+        // Row counts per sub-relation: commitment rows (module rank) + one per reduced coord;
+        // one batch-encoding row per polynomial coefficient; and one BGV ciphertext equation per
+        // (data prime, coefficient, ciphertext component).
         "aggregateRelationRowCount": SHARE_COMMITMENT_MODULE_RANK as u64
             + aggregate_reduced_coordinate_count,
         "plaintextEncodingRelationRowCount": polynomial_degree,

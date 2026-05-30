@@ -557,6 +557,8 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ReceiverKeyBetaSigns(pub(super) i64, pub(super) i64);
 
+// beta3, beta4 in {+1, -1} are the secret blinding signs for the z3/z4
+// responses, taken from bits 0 and 1 of a single AES-CTR keystream byte.
 pub(super) fn receiver_key_tbox_beta_signs(
     seed: &[u8; RECEIVER_KEY_PROVER_RANDOMNESS_BYTES],
 ) -> ReceiverKeyBetaSigns {
@@ -571,6 +573,9 @@ pub(super) fn receiver_key_z34_message_vector(
     proof_ring: PolynomialRing,
     beta_signs: ReceiverKeyBetaSigns,
 ) -> CanonicalResult<PolynomialVector> {
+    // Polynomial slot 8 is the dedicated beta-carrier. beta3 sits at coefficient
+    // 0 and beta4 at d/2: the two automorphism-fixed coordinates that the norm
+    // relations read directly (sigma maps X->X^{-1}, fixing indices 0 and d/2).
     let mut entries =
         vec![vec![0_u64; proof_ring.degree()]; RECEIVER_KEY_TBOX_Z34_MESSAGE_POLYNOMIALS];
     entries[8][0] = positive_mod_i128(i128::from(beta_signs.0), proof_ring.modulus())?;
@@ -661,6 +666,8 @@ pub(super) fn compute_receiver_key_tbox_z3_response(
         short_witness,
         "short witness",
     )?;
+    // 256 is the T-box approximate-norm projection dimension (LaZer's fixed
+    // challenge-row count). z3 uses challenge rows 0..256 directly.
     let mut flattened_response = vec![0_i64; 256];
     for (row_index, response_coefficient) in flattened_response.iter_mut().enumerate() {
         let row_sum = sparse_ternary_row_dot_product(
@@ -693,6 +700,8 @@ pub(super) fn compute_receiver_key_tbox_z4_response(
         flatten_nonzero_canonical_vector_to_centered_i64(proof_ring, tbox_z4_secret, "z4 secret")?;
     let mut flattened_response = vec![0_i64; 256];
     for (row_index, response_coefficient) in flattened_response.iter_mut().enumerate() {
+        // The +256 offset domain-separates the z4 challenge rows from z3's rows
+        // 0..256, so the two response projections draw independent challenges.
         let row_sum = sparse_ternary_row_dot_product(
             flattened_secret.length,
             &flattened_secret.nonzero_entries,
@@ -770,6 +779,10 @@ pub(super) fn flatten_nonzero_canonical_vector_to_centered_i64(
     })
 }
 
+// Dot product of the witness with one {-1, 0, +1} challenge row. Each coordinate
+// reads two keystream bits: positive_bit at `position`, negative_bit at
+// row_length+position; their difference is the ternary entry. Iterating only the
+// nonzero witness entries is an equivalent sparse optimization of the full dot.
 pub(super) fn sparse_ternary_row_dot_product(
     row_length: usize,
     nonzero_entries: &[FlattenedNonzeroCenteredCoefficient],

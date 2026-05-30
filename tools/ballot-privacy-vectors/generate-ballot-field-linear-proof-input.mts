@@ -27,6 +27,10 @@ const oneHotScore = (score: number): readonly number[] =>
         scoreIndex + 1 === score ? 1 : 0,
     );
 
+// Hand-tuned 2-option/3-receiver mini relation: scores 7 and 3, with the per-option
+// scalar share given by Shamir evaluation of a degree-1 polynomial at the roster point
+// (firstOption shares 6,5,4 for receivers 1,2,3 fit slope -1; secondOption 12,21,30
+// fit slope 9). oneHotScore(7)/oneHotScore(3) carry the one-hot bucket witnesses.
 const miniEncodedShareVector = (input: {
     readonly firstOptionScoreShare: number;
     readonly secondOptionScoreShare: number;
@@ -37,6 +41,9 @@ const miniEncodedShareVector = (input: {
     ...oneHotScore(3),
 ];
 
+// Per-coordinate degree-1 Shamir coefficients: [65_536] is the slope for option-1's
+// scalar (65536 == -1 mod 65537), [9] is option-2's slope; all bucket coordinates have
+// slope 0. The constant terms (the recovered scores) live in the shares above.
 const miniEncodedCoordinateShamirCoefficients =
     (): readonly (readonly number[])[] => [
         [65_536],
@@ -130,6 +137,7 @@ const publicContextForRoster = (
             ciphertextChunkHash: hash(
                 `receiver-payload-ciphertext-chunks-${rosterSize}-${receiverReference.receiverRosterPosition}`,
             ),
+            // 704 = 64 coordinates x 11 bits, matching the encoded payload layout.
             plaintextBitLength: 704,
             ...receiverReference,
             receiverPayloadCiphertextRoot: hash(

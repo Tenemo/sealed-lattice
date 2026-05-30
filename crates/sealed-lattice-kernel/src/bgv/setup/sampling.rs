@@ -159,6 +159,8 @@ pub(super) fn dense_centered_binomial_coefficients(
     coefficients
 }
 
+// Centered binomial distribution with eta=2, support [-2, 2]: takes 4 random
+// bits per sample and returns (b0 + b1) - (b2 + b3).
 fn centered_binomial_eta2_from_bits(bits: u8) -> i64 {
     let low_weight = i64::from(bits & 1) + i64::from((bits >> 1) & 1);
     let high_weight = i64::from((bits >> 2) & 1) + i64::from((bits >> 3) & 1);
@@ -179,6 +181,8 @@ pub(super) fn signed_to_modulus_residue(value: i64, modulus: u64) -> u64 {
     }
 }
 
+// Polynomial multiplication in Z_q[X]/(X^N + 1): forward NTT both operands,
+// multiply pointwise, then inverse NTT.
 pub(super) fn negacyclic_product_mod(
     left: &[u64],
     right: &[u64],

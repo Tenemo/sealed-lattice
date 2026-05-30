@@ -145,6 +145,8 @@ impl PolynomialRing {
         value: &[u64],
         rotation: usize,
     ) -> CanonicalResult<Vec<u64>> {
+        // Rotation by X^r in Z_q[X]/(X^N+1). Because X^N = -1, the sign flips
+        // every N steps, so the full period is 2N (the cycle_length below).
         self.validate_coefficients(value)?;
         let cycle_length = self
             .degree
@@ -180,6 +182,8 @@ impl PolynomialRing {
     }
 
     pub fn automorphism(&self, value: &[u64]) -> CanonicalResult<Vec<u64>> {
+        // sigma: f(X) -> f(X^{-1}) in the negacyclic ring. Coordinates 0 and
+        // N/2 (half_degree) are the fixed points; the rest swap with a sign flip.
         self.validate_coefficients(value)?;
 
         let mut output = vec![0_u64; self.degree];
@@ -238,6 +242,8 @@ impl PolynomialRing {
         if left_nonzero_count == 0 || right_nonzero_count == 0 {
             return;
         }
+        // Density heuristic: dense enough operands use Karatsuba, otherwise the
+        // sparse schoolbook loop below. Both paths produce identical results.
         if self.degree >= 32
             && left_nonzero_count * right_nonzero_count > (self.degree * self.degree) / 2
         {
@@ -249,6 +255,7 @@ impl PolynomialRing {
 
             return;
         }
+        // Iterate the sparser operand on the outside to skip more zero terms.
         let (outer, inner) = if right_nonzero_count < left_nonzero_count {
             (right, left)
         } else {
@@ -264,6 +271,8 @@ impl PolynomialRing {
                     continue;
                 }
                 let raw_index = left_index + right_index;
+                // `& (degree-1)` is mod N (power-of-two degree); when raw_index
+                // wraps past N the sign flips, implementing X^N = -1.
                 let target_index = raw_index & (self.degree - 1);
                 let product = mul_mod(left_coefficient, right_coefficient, self.modulus);
                 if raw_index >= self.degree {
@@ -377,8 +386,12 @@ fn subtract_polynomial_into(output: &mut [u64], value: &[u64], modulus: u64) {
     }
 }
 
+// Goldilocks prime 2^64 - 2^32 + 1; from 2^64 = 2^32 - 1 (mod q) the fold
+// factor below is 2^32 - 1.
 const GOLDILOCKS_MODULUS: u64 = 18_446_744_069_414_584_321;
 const GOLDILOCKS_FOLD_FACTOR: u128 = (1_u128 << 32) - 1;
+// 36_028_797_018_964_597 = 629*2^55 + 1, so 629*2^55 = -1 (mod q). The fold
+// bits (55) and fold factor (629) drive the Solinas-style reduction below.
 pub(crate) const LINEAR_PROOF_MODULUS: u64 = 36_028_797_018_964_597;
 const LINEAR_PROOF_MODULUS_FOLD_BITS: u32 = 55;
 const LINEAR_PROOF_MODULUS_FOLD_MASK: u128 = (1_u128 << LINEAR_PROOF_MODULUS_FOLD_BITS) - 1;
@@ -388,6 +401,7 @@ pub(crate) fn add_mod(left: u64, right: u64, modulus: u64) -> u64 {
     if modulus == GOLDILOCKS_MODULUS {
         return reduce_goldilocks_u128(u128::from(left) + u128::from(right));
     }
+    // modulus <= u64::MAX/2 guarantees left + right cannot overflow u64.
     if modulus <= u64::MAX / 2 {
         let sum = left + right;
         return if sum >= modulus { sum - modulus } else { sum };
@@ -422,6 +436,8 @@ pub(crate) fn mul_mod(left: u64, right: u64, modulus: u64) -> u64 {
 }
 
 pub(crate) fn reduce_linear_proof_modulus_u128(value: u128) -> u64 {
+    // Two-stage signed fold using 629*2^55 = -1 (mod q); two folds suffice to
+    // reduce any 128-bit input into the canonical range.
     let low_part = (value & LINEAR_PROOF_MODULUS_FOLD_MASK) as i128;
     let high_part = value >> LINEAR_PROOF_MODULUS_FOLD_BITS;
     let folded_high = LINEAR_PROOF_MODULUS_FOLD_FACTOR * high_part as i128;
@@ -454,6 +470,8 @@ pub(crate) fn positive_mod_linear_proof_i128(value: i128) -> u64 {
 }
 
 fn reduce_u53_product(left: u64, right: u64, modulus: u64) -> u64 {
+    // f64 approximate quotient plus a bounded correction loop; valid for
+    // sub-2^53 moduli where the f64 quotient is exact enough. % is the fallback.
     let product = u128::from(left) * u128::from(right);
     let approximate_quotient = ((left as f64) * (right as f64) / (modulus as f64)) as u64;
     let mut remainder =

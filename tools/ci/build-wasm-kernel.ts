@@ -27,27 +27,6 @@ const sdkKernelLoaderFilePath = path.resolve(
     'dist',
     'kernel.js',
 );
-const wasmKernelOutputFilePath = path.resolve(
-    repoRoot,
-    'packages',
-    'wasm',
-    'dist',
-    'sealed-lattice-kernel.wasm',
-);
-const wasmKernelSourceLoaderFilePath = path.resolve(
-    repoRoot,
-    'packages',
-    'wasm',
-    'src',
-    'index.ts',
-);
-const wasmKernelDistLoaderFilePath = path.resolve(
-    repoRoot,
-    'packages',
-    'wasm',
-    'dist',
-    'index.js',
-);
 const kernelHashAssignmentPattern =
     /const packagedTranscriptCoreKernelNormalizedSha256Hex(?:\s*:\s*string\s*\|\s*undefined)?\s*=\s*(?:undefined|'[a-f0-9]{64}');/u;
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
@@ -263,22 +242,6 @@ const pinSdkKernelHashIfNeeded = async (
     await writePinnedKernelHashIfChanged(sdkKernelLoaderFilePath, sha256Hex);
 };
 
-const pinInternalWasmKernelHashIfNeeded = async (
-    outputFilePath: string,
-    sha256Hex: string,
-): Promise<void> => {
-    if (path.resolve(outputFilePath) !== wasmKernelOutputFilePath) {
-        return;
-    }
-
-    for (const loaderFilePath of [
-        wasmKernelSourceLoaderFilePath,
-        wasmKernelDistLoaderFilePath,
-    ]) {
-        await writePinnedKernelHashIfChanged(loaderFilePath, sha256Hex);
-    }
-};
-
 export const buildWasmKernel = async (): Promise<void> => {
     const outputFilePath = resolveOutputFilePath(process.argv.slice(2));
     const outputDirectory = path.dirname(outputFilePath);
@@ -297,7 +260,6 @@ export const buildWasmKernel = async (): Promise<void> => {
     }
     const sha256Hex = await hashFileSha256Hex(outputFilePath);
     await pinSdkKernelHashIfNeeded(outputFilePath, sha256Hex);
-    await pinInternalWasmKernelHashIfNeeded(outputFilePath, sha256Hex);
 
     console.log(
         `transcript-core kernel copied to ${path.relative(repoRoot, outputFilePath)} (${sha256Hex})`,

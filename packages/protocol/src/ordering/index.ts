@@ -16,6 +16,9 @@ import {
 
 const defaultMaxPerIdentity = 1;
 
+// Canonical total order, compared in tuple priority:
+// (boardSequence, boardPosition, actionSequence, objectHash). The objectHash
+// tiebreak guarantees a deterministic order even when the first three match.
 const compareCandidates = (
     left: ValidatedFirstValidObject,
     right: ValidatedFirstValidObject,
@@ -101,6 +104,11 @@ const isCurrentRecoveryEpoch = (
     if (recoveryEntry === undefined) {
         return false;
     }
+    // Recovery-epoch validity window. An action on the current epoch is valid;
+    // additionally, a prior-epoch action stays valid only if it predates the
+    // recovery cutoff board sequence (pre-cutoff actions from the old epoch are
+    // honored). Post-cutoff stale-epoch actions are rejected: anti-rollback /
+    // cloned-device defense.
     if (
         candidate.recoveryEpoch === recoveryEntry.currentRecoveryEpoch &&
         candidate.deviceEpoch === recoveryEntry.currentDeviceEpoch
@@ -240,6 +248,9 @@ const deriveValidatedFirstValidOrderUnchecked = (
             ),
         );
     }
+    // After sorting into canonical order, cap each signer at maxPerIdentity
+    // (default 1) accepted objects per context — enforcing one accepted object
+    // per signer per context, keeping the earliest in canonical order.
     const countByIdentity = new Map<string, number>();
     const orderedCandidates = deduplicatedCandidates
         .sort(compareCandidates)

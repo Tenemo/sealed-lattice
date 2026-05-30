@@ -46,6 +46,9 @@ import {
 } from './backend-row-helpers.js';
 import { receiverReferenceKey } from './relation-row-builders.js';
 
+// Column budget separating "small" rosters (fully explicit sparse rows) from larger ones
+// (structured Module-SIS / compact witness columns). 22 here is the small-roster share
+// width and 64 the opening dimension, scaled by a factor of 6 receivers' worth.
 const maximumExplicitSmallReceiverSourceColumnCount =
     6 * (22 + shareCommitmentOpeningDimension);
 
@@ -101,6 +104,8 @@ const buildExplicitShareCommitmentRowBatch = (input: {
     };
 };
 
+// Switch to structured rows once the share width exceeds 64 or the explicit
+// column count would blow the small-roster budget, bounding overall proof size.
 const shouldUseStructuredShareCommitmentRows = (input: {
     readonly receiverCount: number;
     readonly shareVectorWidth: number;

@@ -8,6 +8,9 @@ import type {
 
 import { createRefusal } from '../common/verification-helpers.js';
 
+// Equals the maximum option count. All share/commitment/opening vectors are
+// fixed at this width with zero padding, so summing across ballots aligns
+// slot-by-slot (additive aggregation lines up the same option in every ballot).
 export const pvssBallotShareVectorWidth = 20 as const;
 
 export const compareSignedBoardOrder = (

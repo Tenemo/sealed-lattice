@@ -366,6 +366,8 @@ const buildMembershipRows = (
     return rows;
 };
 
+// The receiver point (roster position) raised to a coefficient degree mod q: this is
+// the public Vandermonde/Shamir multiplier i^k applied to the degree-k coefficient.
 const fieldPower = (
     receiverRosterPosition: number,
     coefficientDegree: number,
@@ -625,6 +627,9 @@ const buildReceiverPayloadPlaintextBitDecompositionRows = (
                 receiverRosterPosition,
                 rowKind: 'ReceiverPayloadOpeningBitDecomposition',
                 rowName: `receiver_${receiverRosterPosition}_payload_plaintext_opening_coordinate_${openingCoordinateIndex}_bit_decomposition`,
+                // sum(2^i * bit) - opening = target=1024, i.e. the bits reconstruct the
+                // SHIFTED opening (signed value + 1024) so every bit is non-negative; the
+                // row target carries the 1024 recentre offset (the opening infinity bound).
                 target: shareCommitmentOpeningInfinityNormBound,
                 terms: [
                     ...Array.from(

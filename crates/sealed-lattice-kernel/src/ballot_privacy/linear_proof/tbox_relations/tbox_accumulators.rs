@@ -29,6 +29,10 @@ pub(crate) const TBOX_QUADRATIC_EVALUATION_MESSAGE_LENGTH: usize = 9;
 pub(crate) const TBOX_QUADRATIC_MANY_MESSAGE_LENGTH: usize = 11;
 pub(super) const TBOX_QUADRATIC_EVALUATION_REPETITIONS: usize = 4;
 
+// Each constant reserves a contiguous, non-overlapping Fiat-Shamir challenge
+// block (beta3, beta4, upsilon, binary, euclidean, z4, z3 in order). The cumulative
+// offsets are frozen against the generated LaZer vectors: changing the layout is a
+// proof-profile change, not a local patch.
 pub(super) const TBOX_BETA3_DOMAIN_OFFSET: u32 = 0;
 pub(super) const TBOX_BETA4_DOMAIN_OFFSET: u32 =
     (TBOX_QUADRATIC_EVALUATION_REPETITIONS * (DEFAULT_LINEAR_PROOF_RING_DEGREE - 1)) as u32;
@@ -188,6 +192,8 @@ pub(super) fn initialize_tbox_relation_accumulators(
 
     let proof_ring = tbox_profile.proof_ring;
     let equation_dimension = tbox_profile.quadratic_evaluation_dimension();
+    // One accumulator per Schwartz-Zippel pair: each pair consumes two of the
+    // four repetitions (one primary, one secondary evaluation point).
     let accumulator_count = TBOX_QUADRATIC_EVALUATION_REPETITIONS / 2;
     let primary_schwartz_zippel_accumulators = (0..accumulator_count)
         .map(|_| LinearProofQuadraticEquation::zero(proof_ring, equation_dimension))
@@ -288,11 +294,15 @@ fn build_accumulated_beta3_relation(
     tbox_profile: TboxRelationProfile,
 ) -> CanonicalResult<LinearProofQuadraticEquation> {
     let proof_ring = tbox_profile.proof_ring;
+    // inverse_two is 1/2 mod q; the half-factor pre-divides each challenge so the
+    // later auto-fold (which sums the conjugate pair) is not doubled.
     let inverse_two = proof_ring.modulus().div_ceil(2);
     let beta_offset = tbox_profile.beta_offset();
     let equation_dimension = tbox_profile.quadratic_evaluation_dimension();
     let mut beta_polynomial = vec![0_u64; proof_ring.degree()];
 
+    // challenge_lane_offset 0/1 selects the primary/secondary Schwartz-Zippel
+    // evaluation point; the two points are the pair the auto-fold later combines.
     for (coefficient_index, coefficient) in beta_polynomial.iter_mut().enumerate().skip(1) {
         let challenge_index = (coefficient_index - 1) * TBOX_QUADRATIC_EVALUATION_REPETITIONS
             + 2 * accumulator_pair_index

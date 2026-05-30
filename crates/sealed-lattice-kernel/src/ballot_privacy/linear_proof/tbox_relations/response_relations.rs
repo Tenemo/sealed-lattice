@@ -296,6 +296,8 @@ pub(super) fn compute_linear_proof_response_rotation_products(
     let mut signed_products =
         vec![vec![0_i128; rotation_column_count]; TBOX_QUADRATIC_EVALUATION_REPETITIONS];
 
+    // Iterate the 256 approximate-norm projection rows. z4 (prime domain) uses
+    // rows 256+index; z3 uses rows index, matching the prover's response domains.
     for response_coordinate_index in 0..256 {
         let row_domain_separator = if use_prime_rotation_domain {
             256 + response_coordinate_index
@@ -340,6 +342,10 @@ pub(super) fn compute_linear_proof_response_rotation_products(
     }
 }
 
+// Apply the negacyclic sigma-conjugate "shift by X^{d/2}" central to the
+// approximate-norm relation: scale by 1/2, then move coefficient i to i+d/2 in the
+// lower half or negate it into i-d/2 in the upper half (X^{d/2}*X^i, X^d = -1).
+// The 1/2 factor undoes the doubling from the conjugate sum.
 pub(super) fn convert_z4_rotation_products_to_polynomials(
     ring: PolynomialRing,
     response_rotation_matrix_products: &[Vec<u64>],
@@ -804,6 +810,8 @@ pub(super) fn dot_signed_response_with_challenge(
         }
         accumulated_value += i128::from(*response_coefficient) * i128::from(*challenge_coefficient);
         accumulated_product_count += 1;
+        // Lazy reduction: flush to mod q every 64 products so the i128 accumulator
+        // stays bounded (64 * q * max|coeff| < 2^127) and never overflows.
         if accumulated_product_count == 64 {
             accumulated_value %= i128::from(modulus);
             accumulated_product_count = 0;

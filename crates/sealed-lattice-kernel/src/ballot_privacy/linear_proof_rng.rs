@@ -12,6 +12,9 @@ pub fn generate_linear_proof_aes256ctr_stream(
 ) -> Vec<u8> {
     let cipher = Aes256::new(Key::<Aes256>::from_slice(seed));
     let mut counter_block = [0_u8; 16];
+    // Counter layout: domain_separator in the low 8 bytes; the block counter
+    // increments from the high 8 bytes (see increment_linear_proof_counter), so
+    // the 64-bit domain and 64-bit counter spaces never collide.
     counter_block[..8].copy_from_slice(&domain_separator.to_le_bytes());
 
     let mut output = Vec::with_capacity(output_length);
@@ -74,6 +77,9 @@ impl LinearProofUniformSampler {
                 "uniform modulus bit length must be between one and sixty-three",
             ));
         }
+        // Rejection sampling for uniform-mod-q from bit-packed bytes: require the
+        // modulus in [2^(bits-1), 2^bits) so the bit-length hugs the modulus and
+        // bounds the rejection probability below (candidate < modulus accepts).
         if modulus < (1_u64 << (modulus_bit_length - 1)) || modulus >= (1_u64 << modulus_bit_length)
         {
             return Err(invalid_rng(
@@ -140,6 +146,10 @@ pub fn sample_linear_proof_autostable_challenge_coefficients(
         seed,
         domain_separator,
     )?;
+    // "Autostable" construction: sample count/2 lower coefficients, force the
+    // middle coefficient (index count/2) to zero, then set the upper half to the
+    // negated mirror of the lower half. This yields a polynomial fixed by sigma
+    // (sigma(c) = c), the symmetry the auto-fold soundness argument relies on.
     let mut coefficients = vec![0_i64; coefficient_count];
     for (coefficient_index, sampled_value) in sampled_values.iter().enumerate() {
         coefficients[coefficient_index] = i64::try_from(*sampled_value)

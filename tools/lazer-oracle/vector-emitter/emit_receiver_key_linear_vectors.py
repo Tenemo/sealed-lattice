@@ -67,6 +67,9 @@ def require_nonempty_glob(directory: Path, pattern: str) -> None:
 def proof_encoding_contract(proof: bytes) -> dict[str, Any]:
     return {
         "profileId": "receiver-key-linear-proof-encoding-v1",
+        # Deliberate: the statement ring is degree 256 (RECEIVER_KEY_RING_DEGREE), but
+        # LaZer's internal proof-system ring degree is 64. This is the proof encoding,
+        # so 64 is correct here; do not "fix" the apparent mismatch.
         "ringDegree": 64,
         "coefficientModulus": "274877908477",
         "fullSizeCoefficientBitLength": 39,

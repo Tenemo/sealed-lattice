@@ -18,6 +18,9 @@ import {
     subtractFieldElements,
 } from './field.js';
 
+// DoS guard for the worst-case report below, which brute-forces over every
+// threshold-sized contributor subset: caps C(rosterSize, threshold) so the
+// exhaustive local enumeration cannot blow up. 50 is the protocol roster ceiling.
 const defaultMaximumExhaustiveSubsetCount = 250_000;
 const maximumSupportedRosterSize = 50;
 
@@ -196,6 +199,8 @@ const deriveLagrangeCoefficientsAtZero = (
         },
     );
 
+    // Lagrange basis weights evaluated at x = 0, i.e. the L_i(0) coefficients.
+    // The shared secret is P(0), so sum(L_i(0) * share_i) reconstructs it.
     return validatedPositions.map((rosterPosition, selectedIndex) => {
         let coefficient: FieldElement = 1;
 
@@ -292,6 +297,9 @@ export const deriveInterpolationCoefficientReport = (input: {
     };
 };
 
+// C(rosterSize, threshold) via an incremental multiply/divide product. The
+// final Math.round corrects floating-point drift from the intermediate
+// divisions. Feeds the exhaustive-subset cap above.
 const countCombinations = (rosterSize: number, threshold: number): number => {
     let combinationCount = 1;
 

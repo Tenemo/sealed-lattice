@@ -133,6 +133,8 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
                     "Structured receiver-encryption receiver row ciphertextChunks must be an array.",
                 )
             })?;
+        // Each ciphertext chunk contributes MODULE_RANK rows for the first ciphertext vector plus
+        // one row for the second ciphertext polynomial (hence RANK + 1 per chunk).
         let expected_row_count = ciphertext_chunks
             .len()
             .checked_mul(RECEIVER_ENCRYPTION_MODULE_RANK as usize + 1)
@@ -154,6 +156,8 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
                 "Structured receiver-encryption receiver rows exceed the statement shape.",
             ));
         }
+        // Canonicalization invariant: rows must tile the statement exactly, with no gap, overlap,
+        // or reorder (each row's offset must equal the running covered-row count).
         if row_offset_within_statement != covered_row_count {
             return Err(ComponentProofBackendError::invalid(
                 "Structured receiver-encryption receiver row offsets must be canonical and contiguous.",
@@ -284,6 +288,10 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
                     )
                 })?;
 
+            // Encodes the Module-LWE relation c1 = A*r + e1 (the RANK rows) and
+            // c2 = b*r + e2 + floor(q/2)*m (the trailing row): negated ciphertext goes into the
+            // target, the public matrix/key into the randomness columns, identity (1) into the
+            // noise columns, and floor(q/2) into the plaintext column.
             for ciphertext_vector_index in 0..RECEIVER_ENCRYPTION_MODULE_RANK as usize {
                 let row_index = chunk_row_offset + ciphertext_vector_index;
                 target_vector_coefficients[row_index] =
@@ -321,6 +329,7 @@ pub(crate) fn parse_structured_receiver_encryption_statement(
                 second_noise_column_index,
                 receiver_constant_polynomial(1),
             );
+            // floor(q/2) message encoding: the plaintext bit is placed in the high half of Z_q.
             push_receiver_sparse_entry(
                 &mut source_statement_entries,
                 second_ciphertext_row_index,

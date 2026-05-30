@@ -525,6 +525,9 @@ impl<'proof> ProofBitReader<'proof> {
     }
 
     fn finish(&mut self) -> CanonicalResult<()> {
+        // Strict canonical terminator (anti-malleability): the next bit must be
+        // 1, every higher bit in that byte must be 0, and no trailing bytes may
+        // follow. Any deviation is a noncanonical (malleable) encoding.
         if self.bit_offset >= self.proof_bytes.len() * 8 {
             return Err(invalid_proof("proof encoding has no terminal padding bit"));
         }
@@ -601,6 +604,8 @@ impl ProofBitWriter {
     }
 
     fn finish(mut self) -> CanonicalResult<Vec<u8>> {
+        // Encoder counterpart to ProofBitReader::finish: terminal 1-bit then
+        // zero-pad to the byte boundary.
         self.write_bit(1)?;
         while !self.bit_offset.is_multiple_of(8) {
             self.write_bit(0)?;
@@ -707,6 +712,8 @@ pub(super) fn decode_challenge_polynomial(
     .into_iter()
     .next()
     .ok_or_else(|| invalid_proof("challenge polynomial must contain one polynomial"))?;
+    // Center each challenge coefficient to a balanced residue: values above
+    // half the modulus map to the negative representative c - modulus.
     let half_modulus = coefficient_modulus / 2;
     let centered_coefficients = encoded_polynomial
         .iter()
@@ -739,6 +746,9 @@ pub(super) fn decode_hint_polynomial_vector(
     let coefficient_count = vector_length
         .checked_mul(ring_degree)
         .ok_or_else(|| invalid_proof("proof hint coefficient count overflowed"))?;
+    // LaZer hint codeword table (must stay bit-identical to the LaZer format):
+    //   00 -> 0, 01 -> +1, 10 -> -1, and 11 -> a unary zero-run terminated by a
+    //   1 bit encoding |v| >= 2: even run -> (run+4)/2, odd run -> -((run+3)/2).
     let mut decoded_coefficients = Vec::with_capacity(coefficient_count);
     for _ in 0..coefficient_count {
         let first_bit = reader.read_bit()?;
@@ -788,6 +798,9 @@ pub(super) fn encode_hint_polynomial_vector(
                 "hint polynomial degree does not match the proof encoding",
             ));
         }
+        // Inverse of the decoder codeword table; encoder/decoder must stay
+        // bit-identical. |v| >= 2 emits 11, a zero-run, then a terminating 1:
+        // positive run = 2v - 4 (even), negative run = -2v - 3 (odd).
         for coefficient in polynomial {
             match *coefficient {
                 0 => {

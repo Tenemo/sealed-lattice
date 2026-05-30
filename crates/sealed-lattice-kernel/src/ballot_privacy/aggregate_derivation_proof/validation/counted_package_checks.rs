@@ -401,6 +401,9 @@ fn commitment_polynomial_vector_from_value(value: &Value) -> Option<Vec<Vec<Stri
         .collect()
 }
 
+// Homomorphic-aggregation invariant: the share commitment is additively homomorphic, so the
+// aggregate commitment must equal the coefficientwise sum (mod SHARE_COMMITMENT_MODULUS, the
+// Goldilocks prime) of each counted package's per-contributor commitment vector.
 fn summed_share_commitment_vector(vectors: &[Vec<Vec<String>>]) -> Option<Vec<Vec<String>>> {
     if vectors.is_empty() {
         return None;

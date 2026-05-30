@@ -159,6 +159,9 @@ const buildAlgebraicRows = (
             publicKey?.publicKeyVector !== undefined &&
             publicKey.publicMatrixSeedHash !== undefined &&
             receiverPayload?.ciphertextChunks !== undefined;
+        // Default plaintext bit budget = encodedCoordinateCount*17 + 64*12:
+        // 17 bits per share coordinate plus 12 bits per opening coordinate over the
+        // 64 opening coordinates (shareCommitmentOpeningDimension).
         const plaintextBitLength =
             receiverPayload?.plaintextBitLength ??
             encodedCoordinateCount * receiverShareRepresentativeBitLength +
@@ -173,6 +176,9 @@ const buildAlgebraicRows = (
                       plaintextBitLength,
                   )
                 : [];
+        // Selects the receiver-encryption lowering: explicit per-coefficient witness
+        // columns, or (for large rosters) compact structured columns added later, or a
+        // hash-expanded randomness/noise pair when no explicit ciphertext material exists.
         const encryptionVariableNames = hasExplicitReceiverEncryptionRows
             ? shouldUseCompactReceiverEncryptionWitnessColumns({
                   receiverCount: input.relationInput.receivers.length,
@@ -196,6 +202,8 @@ const buildAlgebraicRows = (
               ];
 
         rows.push({
+            // Share-commitment yields rank*degree scalar equations (one per coefficient
+            // of each of the moduleRank polynomials in the commitment ring).
             equationCount:
                 shareCommitmentModuleRank * shareCommitmentModuleDegree,
             modulus: shareCommitmentModulus,
@@ -221,6 +229,9 @@ const buildAlgebraicRows = (
             variableNames: [...shareVariableNames, ...openingVariableNames],
         });
         rows.push({
+            // Receiver encryption yields (rank ciphertext-vector rows + 1 second-component
+            // row) * degree equations per ciphertext chunk: the +1 is the second ciphertext
+            // polynomial carrying the message.
             equationCount:
                 ciphertextChunkCount *
                 (receiverEncryptionModuleRank + 1) *
@@ -275,6 +286,10 @@ const buildAlgebraicRows = (
     return rows;
 };
 
+// Bounds the integer Shamir quotient: the worst case is evaluating a degree-(t-1)
+// polynomial with canonical coefficients (each <= q-1) at a roster point, minus a
+// canonical share, all divided by q. Certifying this short bound lets the proof attest
+// the quotient witness is small rather than a wraparound-hiding large value.
 const calculateCertifiedShamirQuotientBound = (input: {
     readonly pvssThreshold: number;
 }): number => {

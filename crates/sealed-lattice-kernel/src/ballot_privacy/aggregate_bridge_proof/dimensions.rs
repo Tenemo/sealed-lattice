@@ -10,6 +10,8 @@ pub(super) struct BridgeVariantDimensions {
     pub(super) evidence_tier: &'static str,
 }
 
+// The only (participantCount, optionCount) shapes with checked-in row evidence; any other
+// shape is flagged full-matrix-row-evidence-missing below (downgraded, not rejected).
 const REPRESENTATIVE_EVIDENCE_VARIANTS: &[(u64, u64)] = &[
     (3, 2),
     (3, 20),
@@ -38,6 +40,9 @@ pub(super) fn bridge_variant_dimensions(
         "shareVectorWidth",
         "aggregateDerivationStatement",
     )?;
+    // IMPORTANT: the bridge caps participants at 20 (MANDATORY_RECEIVER_COUNT) while the
+    // aggregate-derivation statement allows up to MAXIMUM_PARTICIPANT_COUNT (50). This narrower
+    // bound is intentional for the bridge milestone, not a bug.
     let maximum_bridge_participant_count = u64::try_from(BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT)
         .map_err(|_| {
         CanonicalError::new(
@@ -75,6 +80,8 @@ pub(super) fn bridge_variant_dimensions(
             "encrypted aggregate bridge shareVectorWidth must equal 11 * optionCount",
         ));
     }
+    // 3..9 participants are accepted structurally but fall outside the privacy claim (anonymity
+    // set too small); this tier ties to the casualMicroRosterAcknowledged acknowledgement.
     let claim_tier = if participant_count < BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT as u64 {
         "micro-roster-outside-claim"
     } else {

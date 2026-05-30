@@ -222,7 +222,8 @@ pub(crate) const GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED: 
 // aggregate witness covering S, rho, Y, and quotient for up to 50 counted
 // ballots and 20 options. This is an implementation-side compatibility bound
 // for the current Rust/WASM proof experiment, not standalone final theorem
-// evidence.
+// evidence. The literal is a round 3e15 over-approximation chosen to comfortably
+// cover that witness layout, not an exact term-by-term product.
 pub(crate) const AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
     3_000_000_000_000_000;
 
@@ -230,14 +231,16 @@ pub(crate) const AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
 // encoded-score decompression tuple over wider generated component statements.
 // This value is not present in the generated LaZer headers as `Bz3sqr`; it is
 // an explicit Rust-side cap and must not be described as generated or as
-// standalone final soundness evidence.
+// standalone final soundness evidence. 2^96 is large enough never to bind for
+// the component experiments yet small enough to avoid overflow.
 pub(crate) const GENERATED_COMPONENT_EUCLIDEAN_RESPONSE_BOUND_SQUARED: u128 = 1_u128 << 96;
 
 // Compatibility cap for generated component-proof experiments that reuse the
 // encoded-score decompression tuple over wider generated component statements.
 // This value is not present in the generated LaZer headers as `Bz4`; it is an
 // explicit Rust-side cap and must not be described as generated or as
-// standalone final soundness evidence.
+// standalone final soundness evidence. 2^48 is large enough never to bind for
+// the component experiments yet small enough to avoid overflow.
 pub(crate) const GENERATED_COMPONENT_INFINITY_RESPONSE_BOUND: u128 = 1_u128 << 48;
 
 #[cfg(test)]

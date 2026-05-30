@@ -19,6 +19,8 @@ pub(crate) fn component_proof_backend_rejection(
     })
 }
 
+// Accepts a JSON number or a canonical decimal string (no leading zeros, except "0" itself), so a
+// JSON int and its decimal-string form encode the same value and hash identically.
 pub(crate) fn integer_value(value: &Value) -> Option<u64> {
     match value {
         Value::Number(number) => number.as_u64(),
@@ -280,6 +282,8 @@ pub(crate) fn sparse_matrix_from_sparse_component_statement(
                 "Sparse matrix entry index is outside the statement shape.",
             ));
         }
+        // Reject stored zero polynomials and duplicate (row, column) positions to keep the sparse
+        // encoding canonical, so the matrix hash is well-defined (one encoding per matrix).
         if polynomial_is_zero(&coefficients) {
             return Err(ComponentProofBackendError::invalid(
                 "Sparse matrix entries must not store zero polynomials.",

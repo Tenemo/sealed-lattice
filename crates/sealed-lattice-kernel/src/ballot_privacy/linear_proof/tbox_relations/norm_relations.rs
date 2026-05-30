@@ -1,4 +1,7 @@
 use super::*;
+// Encodes (1/2 (beta + sigma(beta)))^2 = 1, i.e. beta^2 = 1 over the sigma-fixed
+// subfield (beta is a sign). Diagonal entries carry 1/4, the off-diagonal 1/2, and
+// the constant is q-1 = -1 mod q.
 pub(super) fn build_beta_norm_equation(
     negated_diagonal_terms: bool,
     tbox_profile: TboxRelationProfile,
@@ -260,6 +263,8 @@ pub(super) fn ensure_linear_proof_binary_relation_is_not_required() -> Canonical
     Ok(())
 }
 
+// Computes 4^{-1} mod q as (k*q + 1)/4. k is chosen so k*q + 1 is divisible by 4:
+// k = 3 when q ≡ 1 (mod 4), else k = 1 (q is odd, so q ≡ 3 (mod 4) gives q+1 ≡ 0).
 pub(super) fn inverse_four_modulus(modulus: u64) -> CanonicalResult<u64> {
     if modulus <= 4 || modulus.is_multiple_of(2) {
         return Err(invalid_tbox_relation(
@@ -278,6 +283,8 @@ pub(super) fn inverse_four_modulus(modulus: u64) -> CanonicalResult<u64> {
         .map_err(|_| invalid_tbox_relation("modular inverse of four does not fit in u64"))
 }
 
+// Tripwire: hard-asserts the demo profile shape (33/1/0/16/33/11/4) so the
+// demo-derived relation builders cannot be used with a mismatched profile.
 pub(super) fn validate_tbox_shape() -> CanonicalResult<()> {
     if TBOX_SHORT_MESSAGE_LENGTH != 33
         || TBOX_UPSILON_COORDINATES != 1
@@ -359,6 +366,8 @@ pub(super) fn single_coefficient_polynomial(
     Ok(polynomial)
 }
 
+// Binary-decomposition gadget for the squared-norm bound: builds Sum 2^i X^i over
+// powers 2^i <= value (truncated to coefficient_bit_length), then applies sigma.
 pub(super) fn binary_power_polynomial_automorphism(
     ring: PolynomialRing,
     value: u64,

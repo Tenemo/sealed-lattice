@@ -308,6 +308,8 @@ const compileReceiverMap = (
             receiver,
         );
 
+        // Coordinates beyond the encoded width must be zero, so share-vector padding
+        // cannot smuggle data past the proven coordinates.
         if (
             receiver.receiverShareVector.length > expectedShareVectorWidth &&
             receiver.receiverShareVector
@@ -463,6 +465,15 @@ const compileShamirQuotientConstraints = (
                 );
                 continue;
             }
+            // INTEGER-EQUATION + EXPLICIT QUOTIENT. The Shamir relation is modular:
+            //   p(i) = share (mod q), where p is the per-coordinate polynomial and i the
+            // receiver's roster point. A modular equation is not directly provable over
+            // the integers, so it is lowered to the exact integer equation
+            //   p(i) - share - q*quotient = 0
+            // carrying a short integer `quotient` as an extra witness. The %q==0 check
+            // rejects malformed witnesses where no integer quotient exists (the integer
+            // numerator is not divisible by q, so the modular congruence fails). The same
+            // trick recurs for the aggregate reduction (see aggregate-derivation/proof-input).
             const quotientNumerator = evaluatedInteger - shareRepresentative;
             if (quotientNumerator % fieldModulus !== 0) {
                 addRelationRefusal(

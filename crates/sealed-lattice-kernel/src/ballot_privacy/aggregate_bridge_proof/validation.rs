@@ -566,6 +566,9 @@ pub(super) fn validate_bridge_encryption_public_shell(
     Ok(())
 }
 
+// Defense against a sampled-only shortcut: the diagnosticOnly single-prime relation check
+// (relationCheckSource "first-data-prime-diagnostic") must never be accepted as proof evidence.
+// Both the per-check loop and the policy object are forced to reject bridge-proof acceptance.
 pub(super) fn validate_sampled_public_relation_check_policy(
     bridge_encryption: &Value,
 ) -> CanonicalResult<()> {
@@ -706,6 +709,9 @@ pub(super) fn reject_forbidden_public_bridge_fields(
     Ok(())
 }
 
+// Secret-witness field denylist, applied recursively (reject_forbidden_public_bridge_fields) to
+// every public artifact. Privacy fail-closed guard against witness material leaking into any
+// public bridge object.
 fn forbidden_public_bridge_field_name(field_name: &str) -> bool {
     matches!(
         field_name,

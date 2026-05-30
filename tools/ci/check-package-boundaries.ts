@@ -48,6 +48,9 @@ const repositoryPrivateAliasPrefixes = [
     '#test-vectors/',
 ] as const;
 
+// Encodes the intended package layering (types <- crypto <- wasm <- protocol <- sdk):
+// each entry is the set of workspace packages that package may import.
+// @sealed-lattice/types maps to an empty set, so it must stay dependency-free.
 const allowedWorkspaceImportsByPackageName = new Map<
     string,
     ReadonlySet<string>

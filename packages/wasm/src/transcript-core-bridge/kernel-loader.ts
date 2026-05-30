@@ -91,6 +91,9 @@ export const createTranscriptCoreKernelLoader = (
                 .map((entry) => entry.name)
                 .sort();
             let kernelOperationInProgress = false;
+            // One WASM instance has a single shared linear memory and allocator, so
+            // overlapping commands would corrupt each other's buffers; the kernel is
+            // single-threaded by contract, so reject any re-entrant operation.
             const runExclusiveKernelOperation = <Result>(
                 operationName: string,
                 operation: () => Result,
@@ -584,6 +587,8 @@ export const createTranscriptCoreKernelLoader = (
                     }),
             };
         })().catch((error: unknown) => {
+            // Clear the cached promise on failure so a later call can retry
+            // instantiation instead of permanently re-throwing the cached rejection.
             kernelPromise = undefined;
             throw error;
         });

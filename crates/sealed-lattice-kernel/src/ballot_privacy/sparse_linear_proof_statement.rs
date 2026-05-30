@@ -135,6 +135,10 @@ pub fn transform_sparse_statement_matrix_to_proof_ring_with_coefficient_represen
             .map(|polynomial| rotate_left_negacyclic_signed_polynomial(polynomial))
             .collect::<Vec<_>>();
 
+        // Build the negacyclic Toeplitz/companion expansion that lowers one
+        // source polynomial into a split_factor x split_factor block (ring-degree
+        // lowering). split_index = row_offset - column_offset selects the split
+        // half; negative indices use the negacyclic-rotated split halves.
         for output_row_offset in 0..source_polynomial_split_factor {
             for output_column_offset in 0..source_polynomial_split_factor {
                 let split_index = output_row_offset as isize - output_column_offset as isize;
@@ -205,6 +209,9 @@ pub fn transform_sparse_target_vector_to_proof_ring(
     )
 }
 
+// Multiplies by the source-modulus inverse mod the proof modulus, rescaling
+// source-ring coefficients into the proof ring. This rescaling is the
+// correctness crux of the source-to-proof-ring transform.
 fn scale_signed_polynomial_by_precomputed_inverse(
     signed_polynomial: &[i128],
     source_modulus_inverse: i128,
@@ -521,7 +528,9 @@ fn hash_sparse_transformed_statement_as_dense(
 
 fn shake128_32_from_parts(first_part: &[u8], second_part: &[u8]) -> [u8; 32] {
     // LaZer-compatible fixed-width composition: current callers pass two
-    // 32-byte values. Do not reuse this helper for variable-length transcripts.
+    // 32-byte values. Both inputs being fixed 32 bytes makes the unprefixed
+    // concatenation unambiguous (the precondition for Fiat-Shamir chaining).
+    // Do not reuse this helper for variable-length transcripts.
     let mut hasher = Shake128::default();
     hasher.update(first_part);
     hasher.update(second_part);
@@ -538,6 +547,10 @@ struct SparseStatementHasher {
     encoded_bytes: usize,
 }
 
+// Packs each coefficient as full_size_coefficient_bit_length little-endian bits
+// flowing across byte boundaries, then a terminal write_bit(1) + zero pad. This
+// layout MUST byte-match the dense statement hasher (statement_transcript.rs) or
+// statement verification silently breaks.
 struct DenseCompatibleStatementBitHasher {
     hasher: Shake128,
     byte_value: u8,
@@ -669,6 +682,8 @@ impl DenseCompatibleStatementBitHasher {
     }
 
     fn finish(mut self) -> CanonicalResult<([u8; 32], usize)> {
+        // Terminal 1-bit then zero-pad to the next byte: an unambiguous
+        // bit-string terminator so trailing zero coefficients cannot be lost.
         self.write_bit(1)?;
         while self.bit_offset_in_byte != 0 {
             self.write_bit(0)?;

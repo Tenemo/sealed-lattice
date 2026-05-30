@@ -58,6 +58,9 @@ const verifierFailureDiagnostics = (failure: {
     return diagnostics;
 };
 
+// Inverted "null-is-good" contract that the whole negative matrix relies on: returns
+// null only when the expected rejection WAS observed (the matching pattern fired), and
+// a diagnostic string on every other path (unexpected pass, wrong diagnostic, throw).
 export const assertFailure = (
     action: () => unknown,
     expectation: FailureExpectation,

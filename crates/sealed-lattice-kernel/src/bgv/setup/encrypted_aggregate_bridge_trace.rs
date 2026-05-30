@@ -174,6 +174,8 @@ pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from
                     "encrypted aggregate bridge plaintext is missing a selected data-basis residue limb",
                 )
             })?;
+        // Inline RLWE encryption under the collective public key (pk, a) with
+        // randomizer u and errors e0, e1: c0 = pk*u + e0 + m, c1 = a*u + e1.
         let ciphertext_component_zero = public_key_product
             .iter()
             .zip(error_zero_residues.iter())
@@ -462,6 +464,10 @@ pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_respons
                 )
             })?;
 
+        // Sigma-protocol verification: recompute the commitment from the
+        // responses as A = response*base - challenge*statement. Per limb that is
+        // A = (pk*z_r + z_pert + z_m) - c*ct (z_r randomizer, z_m plaintext
+        // response, z_pert noise perturbation, c challenge, ct the ciphertext).
         let commitment_zero = public_key_product
             .iter()
             .zip(perturbation_zero_residues.iter())

@@ -41,6 +41,9 @@ const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const isProtocolHashString = (value: ProtocolHash): boolean =>
     protocolHashPattern.test(value);
 
+// Exact-schema lock: the manifest's opaque bindings must carry precisely this
+// set of field names (see the count check in
+// collectManifestOpaqueBindingRefusals) — no more, no fewer — or it fails closed.
 const manifestOpaqueBindingFieldNames = new Set([
     'encryptedAggregateBridgeProfileId',
     'bgvPassiveSetupProfileId',
@@ -116,6 +119,9 @@ const collectManifestOpaqueBindingRefusals = (
             ),
         );
     }
+    // Enforce the exact-schema lock: the binding object must have exactly the
+    // expected number of keys AND no key outside the allowed set (rejects both
+    // missing and extra fields).
     const bindingFieldNames = Object.keys(bindings);
     if (
         bindingFieldNames.length !== manifestOpaqueBindingFieldCount ||

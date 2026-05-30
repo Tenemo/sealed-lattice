@@ -318,6 +318,9 @@ const verifyRecoveryEpochUpdateUnchecked = (
             ),
         );
     }
+    // Strict single-step advancement: both the recovery epoch and the device
+    // epoch must increase by exactly one. This forbids skipping or replaying
+    // epochs (an update must extend the immediately prior state, not jump).
     if (
         update.newRecoveryEpoch !== update.previousRecoveryEpoch + 1 ||
         update.newDeviceEpoch !== update.previousDeviceEpoch + 1 ||
@@ -362,6 +365,10 @@ const verifyRecoveryEpochUpdateUnchecked = (
             ),
         );
     }
+    // The update must be included at exactly the cutoff boundary it declares:
+    // the inclusion proof's board sequence equals the declared
+    // oldActionCutoffBoardSequence, and the inclusion head extends the update's
+    // own boardHeadHash (its previousHeadHash points back at it).
     if (
         input.updateInclusionProof.boardSequence !==
             update.oldActionCutoffBoardSequence ||

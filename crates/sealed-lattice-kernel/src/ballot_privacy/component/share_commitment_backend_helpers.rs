@@ -60,6 +60,8 @@ pub(crate) fn derive_share_commitment_polynomial(
     Ok(polynomial)
 }
 
+// Rejection sampling for an unbiased uniform value mod q: rejection_limit = 2^64 - (2^64 mod q)
+// is the largest multiple of q below 2^64; words at or above it are discarded to avoid modulo bias.
 pub(crate) fn derive_share_commitment_uniform_number(
     domain: &str,
     payload: &Value,
@@ -129,6 +131,8 @@ pub(crate) fn derive_share_commitment_bytes(
     Ok(output)
 }
 
+// Coefficients of m(X)*X^k mod (X^n+1): a straight index shift for non-wrapping terms, with the
+// wraparound terms negated because X^n = -1 in this negacyclic ring.
 pub(crate) fn share_commitment_message_entry_polynomial(
     message_matrix_polynomial: &[u64],
     share_coordinate_index: usize,
@@ -164,6 +168,8 @@ pub(crate) fn negate_share_commitment_polynomial(polynomial: &[u64]) -> Vec<u64>
         .collect()
 }
 
+// Coefficient-stride ring split: decomposes Z_q[X]/(X^256+1) into split_factor copies of a
+// lower-degree ring by interleaving coefficients (split_polynomial[j][i] = polynomial[sf*i + j]).
 pub(crate) fn split_share_commitment_polynomial(
     polynomial: &[u64],
     split_polynomial_degree: usize,
@@ -244,6 +250,8 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
         &self.target_vector_coefficients
     }
 
+    // Source-relation soundness check: matrix*witness + target must be the zero polynomial vector
+    // (i.e. A*w + t = 0); any nonzero coefficient rejects the witness.
     fn validate_source_relation(
         &self,
         parameter_set: &LinearProofParameterSet,
@@ -277,6 +285,10 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
         Ok(())
     }
 
+    // Two-stage transcript hash: arithmetic_statement_hash = shake128(canonical-JSON statement),
+    // then public_parameters_and_statement_hash = shake128(public_randomness || that). Binds the
+    // public randomness to the statement; the canonical field ordering must be byte-exact for
+    // cross-implementation agreement.
     fn derive_statement_transcript(
         &self,
         parameter_set: &LinearProofParameterSet,
@@ -287,6 +299,7 @@ impl StreamedLinearProofStatement for ParsedStructuredReceiverEncryptionStatemen
     ) -> crate::encoding::CanonicalResult<
         crate::ballot_privacy::linear_proof::statement::LinearStatementTranscript,
     > {
+        // 32 bytes is the fixed public-randomness/seed width for the Fiat-Shamir transcript.
         if public_randomness.len() != 32 {
             return Err(invalid_preflight(
                 "structured linear statement public randomness must be exactly 32 bytes",
@@ -536,6 +549,9 @@ fn build_z4_statement_products_from_structured_source_entries(
     Ok(output_rows)
 }
 
+// Negacyclic block-Toeplitz lift: each source entry expands into a split_factor x split_factor
+// block. split_index = output_row_offset - output_column_offset selects which split polynomial;
+// negative (wrapped) indices use the negacyclically rotated split (X^n = -1).
 fn for_each_transformed_structured_source_entry(
     statement: &ParsedStructuredReceiverEncryptionStatement,
     parameter_set: &LinearProofParameterSet,
@@ -608,6 +624,8 @@ fn for_each_transformed_structured_source_entry(
     Ok(())
 }
 
+// Rescales coefficients from the source modulus into the proof modulus by multiplying through the
+// precomputed source-modulus inverse and reducing mod the proof modulus.
 fn scale_signed_polynomial_by_precomputed_inverse(
     signed_polynomial: &[i128],
     source_modulus_inverse: i128,

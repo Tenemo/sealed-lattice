@@ -138,6 +138,7 @@ pub fn roundtrip_bytes(input: &[u8]) -> Vec<u8> {
     input.to_vec()
 }
 
+// LEB128: 7 payload bits per byte, high bit set marks a continuation byte.
 pub fn encode_varuint(mut value: u64) -> Vec<u8> {
     let mut output = Vec::new();
     loop {
@@ -217,6 +218,8 @@ impl<'a> CanonicalReader<'a> {
             let byte = self.bytes[self.offset];
             self.offset += 1;
             let payload = u64::from(byte & 0x7f);
+            // 10th byte (index 9) carries only 1 usable bit of a u64; payload > 1
+            // would overflow, so reject it.
             if index == 9 && payload > 1 {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::MalformedVarUint,
@@ -226,6 +229,8 @@ impl<'a> CanonicalReader<'a> {
             value |= payload << shift;
 
             if byte & 0x80 == 0 {
+                // Enforce minimal/canonical encoding: re-encode the decoded value
+                // and require the consumed bytes to match exactly.
                 let consumed = &self.bytes[start..self.offset];
                 if consumed != encode_varuint(value).as_slice() {
                     return Err(CanonicalError::new(

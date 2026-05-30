@@ -112,6 +112,8 @@ pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> Trans
     }
 }
 
+// Writes the fixed field-ID schema: each field is emitted as its numeric field
+// ID followed by its value, in strictly increasing ID order (parser enforced).
 pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8> {
     let mut output = Vec::new();
     output.extend(MAGIC);
@@ -209,6 +211,8 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
     let mut tags = None;
     let mut checkpoints = None;
 
+    // Canonical ordering: field IDs must be strictly increasing, so duplicate or
+    // reordered fields are rejected and the encoding stays unique.
     for _ in 0..field_count {
         let field_id = reader.read_varuint()?;
         if field_id == previous_field_id {

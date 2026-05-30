@@ -69,6 +69,14 @@ const coefficient = (value: bigint): string | number =>
         coefficientModulus: shareCommitmentModulus,
     });
 
+// STATEMENT LAYOUT. The witness columns form four contiguous blocks, where w =
+// shareVectorWidth and the opening dimension is 64:
+//   [0 .. w)        aggregate integer share coordinates
+//   [w .. w+64)     commitment opening randomness
+//   [w+64 .. 2w+64) per-coordinate reduced field value (share mod q)
+//   [2w+64 .. 3w+64) per-coordinate quotient (share div q)
+// Rows split into two blocks: first `shareCommitmentModuleRank` commitment-opening rows,
+// then w per-coordinate reduce-mod-q rows (rows = rank + w).
 const shareColumnIndex = (coordinateIndex: number): number => coordinateIndex;
 
 const openingColumnIndex = (
@@ -400,6 +408,11 @@ export const buildAggregateDerivationProofInput = (
             proofStatementPayload,
         ),
     };
+    // Same integer-quotient trick as the per-ballot Shamir rows (see relation-compiler.ts):
+    // reducedFieldVector = value mod q and quotientVector = value div q, proving the
+    // aggregate reduction value = reduced + q*quotient holds over the integers (no
+    // wraparound). The quotient is bounded by turnout since it sums at most `turnout`
+    // canonical field elements.
     const aggregateIntegerShareVector =
         input.witness.aggregateIntegerShareVector;
     const reducedFieldVector = aggregateIntegerShareVector.map(

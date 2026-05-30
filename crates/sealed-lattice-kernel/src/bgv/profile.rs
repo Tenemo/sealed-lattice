@@ -7,7 +7,10 @@ use crate::{
 
 pub(crate) const PROFILE_ID: &str = "sealed-lattice-bgv-rns-v1";
 pub(crate) const BACKEND_PROFILE_ID: &str = "sealed-lattice-rust-wasm-bgv-rns-v1";
+// Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
 pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
+// Plaintext modulus t. 65537 is the Fermat prime 2^16+1; t-1 = 2^16 is
+// divisible by 2N, so a length-2N NTT exists for batch (slot) encoding.
 pub(crate) const PLAINTEXT_MODULUS: u64 = 65_537;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis-v1";
 pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis-v1";
@@ -29,6 +32,8 @@ pub(crate) const ENCODED_AGGREGATE_LAYOUT_ID: &str =
 pub(crate) const TOP_K_EVALUATOR_INPUT_LAYOUT_ID: &str =
     "top-k-evaluator-input-layout-encrypted-aggregate-input-v1";
 
+// RNS data basis: 16 distinct ~47-bit primes (~2^47), each chosen so that
+// p == 1 (mod 2N), guaranteeing a 2N-th root of unity exists (NTT-friendly).
 pub(crate) const DATA_PRIMES: [u64; 16] = [
     140_737_487_306_753,
     140_737_486_716_929,
@@ -48,6 +53,8 @@ pub(crate) const DATA_PRIMES: [u64; 16] = [
     140_737_471_774_721,
 ];
 
+// Extra ~47-bit NTT-friendly prime (p == 1 mod 2N) for the "special" basis;
+// the extended basis is the 16 data primes plus this one (see all_moduli).
 pub(crate) const SPECIAL_PRIME: u64 = 140_737_471_578_113;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +124,10 @@ pub(crate) struct RootParameters {
     pub(crate) inverse_polynomial_degree: u64,
 }
 
+// Precomputed NTT roots per modulus: the negacyclic root (order 2N), the cyclic
+// root (order N), both inverses, and N^{-1} mod p (`inverse_polynomial_degree`).
+// Entry [0] is the plaintext modulus 65537 used by the batch (slot) encoder, NOT
+// an RNS limb; entries [1..] cover the 16 data primes then the special prime.
 pub(crate) const ROOT_PARAMETERS: [RootParameters; 18] = [
     RootParameters {
         modulus: 65_537,

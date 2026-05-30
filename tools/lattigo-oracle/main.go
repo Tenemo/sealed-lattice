@@ -11,10 +11,14 @@ import (
 	"github.com/tuneinsight/lattigo/v6/ring"
 )
 
+// BGV RNS profile parameters (N=32768) that must byte-mirror the Rust/WASM kernel.
+// This Go oracle exists only to cross-check ring/NTT arithmetic parity; pinnedCommit
+// pins the Lattigo revision the parity check was validated against.
 const polynomialDegree = 32768
 const pinnedCommit = "5dbffbdea05394de2ca3a432ed5318aa832e3f40"
 const canonicalMaterialFixturePath = "sealed-lattice-canonical-rns-fixtures.json"
 
+// 17-entry data+special prime basis (~2^47 NTT-friendly primes) of the BGV RNS profile.
 var selectedModuli = []uint64{
 	140737487306753,
 	140737486716929,
@@ -103,6 +107,7 @@ func buildReport() (oracleReport, error) {
 	for modulusIndex, modulus := range fixture.Moduli {
 		for coefficientIndex := 0; coefficientIndex < polynomialDegree; coefficientIndex++ {
 			left.Coeffs[modulusIndex][coefficientIndex] = patternValue(coefficientIndex, modulus)
+			// +17 offset just decorrelates the two operands; not a protocol constant.
 			right.Coeffs[modulusIndex][coefficientIndex] = patternValue(coefficientIndex+17, modulus)
 		}
 	}
@@ -212,6 +217,7 @@ func validateCanonicalFixture(fixture canonicalRnsFixture) error {
 		return fmt.Errorf("sealed-lattice canonical material fixture has unexpected serialization policy %q", fixture.ReferenceSerializationPolicy)
 	}
 
+	// Fixed coefficient indices the Rust side also samples, for cross-impl comparison.
 	expectedSamplePositions := []int{0, 1, 2, 17, polynomialDegree / 2, polynomialDegree - 1}
 	if len(fixture.SamplePositions) != len(expectedSamplePositions) {
 		return fmt.Errorf("sealed-lattice canonical material fixture sample position count is %d, expected %d", len(fixture.SamplePositions), len(expectedSamplePositions))
@@ -225,6 +231,8 @@ func validateCanonicalFixture(fixture canonicalRnsFixture) error {
 	return nil
 }
 
+// Arbitrary deterministic quadratic test pattern (pos^2 + 31*pos + 7); the specific
+// coefficients carry no protocol meaning, they just produce reproducible inputs.
 func patternValue(position int, modulus uint64) uint64 {
 	value := uint64(position*position + 31*position + 7)
 	return value % modulus

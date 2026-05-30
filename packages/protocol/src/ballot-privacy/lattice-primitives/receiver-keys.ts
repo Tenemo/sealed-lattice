@@ -58,6 +58,10 @@ const encodePayloadPlaintextBits = (
         }
     };
 
+    // CANONICAL payload plaintext bit layout: all 17-bit share representatives first,
+    // then each opening as (coordinate + openingRandomnessInfinityNormBound) at 12 bits
+    // (recentred to non-negative). Encryption and the bit-decomposition proof rows must
+    // reproduce this exact byte-for-byte order, or the binding proof fails.
     for (const shareRepresentative of plaintext.receiverShareVector) {
         pushUnsignedBits(shareRepresentative, 17);
     }

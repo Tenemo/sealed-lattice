@@ -41,10 +41,13 @@ pub(super) const RECEIVER_KEY_EQUATION_COEFFICIENT_EXPANSION_DOMAIN: &str =
     "sealed.vote/internal/receiver-key-proof/receiver-key-equation/coefficient-expansion-v1";
 pub(super) const RECEIVER_KEY_EQUATION_TARGET_EXPANSION_DOMAIN: &str =
     "sealed.vote/internal/receiver-key-proof/receiver-key-equation/target-expansion-v1";
+// eta=2 centered-binomial infinity-norm bound on each witness coefficient.
 pub(super) const RECEIVER_ENCRYPTION_SHORT_VECTOR_INFINITY_NORM_BOUND: u64 = 2;
 pub(super) const RECEIVER_KEY_LINEAR_STATEMENT_ROW_COUNT: u64 = RECEIVER_ENCRYPTION_MODULE_RANK;
+// Witness is [secret || error], hence rank*2 module columns.
 pub(super) const RECEIVER_KEY_LINEAR_STATEMENT_COLUMN_COUNT: u64 =
     RECEIVER_ENCRYPTION_MODULE_RANK * 2;
+// Worst-case L2 bound = columns * ring degree * bound^2 (every coefficient at the infinity bound).
 pub(super) const RECEIVER_KEY_LINEAR_WITNESS_L2_BOUND_SQUARED: u64 =
     RECEIVER_KEY_LINEAR_STATEMENT_COLUMN_COUNT
         * RECEIVER_ENCRYPTION_MODULE_DEGREE
@@ -697,6 +700,9 @@ pub(super) fn validate_modulus_polynomial(
     Ok(polynomial)
 }
 
+// Binds the witness layout to the LWE relation by forcing matrix == [A | I]: the left rank columns
+// must equal the derived public matrix A, and the right rank columns must be the identity block
+// (which selects the error vector in A*s + I*e = b).
 pub(super) fn validate_canonical_linear_matrix(
     linear_statement: &Map<String, Value>,
     statement_matrix: &[Vec<Vec<u64>>],

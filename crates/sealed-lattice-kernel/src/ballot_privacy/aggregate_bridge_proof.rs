@@ -30,9 +30,13 @@ const BRIDGE_PROOF_BACKEND: &str = "SealedLatticeBridgeRelation";
 const BGV_ENCRYPTION_PROOF_SUBRELATION: &str =
     "SealedLatticePassiveCollectiveCiphertextEquationRelation";
 const BGV_ENCRYPTION_KEY_MATERIAL_KIND: &str = "passive-transcript-derived-collective-public-key";
+// Deliberate proof gaps for this milestone (not bugs): the bridge ciphertext is intentionally
+// NOT threshold-decryptable and NOT claim-bearing; surfaced as false in the target contract.
 const DEVELOPMENT_KEY_ONLY: bool = false;
 const THRESHOLD_DECRYPTABLE: bool = false;
 const CLAIM_BEARING_BRIDGE_ENCRYPTION: bool = false;
+// Status-string markers below: intentional proof-gap labels that downgrade the claim,
+// not verification failures. *_DEFERRED / *_MISSING / *_PRECONDITION mark known open gaps.
 const BRIDGE_PROOF_PENDING_STATUS: &str = "BridgeProofBackendPending";
 const SHARED_WITNESS_BINDING_PENDING_STATUS: &str = "SharedWitnessBindingProofPending";
 const AGGREGATE_TO_PLAINTEXT_BINDING_PENDING_STATUS: &str =
@@ -62,12 +66,16 @@ const SEPARATE_SUBPROOFS_CLOSURE_STATUS: &str = "RejectedForAggregateBridgeClaim
 const PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS: &str = "PlaintextCanonicalLiftProofMissing";
 const AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS: &str =
     "AggregateDerivationFullVerificationPreconditionNotBound";
+// Soundness-bit budget. 64 challenge bits per check x 2 checks = 128-bit challenge entropy.
+// Rejection-sampling (limit 64 attempts) costs a 6-bit-per-check grinding discount.
 const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = 64;
 const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 2;
 const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
 const SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK: u64 = 6;
 const BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS: u64 =
     SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+// The batch-encoding relation mod 65537 (PLAINTEXT_MODULUS) is the soundness bottleneck;
+// its 32-bit unadjusted floor lands at the 20-bit effective binding floor after grinding.
 const BRIDGE_SHARED_WITNESS_WEAKEST_RELATION_MODULUS: u64 = PLAINTEXT_MODULUS;
 const BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR: u64 = 32;
 const BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR: u64 = 20;

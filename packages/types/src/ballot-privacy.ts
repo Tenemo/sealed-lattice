@@ -18,11 +18,14 @@ export type ReceiverEncryptionProfile = {
     readonly receiverEncryptionProfileHash: ProtocolHash;
     readonly scheme: 'LinearModuleLweRegev';
     readonly hardnessAssumption: 'Module-LWE';
+    // Power-of-two cyclotomic ring Z_q[X]/(X^256 + 1) (negacyclic, degree 256).
     readonly ring: 'Z_q[X]/(X^256 + 1)';
     readonly moduleRank: 4;
     readonly moduleDegree: 256;
     readonly ciphertextModulus: DecimalIntegerString;
     readonly plaintextModulus: 2;
+    // 17 = ceil(log2(65537)): each GF(65537) field element needs 17 bits, which the
+    // bit-sliced encoding below spreads across the plaintextModulus-2 message slots.
     readonly fieldElementBitLength: 17;
     readonly messageEncoding: 'BitSlicedCanonicalGF65537LittleEndian';
     readonly publicMatrixDerivationDomain: string;
@@ -62,6 +65,7 @@ export type ShareCommitmentProfile = {
     readonly messageEncoding: 'CanonicalGF65537RepresentativeVector';
     readonly commitmentFormula: 'A_message * EncodeShareVector(S) + A_randomness * rho mod q_commit';
     readonly matrixDerivationDomain: string;
+    // Per-commitment opening randomness rho has 64 coordinates.
     readonly openingRandomnessDimension: 64;
     readonly openingRandomnessDistribution: 'UniformCenteredInteger';
     readonly openingRandomnessInfinityNormBound: number;
@@ -69,6 +73,9 @@ export type ShareCommitmentProfile = {
     readonly openingRandomnessSampler: 'RejectionSampledLittleEndianUint16';
     readonly openingRandomnessSamplerDomain: string;
     readonly openingRandomnessSamplerWordBits: 16;
+    // Turnout bound of 50 is what guarantees no aggregate-opening wraparound when
+    // summing per-ballot openings (ties to ShareCommitmentMessageBoundCert's
+    // noWraparoundCondition).
     readonly aggregateOpeningRandomnessMaximumTurnout: 50;
 };
 
@@ -97,6 +104,8 @@ export type BallotScoreEncodingProfile = {
     readonly scoreMinimum: 1;
     readonly scoreMaximum: 10;
     readonly oneHotWidth: 10;
+    // 11 coordinates per option = 1 scalar score + 10 one-hot buckets; this is the
+    // *11 / width-220 magic-number anchor referenced across the ballot relation.
     readonly coordinatesPerOption: 11;
     readonly scalarCoordinateOffset: 0;
     readonly scoreBucketCoordinateOffsets: readonly [
@@ -125,6 +134,8 @@ export type BallotShareLayoutProfile = {
     readonly minimumOptionCount: 2;
     readonly maximumOptionCount: 20;
     readonly shareVectorWidth: number;
+    // 11 coordinates per option (1 scalar + 10 one-hot), so width = 11 * optionCount
+    // (e.g. 20 options -> width 220).
     readonly widthFormula: 'shareVectorWidth = 11 * optionCount';
     readonly paddingRule: 'unused coordinates must be zero';
 };

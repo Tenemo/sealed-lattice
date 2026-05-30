@@ -63,6 +63,9 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
 
         return refused_objects;
     };
+    // Statement-shape index math. share_vector_width = statementRows - module rank. The *3 covers
+    // the three witness blocks (integer share, reduced field, quotient); + opening dimension gives
+    // the column count. The short response uses the 256/64 source-to-proof ring-embedding ratio, +1.
     let statement_rows = usize_object_field(proof_statement, "statementRows");
     let statement_columns = usize_object_field(proof_statement, "statementColumns");
     let share_vector_width =
@@ -177,6 +180,9 @@ pub(in crate::ballot_privacy::aggregate_derivation_proof) fn collect_aggregate_p
             object_hash,
         ));
     }
+    // Public randomness must equal the first 32 bytes (64 hex chars) of the statement's
+    // challengeDomainHash, binding Fiat-Shamir randomness to the statement so the prover cannot
+    // choose its own randomness.
     if let Some(component_value) = component
         && let Some(statement) = component_value.get("statement")
         && let Some(challenge_domain_hash) = string_field(statement, "challengeDomainHash")

@@ -30,15 +30,22 @@ pub(super) const BACKEND_TARGET_VECTOR_HASH_PURPOSE: &str =
 pub(super) const BACKEND_BOUNDS_HASH_PURPOSE: &str = "ballot-privacy-backend-bounds-v1";
 pub(super) const BACKEND_PROOF_COMPONENTS_HASH_PURPOSE: &str =
     "ballot-privacy-backend-proof-components-v1";
+// Each receiver contributes 3 algebraic rows: share-commitment, encryption,
+// and key-binding (see validate_algebraic_row_kinds).
 pub(super) const ALGEBRAIC_ROWS_PER_RECEIVER: u64 = 3;
 pub(super) const EXPLICIT_ROW_BATCHES_BEFORE_ALGEBRAIC_ROWS: u64 = 2;
 pub(super) const EXPLICIT_ROW_BATCHES_WITH_SHARE_COMMITMENT_ROWS: u64 = 3;
 pub(super) const OPENING_VARIABLES_PER_RECEIVER: u64 = 64;
 pub(super) const ENCRYPTION_BATCH_VARIABLES_PER_RECEIVER: u64 = 2;
+// rank * degree = 4 * 256 (RECEIVER_ENCRYPTION_MODULE_RANK * _MODULE_DEGREE).
 pub(super) const SHARE_COMMITMENT_EQUATION_ROWS: u64 = 1_024;
+// (rank + 1) * degree = 5 * 256, one equation per ciphertext chunk component.
 pub(super) const RECEIVER_ENCRYPTION_EQUATION_ROWS: u64 = 1_280;
+// rank * degree = 4 * 256, same shape as the share-commitment equation.
 pub(super) const RECEIVER_KEY_EQUATION_ROWS: u64 = 1_024;
+// ceil(log2(65537)) = 17 bits to represent a GF(65537) share residue.
 pub(super) const RECEIVER_SHARE_REPRESENTATIVE_BIT_LENGTH: u64 = 17;
+// 12 bits per opening-randomness coordinate (bounded gadget width).
 pub(super) const RECEIVER_OPENING_RANDOMNESS_BIT_LENGTH: u64 = 12;
 
 pub fn verify_encoded_relation_vector_case_value(vector_case: &Value) -> Value {

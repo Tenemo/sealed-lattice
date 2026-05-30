@@ -44,6 +44,8 @@ const BRIDGE_SHARED_WITNESS_RESPONSE_BOUND_STATUS: &str =
     "SharedWitnessResponseDistributionBoundsChecked";
 const BRIDGE_SHARED_WITNESS_RESPONSE_DISTRIBUTION_STATUS: &str =
     "SharedWitnessResponseDistributionRejectionSampled";
+// Uniform-mask rejection-sampling window making the response distribution witness-independent.
+// 240-bit mask; 112-bit shift slack bounds |challenge*witness|; response bound = 2^240 - 2^112.
 const BRIDGE_SHARED_WITNESS_MASK_BIT_LENGTH: usize = 240;
 const BRIDGE_SHARED_WITNESS_RESPONSE_REJECTION_SLACK_BIT_LENGTH: usize = 112;
 const BRIDGE_SHARED_WITNESS_MASK_RANDOM_BIT_LENGTH: usize =
@@ -805,6 +807,8 @@ fn sample_bridge_mask_vector(
     masks
 }
 
+// Recenters an unsigned [0, 2^241) draw to a signed (-2^240, 2^240) mask: clamp the top byte to
+// MASK_RANDOM_BIT_LENGTH%8 high bits, then subtract the absolute bound.
 fn mask_from_uniform_lane(lane: &[u8], mask_absolute_bound: &BigInt) -> BigInt {
     debug_assert_eq!(lane.len(), BRIDGE_SHARED_WITNESS_MASK_BYTES_PER_COORDINATE);
     let mut coordinate_bytes = lane.to_vec();
@@ -847,6 +851,8 @@ fn bridge_shared_witness_challenge_scalar(
         return challenge;
     }
 
+    // Astronomically rare all-zero-challenge avoidance, kept deterministic for Fiat-Shamir
+    // reproducibility (verifier recomputes the same retry sequence).
     let mut retry_index = 1_u64;
     loop {
         let retry_index_bytes = retry_index.to_le_bytes();
@@ -934,17 +940,22 @@ fn response_vector(
         .zip(witness.iter())
         .map(|(mask, witness_value)| {
             let scaled_witness = challenge * witness_value;
+            // Per-coordinate rejection-sampling condition (|challenge*witness| >= shift_bound),
+            // not a hard error; the 6-bit grinding discount in the soundness budget accounts for it.
             if &scaled_witness >= shift_bound || scaled_witness <= negative_shift_bound {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ProfileComponentMismatch,
                     "encrypted aggregate bridge proof witness shift exceeds the supported response-distribution slack",
                 ));
             }
+            // Homomorphic opening: response = mask + challenge*witness.
             Ok(mask + scaled_witness)
         })
         .collect()
 }
 
+// Lifts a signed scalar to a degree-0 constant polynomial (only coefficient 0 set). The
+// "centeredSignedSourceModulus" label is on the inner linear-proof statement, not this recompute.
 fn constant_response_polynomial(
     value: &BigInt,
     degree: usize,
@@ -956,6 +967,7 @@ fn constant_response_polynomial(
     polynomial
 }
 
+// Reduces a signed BigInt to the non-negative [0, modulus) residue.
 pub(crate) fn signed_bigint_to_modulus_residue(value: &BigInt, modulus_bigint: &BigInt) -> u64 {
     let residue = ((value % modulus_bigint) + modulus_bigint) % modulus_bigint;
 

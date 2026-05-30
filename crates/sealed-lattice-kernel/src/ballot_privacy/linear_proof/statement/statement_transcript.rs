@@ -348,6 +348,10 @@ pub(super) fn transform_statement_matrix_to_proof_ring_with_coefficient_represen
                 .map(|polynomial| rotate_left_negacyclic_signed_polynomial(polynomial))
                 .collect::<Vec<_>>();
 
+            // Build the negacyclic companion/rotation embedding that lowers one
+            // degree-d source poly into a k x k block of degree-d/k proof polys.
+            // split_index = row_offset - column_offset; off-diagonal (negative)
+            // entries use the negacyclic-rotated split halves.
             for output_row_offset in 0..source_polynomial_split_factor {
                 for output_column_offset in 0..source_polynomial_split_factor {
                     let split_index = output_row_offset as isize - output_column_offset as isize;
@@ -509,6 +513,9 @@ pub(super) fn split_polynomial_into_proof_ring(
 }
 
 pub(crate) fn rotate_left_negacyclic_signed_polynomial(polynomial: &[i128]) -> Vec<i128> {
+    // X * p(X) mod (X^N + 1): shift coefficients up one slot and wrap the top
+    // one to index 0 with a sign flip. That lone negation is the whole
+    // negacyclic semantics, not an off-by-one.
     let mut rotated = vec![0_i128; polynomial.len()];
     if polynomial.is_empty() {
         return rotated;
@@ -552,6 +559,7 @@ pub(crate) fn source_modulus_inverse_mod_proof_modulus(
             "linear statement moduli must be greater than one",
         ));
     }
+    // Hand-rolled extended Euclid computing source_modulus^{-1} mod proof_modulus.
     let source_modulus_value = i128::from(source_modulus);
     let proof_modulus_value = i128::from(proof_modulus);
     let mut previous_remainder = source_modulus_value;
@@ -578,6 +586,8 @@ pub(crate) fn source_modulus_inverse_mod_proof_modulus(
         current_coefficient = next_coefficient;
     }
 
+    // gcd ends in previous_remainder; != 1 means the moduli are not coprime, so
+    // no inverse exists.
     if previous_remainder != 1 {
         return Err(invalid_statement(
             "linear statement source modulus is not invertible modulo the proof modulus",
@@ -737,6 +747,7 @@ impl StatementBitWriter {
     }
 
     fn finish(mut self) -> CanonicalResult<Vec<u8>> {
+        // Canonical end-of-stream marker: terminal 1-bit then zero-pad to the byte.
         self.write_bit(1)?;
         while !self.bit_offset.is_multiple_of(8) {
             self.write_bit(0)?;

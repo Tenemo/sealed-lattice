@@ -47,6 +47,8 @@ pub fn validate_linear_proof_tbox_public_checks(
         &target_commitment_vector[..TBOX_Z34_TARGET_VECTOR_LENGTH],
         proof_encoding,
     )?;
+    // Fiat-Shamir chaining: each challenge hash absorbs the previous hash plus the
+    // next public target slice (here base_transcript_hash || z34 target encoding).
     let z34_challenge_hash = shake128_32(&[base_transcript_hash, &z34_challenge_encoding]);
 
     let generator_range_start = TBOX_GENERATOR_VECTOR_OFFSET;

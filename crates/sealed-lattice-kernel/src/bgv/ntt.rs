@@ -17,6 +17,10 @@ pub(crate) fn inverse_negacyclic_ntt(values: &[u64], modulus: u64) -> CanonicalR
     transform_negacyclic(values, modulus, TransformDirection::Inverse)
 }
 
+// Negacyclic (X^N+1) transform reduced to a cyclic NTT: weight the input by
+// powers of psi (the 2N-th root), run a cyclic NTT, then weight the output. The
+// inverse undoes both. `root_exponent = POLYNOMIAL_DEGREE/len` rescales the
+// stored full-degree root down to the requested transform length.
 fn transform_negacyclic(
     values: &[u64],
     modulus: u64,
@@ -56,6 +60,8 @@ fn transform_negacyclic(
     Ok(transformed)
 }
 
+// Decimation-in-time Cooley-Tukey NTT: bit-reversed input -> natural-order
+// output, with per-stage twiddle factors derived from the stage root.
 fn cyclic_ntt(
     values: &mut [u64],
     root: u64,
@@ -109,6 +115,9 @@ fn multiply_by_powers(values: &mut [u64], root: u64, modulus: u64) -> CanonicalR
     Ok(())
 }
 
+// Applies the bit-reversal permutation in place. `reversed_index` is advanced
+// as a bit-reversed counter: the inner loop performs the carry of incrementing
+// the most-significant bit downward, so each step yields the next reversed index.
 fn bit_reverse_permute(values: &mut [u64]) {
     let length = values.len();
     let mut reversed_index = 0_usize;

@@ -37,6 +37,7 @@ pub(crate) fn parse_structured_share_commitment_statement(
                 "Structured share-commitment proof statement is missing sourceRingDegree.",
             )
         })?;
+    // Two supported lowerings: the degree-256 native commitment ring, or the degree-64 proof ring.
     if source_ring_degree != SHARE_COMMITMENT_MODULE_DEGREE && source_ring_degree != 64 {
         return Err(ComponentProofBackendError::invalid(
             "Structured share-commitment proof statement sourceRingDegree is not supported.",
@@ -140,6 +141,9 @@ pub(crate) fn parse_structured_share_commitment_statement(
         previous_backend_column_index = Some(column_index);
     }
 
+    // Columns: per receiver, share_vector_width share columns followed by OPENING_DIMENSION opening
+    // columns. Rows: per receiver, MODULE_RANK commitment rows, each split into row_split_factor =
+    // 256/source_degree source rows (a degree-256 commitment row maps to that many source rows).
     let expected_columns = receiver_rows
         .len()
         .checked_mul(share_vector_width + SHARE_COMMITMENT_OPENING_DIMENSION)
@@ -265,6 +269,8 @@ pub(crate) fn parse_structured_share_commitment_statement(
                     row_offset_within_statement + module_row_index * row_split_factor + split_index;
                 target_vector_coefficients[row_index] = split_target_polynomial.clone();
             }
+            // Each share coordinate column realizes negacyclic multiplication by X^k (a
+            // Toeplitz/rotation column) of the message-matrix row against that coordinate.
             for share_coordinate_index in 0..share_vector_width {
                 let split_message_polynomials = split_share_commitment_polynomial(
                     &share_commitment_message_entry_polynomial(

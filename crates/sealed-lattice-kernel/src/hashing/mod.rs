@@ -156,6 +156,11 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// must pass the frozen ceremony, statement, and encoded object material as
 /// explicit framed parts rather than using an informal parallel convention.
 pub fn hash512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
+    // Length-framed, domain-separated preimage: fixed prefix, then the length-
+    // framed domain, then a varuint part count, then each part length-prefixed.
+    // This unambiguous framing is security-critical (no concatenation
+    // collisions) and MUST byte-match the TypeScript reference, or every
+    // protocol hash forks across the two implementations.
     let mut preimage = Vec::new();
     preimage.extend(HASH512_PREIMAGE_PREFIX);
     append_bytes(&mut preimage, domain.as_bytes());
@@ -240,6 +245,9 @@ pub fn namespace_root(namespace: &str, canonical_bytes: &[u8]) -> String {
     hash512_hex(namespace, &[canonical_bytes])
 }
 
+// Orders strings by UTF-16 code-unit value to match the JavaScript reference's
+// key sort. This deliberately differs from Rust's native UTF-8 str ordering;
+// using str ordering would fork every canonical-JSON hash from the TS side.
 fn compare_utf16(left: &str, right: &str) -> Ordering {
     let mut left_units = left.encode_utf16();
     let mut right_units = right.encode_utf16();
@@ -257,6 +265,8 @@ fn compare_utf16(left: &str, right: &str) -> Ordering {
     }
 }
 
+// Non-ASCII strings are NFC-normalized before hashing (ASCII is already NFC);
+// this keeps the canonical form stable across Unicode-equivalent encodings.
 fn normalize_json_string(value: &str) -> Cow<'_, str> {
     if value.is_ascii() {
         Cow::Borrowed(value)
@@ -715,6 +725,9 @@ fn chunk_node(left: &[u8], right: &[u8]) -> [u8; 64] {
     hash512("transcript-core/chunk-node", &[left, right])
 }
 
+// Merkle tree over fixed-size chunks with domain-separated leaf/node/empty
+// hashes. An odd node is paired with itself (right = left); empty input gets a
+// dedicated empty-leaf hash, keeping it collision-separate from a zero chunk.
 pub fn chunk_root(input: &[u8], chunk_size: usize) -> CanonicalResult<String> {
     if chunk_size == 0 {
         return Err(CanonicalError::new(

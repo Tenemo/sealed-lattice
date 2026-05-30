@@ -40,6 +40,8 @@ const containsLoneSurrogate = (value: string): boolean => {
 };
 
 const normalizeCanonicalString = (value: string): string => {
+    // Canonical strings must be surrogate-free and NFC-normalized so that
+    // byte-different-but-equivalent inputs cannot collide under the hash.
     if (containsLoneSurrogate(value)) {
         throw new TypeError(
             'Canonical strings cannot contain lone UTF-16 surrogates.',
@@ -104,6 +106,9 @@ const serializeCanonicalValue = (value: unknown): string => {
                 value: serializeCanonicalValue(entry),
             });
         }
+        // Keys sorted by UTF-16 code-unit comparison (`<`/`>` on JS strings),
+        // not code-point or locale order. This ordering is part of the hash
+        // contract and must byte-match the Rust kernel.
         serializedEntries.sort((left, right) =>
             left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
         );
@@ -129,6 +134,9 @@ const appendVarUintToHash = (
         );
     }
 
+    // LEB128 unsigned varint. Used as a length prefix so every hashed part is
+    // framed (length ‖ bytes); this makes the preimage injective and prevents
+    // length-extension / concatenation ambiguity across parts.
     const encodedBytes: number[] = [];
     let remainingValue = value;
     for (;;) {
@@ -161,6 +169,10 @@ export const hash512 = (
     const hash = shake256.create({ dkLen: 64 });
 
     try {
+        // Security-critical anti-collision preimage layout that every protocol
+        // hash relies on, and that must byte-match the Rust kernel:
+        //   prefix ‖ len(domain) ‖ domain ‖ count(parts) ‖ (len(part) ‖ part)*
+        // The varint length prefixes make the layout unambiguous/injective.
         hash.update(hash512PreimagePrefix);
         appendBytesToHash(hash, textEncoder.encode(domain));
         appendVarUintToHash(hash, parts.length);

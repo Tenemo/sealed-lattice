@@ -380,6 +380,8 @@ const fieldPowerForReceiver = (
     return fieldPower;
 };
 
+// Re-derives the Shamir quotient (evaluated - share)/q independently from the witness;
+// must agree with the compiler's quotient (see relation-compiler.ts quotientNumerator).
 const quotientValue = (
     relationInput: BallotPrivacyRelationCompilerInput,
     receiverRosterPosition: number,
@@ -559,6 +561,11 @@ const receiverPayloadPlaintextBitValue = (
         });
     }
     if (variableColumn.openingCoordinateIndex !== undefined) {
+        // Recentres the signed opening before bit decomposition (opening + 1024 >= 0).
+        // 1024 = shareCommitmentOpeningInfinityNormBound and MUST exactly match the
+        // recentre offset used in the row builders' opening bit-decomposition target;
+        // a mismatch silently breaks soundness. Note 1024n is a hard-coded duplicate
+        // of the named constant.
         return integerBit({
             bitIndex: variableColumn.bitIndex,
             integerValue:

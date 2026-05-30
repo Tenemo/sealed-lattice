@@ -712,6 +712,9 @@ pub(super) fn build_bridge_proof_statement(
     Ok(Value::Object(bridge_statement))
 }
 
+// Canonical domain-separated hash preimage built from an explicit, alphabetically sorted field
+// allowlist (top-level string then u64 groups, followed by relationRequirements string/u64/bool
+// groups). Adding a statement field requires inserting it into the matching group here.
 pub(super) fn bridge_proof_statement_hash(
     bridge_proof_statement: &Value,
 ) -> CanonicalResult<String> {
@@ -877,6 +880,9 @@ pub(super) fn bridge_proof_statement_hash(
     derive_protocol_hash("BridgeProofRecordHash", &Value::Object(hash_input))
 }
 
+// Enforces the no-wraparound invariant: maximumAggregateInteger = canonicalTurnout*(q-1) must
+// stay < commitmentMessageBound. Every noWraparoundCondition clause must hold; any false clause
+// (or a failed inequality) means modular wraparound is possible and the cert is rejected.
 fn validate_bridge_share_commitment_bound_cert(
     certificate: &Value,
     statement: &Value,

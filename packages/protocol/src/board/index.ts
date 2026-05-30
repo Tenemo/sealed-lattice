@@ -92,6 +92,9 @@ const verifyBoardHead = (
             ),
         );
     }
+    // Genesis is exactly sequence 0: only it may omit the previous-head link,
+    // and conversely only it may have no previous head. The two checks are
+    // mutual inverses, pinning sequence-0 <-> no-previous-head one-to-one.
     if (head.previousHeadHash === null && head.boardSequence !== 0) {
         refusedObjects.push(
             createRefusal(
@@ -133,6 +136,10 @@ const verifyBoardHead = (
     return refusedObjects;
 };
 
+// Walks the previousHeadHash chain from the descendant looking for the
+// ancestor. The visited-set guards against a maliciously cyclic head chain
+// causing an infinite loop; if the chain ends (or repeats) without a match,
+// the ancestor relation does not hold.
 const isVerifiedAncestor = (
     ancestorHash: ProtocolHash,
     descendantHash: ProtocolHash,
@@ -343,6 +350,10 @@ const deriveBoardRootFromMerkleInclusionProof = (
         return undefined;
     }
 
+    // Recompute the board root from the leaf upward using parity: an
+    // even-indexed node combines with its Right sibling, an odd-indexed node
+    // with its Left sibling. A lone even node at the end of an odd-width level
+    // (no right sibling) is carried up unchanged with no synthetic padding.
     let computedNodeHash = deriveBoardLeafNodeHash(
         inclusionProof.boardPosition,
         inclusionProof.boardEntryHash,
@@ -385,6 +396,8 @@ const deriveBoardRootFromMerkleInclusionProof = (
         levelWidth = Math.ceil(levelWidth / 2);
     }
 
+    // Every supplied path step must be consumed; leftover steps mean the proof
+    // is malformed (more siblings than the tree height warrants).
     if (pathStepIndex !== boardEntryMerklePath.length) {
         return undefined;
     }

@@ -281,21 +281,33 @@ pub(super) fn validate_statement_dimensions(
     if dimensions.algebraic_row_count != expected_algebraic_rows {
         return Err("encoded relation algebraic row count does not match dimensions".to_string());
     }
+    // Hash-expanded witness layout, per coordinate then per receiver:
+    //   coords * (Shamir coefficients [threshold] + 2 shares per receiver)
+    // + receivers * (plaintext shares [coords] + 2x opening vars
+    //                + encryption-batch placeholder vars).
     let expected_hash_expanded_variable_count = dimensions.encoded_coordinate_count
         * (dimensions.pvss_threshold + 2 * dimensions.roster_size)
         + dimensions.roster_size
             * (dimensions.encoded_coordinate_count
                 + 2 * OPENING_VARIABLES_PER_RECEIVER
                 + ENCRYPTION_BATCH_VARIABLES_PER_RECEIVER);
+    // Total payload bits per receiver: share residues (17 bits each across all
+    // coordinates) plus opening-randomness bits (12 bits each).
     let receiver_payload_bit_count = dimensions.encoded_coordinate_count
         * RECEIVER_SHARE_REPRESENTATIVE_BIT_LENGTH
         + OPENING_VARIABLES_PER_RECEIVER * RECEIVER_OPENING_RANDOMNESS_BIT_LENGTH;
+    // Payload bits packed into degree-256 module-LWE ciphertext chunks.
     let receiver_payload_ciphertext_chunk_count =
         receiver_payload_bit_count.div_ceil(ENCODED_RELATION_RECEIVER_ENCRYPTION_MODULE_DEGREE);
+    // Per chunk: randomness + noise over a rank-k module (2 * rank * degree)
+    // plus the degree-many message coefficients.
     let receiver_encryption_witness_variables_per_receiver = receiver_payload_ciphertext_chunk_count
         * (2 * ENCODED_RELATION_RECEIVER_ENCRYPTION_MODULE_RANK
             * ENCODED_RELATION_RECEIVER_ENCRYPTION_MODULE_DEGREE
             + ENCODED_RELATION_RECEIVER_ENCRYPTION_MODULE_DEGREE);
+    // Fully explicit layout: same coordinate/share/opening terms as the
+    // hash-expanded count, but the encryption batch placeholder is replaced by
+    // the explicit payload bits and per-chunk encryption witness variables.
     let expected_full_explicit_variable_count = dimensions.encoded_coordinate_count
         * (dimensions.pvss_threshold + 2 * dimensions.roster_size)
         + dimensions.roster_size

@@ -670,6 +670,9 @@ pub(super) fn transform_source_witness_to_proof_ring(
     Ok(transformed_entries)
 }
 
+// Strided decomposition of one degree-256 source polynomial into k degree-64
+// proof polynomials, interleaving by split_factor*coeff_index + component_index.
+// The verifier recombines with the same stride, so this layout is load-bearing.
 pub(super) fn split_signed_polynomial_into_proof_ring(
     source_polynomial: &[i64],
     source_polynomial_split_factor: usize,
@@ -740,6 +743,8 @@ pub(super) fn sample_abdlop_opening_randomness_vector(
             seed,
             domain_separator,
         )?;
+        // ABDLOP opening randomness is centered ternary {-1, 0, +1}: each sample
+        // is drawn mod 3 (0/1/2) and recentred to -1/0/+1 by subtracting 1.
         let polynomial = sampled_coefficients
             .iter()
             .map(|sample| {
@@ -753,6 +758,9 @@ pub(super) fn sample_abdlop_opening_randomness_vector(
     PolynomialVector::new(proof_ring, entries)
 }
 
+// Dilithium-style Power2Round compression of the ABDLOP commitment: split each
+// coefficient into a centered low part in (-base/2, base/2] (the remainder) and
+// a high part divided out by base. compression_shift = full_bits - compressed_bits.
 pub(super) fn power2round_abdlop_commitment(
     uncompressed_commitment: &PolynomialVector,
     proof_encoding: &LinearProofEncoding,

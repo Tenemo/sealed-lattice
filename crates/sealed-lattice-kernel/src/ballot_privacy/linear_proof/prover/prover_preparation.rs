@@ -286,6 +286,9 @@ pub(crate) fn prepare_linear_prover_witness(
     )?;
     let transformed_relation_output = transformed_statement_matrix
         .evaluate_linear_relation(&transformed_witness_vector, &transformed_target_vector)?;
+    // The source relation A*w + t = 0 holds only mod q_source. Lifted into the
+    // proof ring (modulus q), each row's residual is exactly q_source*(row
+    // quotient): an integer multiple of q_source, not necessarily zero.
     // Modular source rows can lift to a nonzero proof-ring residual equal to
     // the row quotient. The tbox z4 path binds that bounded residual.
 
@@ -300,6 +303,9 @@ pub(crate) fn prepare_linear_prover_witness(
         ));
     }
 
+    // norm_slack = B^2 - ||w||^2 >= 0 is the slack that turns the L2 inequality
+    // ||w||^2 <= B^2 into the exact equality ||w||^2 + slack = B^2 that the
+    // quadratic norm relation proves; appended as a binary-expansion witness.
     let norm_slack = input
         .parameter_set
         .witness_l2_bound_squared
@@ -387,6 +393,9 @@ pub(crate) fn prepare_sparse_linear_prover_witness(
     let mut transformed_relation_output =
         transformed_statement_matrix.multiply_vector(&transformed_witness_vector)?;
     transformed_relation_output.add_assign(&transformed_target_vector)?;
+    // The source relation A*w + t = 0 holds only mod q_source. Lifted into the
+    // proof ring (modulus q), each row's residual is exactly q_source*(row
+    // quotient): an integer multiple of q_source, not necessarily zero.
     // Modular source rows can lift to a nonzero proof-ring residual equal to
     // the row quotient. The tbox z4 path binds that bounded residual.
 
@@ -401,6 +410,9 @@ pub(crate) fn prepare_sparse_linear_prover_witness(
         ));
     }
 
+    // norm_slack = B^2 - ||w||^2 >= 0 is the slack that turns the L2 inequality
+    // ||w||^2 <= B^2 into the exact equality ||w||^2 + slack = B^2 that the
+    // quadratic norm relation proves; appended as a binary-expansion witness.
     let norm_slack = input
         .parameter_set
         .witness_l2_bound_squared
@@ -474,6 +486,9 @@ where
         &transformed_witness_vector,
         &transformed_target_vector,
     )?;
+    // The source relation A*w + t = 0 holds only mod q_source. Lifted into the
+    // proof ring (modulus q), each row's residual is exactly q_source*(row
+    // quotient): an integer multiple of q_source, not necessarily zero.
     // Modular source rows can lift to a nonzero proof-ring residual equal to
     // the row quotient. The tbox z4 path binds that bounded residual.
 
@@ -487,6 +502,9 @@ where
         ));
     }
 
+    // norm_slack = B^2 - ||w||^2 >= 0 is the slack that turns the L2 inequality
+    // ||w||^2 <= B^2 into the exact equality ||w||^2 + slack = B^2 that the
+    // quadratic norm relation proves; appended as a binary-expansion witness.
     let norm_slack = parameter_set
         .witness_l2_bound_squared
         .checked_sub(witness_l2_squared)

@@ -28,6 +28,9 @@ pub(crate) fn encode_compressed_commitment_vector(
         ));
     }
 
+    // Compressed commitment coefficients are packed as raw b-bit little-endian
+    // fields (b = compressed_coefficient_bit_length), so the modulus here is
+    // 2^b, not the proof coefficient modulus.
     let mut writer = CommitmentBitWriter::new();
     let coefficient_modulus = 1_u64
         .checked_shl(
@@ -121,6 +124,8 @@ impl CommitmentBitWriter {
     }
 
     fn finish(mut self) -> CanonicalResult<Vec<u8>> {
+        // Terminal 1-bit + zero pad to the byte: an unambiguous bit-string
+        // terminator so trailing zero coefficients cannot be truncated.
         self.write_bit(1)?;
         while !self.bit_offset.is_multiple_of(8) {
             self.write_bit(0)?;

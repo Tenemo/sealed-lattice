@@ -340,6 +340,9 @@ fn validate_linear_proof_profile_invariants(
     Ok(proof_profile)
 }
 
+// Reuses the encoded-score field decompression/challenge tuple for the wider
+// field-compatible component profiles, overriding only the response/norm bounds.
+// Provenance of the borrowed values is in linear_proof_profile_constants.rs.
 fn encoded_score_compatible_profile(
     proof_encoding: &LinearProofEncoding,
     exact_norm_bound_squared: u64,
@@ -417,6 +420,10 @@ pub fn encoded_score_field_linear_parameter_contract() -> LinearProofParameterSe
     }
 }
 
+// Frozen encoding contract mirroring the generated LaZer demo profile. These
+// magic numbers (coefficient modulus, bit lengths, vector lengths, log2 stddevs)
+// are checked field-by-field elsewhere; provenance is documented in
+// linear_proof_profile_constants.rs.
 pub fn demo_linear_proof_encoding_contract() -> LinearProofEncoding {
     LinearProofEncoding {
         profile_id: "demo-linear-proof-encoding-v1".to_string(),
@@ -470,6 +477,10 @@ pub fn receiver_key_linear_proof_encoding_contract() -> LinearProofEncoding {
     }
 }
 
+// These frozen encoding literals (coefficient modulus 70_368_744_177_829,
+// fullSize 47, compressed 35, challenge modulus 17, vector lengths, log2 stddevs)
+// must stay identical to the frozen block in linear_proof/contract_validation.rs;
+// provenance is in linear_proof_profile_constants.rs.
 #[cfg(test)]
 pub fn encoded_score_field_linear_proof_encoding_contract() -> LinearProofEncoding {
     LinearProofEncoding {

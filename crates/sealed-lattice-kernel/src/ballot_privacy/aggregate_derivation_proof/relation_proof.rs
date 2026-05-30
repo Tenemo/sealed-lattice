@@ -173,6 +173,8 @@ pub(super) fn verify_aggregate_relation_proof(
     })
 }
 
+// Relation is satisfied when M*w + target == 0 (every coefficient zero). Sign convention: the
+// target vector is the negated image, so the witness check is an addition, not a subtraction.
 fn require_aggregate_relation_satisfied(
     source_statement_matrix: &SparsePolynomialMatrix,
     target_vector: &PolynomialVector,
@@ -293,6 +295,9 @@ pub(super) fn aggregate_relation_challenge_scalar(
     modulus: u64,
     check_index: usize,
 ) -> crate::encoding::CanonicalResult<u64> {
+    // Fiat-Shamir challenge derived by hashing the canonical-JSON of the commitment vector.
+    // Byte-for-byte canonical-JSON reproduction is load-bearing: the verifier rehashes the same
+    // bytes, so any serialization drift breaks challenge soundness.
     let commitment_value = canonical_polynomial_vector_value(relation_commitment_vector);
     let commitment_json = canonical_json(&commitment_value)?;
     let nonzero_challenge_range = modulus.checked_sub(1).ok_or_else(|| {
@@ -318,6 +323,8 @@ pub(super) fn aggregate_relation_challenge_scalar(
             if let Some(challenge) =
                 reduce_unbiased_u64(u64::from_le_bytes(challenge_bytes), nonzero_challenge_range)
             {
+                // Unbiased reduce mod (modulus-1) gives [0, modulus-2]; +1 shifts to [1, modulus-1],
+                // i.e. a guaranteed nonzero challenge.
                 return Ok(challenge + 1);
             }
         }
@@ -327,6 +334,8 @@ pub(super) fn aggregate_relation_challenge_scalar(
     }
 }
 
+// Rejection sampling that removes modulo bias: rejects (returns None for) candidates in the
+// non-uniform tail above the largest multiple of modulus, then reduces the rest mod modulus.
 pub(super) fn reduce_unbiased_u64(candidate: u64, modulus: u64) -> Option<u64> {
     if modulus == 0 {
         return None;

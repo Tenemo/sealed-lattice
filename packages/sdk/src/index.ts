@@ -239,6 +239,9 @@ export const evaluateActionCapability = (
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
 
+// Fail-closed result builder for the reserved future complete-protocol entry points
+// below: each returns a structured OperationUnavailable refusal (ok:false) rather than
+// throwing, so callers get a typed, non-crashing refusal until the path is implemented.
 const unavailableFutureProtocolOperation = (
     operation: string,
 ): FutureProtocolOperationResult => ({

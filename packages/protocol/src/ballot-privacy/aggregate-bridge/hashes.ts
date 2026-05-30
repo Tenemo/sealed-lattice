@@ -37,8 +37,8 @@ export const deriveBridgeProofProfileHash = (input: {
         purpose: 'sealed-lattice-aggregate-bridge-proof-profile-v1',
     });
 
-const bridgePlaintextCoefficientCount = 32_768;
-const bridgeDataPrimeCount = 16;
+const bridgePlaintextCoefficientCount = 32_768; // BGV ring degree (polynomial slots).
+const bridgeDataPrimeCount = 16; // RNS data primes in the BGV ciphertext modulus.
 const bridgeCiphertextComponentCount = 2;
 const shareCommitmentModuleRank = 4;
 const shareCommitmentOpeningCoordinateCount = 64;
@@ -53,6 +53,9 @@ const bridgeSharedWitnessWeakestRelation =
     'BGVBatchEncode65537InverseNegacyclicNtt';
 const bridgeSharedWitnessWeakestRelationModulus = ballotPrivacyFieldModulus;
 const bridgeSharedWitnessRejectionAttemptLimit = 64;
+// Soundness accounting for the same-witness linkage between the two bridge sub-proofs:
+// the weakest sub-relation gives >=32 raw bits; subtracting a 6-bit grinding discount
+// per check (across the checks) leaves an effective binding floor of >=20 bits.
 const bridgeSharedWitnessGrindingDiscountBitsPerCheck = 6;
 const bridgeSharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor = 32;
 const bridgeSharedWitnessEffectiveBindingSoundnessBitsFloor = 20;
@@ -122,6 +125,10 @@ const createBridgeSharedWitnessLayout = (input: {
         separateSubproofsAcceptedForClosure: false,
         sharedReducedCoordinateColumnRole:
             'aggregate-reduction-and-bgv-plaintext-slot',
+        // Length of the single shared response vector that binds the aggregate-reduction
+        // and BGV-encryption sub-relations to one witness: the concatenation of every
+        // shared-witness coordinate block (shares, openings, reduced, quotients, plaintext
+        // coefficients, encoding quotients, encryption randomizer, encryption error).
         sharedResponseScalarCount:
             aggregateIntegerShareCoordinateCount +
             shareCommitmentOpeningCoordinateCount +
