@@ -3,6 +3,8 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { Writable } from 'node:stream';
 
+import { createLogUpdate } from 'log-update';
+
 import type {
     CommandInvocation,
     CommandOutputEvent,
@@ -19,6 +21,25 @@ export type CheckProgressStatus =
 
 type CheckCommandStatus = CheckProgressStatus;
 
+type CheckProgressSource =
+    | 'commands'
+    | 'libtest'
+    | 'opaque'
+    | 'turbo'
+    | 'vitest';
+type CheckProgressUnit =
+    | 'command'
+    | 'task'
+    | 'task seen'
+    | 'test'
+    | 'test file';
+
+type CheckProgressMetric = {
+    completed: number;
+    total?: number;
+    unit: CheckProgressUnit;
+};
+
 export type CheckProgressCommandPlan = {
     readonly description: string;
     readonly expectedDurationMilliseconds?: number;
@@ -28,10 +49,21 @@ export type CheckProgressLanePlan = {
     readonly commands: readonly CheckProgressCommandPlan[];
     readonly expectedDurationMilliseconds?: number;
     readonly name: string;
+    readonly progress?: {
+        readonly primary?: CheckProgressMetric;
+        readonly secondary?: CheckProgressMetric;
+        readonly source: CheckProgressSource;
+    };
+};
+
+type CheckProgressHistoryMetric = {
+    readonly primary?: CheckProgressMetric;
+    readonly secondary?: CheckProgressMetric;
 };
 
 export type CheckTimingHistory = {
     readonly commandDurationMilliseconds: ReadonlyMap<string, number>;
+    readonly laneProgress: ReadonlyMap<string, CheckProgressHistoryMetric>;
     readonly laneDurationMilliseconds: ReadonlyMap<string, number>;
     readonly totalDurationMilliseconds?: number;
 };
@@ -48,6 +80,7 @@ export type CheckRunLaneTiming = {
     readonly commands: readonly CheckRunCommandTiming[];
     readonly durationMilliseconds?: number;
     readonly name: string;
+    readonly progress?: CheckProgressHistoryMetric;
     readonly status: CheckProgressStatus;
 };
 
@@ -71,6 +104,7 @@ type CommandState = {
     durationMilliseconds?: number;
     exitCode?: number;
     expectedDurationMilliseconds?: number;
+    outputLineBuffer: OutputLineBuffer;
     logPath?: string;
     recentOutput: RecentOutputBuffer;
     startedAtMilliseconds?: number;
@@ -83,24 +117,36 @@ type LaneState = {
     expectedDurationMilliseconds?: number;
     finishedAtMilliseconds?: number;
     name: string;
+    primaryProgress?: CheckProgressMetric;
+    progressSource: CheckProgressSource;
+    secondaryProgress?: CheckProgressMetric;
     startedAtMilliseconds?: number;
     status: CheckProgressStatus;
+    libtestCompletedTestCount: number;
+    libtestDiscoveredTestCount: number;
+    libtestRunningTestCount?: number;
+    turboTaskIdsSeen: Set<string>;
 };
 
 type TerminalWriter = Pick<Writable, 'write'> & {
     readonly columns?: number;
     readonly isTTY?: boolean;
+    readonly rows?: number;
 };
 
 const previousTimingDetailsVersion = 'sealed-lattice-check-run-details-v1';
 const outputLineLimit = 80;
 const latestOutputLineLimit = 6;
 const failureOutputLineLimit = 40;
-const defaultRenderIntervalMilliseconds = 200;
+const defaultRenderIntervalMilliseconds = 100;
+const renderDebounceMilliseconds = 25;
+const fallbackTerminalWidth = 80;
+const minimumTerminalWidth = 40;
 const ansiEscapePattern = new RegExp(
     String.raw`\u001B\[[0-?]*[ -/]*[@-~]`,
     'gu',
 );
+const progressEventPrefix = 'sealed-lattice-progress ';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
@@ -110,6 +156,7 @@ const isUsableDuration = (value: unknown): value is number =>
 
 const emptyTimingHistory = (): CheckTimingHistory => ({
     commandDurationMilliseconds: new Map(),
+    laneProgress: new Map(),
     laneDurationMilliseconds: new Map(),
 });
 
@@ -219,6 +266,87 @@ export class RecentOutputBuffer {
     }
 }
 
+class OutputLineBuffer {
+    #pendingLine = '';
+
+    append(chunk: string, onLine: (line: string) => void): void {
+        const normalizedChunk = chunk
+            .replace(/\r\n/gu, '\n')
+            .replace(/\r/gu, '\n');
+        if (normalizedChunk.length === 0) {
+            return;
+        }
+
+        const lines = `${this.#pendingLine}${normalizedChunk}`.split('\n');
+        this.#pendingLine = lines.pop() ?? '';
+        for (const line of lines) {
+            onLine(line);
+        }
+    }
+
+    flush(onLine: (line: string) => void): void {
+        if (this.#pendingLine.length === 0) {
+            return;
+        }
+
+        onLine(this.#pendingLine);
+        this.#pendingLine = '';
+    }
+}
+
+const cloneProgressMetric = (
+    metric: CheckProgressMetric | undefined,
+): CheckProgressMetric | undefined =>
+    metric === undefined
+        ? undefined
+        : {
+              completed: metric.completed,
+              total: metric.total,
+              unit: metric.unit,
+          };
+
+const isProgressUnit = (value: unknown): value is CheckProgressUnit =>
+    value === 'command' ||
+    value === 'task' ||
+    value === 'task seen' ||
+    value === 'test' ||
+    value === 'test file';
+
+const readProgressMetric = (
+    value: unknown,
+): CheckProgressMetric | undefined => {
+    if (!isRecord(value) || !isUsableDuration(value.completed)) {
+        return undefined;
+    }
+    if (!isProgressUnit(value.unit)) {
+        return undefined;
+    }
+
+    return {
+        completed: value.completed,
+        total: isUsableDuration(value.total) ? value.total : undefined,
+        unit: value.unit,
+    };
+};
+
+const readProgressHistoryMetric = (
+    value: unknown,
+): CheckProgressHistoryMetric | undefined => {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    const primary = readProgressMetric(value.primary);
+    const secondary = readProgressMetric(value.secondary);
+    if (primary === undefined && secondary === undefined) {
+        return undefined;
+    }
+
+    return {
+        primary,
+        secondary,
+    };
+};
+
 const readCheckRunDetails = (
     value: unknown,
 ): CheckRunTimingDetails | undefined => {
@@ -278,6 +406,7 @@ const readCheckRunDetails = (
                 ? laneValue.durationMilliseconds
                 : undefined,
             name: laneValue.name,
+            progress: readProgressHistoryMetric(laneValue.progress),
             status:
                 typeof laneValue.status === 'string'
                     ? (laneValue.status as CheckProgressStatus)
@@ -315,6 +444,7 @@ export const extractCheckTimingHistoryFromSummary = (
     const details = readCheckRunDetails(summary.details);
     const laneDurationMilliseconds = new Map<string, number>();
     const commandDurationMilliseconds = new Map<string, number>();
+    const laneProgress = new Map<string, CheckProgressHistoryMetric>();
 
     if (details !== undefined) {
         for (const lane of details.lanes) {
@@ -323,6 +453,9 @@ export const extractCheckTimingHistoryFromSummary = (
                     lane.name,
                     lane.durationMilliseconds,
                 );
+            }
+            if (lane.progress !== undefined) {
+                laneProgress.set(lane.name, lane.progress);
             }
             for (const command of lane.commands) {
                 if (isUsableDuration(command.durationMilliseconds)) {
@@ -337,6 +470,7 @@ export const extractCheckTimingHistoryFromSummary = (
 
     return {
         commandDurationMilliseconds,
+        laneProgress,
         laneDurationMilliseconds,
         totalDurationMilliseconds,
     };
@@ -387,6 +521,25 @@ const laneStatusLabels: Readonly<Record<CheckProgressStatus, string>> = {
 const commandIsFinished = (command: CommandState): boolean =>
     command.status === 'failed' || command.status === 'passed';
 
+const commandProgressForLane = (lane: LaneState): CheckProgressMetric => ({
+    completed: lane.commands.filter(commandIsFinished).length,
+    total: lane.commands.length,
+    unit: 'command',
+});
+
+const primaryProgressForLane = (
+    lane: LaneState,
+): CheckProgressMetric | undefined => {
+    if (
+        lane.progressSource === 'commands' ||
+        lane.progressSource === 'libtest'
+    ) {
+        return commandProgressForLane(lane);
+    }
+
+    return lane.primaryProgress;
+};
+
 const laneElapsedMilliseconds = (
     lane: LaneState,
     nowMilliseconds: number,
@@ -412,17 +565,98 @@ const truncateLine = (line: string, maximumLength: number): string => {
     return `${line.slice(0, maximumLength - 3)}...`;
 };
 
+const progressUnitLabel = (unit: CheckProgressUnit, count: number): string => {
+    switch (unit) {
+        case 'command':
+            return count === 1 ? 'command' : 'commands';
+        case 'task':
+            return count === 1 ? 'task' : 'tasks';
+        case 'task seen':
+            return count === 1 ? 'task seen' : 'tasks seen';
+        case 'test':
+            return count === 1 ? 'test' : 'tests';
+        case 'test file':
+            return count === 1 ? 'test file' : 'test files';
+    }
+};
+
+const formatProgressMetric = (metric: CheckProgressMetric): string => {
+    if (metric.total !== undefined) {
+        return `${metric.completed}/${metric.total} ${progressUnitLabel(
+            metric.unit,
+            metric.total,
+        )}`;
+    }
+
+    return `${metric.completed} ${progressUnitLabel(
+        metric.unit,
+        metric.completed,
+    )}`;
+};
+
+const formatLaneProgress = (lane: LaneState): string => {
+    const primary = primaryProgressForLane(lane);
+    const secondary = lane.secondaryProgress;
+    if (lane.progressSource === 'vitest') {
+        return secondary === undefined ? '' : formatProgressMetric(secondary);
+    }
+    if (lane.progressSource === 'libtest' && secondary !== undefined) {
+        return formatProgressMetric(secondary);
+    }
+    if (primary === undefined) {
+        return '';
+    }
+    if (secondary === undefined) {
+        return formatProgressMetric(primary);
+    }
+
+    return `${formatProgressMetric(primary)}, ${formatProgressMetric(
+        secondary,
+    )}`;
+};
+
+const readProgressCount = (value: unknown): number | undefined =>
+    isUsableDuration(value) ? Math.trunc(value) : undefined;
+
+const readPositiveIntegerEnvironment = (
+    environmentVariableName: string,
+): number | undefined => {
+    const value = process.env[environmentVariableName];
+    if (value === undefined) {
+        return undefined;
+    }
+
+    const parsedValue = Number.parseInt(value, 10);
+
+    return Number.isFinite(parsedValue) && parsedValue > 0
+        ? parsedValue
+        : undefined;
+};
+
+const terminalColumnCount = (output: TerminalWriter): number =>
+    Math.max(
+        output.columns ??
+            readPositiveIntegerEnvironment('COLUMNS') ??
+            fallbackTerminalWidth,
+        minimumTerminalWidth,
+    );
+
+const terminalRowCount = (output: TerminalWriter): number | undefined =>
+    output.rows ?? readPositiveIntegerEnvironment('LINES');
+
 export class CheckProgressReporter {
     readonly #history: CheckTimingHistory;
     readonly #laneStates: LaneState[];
     readonly #latestOutput = new RecentOutputBuffer();
+    readonly #logUpdate: ReturnType<typeof createLogUpdate> | undefined;
     readonly #now: () => number;
     readonly #output: TerminalWriter;
     readonly #redrawEnabled: boolean;
     readonly #renderIntervalMilliseconds: number;
     readonly #startedAtMilliseconds: number;
     #interval: NodeJS.Timeout | undefined;
-    #lastRenderedLineCount = 0;
+    #lastRenderedFrame: string | undefined;
+    #renderTimeout: NodeJS.Timeout | undefined;
 
     constructor(input: {
         readonly history?: CheckTimingHistory;
@@ -438,18 +672,34 @@ export class CheckProgressReporter {
                 description: command.description,
                 expectedDurationMilliseconds:
                     command.expectedDurationMilliseconds,
+                outputLineBuffer: new OutputLineBuffer(),
                 recentOutput: new RecentOutputBuffer(),
                 status: 'waiting',
             })),
             expectedDurationMilliseconds: lane.expectedDurationMilliseconds,
             name: lane.name,
+            primaryProgress: cloneProgressMetric(lane.progress?.primary),
+            progressSource:
+                lane.progress?.source ??
+                (lane.commands.length > 1 ? 'commands' : 'opaque'),
+            secondaryProgress: cloneProgressMetric(lane.progress?.secondary),
             status: 'waiting',
+            libtestCompletedTestCount: 0,
+            libtestDiscoveredTestCount: 0,
+            turboTaskIdsSeen: new Set<string>(),
         }));
         this.#now = input.now ?? performance.now.bind(performance);
         this.#output = input.output ?? process.stdout;
         this.#redrawEnabled =
             input.redrawEnabled ??
             (this.#output.isTTY === true && process.env.CI !== 'true');
+        this.#logUpdate = this.#redrawEnabled
+            ? createLogUpdate(this.#output as NodeJS.WritableStream, {
+                  defaultHeight: terminalRowCount(this.#output),
+                  defaultWidth: terminalColumnCount(this.#output),
+                  showCursor: true,
+              })
+            : undefined;
         this.#renderIntervalMilliseconds =
             input.renderIntervalMilliseconds ??
             defaultRenderIntervalMilliseconds;
@@ -483,6 +733,18 @@ export class CheckProgressReporter {
                 })),
                 durationMilliseconds: lane.durationMilliseconds,
                 name: lane.name,
+                progress:
+                    lane.primaryProgress === undefined &&
+                    lane.secondaryProgress === undefined
+                        ? undefined
+                        : {
+                              primary: cloneProgressMetric(
+                                  lane.primaryProgress,
+                              ),
+                              secondary: cloneProgressMetric(
+                                  lane.secondaryProgress,
+                              ),
+                          },
                 status: lane.status,
             })),
             objectVersion: previousTimingDetailsVersion,
@@ -561,6 +823,7 @@ export class CheckProgressReporter {
                 )}`,
             );
         }
+        this.#requestRender();
     }
 
     start(): void {
@@ -583,8 +846,13 @@ export class CheckProgressReporter {
             clearInterval(this.#interval);
             this.#interval = undefined;
         }
+        if (this.#renderTimeout !== undefined) {
+            clearTimeout(this.#renderTimeout);
+            this.#renderTimeout = undefined;
+        }
         if (this.#redrawEnabled) {
-            this.#clearPreviousRender();
+            this.#logUpdate?.clear();
+            this.#lastRenderedFrame = undefined;
         }
     }
 
@@ -605,28 +873,6 @@ export class CheckProgressReporter {
         );
     }
 
-    #clearPreviousRender(): void {
-        if (this.#lastRenderedLineCount === 0) {
-            return;
-        }
-
-        this.#output.write(`\u001B[${this.#lastRenderedLineCount}A`);
-        for (
-            let lineIndex = 0;
-            lineIndex < this.#lastRenderedLineCount;
-            lineIndex += 1
-        ) {
-            this.#output.write('\u001B[2K');
-            if (lineIndex < this.#lastRenderedLineCount - 1) {
-                this.#output.write('\u001B[1B');
-            }
-        }
-        if (this.#lastRenderedLineCount > 1) {
-            this.#output.write(`\u001B[${this.#lastRenderedLineCount - 1}A`);
-        }
-        this.#lastRenderedLineCount = 0;
-    }
-
     #currentCommand(lane: LaneState): CommandState | undefined {
         return lane.commands.find((command) => command.status === 'running');
     }
@@ -642,15 +888,16 @@ export class CheckProgressReporter {
                       this.#history.totalDurationMilliseconds,
                   )}`;
 
-        return `check  ${this.completedCommandCount()}/${this.totalCommandCount()}  elapsed ${formatProgressDuration(
+        return `check  commands ${this.completedCommandCount()}/${this.totalCommandCount()}  elapsed ${formatProgressDuration(
             elapsedMilliseconds,
         )}${expectedDuration}`;
     }
 
     #laneLine(lane: LaneState): string {
         const nowMilliseconds = this.#now();
-        const completedCommands =
-            lane.commands.filter(commandIsFinished).length;
+        const progressText = formatLaneProgress(lane);
+        const formattedProgress =
+            progressText.length === 0 ? ''.padEnd(24) : progressText.padEnd(24);
         const elapsedDuration = formatProgressDuration(
             laneElapsedMilliseconds(lane, nowMilliseconds),
         ).padStart(8);
@@ -668,13 +915,14 @@ export class CheckProgressReporter {
                       currentCommand.expectedDurationMilliseconds,
                   )}`;
         const currentCommandText =
-            currentCommand === undefined
+            currentCommand === undefined ||
+            currentCommand.description === lane.name
                 ? ''
                 : ` - ${currentCommand.description}${currentCommandExpectedDuration}`;
 
         return `[${laneStatusLabels[lane.status].padEnd(
             4,
-        )}] ${completedCommands}/${lane.commands.length} ${elapsedDuration}${expectedDuration} ${lane.name}${currentCommandText}`;
+        )}] ${formattedProgress} ${elapsedDuration}${expectedDuration} ${lane.name}${currentCommandText}`;
     }
 
     #recordCommandExit(
@@ -689,17 +937,25 @@ export class CheckProgressReporter {
             laneName,
             event.invocation.description,
         );
+        command.outputLineBuffer.flush((line) => {
+            this.#recordCommandOutputLine(laneName, command, line);
+        });
         command.durationMilliseconds = event.durationMilliseconds;
         command.exitCode = event.exitCode;
         command.status = event.exitCode === 0 ? 'passed' : 'failed';
 
         if (!this.#redrawEnabled) {
+            const commandDescription =
+                event.invocation.description === laneName
+                    ? ''
+                    : ` ${event.invocation.description}`;
             this.#writeLine(
                 `${laneStatusLabels[command.status]} ${laneName} ${formatProgressDuration(
                     event.durationMilliseconds,
-                )} ${event.invocation.description}`,
+                )}${commandDescription}`,
             );
         }
+        this.#requestRender();
     }
 
     #recordCommandOutput(laneName: string, event: CommandOutputEvent): void {
@@ -707,9 +963,26 @@ export class CheckProgressReporter {
             laneName,
             event.invocation.description,
         );
+        command.outputLineBuffer.append(event.chunk, (line) => {
+            this.#recordCommandOutputLine(laneName, command, line);
+        });
+        this.#requestRender();
+    }
+
+    #recordCommandOutputLine(
+        laneName: string,
+        command: CommandState,
+        line: string,
+    ): void {
+        const lane = this.#requiredLane(laneName);
+        if (this.#consumeProgressLine(lane, line)) {
+            return;
+        }
+
         const outputPrefix = `${laneName}`;
-        command.recentOutput.append(outputPrefix, event.chunk);
-        this.#latestOutput.append(outputPrefix, event.chunk);
+        const lineWithTerminator = `${line}\n`;
+        command.recentOutput.append(outputPrefix, lineWithTerminator);
+        this.#latestOutput.append(outputPrefix, lineWithTerminator);
     }
 
     #recordCommandStart(laneName: string, event: CommandStartEvent): void {
@@ -726,22 +999,34 @@ export class CheckProgressReporter {
         command.logPath = event.logFiles?.combinedPath;
 
         if (!this.#redrawEnabled) {
+            const progressText = formatLaneProgress(lane);
+            const commandDescription =
+                event.invocation.description === lane.name
+                    ? ''
+                    : ` ${event.invocation.description}`;
+            const progressDescription =
+                progressText.length === 0 ? '' : ` ${progressText}`;
             this.#writeLine(
-                `run ${laneName} ${
-                    lane.commands.filter(commandIsFinished).length
-                }/${lane.commands.length} ${event.invocation.description}`,
+                `run ${laneName}${progressDescription}${commandDescription}`,
             );
         }
+        this.#requestRender();
     }
 
     #render(): void {
-        const terminalWidth = Math.max(this.#output.columns ?? 120, 40);
-        const lines = this.#renderLines().map((line) =>
-            truncateLine(line, terminalWidth),
-        );
-        this.#clearPreviousRender();
-        this.#output.write(`${lines.join('\n')}\n`);
-        this.#lastRenderedLineCount = lines.length;
+        if (!this.#redrawEnabled) {
+            return;
+        }
+        const terminalWidth = terminalColumnCount(this.#output);
+        const frame = this.#renderLines()
+            .map((line) => truncateLine(line, terminalWidth))
+            .join('\n');
+        if (frame === this.#lastRenderedFrame) {
+            return;
+        }
+
+        this.#lastRenderedFrame = frame;
+        this.#logUpdate?.(frame);
     }
 
     #renderLines(): readonly string[] {
@@ -756,6 +1041,144 @@ export class CheckProgressReporter {
         }
 
         return lines;
+    }
+
+    #consumeProgressLine(lane: LaneState, line: string): boolean {
+        if (line.startsWith(progressEventPrefix)) {
+            this.#consumeStructuredProgressLine(lane, line);
+
+            return true;
+        }
+        if (lane.progressSource === 'turbo') {
+            this.#consumeTurboProgressLine(lane, line);
+        }
+        if (lane.progressSource === 'libtest') {
+            this.#consumeLibtestProgressLine(lane, line);
+        }
+
+        return false;
+    }
+
+    #consumeStructuredProgressLine(lane: LaneState, line: string): void {
+        try {
+            const payload = JSON.parse(
+                line.slice(progressEventPrefix.length),
+            ) as unknown;
+            if (!isRecord(payload) || payload.tool !== 'vitest') {
+                return;
+            }
+
+            const files = isRecord(payload.files) ? payload.files : undefined;
+            const tests = isRecord(payload.tests) ? payload.tests : undefined;
+            const completedFiles = readProgressCount(files?.completed);
+            const totalFiles = readProgressCount(files?.total);
+            const completedTests = readProgressCount(tests?.completed);
+            const totalTests = readProgressCount(tests?.total);
+            if (completedFiles !== undefined) {
+                lane.primaryProgress = {
+                    completed: completedFiles,
+                    total: totalFiles,
+                    unit: 'test file',
+                };
+            }
+            if (
+                completedTests !== undefined &&
+                (completedTests > 0 ||
+                    (totalTests !== undefined && totalTests > 0))
+            ) {
+                lane.secondaryProgress = {
+                    completed: completedTests,
+                    total: totalTests,
+                    unit: 'test',
+                };
+            }
+        } catch {
+            // Progress markers are diagnostic only; malformed lines should not
+            // fail the validation run.
+        }
+    }
+
+    #consumeTurboProgressLine(lane: LaneState, line: string): void {
+        const runningMatch = /Running build in (\d+) packages/u.exec(line);
+        if (runningMatch?.[1] !== undefined) {
+            lane.primaryProgress = {
+                completed: lane.primaryProgress?.completed ?? 0,
+                total: Number(runningMatch[1]),
+                unit: 'task seen',
+            };
+
+            return;
+        }
+
+        const taskSeenMatch =
+            /^([^:\s]+):build:\s+(?:cache hit|cache miss)/u.exec(line);
+        if (taskSeenMatch?.[1] !== undefined) {
+            lane.turboTaskIdsSeen.add(taskSeenMatch[1]);
+            lane.primaryProgress = {
+                completed: lane.turboTaskIdsSeen.size,
+                total: lane.primaryProgress?.total,
+                unit: 'task seen',
+            };
+
+            return;
+        }
+
+        const finalTaskMatch =
+            /Tasks:\s+(\d+)\s+successful,\s+(\d+)\s+total/u.exec(line);
+        if (
+            finalTaskMatch?.[1] !== undefined &&
+            finalTaskMatch[2] !== undefined
+        ) {
+            lane.primaryProgress = {
+                completed: Number(finalTaskMatch[1]),
+                total: Number(finalTaskMatch[2]),
+                unit: 'task',
+            };
+        }
+    }
+
+    #consumeLibtestProgressLine(lane: LaneState, line: string): void {
+        const runningMatch = /^running (\d+) tests$/u.exec(line.trim());
+        if (runningMatch?.[1] !== undefined) {
+            const runningTestCount = Number(runningMatch[1]);
+            lane.libtestRunningTestCount = runningTestCount;
+            lane.libtestDiscoveredTestCount += runningTestCount;
+            lane.secondaryProgress = {
+                completed: lane.libtestCompletedTestCount,
+                total: Math.max(
+                    lane.secondaryProgress?.total ?? 0,
+                    lane.libtestDiscoveredTestCount,
+                ),
+                unit: 'test',
+            };
+
+            return;
+        }
+
+        if (/^test .+ \.\.\. (?:ok|ignored|FAILED)$/u.test(line.trim())) {
+            lane.libtestCompletedTestCount += 1;
+            const discoveredTestCount =
+                lane.libtestDiscoveredTestCount === 0
+                    ? lane.secondaryProgress?.total
+                    : lane.libtestDiscoveredTestCount;
+            lane.secondaryProgress = {
+                completed: lane.libtestCompletedTestCount,
+                total: discoveredTestCount,
+                unit: 'test',
+            };
+        }
+    }
+
+    #requestRender(): void {
+        if (!this.#redrawEnabled || this.#renderTimeout !== undefined) {
+            return;
+        }
+
+        this.#renderTimeout = setTimeout(() => {
+            this.#renderTimeout = undefined;
+            this.#render();
+        }, renderDebounceMilliseconds);
+        this.#renderTimeout.unref?.();
     }
 
     #requiredCommand(

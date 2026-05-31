@@ -1,1 +1,7 @@
-pnpm run check
+if [ -t 1 ]; then
+    pnpm run check -- --progress=always
+elif [ -e /dev/tty ]; then
+    pnpm run check -- --progress=always > /dev/tty 2>&1
+else
+    pnpm run check -- --progress=never
+fi

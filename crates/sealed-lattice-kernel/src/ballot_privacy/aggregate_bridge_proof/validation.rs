@@ -75,6 +75,66 @@ pub(super) fn validate_bridge_randomness_source(
     Ok(())
 }
 
+pub(super) fn validate_bridge_randomness_source_evidence(
+    evidence: &Value,
+    prover_randomness_source: &str,
+    encryption_randomness_seed_source: &str,
+    object_name: &str,
+) -> CanonicalResult<()> {
+    reject_forbidden_public_bridge_fields(evidence, object_name)?;
+    reject_unexpected_object_fields(
+        evidence,
+        object_name,
+        &[
+            "callerSuppliedDevelopmentRandomness",
+            "claimBearingEntropyEvidence",
+            "encryptionRandomnessSeedSource",
+            "objectType",
+            "objectVersion",
+            "proverRandomnessSource",
+        ],
+    )?;
+    if string_field(evidence, "objectType") != Some("AggregateBridgeRandomnessSourceEvidence")
+        || read_u64_object_field(evidence, "objectVersion", object_name)? != 1
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!("{object_name} must be aggregate bridge randomness source evidence"),
+        ));
+    }
+    require_equal_string(
+        evidence,
+        "proverRandomnessSource",
+        prover_randomness_source,
+        "randomness source evidence prover source",
+    )?;
+    require_equal_string(
+        evidence,
+        "encryptionRandomnessSeedSource",
+        encryption_randomness_seed_source,
+        "randomness source evidence encryption source",
+    )?;
+
+    let caller_supplied_development_randomness = prover_randomness_source
+        == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC
+        || encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC;
+    let claim_bearing_entropy_evidence = prover_randomness_source
+        == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
+        && encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG;
+    require_equal_bool(
+        evidence,
+        "callerSuppliedDevelopmentRandomness",
+        caller_supplied_development_randomness,
+        "randomness source evidence development flag",
+    )?;
+    require_equal_bool(
+        evidence,
+        "claimBearingEntropyEvidence",
+        claim_bearing_entropy_evidence,
+        "randomness source evidence claim-bearing entropy flag",
+    )
+}
+
 pub(super) fn validate_development_randomness_acknowledgement(
     request: &Value,
     prover_randomness_source: &str,
@@ -335,6 +395,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "thresholdDecryptable",
                 ],
             )?;
+            validate_bridge_relation_proof_nonclosure_status(proof_value)?;
             let shared_witness_proof =
                 required_json_field(proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
             reject_unexpected_object_fields(
@@ -433,6 +494,33 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
         }
     }
     validate_bridge_private_material_disclosure(proof_value)
+}
+
+fn validate_bridge_relation_proof_nonclosure_status(proof_value: &Value) -> CanonicalResult<()> {
+    require_equal_bool(
+        proof_value,
+        "scopedBridgeRelationClosure",
+        false,
+        "scoped bridge relation closure flag",
+    )?;
+    require_equal_bool(
+        proof_value,
+        "finalBridgeTheoremClosure",
+        false,
+        "final bridge theorem closure flag",
+    )?;
+    require_equal_bool(
+        proof_value,
+        "bridgeClaimClosureVerified",
+        false,
+        "bridge claim closure flag",
+    )?;
+    require_equal_string(
+        proof_value,
+        "bridgeClaimVerificationStatus",
+        BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bridge claim verification status",
+    )
 }
 
 pub(super) fn reject_unexpected_object_fields(

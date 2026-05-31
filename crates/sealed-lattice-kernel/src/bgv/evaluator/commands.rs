@@ -350,6 +350,57 @@ fn require_false(value: &Value, path: &[&str], description: &str) -> CanonicalRe
     Ok(())
 }
 
+fn require_true(value: &Value, path: &[&str], description: &str) -> CanonicalResult<()> {
+    if value_at_path(value, path)?.as_bool() != Some(true) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!("encrypted aggregate evaluation requires {description}"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_compact_bridge_status_for_evaluation(
+    bridge_encryption: &Value,
+    bridge_verification: &Value,
+    bridge_proof_record: &Value,
+) -> CanonicalResult<()> {
+    for (value, object_name) in [
+        (bridge_encryption, "bridge encryption"),
+        (bridge_verification, "bridge evidence"),
+        (bridge_proof_record, "bridge proof record"),
+    ] {
+        require_false(
+            value,
+            &["developmentKeyOnly"],
+            &format!("development-only {object_name}"),
+        )?;
+        require_true(
+            value,
+            &["thresholdDecryptable"],
+            &format!("threshold-decryptable {object_name}"),
+        )?;
+        require_false(
+            value,
+            &["claimBearingBridgeEncryption"],
+            &format!("claim-bearing {object_name} before bridge claim closure"),
+        )?;
+        if string_at_path(value, &["bgvEncryptionKeyMaterialKind"])?
+            != "passive-transcript-derived-collective-public-key"
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!(
+                    "encrypted aggregate evaluation requires supported BGV key material for {object_name}"
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn require_aggregate_derivation_full_verification_checked(
     value: &Value,
     path: &[&str],
@@ -406,10 +457,10 @@ fn verify_compact_aggregate_bridge_input_for_evaluation(
             "encrypted aggregate evaluation requires checked compact aggregate bridge evidence",
         ));
     }
-    require_false(
+    validate_compact_bridge_status_for_evaluation(
+        bridge_encryption,
         bridge_verification,
-        &["developmentKeyOnly"],
-        "development-only bridge evidence",
+        bridge_proof_record,
     )?;
     if string_at_path(bridge_verification, &["proverRandomnessSource"])? != "fresh-csprng"
         || string_at_path(bridge_verification, &["encryptionRandomnessSeedSource"])?
@@ -443,11 +494,6 @@ fn verify_compact_aggregate_bridge_input_for_evaluation(
             "encrypted aggregate evaluation requires a proof-checked aggregate contribution",
         ));
     }
-    require_false(
-        bridge_proof_record,
-        &["developmentKeyOnly"],
-        "development-only bridge proof record",
-    )?;
     require_aggregate_derivation_full_verification_checked(
         bridge_proof_record,
         &["aggregateDerivationVerificationScope"],
@@ -1377,7 +1423,7 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation(request: &Value) -> Canon
 mod tests {
     use super::{
         aggregate_ready_binding_from_request, aggregate_ready_record_hash,
-        run_encrypted_aggregate_top_k_evaluation,
+        run_encrypted_aggregate_top_k_evaluation, validate_compact_bridge_status_for_evaluation,
     };
     use crate::{
         bgv::setup::{
@@ -1503,6 +1549,74 @@ mod tests {
 
     fn valid_hash(fill: &str) -> String {
         fill.repeat(128)
+    }
+
+    fn compact_bridge_status() -> Value {
+        json!({
+            "bgvEncryptionKeyMaterialKind": "passive-transcript-derived-collective-public-key",
+            "developmentKeyOnly": false,
+            "thresholdDecryptable": true,
+            "claimBearingBridgeEncryption": false,
+        })
+    }
+
+    #[test]
+    fn compact_bridge_status_rejects_inflated_or_wrong_key_status() {
+        validate_compact_bridge_status_for_evaluation(
+            &compact_bridge_status(),
+            &compact_bridge_status(),
+            &compact_bridge_status(),
+        )
+        .expect("consistent non-closing compact bridge status should validate");
+
+        for (object_index, field_name, mutated_value, expected_message) in [
+            (
+                0,
+                "developmentKeyOnly",
+                Value::Bool(true),
+                "development-only",
+            ),
+            (
+                1,
+                "thresholdDecryptable",
+                Value::Bool(false),
+                "threshold-decryptable",
+            ),
+            (
+                2,
+                "claimBearingBridgeEncryption",
+                Value::Bool(true),
+                "claim-bearing",
+            ),
+            (
+                1,
+                "bgvEncryptionKeyMaterialKind",
+                Value::String("development-fixture-key".to_string()),
+                "supported BGV key material",
+            ),
+        ] {
+            let mut bridge_encryption = compact_bridge_status();
+            let mut bridge_verification = compact_bridge_status();
+            let mut bridge_proof_record = compact_bridge_status();
+            match object_index {
+                0 => bridge_encryption[field_name] = mutated_value,
+                1 => bridge_verification[field_name] = mutated_value,
+                2 => bridge_proof_record[field_name] = mutated_value,
+                _ => unreachable!("test object index is fixed"),
+            }
+
+            let error = validate_compact_bridge_status_for_evaluation(
+                &bridge_encryption,
+                &bridge_verification,
+                &bridge_proof_record,
+            )
+            .expect_err("mutated compact bridge status should reject");
+
+            assert!(
+                error.message.contains(expected_message),
+                "{field_name}: {error:?}"
+            );
+        }
     }
 
     #[test]

@@ -17,7 +17,7 @@
 - roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
 - verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM verifier;
 - aggregate derivation component verification for the scoped post-close aggregate derivation relation, without exposing aggregate shares, aggregate histograms, exact aggregate scores, aggregate score bits, openings, quotients, plaintext comparison inputs, receiver plaintexts, or proof witnesses;
-- verification-oriented `verifyBridgeProof` support for encrypted aggregate bridge evidence through the packaged Rust/WASM verifier. Internal bridge evidence includes checked integer-lifted plaintext encoding, target-threshold decryptability compatibility under the passive setup key, full aggregate-derivation verification binding when close/counting context is supplied, and shared-witness challenge-context binding. This is still implementation evidence: bridge-proof acceptance, claim-bearing setup/evaluator integration, and production result release remain unavailable.
+- verification-oriented `verifyBridgeProof` support for encrypted aggregate bridge evidence through the packaged Rust/WASM verifier. Internal bridge evidence includes checked integer-lifted plaintext encoding, target-threshold decryptability compatibility under the passive setup key, full aggregate-derivation verification binding when close/counting context is supplied, shared-witness challenge-context binding, relation proof closure-field refusal, and randomness-source evidence consistency checks. This is still implementation evidence: bridge-proof acceptance, claim-bearing setup/evaluator integration, and production result release remain unavailable.
 
 Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof acceptance, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
 
@@ -43,7 +43,7 @@ Current accepted ballot package dimensions are:
 - dynamic frozen receiver counts from 10 to 50 only when the statement carries bound roster-profile evidence;
 - explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance.
 
-The workspace also contains internal ballot-privacy, aggregate-derivation, BGV-RNS, encrypted aggregate bridge, and top-k evaluator evidence. Those pieces remain internal implementation evidence unless explicitly exposed above. Bridge proof acceptance, claim-bearing evaluation, target decryption, CPAD, supported-phone evidence, active-malicious closure, and production result release remain unavailable. This README is the public implementation ledger for the package boundary.
+The workspace also contains internal ballot-privacy, aggregate-derivation, BGV-RNS, encrypted aggregate bridge, and top-k evaluator evidence, including compact evaluator checks that keep bridge key and claim-status fields consistent across accepted bridge input records. The packed direct-comparison evaluator remains internal implementation evidence; an attempted single-packed unordered-pair shortcut was rejected during local investigation because its extra pre-polynomial rotations consumed too much noise headroom in the encrypted diagnostic slice. Bridge proof acceptance, claim-bearing evaluation, target decryption, CPAD, supported-phone evidence, active-malicious closure, and production result release remain unavailable. This README is the public implementation ledger for the package boundary.
 
 Still unavailable:
 
@@ -115,7 +115,7 @@ Run the full local validation gate (the pre-commit hook runs this):
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, then runs the type-check before launching the remaining lanes in parallel against that built output. The build and type-check run first because they emit `dist/`; the docs and package-smoke lanes reuse those artifacts instead of running their standalone rebuild scripts. The first parallel lane to fail aborts the rest. It runs:
+`pnpm run check` builds the workspace once, then runs the type-check before launching the independent docs, package-smoke, lint, package-policy, vector, knip, API, boundary, and fast Node lanes in parallel against that built output. The Rust formatting, clippy, and test lane runs afterward in isolation, so memory-heavy Rust tests do not compete with docs rendering, linting, package smoke verification, and Node tests. The build and type-check run first because they emit `dist/`; the docs and package-smoke lanes reuse those artifacts instead of running their standalone rebuild scripts. The first independent lane to fail aborts the remaining work. It runs:
 
 - workspace package build;
 - workspace type-check;
@@ -130,7 +130,7 @@ pnpm run check
 - Rust formatting, clippy, and tests;
 - fast Node tests.
 
-The heavier protocol and kernel Node projects and the Playwright browser projects are not in this gate; run `pnpm run test:node` and `pnpm run test:browser` before a push. Locally, it shows a live command-count progress view with elapsed time, latest captured output, and the previous successful check duration when local history is available. It ends with a per-lane pass/fail summary and writes per-lane logs under `logs/` unless you pass `--no-run-log`; failures also print the failed command, exit code, log path, and recent captured output.
+The heavier protocol and kernel Node projects and the Playwright browser projects are not in this gate; run `pnpm run test:node` and `pnpm run test:browser` before a push. Locally, it shows a live progress view with elapsed time, latest captured output, previous successful check duration when local history is available, command counts for real command-series lanes, Turbo task visibility for the build lane, Vitest test progress for the fast Node lane, and libtest test progress for the Rust test command. Pass `--progress=always` to use the live view when stdout is a terminal, or `--progress=never` for plain logs. The pre-commit hook redirects the check command to `/dev/tty` when Git gives the hook a non-terminal stdout. It ends with a per-lane pass/fail summary and writes per-lane logs under `logs/` unless you pass `--no-run-log`; failures also print the failed command, exit code, log path, and recent captured output.
 
 Run targeted verification:
 

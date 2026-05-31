@@ -433,4 +433,28 @@ mod tests {
             expected_slots
         );
     }
+
+    #[test]
+    fn inverse_rotation_matches_the_plaintext_automorphism() {
+        let key = shared_key();
+        let galois_element = 43_691_usize;
+        let slots = [11_u64, 22, 33, 44, 55, 66, 77, 88];
+        let ciphertext = at_test_level(&key.encrypt_slots(&slots, "ksk07").expect("encrypt"));
+        let galois_key =
+            generate_galois_key(key, galois_element, TEST_LEVEL, "inverse-galois-seed")
+                .expect("galois key");
+        let rotated = rotate(&ciphertext, galois_element, &galois_key).expect("rotate");
+
+        let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
+        let rotated_coefficients =
+            automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS)
+                .expect("plaintext automorphism");
+        let expected_slots =
+            forward_negacyclic_ntt(&rotated_coefficients, PLAINTEXT_MODULUS).expect("decode");
+
+        assert_eq!(
+            key.decrypt_to_slots(&rotated).expect("decrypt"),
+            expected_slots
+        );
+    }
 }

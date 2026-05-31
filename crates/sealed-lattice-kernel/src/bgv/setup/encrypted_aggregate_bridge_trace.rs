@@ -1191,6 +1191,42 @@ mod tests {
         .expect("bridge ciphertext relation trace")
     }
 
+    #[test]
+    fn integer_lifted_batch_preflight_rejects_wrong_batch_quotient() {
+        let supplied_plaintext_slots = vec![0_u64, 1, 2, 65_536, 19, 200, 34, 55];
+        let encoded =
+            encode_batch_plaintext_slots(&supplied_plaintext_slots, DATA_PRIMES.len() - 1)
+                .expect("batch plaintext");
+        let mut trace = EncryptedAggregateBridgeCiphertextRelationTrace {
+            public_artifact: json!({}),
+            plaintext_encoding_quotients: derive_plaintext_encoding_quotients(
+                &supplied_plaintext_slots,
+                &encoded.coefficients_mod_plaintext,
+            )
+            .expect("batch quotients"),
+            supplied_plaintext_slots,
+            padded_plaintext_slots: encoded.slots,
+            plaintext_coefficients_mod_plaintext: encoded.coefficients_mod_plaintext,
+            encryption_randomness_coefficients: vec![0; POLYNOMIAL_DEGREE],
+            encryption_error_zero_coefficients: vec![0; POLYNOMIAL_DEGREE],
+            encryption_error_one_coefficients: vec![0; POLYNOMIAL_DEGREE],
+        };
+        let first_quotient = trace
+            .plaintext_encoding_quotients
+            .first_mut()
+            .expect("trace should include batch quotients");
+        *first_quotient = first_quotient.saturating_add(1);
+
+        let error = trace
+            .validate_private_preflight()
+            .expect_err("wrong batch quotient should reject");
+
+        assert!(
+            error.message.contains("batch quotients"),
+            "unexpected error: {error:?}"
+        );
+    }
+
     fn collective_secret_coefficients(setup_package: &Value) -> Vec<i64> {
         let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])
             .expect("setup seed hash");

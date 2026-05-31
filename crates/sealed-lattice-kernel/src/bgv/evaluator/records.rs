@@ -564,10 +564,19 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
         comparison_input_comparator_depth + indicator_depth + projection_depth;
     let comparison_input_depth_optimal_multiplicative_depth =
         comparison_input_depth_optimal_comparator_depth + indicator_depth + projection_depth;
+    let comparison_input_polynomial_evaluations = match parameters.rank_packing_method {
+        RankPackingMethod::PerOptionBroadcast => ordered_pairs,
+        RankPackingMethod::GeneratorOrdered => option_count.saturating_sub(1),
+    };
+    let comparison_input_polynomial_ciphertext_multiplication_estimate =
+        comparison_input_polynomial_evaluations
+            * usize::try_from(comparison_polynomial_degree.saturating_sub(1))
+                .expect("comparison degree fits usize");
 
     json!({
         "scoreBitCount": bit_count,
         "orderedComparisonCount": ordered_pairs,
+        "unorderedComparisonCount": option_count * option_count.saturating_sub(1) / 2,
         "multiplicativeDepth": multiplicative_depth,
         "extractionDepth": extraction_depth,
         "comparatorDepth": comparator_depth,
@@ -577,8 +586,13 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
         "comparisonInputMultiplicativeDepth": comparison_input_multiplicative_depth,
         "comparisonInputDepthOptimalComparatorDepth": comparison_input_depth_optimal_comparator_depth,
         "comparisonInputDepthOptimalMultiplicativeDepth": comparison_input_depth_optimal_multiplicative_depth,
+        "comparisonInputPolynomialEvaluationCount": comparison_input_polynomial_evaluations,
+        "comparisonInputPolynomialCiphertextMultiplicationEstimate": comparison_input_polynomial_ciphertext_multiplication_estimate,
         "scoreBitHighDegreePolynomialSchedule": "paterson-stockmeyer",
-        "comparisonInputPolynomialSchedule": "depth-optimized-power-table",
+        "comparisonInputPolynomialSchedule": match parameters.rank_packing_method {
+            RankPackingMethod::PerOptionBroadcast => "per-pair-depth-optimized-power-table",
+            RankPackingMethod::GeneratorOrdered => "per-shift-depth-optimized-power-table",
+        },
         "highDegreePolynomialSchedule": "mixed-by-selected-profile",
         "rankPackingMethod": parameters.rank_packing_method.profile_id(),
         "rotationCount": parameters.rank_packing_method.rotation_count(parameters.option_count),

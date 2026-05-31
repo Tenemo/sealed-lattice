@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "declarationHash": "sha256:48e4bb3b6b414412e5f983b45d243298e69110c8e4edbf816523111c146769e0",
+    "declarationHash": "sha256:543c254feef27e7686a627ee735355486ba5b1970e1f255662472b1759f5d502",
     "runtimeExports": [
         "createBridgeProof",
         "deriveFrozenRosterProfile",

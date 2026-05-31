@@ -14,7 +14,7 @@ use super::{
         parse_bridge_proof_value, read_u64_object_field, require_equal_bool, require_equal_string,
         require_equal_u64, required_protocol_hash_field, required_string_at_path,
         validate_bridge_encryption_public_shell, validate_bridge_proof_public_shell,
-        validate_bridge_randomness_source,
+        validate_bridge_randomness_source, validate_bridge_randomness_source_evidence,
     },
 };
 
@@ -438,13 +438,36 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         validate_bridge_randomness_source(randomness_source, field_name)?;
         require_equal_string(&proof_value, field_name, randomness_source, field_name)?;
     }
-    if required_json_field(&proof_value, "randomnessSourceEvidence", "bridgeProof")?
-        != required_json_field(
-            bridge_encryption,
-            "randomnessSourceEvidence",
-            "bridgeEncryption",
-        )?
-    {
+    let prover_randomness_source = required_string_field(
+        bridge_encryption,
+        "proverRandomnessSource",
+        "bridgeEncryption",
+    )?;
+    let encryption_randomness_seed_source = required_string_field(
+        bridge_encryption,
+        "encryptionRandomnessSeedSource",
+        "bridgeEncryption",
+    )?;
+    let proof_randomness_source_evidence =
+        required_json_field(&proof_value, "randomnessSourceEvidence", "bridgeProof")?;
+    validate_bridge_randomness_source_evidence(
+        proof_randomness_source_evidence,
+        prover_randomness_source,
+        encryption_randomness_seed_source,
+        "bridgeProof.randomnessSourceEvidence",
+    )?;
+    let encryption_randomness_source_evidence = required_json_field(
+        bridge_encryption,
+        "randomnessSourceEvidence",
+        "bridgeEncryption",
+    )?;
+    validate_bridge_randomness_source_evidence(
+        encryption_randomness_source_evidence,
+        prover_randomness_source,
+        encryption_randomness_seed_source,
+        "bridgeEncryption.randomnessSourceEvidence",
+    )?;
+    if proof_randomness_source_evidence != encryption_randomness_source_evidence {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "encrypted aggregate bridge randomness source evidence does not match the proof binding",

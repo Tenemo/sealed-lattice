@@ -42,7 +42,7 @@ pnpm run smoke:pack:npm
 - `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
 - `pnpm run api-surface:update`: runs the full build and updates the compact public API snapshot
 - `pnpm run api-surface:check`: runs the full build and verifies it against the compact public API snapshot
-- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API snapshot verification, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, Rust formatting, Rust clippy, Rust tests, and the fast Node tests in parallel against the built output, aborting the remaining lanes as soon as one fails
+- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API snapshot verification, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane; the first failing lane aborts the remaining work
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
 - `pnpm run test:node:protocol`: slow protocol relation and proof-record generation input tests that remain part of the default Node gate without running under coverage instrumentation
@@ -61,7 +61,7 @@ pnpm run smoke:pack:npm
 ## Local hooks
 
 The pre-commit hook runs `pnpm run check`.
-This builds the workspace once, then runs static verification, docs verification, npm package smoke verification, Rust verification, and the fast Node Vitest project in parallel against the built output, aborting the remaining lanes as soon as one fails.
+This builds the workspace once, then runs static verification, docs verification, npm package smoke verification, and the fast Node Vitest project in parallel against the built output before running Rust verification in isolation; the first failing lane aborts the remaining work.
 Protocol, kernel, browser, and proof benchmark lanes remain explicit commands so they can use checkpoints and targeted reruns instead of slowing every local commit. The Node kernel command runs its merged heavy WASM project sequentially, the proof benchmark command runs its Node and desktop lanes concurrently on one machine, and the encrypted aggregate bridge matrix defaults to parallel local execution. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation. The coverage badge is generated locally in the Pages workflow, not by Codecov.
 
 ## Local run logs

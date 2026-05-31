@@ -8,6 +8,7 @@ use super::{
     },
     validation::{
         validate_bridge_proof_public_shell, validate_bridge_randomness_source,
+        validate_bridge_randomness_source_evidence,
         validate_development_randomness_acknowledgement,
     },
 };
@@ -105,12 +106,20 @@ fn target_contract_relation_requirements() -> Value {
     })
 }
 
-fn minimal_checked_relation_proof_bytes_hex() -> String {
-    let proof_value = json!({
+fn minimal_checked_relation_proof_value() -> Value {
+    json!({
         "objectType": "SealedLatticeAggregateBridgeRelationProof",
         "bridgeSharedWitnessProof": {},
+        "scopedBridgeRelationClosure": false,
+        "finalBridgeTheoremClosure": false,
+        "bridgeClaimClosureVerified": false,
+        "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
         "privateMaterialDisclosure": private_material_disclosure(),
-    });
+    })
+}
+
+fn minimal_checked_relation_proof_bytes_hex() -> String {
+    let proof_value = minimal_checked_relation_proof_value();
 
     to_hex(
         canonical_json(&proof_value)
@@ -310,6 +319,61 @@ fn bridge_proof_target_contract_is_variant_parametric() {
 }
 
 #[test]
+fn bridge_proof_target_contract_soundness_uses_weakest_relation_modulus() {
+    let target_contract = bridge_proof_target_contract_value(
+        220,
+        220,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    )
+    .expect("target contract");
+    let relation_modulus_product_bits_floor =
+        127_u64 - BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT.leading_zeros() as u64;
+    let unadjusted_weakest_relation_soundness =
+        relation_modulus_product_bits_floor * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+    let retry_loss = SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK
+        * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+    let effective_soundness = unadjusted_weakest_relation_soundness
+        - retry_loss
+        - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS
+        - BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS
+        - BRIDGE_PROOF_SYSTEM_LOSS_BITS
+        - BRIDGE_CHALLENGE_BIAS_BITS;
+
+    assert_eq!(relation_modulus_product_bits_floor, 93);
+    assert_eq!(
+        target_contract["plaintextEncodingProofModulusProductBitsFloor"],
+        json!(relation_modulus_product_bits_floor)
+    );
+    assert_eq!(
+        target_contract["sharedWitnessChallengeEntropyBits"],
+        json!(BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS)
+    );
+    assert_eq!(
+        target_contract["sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor"],
+        json!(unadjusted_weakest_relation_soundness)
+    );
+    assert_eq!(
+        target_contract["sharedWitnessRejectionRetryLossBits"],
+        json!(retry_loss)
+    );
+    assert_eq!(
+        target_contract["sharedWitnessEffectiveBindingSoundnessBitsFloor"],
+        json!(effective_soundness)
+    );
+    assert!(
+        effective_soundness >= BRIDGE_TARGET_BINDING_SOUNDNESS_BITS,
+        "effective same-witness binding soundness must meet target"
+    );
+    assert_ne!(
+        effective_soundness,
+        BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS
+            - BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS
+            - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS,
+        "bridge soundness must not be derived from challenge entropy alone"
+    );
+}
+
+#[test]
 fn bridge_proof_target_contract_binds_aggregate_derivation_scope() {
     let target_contract = bridge_proof_target_contract_value(
         220,
@@ -386,6 +450,90 @@ fn bridge_randomness_sources_require_explicit_development_acknowledgement() {
         )
         .is_ok()
     );
+}
+
+#[test]
+fn bridge_randomness_source_evidence_must_match_sources() {
+    let fresh_entropy_evidence = json!({
+        "objectType": "AggregateBridgeRandomnessSourceEvidence",
+        "objectVersion": 1,
+        "proverRandomnessSource": "fresh-csprng",
+        "encryptionRandomnessSeedSource": "fresh-csprng",
+        "callerSuppliedDevelopmentRandomness": false,
+        "claimBearingEntropyEvidence": true,
+    });
+    validate_bridge_randomness_source_evidence(
+        &fresh_entropy_evidence,
+        "fresh-csprng",
+        "fresh-csprng",
+        "test.randomnessSourceEvidence",
+    )
+    .expect("fresh CSPRNG evidence should validate");
+
+    let development_entropy_evidence = json!({
+        "objectType": "AggregateBridgeRandomnessSourceEvidence",
+        "objectVersion": 1,
+        "proverRandomnessSource": "development-deterministic-fixture",
+        "encryptionRandomnessSeedSource": "fresh-csprng",
+        "callerSuppliedDevelopmentRandomness": true,
+        "claimBearingEntropyEvidence": false,
+    });
+    validate_bridge_randomness_source_evidence(
+        &development_entropy_evidence,
+        "development-deterministic-fixture",
+        "fresh-csprng",
+        "test.randomnessSourceEvidence",
+    )
+    .expect("development evidence should validate only as non-claim-bearing entropy");
+
+    for (mutated_field, mutated_value, expected_message) in [
+        (
+            "objectType",
+            Value::String("WrongRandomnessEvidence".to_string()),
+            "aggregate bridge randomness source evidence",
+        ),
+        (
+            "proverRandomnessSource",
+            Value::String("development-deterministic-fixture".to_string()),
+            "prover source",
+        ),
+        (
+            "callerSuppliedDevelopmentRandomness",
+            Value::Bool(true),
+            "development flag",
+        ),
+        (
+            "claimBearingEntropyEvidence",
+            Value::Bool(false),
+            "claim-bearing entropy flag",
+        ),
+    ] {
+        let mut evidence = fresh_entropy_evidence.clone();
+        evidence[mutated_field] = mutated_value;
+        let error = validate_bridge_randomness_source_evidence(
+            &evidence,
+            "fresh-csprng",
+            "fresh-csprng",
+            "test.randomnessSourceEvidence",
+        )
+        .expect_err("mutated randomness source evidence should reject");
+
+        assert!(
+            error.message.contains(expected_message),
+            "{mutated_field}: {error:?}"
+        );
+    }
+
+    let mut evidence_with_extra_field = fresh_entropy_evidence;
+    evidence_with_extra_field["entropyOracleClaim"] = Value::Bool(true);
+    let error = validate_bridge_randomness_source_evidence(
+        &evidence_with_extra_field,
+        "fresh-csprng",
+        "fresh-csprng",
+        "test.randomnessSourceEvidence",
+    )
+    .expect_err("extra entropy evidence field should reject");
+    assert!(error.message.contains("entropyOracleClaim"), "{error:?}");
 }
 
 #[test]
@@ -688,12 +836,8 @@ fn bridge_proof_shell_rejects_sampled_only_acceptance() {
 
 #[test]
 fn bridge_proof_shell_rejects_unsupported_bgv_boundedness_proof_bytes() {
-    let proof_value = json!({
-        "objectType": "SealedLatticeAggregateBridgeRelationProof",
-        "bridgeSharedWitnessProof": {},
-        "bgvRandomnessBoundProofBytesHex": "00",
-        "privateMaterialDisclosure": private_material_disclosure(),
-    });
+    let mut proof_value = minimal_checked_relation_proof_value();
+    proof_value["bgvRandomnessBoundProofBytesHex"] = Value::String("00".to_string());
     let error = validate_bridge_proof_public_shell(&proof_value).expect_err(
         "unsupported BGV boundedness proof bytes should reject while the proof is missing",
     );
@@ -706,23 +850,77 @@ fn bridge_proof_shell_rejects_unsupported_bgv_boundedness_proof_bytes() {
 
 #[test]
 fn bridge_proof_shell_rejects_unknown_nested_shared_witness_fields() {
-    let proof_value = json!({
-        "objectType": "SealedLatticeAggregateBridgeRelationProof",
-        "bridgeSharedWitnessProof": {
-            "objectType": "AggregateBridgeSharedWitnessProof",
-            "checks": [
-                {
-                    "checkIndex": 0,
-                    "novelWitnessLeak": "not accepted"
-                }
-            ]
-        },
-        "privateMaterialDisclosure": private_material_disclosure(),
+    let mut proof_value = minimal_checked_relation_proof_value();
+    proof_value["bridgeSharedWitnessProof"] = json!({
+        "objectType": "AggregateBridgeSharedWitnessProof",
+        "checks": [
+            {
+                "checkIndex": 0,
+                "novelWitnessLeak": "not accepted"
+            }
+        ]
     });
     let error = validate_bridge_proof_public_shell(&proof_value)
         .expect_err("unknown nested shared-witness fields should reject");
 
     assert!(error.message.contains("novelWitnessLeak"), "{error:?}");
+}
+
+#[test]
+fn bridge_proof_shell_rejects_bgv_side_duplicate_aggregate_response() {
+    let mut proof_value = minimal_checked_relation_proof_value();
+    proof_value["bridgeSharedWitnessProof"] = json!({
+        "objectType": "AggregateBridgeSharedWitnessProof",
+        "checks": [
+            {
+                "checkIndex": 0,
+                "bgvAggregateReducedResponseHex": "00"
+            }
+        ]
+    });
+    let error = validate_bridge_proof_public_shell(&proof_value)
+        .expect_err("duplicate BGV-side aggregate response should reject");
+
+    assert!(
+        error.message.contains("bgvAggregateReducedResponseHex"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn bridge_proof_shell_rejects_closure_field_injection() {
+    for (field_name, injected_value, expected_message) in [
+        (
+            "scopedBridgeRelationClosure",
+            Value::Bool(true),
+            "scoped bridge relation closure flag",
+        ),
+        (
+            "finalBridgeTheoremClosure",
+            Value::Bool(true),
+            "final bridge theorem closure flag",
+        ),
+        (
+            "bridgeClaimClosureVerified",
+            Value::Bool(true),
+            "bridge claim closure flag",
+        ),
+        (
+            "bridgeClaimVerificationStatus",
+            Value::String("BridgeProofClaimClosureVerified".to_string()),
+            "bridge claim verification status",
+        ),
+    ] {
+        let mut proof_value = minimal_checked_relation_proof_value();
+        proof_value[field_name] = injected_value;
+        let error = validate_bridge_proof_public_shell(&proof_value)
+            .expect_err("closure-field injection should reject");
+
+        assert!(
+            error.message.contains(expected_message),
+            "{field_name}: {error:?}"
+        );
+    }
 }
 
 #[test]

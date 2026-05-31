@@ -32,10 +32,10 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 type LaneStatus = 'failed' | 'passed' | 'stopped';
 
 // A validation lane is a named group of commands that run in series with one
-// another. Lanes run concurrently, so the Rust toolchain lane keeps `cargo fmt`,
-// `cargo clippy`, and `cargo test` sequential (they share one native `target/`
-// build lock and reuse each other's dependency artifacts) while every
-// independent check overlaps it.
+// another. Lanes may run concurrently during the independent-check phase, and
+// the isolated Rust lane keeps `cargo fmt`, `cargo clippy`, and `cargo test`
+// sequential so they share one native `target/` build lock and reuse each
+// other's dependency artifacts.
 type ValidationLane = {
     readonly commands: readonly CommandInvocation[];
     readonly name: string;
@@ -48,10 +48,66 @@ type ValidationLaneResult = {
     readonly status: LaneStatus;
 };
 
-const parseCheckArguments = (commandArguments: readonly string[]): void => {
-    if (commandArguments.length > 0) {
-        throw new Error('Usage: run-check.ts [--no-run-log].');
+export type CheckProgressMode = 'always' | 'auto' | 'never';
+
+export type ParsedCheckArguments = {
+    readonly progressMode: CheckProgressMode;
+};
+
+const checkUsage =
+    'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
+
+const isCheckProgressMode = (value: string): value is CheckProgressMode =>
+    value === 'always' || value === 'auto' || value === 'never';
+
+export const parseCheckArguments = (
+    commandArguments: readonly string[],
+): ParsedCheckArguments => {
+    let progressMode: CheckProgressMode = 'auto';
+    for (let index = 0; index < commandArguments.length; index += 1) {
+        const argument = commandArguments[index];
+        if (argument === undefined) {
+            continue;
+        }
+
+        if (argument === '--progress') {
+            const value = commandArguments[index + 1];
+            if (value === undefined || !isCheckProgressMode(value)) {
+                throw new Error(checkUsage);
+            }
+            progressMode = value;
+            index += 1;
+            continue;
+        }
+
+        const progressPrefix = '--progress=';
+        if (argument.startsWith(progressPrefix)) {
+            const value = argument.slice(progressPrefix.length);
+            if (!isCheckProgressMode(value)) {
+                throw new Error(checkUsage);
+            }
+            progressMode = value;
+            continue;
+        }
+
+        throw new Error(checkUsage);
     }
+
+    return { progressMode };
+};
+
+export const redrawEnabledForProgressMode = (
+    progressMode: CheckProgressMode,
+    standardOutputIsTerminal = process.stdout.isTTY === true,
+): boolean | undefined => {
+    if (progressMode === 'always') {
+        return standardOutputIsTerminal;
+    }
+    if (progressMode === 'never') {
+        return false;
+    }
+
+    return undefined;
 };
 
 const createCargoCommand = (
@@ -103,15 +159,15 @@ const buildGatingLanes = (
     ),
 ];
 
-// Every remaining check runs concurrently against the built output. The docs
-// and pack smoke lanes deliberately call their underlying tools directly instead
-// of `pnpm run verify:docs` or `pnpm run smoke:pack:npm`, because those package
-// scripts rebuild for standalone use. The Rust lane is the only one that stays
-// internally serial, because `cargo clippy` and `cargo test` share the native
-// `target/` build lock. The commit gate runs only the fast Node test project;
-// the heavier protocol and kernel Node projects and the Playwright browser
-// projects stay in `pnpm run test:node` and `pnpm run test:browser` for pre-push
-// verification.
+// Independent checks run concurrently against the built output. The docs and
+// pack smoke lanes deliberately call their underlying tools directly instead of
+// `pnpm run verify:docs` or `pnpm run smoke:pack:npm`, because those package
+// scripts rebuild for standalone use. The Rust lane runs after this phase: the
+// tests are memory-heavy on Windows and should not compete with docs rendering,
+// linting, package smoke verification, and Node tests. The commit gate runs only
+// the fast Node test project; the heavier protocol and kernel Node projects and
+// the Playwright browser projects stay in `pnpm run test:node` and
+// `pnpm run test:browser` for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -220,49 +276,120 @@ const buildParallelLanes = (
         ]),
         lane('Verify test vectors', 'test-vectors', ['run', 'vectors']),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        {
-            commands: [
-                createCargoCommand(
-                    'cargo fmt --check',
-                    ['fmt', '--check', '-p', 'sealed-lattice-kernel'],
-                    'cargo-fmt',
-                ),
-                createCargoCommand(
-                    'cargo clippy',
-                    [
-                        'clippy',
-                        '--workspace',
-                        '--all-targets',
-                        '--all-features',
-                        '--',
-                        '-D',
-                        'warnings',
-                    ],
-                    'cargo-clippy',
-                ),
-                createCargoCommand(
-                    'cargo test',
-                    ['test', '--workspace'],
-                    'cargo-test',
-                ),
-            ],
-            name: 'Rust kernel (fmt, clippy, test)',
-        },
         lane('Node tests (fast)', 'vitest-node', [
             'exec',
             'vitest',
             '--project',
             'node',
             '--run',
+            '--reporter',
+            'default',
+            '--reporter',
+            './tools/ci/vitest-progress-reporter.ts',
         ]),
     ];
 };
 
+const buildRustKernelLane = (): ValidationLane => ({
+    commands: [
+        createCargoCommand(
+            'cargo fmt --check',
+            ['fmt', '--check', '-p', 'sealed-lattice-kernel'],
+            'cargo-fmt',
+        ),
+        createCargoCommand(
+            'cargo clippy',
+            [
+                'clippy',
+                '--workspace',
+                '--all-targets',
+                '--all-features',
+                '--',
+                '-D',
+                'warnings',
+            ],
+            'cargo-clippy',
+        ),
+        createCargoCommand(
+            'cargo test',
+            ['test', '--workspace', '--', '--test-threads=2'],
+            'cargo-test',
+        ),
+    ],
+    name: 'Rust kernel (fmt, clippy, test)',
+});
+
+const buildIsolatedLanes = (): readonly ValidationLane[] => [
+    buildRustKernelLane(),
+];
+
 const buildProgressLanePlans = (
     lanes: readonly ValidationLane[],
     timingHistory: CheckTimingHistory,
-): readonly CheckProgressLanePlan[] =>
-    lanes.map((lane) => ({
+): readonly CheckProgressLanePlan[] => {
+    const progressSourceForLane = (
+        lane: ValidationLane,
+    ): CheckProgressLanePlan['progress'] => {
+        const previousProgress = timingHistory.laneProgress.get(lane.name);
+        if (lane.name === 'Build workspace packages') {
+            return {
+                primary:
+                    previousProgress?.primary === undefined
+                        ? undefined
+                        : {
+                              completed: 0,
+                              total: previousProgress.primary.total,
+                              unit: 'task seen',
+                          },
+                source: 'turbo',
+            };
+        }
+        if (lane.name === 'Node tests (fast)') {
+            return {
+                primary:
+                    previousProgress?.primary === undefined
+                        ? undefined
+                        : {
+                              completed: 0,
+                              total: previousProgress.primary.total,
+                              unit: 'test file',
+                          },
+                secondary:
+                    previousProgress?.secondary === undefined
+                        ? undefined
+                        : {
+                              completed: 0,
+                              total: previousProgress.secondary.total,
+                              unit: 'test',
+                          },
+                source: 'vitest',
+            };
+        }
+        if (lane.name === 'Rust kernel (fmt, clippy, test)') {
+            return {
+                secondary:
+                    previousProgress?.secondary === undefined
+                        ? undefined
+                        : {
+                              completed: 0,
+                              total: previousProgress.secondary.total,
+                              unit: 'test',
+                          },
+                source: 'libtest',
+            };
+        }
+        if (lane.commands.length > 1) {
+            return {
+                source: 'commands',
+            };
+        }
+
+        return {
+            source: 'opaque',
+        };
+    };
+
+    return lanes.map((lane) => ({
         commands: lane.commands.map((command) => ({
             description: command.description,
             expectedDurationMilliseconds:
@@ -273,7 +400,9 @@ const buildProgressLanePlans = (
         expectedDurationMilliseconds:
             timingHistory.laneDurationMilliseconds.get(lane.name),
         name: lane.name,
+        progress: progressSourceForLane(lane),
     }));
+};
 
 const runGatingLane = async (
     lane: ValidationLane,
@@ -436,25 +565,29 @@ const overallExitCode = (results: readonly ValidationLaneResult[]): number => {
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     const commandArguments = removeRunLogArguments(rawArguments);
-    parseCheckArguments(commandArguments);
+    const parsedArguments = parseCheckArguments(commandArguments);
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildGatingLanes(packageManagerRunner);
     const parallelLanes = buildParallelLanes(packageManagerRunner);
+    const isolatedLanes = buildIsolatedLanes();
+    const validationLanes = [
+        ...gatingLanes,
+        ...parallelLanes,
+        ...isolatedLanes,
+    ];
     const timingHistory = await readPreviousCheckTimingHistory();
     const reporter = new CheckProgressReporter({
         history: timingHistory,
-        lanes: buildProgressLanePlans(
-            [...gatingLanes, ...parallelLanes],
-            timingHistory,
+        lanes: buildProgressLanePlans(validationLanes, timingHistory),
+        redrawEnabled: redrawEnabledForProgressMode(
+            parsedArguments.progressMode,
         ),
     });
     const runLog = runLogDisabledByArguments(rawArguments)
         ? undefined
         : await createLocalRunLog({
               commandLineArguments: rawArguments,
-              lanes: [...gatingLanes, ...parallelLanes].map(
-                  (lane) => lane.name,
-              ),
+              lanes: validationLanes.map((lane) => lane.name),
               scriptName: 'check',
           });
     let timingDetails: CheckRunTimingDetails | undefined;
@@ -493,6 +626,28 @@ const main = async (): Promise<void> => {
                     second.durationMilliseconds - first.durationMilliseconds,
             ),
         );
+        if (parallelResults.some((result) => result.exitCode !== 0)) {
+            reporter.stop();
+            timingDetails = reporter.createTimingDetails();
+            printValidationSummary(
+                results,
+                runLog,
+                timingHistory,
+                reporter.failureDetails(),
+            );
+            process.exitCode = overallExitCode(results);
+
+            return;
+        }
+
+        for (const lane of isolatedLanes) {
+            const result = await runGatingLane(lane, runLog, reporter);
+            results.push(result);
+            if (result.exitCode !== 0) {
+                break;
+            }
+        }
+
         reporter.stop();
         timingDetails = reporter.createTimingDetails();
         printValidationSummary(
