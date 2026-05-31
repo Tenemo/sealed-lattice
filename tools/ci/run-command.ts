@@ -1,4 +1,9 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import {
+    spawn,
+    spawnSync,
+    type ChildProcess,
+    type SpawnOptions,
+} from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import path from 'node:path';
@@ -326,21 +331,59 @@ export const runPackageManager = (
     );
 };
 
-const killProcessTree = (childProcess: ChildProcess): void => {
+type KillableChildProcess = Pick<ChildProcess, 'kill' | 'pid'>;
+
+type ProcessGroupKiller = (
+    processIdentifier: number,
+    signal: NodeJS.Signals,
+) => unknown;
+
+type WindowsTaskKiller = (
+    command: string,
+    commandArguments: readonly string[],
+    options: { readonly stdio: 'ignore' },
+) => unknown;
+
+export const createAbortableCommandSpawnOptions = (
+    env: NodeJS.ProcessEnv,
+    stdio: SpawnOptions['stdio'],
+    platform: NodeJS.Platform = process.platform,
+): SpawnOptions => ({
+    detached: platform !== 'win32',
+    env,
+    stdio,
+});
+
+export const killProcessTree = (
+    childProcess: KillableChildProcess,
+    input: {
+        readonly platform?: NodeJS.Platform;
+        readonly processGroupKiller?: ProcessGroupKiller;
+        readonly windowsTaskKiller?: WindowsTaskKiller;
+    } = {},
+): void => {
     const processId = childProcess.pid;
     if (processId === undefined) {
         return;
     }
-    if (process.platform === 'win32') {
+    if ((input.platform ?? process.platform) === 'win32') {
         // child.kill() only ends the direct child on Windows; package-manager
         // and test-runner grandchildren survive. taskkill /t ends the whole
         // tree. spawnSync keeps the abort path free of dangling listeners.
-        spawnSync('taskkill', ['/pid', String(processId), '/t', '/f'], {
-            stdio: 'ignore',
-        });
+        (input.windowsTaskKiller ?? spawnSync)(
+            'taskkill',
+            ['/pid', String(processId), '/t', '/f'],
+            {
+                stdio: 'ignore',
+            },
+        );
         return;
     }
-    childProcess.kill('SIGTERM');
+    try {
+        (input.processGroupKiller ?? process.kill)(-processId, 'SIGTERM');
+    } catch {
+        childProcess.kill('SIGTERM');
+    }
 };
 
 const runCommandInParallel = (
@@ -353,10 +396,14 @@ const runCommandInParallel = (
             return;
         }
         console.log(`\n${invocation.description}`);
-        const childProcess = spawn(invocation.command, invocation.args, {
-            env: invocation.env ?? process.env,
-            stdio: 'inherit',
-        });
+        const childProcess = spawn(
+            invocation.command,
+            invocation.args,
+            createAbortableCommandSpawnOptions(
+                invocation.env ?? process.env,
+                'inherit',
+            ),
+        );
         const onAbort = (): void => {
             killProcessTree(childProcess);
         };
@@ -441,10 +488,32 @@ const runCommandWithOptionalLog = async (
     runLog.writeCombinedOutput(heading);
 
     return new Promise((resolve, reject) => {
-        const childProcess = spawn(invocation.command, invocation.args, {
-            env: invocation.env ?? process.env,
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        const childProcess = spawn(
+            invocation.command,
+            invocation.args,
+            createAbortableCommandSpawnOptions(invocation.env ?? process.env, [
+                'ignore',
+                'pipe',
+                'pipe',
+            ]),
+        );
+        const childStandardOutput = childProcess.stdout;
+        const childStandardError = childProcess.stderr;
+        if (childStandardOutput === null || childStandardError === null) {
+            killProcessTree(childProcess);
+            void (async () => {
+                try {
+                    await closeCommandLogStreams(commandLogStreams);
+                } finally {
+                    reject(
+                        new Error(
+                            'Command log capture requires piped stdout and stderr.',
+                        ),
+                    );
+                }
+            })();
+            return;
+        }
         const onAbort = (): void => {
             killProcessTree(childProcess);
         };
@@ -465,12 +534,12 @@ const runCommandWithOptionalLog = async (
             runLog.writeCombinedOutput(chunk);
         };
         let settled = false;
-        childProcess.stdout.setEncoding('utf8');
-        childProcess.stderr.setEncoding('utf8');
-        childProcess.stdout.on('data', (chunk: string) => {
+        childStandardOutput.setEncoding('utf8');
+        childStandardError.setEncoding('utf8');
+        childStandardOutput.on('data', (chunk: string) => {
             writeChunk('stdout', chunk);
         });
-        childProcess.stderr.on('data', (chunk: string) => {
+        childStandardError.on('data', (chunk: string) => {
             writeChunk('stderr', chunk);
         });
         childProcess.once('error', (error) => {
