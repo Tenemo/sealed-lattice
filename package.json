@@ -31,6 +31,7 @@
         "test:proof-benchmark": "tsx ./tools/ci/run-proof-benchmarks.ts",
         "test:proof-benchmark:node": "tsx ./tools/ci/run-proof-benchmarks.ts --only node",
         "test:proof-benchmark:browser:desktop": "tsx ./tools/ci/run-proof-benchmarks.ts --only desktop",
+        "test:aggregate-derivation-kernel": "tsx ./tools/ci/run-aggregate-derivation-kernel.ts",
         "test:encrypted-aggregate-bridge": "tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts",
         "test:encrypted-aggregate-bridge:representative": "tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts --representative",
         "test": "pnpm run test:node && pnpm run test:browser",

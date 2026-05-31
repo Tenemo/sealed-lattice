@@ -15,8 +15,11 @@ use crate::bgv::modular_arithmetic::{add_mod, sub_mod};
 use crate::bgv::ntt::forward_negacyclic_ntt;
 use crate::bgv::profile::PLAINTEXT_MODULUS;
 use crate::hashing::{derive_protocol_hash, hash512};
+use std::sync::OnceLock;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
+
+static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 
 fn request() -> serde_json::Value {
     serde_json::json!({
@@ -40,6 +43,12 @@ fn request() -> serde_json::Value {
         ],
         "setupSeed": "passive-bgv-setup-test-seed",
     })
+}
+
+fn setup_package() -> serde_json::Value {
+    PASSIVE_SETUP_TEST_PACKAGE
+        .get_or_init(|| generate_passive_setup_package_from_request(&request()).expect("setup"))
+        .clone()
 }
 
 fn rebind_setup_package_hash(package: &mut serde_json::Value) {
@@ -182,7 +191,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
 
 #[test]
 fn passive_setup_collective_key_uses_evaluator_decryptable_contract() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     let evaluator_key = setup_derived_evaluator_key(&package);
 
     let ciphertext = evaluator_key
@@ -197,7 +206,7 @@ fn passive_setup_collective_key_uses_evaluator_decryptable_contract() {
 
 #[test]
 fn passive_setup_collective_key_drives_evaluator_key_switch_primitives() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     let evaluator_key = setup_derived_evaluator_key(&package);
     let context =
         EvaluatorContext::from_key(evaluator_key, "setup-derived-evaluation-key-switch", 3)
@@ -211,7 +220,7 @@ fn passive_setup_collective_key_drives_evaluator_key_switch_primitives() {
 
 #[test]
 fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     let evaluator_key = setup_derived_evaluator_key(&package);
     let sampled_checks = package["evaluationKeys"]["evaluationKeyMaterialCommitment"]["record"]
         ["sampledRelationChecks"]
@@ -308,7 +317,7 @@ fn passive_setup_marks_default_development_seed_usage() {
 
 #[test]
 fn passive_setup_uses_rejection_sampled_setup_distributions() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     assert_eq!(
         package["certificates"]["collectiveSecretDistributionCertificate"]["localShareSampler"]["samplerId"],
         "hash-derived-rejection-sampled-balanced-ternary-local-share-v2"
@@ -344,7 +353,7 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
 
 #[test]
 fn public_common_random_polynomial_uses_its_own_root_namespace() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     let setup_seed_hash = package["setupInputs"]["setupSeedHash"]
         .as_str()
         .expect("setup seed hash");
@@ -409,7 +418,7 @@ fn passive_setup_rejects_non_canonical_roster_positions_and_hashes() {
 
 #[test]
 fn passive_setup_verification_rejects_mutated_roots() {
-    let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let mut package = setup_package();
     package["collectivePublicKey"]["collectivePublicKeyRoot"] = serde_json::json!("0".repeat(128));
 
     assert!(
@@ -422,7 +431,7 @@ fn passive_setup_verification_rejects_mutated_roots() {
 
 #[test]
 fn passive_setup_verification_rejects_rebound_internal_inconsistency() {
-    let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let mut package = setup_package();
     package["collectivePublicKey"]["record"]["publicKeyShareRoots"][0] =
         serde_json::json!("f".repeat(128));
     rebind_setup_package_hash(&mut package);
@@ -437,7 +446,7 @@ fn passive_setup_verification_rejects_rebound_internal_inconsistency() {
 
 #[test]
 fn passive_setup_verification_rejects_rebound_coefficient_material_mutations() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
 
     let mut changed_coefficient_root = package.clone();
     changed_coefficient_root["collectivePublicKey"]["collectivePublicKeyCoefficientRoot"] =
@@ -458,7 +467,7 @@ fn passive_setup_verification_rejects_rebound_coefficient_material_mutations() {
 
 #[test]
 fn passive_setup_verification_rejects_nested_secret_material() {
-    let mut package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let mut package = setup_package();
     package["participants"][0]["globalSecretPolynomial"] = serde_json::json!("forbidden");
     rebind_setup_package_hash(&mut package);
 
@@ -472,7 +481,7 @@ fn passive_setup_verification_rejects_nested_secret_material() {
 
 #[test]
 fn passive_setup_verification_rejects_rebound_binding_mutations() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     let mutations: Vec<SetupPackageMutation> = vec![
         (
             "BGV public key root",
@@ -596,7 +605,7 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
 
 #[test]
 fn passive_setup_verification_rejects_evaluator_binding_mutations() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     for field_name in [
         "evaluatorBindingContextHash",
         "encryptedAggregateBridgeHash",
@@ -688,7 +697,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
         generate_passive_setup_package_from_request(&malformed_threshold_hash_request).is_err()
     );
 
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     for (mutation_description, mutate_package) in [
         (
             "setup ceremony id",
@@ -737,7 +746,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
 
 #[test]
 fn passive_setup_verification_rejects_rotation_set_gaps() {
-    let package = generate_passive_setup_package_from_request(&request()).expect("setup");
+    let package = setup_package();
     let rotations = package["evaluationKeys"]["rotSet"]["rotations"]
         .as_array()
         .expect("rotations");

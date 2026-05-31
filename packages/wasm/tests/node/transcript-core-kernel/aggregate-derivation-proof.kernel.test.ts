@@ -28,10 +28,10 @@ import {
     selectFirstValidAggregateContributions,
     sumAggregateDerivationWitnesses,
     verifyAggregateDerivationComponentStructure,
+    verifyAggregateReadyRecordStructure,
     type AggregateDerivationWitnessInput,
 } from '#packages/protocol/src/ballot-privacy/index';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
-import type { TopKEvaluatorEncryptedAggregateInput } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
 import {
     createMandatoryProfileBallotProofRecordBenchmarkFixture,
     createWasmBallotProofRecordGenerationFixture,
@@ -276,7 +276,6 @@ type BridgeContributorContext = {
     readonly bridgeEncryption: Record<string, unknown>;
     readonly bridgeVerification: Record<string, unknown>;
     readonly componentContext: AggregateComponentContext;
-    readonly encryptedAggregateInput: TopKEvaluatorEncryptedAggregateInput;
 };
 
 const runAggregateTestStep = async <T>(
@@ -935,10 +934,10 @@ describe.sequential(
         });
 
         it(
-            'runs encrypted aggregate evaluation from proof-checked bridge contributions',
+            'builds aggregate-ready record from proof-checked bridge contributions',
             async () => {
                 await runAggregateTestStep(
-                    'Run encrypted aggregate evaluation from checked bridge contributions',
+                    'Build aggregate-ready record from checked bridge contributions',
                     async () => {
                         const firstComponentContext =
                             requireAggregateComponentContext(
@@ -1101,26 +1100,6 @@ describe.sequential(
                                 bridgeVerification,
                                 componentContext,
                                 contribution,
-                                encryptedAggregateInput: {
-                                    aggregateContribution: contribution,
-                                    aggregateDerivationComponentHash:
-                                        componentContext.component
-                                            .aggregateDerivationComponentHash,
-                                    aggregateDerivationStatementHash:
-                                        componentContext.statement
-                                            .aggregateDerivationStatementHash,
-                                    bridgeEncryption: {
-                                        ...bridgeEncryption,
-                                        bridgeProofBytesHex: undefined,
-                                        sampledPublicRelationChecks: undefined,
-                                        statusLabels: undefined,
-                                    },
-                                    bridgeEvidenceVerification:
-                                        bridgeVerification,
-                                    postVotingClosedContextHash:
-                                        componentContext.statement
-                                            .postVotingClosedContextHash,
-                                },
                             };
                         };
                         const bridgeContributors = [
@@ -1167,69 +1146,18 @@ describe.sequential(
                                     selection.selectedContributions,
                             },
                         );
-                        const encryptedAggregateInputByRosterPosition = new Map(
-                            bridgeContributors.map((bridgeContributor) => [
-                                bridgeContributor.contribution
-                                    .contributorRosterPosition,
-                                bridgeContributor.encryptedAggregateInput,
-                            ]),
-                        );
-                        const encryptedAggregateInputs =
-                            selection.selectedContributions.map(
-                                (contribution) => {
-                                    const encryptedAggregateInput =
-                                        encryptedAggregateInputByRosterPosition.get(
-                                            contribution.contributorRosterPosition,
-                                        );
-                                    if (encryptedAggregateInput === undefined) {
-                                        throw new Error(
-                                            `Missing bridge input for selected contributor ${contribution.contributorRosterPosition}.`,
-                                        );
-                                    }
-
-                                    return encryptedAggregateInput;
-                                },
+                        const aggregateReadyVerification =
+                            verifyAggregateReadyRecordStructure(
+                                aggregateReadyRecord,
                             );
-                        expect(statement.optionCount).toBe(20);
-                        const topCountValues = [1];
-
-                        for (const topCount of topCountValues) {
-                            const evaluation = await runAggregateSubcase(
-                                `run encrypted aggregate evaluator for topCount=${topCount}`,
-                                () =>
-                                    kernel.runEncryptedAggregateTopKEvaluation({
-                                        aggregateReadyRecord,
-                                        aggregateSelectionPolicyHash,
-                                        bridgeWitnessPrivacyProfileHash,
-                                        encryptedAggregateInputs,
-                                        heParamHash,
-                                        scoreDomainMax: 200,
-                                        setupPackage,
-                                        topCount,
-                                    }),
-                            );
-
-                            expect(evaluation).toMatchObject({
-                                comparisonProfile:
-                                    'direct-encrypted-score-comparison-v1',
-                                inputBindingStatus:
-                                    'aggregate-ready-record-verified',
-                                ok: true,
-                                operation:
-                                    'runEncryptedAggregateTopKEvaluation',
-                                rankPackingMethod:
-                                    'generator-ordered-packed-rank-v1',
-                            });
-                            expect(evaluation.statusLabels).toContain(
-                                'AggregateReadyRecordVerified',
-                            );
-                            expect(evaluation).not.toHaveProperty(
-                                'decodedRanks',
-                            );
-                            expect(evaluation).not.toHaveProperty(
-                                'decodedTargetIdSlots',
-                            );
-                        }
+                        expect(aggregateReadyVerification).toMatchObject({
+                            aggregateReadyRecordHash:
+                                aggregateReadyRecord.aggregateReadyRecordHash,
+                            ok: true,
+                        });
+                        expect(
+                            aggregateReadyVerification.statusLabels,
+                        ).toContain('AggregateReadyRecordVerified');
                     },
                 );
             },

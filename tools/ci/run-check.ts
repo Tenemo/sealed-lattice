@@ -93,12 +93,15 @@ const buildGatingLanes = (
     ),
 ];
 
-// Every remaining check runs concurrently against the built output. The Rust
-// lane is the only one that stays internally serial, because `cargo clippy` and
-// `cargo test` share the native `target/` build lock. The commit gate runs only
-// the fast Node test project; the heavier protocol and kernel Node projects and
-// the Playwright browser projects stay in `pnpm run test:node` and
-// `pnpm run test:browser` for pre-push verification.
+// Every remaining check runs concurrently against the built output. The docs
+// and pack smoke lanes deliberately call their underlying tools directly instead
+// of `pnpm run verify:docs` or `pnpm run smoke:pack:npm`, because those package
+// scripts rebuild for standalone use. The Rust lane is the only one that stays
+// internally serial, because `cargo clippy` and `cargo test` share the native
+// `target/` build lock. The commit gate runs only the fast Node test project;
+// the heavier protocol and kernel Node projects and the Playwright browser
+// projects stay in `pnpm run test:node` and `pnpm run test:browser` for pre-push
+// verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -116,6 +119,80 @@ const buildParallelLanes = (
 
     return [
         lane('Lint', 'lint', ['run', 'lint']),
+        {
+            commands: [
+                createPackageManagerCommand(
+                    'Clean generated API docs',
+                    ['exec', 'del-cli', 'docs/src/content/docs/api/reference'],
+                    {
+                        logFileSlug: 'docs-api-clean',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Generate API docs',
+                    [
+                        'exec',
+                        'tsx',
+                        './node_modules/typedoc/bin/typedoc',
+                        '--options',
+                        'typedoc.config.mjs',
+                    ],
+                    {
+                        logFileSlug: 'docs-api-generate',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Postprocess API docs',
+                    ['exec', 'tsx', './docs/typedoc/postprocess-site-docs.ts'],
+                    {
+                        logFileSlug: 'docs-api-postprocess',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Clean rendered docs',
+                    ['exec', 'del-cli', 'docs/dist'],
+                    {
+                        logFileSlug: 'docs-site-clean',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Build docs site',
+                    ['exec', 'astro', 'build', '--root', 'docs', '--silent'],
+                    {
+                        logFileSlug: 'docs-site-build',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Verify docs links',
+                    ['exec', 'tsx', './docs/typedoc/verify-docs.ts'],
+                    {
+                        logFileSlug: 'docs-link-verification',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Verify rendered docs',
+                    ['exec', 'tsx', './tools/ci/verify-docs-render.ts'],
+                    {
+                        logFileSlug: 'docs-render-verification',
+                        packageManagerRunner,
+                    },
+                ),
+            ],
+            name: 'Verify docs',
+        },
+        lane('Smoke npm package', 'smoke-pack-npm', [
+            'exec',
+            'tsx',
+            './tools/ci/verify-packed-package.ts',
+            '--package-manager',
+            'npm',
+        ]),
         lane('Verify public API surface', 'api-surface', [
             'exec',
             'tsx',

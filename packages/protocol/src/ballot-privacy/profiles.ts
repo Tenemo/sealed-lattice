@@ -397,7 +397,7 @@ const createEncodedAggregateLayoutProfile = (
 
 const createBallotProofProfile = (): BallotProofProfile => {
     // This profile records the selected proof target. Current implementation
-    // evidence and claim limits are tracked in CURRENT_STATUS.md; do not treat
+    // evidence and claim limits are tracked in README.md; do not treat
     // these fields as final theorem eligibility by themselves.
     const profilePayload: BallotProofProfilePayload = {
         objectType: 'BallotProofProfile',
