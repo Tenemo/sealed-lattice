@@ -192,9 +192,9 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "KLLPSC1C4NotCertified",
             "FinalSetupSecurityPendingTargetModulus",
             "FinalEvaluatorNoisePendingEncryptedAggregateEvaluatorClosure",
-            "StageXNotClosed",
-            "StageCNotClosed",
-            "StageANotClosed"
+            "EvaluationProofNotClosed",
+            "TargetDecryptionNotClosed",
+            "ActiveMaliciousSetupNotClosed"
         ],
     });
     let setup_package_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &package)?;

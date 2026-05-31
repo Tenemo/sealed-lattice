@@ -62,10 +62,7 @@ export const collectFiles = async (
     const pendingDirectories = [entryPath];
 
     while (pendingDirectories.length > 0) {
-        const currentDirectoryPath = pendingDirectories.pop();
-        if (currentDirectoryPath === undefined) {
-            continue;
-        }
+        const currentDirectoryPath = pendingDirectories.pop()!;
 
         const entries = await fs.readdir(currentDirectoryPath, {
             withFileTypes: true,

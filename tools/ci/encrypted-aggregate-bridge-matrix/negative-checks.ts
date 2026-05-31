@@ -201,6 +201,57 @@ const mutateFirstSignedI256ResponseOutOfBound = (value: unknown): string => {
     return `${outOfBoundSignedI256SharedWitnessResponseHex}${hex.slice(64)}`;
 };
 
+const mutateFirstFixedWidthLittleEndianResidue = (input: {
+    readonly modulus: number;
+    readonly residueByteLength: number;
+    readonly value: unknown;
+}): string => {
+    const hex = String(input.value);
+    const residueHexLength = input.residueByteLength * 2;
+    if (!/^(?:[a-f0-9]{2})*$/u.test(hex)) {
+        throw new Error('Boundedness commitment must be lowercase hex.');
+    }
+    if (hex.length < residueHexLength) {
+        throw new Error('Boundedness commitment is too short.');
+    }
+    if (
+        !Number.isSafeInteger(input.modulus) ||
+        input.modulus <= 1 ||
+        input.residueByteLength <= 0 ||
+        input.residueByteLength > 6
+    ) {
+        throw new Error(
+            'Boundedness commitment mutation parameters are invalid.',
+        );
+    }
+
+    let residue = 0;
+    let byteMultiplier = 1;
+    for (
+        let byteIndex = 0;
+        byteIndex < input.residueByteLength;
+        byteIndex += 1
+    ) {
+        residue +=
+            Number.parseInt(hex.slice(byteIndex * 2, byteIndex * 2 + 2), 16) *
+            byteMultiplier;
+        byteMultiplier *= 256;
+    }
+
+    let mutatedResidue = (residue + 1) % input.modulus;
+    const mutatedResidueBytes: number[] = [];
+    for (
+        let byteIndex = 0;
+        byteIndex < input.residueByteLength;
+        byteIndex += 1
+    ) {
+        mutatedResidueBytes.push(mutatedResidue & 0xff);
+        mutatedResidue = Math.floor(mutatedResidue / 256);
+    }
+
+    return `${byteArrayToHex(mutatedResidueBytes)}${hex.slice(residueHexLength)}`;
+};
+
 const bridgeSharedWitnessProofHash = (
     bridgeSharedWitnessProof: unknown,
 ): ProtocolHash =>
@@ -966,11 +1017,14 @@ export const runSentinelNegativeChecks = (input: {
         const supportModuli =
             bgvRandomnessBoundCommitment.supportModuli as readonly number[];
         const randomizerCommitmentsByModulus =
-            bgvRandomnessBoundCommitment.randomizerExpansionCommitmentsByModulus as number[][];
+            bgvRandomnessBoundCommitment.randomizerExpansionCommitmentsByModulus as unknown[];
         const firstModulus = supportModuli[0];
-        const firstCommitment = randomizerCommitmentsByModulus[0][0];
-        randomizerCommitmentsByModulus[0][0] =
-            (firstCommitment + 1) % firstModulus;
+        randomizerCommitmentsByModulus[0] =
+            mutateFirstFixedWidthLittleEndianResidue({
+                modulus: firstModulus,
+                residueByteLength: 6,
+                value: randomizerCommitmentsByModulus[0],
+            });
         firstCheck.bgvRandomnessBoundCommitmentHash =
             bgvRandomnessBoundCommitmentHash(bgvRandomnessBoundCommitment);
     };

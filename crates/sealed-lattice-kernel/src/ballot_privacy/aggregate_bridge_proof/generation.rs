@@ -221,13 +221,16 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
     let caller_supplied_development_randomness = prover_randomness_source
         == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC
         || encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC;
+    let claim_bearing_entropy_evidence = prover_randomness_source
+        == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
+        && encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG;
     let randomness_source_evidence = json!({
         "objectType": "AggregateBridgeRandomnessSourceEvidence",
         "objectVersion": 1,
         "proverRandomnessSource": prover_randomness_source,
         "encryptionRandomnessSeedSource": encryption_randomness_seed_source,
         "callerSuppliedDevelopmentRandomness": caller_supplied_development_randomness,
-        "claimBearingEntropyEvidence": false,
+        "claimBearingEntropyEvidence": claim_bearing_entropy_evidence,
     });
     let prover_randomness_public_hash = derive_protocol_hash(
         "ProofBytesHash",
@@ -526,7 +529,8 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "AggregateBridgeCiphertextGenerated",
         "CollectivePublicKeyRootBound",
         "BgvPublicKeyCoefficientMaterialBound",
-        "NotThresholdDecryptableBridgeCiphertext",
+        DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS,
+        TARGET_THRESHOLD_DECRYPTION_PROTOCOL_PENDING_STATUS,
         "CoefficientDomainCanonical",
         "BridgeProofRelationChecked",
         "BridgeProofImplementationEvidenceOnly",

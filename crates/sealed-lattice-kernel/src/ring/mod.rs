@@ -127,6 +127,40 @@ fn derive_lagrange_coefficients_at_zero(
     Ok(coefficients)
 }
 
+pub(crate) fn derive_lagrange_coefficients_at_zero_for_roster_positions(
+    roster_positions: &[u64],
+) -> CanonicalResult<Vec<(u64, u64)>> {
+    if roster_positions.is_empty() {
+        return Err(invalid_ring_input(
+            "at least one roster interpolation point is required",
+        ));
+    }
+    if roster_positions.len() > MAXIMUM_SHAMIR_INTERPOLATION_POINTS {
+        return Err(invalid_ring_input(
+            "at most 50 roster interpolation points are supported",
+        ));
+    }
+    let mut seen_roster_positions = Vec::with_capacity(roster_positions.len());
+    for roster_position in roster_positions {
+        assert_roster_position(*roster_position)?;
+        if seen_roster_positions.contains(roster_position) {
+            return Err(invalid_ring_input(
+                "roster interpolation points must be distinct",
+            ));
+        }
+        seen_roster_positions.push(*roster_position);
+    }
+    let share_points = roster_positions
+        .iter()
+        .map(|roster_position| ShamirSharePoint {
+            roster_position: *roster_position,
+            value: 0,
+        })
+        .collect::<Vec<_>>();
+
+    derive_lagrange_coefficients_at_zero(&share_points)
+}
+
 pub fn interpolate_shamir_constant_term(share_points: &[ShamirSharePoint]) -> CanonicalResult<u64> {
     if share_points.is_empty() {
         return Err(invalid_ring_input("at least one Shamir share is required"));

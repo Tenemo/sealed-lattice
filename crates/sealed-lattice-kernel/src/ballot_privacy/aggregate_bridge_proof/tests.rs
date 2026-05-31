@@ -217,7 +217,7 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(
             shared_witness_layout["sharedResponseScalarCount"],
-            json!(3 * width + 64 + 4 * 32_768)
+            json!(3 * width + 64 + 5 * 32_768)
         );
         assert_eq!(target_contract["sharedWitnessCheckCount"], json!(2));
         assert_eq!(
@@ -229,12 +229,24 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             json!(PLAINTEXT_ENCODING_RELATION)
         );
         assert_eq!(
-            target_contract["sharedWitnessWeakestRelationModulus"],
-            json!(PLAINTEXT_MODULUS)
+            target_contract["sharedWitnessWeakestRelationModuli"],
+            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessWeakestRelationModulusProduct"],
+            json!(bridge_batch_integer_lift_proof_modulus_product_decimal())
+        );
+        assert_eq!(
+            target_contract["plaintextEncodingProofModuli"],
+            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI)
+        );
+        assert_eq!(
+            target_contract["plaintextEncodingProofModulusProductBitsFloor"],
+            json!(93)
         );
         assert_eq!(
             target_contract["sharedWitnessEffectiveBindingSoundnessBitsFloor"],
-            json!(20)
+            json!(165)
         );
         assert_eq!(
             target_contract["sharedWitnessRejectionAttemptLimit"],
@@ -246,7 +258,15 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(
             target_contract["sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor"],
-            json!(32)
+            json!(186)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessFullMatrixUnionBoundBits"],
+            json!(9)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessEffectiveBindingBelowTarget"],
+            json!(false)
         );
         assert_eq!(
             target_contract["bgvEncryptionKeyMaterialKind"],

@@ -84,12 +84,56 @@ pub(super) fn bridge_proof_target_contract_value(
             Value::String(PLAINTEXT_ENCODING_RELATION.to_string()),
         ),
         (
-            "sharedWitnessWeakestRelationModulus",
-            json!(BRIDGE_SHARED_WITNESS_WEAKEST_RELATION_MODULUS),
+            "sharedWitnessWeakestRelationModuli",
+            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI),
+        ),
+        (
+            "sharedWitnessWeakestRelationModulusProduct",
+            Value::String(bridge_batch_integer_lift_proof_modulus_product_decimal()),
+        ),
+        (
+            "plaintextEncodingProofModuli",
+            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI),
+        ),
+        (
+            "plaintextEncodingProofModulusProduct",
+            Value::String(bridge_batch_integer_lift_proof_modulus_product_decimal()),
+        ),
+        (
+            "plaintextEncodingProofModulusProductBitsFloor",
+            json!(BRIDGE_SHARED_WITNESS_PROOF_MODULUS_PRODUCT_BITS_FLOOR),
         ),
         (
             "sharedWitnessRejectionAttemptLimit",
             json!(BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT as u64),
+        ),
+        (
+            "sharedWitnessRejectionRetryLossBits",
+            json!(BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS),
+        ),
+        (
+            "sharedWitnessFullMatrixUnionBoundBits",
+            json!(BRIDGE_FULL_MATRIX_UNION_BOUND_BITS),
+        ),
+        (
+            "sharedWitnessRandomOracleQueryBoundBits",
+            json!(BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS),
+        ),
+        (
+            "sharedWitnessProofSystemLossBits",
+            json!(BRIDGE_PROOF_SYSTEM_LOSS_BITS),
+        ),
+        (
+            "sharedWitnessChallengeBiasBits",
+            json!(BRIDGE_CHALLENGE_BIAS_BITS),
+        ),
+        (
+            "sharedWitnessTargetBindingSoundnessBits",
+            json!(BRIDGE_TARGET_BINDING_SOUNDNESS_BITS),
+        ),
+        (
+            "sharedWitnessEffectiveBindingBelowTarget",
+            json!(BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET),
         ),
         (
             "sharedWitnessGrindingDiscountBitsPerCheck",
@@ -120,8 +164,7 @@ fn shared_witness_layout_value(
     let aggregate_integer_share_coordinate_count = aggregate_reduced_coordinate_count;
     let commitment_opening_coordinate_count = SHARE_COMMITMENT_OPENING_DIMENSION as u64;
     let plaintext_coefficient_count = polynomial_degree;
-    // Pinned 0: this layout carries no separate plaintext-encoding quotient block.
-    let plaintext_encoding_quotient_count = 0_u64;
+    let plaintext_encoding_quotient_count = polynomial_degree;
     let encryption_randomizer_coefficient_count = polynomial_degree;
     let encryption_error_coefficient_count = ciphertext_component_count * polynomial_degree;
     // Single shared response vector = concatenation of all witness blocks: integer share coords,

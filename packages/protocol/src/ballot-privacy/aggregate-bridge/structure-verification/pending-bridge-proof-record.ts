@@ -269,6 +269,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         ballotSetHash: statement.ballotSetHash,
         ballotShareLayoutProfileHash,
         basisId: bridgeEncryptionEvidence.basisId,
+        batchEncodingBoundCertificateHash:
+            bridgeEncryptionEvidence.batchEncodingBoundCertificateHash,
         bgvBatchEncoderHash,
         bgvEncryptionKeyMaterialKind:
             'passive-transcript-derived-collective-public-key',
@@ -325,6 +327,13 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         aggregateDerivationVerificationScope:
             'AggregateDerivationFullVerificationPreconditionNotBound',
         plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
+        plaintextEncodingBoundCertificateHash:
+            bridgeEncryptionEvidence.batchEncodingBoundCertificateHash,
+        plaintextEncodingProofModuli: [
+            140_737_487_306_753, 140_737_486_716_929,
+        ],
+        plaintextEncodingProofModulusProduct: '19807040250408114080301121537',
+        plaintextEncodingProofModulusProductBitsFloor: 93,
         plaintextRoot: bridgeEncryptionEvidence.plaintextRoot,
         pollSpecHash: statement.pollSpecHash,
         postVotingClosedContextHash: statement.postVotingClosedContextHash,
@@ -348,10 +357,22 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         sharedWitnessChallengeEntropyBits: 128,
         sharedWitnessRejectionAttemptLimit: 64,
         sharedWitnessGrindingDiscountBitsPerCheck: 6,
-        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32,
-        sharedWitnessEffectiveBindingSoundnessBitsFloor: 20,
-        sharedWitnessWeakestRelation: 'BGVBatchEncode65537InverseNegacyclicNtt',
-        sharedWitnessWeakestRelationModulus: 65_537,
+        sharedWitnessRejectionRetryLossBits: 12,
+        sharedWitnessFullMatrixUnionBoundBits: 9,
+        sharedWitnessRandomOracleQueryBoundBits: 0,
+        sharedWitnessProofSystemLossBits: 0,
+        sharedWitnessChallengeBiasBits: 0,
+        sharedWitnessTargetBindingSoundnessBits: 128,
+        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+        sharedWitnessEffectiveBindingBelowTarget: false,
+        sharedWitnessWeakestRelation:
+            'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+        sharedWitnessWeakestRelationModuli: [
+            140_737_487_306_753, 140_737_486_716_929,
+        ],
+        sharedWitnessWeakestRelationModulusProduct:
+            '19807040250408114080301121537',
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: bridgeEncryptionEvidence.slotCount,
@@ -584,7 +605,9 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     requireMatchingValue(
         bridgeEncryptionEvidence.randomnessSourceEvidence
             .claimBearingEntropyEvidence,
-        false,
+        bridgeEncryptionEvidence.proverRandomnessSource === 'fresh-csprng' &&
+            bridgeEncryptionEvidence.encryptionRandomnessSeedSource ===
+                'fresh-csprng',
         'randomness source evidence claim-bearing entropy flag',
     );
     requireMatchingValue(

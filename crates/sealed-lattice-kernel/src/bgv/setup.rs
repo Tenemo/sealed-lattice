@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
@@ -18,14 +18,15 @@ mod tests;
 
 use sampling::{
     dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,
-    development_fixture_hash, negacyclic_product_mod, sample_centered_binomial_eta2,
-    sample_encryption_relation_checks, sample_positions, sample_public_residues, sample_residue,
-    sample_signed_values, sample_small_distribution, sample_values, signed_to_modulus_residue,
+    negacyclic_product_mod, sample_centered_binomial_eta2, sample_encryption_relation_checks,
+    sample_positions, sample_public_residues, sample_signed_values, sample_small_distribution,
+    sample_values, signed_to_modulus_residue, signed_to_plaintext_scaled_residue,
 };
 
 use crate::{
     bgv::{
         encoding::encode_batch_plaintext_slots,
+        evaluator::engine::DevelopmentBgvKey,
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         profile::{
@@ -62,18 +63,13 @@ pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
 pub(crate) const THRESHOLD_DECRYPTION_PROFILE_ID: &str = "BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1";
 pub(crate) const KEY_SWITCH_DECOMPOSITION_PROFILE_ID: &str =
     "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
-pub(crate) const PROVISIONAL_ROT_SET_ID: &str =
-    "sealed-lattice-provisional-encrypted-aggregate-evaluator-top-k-rotation-set-v1";
+pub(crate) const SELECTED_ROT_SET_ID: &str = "generator-ordered-packed-rank-rot-set-v1";
 const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
 const MINIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 3;
 const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
     "sealed-lattice-passive-bgv-setup-development-encryption-fixture-v1";
-const DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID: &str =
-    "sealed-lattice-passive-bgv-setup-development-relinearization-arithmetic-fixture-v1";
-const DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID: &str =
-    "sealed-lattice-passive-bgv-setup-development-key-switch-arithmetic-fixture-v1";
-const EVALUATION_KEY_STREAMING_FIXTURE_ID: &str =
-    "sealed-lattice-passive-bgv-setup-evaluation-key-streaming-fixture-v1";
+const EVALUATION_KEY_STREAMING_COMMITMENT_ID: &str =
+    "sealed-lattice-passive-bgv-setup-evaluation-key-streaming-commitment-v1";
 const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
 const DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES: usize = 32 * 1024 * 1024;
 
@@ -114,13 +110,18 @@ struct VerifiedParticipantSetupBinding {
     trustee_threshold_verification_key_hash: String,
 }
 
+pub(crate) struct PassiveSetupEvaluationKeySeeds {
+    pub(crate) relinearization_key_seeds: BTreeMap<usize, String>,
+    pub(crate) rotation_key_seeds: BTreeMap<(usize, usize), String>,
+}
+
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
         "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
         "keySwitchDecompositionProfileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
-        "provisionalRotSetId": PROVISIONAL_ROT_SET_ID,
+        "selectedRotSetId": SELECTED_ROT_SET_ID,
         "canonicalObjects": [
             "BgvPassiveSetupPackage",
             "ParticipantBgvSetupRecord",
@@ -133,6 +134,8 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "BgvRotationKey",
             "BgvKeySwitchKey",
             "BgvEvaluationKeySet",
+            "BgvEvaluationKeyMaterialCommitment",
+            "BgvEvaluationKeyStreamingCommitment",
             "BgvSetupParameterCertificate",
             "CollectiveSecretDistributionCertificate",
             "ErrorDistributionCertificate",
@@ -154,6 +157,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "KeySwitchKeyRoot",
             "KeySwitchDecompositionHash",
             "EvalKeyRoot",
+            "EvaluationKeySetDigest",
             "EvaluationKeySizeProfileHash",
             "CollectiveSecretDistributionCertificateHash",
             "ErrorDistributionCertificateHash",
@@ -319,6 +323,99 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
             "FinalSetupSecurityPendingTargetModulus"
         ],
     }))
+}
+
+pub(crate) fn development_evaluator_key_from_passive_setup_package(
+    setup_package: &Value,
+) -> CanonicalResult<DevelopmentBgvKey> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
+    let participants = array_at_path(setup_package, &["participants"])?;
+    let participant_identities = participants
+        .iter()
+        .map(|participant| {
+            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let (collective_secret_coefficients, _) =
+        key_material::collective_signed_secret_and_error_coefficients(
+            setup_seed_hash,
+            &participant_identities,
+        );
+    let collective_public_key_coefficients =
+        key_material::collective_public_key_coefficients_by_modulus_from_setup_package(
+            setup_package,
+        )?;
+    let public_b = collective_public_key_coefficients
+        .iter()
+        .map(|coefficients| coefficients.component_zero_coefficients.clone())
+        .collect::<Vec<_>>();
+    let public_a = collective_public_key_coefficients
+        .iter()
+        .map(|coefficients| coefficients.component_one_coefficients.clone())
+        .collect::<Vec<_>>();
+
+    DevelopmentBgvKey::from_collective_components(
+        collective_secret_coefficients,
+        public_b,
+        public_a,
+    )
+}
+
+pub(crate) fn evaluation_key_seeds_from_passive_setup_package(
+    setup_package: &Value,
+    working_level: usize,
+) -> CanonicalResult<PassiveSetupEvaluationKeySeeds> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
+    if working_level >= DATA_PRIMES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setup-bound evaluator working level is outside the selected data basis",
+        ));
+    }
+    let relinearization_key_seeds = (1..=working_level)
+        .map(|level| {
+            (
+                level,
+                key_material::evaluation_key_stream_seed(
+                    setup_seed_hash,
+                    "relinearization",
+                    level,
+                    None,
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut rotation_key_seeds = BTreeMap::new();
+    let rotation_roots = array_at_path(
+        setup_package,
+        &[
+            "evaluationKeys",
+            "evaluationKeyMaterialCommitment",
+            "rotationKeyRoots",
+        ],
+    )?;
+    for rotation_root in rotation_roots {
+        let rotation = usize_at_path(rotation_root, &["rotation"])?;
+        let level = usize_at_path(rotation_root, &["level"])?;
+        rotation_key_seeds.insert(
+            (rotation, level),
+            key_material::evaluation_key_stream_seed(
+                setup_seed_hash,
+                "rotation",
+                level,
+                Some(rotation),
+            ),
+        );
+    }
+
+    Ok(PassiveSetupEvaluationKeySeeds {
+        relinearization_key_seeds,
+        rotation_key_seeds,
+    })
 }
 
 pub(crate) use encrypted_aggregate_bridge_trace::{

@@ -1,5 +1,4 @@
 import { performance } from 'node:perf_hooks';
-import { pathToFileURL } from 'node:url';
 
 import {
     createLocalRunLog,
@@ -15,6 +14,8 @@ import {
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
+
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 // `passed` and `failed` are a lane's own result; `stopped` means a sibling lane
 // failed first and this lane was killed before it could finish.
@@ -337,11 +338,6 @@ const main = async (): Promise<void> => {
     }
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }

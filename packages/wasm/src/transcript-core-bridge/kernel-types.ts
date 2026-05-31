@@ -285,6 +285,99 @@ export type TranscriptCoreKernel = {
     rejectBgvReferenceOracleArtifact(input: {
         readonly artifact: unknown;
     }): BgvReferenceOracleRejection;
+    runDevelopmentTopKEvaluation(
+        input: TopKEvaluatorDevelopmentEvaluationInput,
+    ): TopKEvaluatorDevelopmentEvaluation;
+    runEncryptedAggregateTopKEvaluation(
+        input: TopKEvaluatorEncryptedAggregateEvaluationInput,
+    ): TopKEvaluatorEncryptedAggregateEvaluation;
+};
+
+export type TopKEvaluatorDevelopmentEvaluationInput = {
+    readonly scores: readonly number[];
+    readonly topCount: number;
+    readonly scoreDomainMax: number;
+    readonly comparisonMethod?: 'bitSliced' | 'differencePolynomial';
+    readonly rankPackingMethod?: 'perOptionBroadcast' | 'generatorOrdered';
+    readonly workingLevel?: number;
+    readonly seed?: string;
+    readonly ceremonyId?: string;
+    readonly manifestHash?: string;
+    readonly rosterHash?: string;
+    readonly canonicalBallotSetHash?: string;
+    readonly aggregateReadyRecordHash?: string;
+    readonly encryptedAggregateBridgeHash?: string;
+    readonly encryptedAggregateTargetBasisDataRoot?: string;
+    readonly bgvPublicKeyRoot?: string;
+    readonly collectivePublicKeyRoot?: string;
+    readonly evaluationKeyRoot?: string;
+    readonly rotSetHash?: string;
+    readonly preTargetBoardHead?: string;
+    readonly evaluatorSignature?: string;
+};
+
+export type TopKEvaluatorDevelopmentEvaluation = {
+    readonly ok: true;
+    readonly operation: 'runDevelopmentTopKEvaluation';
+    readonly comparisonProfile: string;
+    readonly evaluationContextHash: string;
+    readonly evaluationKeysValidated: boolean;
+    readonly decodedTargetIdSlots: readonly number[];
+    readonly decodedTargetOrderSlots: readonly number[];
+    readonly decodedRanks: readonly number[];
+    readonly rankPackingMethod: 'perOptionBroadcast' | 'generatorOrdered';
+    readonly packedRankRoot: string | null;
+    readonly packedTargetIdRoot: string | null;
+    readonly packedTargetOrderRoot: string | null;
+    readonly decodedPackedRanks: readonly number[] | null;
+    readonly decodedPackedTargetIdSlots: readonly number[] | null;
+    readonly decodedPackedTargetOrderSlots: readonly number[] | null;
+    readonly program: Record<string, unknown>;
+    readonly evaluationNoiseCertificate: Record<string, unknown>;
+    readonly topKEvaluationRecord: Record<string, unknown>;
+    readonly targetProposalHash: string;
+    readonly appendixDPublicInputStatement: Record<string, unknown>;
+    readonly statusLabels: readonly string[];
+};
+
+export type TopKEvaluatorEncryptedAggregateInput = {
+    readonly aggregateContribution?: unknown;
+    readonly aggregateDerivationComponent?: unknown;
+    readonly aggregateDerivationComponentHash: ProtocolHash;
+    readonly aggregateDerivationStatementHash: ProtocolHash;
+    readonly bridgeEvidenceVerification?: unknown;
+    readonly postVotingClosedContextHash: ProtocolHash;
+    readonly bridgeEncryption: unknown;
+};
+
+export type TopKEvaluatorEncryptedAggregateEvaluationInput = {
+    readonly setupPackage: BgvPassiveSetupPackage;
+    readonly aggregateReadyRecord?: unknown;
+    readonly aggregateSelectionPolicyHash?: ProtocolHash;
+    readonly bridgeWitnessPrivacyProfileHash?: ProtocolHash;
+    readonly heParamHash?: ProtocolHash;
+    readonly encryptedAggregateInputs?: readonly TopKEvaluatorEncryptedAggregateInput[];
+    readonly encryptedAggregateScoreInputs?: readonly TopKEvaluatorEncryptedAggregateInput[];
+    readonly topCount: number;
+    readonly scoreDomainMax: number;
+    readonly workingLevel?: number;
+    readonly canonicalBallotSetHash?: string;
+    readonly preTargetBoardHead?: string;
+    readonly evaluatorSignature?: string;
+};
+
+export type TopKEvaluatorEncryptedAggregateEvaluation = {
+    readonly ok: true;
+    readonly operation: 'runEncryptedAggregateTopKEvaluation';
+    readonly comparisonProfile: string;
+    readonly rankPackingMethod: string;
+    readonly inputBindingStatus: string;
+    readonly evaluationContextHash: string;
+    readonly evaluationNoiseCertificate: Record<string, unknown>;
+    readonly topKEvaluationRecord: Record<string, unknown>;
+    readonly targetProposalHash: string;
+    readonly appendixDPublicInputStatement: Record<string, unknown>;
+    readonly statusLabels: readonly string[];
 };
 
 type TranscriptCoreKernelCommand =
@@ -542,7 +635,13 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'RejectBgvReferenceOracleArtifact';
           readonly artifact: unknown;
-      };
+      }
+    | ({
+          readonly command: 'RunDevelopmentTopKEvaluation';
+      } & TopKEvaluatorDevelopmentEvaluationInput)
+    | ({
+          readonly command: 'RunEncryptedAggregateTopKEvaluation';
+      } & TopKEvaluatorEncryptedAggregateEvaluationInput);
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;

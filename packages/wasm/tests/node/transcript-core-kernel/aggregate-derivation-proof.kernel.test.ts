@@ -1,24 +1,37 @@
 import type {
+    ActionContext,
+    AggregateContribution,
     ClaimBearingBallotPackage,
+    ProtocolSignatureEnvelope,
     ShareCommitmentMessageBoundCert,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import { registerAggregateBridgeEncryptionTest } from './aggregate-derivation-proof/bridge-encryption.js';
 
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+    deriveProtocolHash,
+} from '#packages/crypto/src/index';
+import { createPendingBridgeProofRecordFromBridgeEvidence } from '#packages/protocol/src/ballot-privacy/aggregate-bridge/structure-verification.js';
 import {
     aggregateWitnessFromReceiverPlaintext,
     buildAggregateDerivationProofInput,
     buildAggregateDerivationStatement,
+    createAggregateContributionFromBridgeProofRecord,
     createAggregateDerivationComponent,
+    createAggregateReadyRecord,
     createBallotPrivacyProfileSet,
     createShareCommitmentMessageBoundCert,
+    selectFirstValidAggregateContributions,
     sumAggregateDerivationWitnesses,
     verifyAggregateDerivationComponentStructure,
     type AggregateDerivationWitnessInput,
 } from '#packages/protocol/src/ballot-privacy/index';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
+import type { TopKEvaluatorEncryptedAggregateInput } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
 import {
     createMandatoryProfileBallotProofRecordBenchmarkFixture,
     createWasmBallotProofRecordGenerationFixture,
@@ -79,20 +92,25 @@ const createFixtureBallotPackage = (input: {
 
 const receiverWitness = (
     fixture: ReturnType<typeof createWasmBallotProofRecordGenerationFixture>,
+    receiverRosterPosition = 1,
 ): AggregateDerivationWitnessInput => {
     const receiverPayloadPlaintext =
         fixture.projectionWitness.receiverPayloadPlaintexts?.find(
-            (plaintext) => plaintext.receiverRosterPosition === 1,
+            (plaintext) =>
+                plaintext.receiverRosterPosition === receiverRosterPosition,
         );
     const shareCommitmentOpening =
         fixture.projectionWitness.shareCommitmentOpenings.find(
-            (opening) => opening.receiverRosterPosition === 1,
+            (opening) =>
+                opening.receiverRosterPosition === receiverRosterPosition,
         );
     if (
         receiverPayloadPlaintext === undefined ||
         shareCommitmentOpening === undefined
     ) {
-        throw new Error('Fixture should include receiver-1 witness material.');
+        throw new Error(
+            `Fixture should include receiver-${receiverRosterPosition} witness material.`,
+        );
     }
 
     return aggregateWitnessFromReceiverPlaintext({
@@ -254,6 +272,12 @@ type AggregateComponentContext = AggregateStatementContext & {
     readonly generatedAggregateProof: AggregateProofGeneration;
     readonly proofBuild: AggregateProofBuild;
 };
+type BridgeContributorContext = {
+    readonly bridgeEncryption: Record<string, unknown>;
+    readonly bridgeVerification: Record<string, unknown>;
+    readonly componentContext: AggregateComponentContext;
+    readonly encryptedAggregateInput: TopKEvaluatorEncryptedAggregateInput;
+};
 
 const runAggregateTestStep = async <T>(
     name: string,
@@ -318,6 +342,174 @@ const requireAggregateComponentContext = (
 
     return context;
 };
+
+const createAggregateComponentContextForReceiver = (input: {
+    readonly ballotPackageContext: BallotPackageContext;
+    readonly contributorRosterPosition: number;
+    readonly proverRandomnessHex: string;
+}): AggregateComponentContext => {
+    const contributorIdentity = `receiver-${input.contributorRosterPosition}`;
+    const postCloseEvidence = createPostCloseEvidence({
+        ceremonyId: input.ballotPackageContext.fixture.statement.ceremonyId,
+        contributorIdentity,
+        electionManifestHash:
+            input.ballotPackageContext.fixture.statement.manifestHash,
+        rosterExternalAcceptanceHash:
+            input.ballotPackageContext.fixture.statement
+                .rosterExternalAcceptanceHash,
+        votingClosedBoardHeadHash: hash('closed-board-head'),
+    });
+    const statementInput = {
+        ballotPackages: [input.ballotPackageContext.ballotPackage],
+        closeRecordHash: postCloseEvidence.closeRecordHash,
+        contributorActionContextHash: postCloseEvidence.contributorActionContext
+            .actionContextHash as string,
+        contributorIdentity,
+        contributorRosterExternalAcceptanceHash:
+            input.ballotPackageContext.fixture.statement
+                .rosterExternalAcceptanceHash,
+        contributorRosterPosition: input.contributorRosterPosition,
+        postVotingClosedContextHash:
+            postCloseEvidence.postVotingClosedContextHash,
+        casualMicroRosterAcknowledged: false,
+        votingClosedBoardHeadHash: postCloseEvidence.closeRecord
+            .closedBoardHeadHash as string,
+    } satisfies AggregateStatementInput;
+    const { aggregateCommitment, statement } =
+        buildAggregateDerivationStatement(statementInput);
+    const witness = sumAggregateDerivationWitnesses({
+        witnesses: [
+            receiverWitness(
+                input.ballotPackageContext.fixture,
+                input.contributorRosterPosition,
+            ),
+        ],
+    });
+    const proofBuild = buildAggregateDerivationProofInput({
+        aggregateCommitment,
+        statement,
+        witness,
+    });
+    const generatedAggregateProof =
+        input.ballotPackageContext.kernel.generateAggregateDerivationProof({
+            proofInput: proofBuild.proofInput,
+            proverRandomnessHex: input.proverRandomnessHex,
+            secretState: proofBuild.secretState,
+        });
+    if (generatedAggregateProof.ok !== true) {
+        throw new Error(
+            `Aggregate derivation proof generation failed for ${contributorIdentity}: ${JSON.stringify(generatedAggregateProof)}`,
+        );
+    }
+    const component = createAggregateDerivationComponent({
+        aggregateCommitment,
+        proofBytesHex: String(generatedAggregateProof.proofBytesHex),
+        proofInput: proofBuild.proofInput,
+        shareCommitmentMessageBoundCert: input.ballotPackageContext.certificate,
+        statement,
+    });
+    const componentVerification =
+        verifyAggregateDerivationComponentStructure(component);
+    if (!componentVerification.ok) {
+        throw new Error(
+            `Aggregate component structure rejected for ${contributorIdentity}: ${JSON.stringify(componentVerification)}`,
+        );
+    }
+
+    return {
+        ...input.ballotPackageContext,
+        aggregateCommitment,
+        component,
+        generatedAggregateProof,
+        postCloseEvidence,
+        proofBuild,
+        statement,
+        statementInput,
+        witness,
+    };
+};
+
+const deriveSharedBridgeSupportHashes = (input: {
+    readonly ballotSetHash: string;
+    readonly ceremonyId: string;
+    readonly setupPackageHash: string;
+}): {
+    readonly aggregateSelectionPolicyHash: string;
+    readonly bridgeWitnessPrivacyProfileHash: string;
+    readonly heParamHash: string;
+} => ({
+    aggregateSelectionPolicyHash: deriveProtocolHash('ChallengeDomainHash', {
+        ballotSetHash: input.ballotSetHash,
+        ceremonyId: input.ceremonyId,
+        purpose: 'accepted-encrypted-aggregate-evaluator-selection-policy-v1',
+        setupPackageHash: input.setupPackageHash,
+    }),
+    bridgeWitnessPrivacyProfileHash: deriveProtocolHash('ChallengeDomainHash', {
+        ballotSetHash: input.ballotSetHash,
+        ceremonyId: input.ceremonyId,
+        purpose: 'accepted-encrypted-aggregate-evaluator-witness-privacy-v1',
+        setupPackageHash: input.setupPackageHash,
+    }),
+    heParamHash: deriveProtocolHash('ChallengeDomainHash', {
+        ballotSetHash: input.ballotSetHash,
+        ceremonyId: input.ceremonyId,
+        purpose: 'accepted-encrypted-aggregate-evaluator-he-param-v1',
+        setupPackageHash: input.setupPackageHash,
+    }),
+});
+
+const createAggregateContributionSignature = (input: {
+    readonly actionContext: ActionContext;
+    readonly aggregateContributionHash: string;
+    readonly manifestHash: string;
+}): ProtocolSignatureEnvelope => {
+    const keyFixture = createMlDsaKeyPairFixture(
+        `aggregate-ready-${input.actionContext.signerIdentity}`,
+    );
+
+    return createProtocolSignatureFixture({
+        profile: createMlDsaSignatureProfileFixture(),
+        publicKeyBytesHex: keyFixture.publicKeyBytesHex,
+        publicKeyHash: keyFixture.publicKeyHash,
+        secretKeyBytesHex: keyFixture.secretKeyBytesHex,
+        signedRoot: {
+            boardHeadHash: input.actionContext.boardHeadHash,
+            byteLength: 64,
+            ceremonyId: input.actionContext.ceremonyId,
+            chunkMerkleRoot: null,
+            contextHash: input.actionContext.contextHash,
+            deviceEpoch: input.actionContext.deviceEpoch,
+            manifestHash: input.manifestHash,
+            objectRoot: input.aggregateContributionHash,
+            objectType: 'AggregateContribution',
+            objectVersion: 1,
+            recoveryEpoch: input.actionContext.recoveryEpoch,
+            signerIdentity: input.actionContext.signerIdentity,
+            signerRole: 'Trustee',
+        },
+    });
+};
+
+const createCurrentRecoveryEpochMap = (
+    contributions: readonly AggregateContribution[],
+): Record<
+    string,
+    {
+        readonly currentDeviceEpoch: number;
+        readonly currentRecoveryEpoch: number;
+        readonly signerIdentity: string;
+    }
+> =>
+    Object.fromEntries(
+        contributions.map((contribution) => [
+            contribution.contributorIdentity,
+            {
+                currentDeviceEpoch: contribution.deviceEpoch,
+                currentRecoveryEpoch: contribution.recoveryEpoch,
+                signerIdentity: contribution.contributorIdentity,
+            },
+        ]),
+    );
 
 describe.sequential(
     'aggregate derivation proof through the transcript-core kernel',
@@ -741,6 +933,309 @@ describe.sequential(
                 requireAggregateComponentContext(aggregateComponentContext),
             runAggregateTestStep,
         });
+
+        it(
+            'runs encrypted aggregate evaluation from proof-checked bridge contributions',
+            async () => {
+                await runAggregateTestStep(
+                    'Run encrypted aggregate evaluation from checked bridge contributions',
+                    async () => {
+                        const firstComponentContext =
+                            requireAggregateComponentContext(
+                                aggregateComponentContext,
+                            );
+                        const completedBallotPackageContext =
+                            requireBallotPackageContext(ballotPackageContext);
+                        const secondComponentContext =
+                            createAggregateComponentContextForReceiver({
+                                ballotPackageContext:
+                                    completedBallotPackageContext,
+                                contributorRosterPosition: 2,
+                                proverRandomnessHex: '67'.repeat(32),
+                            });
+                        const { kernel, statement } = firstComponentContext;
+                        const setupPackage = await runAggregateSubcase(
+                            'generate shared BGV setup package',
+                            () =>
+                                kernel.generateBgvPassiveSetup({
+                                    ceremonyId: statement.ceremonyId,
+                                    manifestHash: statement.manifestHash,
+                                    participants: Array.from(
+                                        { length: statement.participantCount },
+                                        (_unusedValue, participantIndex) => ({
+                                            boardPosition: participantIndex + 3,
+                                            rosterPosition: participantIndex,
+                                            trusteeIdentity: `receiver-${participantIndex}`,
+                                        }),
+                                    ),
+                                    rosterHash: statement.rosterHash,
+                                    setupSeed:
+                                        'accepted-encrypted-aggregate-evaluator-test-seed',
+                                    thresholdProfileHash:
+                                        statement.thresholdProfileHash,
+                                }),
+                        );
+                        const {
+                            aggregateSelectionPolicyHash,
+                            bridgeWitnessPrivacyProfileHash,
+                            heParamHash,
+                        } = deriveSharedBridgeSupportHashes({
+                            ballotSetHash: statement.ballotSetHash,
+                            ceremonyId: statement.ceremonyId,
+                            setupPackageHash: setupPackage.setupPackageHash,
+                        });
+                        type PendingBridgeProofRecordInput = Parameters<
+                            typeof createPendingBridgeProofRecordFromBridgeEvidence
+                        >[0];
+                        const createBridgeContributor = async (
+                            componentContext: AggregateComponentContext,
+                        ): Promise<
+                            BridgeContributorContext & {
+                                readonly contribution: AggregateContribution;
+                            }
+                        > => {
+                            const bridgeEncryption = (await runAggregateSubcase(
+                                `generate bridge proof for ${componentContext.statement.contributorIdentity}`,
+                                () =>
+                                    kernel.generateAggregateBridgeEncryption({
+                                        aggregateDerivationComponent:
+                                            componentContext.component,
+                                        aggregateSelectionPolicyHash,
+                                        aggregateWitness:
+                                            componentContext.witness,
+                                        bridgeWitnessPrivacyProfileHash,
+                                        heParamHash,
+                                        includeCanonicalBytesHex: true,
+                                        setupPackage,
+                                    }),
+                            )) as Record<string, unknown>;
+                            expect(bridgeEncryption).toMatchObject({
+                                bridgeProofVerificationStatus:
+                                    'BridgeProofRelationChecked',
+                                developmentKeyOnly: false,
+                                encryptionRandomnessSeedSource: 'fresh-csprng',
+                                ok: true,
+                                operation: 'generateAggregateBridgeEncryption',
+                                proverRandomnessSource: 'fresh-csprng',
+                                randomnessSourceEvidence: {
+                                    callerSuppliedDevelopmentRandomness: false,
+                                    claimBearingEntropyEvidence: true,
+                                },
+                            });
+
+                            const bridgeVerification =
+                                (await runAggregateSubcase(
+                                    `verify bridge proof for ${componentContext.statement.contributorIdentity}`,
+                                    () =>
+                                        kernel.verifyAggregateBridgeEncryption({
+                                            aggregateDerivationComponent:
+                                                componentContext.component,
+                                            aggregateSelectionPolicyHash,
+                                            bridgeEncryption,
+                                            bridgeWitnessPrivacyProfileHash,
+                                            heParamHash,
+                                            setupPackage,
+                                        }),
+                                )) as Record<string, unknown>;
+                            expect(bridgeVerification).toMatchObject({
+                                bridgeProofVerificationStatus:
+                                    'BridgeProofRelationChecked',
+                                developmentKeyOnly: false,
+                                encryptionRandomnessSeedSource: 'fresh-csprng',
+                                ok: true,
+                                operation: 'verifyAggregateBridgeEncryption',
+                                proverRandomnessSource: 'fresh-csprng',
+                                randomnessSourceEvidence: {
+                                    callerSuppliedDevelopmentRandomness: false,
+                                    claimBearingEntropyEvidence: true,
+                                },
+                            });
+
+                            const bridgeProofRecord =
+                                createPendingBridgeProofRecordFromBridgeEvidence(
+                                    {
+                                        aggregateDerivationComponent:
+                                            componentContext.component,
+                                        aggregateSelectionPolicyHash,
+                                        bridgeEncryptionEvidence:
+                                            bridgeEncryption as PendingBridgeProofRecordInput['bridgeEncryptionEvidence'],
+                                        bridgeEvidenceVerification:
+                                            bridgeVerification as PendingBridgeProofRecordInput['bridgeEvidenceVerification'],
+                                        bridgeWitnessPrivacyProfileHash,
+                                        heParamHash,
+                                        setupPackage,
+                                    },
+                                );
+                            const actionContext = componentContext
+                                .postCloseEvidence
+                                .contributorActionContext as ActionContext;
+                            const contribution =
+                                createAggregateContributionFromBridgeProofRecord(
+                                    {
+                                        actionContext,
+                                        boardPosition:
+                                            componentContext.statement
+                                                .contributorRosterPosition,
+                                        bridgeProofRecord,
+                                        closeRecordHash:
+                                            componentContext.postCloseEvidence
+                                                .closeRecordHash,
+                                        signature: ({
+                                            aggregateContributionHash,
+                                        }) =>
+                                            createAggregateContributionSignature(
+                                                {
+                                                    actionContext,
+                                                    aggregateContributionHash,
+                                                    manifestHash:
+                                                        componentContext
+                                                            .statement
+                                                            .manifestHash,
+                                                },
+                                            ),
+                                    },
+                                );
+
+                            return {
+                                bridgeEncryption,
+                                bridgeVerification,
+                                componentContext,
+                                contribution,
+                                encryptedAggregateInput: {
+                                    aggregateContribution: contribution,
+                                    aggregateDerivationComponentHash:
+                                        componentContext.component
+                                            .aggregateDerivationComponentHash,
+                                    aggregateDerivationStatementHash:
+                                        componentContext.statement
+                                            .aggregateDerivationStatementHash,
+                                    bridgeEncryption: {
+                                        ...bridgeEncryption,
+                                        bridgeProofBytesHex: undefined,
+                                        sampledPublicRelationChecks: undefined,
+                                        statusLabels: undefined,
+                                    },
+                                    bridgeEvidenceVerification:
+                                        bridgeVerification,
+                                    postVotingClosedContextHash:
+                                        componentContext.statement
+                                            .postVotingClosedContextHash,
+                                },
+                            };
+                        };
+                        const bridgeContributors = [
+                            await createBridgeContributor(
+                                firstComponentContext,
+                            ),
+                            await createBridgeContributor(
+                                secondComponentContext,
+                            ),
+                        ];
+                        const contributions = bridgeContributors.map(
+                            (bridgeContributor) =>
+                                bridgeContributor.contribution,
+                        );
+                        const selection =
+                            selectFirstValidAggregateContributions({
+                                aggregateContributionQuorum: 2,
+                                contributions,
+                                currentRecoveryEpochMap:
+                                    createCurrentRecoveryEpochMap(
+                                        contributions,
+                                    ),
+                                expectedAggregateSelectionPolicyHash:
+                                    aggregateSelectionPolicyHash,
+                                requiredPostVotingClosedContextHash:
+                                    firstComponentContext.statement
+                                        .postVotingClosedContextHash,
+                            });
+                        expect(selection.ok).toBe(true);
+                        expect(selection.refusedObjects).toEqual([]);
+                        expect(
+                            selection.selectedContributions.map(
+                                (contribution) =>
+                                    contribution.contributorRosterPosition,
+                            ),
+                        ).toEqual([1, 2]);
+                        const aggregateReadyRecord = createAggregateReadyRecord(
+                            {
+                                aggregateContributionQuorum: 2,
+                                firstValidOrderHash:
+                                    selection.firstValidOrderHash ?? '',
+                                rosterSize: statement.participantCount,
+                                selectedContributions:
+                                    selection.selectedContributions,
+                            },
+                        );
+                        const encryptedAggregateInputByRosterPosition = new Map(
+                            bridgeContributors.map((bridgeContributor) => [
+                                bridgeContributor.contribution
+                                    .contributorRosterPosition,
+                                bridgeContributor.encryptedAggregateInput,
+                            ]),
+                        );
+                        const encryptedAggregateInputs =
+                            selection.selectedContributions.map(
+                                (contribution) => {
+                                    const encryptedAggregateInput =
+                                        encryptedAggregateInputByRosterPosition.get(
+                                            contribution.contributorRosterPosition,
+                                        );
+                                    if (encryptedAggregateInput === undefined) {
+                                        throw new Error(
+                                            `Missing bridge input for selected contributor ${contribution.contributorRosterPosition}.`,
+                                        );
+                                    }
+
+                                    return encryptedAggregateInput;
+                                },
+                            );
+                        expect(statement.optionCount).toBe(20);
+                        const topCountValues = [1];
+
+                        for (const topCount of topCountValues) {
+                            const evaluation = await runAggregateSubcase(
+                                `run encrypted aggregate evaluator for topCount=${topCount}`,
+                                () =>
+                                    kernel.runEncryptedAggregateTopKEvaluation({
+                                        aggregateReadyRecord,
+                                        aggregateSelectionPolicyHash,
+                                        bridgeWitnessPrivacyProfileHash,
+                                        encryptedAggregateInputs,
+                                        heParamHash,
+                                        scoreDomainMax: 200,
+                                        setupPackage,
+                                        topCount,
+                                    }),
+                            );
+
+                            expect(evaluation).toMatchObject({
+                                comparisonProfile:
+                                    'direct-encrypted-score-comparison-v1',
+                                inputBindingStatus:
+                                    'aggregate-ready-record-verified',
+                                ok: true,
+                                operation:
+                                    'runEncryptedAggregateTopKEvaluation',
+                                rankPackingMethod:
+                                    'generator-ordered-packed-rank-v1',
+                            });
+                            expect(evaluation.statusLabels).toContain(
+                                'AggregateReadyRecordVerified',
+                            );
+                            expect(evaluation).not.toHaveProperty(
+                                'decodedRanks',
+                            );
+                            expect(evaluation).not.toHaveProperty(
+                                'decodedTargetIdSlots',
+                            );
+                        }
+                    },
+                );
+            },
+            aggregateBallotProofPackageTimeoutMs,
+        );
+
         it(
             'rejects public witness leakage and wraparound certificates',
             async () => {

@@ -1,7 +1,8 @@
 import { promises as fileSystem } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import {
     collectFiles,
     isWithinDirectory,
@@ -439,11 +440,6 @@ const main = async (): Promise<void> => {
     console.log('Package boundary verification passed.');
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }

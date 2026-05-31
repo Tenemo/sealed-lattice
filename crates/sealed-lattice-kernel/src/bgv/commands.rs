@@ -364,10 +364,12 @@ pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
 pub(crate) fn encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
     reduced_slot_response: &[BigInt],
     plaintext_coefficient_response: &[BigInt],
+    plaintext_encoding_quotient_response: &[BigInt],
 ) -> CanonicalResult<String> {
     crate::bgv::setup::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
         reduced_slot_response,
         plaintext_coefficient_response,
+        plaintext_encoding_quotient_response,
     )
 }
 

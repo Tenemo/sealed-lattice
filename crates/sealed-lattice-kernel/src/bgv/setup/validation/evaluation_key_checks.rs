@@ -1,4 +1,9 @@
 use super::*;
+use crate::bgv::evaluator::{
+    records::MAXIMUM_OPTION_COUNT,
+    top_k::{aggregate_score_packing_galois_elements, packed_rank_galois_elements},
+};
+use crate::bgv::setup::key_material::expected_evaluation_key_material_binding;
 
 pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult<()> {
     let evaluation_keys = value_at_path(setup_package, &["evaluationKeys"])?;
@@ -41,47 +46,37 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
         rot_set_hash,
         "evaluation key rotation set hash",
     )?;
-    let relinearization_arithmetic_fixture_hash = validate_development_key_arithmetic_fixture(
-        value_at_path(evaluation_keys, &["relinearizationArithmeticFixture"])?,
-        DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID,
-        key_switch_decomposition_hash,
-    )?;
-    let key_switch_arithmetic_fixture_hash = validate_development_key_arithmetic_fixture(
-        value_at_path(evaluation_keys, &["keySwitchArithmeticFixture"])?,
-        DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID,
-        key_switch_decomposition_hash,
-    )?;
+    let expected_material = expected_evaluation_key_material_binding(setup_package)?;
+    let actual_material = value_at_path(evaluation_keys, &["evaluationKeyMaterialCommitment"])?;
     compare_hash_at_path(
         evaluation_key_record,
-        &["relinearizationArithmeticFixtureHash"],
-        &relinearization_arithmetic_fixture_hash,
-        "evaluation key relinearization arithmetic fixture hash",
+        &["evaluationKeyMaterialCommitmentHash"],
+        string_at_path(&expected_material, &["materialHash"])?,
+        "evaluation key material commitment hash",
     )?;
     compare_hash_at_path(
-        evaluation_key_record,
-        &["keySwitchArithmeticFixtureHash"],
-        &key_switch_arithmetic_fixture_hash,
-        "evaluation key key-switch arithmetic fixture hash",
+        evaluation_keys,
+        &["evaluationKeyMaterialCommitmentHash"],
+        string_at_path(&expected_material, &["materialHash"])?,
+        "exported evaluation key material commitment hash",
     )?;
+    if actual_material != &expected_material {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "evaluation key material commitment does not match the setup-derived key stream schedule",
+        ));
+    }
+    validate_sampled_key_material_checks(value_at_path(
+        actual_material,
+        &["record", "sampledRelationChecks"],
+    )?)?;
 
-    let relinearization_key_record = json!({
-        "objectType": "BgvRelinearizationKey",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
-        "rosterHash": hash_at_path(evaluation_key_record, &["rosterHash"])?,
-        "collectivePublicKeyRoot": collective_public_key_root,
-        "bgvPublicKeyRoot": bgv_public_key_root,
-        "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Extended.basis_id(),
-        "publicRlweSampleCount": 2,
-        "arithmeticFixtureHash": relinearization_arithmetic_fixture_hash,
-        "maliciousEvaluationKeyProofIncluded": false,
-    });
+    let relinearization_key_record =
+        value_at_path(&expected_material, &["relinearizationKeyRecord"])?;
     let relinearization_key_root = hash_at_path(evaluation_keys, &["relinearizationKeyRoot"])?;
     compare_derived_hash(
         "RelinearizationKeyRoot",
-        &relinearization_key_record,
+        relinearization_key_record,
         relinearization_key_root,
         "relinearization key root",
     )?;
@@ -93,39 +88,33 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
     )?;
 
     let rotation_key_roots = array_at_path(evaluation_keys, &["rotationKeyRoots"])?;
-    let rotations = array_at_path(rot_set, &["rotations"])?;
-    if rotation_key_roots.len() != rotations.len() {
+    let expected_rotation_key_roots = array_at_path(&expected_material, &["rotationKeyRoots"])?;
+    if rotation_key_roots.len() != expected_rotation_key_roots.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "rotation key root count does not match the provisional rotation set",
+            "rotation key root count does not match the setup-derived key stream schedule",
         ));
     }
     let mut exported_rotation_values = BTreeSet::new();
     for (rotation_index, rotation_key_root_record) in rotation_key_roots.iter().enumerate() {
-        if value_at_path(rotation_key_root_record, &["rotation"])? != &rotations[rotation_index] {
+        exported_rotation_values.insert(integer_at_path(rotation_key_root_record, &["rotation"])?);
+        let expected_rotation_root_record = expected_rotation_key_roots[rotation_index].clone();
+        if rotation_key_root_record != &expected_rotation_root_record {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "rotation key root order does not match the provisional rotation set",
+                "rotation key root record does not match the setup-derived key stream schedule",
             ));
         }
-        exported_rotation_values.insert(integer_at_path(rotation_key_root_record, &["rotation"])?);
-        let rotation_key_record = json!({
-            "objectType": "BgvRotationKey",
-            "objectVersion": 1,
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-            "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
-            "rosterHash": hash_at_path(evaluation_key_record, &["rosterHash"])?,
-            "collectivePublicKeyRoot": collective_public_key_root,
-            "rotSetHash": rot_set_hash,
-            "rotation": rotations[rotation_index].clone(),
-            "keySwitchDecompositionHash": key_switch_decomposition_hash,
-            "publicBasisId": BgvBasisKind::Extended.basis_id(),
-            "publicRlweSampleCount": 1,
-            "maliciousEvaluationKeyProofIncluded": false,
-        });
+        let rotation_key_records = array_at_path(&expected_material, &["rotationKeyRecords"])?;
+        let rotation_key_record = rotation_key_records.get(rotation_index).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "expected rotation key record count does not match the selected rotation set",
+            )
+        })?;
         compare_derived_hash(
             "RotationKeyRoot",
-            &rotation_key_record,
+            rotation_key_record,
             hash_at_path(rotation_key_root_record, &["rotationKeyRoot"])?,
             "rotation key root",
         )?;
@@ -138,24 +127,11 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
         ));
     }
 
-    let key_switch_key_record = json!({
-        "objectType": "BgvKeySwitchKey",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "ceremonyId": string_at_path(evaluation_key_record, &["ceremonyId"])?,
-        "rosterHash": hash_at_path(evaluation_key_record, &["rosterHash"])?,
-        "collectivePublicKeyRoot": collective_public_key_root,
-        "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Extended.basis_id(),
-        "publicRlweSampleCount": 1,
-        "arithmeticFixtureHash": key_switch_arithmetic_fixture_hash,
-        "genericKeySwitchApiExported": false,
-        "maliciousEvaluationKeyProofIncluded": false,
-    });
+    let key_switch_key_record = value_at_path(&expected_material, &["keySwitchKeyRecord"])?;
     let key_switch_key_root = hash_at_path(evaluation_keys, &["keySwitchKeyRoot"])?;
     compare_derived_hash(
         "KeySwitchKeyRoot",
-        &key_switch_key_record,
+        key_switch_key_record,
         key_switch_key_root,
         "key-switch key root",
     )?;
@@ -185,7 +161,7 @@ fn validate_required_rotation_groups(
             rotation.as_i64().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "provisional rotation set entries must be signed integers",
+                    "selected rotation set entries must be signed integers",
                 )
             })
         })
@@ -193,7 +169,7 @@ fn validate_required_rotation_groups(
     if &declared_rotations != exported_rotation_values {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "exported rotation keys must cover exactly the provisional rotation set",
+            "exported rotation keys must cover exactly the selected rotation set",
         ));
     }
 
@@ -238,17 +214,12 @@ fn validate_required_rotation_groups(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 format!(
-                    "required rotation group {purpose} does not match the passive BGV setup fixture set"
+                    "required rotation group {purpose} does not match the selected BGV setup rotation set"
                 ),
             ));
         }
     }
-    for purpose in [
-        "bit-sliced-projection",
-        "encrypted-aggregate-score-bit-derivation",
-        "rank-accumulation",
-        "target-projection",
-    ] {
+    for purpose in ["aggregate-score-packing", "generator-ordered-packed-rank"] {
         if !seen_purposes.contains(purpose) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
@@ -262,101 +233,47 @@ fn validate_required_rotation_groups(
 
 fn expected_required_rotation_group(purpose: &str) -> Option<BTreeSet<i64>> {
     let rotations = match purpose {
-        "bit-sliced-projection" => vec![1, 2, 4, 8, 16, -1, -2, -4, -8, -16],
-        "encrypted-aggregate-score-bit-derivation" => vec![32, 64, 128, -32, -64, -128],
-        "rank-accumulation" => vec![256, 512, 1024, 2048, -256, -512, -1024, -2048],
-        "target-projection" => vec![4096, 8192, -4096, -8192],
+        "aggregate-score-packing" => aggregate_score_packing_galois_elements(MAXIMUM_OPTION_COUNT)
+            .ok()?
+            .into_iter()
+            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+            .collect::<Vec<_>>(),
+        "generator-ordered-packed-rank" => packed_rank_galois_elements(MAXIMUM_OPTION_COUNT)
+            .ok()?
+            .into_iter()
+            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+            .collect::<Vec<_>>(),
         _ => return None,
     };
 
     Some(rotations.into_iter().collect())
 }
 
-fn validate_development_key_arithmetic_fixture(
-    wrapped_fixture: &Value,
-    expected_fixture_id: &str,
-    expected_key_switch_decomposition_hash: &str,
-) -> CanonicalResult<String> {
-    let fixture_record = value_at_path(wrapped_fixture, &["fixture"])?;
-    compare_string_at_path(
-        fixture_record,
-        &["objectType"],
-        "BgvDevelopmentKeyArithmeticFixture",
-        "development key arithmetic fixture object type",
-    )?;
-    compare_string_at_path(
-        fixture_record,
-        &["fixtureId"],
-        expected_fixture_id,
-        "development key arithmetic fixture id",
-    )?;
-    compare_hash_at_path(
-        fixture_record,
-        &["keySwitchDecompositionHash"],
-        expected_key_switch_decomposition_hash,
-        "development key arithmetic fixture decomposition hash",
-    )?;
-    compare_string_at_path(
-        fixture_record,
-        &["rnsArithmeticStatus"],
-        "sampled-decompose-recompose-and-modmul-passed",
-        "development key arithmetic status",
-    )?;
-    for sample in array_at_path(fixture_record, &["sampledCoefficientChecks"])? {
-        if !bool_at_path(sample, &["recompositionMatches"])? {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "development key arithmetic fixture has a failed decomposition check",
-            ));
-        }
-        let modulus = unsigned_at_path(sample, &["modulus"])?;
-        let source_coefficient = unsigned_at_path(sample, &["sourceCoefficient"])?;
-        let digits = array_at_path(sample, &["decompositionDigits"])?;
-        if digits.len() != 3 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "development key arithmetic fixture must use three decomposition digits",
-            ));
-        }
-        let digit_base = 1_u128 << 23;
-        let first_digit = u128::from(digits[0].as_u64().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "development key arithmetic digits must be non-negative integers",
-            )
-        })?);
-        let second_digit = u128::from(digits[1].as_u64().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "development key arithmetic digits must be non-negative integers",
-            )
-        })?);
-        let third_digit = u128::from(digits[2].as_u64().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "development key arithmetic digits must be non-negative integers",
-            )
-        })?);
-        let recomposed =
-            ((first_digit + digit_base * second_digit + digit_base * digit_base * third_digit)
-                % u128::from(modulus)) as u64;
-        if recomposed != source_coefficient
-            || unsigned_at_path(sample, &["recomposedCoefficient"])? != source_coefficient
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "development key arithmetic fixture decomposition does not recompose",
-            ));
+fn validate_sampled_key_material_checks(sampled_checks: &Value) -> CanonicalResult<()> {
+    for check in sampled_checks.as_array().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation key material sampled checks must be an array",
+        )
+    })? {
+        hash_at_path(check, &["keyStreamSeed"])?;
+        for sample in array_at_path(check, &["samples"])? {
+            if !bool_at_path(sample, &["relationMatches"])? {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "evaluation key material stream sample does not satisfy the key-switch relation",
+                ));
+            }
+            let expected = unsigned_at_path(sample, &["expectedKeyLimbCoefficient"])?;
+            let actual = unsigned_at_path(sample, &["decryptedKeyLimbCoefficient"])?;
+            if actual != expected {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "evaluation key material stream sample has an inconsistent relation result",
+                ));
+            }
         }
     }
 
-    let fixture_hash = development_fixture_hash(fixture_record)?;
-    compare_hash_at_path(
-        wrapped_fixture,
-        &["fixtureHash"],
-        &fixture_hash,
-        "development key arithmetic fixture hash",
-    )?;
-
-    Ok(fixture_hash)
+    Ok(())
 }

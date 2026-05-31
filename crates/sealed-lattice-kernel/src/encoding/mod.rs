@@ -336,6 +336,8 @@ enum TranscriptCoreCommand {
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
     RejectBgvReferenceOracleArtifact,
+    RunDevelopmentTopKEvaluation,
+    RunEncryptedAggregateTopKEvaluation,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -523,7 +525,9 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
-        | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
+        | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
+        | TranscriptCoreCommand::RunDevelopmentTopKEvaluation
+        | TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluation => {
             run_bgv_command(command, &request)
         }
     }
@@ -669,6 +673,12 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
             Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
+        }
+        TranscriptCoreCommand::RunDevelopmentTopKEvaluation => {
+            crate::bgv::evaluator::commands::run_development_top_k_evaluation(request)
+        }
+        TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluation => {
+            crate::bgv::evaluator::commands::run_encrypted_aggregate_top_k_evaluation(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

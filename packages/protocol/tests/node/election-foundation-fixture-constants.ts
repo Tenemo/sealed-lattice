@@ -236,34 +236,30 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         'ScoreBitDerivationCircuitHash',
         {
             circuit: 'score-bit-derivation-circuit-v1',
-            selectedEvaluatorPath:
-                'encrypted-aggregate-score-bit-derivation-v1',
+            selectedEvaluatorPath: 'encrypted-score-bit-sliced-comparison-v1',
         },
     ),
     encryptedScoreBitInputHash: deriveProtocolHash(
         'EncryptedScoreBitInputHash',
         {
             layout: 'encrypted-score-bit-inputs-v1',
-            selectedEvaluatorPath:
-                'encrypted-aggregate-score-bit-derivation-v1',
+            selectedEvaluatorPath: 'encrypted-score-bit-sliced-comparison-v1',
         },
     ),
     comparisonInputDerivationCircuitHash: deriveProtocolHash(
         'ComparisonInputDerivationCircuitHash',
         {
             circuit: 'comparison-input-derivation-circuit-v1',
-            futureDesignNoteRequired: true,
-            selectedEvaluatorPath:
-                'inactive-future-direct-comparison-input-profile',
+            noiseCertificateAcceptancePending: true,
+            selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
         },
     ),
     encryptedComparisonInputHash: deriveProtocolHash(
         'EncryptedComparisonInputHash',
         {
-            futureDesignNoteRequired: true,
             layout: 'encrypted-comparison-inputs-v1',
-            selectedEvaluatorPath:
-                'inactive-future-direct-comparison-input-profile',
+            noiseCertificateAcceptancePending: true,
+            selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
         },
     ),
     evaluationNoiseProfileHash: deriveFixtureHash(

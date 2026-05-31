@@ -504,6 +504,9 @@ pub(crate) fn canonical_ciphertext_convention_hash() -> CanonicalResult<String> 
             "conventionId": CANONICAL_CIPHERTEXT_CONVENTION_ID,
             "profileHash": profile_hash()?,
             "coefficientDomainOnly": true,
+            "publicKeyRelation": "componentZero=p*e-a*s,componentOne=a",
+            "encryptionRelation": "c0=componentZero*u+p*e0+m,c1=componentOne*u+p*e1",
+            "messageEmbedding": "least-significant-residue-mod-plaintext-modulus",
             "lattigoSerializationAccepted": false,
         }),
     )
@@ -779,7 +782,7 @@ mod tests {
             (
                 "canonical ciphertext convention",
                 canonical_ciphertext_convention_hash(),
-                "f12e731e1096504c1ade1fb25422d610888e44bcc1936234b160774f2e60e83dc8bd9d9b3ff43ddb6195b5ea6baec08544088e562f86b439a252de76c20d3bc8",
+                "020f25432f206f7da734ca5c07f8a13e536ead99a664e703eb15bcbd39dfc45863a126e5c220e5548357574f396eb7ea86aed54701a9a5bd1c82409b70074a83",
             ),
             (
                 "allowed operation registry",

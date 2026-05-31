@@ -349,6 +349,11 @@ pub(super) fn build_bridge_proof_statement(
     )?;
     let sampled_public_relation_check_policy_hash =
         sampled_public_relation_check_policy_hash(sampled_public_relation_check_policy)?;
+    let batch_encoding_bound_certificate_hash = required_string_field(
+        bridge_encryption,
+        "batchEncodingBoundCertificateHash",
+        "bridgeEncryption",
+    )?;
     let relation_requirements = json!({
         "aggregateReducedCoordinateCount": share_vector_width,
         "aggregateQuotientCoordinateCount": share_vector_width,
@@ -358,8 +363,20 @@ pub(super) fn build_bridge_proof_statement(
         "sharedWitnessCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64,
         "sharedWitnessChallengeEntropyBits": BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS,
         "sharedWitnessWeakestRelation": PLAINTEXT_ENCODING_RELATION,
-        "sharedWitnessWeakestRelationModulus": BRIDGE_SHARED_WITNESS_WEAKEST_RELATION_MODULUS,
+        "sharedWitnessWeakestRelationModuli": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI,
+        "sharedWitnessWeakestRelationModulusProduct": bridge_batch_integer_lift_proof_modulus_product_decimal(),
+        "plaintextEncodingProofModuli": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI,
+        "plaintextEncodingProofModulusProduct": bridge_batch_integer_lift_proof_modulus_product_decimal(),
+        "plaintextEncodingProofModulusProductBitsFloor": BRIDGE_SHARED_WITNESS_PROOF_MODULUS_PRODUCT_BITS_FLOOR,
+        "plaintextEncodingBoundCertificateHash": batch_encoding_bound_certificate_hash,
         "sharedWitnessRejectionAttemptLimit": BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT as u64,
+        "sharedWitnessRejectionRetryLossBits": BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS,
+        "sharedWitnessFullMatrixUnionBoundBits": BRIDGE_FULL_MATRIX_UNION_BOUND_BITS,
+        "sharedWitnessRandomOracleQueryBoundBits": BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS,
+        "sharedWitnessProofSystemLossBits": BRIDGE_PROOF_SYSTEM_LOSS_BITS,
+        "sharedWitnessChallengeBiasBits": BRIDGE_CHALLENGE_BIAS_BITS,
+        "sharedWitnessTargetBindingSoundnessBits": BRIDGE_TARGET_BINDING_SOUNDNESS_BITS,
+        "sharedWitnessEffectiveBindingBelowTarget": BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET,
         "sharedWitnessGrindingDiscountBitsPerCheck": SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK,
         "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR,
         "sharedWitnessEffectiveBindingSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR,
@@ -453,6 +470,10 @@ pub(super) fn build_bridge_proof_statement(
     bridge_statement.insert(
         "bridgeProofTargetContractHash".to_string(),
         Value::String(bridge_proof_target_contract_hash),
+    );
+    bridge_statement.insert(
+        "batchEncodingBoundCertificateHash".to_string(),
+        Value::String(batch_encoding_bound_certificate_hash.to_string()),
     );
     bridge_statement.insert(
         "bgvBatchEncoderHash".to_string(),
@@ -733,6 +754,7 @@ pub(super) fn bridge_proof_statement_hash(
         "ballotSetHash",
         "ballotShareLayoutProfileHash",
         "basisId",
+        "batchEncodingBoundCertificateHash",
         "bgvBatchEncoderHash",
         "bgvProfileHash",
         "bgvPublicKeyRoot",
@@ -824,7 +846,10 @@ pub(super) fn bridge_proof_statement_hash(
         "rnsCrtConsistencyProofStatus",
         "bridgeClaimClosureStatus",
         "hwangPiopStatus",
+        "plaintextEncodingBoundCertificateHash",
+        "plaintextEncodingProofModulusProduct",
         "sharedWitnessWeakestRelation",
+        "sharedWitnessWeakestRelationModulusProduct",
     ] {
         hash_input.insert(
             field_name.to_string(),
@@ -844,8 +869,14 @@ pub(super) fn bridge_proof_statement_hash(
         "sharedWitnessChallengeBitsPerCheck",
         "sharedWitnessCheckCount",
         "sharedWitnessChallengeEntropyBits",
-        "sharedWitnessWeakestRelationModulus",
+        "plaintextEncodingProofModulusProductBitsFloor",
         "sharedWitnessRejectionAttemptLimit",
+        "sharedWitnessRejectionRetryLossBits",
+        "sharedWitnessFullMatrixUnionBoundBits",
+        "sharedWitnessRandomOracleQueryBoundBits",
+        "sharedWitnessProofSystemLossBits",
+        "sharedWitnessChallengeBiasBits",
+        "sharedWitnessTargetBindingSoundnessBits",
         "sharedWitnessGrindingDiscountBitsPerCheck",
         "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor",
         "sharedWitnessEffectiveBindingSoundnessBitsFloor",
@@ -866,6 +897,7 @@ pub(super) fn bridge_proof_statement_hash(
         "developmentKeyOnly",
         "thresholdDecryptable",
         "claimBearingBridgeEncryption",
+        "sharedWitnessEffectiveBindingBelowTarget",
     ] {
         hash_input.insert(
             field_name.to_string(),
@@ -874,6 +906,20 @@ pub(super) fn bridge_proof_statement_hash(
                 field_name,
                 "bridgeProofStatement.relationRequirements",
             )?),
+        );
+    }
+    for field_name in [
+        "plaintextEncodingProofModuli",
+        "sharedWitnessWeakestRelationModuli",
+    ] {
+        hash_input.insert(
+            field_name.to_string(),
+            required_json_field(
+                relation_requirements,
+                field_name,
+                "bridgeProofStatement.relationRequirements",
+            )?
+            .clone(),
         );
     }
 

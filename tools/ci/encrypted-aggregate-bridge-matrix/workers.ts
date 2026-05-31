@@ -136,7 +136,18 @@ const runVariantInChildProcess = async (
                   ];
         const childProcess = spawn(process.execPath, workerArguments, {
             cwd: process.cwd(),
-            env: process.env,
+            env: {
+                ...process.env,
+                NODE_OPTIONS: [
+                    process.env.NODE_OPTIONS,
+                    '--max-old-space-size=8192',
+                ]
+                    .filter(
+                        (option): option is string =>
+                            option !== undefined && option.length > 0,
+                    )
+                    .join(' '),
+            },
             stdio: ['ignore', 'pipe', 'pipe'],
         });
         let standardOutput = '';

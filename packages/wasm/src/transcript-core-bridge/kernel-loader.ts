@@ -25,6 +25,8 @@ import type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    TopKEvaluatorDevelopmentEvaluation,
+    TopKEvaluatorEncryptedAggregateEvaluation,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -584,6 +586,20 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BgvReferenceOracleRejection>({
                         command: 'RejectBgvReferenceOracleArtifact',
                         artifact: input.artifact,
+                    }),
+                runDevelopmentTopKEvaluation: (
+                    input,
+                ): TopKEvaluatorDevelopmentEvaluation =>
+                    executeCommand<TopKEvaluatorDevelopmentEvaluation>({
+                        command: 'RunDevelopmentTopKEvaluation',
+                        ...input,
+                    }),
+                runEncryptedAggregateTopKEvaluation: (
+                    input,
+                ): TopKEvaluatorEncryptedAggregateEvaluation =>
+                    executeCommand<TopKEvaluatorEncryptedAggregateEvaluation>({
+                        command: 'RunEncryptedAggregateTopKEvaluation',
+                        ...input,
                     }),
             };
         })().catch((error: unknown) => {

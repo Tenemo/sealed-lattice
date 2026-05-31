@@ -10,7 +10,7 @@ export type BridgeRandomnessSourceEvidence = {
     readonly proverRandomnessSource: BridgeRandomnessSource;
     readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
     readonly callerSuppliedDevelopmentRandomness: boolean;
-    readonly claimBearingEntropyEvidence: false;
+    readonly claimBearingEntropyEvidence: boolean;
 };
 
 export type AggregateBridgeEncryptionGeneration = {
@@ -59,6 +59,9 @@ export type AggregateBridgeEncryptionGeneration = {
         | 'full-matrix-row-evidence-missing';
     readonly canonicalBytesHash512: string;
     readonly canonicalByteLength: number;
+    readonly batchEncodingRelation: 'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt';
+    readonly batchEncodingBoundCertificate: unknown;
+    readonly batchEncodingBoundCertificateHash: ProtocolHash;
     readonly basisId: string;
     readonly level: number;
     readonly coefficientCount: number;

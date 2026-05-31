@@ -2,6 +2,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
+
 type VendoredProtocolRuntimeEntryExport = {
     readonly exports: readonly string[];
     readonly source: string;
@@ -362,11 +364,6 @@ const main = async (): Promise<void> => {
     console.log('Public package policy verification passed.');
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }

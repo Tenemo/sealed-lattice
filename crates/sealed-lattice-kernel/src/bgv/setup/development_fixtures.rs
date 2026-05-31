@@ -1,66 +1,5 @@
 use super::*;
 
-pub(super) fn development_key_arithmetic_fixture(
-    input: &PassiveSetupInput,
-    fixture_id: &str,
-    fixture_scope: &str,
-    key_switch_decomposition_hash: &str,
-) -> CanonicalResult<Value> {
-    let modulus = DATA_PRIMES[0];
-    let digit_base = 1_u64 << 23;
-    let samples = sample_positions()
-        .into_iter()
-        .map(|position| {
-            let source_coefficient =
-                sample_residue(&input.setup_seed_hash, fixture_scope, position, modulus);
-            let first_digit = source_coefficient % digit_base;
-            let second_digit = (source_coefficient / digit_base) % digit_base;
-            let third_digit = (source_coefficient / digit_base / digit_base) % digit_base;
-            let recomposed =
-                (first_digit + digit_base * second_digit + digit_base * digit_base * third_digit)
-                    % modulus;
-            let multiplier = sample_residue(
-                &input.setup_seed_hash,
-                &format!("{fixture_scope}-bgv-rns-multiplier"),
-                position,
-                modulus,
-            );
-            Ok(json!({
-                "position": position,
-                "modulus": modulus,
-                "sourceCoefficient": source_coefficient,
-                "decompositionDigits": [first_digit, second_digit, third_digit],
-                "recomposedCoefficient": recomposed,
-                "recompositionMatches": recomposed == source_coefficient,
-                "rnsMulCheck": mul_mod(source_coefficient, multiplier, modulus)?,
-            }))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let fixture_record = json!({
-        "objectType": "BgvDevelopmentKeyArithmeticFixture",
-        "objectVersion": 1,
-        "fixtureId": fixture_id,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "ceremonyId": input.ceremony_id,
-        "rosterHash": input.roster_hash,
-        "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "basisId": BgvBasisKind::Extended.basis_id(),
-        "digitBaseBits": 23,
-        "digitCountPerPrime": 3,
-        "sampleModulus": modulus,
-        "sampledCoefficientChecks": samples,
-        "rnsArithmeticStatus": "sampled-decompose-recompose-and-modmul-passed",
-        "protocolEvidence": false,
-        "maliciousEvaluationKeyProofIncluded": false,
-    });
-    let fixture_hash = development_fixture_hash(&fixture_record)?;
-
-    Ok(json!({
-        "fixture": fixture_record,
-        "fixtureHash": fixture_hash,
-    }))
-}
-
 pub(super) fn development_encryption_fixture(
     input: &PassiveSetupInput,
     collective_public_key: &Value,
@@ -99,14 +38,14 @@ pub(super) fn development_encryption_fixture(
         .iter()
         .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
         .collect::<Vec<_>>();
-    let error_zero_residues = encryption_error_zero_coefficients
+    let scaled_error_zero_residues = encryption_error_zero_coefficients
         .iter()
-        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
-        .collect::<Vec<_>>();
-    let error_one_residues = encryption_error_one_coefficients
+        .map(|coefficient| signed_to_plaintext_scaled_residue(*coefficient, modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let scaled_error_one_residues = encryption_error_one_coefficients
         .iter()
-        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
-        .collect::<Vec<_>>();
+        .map(|coefficient| signed_to_plaintext_scaled_residue(*coefficient, modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
     let public_key_product =
         negacyclic_product_mod(&public_key_coefficients, &randomness_residues, modulus)?;
     let public_sample_product =
@@ -123,11 +62,11 @@ pub(super) fn development_encryption_fixture(
         })?;
     let ciphertext_component_zero = public_key_product
         .iter()
-        .zip(error_zero_residues.iter())
+        .zip(scaled_error_zero_residues.iter())
         .zip(message_residues.iter())
-        .map(|((product, error), message_coefficient)| {
+        .map(|((product, scaled_error), message_coefficient)| {
             add_mod(
-                add_mod(*product, *error, modulus)?,
+                add_mod(*product, *scaled_error, modulus)?,
                 *message_coefficient,
                 modulus,
             )
@@ -135,8 +74,8 @@ pub(super) fn development_encryption_fixture(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let ciphertext_component_one = public_sample_product
         .iter()
-        .zip(error_one_residues.iter())
-        .map(|(product, error)| add_mod(*product, *error, modulus))
+        .zip(scaled_error_one_residues.iter())
+        .map(|(product, scaled_error)| add_mod(*product, *scaled_error, modulus))
         .collect::<CanonicalResult<Vec<_>>>()?;
     let layout_hash = layout_hash()?;
     let component_zero = RnsPolynomial::coefficient_domain(
@@ -195,13 +134,13 @@ pub(super) fn development_encryption_fixture(
         "canonicalByteLength": canonical_bytes.len(),
         "messageSlotSample": message_slots,
         "sampleModulus": modulus,
-        "encryptionFormula": "c0=pk*u+e0+m,c1=a*u+e1-over-selected-level-zero-Q-data",
+        "encryptionFormula": "c0=pk*u+p*e0+m,c1=a*u+p*e1-over-selected-level-zero-Q-data",
         "sampledPublicRelationChecks": sample_encryption_relation_checks(
             message_residues,
             &public_key_product,
             &public_sample_product,
-            &error_zero_residues,
-            &error_one_residues,
+            &scaled_error_zero_residues,
+            &scaled_error_one_residues,
         )?,
         "fixtureScope": "development-collective-public-key-encryption-fixture",
         "bridgeEncryptionClaim": false,

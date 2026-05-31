@@ -40,7 +40,7 @@ export type BridgeRandomnessSourceEvidence = {
     readonly proverRandomnessSource: BridgeRandomnessSource;
     readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
     readonly callerSuppliedDevelopmentRandomness: boolean;
-    readonly claimBearingEntropyEvidence: false;
+    readonly claimBearingEntropyEvidence: boolean;
 };
 
 export type BridgeEncryptionEvidence = {
@@ -52,6 +52,7 @@ export type BridgeEncryptionEvidence = {
     readonly aggregateRelationCommitmentHash: ProtocolHash;
     readonly aggregateRelationSubproofSizeBytes: number;
     readonly basisId: string;
+    readonly batchEncodingBoundCertificateHash: ProtocolHash;
     readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
     readonly bgvPublicKeyRoot: ProtocolHash;
     readonly bridgeProofBytesHash: ProtocolHash;

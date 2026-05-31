@@ -6,7 +6,10 @@ import {
     TranscriptCoreKernelCommandError,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
-import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
+import type {
+    BgvPassiveSetupPackage,
+    TopKEvaluatorEncryptedAggregateInput,
+} from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
 const setupRequest = {
     ceremonyId: 'ceremony-main',
@@ -471,17 +474,19 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                     ),
             ],
             [
-                'arithmetic fixture',
+                'evaluation key material commitment',
                 (setupPackage) =>
                     setPathValue(
                         setupPackage,
                         [
                             'evaluationKeys',
-                            'relinearizationArithmeticFixture',
-                            'fixture',
-                            'sampledCoefficientChecks',
+                            'evaluationKeyMaterialCommitment',
+                            'record',
+                            'sampledRelationChecks',
                             0,
-                            'recompositionMatches',
+                            'samples',
+                            0,
+                            'relationMatches',
                         ],
                         false,
                     ),
@@ -493,8 +498,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                         setupPackage,
                         [
                             'certificates',
-                            'evaluationKeyStreamingFixture',
-                            'fixture',
+                            'evaluationKeyStreamingCommitment',
+                            'commitment',
                             'chunkRoot',
                         ],
                         validHash('7'),
@@ -533,6 +538,50 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             );
             expectReboundSetupPackageToBeRejected(kernel, mutatedSetup);
         }
+    });
+
+    it('refuses encrypted aggregate evaluation when bridge ciphertexts use the wrong setup key', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const setup = kernel.generateBgvPassiveSetup(setupRequest);
+        const profileBindings = setup.profileBindings as Record<string, string>;
+        const wrongKeyBridgeInput: TopKEvaluatorEncryptedAggregateInput = {
+            aggregateDerivationComponentHash: validHash('1'),
+            aggregateDerivationStatementHash: validHash('2'),
+            postVotingClosedContextHash: validHash('3'),
+            bridgeEncryption: {
+                profileHash: profileBindings.profileHash,
+                rustBgvBackendProfileHash: profileBindings.backendProfileHash,
+                canonicalCiphertextConventionHash:
+                    profileBindings.canonicalCiphertextConventionHash,
+                plaintextRoot: validHash('4'),
+                ciphertextRoot: validHash('5'),
+                collectivePublicKeyRoot: validHash('6'),
+            },
+        };
+
+        expect(() =>
+            kernel.runEncryptedAggregateTopKEvaluation({
+                setupPackage: setup,
+                encryptedAggregateScoreInputs: [
+                    wrongKeyBridgeInput,
+                    wrongKeyBridgeInput,
+                ],
+                topCount: 1,
+                scoreDomainMax: 10,
+                workingLevel: 6,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+        expect(() =>
+            kernel.runEncryptedAggregateTopKEvaluation({
+                setupPackage: setup,
+                encryptedAggregateInputs: [
+                    wrongKeyBridgeInput,
+                    wrongKeyBridgeInput,
+                ],
+                topCount: 1,
+                scoreDomainMax: 10,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
     });
 
     it('refuses wrong request shapes and recovery-state drift', async () => {
@@ -623,11 +672,20 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         }
     });
 
-    it('refuses missing rotation keys for each provisional purpose', async () => {
+    it('refuses missing rotation keys for each selected purpose', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
+        const selectedRotations = arrayAtPath(setup, [
+            'evaluationKeys',
+            'rotationKeyRoots',
+        ])
+            .slice(0, 4)
+            .map(
+                (rotationRoot) =>
+                    (rotationRoot as { readonly rotation: number }).rotation,
+            );
 
-        for (const rotation of [1, 32, 256, 4096]) {
+        for (const rotation of selectedRotations) {
             const mutatedSetup = structuredClone(setup);
             const rotationRoots = arrayAtPath(mutatedSetup, [
                 'evaluationKeys',
@@ -654,7 +712,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'rotations',
                 0,
             ],
-            3,
+            1,
         );
         expectReboundSetupPackageToBeRejected(kernel, wrongRotationGroup);
     });

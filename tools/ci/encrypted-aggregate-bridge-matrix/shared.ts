@@ -232,13 +232,13 @@ export const variantsForMode = (mode: MatrixMode): readonly Variant[] => {
     return variants;
 };
 
-const fullMatrixMinimumWorkerCount = 16;
-const representativeMatrixMinimumWorkerCount = sentinelVariants.size;
+const fullMatrixWorkerCount = 8;
+const representativeMatrixWorkerCount = 4;
 
 export const requestedWorkerCount = (mode: MatrixMode): number => {
     return mode === 'representative'
-        ? representativeMatrixMinimumWorkerCount
-        : fullMatrixMinimumWorkerCount;
+        ? representativeMatrixWorkerCount
+        : fullMatrixWorkerCount;
 };
 
 export const claimTierForRosterSize = (rosterSize: number): string =>

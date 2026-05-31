@@ -39,21 +39,36 @@ import {
     type BallotPrivacyLoweredLinearRelationStatement,
     type BallotPrivacyRelationBackendPublicContext,
 } from '#packages/protocol/src/ballot-privacy/relation-backend-lowering';
-import ballotFieldLinearProofBackendVectorsJson from '#test-vectors/ballot-privacy/ballot-field-linear-proof-vectors.json';
+
+const baseBallotFieldLinearProofEncoding: Record<string, unknown> = {
+    challengeCoefficientBitLength: 5,
+    challengeCoefficientModulus: 17,
+    coefficientModulus: '70368744177829',
+    compressedCoefficientBitLength: 35,
+    compressedCommitmentVectorLength: 18,
+    euclideanResponseLog2StandardDeviation: 14,
+    euclideanResponseVectorLength: 4,
+    fullSizeCoefficientBitLength: 47,
+    hashMaskVectorLength: 2,
+    hintVectorLength: 18,
+    infinityResponseLog2StandardDeviation: 22,
+    infinityResponseVectorLength: 4,
+    profileId: 'encoded-score-field-linear-proof-encoding-v1',
+    randomnessResponseLog2StandardDeviation: 12,
+    randomnessResponseVectorLength: 41,
+    ringDegree: 64,
+    shortResponseLog2StandardDeviation: 18,
+    shortResponseVectorLength: 177,
+    source: 'temp/lazer/python/demo/ballot_field_params.h:ballot_field_param',
+    targetCommitmentVectorLength: 12,
+};
 
 const createProofEncoding = (input: {
     readonly profileId: string;
     readonly shortResponseVectorLength: number;
     readonly source: string;
 }): ProofEncoding => {
-    const baseEncoding = cloneJsonValue(
-        (
-            ballotFieldLinearProofBackendVectorsJson as {
-                readonly proofEncoding: Record<string, unknown>;
-            }
-        ).proofEncoding,
-    );
-    delete baseEncoding.expectedProofSizeBytes;
+    const baseEncoding = cloneJsonValue(baseBallotFieldLinearProofEncoding);
 
     return {
         ...baseEncoding,

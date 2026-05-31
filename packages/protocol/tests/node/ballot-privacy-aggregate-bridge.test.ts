@@ -79,6 +79,9 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateReducedCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
             });
+        const batchEncodingBoundCertificateHash = hash(
+            'batch-encoding-bound-certificate-1',
+        );
         const bridgeProofStatementHash = deriveBridgeProofStatementHash({
             aggregateDerivationComponentHash,
             aggregateInputEncodingProfileHash:
@@ -98,6 +101,7 @@ describe('encrypted aggregate bridge objects', () => {
             ballotShareLayoutProfileHash:
                 baseFields.ballotShareLayoutProfileHash,
             basisId: 'sealed-lattice-bgv-rns-data-basis-v1',
+            batchEncodingBoundCertificateHash,
             bgvBatchEncoderHash: baseFields.bgvBatchEncoderHash,
             bgvEncryptionKeyMaterialKind:
                 'passive-transcript-derived-collective-public-key',
@@ -154,6 +158,14 @@ describe('encrypted aggregate bridge objects', () => {
                 'AggregateDerivationFullVerificationPreconditionNotBound',
             plaintextCanonicalLiftProofStatus:
                 'PlaintextCanonicalLiftProofMissing',
+            plaintextEncodingBoundCertificateHash:
+                batchEncodingBoundCertificateHash,
+            plaintextEncodingProofModuli: [
+                140_737_487_306_753, 140_737_486_716_929,
+            ],
+            plaintextEncodingProofModulusProduct:
+                '19807040250408114080301121537',
+            plaintextEncodingProofModulusProductBitsFloor: 93,
             plaintextRoot: hash('bridge-plaintext-1'),
             pollSpecHash: baseFields.pollSpecHash,
             postVotingClosedContextHash: baseFields.postVotingClosedContextHash,
@@ -175,11 +187,22 @@ describe('encrypted aggregate bridge objects', () => {
             sharedWitnessChallengeEntropyBits: 128,
             sharedWitnessRejectionAttemptLimit: 64,
             sharedWitnessGrindingDiscountBitsPerCheck: 6,
-            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32,
-            sharedWitnessEffectiveBindingSoundnessBitsFloor: 20,
+            sharedWitnessRejectionRetryLossBits: 12,
+            sharedWitnessFullMatrixUnionBoundBits: 9,
+            sharedWitnessRandomOracleQueryBoundBits: 0,
+            sharedWitnessProofSystemLossBits: 0,
+            sharedWitnessChallengeBiasBits: 0,
+            sharedWitnessTargetBindingSoundnessBits: 128,
+            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
+            sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+            sharedWitnessEffectiveBindingBelowTarget: false,
             sharedWitnessWeakestRelation:
-                'BGVBatchEncode65537InverseNegacyclicNtt',
-            sharedWitnessWeakestRelationModulus: 65_537,
+                'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+            sharedWitnessWeakestRelationModuli: [
+                140_737_487_306_753, 140_737_486_716_929,
+            ],
+            sharedWitnessWeakestRelationModulusProduct:
+                '19807040250408114080301121537',
             sharedWitnessZeroKnowledgeStatus:
                 'SharedWitnessZeroKnowledgeResponseDistributionChecked',
             slotCount: 32_768,
@@ -208,7 +231,7 @@ describe('encrypted aggregate bridge objects', () => {
         );
         const randomnessSourceEvidence = {
             callerSuppliedDevelopmentRandomness: false,
-            claimBearingEntropyEvidence: false,
+            claimBearingEntropyEvidence: true,
             encryptionRandomnessSeedSource: 'fresh-csprng',
             objectType: 'AggregateBridgeRandomnessSourceEvidence',
             objectVersion: 1,
@@ -228,6 +251,7 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateRelationCommitmentHash,
                 aggregateRelationSubproofSizeBytes,
                 basisId: 'sealed-lattice-bgv-rns-data-basis-v1',
+                batchEncodingBoundCertificateHash,
                 bgvEncryptionKeyMaterialKind:
                     'passive-transcript-derived-collective-public-key',
                 bgvPublicKeyRoot: baseFields.bgvPublicKeyRoot,
@@ -461,6 +485,31 @@ describe('encrypted aggregate bridge objects', () => {
                 setupPackage,
             }),
         ).toThrow(/randomness source evidence development flag/u);
+        expect(() =>
+            createPendingBridgeProofRecordFromBridgeEvidence({
+                aggregateDerivationComponent,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
+                bridgeEncryptionEvidence: {
+                    ...bridgeEncryptionEvidence,
+                    randomnessSourceEvidence: {
+                        ...bridgeEncryptionEvidence.randomnessSourceEvidence,
+                        claimBearingEntropyEvidence: false,
+                    },
+                },
+                bridgeEvidenceVerification: {
+                    ...bridgeEvidenceVerification,
+                    randomnessSourceEvidence: {
+                        ...bridgeEvidenceVerification.randomnessSourceEvidence,
+                        claimBearingEntropyEvidence: false,
+                    },
+                },
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
+                setupPackage,
+            }),
+        ).toThrow(/randomness source evidence claim-bearing entropy flag/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,

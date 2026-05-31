@@ -29,13 +29,13 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         hash_at_path(certificates, &["evaluationKeySizeProfileHash"])?,
         "evaluation key size profile hash",
     )?;
-    let evaluation_key_streaming_fixture_hash =
-        validate_evaluation_key_streaming_fixture(certificates)?;
+    let evaluation_key_streaming_commitment_hash =
+        validate_evaluation_key_streaming_commitment(certificates)?;
     compare_hash_at_path(
         value_at_path(certificates, &["setupParameterCertificate"])?,
-        &["evaluationKeyStreamingFixtureHash"],
-        &evaluation_key_streaming_fixture_hash,
-        "setup parameter evaluation key streaming fixture hash",
+        &["evaluationKeyStreamingCommitmentHash"],
+        &evaluation_key_streaming_commitment_hash,
+        "setup parameter evaluation key streaming commitment hash",
     )?;
     compare_derived_hash(
         "BGVSetupParameterCertificateHash",
@@ -64,62 +64,62 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
     )
 }
 
-fn validate_evaluation_key_streaming_fixture(certificates: &Value) -> CanonicalResult<String> {
-    let wrapped_fixture = value_at_path(certificates, &["evaluationKeyStreamingFixture"])?;
-    let fixture_record = value_at_path(wrapped_fixture, &["fixture"])?;
+fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> CanonicalResult<String> {
+    let wrapped_commitment = value_at_path(certificates, &["evaluationKeyStreamingCommitment"])?;
+    let commitment_record = value_at_path(wrapped_commitment, &["commitment"])?;
     compare_string_at_path(
-        fixture_record,
+        commitment_record,
         &["objectType"],
-        "BgvEvaluationKeyStreamingFixture",
-        "evaluation key streaming fixture object type",
+        "BgvEvaluationKeyStreamingCommitment",
+        "evaluation key streaming commitment object type",
     )?;
     compare_string_at_path(
-        fixture_record,
-        &["fixtureId"],
-        EVALUATION_KEY_STREAMING_FIXTURE_ID,
-        "evaluation key streaming fixture id",
+        commitment_record,
+        &["commitmentId"],
+        EVALUATION_KEY_STREAMING_COMMITMENT_ID,
+        "evaluation key streaming commitment id",
     )?;
-    if usize_at_path(fixture_record, &["chunkSizeBytes"])? != EVALUATION_KEY_CHUNK_SIZE_BYTES {
+    if usize_at_path(commitment_record, &["chunkSizeBytes"])? != EVALUATION_KEY_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidChunkSize,
-            "evaluation key streaming fixture chunk size changed",
+            "evaluation key streaming commitment chunk size changed",
         ));
     }
-    let stream_record = value_at_path(fixture_record, &["streamRecord"])?;
+    let stream_record = value_at_path(commitment_record, &["streamRecord"])?;
     let stream_bytes = canonical_json(stream_record)?.into_bytes();
-    if usize_at_path(fixture_record, &["canonicalStreamByteLength"])? != stream_bytes.len() {
+    if usize_at_path(commitment_record, &["canonicalStreamByteLength"])? != stream_bytes.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "evaluation key streaming fixture byte length does not match its stream record",
+            "evaluation key streaming commitment byte length does not match its stream record",
         ));
     }
     compare_hash_at_path(
-        fixture_record,
+        commitment_record,
         &["chunkRoot"],
         &chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?,
-        "evaluation key streaming fixture chunk root",
+        "evaluation key streaming commitment chunk root",
     )?;
     let total_evaluation_key_byte_estimate = usize_at_path(
-        fixture_record,
-        &["storageQuotaFixture", "totalEvaluationKeyByteEstimate"],
+        commitment_record,
+        &["storageQuotaDecision", "totalEvaluationKeyByteEstimate"],
     )?;
-    let quota_bytes = usize_at_path(fixture_record, &["storageQuotaFixture", "quotaBytes"])?;
-    let accepted = bool_at_path(fixture_record, &["storageQuotaFixture", "accepted"])?;
+    let quota_bytes = usize_at_path(commitment_record, &["storageQuotaDecision", "quotaBytes"])?;
+    let accepted = bool_at_path(commitment_record, &["storageQuotaDecision", "accepted"])?;
     if accepted != (total_evaluation_key_byte_estimate <= quota_bytes) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "evaluation key streaming fixture storage quota decision is inconsistent",
+            "evaluation key streaming commitment storage quota decision is inconsistent",
         ));
     }
-    let fixture_hash = development_fixture_hash(fixture_record)?;
+    let commitment_hash = derive_protocol_hash("EvaluationKeySetDigest", commitment_record)?;
     compare_hash_at_path(
-        wrapped_fixture,
-        &["fixtureHash"],
-        &fixture_hash,
-        "evaluation key streaming fixture hash",
+        wrapped_commitment,
+        &["commitmentHash"],
+        &commitment_hash,
+        "evaluation key streaming commitment hash",
     )?;
 
-    Ok(fixture_hash)
+    Ok(commitment_hash)
 }
 
 fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalResult<()> {

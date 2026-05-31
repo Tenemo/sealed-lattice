@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import * as ts from 'typescript';
 
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
+
 type ApiSnapshot = {
     readonly declarationFiles: readonly string[];
     readonly declarationHash: string;
@@ -311,11 +313,6 @@ const main = async (): Promise<void> => {
     console.log('Public API snapshot verification passed.');
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }

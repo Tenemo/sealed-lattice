@@ -100,19 +100,6 @@ const requireRandomnessHex = (value: string, label: string): void => {
 };
 
 const requireComponentContract = <Value>(
-    values: Readonly<Record<BallotPrivacyBackendProofComponentId, Value>>,
-    componentId: BallotPrivacyBackendProofComponentId,
-    label: string,
-): Value => {
-    const value = values[componentId];
-    if (value === undefined) {
-        throw new Error(`${label}.${componentId} is required.`);
-    }
-
-    return value;
-};
-
-const requirePartialComponentContract = <Value>(
     values: Readonly<
         Partial<Record<BallotPrivacyBackendProofComponentId, Value>>
     >,
@@ -228,7 +215,6 @@ export {
     requireContractProfileId,
     requireRandomnessHex,
     requireComponentContract,
-    requirePartialComponentContract,
     assertProofParameterSetMatchesStatement,
     assertProofEncodingMatchesStatement,
 };

@@ -1,5 +1,3 @@
-import { pathToFileURL } from 'node:url';
-
 import {
     createLocalRunLog,
     currentProcessExitCode,
@@ -20,6 +18,8 @@ import {
     proofBenchmarkLaneValues,
     type ProofBenchmarkLane,
 } from './test-lanes.js';
+
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const isProofBenchmarkLane = (lane: string): lane is ProofBenchmarkLane =>
     proofBenchmarkLaneValues.some((supportedLane) => supportedLane === lane);
@@ -127,11 +127,6 @@ const main = async (): Promise<void> => {
     }
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }

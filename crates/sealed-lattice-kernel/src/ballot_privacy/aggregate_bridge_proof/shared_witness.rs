@@ -63,6 +63,8 @@ pub(super) fn generate_bridge_shared_witness_proof(
     let aggregate_quotient_witness = u64_slice_to_bigint_vec(input.aggregate_quotient_vector);
     let plaintext_coefficient_witness =
         u64_slice_to_bigint_vec(&input.trace.plaintext_coefficients_mod_plaintext);
+    let plaintext_encoding_quotient_witness =
+        u64_slice_to_bigint_vec(&input.trace.plaintext_encoding_quotients);
     let randomizer_witness =
         i64_slice_to_bigint_vec(&input.trace.encryption_randomness_coefficients);
     let perturbation_zero_witness =
@@ -124,6 +126,15 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 plaintext_coefficient_witness.len(),
                 &mask_absolute_bound,
             );
+            let plaintext_encoding_quotient_mask = sample_bridge_mask_vector(
+                input.bridge_proof_statement_hash,
+                input.prover_randomness_hex,
+                check_index,
+                rejection_attempt_index,
+                "batch-quotient",
+                plaintext_encoding_quotient_witness.len(),
+                &mask_absolute_bound,
+            );
             let randomizer_mask = sample_bridge_mask_vector(
                 input.bridge_proof_statement_hash,
                 input.prover_randomness_hex,
@@ -163,6 +174,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 crate::bgv::commands::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
                     &aggregate_reduced_mask,
                     &plaintext_coefficient_mask,
+                    &plaintext_encoding_quotient_mask,
                 )?;
             let bgv_commitment_hash =
                 crate::bgv::commands::encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
@@ -229,6 +241,12 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &response_shift_bound,
                 &plaintext_coefficient_witness,
             )?;
+            let batch_quotient_response = response_vector(
+                &plaintext_encoding_quotient_mask,
+                &challenge,
+                &response_shift_bound,
+                &plaintext_encoding_quotient_witness,
+            )?;
             let cipher_randomizer_response = response_vector(
                 &randomizer_mask,
                 &challenge,
@@ -253,6 +271,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &aggregate_reduced_response,
                 &aggregate_quotient_response,
                 &batch_coefficient_response,
+                &batch_quotient_response,
                 &cipher_randomizer_response,
                 &bounded_perturbation_zero_response,
                 &bounded_perturbation_one_response,
@@ -276,6 +295,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 "aggregateReducedResponseHex": signed_i256_vector_hex(&aggregate_reduced_response)?,
                 "aggregateQuotientResponseHex": signed_i256_vector_hex(&aggregate_quotient_response)?,
                 "batchCoefficientResponseHex": signed_i256_vector_hex(&batch_coefficient_response)?,
+                "batchQuotientResponseHex": signed_i256_vector_hex(&batch_quotient_response)?,
                 "cipherRandomizerResponseHex": signed_i256_vector_hex(&cipher_randomizer_response)?,
                 "boundedPerturbationZeroResponseHex": signed_i256_vector_hex(&bounded_perturbation_zero_response)?,
                 "boundedPerturbationOneResponseHex": signed_i256_vector_hex(&bounded_perturbation_one_response)?,
@@ -572,6 +592,11 @@ pub(super) fn verify_bridge_shared_witness_proof(
             "batchCoefficientResponseHex",
             "bridgeSharedWitnessProof.check",
         )?;
+        let batch_quotient_response = read_signed_i256_hex_vector(
+            check,
+            "batchQuotientResponseHex",
+            "bridgeSharedWitnessProof.check",
+        )?;
         let cipher_randomizer_response = read_signed_i256_hex_vector(
             check,
             "cipherRandomizerResponseHex",
@@ -593,6 +618,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             &aggregate_reduced_response,
             &aggregate_quotient_response,
             &batch_coefficient_response,
+            &batch_quotient_response,
             &cipher_randomizer_response,
             &bounded_perturbation_zero_response,
             &bounded_perturbation_one_response,
@@ -606,6 +632,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             ("aggregate reduced", aggregate_reduced_response.as_slice()),
             ("aggregate quotient", aggregate_quotient_response.as_slice()),
             ("batch coefficient", batch_coefficient_response.as_slice()),
+            ("batch quotient", batch_quotient_response.as_slice()),
             ("cipher randomizer", cipher_randomizer_response.as_slice()),
             (
                 "bounded perturbation zero",
@@ -630,6 +657,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             crate::bgv::commands::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
                 &aggregate_reduced_response,
                 &batch_coefficient_response,
+                &batch_quotient_response,
             )?;
         let bgv_commitment_hash =
             crate::bgv::commands::encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
@@ -1026,6 +1054,7 @@ fn validate_response_lengths(
     aggregate_reduced_response: &[BigInt],
     aggregate_quotient_response: &[BigInt],
     batch_coefficient_response: &[BigInt],
+    batch_quotient_response: &[BigInt],
     cipher_randomizer_response: &[BigInt],
     bounded_perturbation_zero_response: &[BigInt],
     bounded_perturbation_one_response: &[BigInt],
@@ -1037,6 +1066,7 @@ fn validate_response_lengths(
         || aggregate_reduced_response.len() != expected_aggregate_count
         || aggregate_quotient_response.len() != expected_quotient_count
         || batch_coefficient_response.len() != POLYNOMIAL_DEGREE
+        || batch_quotient_response.len() != POLYNOMIAL_DEGREE
         || cipher_randomizer_response.len() != POLYNOMIAL_DEGREE
         || bounded_perturbation_zero_response.len() != POLYNOMIAL_DEGREE
         || bounded_perturbation_one_response.len() != POLYNOMIAL_DEGREE
@@ -1057,6 +1087,7 @@ fn validate_all_response_vector_bounds(
     aggregate_reduced_response: &[BigInt],
     aggregate_quotient_response: &[BigInt],
     batch_coefficient_response: &[BigInt],
+    batch_quotient_response: &[BigInt],
     cipher_randomizer_response: &[BigInt],
     bounded_perturbation_zero_response: &[BigInt],
     bounded_perturbation_one_response: &[BigInt],
@@ -1068,6 +1099,7 @@ fn validate_all_response_vector_bounds(
         ("aggregate reduced", aggregate_reduced_response),
         ("aggregate quotient", aggregate_quotient_response),
         ("batch coefficient", batch_coefficient_response),
+        ("batch quotient", batch_quotient_response),
         ("cipher randomizer", cipher_randomizer_response),
         (
             "bounded perturbation zero",
@@ -1157,6 +1189,7 @@ fn shared_response_scalar_count(
         .checked_add(aggregate_opening_count)
         .and_then(|value| value.checked_add(aggregate_reduced_count))
         .and_then(|value| value.checked_add(aggregate_quotient_count))
+        .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))
         .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))
         .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))
         .and_then(|value| value.checked_add(POLYNOMIAL_DEGREE))

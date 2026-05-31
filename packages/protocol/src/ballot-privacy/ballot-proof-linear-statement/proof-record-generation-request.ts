@@ -37,7 +37,6 @@ import {
     requireContractIntegerField,
     requireContractProfileId,
     requireObjectContract,
-    requirePartialComponentContract,
     requireRandomnessHex,
 } from './proof-contract-validation.js';
 import {
@@ -305,7 +304,7 @@ export const buildBallotProofRecordGenerationRequest = (input: {
         );
         if (componentId !== 'receiver-key-binding-component') {
             requireRandomnessHex(
-                requirePartialComponentContract(
+                requireComponentContract(
                     input.randomness.componentProverRandomnessHexes,
                     componentId,
                     'component prover randomness',

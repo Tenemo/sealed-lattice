@@ -31,8 +31,15 @@ const publicPackageAlias = {
     replacement: publicPackageEntryPoint,
 } as const;
 
+const rootPrivateAliases = [
+    {
+        find: '#test-vectors',
+        replacement: resolveFromRepoRoot('test-vectors'),
+    },
+] as const;
+
 const publicPackageTestResolve = {
-    alias: [publicPackageAlias],
+    alias: [publicPackageAlias, ...rootPrivateAliases],
     tsconfigPaths: true,
 } as const;
 
@@ -222,7 +229,7 @@ export default defineConfig({
     plugins: [createPublicPackageResolutionPlugin()],
     resolve: publicPackageTestResolve,
     test: {
-        alias: [publicPackageAlias],
+        alias: [publicPackageAlias, ...rootPrivateAliases],
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json-summary', 'lcov'],

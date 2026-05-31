@@ -203,7 +203,8 @@ export const registerAggregateBridgeEncryptionTest = (
                         'AggregateBridgeCiphertextGenerated',
                         'CollectivePublicKeyRootBound',
                         'BgvPublicKeyCoefficientMaterialBound',
-                        'NotThresholdDecryptableBridgeCiphertext',
+                        'DecryptableBgvCiphertextConvention',
+                        'TargetThresholdDecryptionProtocolPending',
                         'CoefficientDomainCanonical',
                         'BridgeProofRelationChecked',
                         'BridgeProofImplementationEvidenceOnly',
@@ -408,11 +409,28 @@ export const registerAggregateBridgeEncryptionTest = (
                             sharedWitnessChallengeEntropyBits: 128,
                             sharedWitnessRejectionAttemptLimit: 64,
                             sharedWitnessGrindingDiscountBitsPerCheck: 6,
-                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32,
-                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 20,
+                            sharedWitnessRejectionRetryLossBits: 12,
+                            sharedWitnessFullMatrixUnionBoundBits: 9,
+                            sharedWitnessRandomOracleQueryBoundBits: 0,
+                            sharedWitnessProofSystemLossBits: 0,
+                            sharedWitnessChallengeBiasBits: 0,
+                            sharedWitnessTargetBindingSoundnessBits: 128,
+                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
+                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+                            sharedWitnessEffectiveBindingBelowTarget: false,
                             sharedWitnessWeakestRelation:
-                                'BGVBatchEncode65537InverseNegacyclicNtt',
-                            sharedWitnessWeakestRelationModulus: 65_537,
+                                'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+                            sharedWitnessWeakestRelationModuli: [
+                                140_737_487_306_753, 140_737_486_716_929,
+                            ],
+                            sharedWitnessWeakestRelationModulusProduct:
+                                '19807040250408114080301121537',
+                            plaintextEncodingProofModuli: [
+                                140_737_487_306_753, 140_737_486_716_929,
+                            ],
+                            plaintextEncodingProofModulusProduct:
+                                '19807040250408114080301121537',
+                            plaintextEncodingProofModulusProductBitsFloor: 93,
                             sharedWitnessZeroKnowledgeStatus:
                                 'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                             bgvEncryptionKeyMaterialKind:
@@ -448,14 +466,14 @@ export const registerAggregateBridgeEncryptionTest = (
                                 plaintextCoefficientColumnRole:
                                     'bgv-batch-encoding-and-bgv-encryption-message',
                                 plaintextCoefficientCount: 32_768,
-                                plaintextEncodingQuotientCount: 0,
+                                plaintextEncodingQuotientCount: 32_768,
                                 plaintextEncodingRelationRowCount: 32_768,
                                 sameWitnessLinkageModel:
                                     'SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired',
                                 separateSubproofsAcceptedForClosure: false,
                                 sharedReducedCoordinateColumnRole:
                                     'aggregate-reduction-and-bgv-plaintext-slot',
-                                sharedResponseScalarCount: 131_796,
+                                sharedResponseScalarCount: 164_564,
                             },
                             sharedWitnessLayoutHash: expect.any(
                                 String,
@@ -475,11 +493,28 @@ export const registerAggregateBridgeEncryptionTest = (
                             sharedWitnessChallengeEntropyBits: 128,
                             sharedWitnessRejectionAttemptLimit: 64,
                             sharedWitnessGrindingDiscountBitsPerCheck: 6,
-                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32,
-                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 20,
+                            sharedWitnessRejectionRetryLossBits: 12,
+                            sharedWitnessFullMatrixUnionBoundBits: 9,
+                            sharedWitnessRandomOracleQueryBoundBits: 0,
+                            sharedWitnessProofSystemLossBits: 0,
+                            sharedWitnessChallengeBiasBits: 0,
+                            sharedWitnessTargetBindingSoundnessBits: 128,
+                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
+                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+                            sharedWitnessEffectiveBindingBelowTarget: false,
                             sharedWitnessWeakestRelation:
-                                'BGVBatchEncode65537InverseNegacyclicNtt',
-                            sharedWitnessWeakestRelationModulus: 65_537,
+                                'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+                            sharedWitnessWeakestRelationModuli: [
+                                140_737_487_306_753, 140_737_486_716_929,
+                            ],
+                            sharedWitnessWeakestRelationModulusProduct:
+                                '19807040250408114080301121537',
+                            plaintextEncodingProofModuli: [
+                                140_737_487_306_753, 140_737_486_716_929,
+                            ],
+                            plaintextEncodingProofModulusProduct:
+                                '19807040250408114080301121537',
+                            plaintextEncodingProofModulusProductBitsFloor: 93,
                         },
                     });
                     expect(
@@ -534,7 +569,8 @@ export const registerAggregateBridgeEncryptionTest = (
                         'EncryptedAggregateSingleContributionBridgeRelationChecked',
                         'BridgeProofImplementationEvidenceOnly',
                         'BgvPublicKeyCoefficientMaterialBound',
-                        'NotThresholdDecryptableBridgeCiphertext',
+                        'DecryptableBgvCiphertextConvention',
+                        'TargetThresholdDecryptionProtocolPending',
                         'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                         'BgvRandomnessErrorSupportPolynomialChecked',
                         'PlaintextCanonicalLiftProofMissing',

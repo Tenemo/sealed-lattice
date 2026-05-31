@@ -181,6 +181,14 @@ pub(super) fn signed_to_modulus_residue(value: i64, modulus: u64) -> u64 {
     }
 }
 
+pub(super) fn signed_to_plaintext_scaled_residue(value: i64, modulus: u64) -> CanonicalResult<u64> {
+    mul_mod(
+        PLAINTEXT_MODULUS % modulus,
+        signed_to_modulus_residue(value, modulus),
+        modulus,
+    )
+}
+
 // Polynomial multiplication in Z_q[X]/(X^N + 1): forward NTT both operands,
 // multiply pointwise, then inverse NTT.
 pub(super) fn negacyclic_product_mod(
@@ -227,8 +235,8 @@ pub(super) fn sample_encryption_relation_checks(
     message_residues: &[u64],
     public_key_product: &[u64],
     public_sample_product: &[u64],
-    error_zero_residues: &[u64],
-    error_one_residues: &[u64],
+    scaled_error_zero_residues: &[u64],
+    scaled_error_one_residues: &[u64],
 ) -> CanonicalResult<Vec<Value>> {
     let modulus = DATA_PRIMES[0];
     sample_positions()
@@ -237,7 +245,7 @@ pub(super) fn sample_encryption_relation_checks(
             let component_zero = add_mod(
                 add_mod(
                     public_key_product[position],
-                    error_zero_residues[position],
+                    scaled_error_zero_residues[position],
                     modulus,
                 )?,
                 message_residues[position],
@@ -245,7 +253,7 @@ pub(super) fn sample_encryption_relation_checks(
             )?;
             let component_one = add_mod(
                 public_sample_product[position],
-                error_one_residues[position],
+                scaled_error_one_residues[position],
                 modulus,
             )?;
             Ok(json!({
@@ -315,13 +323,4 @@ pub(super) fn sample_positions() -> Vec<usize> {
     positions.dedup();
 
     positions
-}
-
-pub(super) fn development_fixture_hash(fixture_record: &Value) -> CanonicalResult<String> {
-    let canonical_fixture = canonical_json(fixture_record)?;
-
-    Ok(hash512_hex(
-        "sealed-lattice-bgv-rns/development-fixture-hash-v1",
-        &[canonical_fixture.as_bytes()],
-    ))
 }

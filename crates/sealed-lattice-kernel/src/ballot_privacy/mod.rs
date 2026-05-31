@@ -193,6 +193,7 @@ pub(crate) mod linear_proof {
 pub(crate) use aggregate_bridge_proof::{
     evaluate_aggregate_bridge_relation_from_command_request,
     generate_aggregate_bridge_encryption_from_command_request,
+    verify_aggregate_bridge_encryption_for_evaluator,
     verify_aggregate_bridge_encryption_from_command_request,
 };
 pub(crate) use aggregate_derivation_proof::{

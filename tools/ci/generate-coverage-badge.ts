@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 export type CoverageMetric = {
     readonly covered: number;
@@ -223,12 +224,7 @@ const main = async (): Promise<void> => {
     );
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(path.resolve(scriptEntryPoint)).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }
 /* v8 ignore stop */

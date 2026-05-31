@@ -201,6 +201,10 @@ const syntheticBridgeProofStatementHash = (input: {
         ballotShareLayoutProfileHash:
             profileSet.ballotShareLayoutProfile.ballotShareLayoutProfileHash,
         basisId: 'QData',
+        batchEncodingBoundCertificateHash: syntheticHash(
+            'BridgeProofRecordHash',
+            `batch-lift-bound-${input.variant.rosterSize}-${input.variant.optionCount}`,
+        ),
         bgvBatchEncoderHash: syntheticHash(
             'BGVBatchEncoderHash',
             'shape-config-batch-encoder',
@@ -288,6 +292,15 @@ const syntheticBridgeProofStatementHash = (input: {
         aggregateDerivationVerificationScope:
             'AggregateDerivationFullVerificationPreconditionNotBound',
         plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
+        plaintextEncodingBoundCertificateHash: syntheticHash(
+            'BridgeProofRecordHash',
+            `batch-lift-bound-${input.variant.rosterSize}-${input.variant.optionCount}`,
+        ),
+        plaintextEncodingProofModuli: [
+            140_737_487_306_753, 140_737_486_716_929,
+        ],
+        plaintextEncodingProofModulusProduct: '19807040250408114080301121537',
+        plaintextEncodingProofModulusProductBitsFloor: 93,
         optionCount: input.statement.optionCount,
         participantCount: input.statement.participantCount,
         plaintextRoot: syntheticHash(
@@ -323,10 +336,22 @@ const syntheticBridgeProofStatementHash = (input: {
         sharedWitnessChallengeEntropyBits: 128,
         sharedWitnessRejectionAttemptLimit: 64,
         sharedWitnessGrindingDiscountBitsPerCheck: 6,
-        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 32,
-        sharedWitnessEffectiveBindingSoundnessBitsFloor: 20,
-        sharedWitnessWeakestRelation: 'BGVBatchEncode65537InverseNegacyclicNtt',
-        sharedWitnessWeakestRelationModulus: 65_537,
+        sharedWitnessRejectionRetryLossBits: 12,
+        sharedWitnessFullMatrixUnionBoundBits: 9,
+        sharedWitnessRandomOracleQueryBoundBits: 0,
+        sharedWitnessProofSystemLossBits: 0,
+        sharedWitnessChallengeBiasBits: 0,
+        sharedWitnessTargetBindingSoundnessBits: 128,
+        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+        sharedWitnessEffectiveBindingBelowTarget: false,
+        sharedWitnessWeakestRelation:
+            'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+        sharedWitnessWeakestRelationModuli: [
+            140_737_487_306_753, 140_737_486_716_929,
+        ],
+        sharedWitnessWeakestRelationModulusProduct:
+            '19807040250408114080301121537',
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,

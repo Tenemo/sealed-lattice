@@ -16,18 +16,18 @@ pub(super) fn setup_certificates(
 ) -> CanonicalResult<Value> {
     let q_data_bits = data_basis_modulus_bits();
     let qp_public_bits = extended_basis_modulus_bits();
-    let rotation_key_count = evaluation_keys["rotationKeyRoots"]
+    let rotation_key_roots = evaluation_keys["rotationKeyRoots"]
         .as_array()
-        .expect("rotation key roots use array")
-        .len();
+        .expect("rotation key roots use array");
+    let rotation_key_count = rotation_key_roots.len();
     let public_samples = public_rlwe_samples_by_basis(input.participants.len(), rotation_key_count);
-    let evaluation_key_size_certificate = evaluation_key_size_certificate(rotation_key_count);
+    let evaluation_key_size_certificate = evaluation_key_size_certificate(evaluation_keys)?;
     let evaluation_key_size_profile_hash = derive_protocol_hash(
         "EvaluationKeySizeProfileHash",
         &evaluation_key_size_certificate,
     )?;
-    let evaluation_key_streaming_fixture =
-        evaluation_key_streaming_fixture(evaluation_keys, &evaluation_key_size_certificate)?;
+    let evaluation_key_streaming_commitment =
+        evaluation_key_streaming_commitment(evaluation_keys, &evaluation_key_size_certificate)?;
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
@@ -50,7 +50,7 @@ pub(super) fn setup_certificates(
         "errorDistributionCertificateHash": error_distribution_certificate_hash,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "evaluationKeySizeProfileHash": evaluation_key_size_profile_hash,
-        "evaluationKeyStreamingFixtureHash": evaluation_key_streaming_fixture["fixtureHash"],
+        "evaluationKeyStreamingCommitmentHash": evaluation_key_streaming_commitment["commitmentHash"],
         "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
         "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
         "securityEstimatorInputHash": security_estimator_input_hash()?,
@@ -82,7 +82,7 @@ pub(super) fn setup_certificates(
         "setupParameterCertificateHash": setup_parameter_certificate_hash,
         "evaluationKeySizeCertificate": evaluation_key_size_certificate,
         "evaluationKeySizeProfileHash": evaluation_key_size_profile_hash,
-        "evaluationKeyStreamingFixture": evaluation_key_streaming_fixture,
+        "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
         "developmentEncryptionFixtureHash": development_encryption_fixture["fixtureHash"],
         "statusLabels": [
             "ActualSecretDistributionRecorded",
@@ -277,52 +277,54 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "encrypted-aggregate-score-bit-derivation-v1",
+        "selectedEvaluatorPath": "encrypted-score-bit-sliced-comparison-v1",
         "inputLayoutHash": top_k_evaluator_input_layout_hash()?,
         "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "circuitClosurePendingEncryptedAggregateEvaluator": true,
+        "circuitClosurePendingEncryptedAggregateEvaluator": false,
+        "developmentEvidenceOnly": true,
     });
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "inactive-future-direct-comparison-input-profile",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
         "inputLayoutHash": top_k_evaluator_input_layout_hash()?,
         "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "circuitClosurePendingEncryptedAggregateEvaluator": false,
-        "futureDesignNoteRequired": true,
+        "circuitClosurePendingEncryptedAggregateEvaluator": true,
+        "noiseCertificateAcceptancePending": true,
     });
     let encrypted_score_bit_input_record = json!({
         "objectType": "EncryptedScoreBitInputBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "encrypted-aggregate-score-bit-derivation-v1",
+        "selectedEvaluatorPath": "encrypted-score-bit-sliced-comparison-v1",
         "scoreBitDerivationCircuitHash": derive_protocol_hash(
             "ScoreBitDerivationCircuitHash",
             &score_bit_derivation_record,
         )?,
         "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "packingLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingEncryptedAggregateEvaluator": true,
+        "claimUsePendingEncryptedAggregateEvaluator": false,
+        "developmentEvidenceOnly": true,
     });
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "inactive-future-direct-comparison-input-profile",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
         "comparisonInputDerivationCircuitHash": derive_protocol_hash(
             "ComparisonInputDerivationCircuitHash",
             &comparison_input_derivation_record,
         )?,
         "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "packingLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingEncryptedAggregateEvaluator": false,
-        "futureDesignNoteRequired": true,
+        "claimUsePendingEncryptedAggregateEvaluator": true,
+        "noiseCertificateAcceptancePending": true,
     });
     let comparator_record = json!({
         "objectType": "BitSlicedComparatorBinding",
@@ -395,8 +397,9 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "encryptedComparisonInputHash": encrypted_comparison_input_hash,
         "bitSlicedComparatorHash": bit_sliced_comparator_hash,
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
-        "selectedEvaluatorPath": "encrypted-aggregate-score-bit-derivation-v1",
-        "directComparisonInputDerivationStatus": "inactive-future-profile",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
+        "directComparisonInputDerivationStatus": "active-profile-candidate",
+        "scoreBitSlicedStatus": "development-evidence-rejected-at-full-depth",
         "claimUse": "binding-only-until-bridge-and-evaluator-closure",
     });
 
@@ -468,18 +471,44 @@ fn public_rlwe_samples_by_basis(participant_count: usize, rotation_key_count: us
     })
 }
 
-fn evaluation_key_size_certificate(rotation_key_count: usize) -> Value {
+fn evaluation_key_size_certificate(evaluation_keys: &Value) -> CanonicalResult<Value> {
     let residue_byte_count = 8_usize;
     let polynomial_byte_estimate_data = POLYNOMIAL_DEGREE * DATA_PRIMES.len() * residue_byte_count;
     let polynomial_byte_estimate_extended =
         POLYNOMIAL_DEGREE * (DATA_PRIMES.len() + 1) * residue_byte_count;
-    let relinearization_key_bytes = 2 * 2 * polynomial_byte_estimate_extended;
-    let rotation_key_bytes = rotation_key_count * 2 * polynomial_byte_estimate_extended;
-    let key_switch_key_bytes = 2 * polynomial_byte_estimate_extended;
-    let total_evaluation_key_bytes =
-        relinearization_key_bytes + rotation_key_bytes + key_switch_key_bytes;
+    let relinearization_key_record = value_at_path(
+        evaluation_keys,
+        &[
+            "evaluationKeyMaterialCommitment",
+            "relinearizationKeyRecord",
+        ],
+    )?;
+    let relinearization_key_bytes = array_at_path(relinearization_key_record, &["levelSchedule"])?
+        .iter()
+        .map(|level| {
+            level
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .map(evaluation_key_stream_bytes_at_level)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "relinearization key level schedule entries must be non-negative integers",
+                    )
+                })
+        })
+        .sum::<CanonicalResult<usize>>()?;
+    let rotation_key_roots = array_at_path(evaluation_keys, &["rotationKeyRoots"])?;
+    let rotation_key_bytes = rotation_key_roots
+        .iter()
+        .map(|rotation_key| {
+            usize_at_path(rotation_key, &["level"]).map(evaluation_key_stream_bytes_at_level)
+        })
+        .sum::<CanonicalResult<usize>>()?;
+    let key_switch_key_bytes = relinearization_key_bytes + rotation_key_bytes;
+    let total_evaluation_key_bytes = key_switch_key_bytes;
 
-    json!({
+    Ok(json!({
         "objectType": "EvaluationKeySizeCertificate",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
@@ -487,7 +516,8 @@ fn evaluation_key_size_certificate(rotation_key_count: usize) -> Value {
         "dataBasisPolynomialByteEstimate": polynomial_byte_estimate_data,
         "extendedBasisPolynomialByteEstimate": polynomial_byte_estimate_extended,
         "relinearizationKeyByteEstimate": relinearization_key_bytes,
-        "rotationKeyCount": rotation_key_count,
+        "relinearizationKeyLevelCount": array_at_path(relinearization_key_record, &["levelSchedule"])?.len(),
+        "rotationKeyCount": rotation_key_roots.len(),
         "rotationKeyByteEstimate": rotation_key_bytes,
         "keySwitchKeyByteEstimate": key_switch_key_bytes,
         "totalEvaluationKeyByteEstimate": total_evaluation_key_bytes,
@@ -500,15 +530,15 @@ fn evaluation_key_size_certificate(rotation_key_count: usize) -> Value {
             "status": "large-public-evaluation-key-material",
             "mobileDownloadRequiresPerformanceMeasurement": true
         },
-    })
+    }))
 }
 
-fn evaluation_key_streaming_fixture(
+fn evaluation_key_streaming_commitment(
     evaluation_keys: &Value,
     evaluation_key_size_certificate: &Value,
 ) -> CanonicalResult<Value> {
     let stream_record = json!({
-        "objectType": "BgvEvaluationKeyCanonicalByteStream",
+        "objectType": "BgvEvaluationKeyMaterialCommitmentStream",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluationKeyRoot": evaluation_keys["evaluationKeyRoot"],
@@ -516,10 +546,11 @@ fn evaluation_key_streaming_fixture(
         "relinearizationKeyRoot": evaluation_keys["relinearizationKeyRoot"],
         "keySwitchKeyRoot": evaluation_keys["keySwitchKeyRoot"],
         "rotationKeyRoots": evaluation_keys["rotationKeyRoots"],
-        "relinearizationArithmeticFixtureHash": evaluation_keys["relinearizationArithmeticFixture"]["fixtureHash"],
-        "keySwitchArithmeticFixtureHash": evaluation_keys["keySwitchArithmeticFixture"]["fixtureHash"],
-        "serializationPolicy": "sealed-lattice-canonical-json-evaluation-key-record-stream",
-        "protocolEvidence": false,
+        "evaluationKeyMaterialCommitmentHash": evaluation_keys["evaluationKeyMaterialCommitmentHash"],
+        "evaluationKeyMaterialCommitment": evaluation_keys["evaluationKeyMaterialCommitment"],
+        "serializationPolicy": "sealed-lattice-canonical-json-evaluation-key-material-commitment-stream",
+        "streamCommitmentEvidence": true,
+        "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
     let stream_bytes = canonical_json(&stream_record)?.into_bytes();
     let chunk_root_value = chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?;
@@ -529,17 +560,17 @@ fn evaluation_key_streaming_fixture(
     )?;
     let storage_quota_refused =
         total_evaluation_key_byte_estimate > DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES;
-    let fixture_record = json!({
-        "objectType": "BgvEvaluationKeyStreamingFixture",
+    let commitment_record = json!({
+        "objectType": "BgvEvaluationKeyStreamingCommitment",
         "objectVersion": 1,
-        "fixtureId": EVALUATION_KEY_STREAMING_FIXTURE_ID,
+        "commitmentId": EVALUATION_KEY_STREAMING_COMMITMENT_ID,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "streamRecord": stream_record,
         "canonicalStreamByteLength": stream_bytes.len(),
         "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,
         "chunkRoot": chunk_root_value,
         "chunkCount": stream_bytes.len().div_ceil(EVALUATION_KEY_CHUNK_SIZE_BYTES),
-        "storageQuotaFixture": {
+        "storageQuotaDecision": {
             "quotaBytes": DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES,
             "totalEvaluationKeyByteEstimate": total_evaluation_key_byte_estimate,
             "accepted": !storage_quota_refused,
@@ -549,12 +580,21 @@ fn evaluation_key_streaming_fixture(
                 "within-development-mobile-storage-quota"
             }
         },
-        "protocolEvidence": false,
+        "streamCommitmentEvidence": true,
+        "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
-    let fixture_hash = development_fixture_hash(&fixture_record)?;
+    let commitment_hash = derive_protocol_hash("EvaluationKeySetDigest", &commitment_record)?;
 
     Ok(json!({
-        "fixture": fixture_record,
-        "fixtureHash": fixture_hash,
+        "commitment": commitment_record,
+        "commitmentHash": commitment_hash,
     }))
+}
+
+fn evaluation_key_stream_bytes_at_level(level: usize) -> usize {
+    let active_limb_count = level + 1;
+    let component_count = 2;
+    let digit_count = active_limb_count;
+
+    digit_count * component_count * active_limb_count * POLYNOMIAL_DEGREE * 8
 }

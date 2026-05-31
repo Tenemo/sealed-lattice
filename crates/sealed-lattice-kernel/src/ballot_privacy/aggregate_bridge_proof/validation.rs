@@ -371,6 +371,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                             "aggregateShareResponseHex",
                             "batchCoefficientResponseHex",
                             "batchEncodingCommitmentHash",
+                            "batchQuotientResponseHex",
                             "bgvCiphertextCommitmentHash",
                             "bgvRandomnessBoundCommitment",
                             "bgvRandomnessBoundCommitmentHash",

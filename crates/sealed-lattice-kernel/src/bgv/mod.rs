@@ -3,6 +3,7 @@ pub(crate) mod profile;
 
 mod base_conversion;
 mod encoding;
+pub(crate) mod evaluator;
 mod modular_arithmetic;
 mod ntt;
 mod rns;

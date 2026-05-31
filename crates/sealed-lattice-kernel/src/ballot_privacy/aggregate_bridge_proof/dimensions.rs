@@ -42,7 +42,7 @@ pub(super) fn bridge_variant_dimensions(
     )?;
     // IMPORTANT: the bridge caps participants at 20 (MANDATORY_RECEIVER_COUNT) while the
     // aggregate-derivation statement allows up to MAXIMUM_PARTICIPANT_COUNT (50). This narrower
-    // bound is intentional for the bridge milestone, not a bug.
+    // bound is intentional for the encrypted aggregate bridge profile, not a bug.
     let maximum_bridge_participant_count = u64::try_from(BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT)
         .map_err(|_| {
         CanonicalError::new(

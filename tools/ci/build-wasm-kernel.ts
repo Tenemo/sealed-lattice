@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { isWithinDirectory } from '#tools/internal/files.js';
 
 const repoRoot = path.resolve(
@@ -266,11 +267,6 @@ export const buildWasmKernel = async (): Promise<void> => {
     );
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void buildWasmKernel();
 }
