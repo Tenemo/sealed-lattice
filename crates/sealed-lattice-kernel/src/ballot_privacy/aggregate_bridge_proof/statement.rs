@@ -27,15 +27,26 @@ pub(super) fn bridge_proof_profile_hash() -> CanonicalResult<String> {
     )
 }
 
+pub(super) struct BridgeProofStatementInput<'a> {
+    pub(super) component: &'a Value,
+    pub(super) setup_package: &'a Value,
+    pub(super) bridge_encryption: &'a Value,
+    pub(super) bridge_proof_profile_hash: &'a str,
+    pub(super) aggregate_selection_policy_hash: &'a str,
+    pub(super) bridge_witness_privacy_profile_hash: &'a str,
+    pub(super) he_param_hash: &'a str,
+    pub(super) aggregate_derivation_verification_scope: &'a str,
+}
+
 pub(super) fn build_bridge_proof_statement(
-    component: &Value,
-    setup_package: &Value,
-    bridge_encryption: &Value,
-    bridge_proof_profile_hash: &str,
-    aggregate_selection_policy_hash: &str,
-    bridge_witness_privacy_profile_hash: &str,
-    he_param_hash: &str,
+    input: BridgeProofStatementInput<'_>,
 ) -> CanonicalResult<Value> {
+    validate_aggregate_derivation_verification_scope(
+        input.aggregate_derivation_verification_scope,
+    )?;
+    let component = input.component;
+    let setup_package = input.setup_package;
+    let bridge_encryption = input.bridge_encryption;
     let component_statement =
         required_json_field(component, "statement", "aggregateDerivationComponent")?;
     let component_proof_input =
@@ -382,7 +393,7 @@ pub(super) fn build_bridge_proof_statement(
         "sharedWitnessEffectiveBindingSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR,
         "sharedWitnessZeroKnowledgeStatus": SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
-        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
+        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
         "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_CHECKED_STATUS,
         "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
         "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
@@ -391,13 +402,16 @@ pub(super) fn build_bridge_proof_statement(
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
         "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
-        "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        "aggregateDerivationVerificationScope": input.aggregate_derivation_verification_scope,
         "sampledOnlyBridgeVerificationAccepted": false,
         "coefficientDomainCanonical": true,
         "hwangPiopStatus": HWANG_PIOP_DEFERRED_STATUS,
     });
-    let bridge_proof_target_contract =
-        bridge_proof_target_contract_value(share_vector_width, share_vector_width)?;
+    let bridge_proof_target_contract = bridge_proof_target_contract_value(
+        share_vector_width,
+        share_vector_width,
+        input.aggregate_derivation_verification_scope,
+    )?;
     let bridge_proof_target_contract_hash =
         bridge_proof_target_contract_hash(&bridge_proof_target_contract)?;
 
@@ -413,7 +427,7 @@ pub(super) fn build_bridge_proof_statement(
     );
     bridge_statement.insert(
         "bridgeProofProfileHash".to_string(),
-        Value::String(bridge_proof_profile_hash.to_string()),
+        Value::String(input.bridge_proof_profile_hash.to_string()),
     );
     bridge_statement.insert(
         "proofBackend".to_string(),
@@ -461,7 +475,7 @@ pub(super) fn build_bridge_proof_statement(
     );
     bridge_statement.insert(
         "bridgeWitnessPrivacyProfileHash".to_string(),
-        Value::String(bridge_witness_privacy_profile_hash.to_string()),
+        Value::String(input.bridge_witness_privacy_profile_hash.to_string()),
     );
     bridge_statement.insert(
         "sampledPublicRelationCheckPolicyHash".to_string(),
@@ -509,7 +523,7 @@ pub(super) fn build_bridge_proof_statement(
     );
     bridge_statement.insert(
         "heParamHash".to_string(),
-        Value::String(he_param_hash.to_string()),
+        Value::String(input.he_param_hash.to_string()),
     );
     bridge_statement.insert(
         "bgvProfileHash".to_string(),
@@ -537,7 +551,7 @@ pub(super) fn build_bridge_proof_statement(
     );
     bridge_statement.insert(
         "aggregateSelectionPolicyHash".to_string(),
-        Value::String(aggregate_selection_policy_hash.to_string()),
+        Value::String(input.aggregate_selection_policy_hash.to_string()),
     );
     bridge_statement.insert(
         "ceremonyId".to_string(),
@@ -840,6 +854,7 @@ pub(super) fn bridge_proof_statement_hash(
         "sharedWitnessBindingStatus",
         "sharedWitnessZeroKnowledgeStatus",
         "aggregateToPlaintextBindingStatus",
+        "aggregateDerivationVerificationScope",
         "bgvEncryptionKeyMaterialKind",
         "bgvEncryptionProofStatus",
         "bgvRandomnessBoundProofStatus",
@@ -924,6 +939,22 @@ pub(super) fn bridge_proof_statement_hash(
     }
 
     derive_protocol_hash("BridgeProofRecordHash", &Value::Object(hash_input))
+}
+
+pub(super) fn bridge_proof_challenge_context_hash(
+    bridge_proof_profile_hash: &str,
+    bridge_proof_statement_hash: &str,
+    bridge_proof_target_contract_hash: &str,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BridgeProofRecordHash",
+        &json!({
+            "purpose": "sealed-lattice-aggregate-bridge-proof-challenge-context-v1",
+            "bridgeProofProfileHash": bridge_proof_profile_hash,
+            "bridgeProofStatementHash": bridge_proof_statement_hash,
+            "bridgeProofTargetContractHash": bridge_proof_target_contract_hash,
+        }),
+    )
 }
 
 // Enforces the no-wraparound invariant: maximumAggregateInteger = canonicalTurnout*(q-1) must

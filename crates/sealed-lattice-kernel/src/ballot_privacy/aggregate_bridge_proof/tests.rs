@@ -97,6 +97,14 @@ fn sampled_relation_check_policy() -> Value {
     })
 }
 
+fn target_contract_relation_requirements() -> Value {
+    json!({
+        "aggregateReducedCoordinateCount": 220,
+        "aggregateQuotientCoordinateCount": 220,
+        "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    })
+}
+
 fn minimal_checked_relation_proof_bytes_hex() -> String {
     let proof_value = json!({
         "objectType": "SealedLatticeAggregateBridgeRelationProof",
@@ -194,8 +202,12 @@ fn private_evaluator_rejects_public_artifact_drift() {
 #[test]
 fn bridge_proof_target_contract_is_variant_parametric() {
     for width in [22_u64, 55, 220] {
-        let target_contract =
-            bridge_proof_target_contract_value(width, width).expect("target contract");
+        let target_contract = bridge_proof_target_contract_value(
+            width,
+            width,
+            AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        )
+        .expect("target contract");
         let shared_witness_layout = target_contract["sharedWitnessLayout"]
             .as_object()
             .expect("shared witness layout should be an object");
@@ -273,7 +285,7 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             json!(BGV_ENCRYPTION_KEY_MATERIAL_KIND)
         );
         assert_eq!(target_contract["developmentKeyOnly"], json!(false));
-        assert_eq!(target_contract["thresholdDecryptable"], json!(false));
+        assert_eq!(target_contract["thresholdDecryptable"], json!(true));
         assert_eq!(
             target_contract["claimBearingBridgeEncryption"],
             json!(false)
@@ -288,9 +300,50 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(
             target_contract["plaintextCanonicalLiftProofStatus"],
-            json!(PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS)
+            json!(PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS)
+        );
+        assert_eq!(
+            target_contract["aggregateDerivationVerificationScope"],
+            json!(AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS)
         );
     }
+}
+
+#[test]
+fn bridge_proof_target_contract_binds_aggregate_derivation_scope() {
+    let target_contract = bridge_proof_target_contract_value(
+        220,
+        220,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS,
+    )
+    .expect("target contract with checked aggregate derivation scope");
+    let target_contract_hash =
+        bridge_proof_target_contract_hash(&target_contract).expect("target hash");
+    let relation_requirements = json!({
+        "aggregateReducedCoordinateCount": 220,
+        "aggregateQuotientCoordinateCount": 220,
+        "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS,
+    });
+    let bridge_statement = json!({
+        "bridgeProofTargetContract": target_contract,
+        "bridgeProofTargetContractHash": target_contract_hash,
+    });
+
+    validate_bridge_proof_target_contract(&bridge_statement, &relation_requirements)
+        .expect("checked aggregate-derivation scope should validate");
+
+    let mismatched_relation_requirements = json!({
+        "aggregateReducedCoordinateCount": 220,
+        "aggregateQuotientCoordinateCount": 220,
+        "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    });
+    let error =
+        validate_bridge_proof_target_contract(&bridge_statement, &mismatched_relation_requirements)
+            .expect_err("aggregate derivation scope mismatch should reject");
+    assert!(
+        error.message.contains("target contract does not match"),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -464,11 +517,13 @@ fn bridge_proof_shell_requires_pending_relation_gap_status() {
 
 #[test]
 fn bridge_proof_target_contract_rejects_dimension_mutation() {
-    let relation_requirements = json!({
-        "aggregateReducedCoordinateCount": 220,
-        "aggregateQuotientCoordinateCount": 220,
-    });
-    let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
+    let relation_requirements = target_contract_relation_requirements();
+    let target_contract = bridge_proof_target_contract_value(
+        220,
+        220,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    )
+    .expect("target contract");
     let target_contract_hash =
         bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({
@@ -488,11 +543,13 @@ fn bridge_proof_target_contract_rejects_dimension_mutation() {
 
 #[test]
 fn bridge_proof_target_contract_rejects_hash_mutation() {
-    let relation_requirements = json!({
-        "aggregateReducedCoordinateCount": 220,
-        "aggregateQuotientCoordinateCount": 220,
-    });
-    let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
+    let relation_requirements = target_contract_relation_requirements();
+    let target_contract = bridge_proof_target_contract_value(
+        220,
+        220,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    )
+    .expect("target contract");
     let bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
         "bridgeProofTargetContractHash": "0".repeat(128),
@@ -509,11 +566,13 @@ fn bridge_proof_target_contract_rejects_hash_mutation() {
 
 #[test]
 fn bridge_proof_target_contract_rejects_separate_subproof_closure() {
-    let relation_requirements = json!({
-        "aggregateReducedCoordinateCount": 220,
-        "aggregateQuotientCoordinateCount": 220,
-    });
-    let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
+    let relation_requirements = target_contract_relation_requirements();
+    let target_contract = bridge_proof_target_contract_value(
+        220,
+        220,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    )
+    .expect("target contract");
     let target_contract_hash =
         bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({
@@ -534,11 +593,13 @@ fn bridge_proof_target_contract_rejects_separate_subproof_closure() {
 
 #[test]
 fn bridge_proof_target_contract_rejects_shared_witness_layout_mutation() {
-    let relation_requirements = json!({
-        "aggregateReducedCoordinateCount": 220,
-        "aggregateQuotientCoordinateCount": 220,
-    });
-    let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
+    let relation_requirements = target_contract_relation_requirements();
+    let target_contract = bridge_proof_target_contract_value(
+        220,
+        220,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    )
+    .expect("target contract");
     let target_contract_hash =
         bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({
@@ -559,11 +620,13 @@ fn bridge_proof_target_contract_rejects_shared_witness_layout_mutation() {
 
 #[test]
 fn bridge_proof_target_contract_rejects_shared_witness_layout_hash_mutation() {
-    let relation_requirements = json!({
-        "aggregateReducedCoordinateCount": 220,
-        "aggregateQuotientCoordinateCount": 220,
-    });
-    let target_contract = bridge_proof_target_contract_value(220, 220).expect("target contract");
+    let relation_requirements = target_contract_relation_requirements();
+    let target_contract = bridge_proof_target_contract_value(
+        220,
+        220,
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+    )
+    .expect("target contract");
     let target_contract_hash =
         bridge_proof_target_contract_hash(&target_contract).expect("target hash");
     let mut bridge_statement = json!({

@@ -409,6 +409,8 @@ const bridgeWithMutatedProof = (
             bgvPublicKeyRoot: bridgeEncryption.bgvPublicKeyRoot,
             bridgeProofProfileHash: bridgeEncryption.bridgeProofProfileHash,
             bridgeProofStatementHash: bridgeEncryption.bridgeProofStatementHash,
+            bridgeProofChallengeContextHash:
+                bridgeEncryption.bridgeProofChallengeContextHash,
             collectivePublicKeyRoot: bridgeEncryption.collectivePublicKeyRoot,
             collectivePublicKeyCoefficientRoot:
                 bridgeEncryption.collectivePublicKeyCoefficientRoot,

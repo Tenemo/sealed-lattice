@@ -642,6 +642,15 @@ const bridgeContributor = async (input: {
                         aggregateWitness: input.componentContext.witness,
                         bridgeWitnessPrivacyProfileHash:
                             input.supportHashes.bridgeWitnessPrivacyProfileHash,
+                        closeRecord:
+                            input.componentContext.postCloseEvidence
+                                .closeRecord,
+                        contributorActionContext:
+                            input.componentContext.postCloseEvidence
+                                .contributorActionContext,
+                        countedBallotPackages: [
+                            input.componentContext.ballotPackage,
+                        ],
                         heParamHash: input.supportHashes.heParamHash,
                         includeCanonicalBytesHex: true,
                         setupPackage: input.setupPackage,
@@ -661,6 +670,14 @@ const bridgeContributor = async (input: {
                     bridgeEncryption,
                     bridgeWitnessPrivacyProfileHash:
                         input.supportHashes.bridgeWitnessPrivacyProfileHash,
+                    closeRecord:
+                        input.componentContext.postCloseEvidence.closeRecord,
+                    contributorActionContext:
+                        input.componentContext.postCloseEvidence
+                            .contributorActionContext,
+                    countedBallotPackages: [
+                        input.componentContext.ballotPackage,
+                    ],
                     heParamHash: input.supportHashes.heParamHash,
                     setupPackage: input.setupPackage,
                 }) as Record<string, unknown>;

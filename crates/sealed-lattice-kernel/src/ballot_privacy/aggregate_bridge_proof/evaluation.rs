@@ -199,7 +199,7 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
             "BridgeProofImplementationEvidenceOnly",
             "BgvPublicKeyCoefficientMaterialBound",
             DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS,
-            TARGET_THRESHOLD_DECRYPTION_PROTOCOL_PENDING_STATUS,
+            TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS,
             SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
             BGV_RANDOMNESS_BOUND_PROOF_STATUS,
             "BridgeProofClaimClosureMissing",

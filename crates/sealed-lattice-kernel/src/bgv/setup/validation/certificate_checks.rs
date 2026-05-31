@@ -37,6 +37,36 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         &evaluation_key_streaming_commitment_hash,
         "setup parameter evaluation key streaming commitment hash",
     )?;
+    let expected_target_threshold_decryptability_certificate =
+        target_threshold_decryptability_certificate_from_setup_package(setup_package)?;
+    let target_threshold_decryptability_certificate =
+        value_at_path(certificates, &["targetThresholdDecryptabilityCertificate"])?;
+    if target_threshold_decryptability_certificate
+        != &expected_target_threshold_decryptability_certificate
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "target-threshold decryptability certificate does not match setup key and threshold material",
+        ));
+    }
+    compare_derived_hash(
+        "TargetThresholdDecryptabilityCertificateHash",
+        target_threshold_decryptability_certificate,
+        hash_at_path(
+            certificates,
+            &["targetThresholdDecryptabilityCertificateHash"],
+        )?,
+        "target-threshold decryptability certificate hash",
+    )?;
+    compare_hash_at_path(
+        value_at_path(certificates, &["setupParameterCertificate"])?,
+        &["targetThresholdDecryptabilityCertificateHash"],
+        hash_at_path(
+            certificates,
+            &["targetThresholdDecryptabilityCertificateHash"],
+        )?,
+        "setup parameter target-threshold decryptability certificate hash",
+    )?;
     compare_derived_hash(
         "BGVSetupParameterCertificateHash",
         value_at_path(certificates, &["setupParameterCertificate"])?,

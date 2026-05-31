@@ -640,10 +640,15 @@ export type BridgeProofVerificationStatus =
     | 'BridgeProofBackendPending'
     | 'BridgeProofRelationChecked';
 
+export type AggregateDerivationVerificationScope =
+    | 'AggregateDerivationFullVerificationPreconditionNotBound'
+    | 'AggregateDerivationFullVerificationChecked';
+
 export type BridgeProofRecord = {
     readonly objectType: 'BridgeProofRecord';
     readonly objectVersion: 1;
     readonly aggregateDerivationComponentHash: ProtocolHash;
+    readonly aggregateDerivationVerificationScope: AggregateDerivationVerificationScope;
     readonly aggregateSelectionPolicyHash: ProtocolHash;
     readonly aggregateShareCommitmentHash: ProtocolHash;
     readonly aggregateInputEncodingProfileHash: ProtocolHash;
@@ -659,6 +664,7 @@ export type BridgeProofRecord = {
     readonly bridgeProofProfileHash: ProtocolHash;
     readonly bridgeProofProfileId: string;
     readonly bridgeProofRecordHash: ProtocolHash;
+    readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: BridgeProofVerificationStatus;
     readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
@@ -700,7 +706,7 @@ export type BridgeProofRecord = {
     readonly shareCommitmentMessageBoundCertHash: ProtocolHash;
     readonly shareVectorWidth: number;
     readonly thresholdProfileHash: ProtocolHash;
-    readonly thresholdDecryptable: false;
+    readonly thresholdDecryptable: true;
     readonly topKEvaluatorInputLayoutHash: ProtocolHash;
     readonly votingClosedBoardHeadHash: ProtocolHash;
 };

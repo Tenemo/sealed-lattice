@@ -429,6 +429,12 @@ export const createTranscriptCoreKernelLoader = (
                             input.developmentRandomnessOverrideAcknowledged,
                         includeCanonicalBytesHex:
                             input.includeCanonicalBytesHex,
+                        closeRecord: input.closeRecord,
+                        contributorActionContext:
+                            input.contributorActionContext,
+                        countedBallotPackages: input.countedBallotPackages,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                     });
                 },
                 evaluateAggregateBridgeRelation: (input) => {
@@ -477,6 +483,12 @@ export const createTranscriptCoreKernelLoader = (
                             input.bridgeWitnessPrivacyProfileHash,
                         heParamHash: input.heParamHash,
                         setupPackage: input.setupPackage,
+                        closeRecord: input.closeRecord,
+                        contributorActionContext:
+                            input.contributorActionContext,
+                        countedBallotPackages: input.countedBallotPackages,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                     }),
                 describeBgvRnsProfile: (): BgvRnsProfileDescription =>
                     executeCommand<BgvRnsProfileDescription>({

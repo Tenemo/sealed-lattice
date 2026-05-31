@@ -108,8 +108,8 @@ export const shapeConfigMarkdown = (
     const lines = [
         '# Encrypted aggregate bridge shape/config matrix',
         '',
-        '| n | m | claim tier | t_pvss | selected | shareVectorWidth | target contract hash | statement hash | status | failure reason |',
-        '| -: | -: | - | -: | -: | -: | - | - | - | - |',
+        '| n | m | claim tier | t_pvss | selected | shareVectorWidth | target contract hash | statement hash | challenge context hash | status | failure reason |',
+        '| -: | -: | - | -: | -: | -: | - | - | - | - | - |',
         ...rows.map((row) =>
             [
                 row.rosterSize,
@@ -120,6 +120,7 @@ export const shapeConfigMarkdown = (
                 row.shareVectorWidth,
                 row.bridgeProofTargetContractHash,
                 row.bridgeProofStatementHash,
+                row.bridgeProofChallengeContextHash,
                 row.status,
                 row.failureReason ?? '',
             ].join(' | '),

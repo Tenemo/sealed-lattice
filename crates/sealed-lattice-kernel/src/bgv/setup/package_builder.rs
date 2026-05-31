@@ -93,8 +93,21 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
     )?;
     let development_encryption_fixture =
         development_encryption_fixture(input, &collective_public_key)?;
+    let setup_inputs = json!({
+        "ceremonyId": input.ceremony_id,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
+        "thresholdProfileHash": input.threshold_profile_hash,
+        "participantCount": input.participants.len(),
+        "participantIdentities": input.participants.iter().map(|participant| participant.trustee_identity.clone()).collect::<Vec<_>>(),
+        "defaultSetupSeedUsed": !input.setup_seed_provided,
+        "setupSeedHash": input.setup_seed_hash,
+    });
     let certificates = setup_certificates(
         input,
+        &setup_inputs,
+        &collective_public_key,
+        &threshold_verification_material,
         &collective_secret_distribution_certificate,
         &collective_secret_distribution_certificate_hash,
         &error_distribution_certificate,
@@ -106,16 +119,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         &evaluation_keys,
         &development_encryption_fixture,
     )?;
-    let setup_inputs = json!({
-        "ceremonyId": input.ceremony_id,
-        "manifestHash": input.manifest_hash,
-        "rosterHash": input.roster_hash,
-        "thresholdProfileHash": input.threshold_profile_hash,
-        "participantCount": input.participants.len(),
-        "participantIdentities": input.participants.iter().map(|participant| participant.trustee_identity.clone()).collect::<Vec<_>>(),
-        "defaultSetupSeedUsed": !input.setup_seed_provided,
-        "setupSeedHash": input.setup_seed_hash,
-    });
     let evaluator_context_bindings = passive_setup_evaluator_context_bindings(&setup_inputs)?;
 
     let mut package = json!({

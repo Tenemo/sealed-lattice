@@ -1,5 +1,6 @@
 export {
     deriveAggregateContributionHash,
+    deriveBridgeProofChallengeContextHash,
     deriveBridgeProofProfileHash,
     deriveBridgeProofRecordHash,
     deriveBridgeProofStatementHash,

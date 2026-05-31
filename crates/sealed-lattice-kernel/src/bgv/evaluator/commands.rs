@@ -323,6 +323,11 @@ fn verify_aggregate_bridge_input_for_evaluation(
             "encrypted aggregate evaluation requires bridge entropy evidence accepted for evaluation",
         ));
     }
+    require_aggregate_derivation_full_verification_checked(
+        &bridge_verification,
+        &["aggregateDerivationVerificationScope"],
+        "full aggregate-derivation verification bound to the bridge proof",
+    )?;
 
     Ok(VerifiedAggregateBridgeInput {
         bridge_verification,
@@ -339,6 +344,21 @@ fn require_false(value: &Value, path: &[&str], description: &str) -> CanonicalRe
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             format!("encrypted aggregate evaluation rejects {description}"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn require_aggregate_derivation_full_verification_checked(
+    value: &Value,
+    path: &[&str],
+    description: &str,
+) -> CanonicalResult<()> {
+    if string_at_path(value, path)? != "AggregateDerivationFullVerificationChecked" {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!("encrypted aggregate evaluation requires {description}"),
         ));
     }
 
@@ -410,6 +430,11 @@ fn verify_compact_aggregate_bridge_input_for_evaluation(
             "encrypted aggregate evaluation requires bridge entropy evidence accepted for evaluation",
         ));
     }
+    require_aggregate_derivation_full_verification_checked(
+        bridge_verification,
+        &["aggregateDerivationVerificationScope"],
+        "full aggregate-derivation verification bound to the bridge proof",
+    )?;
     if string_at_path(bridge_proof_record, &["bridgeProofVerificationStatus"])?
         != "BridgeProofRelationChecked"
     {
@@ -422,6 +447,18 @@ fn verify_compact_aggregate_bridge_input_for_evaluation(
         bridge_proof_record,
         &["developmentKeyOnly"],
         "development-only bridge proof record",
+    )?;
+    require_aggregate_derivation_full_verification_checked(
+        bridge_proof_record,
+        &["aggregateDerivationVerificationScope"],
+        "a proof record with full aggregate-derivation verification scope",
+    )?;
+    require_same_string(
+        bridge_proof_record,
+        &["aggregateDerivationVerificationScope"],
+        bridge_verification,
+        &["aggregateDerivationVerificationScope"],
+        "aggregate-derivation verification scope",
     )?;
     require_same_string(
         bridge_proof_record,

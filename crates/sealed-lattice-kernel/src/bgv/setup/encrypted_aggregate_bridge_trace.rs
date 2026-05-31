@@ -185,6 +185,13 @@ pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from
     let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
     let threshold_profile_hash =
         string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
+    let target_threshold_decryptability_certificate_hash = string_at_path(
+        setup_package,
+        &[
+            "certificates",
+            "targetThresholdDecryptabilityCertificateHash",
+        ],
+    )?;
     let encoded = encode_batch_plaintext_slots(reduced_aggregate_slots, DATA_PRIMES.len() - 1)?;
     let plaintext_encoding_quotients = derive_plaintext_encoding_quotients(
         reduced_aggregate_slots,
@@ -336,6 +343,7 @@ pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
             "thresholdProfileHash": threshold_profile_hash,
+            "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
             "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
@@ -360,6 +368,8 @@ pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from
         "plaintextRoot": plaintext_root,
         "ciphertextRoot": ciphertext_root,
         "encryptedAggregateShareCiphertextRoot": encrypted_aggregate_share_ciphertext_root,
+        "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
+        "targetDecryptabilityStatus": "TargetThresholdDecryptabilityCompatibilityCertified",
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
         "canonicalByteLength": canonical_bytes.len(),
         "basisId": BgvBasisKind::Data.basis_id(),
@@ -395,7 +405,7 @@ pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from
             "CollectivePublicKeyRootBound",
             "BgvPublicKeyCoefficientMaterialBound",
             "DecryptableBgvCiphertextConvention",
-            "TargetThresholdDecryptionProtocolPending",
+            "TargetThresholdDecryptabilityCompatibilityCertified",
             "PassiveCollectiveBgvCiphertextEquationRelation",
             "BgvRandomnessBoundProofMissing",
             "CoefficientDomainCanonical",
@@ -970,6 +980,13 @@ pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
     let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
     let threshold_profile_hash =
         string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
+    let target_threshold_decryptability_certificate_hash = string_at_path(
+        setup_package,
+        &[
+            "certificates",
+            "targetThresholdDecryptabilityCertificateHash",
+        ],
+    )?;
     let plaintext_root = string_at_path(bridge_encryption, &["plaintextRoot"])?;
     let ciphertext_root = string_at_path(bridge_encryption, &["ciphertextRoot"])?;
     let expected_encrypted_aggregate_share_ciphertext_root = derive_protocol_hash(
@@ -982,6 +999,7 @@ pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
             "thresholdProfileHash": threshold_profile_hash,
+            "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
             "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
@@ -1028,6 +1046,18 @@ pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
         &["bgvPublicKeyRoot"],
         bgv_public_key_root,
         "BGV public key root",
+    )?;
+    compare_encrypted_aggregate_bridge_string_at_path(
+        bridge_encryption,
+        &["targetThresholdDecryptabilityCertificateHash"],
+        target_threshold_decryptability_certificate_hash,
+        "target-threshold decryptability certificate hash",
+    )?;
+    compare_encrypted_aggregate_bridge_string_at_path(
+        bridge_encryption,
+        &["targetDecryptabilityStatus"],
+        "TargetThresholdDecryptabilityCompatibilityCertified",
+        "target-threshold decryptability status",
     )?;
     compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,

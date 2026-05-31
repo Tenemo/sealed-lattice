@@ -12,6 +12,7 @@ import {
     protocolHashPattern,
 } from '../../aggregate-derivation/constants.js';
 import { collectForbiddenWitnessFieldRefusals as collectBoundedForbiddenWitnessFieldRefusals } from '../../aggregate-derivation/witness-field-refusals.js';
+import type { AggregateDerivationVerificationScope } from '../hashes.js';
 
 export type BridgeSetupEvidence = {
     readonly setupPackageHash: ProtocolHash;
@@ -57,6 +58,7 @@ export type BridgeEncryptionEvidence = {
     readonly bgvPublicKeyRoot: ProtocolHash;
     readonly bridgeProofBytesHash: ProtocolHash;
     readonly bridgeProofBytesHex: string;
+    readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofProfileHash: ProtocolHash;
     readonly bridgeProofRoot: ProtocolHash;
     readonly bridgeSharedWitnessProofHash: ProtocolHash;
@@ -66,8 +68,8 @@ export type BridgeEncryptionEvidence = {
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly claimBearingBridgeEncryption: false;
-    readonly aggregateDerivationVerificationScope?: 'AggregateDerivationFullVerificationPreconditionNotBound';
-    readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofMissing';
+    readonly aggregateDerivationVerificationScope?: AggregateDerivationVerificationScope;
+    readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofChecked';
     readonly bridgeClaimClosureVerified?: false;
     readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
     readonly bridgeVariantEvidenceStatus?:
@@ -102,7 +104,7 @@ export type BridgeEncryptionEvidence = {
     };
     readonly sampledPublicRelationChecks: readonly unknown[];
     readonly slotCount: number;
-    readonly thresholdDecryptable: false;
+    readonly thresholdDecryptable: true;
 };
 
 export type BridgeEvidenceVerification = {
@@ -114,6 +116,7 @@ export type BridgeEvidenceVerification = {
     readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
     readonly bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked';
     readonly bridgeProofBytesHash: ProtocolHash;
+    readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofProfileHash: ProtocolHash;
     readonly bridgeProofRoot: ProtocolHash;
     readonly bridgeSharedWitnessProofHash: ProtocolHash;
@@ -123,8 +126,8 @@ export type BridgeEvidenceVerification = {
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly claimBearingBridgeEncryption: false;
-    readonly aggregateDerivationVerificationScope?: 'AggregateDerivationFullVerificationPreconditionNotBound';
-    readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofMissing';
+    readonly aggregateDerivationVerificationScope?: AggregateDerivationVerificationScope;
+    readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofChecked';
     readonly bridgeClaimClosureVerified?: false;
     readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
     readonly bridgeVariantEvidenceStatus?:
@@ -138,7 +141,7 @@ export type BridgeEvidenceVerification = {
     readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
     readonly randomnessSourceEvidence: BridgeRandomnessSourceEvidence;
     readonly ok: true;
-    readonly thresholdDecryptable: false;
+    readonly thresholdDecryptable: true;
 };
 
 export type PendingBridgeProofRecordFromEvidenceInput = {
@@ -176,6 +179,7 @@ export const bridgeHashFieldNames = [
     'encryptedAggregateShareCiphertextRoot',
     'encryptedAggregateReconstructionHash',
     'bridgeProofProfileHash',
+    'bridgeProofChallengeContextHash',
     'bridgeProofTargetContractHash',
     'bridgeWitnessPrivacyProfileHash',
     'bgvBatchEncoderHash',

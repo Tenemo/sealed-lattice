@@ -1003,6 +1003,15 @@ describe.sequential(
                                         aggregateWitness:
                                             componentContext.witness,
                                         bridgeWitnessPrivacyProfileHash,
+                                        closeRecord:
+                                            componentContext.postCloseEvidence
+                                                .closeRecord,
+                                        contributorActionContext:
+                                            componentContext.postCloseEvidence
+                                                .contributorActionContext,
+                                        countedBallotPackages: [
+                                            completedBallotPackageContext.ballotPackage,
+                                        ],
                                         heParamHash,
                                         includeCanonicalBytesHex: true,
                                         setupPackage,
@@ -1016,6 +1025,8 @@ describe.sequential(
                                 ok: true,
                                 operation: 'generateAggregateBridgeEncryption',
                                 proverRandomnessSource: 'fresh-csprng',
+                                aggregateDerivationVerificationScope:
+                                    'AggregateDerivationFullVerificationChecked',
                                 randomnessSourceEvidence: {
                                     callerSuppliedDevelopmentRandomness: false,
                                     claimBearingEntropyEvidence: true,
@@ -1032,6 +1043,17 @@ describe.sequential(
                                             aggregateSelectionPolicyHash,
                                             bridgeEncryption,
                                             bridgeWitnessPrivacyProfileHash,
+                                            closeRecord:
+                                                componentContext
+                                                    .postCloseEvidence
+                                                    .closeRecord,
+                                            contributorActionContext:
+                                                componentContext
+                                                    .postCloseEvidence
+                                                    .contributorActionContext,
+                                            countedBallotPackages: [
+                                                completedBallotPackageContext.ballotPackage,
+                                            ],
                                             heParamHash,
                                             setupPackage,
                                         }),
@@ -1044,6 +1066,8 @@ describe.sequential(
                                 ok: true,
                                 operation: 'verifyAggregateBridgeEncryption',
                                 proverRandomnessSource: 'fresh-csprng',
+                                aggregateDerivationVerificationScope:
+                                    'AggregateDerivationFullVerificationChecked',
                                 randomnessSourceEvidence: {
                                     callerSuppliedDevelopmentRandomness: false,
                                     claimBearingEntropyEvidence: true,

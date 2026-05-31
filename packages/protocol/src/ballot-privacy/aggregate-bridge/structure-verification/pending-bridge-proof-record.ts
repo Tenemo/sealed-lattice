@@ -6,6 +6,7 @@ import {
 } from '@sealed-lattice/types';
 
 import {
+    deriveBridgeProofChallengeContextHash,
     deriveBridgeProofProfileHash,
     deriveBridgeProofRecordHash,
     deriveBridgeProofStatementHash,
@@ -26,6 +27,7 @@ import {
 
 const derivePendingBridgeProofEncodingProfileHash = (input: {
     readonly bridgeProofBytesHash: ProtocolHash;
+    readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofProfileHash: ProtocolHash;
     readonly bridgeProofStatementHash: ProtocolHash;
 }): ProtocolHash =>
@@ -37,6 +39,7 @@ const derivePendingBridgeProofEncodingProfileHash = (input: {
 
 const derivePendingBridgeProofParameterSetHash = (input: {
     readonly bgvProfileHash: ProtocolHash;
+    readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofProfileHash: ProtocolHash;
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
@@ -49,6 +52,7 @@ const derivePendingBridgeProofParameterSetHash = (input: {
 
 const derivePendingBridgeProofPublicRandomnessHash = (input: {
     readonly bridgeProofBytesHash: ProtocolHash;
+    readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofStatementHash: ProtocolHash;
 }): ProtocolHash =>
     deriveProtocolHash('ProofBytesHash', {
@@ -100,7 +104,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         claimBearingBridgeEncryption: false,
         developmentKeyOnly: false,
         proofBackend: 'SealedLatticeBridgeRelation',
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
     });
     const profileHash = requireProtocolHashField(
         profileBindings,
@@ -213,9 +217,13 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         deriveSampledPublicRelationCheckPolicyHash(
             sampledPublicRelationCheckPolicy,
         );
+    const aggregateDerivationVerificationScope =
+        bridgeEncryptionEvidence.aggregateDerivationVerificationScope ??
+        'AggregateDerivationFullVerificationPreconditionNotBound';
     const bridgeProofTargetContractHash = deriveBridgeProofTargetContractHash({
         aggregateQuotientCoordinateCount: statement.shareVectorWidth,
         aggregateReducedCoordinateCount: statement.shareVectorWidth,
+        aggregateDerivationVerificationScope,
     });
     const bridgeSharedWitnessProofHash = requireProtocolHash(
         bridgeEncryptionEvidence.bridgeSharedWitnessProofHash,
@@ -324,9 +332,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
         level: bridgeEncryptionEvidence.level,
         manifestHash: statement.manifestHash,
-        aggregateDerivationVerificationScope:
-            'AggregateDerivationFullVerificationPreconditionNotBound',
-        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
+        aggregateDerivationVerificationScope,
+        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked',
         plaintextEncodingBoundCertificateHash:
             bridgeEncryptionEvidence.batchEncodingBoundCertificateHash,
         plaintextEncodingProofModuli: [
@@ -377,10 +384,16 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: bridgeEncryptionEvidence.slotCount,
         thresholdProfileHash: statement.thresholdProfileHash,
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
         topKEvaluatorInputLayoutHash,
         votingClosedBoardHeadHash: statement.votingClosedBoardHeadHash,
     });
+    const expectedBridgeProofChallengeContextHash =
+        deriveBridgeProofChallengeContextHash({
+            bridgeProofProfileHash,
+            bridgeProofStatementHash: expectedBridgeProofStatementHash,
+            bridgeProofTargetContractHash,
+        });
 
     requireMatchingValue(
         input.bridgeEvidenceVerification.ok,
@@ -404,7 +417,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.thresholdDecryptable,
-        false,
+        true,
         'threshold-decryptable evidence flag',
     );
     requireMatchingValue(
@@ -413,13 +426,14 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'claim-bearing bridge encryption evidence flag',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.aggregateDerivationVerificationScope,
-        'AggregateDerivationFullVerificationPreconditionNotBound',
+        bridgeEncryptionEvidence.aggregateDerivationVerificationScope ??
+            'AggregateDerivationFullVerificationPreconditionNotBound',
+        aggregateDerivationVerificationScope,
         'aggregate derivation verification scope',
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.plaintextCanonicalLiftProofStatus,
-        'PlaintextCanonicalLiftProofMissing',
+        'PlaintextCanonicalLiftProofChecked',
         'plaintext canonical lift proof status',
     );
     requireMatchingValue(
@@ -439,7 +453,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.thresholdDecryptable,
-        false,
+        true,
         'verified threshold-decryptable flag',
     );
     requireMatchingValue(
@@ -448,13 +462,14 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'verified claim-bearing bridge encryption flag',
     );
     requireMatchingValue(
-        input.bridgeEvidenceVerification.aggregateDerivationVerificationScope,
-        'AggregateDerivationFullVerificationPreconditionNotBound',
+        input.bridgeEvidenceVerification.aggregateDerivationVerificationScope ??
+            'AggregateDerivationFullVerificationPreconditionNotBound',
+        aggregateDerivationVerificationScope,
         'verified aggregate derivation verification scope',
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.plaintextCanonicalLiftProofStatus,
-        'PlaintextCanonicalLiftProofMissing',
+        'PlaintextCanonicalLiftProofChecked',
         'verified plaintext canonical lift proof status',
     );
     requireMatchingValue(
@@ -695,6 +710,11 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             input.bridgeEvidenceVerification.bridgeProofStatementHash,
         ],
         [
+            'bridge proof challenge context hash',
+            bridgeEncryptionEvidence.bridgeProofChallengeContextHash,
+            input.bridgeEvidenceVerification.bridgeProofChallengeContextHash,
+        ],
+        [
             'bridge proof target contract hash',
             bridgeEncryptionEvidence.bridgeProofTargetContractHash,
             input.bridgeEvidenceVerification.bridgeProofTargetContractHash,
@@ -778,6 +798,11 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'canonical bridge proof statement hash',
     );
     requireMatchingValue(
+        bridgeEncryptionEvidence.bridgeProofChallengeContextHash,
+        expectedBridgeProofChallengeContextHash,
+        'canonical bridge proof challenge context hash',
+    );
+    requireMatchingValue(
         bridgeEncryptionEvidence.bridgeProofTargetContractHash,
         bridgeProofTargetContractHash,
         'canonical bridge proof target contract hash',
@@ -793,6 +818,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             derivePendingBridgeProofEncodingProfileHash({
                 bridgeProofBytesHash:
                     bridgeEncryptionEvidence.bridgeProofBytesHash,
+                bridgeProofChallengeContextHash:
+                    expectedBridgeProofChallengeContextHash,
                 bridgeProofProfileHash,
                 bridgeProofStatementHash: expectedBridgeProofStatementHash,
             }),
@@ -802,6 +829,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         input.proofParameterSetHash ??
             derivePendingBridgeProofParameterSetHash({
                 bgvProfileHash: profileHash,
+                bridgeProofChallengeContextHash:
+                    expectedBridgeProofChallengeContextHash,
                 bridgeProofProfileHash,
                 bridgeProofStatementHash: expectedBridgeProofStatementHash,
                 collectivePublicKeyRoot:
@@ -816,6 +845,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             derivePendingBridgeProofPublicRandomnessHash({
                 bridgeProofBytesHash:
                     bridgeEncryptionEvidence.bridgeProofBytesHash,
+                bridgeProofChallengeContextHash:
+                    expectedBridgeProofChallengeContextHash,
                 bridgeProofStatementHash: expectedBridgeProofStatementHash,
             }),
         'public randomness hash',
@@ -833,6 +864,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         aggregateShareCommitmentHash:
             aggregateDerivationComponent.aggregateCommitment
                 .aggregateShareCommitmentHash,
+        aggregateDerivationVerificationScope,
         aggregateInputEncodingProfileHash,
         ballotScoreEncodingProfileHash,
         ballotSetHash: statement.ballotSetHash,
@@ -847,6 +879,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bridgeLayoutHash: encryptedAggregateInputLayoutHash,
         bridgeProofProfileHash,
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
+        bridgeProofChallengeContextHash:
+            expectedBridgeProofChallengeContextHash,
         bridgeProofTargetContractHash,
         bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
         bridgeWitnessPrivacyProfileHash: requireProtocolHash(
@@ -906,7 +940,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             statement.shareCommitmentMessageBoundCertHash,
         shareVectorWidth: statement.shareVectorWidth,
         thresholdProfileHash: statement.thresholdProfileHash,
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
         topKEvaluatorInputLayoutHash,
         votingClosedBoardHeadHash: statement.votingClosedBoardHeadHash,
     };

@@ -18,6 +18,7 @@ import {
 import type { PendingBridgeProofRecordFromEvidenceInput } from '#packages/protocol/src/ballot-privacy/aggregate-bridge/structure-verification.js';
 import {
     deriveAggregateContributionHash,
+    deriveBridgeProofChallengeContextHash,
     deriveBridgeProofProfileHash,
     deriveBridgeProofRecordHash,
     deriveBridgeProofStatementHash,
@@ -197,7 +198,7 @@ export const createAggregateContributionFixture = (
         claimBearingBridgeEncryption: false,
         developmentKeyOnly: false,
         proofBackend: 'SealedLatticeBridgeRelation',
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
     });
     const aggregateDerivationComponentHash = hash(
         `aggregate-derivation-${input.rosterPosition}`,
@@ -211,6 +212,8 @@ export const createAggregateContributionFixture = (
     const bridgeProofTargetContractHash = deriveBridgeProofTargetContractHash({
         aggregateQuotientCoordinateCount: 220,
         aggregateReducedCoordinateCount: 220,
+        aggregateDerivationVerificationScope:
+            'AggregateDerivationFullVerificationPreconditionNotBound',
     });
     const actionContext = createActionContext({
         actionSequence,
@@ -288,7 +291,7 @@ export const createAggregateContributionFixture = (
         manifestHash: baseFields.manifestHash,
         aggregateDerivationVerificationScope:
             'AggregateDerivationFullVerificationPreconditionNotBound',
-        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
+        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked',
         plaintextEncodingBoundCertificateHash: hash(
             `batch-encoding-bound-certificate-${input.rosterPosition}`,
         ),
@@ -337,16 +340,24 @@ export const createAggregateContributionFixture = (
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
         thresholdProfileHash: baseFields.thresholdProfileHash,
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
         topKEvaluatorInputLayoutHash: baseFields.topKEvaluatorInputLayoutHash,
         votingClosedBoardHeadHash: baseFields.votingClosedBoardHeadHash,
     });
+    const bridgeProofChallengeContextHash =
+        deriveBridgeProofChallengeContextHash({
+            bridgeProofProfileHash,
+            bridgeProofStatementHash: proofStatementHash,
+            bridgeProofTargetContractHash,
+        });
     const bridgeProofRecordPayload: Omit<
         BridgeProofRecord,
         'bridgeProofRecordHash'
     > = {
         ...baseFields,
         aggregateDerivationComponentHash,
+        aggregateDerivationVerificationScope:
+            'AggregateDerivationFullVerificationPreconditionNotBound',
         aggregateShareCommitmentHash,
         bgvEncryptionKeyMaterialKind:
             'passive-transcript-derived-collective-public-key',
@@ -354,6 +365,7 @@ export const createAggregateContributionFixture = (
             'SealedLatticePassiveCollectiveCiphertextEquationRelation',
         bridgeProofProfileHash,
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
+        bridgeProofChallengeContextHash,
         bridgeProofTargetContractHash,
         bridgeProofVerificationStatus:
             input.proofStatus ?? 'BridgeProofRelationChecked',
@@ -378,7 +390,7 @@ export const createAggregateContributionFixture = (
         publicRandomnessHash: hash(
             `bridge-proof-randomness-${input.rosterPosition}`,
         ),
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
     };
     const bridgeProofRecord = {
         ...bridgeProofRecordPayload,

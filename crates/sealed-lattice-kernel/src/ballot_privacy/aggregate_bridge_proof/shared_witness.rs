@@ -15,6 +15,7 @@ pub(super) struct BridgeSharedWitnessProverInput<'value> {
     pub(super) bridge_encryption: &'value Value,
     pub(super) proof_input: &'value Value,
     pub(super) bridge_proof_statement_hash: &'value str,
+    pub(super) bridge_proof_challenge_context_hash: &'value str,
     pub(super) contributor_identity: &'value str,
     pub(super) aggregate_derivation_statement_hash: &'value str,
     pub(super) aggregate_integer_share_vector: &'value [u64],
@@ -82,7 +83,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
         let mut accepted_check = None;
         for rejection_attempt_index in 0..BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT {
             let aggregate_integer_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -91,7 +92,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let aggregate_opening_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -100,7 +101,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let aggregate_reduced_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -109,7 +110,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let aggregate_quotient_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -118,7 +119,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let plaintext_coefficient_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -127,7 +128,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let plaintext_encoding_quotient_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -136,7 +137,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let randomizer_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -145,7 +146,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let perturbation_zero_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -154,7 +155,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
                 &mask_absolute_bound,
             );
             let perturbation_one_mask = sample_bridge_mask_vector(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 input.prover_randomness_hex,
                 check_index,
                 rejection_attempt_index,
@@ -202,7 +203,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
             let bgv_randomness_bound_commitment_hash =
                 bridge_bgv_randomness_bound_commitment_hash(&bgv_randomness_bound_commitment)?;
             let challenge_scalar = bridge_shared_witness_challenge_scalar(
-                input.bridge_proof_statement_hash,
+                input.bridge_proof_challenge_context_hash,
                 check_index,
                 rejection_attempt_index,
                 &aggregate_commitment_hash,
@@ -325,6 +326,7 @@ pub(super) fn generate_bridge_shared_witness_proof(
         "objectVersion": 1,
         "proofModel": BRIDGE_SHARED_WITNESS_PROOF_MODEL,
         "bridgeProofStatementHash": input.bridge_proof_statement_hash,
+        "bridgeProofChallengeContextHash": input.bridge_proof_challenge_context_hash,
         "relationCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT,
         "challengeHex": challenge_hex,
         "sharedResponseScalarCount": shared_response_scalar_count,
@@ -430,6 +432,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
     setup_package: &Value,
     bridge_encryption: &Value,
     bridge_proof_statement_hash: &str,
+    bridge_proof_challenge_context_hash: &str,
     contributor_identity: &str,
     aggregate_derivation_statement_hash: &str,
     aggregate_reduced_coordinate_count: u64,
@@ -464,6 +467,12 @@ pub(super) fn verify_bridge_shared_witness_proof(
         "bridgeProofStatementHash",
         bridge_proof_statement_hash,
         "shared-witness proof statement hash",
+    )?;
+    require_equal_string(
+        shared_proof,
+        "bridgeProofChallengeContextHash",
+        bridge_proof_challenge_context_hash,
+        "shared-witness proof challenge context hash",
     )?;
     require_equal_string(
         shared_proof,
@@ -699,7 +708,7 @@ pub(super) fn verify_bridge_shared_witness_proof(
             "shared-witness BGV ciphertext commitment hash",
         )?;
         let recomputed_challenge_scalar = bridge_shared_witness_challenge_scalar(
-            bridge_proof_statement_hash,
+            bridge_proof_challenge_context_hash,
             check_index,
             rejection_attempt_index,
             &aggregate_commitment_hash,

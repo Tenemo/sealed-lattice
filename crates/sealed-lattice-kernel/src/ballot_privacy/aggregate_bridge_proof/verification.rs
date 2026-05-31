@@ -7,7 +7,8 @@ use super::{
         verify_bridge_shared_witness_proof,
     },
     statement::{
-        bridge_proof_profile_hash, bridge_proof_statement_hash, build_bridge_proof_statement,
+        BridgeProofStatementInput, bridge_proof_challenge_context_hash, bridge_proof_profile_hash,
+        bridge_proof_statement_hash, build_bridge_proof_statement,
     },
     validation::{
         parse_bridge_proof_value, read_u64_object_field, require_equal_bool, require_equal_string,
@@ -257,21 +258,33 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             component,
             aggregate_relation_subproof_hex,
         )?;
+    let aggregate_derivation_verification_scope =
+        aggregate_derivation_verification_scope_from_request(
+            request,
+            component,
+            "verifyAggregateBridgeEncryption",
+        )?;
     let bridge_proof_profile_hash = bridge_proof_profile_hash()?;
-    let bridge_proof_statement = build_bridge_proof_statement(
+    let bridge_proof_statement = build_bridge_proof_statement(BridgeProofStatementInput {
         component,
         setup_package,
         bridge_encryption,
-        &bridge_proof_profile_hash,
+        bridge_proof_profile_hash: &bridge_proof_profile_hash,
         aggregate_selection_policy_hash,
         bridge_witness_privacy_profile_hash,
         he_param_hash,
-    )?;
+        aggregate_derivation_verification_scope,
+    })?;
     let bridge_proof_statement_hash = bridge_proof_statement_hash(&bridge_proof_statement)?;
     let bridge_proof_target_contract_hash = required_string_field(
         &bridge_proof_statement,
         "bridgeProofTargetContractHash",
         "bridgeProofStatement",
+    )?;
+    let expected_bridge_proof_challenge_context_hash = bridge_proof_challenge_context_hash(
+        &bridge_proof_profile_hash,
+        &bridge_proof_statement_hash,
+        bridge_proof_target_contract_hash,
     )?;
     require_equal_string(
         &proof_value,
@@ -284,6 +297,12 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeProofStatementHash",
         &bridge_proof_statement_hash,
         "bridge proof statement hash",
+    )?;
+    require_equal_string(
+        &proof_value,
+        "bridgeProofChallengeContextHash",
+        &expected_bridge_proof_challenge_context_hash,
+        "bridge proof challenge context hash",
     )?;
     require_equal_string(
         &proof_value,
@@ -302,6 +321,12 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeProofStatementHash",
         &bridge_proof_statement_hash,
         "bridge proof statement hash",
+    )?;
+    require_equal_string(
+        bridge_encryption,
+        "bridgeProofChallengeContextHash",
+        &expected_bridge_proof_challenge_context_hash,
+        "bridge proof challenge context hash",
     )?;
     require_equal_string(
         bridge_encryption,
@@ -385,6 +410,12 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "postVotingClosedContextHash",
         post_voting_closed_context_hash,
         "bridge proof post-close context hash",
+    )?;
+    require_equal_string(
+        &proof_value,
+        "aggregateDerivationVerificationScope",
+        aggregate_derivation_verification_scope,
+        "aggregate-derivation verification scope",
     )?;
     for field_name in [
         "plaintextRoot",
@@ -510,6 +541,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             setup_package,
             bridge_encryption,
             &bridge_proof_statement_hash,
+            &expected_bridge_proof_challenge_context_hash,
             contributor_identity,
             statement_hash,
             aggregate_reduced_coordinate_count,
@@ -524,6 +556,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "aggregateDerivationStatementHash": statement_hash,
             "bridgeProofProfileHash": bridge_proof_profile_hash,
             "bridgeProofStatementHash": bridge_proof_statement_hash,
+            "bridgeProofChallengeContextHash": expected_bridge_proof_challenge_context_hash,
             "proofBytesHash": bridge_proof_bytes_hash,
             "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
             "collectivePublicKeyRoot": bridge_encryption["collectivePublicKeyRoot"],
@@ -598,11 +631,11 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "BridgeProofImplementationEvidenceOnly",
             "BgvPublicKeyCoefficientMaterialBound",
             DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS,
-            TARGET_THRESHOLD_DECRYPTION_PROTOCOL_PENDING_STATUS,
+            TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS,
             SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
             BGV_RANDOMNESS_BOUND_PROOF_STATUS,
-            PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
-            AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+            PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
+            aggregate_derivation_verification_scope,
             "BridgeProofClaimClosureMissing",
             "FinalBridgeTheoremPending",
         ]
@@ -627,6 +660,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         Value::String(statement_hash.to_string()),
         Value::String(bridge_proof_profile_hash.clone()),
         Value::String(bridge_proof_statement_hash.clone()),
+        Value::String(expected_bridge_proof_challenge_context_hash.clone()),
         Value::String(bridge_proof_target_contract_hash.to_string()),
         Value::String(bridge_proof_bytes_hash.clone()),
         Value::String(bridge_proof_root.clone()),
@@ -660,8 +694,8 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "unresolvedReason": Value::Null,
         "bridgeProofVerificationStatus": bridge_proof_verification_status,
         "bridgeEvidenceVerificationStatus": "BridgeProofEvidenceChecked",
-        "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
-        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
+        "aggregateDerivationVerificationScope": aggregate_derivation_verification_scope,
+        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
         "bridgeClaimClosureVerified": false,
         "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
         "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
@@ -674,6 +708,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeVariantEvidenceStatus": dimensions.evidence_tier,
         "bridgeProofProfileHash": bridge_proof_profile_hash,
         "bridgeProofStatementHash": bridge_proof_statement_hash,
+        "bridgeProofChallengeContextHash": expected_bridge_proof_challenge_context_hash,
         "bridgeProofTargetContractHash": bridge_proof_target_contract_hash,
         "bridgeProofBytesHash": bridge_proof_bytes_hash,
         "bridgeProofRoot": bridge_proof_root,

@@ -83,6 +83,7 @@ export const protocolHashNamespaceValues = [
     'TopKDecryptionShareHash',
     'ThresholdDecryptionProfileHash',
     'KllpsTargetDecryptionProfileHash',
+    'TargetThresholdDecryptabilityCertificateHash',
     'BridgeProofProfileHash',
     'BridgeProofRecordHash',
     'CanonicalCiphertextConventionHash',

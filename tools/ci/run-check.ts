@@ -1,6 +1,16 @@
 import { performance } from 'node:perf_hooks';
 
 import {
+    CheckProgressReporter,
+    checkCommandTimingKey,
+    formatProgressDuration,
+    readPreviousCheckTimingHistory,
+    type CheckFailureDetail,
+    type CheckProgressLanePlan,
+    type CheckRunTimingDetails,
+    type CheckTimingHistory,
+} from './check-progress-reporter.js';
+import {
     createLocalRunLog,
     currentProcessExitCode,
     removeRunLogArguments,
@@ -248,12 +258,35 @@ const buildParallelLanes = (
     ];
 };
 
+const buildProgressLanePlans = (
+    lanes: readonly ValidationLane[],
+    timingHistory: CheckTimingHistory,
+): readonly CheckProgressLanePlan[] =>
+    lanes.map((lane) => ({
+        commands: lane.commands.map((command) => ({
+            description: command.description,
+            expectedDurationMilliseconds:
+                timingHistory.commandDurationMilliseconds.get(
+                    checkCommandTimingKey(lane.name, command.description),
+                ),
+        })),
+        expectedDurationMilliseconds:
+            timingHistory.laneDurationMilliseconds.get(lane.name),
+        name: lane.name,
+    }));
+
 const runGatingLane = async (
     lane: ValidationLane,
     runLog: ActiveLocalRunLog | undefined,
+    reporter: CheckProgressReporter,
 ): Promise<ValidationLaneResult> => {
     const startedAtMilliseconds = performance.now();
-    const exitCode = await runCommandsInSeries(lane.commands, { runLog });
+    const exitCode = await runCommandsInSeries(lane.commands, {
+        observer: reporter.createCommandObserver(lane.name),
+        outputMode: 'capture',
+        runLog,
+    });
+    reporter.recordLaneResult(lane.name, exitCode === 0 ? 'passed' : 'failed');
 
     return {
         durationMilliseconds: Math.round(
@@ -269,9 +302,12 @@ const runParallelLane = async (
     lane: ValidationLane,
     runLog: ActiveLocalRunLog | undefined,
     abortController: AbortController,
+    reporter: CheckProgressReporter,
 ): Promise<ValidationLaneResult> => {
     const startedAtMilliseconds = performance.now();
     const exitCode = await runCommandsInSeries(lane.commands, {
+        observer: reporter.createCommandObserver(lane.name),
+        outputMode: 'capture',
         runLog,
         signal: abortController.signal,
     });
@@ -280,6 +316,8 @@ const runParallelLane = async (
     );
 
     if (exitCode === 0) {
+        reporter.recordLaneResult(lane.name, 'passed');
+
         return {
             durationMilliseconds,
             exitCode,
@@ -288,6 +326,8 @@ const runParallelLane = async (
         };
     }
     if (abortController.signal.aborted) {
+        reporter.recordLaneResult(lane.name, 'stopped');
+
         return {
             durationMilliseconds,
             exitCode,
@@ -299,6 +339,7 @@ const runParallelLane = async (
     // This lane failed on its own. Abort so every other still-running lane is
     // killed instead of grinding to completion behind a known failure.
     abortController.abort();
+    reporter.recordLaneResult(lane.name, 'failed');
 
     return {
         durationMilliseconds,
@@ -320,6 +361,8 @@ const formatDurationSeconds = (durationMilliseconds: number): string =>
 const printValidationSummary = (
     results: readonly ValidationLaneResult[],
     runLog: ActiveLocalRunLog | undefined,
+    timingHistory: CheckTimingHistory,
+    failureDetails: readonly CheckFailureDetail[],
 ): void => {
     console.log('\nValidation summary');
     for (const result of results) {
@@ -339,6 +382,13 @@ const printValidationSummary = (
     ).length;
     if (failedResults.length === 0) {
         console.log('\nAll validation lanes passed.');
+        if (timingHistory.totalDurationMilliseconds !== undefined) {
+            console.log(
+                `Expected duration from previous successful check: ${formatProgressDuration(
+                    timingHistory.totalDurationMilliseconds,
+                )}.`,
+            );
+        }
 
         return;
     }
@@ -354,6 +404,24 @@ const printValidationSummary = (
     );
     if (runLog !== undefined) {
         console.log(`Per-lane logs: ${runLog.runDirectoryPath}`);
+    }
+    for (const failureDetail of failureDetails) {
+        console.log(`\nFailure detail: ${failureDetail.laneName}`);
+        if (failureDetail.commandDescription !== undefined) {
+            console.log(`Command: ${failureDetail.commandDescription}`);
+        }
+        if (failureDetail.exitCode !== undefined) {
+            console.log(`Exit code: ${failureDetail.exitCode}`);
+        }
+        if (failureDetail.logPath !== undefined) {
+            console.log(`Log: ${failureDetail.logPath}`);
+        }
+        if (failureDetail.recentOutputLines.length > 0) {
+            console.log('Recent output:');
+            for (const line of failureDetail.recentOutputLines) {
+                console.log(`  ${line}`);
+            }
+        }
     }
 };
 
@@ -372,6 +440,14 @@ const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildGatingLanes(packageManagerRunner);
     const parallelLanes = buildParallelLanes(packageManagerRunner);
+    const timingHistory = await readPreviousCheckTimingHistory();
+    const reporter = new CheckProgressReporter({
+        history: timingHistory,
+        lanes: buildProgressLanePlans(
+            [...gatingLanes, ...parallelLanes],
+            timingHistory,
+        ),
+    });
     const runLog = runLogDisabledByArguments(rawArguments)
         ? undefined
         : await createLocalRunLog({
@@ -381,15 +457,24 @@ const main = async (): Promise<void> => {
               ),
               scriptName: 'check',
           });
+    let timingDetails: CheckRunTimingDetails | undefined;
 
     try {
         const results: ValidationLaneResult[] = [];
+        reporter.start();
 
         for (const lane of gatingLanes) {
-            const result = await runGatingLane(lane, runLog);
+            const result = await runGatingLane(lane, runLog, reporter);
             results.push(result);
             if (result.exitCode !== 0) {
-                printValidationSummary(results, runLog);
+                reporter.stop();
+                timingDetails = reporter.createTimingDetails();
+                printValidationSummary(
+                    results,
+                    runLog,
+                    timingHistory,
+                    reporter.failureDetails(),
+                );
                 process.exitCode = result.exitCode;
 
                 return;
@@ -399,7 +484,7 @@ const main = async (): Promise<void> => {
         const abortController = new AbortController();
         const parallelResults = await Promise.all(
             parallelLanes.map((lane) =>
-                runParallelLane(lane, runLog, abortController),
+                runParallelLane(lane, runLog, abortController, reporter),
             ),
         );
         results.push(
@@ -408,10 +493,21 @@ const main = async (): Promise<void> => {
                     second.durationMilliseconds - first.durationMilliseconds,
             ),
         );
-        printValidationSummary(results, runLog);
+        reporter.stop();
+        timingDetails = reporter.createTimingDetails();
+        printValidationSummary(
+            results,
+            runLog,
+            timingHistory,
+            reporter.failureDetails(),
+        );
         process.exitCode = overallExitCode(results);
     } finally {
-        await runLog?.finish({ exitCode: currentProcessExitCode() });
+        reporter.stop();
+        await runLog?.finish({
+            details: timingDetails,
+            exitCode: currentProcessExitCode(),
+        });
     }
 };
 

@@ -213,6 +213,10 @@ export type TranscriptCoreKernel = {
         readonly encryptionRandomnessSeedHex?: string;
         readonly developmentRandomnessOverrideAcknowledged?: boolean;
         readonly includeCanonicalBytesHex?: boolean;
+        readonly closeRecord?: unknown;
+        readonly contributorActionContext?: unknown;
+        readonly countedBallotPackages?: readonly unknown[];
+        readonly casualMicroRosterAcknowledged?: boolean;
     }): AggregateBridgeEncryptionGeneration | BallotPrivacyKernelVerification;
     evaluateAggregateBridgeRelation(input: {
         readonly aggregateSelectionPolicyHash: ProtocolHash;
@@ -233,6 +237,10 @@ export type TranscriptCoreKernel = {
         readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
         readonly heParamHash: ProtocolHash;
         readonly setupPackage: unknown;
+        readonly closeRecord?: unknown;
+        readonly contributorActionContext?: unknown;
+        readonly countedBallotPackages?: readonly unknown[];
+        readonly casualMicroRosterAcknowledged?: boolean;
     }): AggregateBridgeEncryptionVerification | BallotPrivacyKernelVerification;
     describeBgvRnsProfile(): BgvRnsProfileDescription;
     describeBgvOperationRegistry(): unknown;
@@ -544,6 +552,10 @@ type TranscriptCoreKernelCommand =
           readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
           readonly developmentRandomnessOverrideAcknowledged?: boolean;
           readonly includeCanonicalBytesHex?: boolean;
+          readonly closeRecord?: unknown;
+          readonly contributorActionContext?: unknown;
+          readonly countedBallotPackages?: readonly unknown[];
+          readonly casualMicroRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'EvaluateAggregateBridgeRelation';
@@ -568,6 +580,10 @@ type TranscriptCoreKernelCommand =
           readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
           readonly heParamHash: ProtocolHash;
           readonly setupPackage: unknown;
+          readonly closeRecord?: unknown;
+          readonly contributorActionContext?: unknown;
+          readonly countedBallotPackages?: readonly unknown[];
+          readonly casualMicroRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'DescribeBgvRnsProfile';

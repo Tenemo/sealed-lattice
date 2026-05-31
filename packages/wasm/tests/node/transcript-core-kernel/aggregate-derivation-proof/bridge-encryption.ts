@@ -9,6 +9,7 @@ import {
 import {
     buildAggregateDerivationStatement,
     createAggregateDerivationComponent,
+    deriveBridgeProofChallengeContextHash,
     deriveBridgeProofTargetContractHash,
     sumAggregateDerivationWitnesses,
 } from '#packages/protocol/src/ballot-privacy/index';
@@ -204,13 +205,13 @@ export const registerAggregateBridgeEncryptionTest = (
                         'CollectivePublicKeyRootBound',
                         'BgvPublicKeyCoefficientMaterialBound',
                         'DecryptableBgvCiphertextConvention',
-                        'TargetThresholdDecryptionProtocolPending',
+                        'TargetThresholdDecryptabilityCompatibilityCertified',
                         'CoefficientDomainCanonical',
                         'BridgeProofRelationChecked',
                         'BridgeProofImplementationEvidenceOnly',
                         'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                         'BgvRandomnessErrorSupportPolynomialChecked',
-                        'PlaintextCanonicalLiftProofMissing',
+                        'PlaintextCanonicalLiftProofChecked',
                         'AggregateDerivationFullVerificationPreconditionNotBound',
                         'BridgeProofClaimClosureMissing',
                         'RepresentativeBridgeMatrixRowEvidence',
@@ -237,7 +238,7 @@ export const registerAggregateBridgeEncryptionTest = (
                             proverRandomnessSource:
                                 'development-deterministic-fixture',
                         },
-                        thresholdDecryptable: false,
+                        thresholdDecryptable: true,
                         claimBearingBridgeEncryption: false,
                         bridgeVariantEvidenceStatus:
                             'representative-row-evidence',
@@ -252,6 +253,11 @@ export const registerAggregateBridgeEncryptionTest = (
                     ).toHaveLength(128);
                     expect(
                         String(bridgeEncryption.bridgeProofStatementHash),
+                    ).toHaveLength(128);
+                    expect(
+                        String(
+                            bridgeEncryption.bridgeProofChallengeContextHash,
+                        ),
                     ).toHaveLength(128);
                     expect(
                         String(bridgeEncryption.bridgeProofTargetContractHash),
@@ -276,6 +282,20 @@ export const registerAggregateBridgeEncryptionTest = (
                         deriveBridgeProofTargetContractHash({
                             aggregateQuotientCoordinateCount: 220,
                             aggregateReducedCoordinateCount: 220,
+                            aggregateDerivationVerificationScope:
+                                'AggregateDerivationFullVerificationPreconditionNotBound',
+                        });
+                    const expectedChallengeContextHash =
+                        deriveBridgeProofChallengeContextHash({
+                            bridgeProofProfileHash: String(
+                                bridgeEncryption.bridgeProofProfileHash,
+                            ),
+                            bridgeProofStatementHash: String(
+                                bridgeEncryption.bridgeProofStatementHash,
+                            ),
+                            bridgeProofTargetContractHash: String(
+                                bridgeEncryption.bridgeProofTargetContractHash,
+                            ),
                         });
                     expect(bridgeProofPayload.bridgeProofProfileHash).toBe(
                         bridgeEncryption.bridgeProofProfileHash,
@@ -283,6 +303,12 @@ export const registerAggregateBridgeEncryptionTest = (
                     expect(bridgeProofPayload.bridgeProofStatementHash).toBe(
                         bridgeEncryption.bridgeProofStatementHash,
                     );
+                    expect(
+                        bridgeProofPayload.bridgeProofChallengeContextHash,
+                    ).toBe(bridgeEncryption.bridgeProofChallengeContextHash);
+                    expect(
+                        bridgeProofPayload.bridgeProofChallengeContextHash,
+                    ).toBe(expectedChallengeContextHash);
                     expect(
                         bridgeProofPayload.bridgeProofTargetContractHash,
                     ).toBe(bridgeEncryption.bridgeProofTargetContractHash);
@@ -299,6 +325,8 @@ export const registerAggregateBridgeEncryptionTest = (
                     expect(bridgeProofPayload).toMatchObject({
                         objectType: 'SealedLatticeAggregateBridgeRelationProof',
                         bridgeSharedWitnessProof: {
+                            bridgeProofChallengeContextHash:
+                                expectedChallengeContextHash,
                             objectType: 'AggregateBridgeSharedWitnessProof',
                             proofModel:
                                 'fiat-shamir-linear-shared-response-rejection-sampled-v1',
@@ -402,7 +430,7 @@ export const registerAggregateBridgeEncryptionTest = (
                             naiveLinearExpansionBackendStatus:
                                 'InfeasibleForEncryptedAggregateBridgeClaim',
                             plaintextCanonicalLiftProofStatus:
-                                'PlaintextCanonicalLiftProofMissing',
+                                'PlaintextCanonicalLiftProofChecked',
                             proofFriendlyPlaintextBindingRequired: true,
                             publicPlaintextRootAcceptedAsClosureEvidence: false,
                             sharedWitnessCheckCount: 2,
@@ -436,7 +464,7 @@ export const registerAggregateBridgeEncryptionTest = (
                             bgvEncryptionKeyMaterialKind:
                                 'passive-transcript-derived-collective-public-key',
                             developmentKeyOnly: false,
-                            thresholdDecryptable: false,
+                            thresholdDecryptable: true,
                             claimBearingBridgeEncryption: false,
                             bgvRandomnessBoundProofStatus:
                                 'BgvRandomnessErrorSupportPolynomialChecked',
@@ -486,7 +514,7 @@ export const registerAggregateBridgeEncryptionTest = (
                             bgvEncryptionKeyMaterialKind:
                                 'passive-transcript-derived-collective-public-key',
                             developmentKeyOnly: false,
-                            thresholdDecryptable: false,
+                            thresholdDecryptable: true,
                             claimBearingBridgeEncryption: false,
                             sampledOnlyBridgeVerificationAccepted: false,
                             sharedWitnessBindingRequired: true,
@@ -570,10 +598,10 @@ export const registerAggregateBridgeEncryptionTest = (
                         'BridgeProofImplementationEvidenceOnly',
                         'BgvPublicKeyCoefficientMaterialBound',
                         'DecryptableBgvCiphertextConvention',
-                        'TargetThresholdDecryptionProtocolPending',
+                        'TargetThresholdDecryptabilityCompatibilityCertified',
                         'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                         'BgvRandomnessErrorSupportPolynomialChecked',
-                        'PlaintextCanonicalLiftProofMissing',
+                        'PlaintextCanonicalLiftProofChecked',
                         'AggregateDerivationFullVerificationPreconditionNotBound',
                         'BridgeProofClaimClosureMissing',
                         'FinalBridgeTheoremPending',
@@ -586,7 +614,7 @@ export const registerAggregateBridgeEncryptionTest = (
                         bgvEncryptionKeyMaterialKind:
                             'passive-transcript-derived-collective-public-key',
                         developmentKeyOnly: false,
-                        thresholdDecryptable: false,
+                        thresholdDecryptable: true,
                         claimBearingBridgeEncryption: false,
                         bridgeVariantEvidenceStatus:
                             'representative-row-evidence',
@@ -624,6 +652,11 @@ export const registerAggregateBridgeEncryptionTest = (
                     ).toBe(
                         String(bridgeEncryption.bridgeProofTargetContractHash),
                     );
+                    expect(
+                        String(
+                            bridgeVerification.bridgeProofChallengeContextHash,
+                        ),
+                    ).toBe(expectedChallengeContextHash);
                     const publicSdkBridgeVerification = await runBridgeTestStep(
                         'verify bridge evidence through the public SDK',
                         () =>
@@ -783,6 +816,8 @@ export const registerAggregateBridgeEncryptionTest = (
                                     },
                                 );
                             expect(pendingBridgeProofRecord).toMatchObject({
+                                bridgeProofChallengeContextHash:
+                                    expectedChallengeContextHash,
                                 bridgeProofTargetContractHash:
                                     bridgeEncryption.bridgeProofTargetContractHash,
                                 bridgeProofVerificationStatus:
@@ -972,6 +1007,8 @@ export const registerAggregateBridgeEncryptionTest = (
                                     bridgePayload.bridgeProofProfileHash,
                                 bridgeProofStatementHash:
                                     bridgePayload.bridgeProofStatementHash,
+                                bridgeProofChallengeContextHash:
+                                    bridgePayload.bridgeProofChallengeContextHash,
                                 bgvPublicKeyRoot:
                                     bridgePayload.bgvPublicKeyRoot,
                                 collectivePublicKeyRoot:
@@ -1122,6 +1159,12 @@ export const registerAggregateBridgeEncryptionTest = (
                             });
                             expectBridgeVerificationRejected({
                                 ...bridgeEncryption,
+                                bridgeProofChallengeContextHash: '0'.repeat(
+                                    128,
+                                ),
+                            });
+                            expectBridgeVerificationRejected({
+                                ...bridgeEncryption,
                                 bridgeProofTargetContractHash: '0'.repeat(128),
                             });
                             expectBridgeVerificationRejected({
@@ -1170,6 +1213,33 @@ export const registerAggregateBridgeEncryptionTest = (
                                             128,
                                         ),
                                     },
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        bridgeProofChallengeContextHash:
+                                            '0'.repeat(128),
+                                    },
+                                    {
+                                        bridgeProofChallengeContextHash:
+                                            '0'.repeat(128),
+                                    },
+                                ),
+                            );
+                            expectBridgeVerificationRejected(
+                                bridgeEncryptionWithUpdatedProofPayload(
+                                    {
+                                        bridgeSharedWitnessProof: {
+                                            ...(bridgeProofPayload.bridgeSharedWitnessProof as Record<
+                                                string,
+                                                unknown
+                                            >),
+                                            bridgeProofChallengeContextHash:
+                                                '0'.repeat(128),
+                                        },
+                                    },
+                                    {},
                                 ),
                             );
                             expectBridgeVerificationRejected(

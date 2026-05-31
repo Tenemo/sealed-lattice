@@ -11,6 +11,7 @@ import {
 } from '#packages/crypto/src/index';
 import {
     createBallotPrivacyProfileSet,
+    deriveBridgeProofChallengeContextHash,
     deriveBridgeProofProfileHash,
     deriveBridgeProofStatementHash,
     deriveBridgeProofTargetContractHash,
@@ -171,7 +172,7 @@ const syntheticBridgeProofStatementHash = (input: {
         claimBearingBridgeEncryption: false,
         developmentKeyOnly: false,
         proofBackend,
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
     });
 
     return deriveBridgeProofStatementHash({
@@ -291,7 +292,7 @@ const syntheticBridgeProofStatementHash = (input: {
         manifestHash: input.statement.manifestHash,
         aggregateDerivationVerificationScope:
             'AggregateDerivationFullVerificationPreconditionNotBound',
-        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing',
+        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked',
         plaintextEncodingBoundCertificateHash: syntheticHash(
             'BridgeProofRecordHash',
             `batch-lift-bound-${input.variant.rosterSize}-${input.variant.optionCount}`,
@@ -356,7 +357,7 @@ const syntheticBridgeProofStatementHash = (input: {
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
         thresholdProfileHash: input.statement.thresholdProfileHash,
-        thresholdDecryptable: false,
+        thresholdDecryptable: true,
         topKEvaluatorInputLayoutHash: syntheticHash(
             'TopKEvaluatorInputLayoutHash',
             `top-k-layout-${input.variant.optionCount}`,
@@ -445,6 +446,8 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
             deriveBridgeProofTargetContractHash({
                 aggregateQuotientCoordinateCount: statement.shareVectorWidth,
                 aggregateReducedCoordinateCount: statement.shareVectorWidth,
+                aggregateDerivationVerificationScope:
+                    'AggregateDerivationFullVerificationPreconditionNotBound',
             });
         const bridgeProofStatementHash = syntheticBridgeProofStatementHash({
             aggregateInputLayoutHash,
@@ -452,6 +455,21 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
             statement,
             variant,
         });
+        const bridgeProofProfileHash = deriveBridgeProofProfileHash({
+            bgvEncryptionKeyMaterialKind,
+            bgvEncryptionProofSubrelation,
+            bridgeProofProfileId,
+            claimBearingBridgeEncryption: false,
+            developmentKeyOnly: false,
+            proofBackend,
+            thresholdDecryptable: true,
+        });
+        const bridgeProofChallengeContextHash =
+            deriveBridgeProofChallengeContextHash({
+                bridgeProofProfileHash,
+                bridgeProofStatementHash,
+                bridgeProofTargetContractHash,
+            });
         const statementDimensionHash = deriveProtocolHash(
             'BridgeProofRecordHash',
             {
@@ -469,6 +487,7 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
 
         return {
             aggregateInputLayoutHash,
+            bridgeProofChallengeContextHash,
             bridgeProofStatementHash,
             bridgeProofTargetContractHash,
             claimTier: claimTierForRosterSize(variant.rosterSize),
@@ -494,6 +513,9 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
             ),
             bridgeProofStatementHash: lowerHexHash(
                 `shape-config-statement-failed-${variant.rosterSize}-${variant.optionCount}`,
+            ),
+            bridgeProofChallengeContextHash: lowerHexHash(
+                `shape-config-challenge-context-failed-${variant.rosterSize}-${variant.optionCount}`,
             ),
             bridgeProofTargetContractHash: lowerHexHash(
                 `shape-config-target-contract-failed-${variant.rosterSize}-${variant.optionCount}`,

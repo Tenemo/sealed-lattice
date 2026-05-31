@@ -146,6 +146,14 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
         first["certificates"]["setupParameterCertificate"]["finalSecurityStatus"],
         "pendingQTarget"
     );
+    assert_eq!(
+        first["certificates"]["targetThresholdDecryptabilityCertificate"]["ciphertextCompatibilityStatus"],
+        "TargetThresholdDecryptabilityCompatibilityCertified"
+    );
+    assert_eq!(
+        first["certificates"]["targetThresholdDecryptabilityCertificate"]["downstreamProtocolStatus"],
+        "TargetDecryptionShareProtocolStillDownstream"
+    );
     assert_eq!(first["setupInputs"]["defaultSetupSeedUsed"], false);
     assert_eq!(
         first["participants"][0]["sampleDisclosure"],
@@ -544,6 +552,20 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
             Box::new(|mutated_package| {
                 mutated_package["certificates"]["setupParameterCertificateHash"] =
                     serde_json::json!(valid_hash('8'));
+            }),
+        ),
+        (
+            "target-threshold decryptability certificate hash",
+            Box::new(|mutated_package| {
+                mutated_package["certificates"]["targetThresholdDecryptabilityCertificateHash"] =
+                    serde_json::json!(valid_hash('8'));
+            }),
+        ),
+        (
+            "target-threshold decryptability certificate key root",
+            Box::new(|mutated_package| {
+                mutated_package["certificates"]["targetThresholdDecryptabilityCertificate"]["keyBinding"]
+                    ["collectivePublicKeyRoot"] = serde_json::json!(valid_hash('8'));
             }),
         ),
         (

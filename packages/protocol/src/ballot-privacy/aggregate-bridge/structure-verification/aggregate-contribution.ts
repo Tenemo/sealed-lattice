@@ -164,7 +164,7 @@ const collectBridgeProofRecordRefusals = (
         proofRecord.bgvEncryptionKeyMaterialKind !==
             'passive-transcript-derived-collective-public-key' ||
         proofRecord.developmentKeyOnly !== false ||
-        proofRecord.thresholdDecryptable !== false ||
+        proofRecord.thresholdDecryptable !== true ||
         proofRecord.claimBearingBridgeEncryption !== false ||
         !['BridgeProofBackendPending', 'BridgeProofRelationChecked'].includes(
             proofRecord.bridgeProofVerificationStatus,

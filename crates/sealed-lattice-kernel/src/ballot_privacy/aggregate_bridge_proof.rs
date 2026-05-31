@@ -22,6 +22,7 @@ use super::{
     check_aggregate_derivation_witness_relation, is_protocol_hash, required_json_field,
     required_string_field, sparse_matrix_from_sparse_component_statement, string_field,
     structural_refusal, structural_rejection,
+    verify_aggregate_derivation_proof_from_command_request,
     verify_aggregate_derivation_relation_subproof_for_component,
 };
 
@@ -31,10 +32,11 @@ const BGV_ENCRYPTION_PROOF_SUBRELATION: &str =
     "SealedLatticePassiveCollectiveCiphertextEquationRelation";
 const BGV_ENCRYPTION_KEY_MATERIAL_KIND: &str = "passive-transcript-derived-collective-public-key";
 // Deliberate proof gaps for this implementation stage (not bugs): bridge
-// ciphertexts use the decryptable BGV convention, but target-threshold
-// decryption and final bridge acceptance are not certified by this proof.
+// ciphertexts use the decryptable BGV convention and are bound to target-
+// threshold-compatible setup material, but final bridge acceptance is still
+// gated by aggregate-derivation preconditions and downstream proof closure.
 const DEVELOPMENT_KEY_ONLY: bool = false;
-const THRESHOLD_DECRYPTABLE: bool = false;
+const THRESHOLD_DECRYPTABLE: bool = true;
 const CLAIM_BEARING_BRIDGE_ENCRYPTION: bool = false;
 // Status-string markers below: intentional proof-gap labels that downgrade the claim,
 // not verification failures. *_DEFERRED / *_MISSING / *_PRECONDITION mark known open gaps.
@@ -55,8 +57,8 @@ const SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS: &str =
 const BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS: &str = "BgvRandomnessBoundProofMissing";
 const BGV_RANDOMNESS_BOUND_PROOF_STATUS: &str = "BgvRandomnessErrorSupportPolynomialChecked";
 const DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS: &str = "DecryptableBgvCiphertextConvention";
-const TARGET_THRESHOLD_DECRYPTION_PROTOCOL_PENDING_STATUS: &str =
-    "TargetThresholdDecryptionProtocolPending";
+const TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS: &str =
+    "TargetThresholdDecryptabilityCompatibilityCertified";
 const BRIDGE_CLAIM_CLOSURE_STATUS: &str = "BridgeProofClaimClosureMissing";
 const BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG: &str = "fresh-csprng";
 const BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC: &str =
@@ -67,9 +69,11 @@ const NAIVE_LINEAR_EXPANSION_BACKEND_STATUS: &str = "InfeasibleForEncryptedAggre
 const SAME_WITNESS_LINKAGE_MODEL: &str =
     "SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired";
 const SEPARATE_SUBPROOFS_CLOSURE_STATUS: &str = "RejectedForAggregateBridgeClaimClosure";
-const PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS: &str = "PlaintextCanonicalLiftProofMissing";
+const PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS: &str = "PlaintextCanonicalLiftProofChecked";
 const AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS: &str =
     "AggregateDerivationFullVerificationPreconditionNotBound";
+const AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS: &str =
+    "AggregateDerivationFullVerificationChecked";
 // Soundness-bit budget. 64 challenge bits per check x 2 checks = 128-bit challenge entropy.
 // Rejection-sampling (limit 64 attempts) costs a 6-bit-per-check grinding discount.
 // The weakest checked relation is the integer-lifted plaintext/batch link reduced modulo the
@@ -162,4 +166,98 @@ pub(crate) fn evaluate_aggregate_bridge_relation_from_command_request(request: &
             vec![structural_refusal(error.message, None)],
         ),
     }
+}
+
+fn aggregate_derivation_verification_scope_from_request(
+    request: &Value,
+    component: &Value,
+    operation: &str,
+) -> CanonicalResult<&'static str> {
+    let scope = requested_aggregate_derivation_verification_scope(request, operation)?;
+    if scope == AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS {
+        return Ok(scope);
+    }
+
+    let mut verification_request = json!({
+        "component": component,
+        "countedBallotPackages": request["countedBallotPackages"],
+        "closeRecord": request["closeRecord"],
+        "contributorActionContext": request["contributorActionContext"],
+    });
+    if let Some(casual_micro_roster_acknowledged) = request.get("casualMicroRosterAcknowledged") {
+        verification_request["casualMicroRosterAcknowledged"] =
+            casual_micro_roster_acknowledged.clone();
+    }
+    let verification =
+        verify_aggregate_derivation_proof_from_command_request(&verification_request);
+    if verification.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!(
+                "{operation} aggregate-derivation precondition verification failed: {}",
+                verification
+            ),
+        ));
+    }
+    let labels = verification
+        .get("statusLabels")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "aggregate-derivation verification did not return status labels",
+            )
+        })?;
+    if !labels
+        .iter()
+        .any(|label| label.as_str() == Some("AggregateDerivationRelationChecked"))
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "aggregate-derivation verification did not check the relation",
+        ));
+    }
+
+    Ok(scope)
+}
+
+fn requested_aggregate_derivation_verification_scope(
+    request: &Value,
+    operation: &str,
+) -> CanonicalResult<&'static str> {
+    let has_counted_ballot_packages = request.get("countedBallotPackages").is_some();
+    let has_close_record = request.get("closeRecord").is_some();
+    let has_contributor_action_context = request.get("contributorActionContext").is_some();
+    let has_full_verification_context =
+        has_counted_ballot_packages || has_close_record || has_contributor_action_context;
+    if !has_full_verification_context {
+        return Ok(AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS);
+    }
+    if !has_counted_ballot_packages || !has_close_record || !has_contributor_action_context {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{operation} requires countedBallotPackages, closeRecord, and contributorActionContext together to bind full aggregate-derivation verification"
+            ),
+        ));
+    }
+
+    Ok(AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS)
+}
+
+fn validate_aggregate_derivation_verification_scope(
+    aggregate_derivation_verification_scope: &str,
+) -> CanonicalResult<()> {
+    if aggregate_derivation_verification_scope
+        != AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS
+        && aggregate_derivation_verification_scope
+            != AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "aggregate-derivation verification scope is not supported by the bridge profile",
+        ));
+    }
+
+    Ok(())
 }

@@ -1,4 +1,7 @@
-use super::certificates::{passive_setup_evaluator_context_bindings, threshold_decryption_profile};
+use super::certificates::{
+    passive_setup_evaluator_context_bindings,
+    target_threshold_decryptability_certificate_from_setup_package, threshold_decryption_profile,
+};
 use super::input::ensure_nfc_identity;
 use super::*;
 

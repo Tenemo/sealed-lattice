@@ -46,6 +46,7 @@ export {
     createAggregateContributionFromBridgeProofRecord,
     createAggregateReadyRecord,
     deriveAggregateContributionHash,
+    deriveBridgeProofChallengeContextHash,
     deriveBridgeProofProfileHash,
     deriveBridgeProofRecordHash,
     deriveBridgeProofStatementHash,

@@ -30,6 +30,7 @@ import { forbiddenPublicWitnessFieldNames } from '#packages/protocol/src/ballot-
 import {
     createAggregateContributionFromBridgeProofRecord,
     createAggregateReadyRecord,
+    deriveBridgeProofChallengeContextHash,
     deriveBridgeProofProfileHash,
     deriveBridgeProofStatementHash,
     deriveBridgeProofTargetContractHash,
@@ -65,7 +66,7 @@ describe('encrypted aggregate bridge objects', () => {
             claimBearingBridgeEncryption: false,
             developmentKeyOnly: false,
             proofBackend: 'SealedLatticeBridgeRelation',
-            thresholdDecryptable: false,
+            thresholdDecryptable: true,
         });
         const encryptedAggregateShareCiphertextRoot = hash(
             'aggregate-share-ciphertext-1',
@@ -78,6 +79,8 @@ describe('encrypted aggregate bridge objects', () => {
                     aggregateDerivationComponent.statement.shareVectorWidth,
                 aggregateReducedCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
+                aggregateDerivationVerificationScope:
+                    'AggregateDerivationFullVerificationPreconditionNotBound',
             });
         const batchEncodingBoundCertificateHash = hash(
             'batch-encoding-bound-certificate-1',
@@ -157,7 +160,7 @@ describe('encrypted aggregate bridge objects', () => {
             aggregateDerivationVerificationScope:
                 'AggregateDerivationFullVerificationPreconditionNotBound',
             plaintextCanonicalLiftProofStatus:
-                'PlaintextCanonicalLiftProofMissing',
+                'PlaintextCanonicalLiftProofChecked',
             plaintextEncodingBoundCertificateHash:
                 batchEncodingBoundCertificateHash,
             plaintextEncodingProofModuli: [
@@ -207,11 +210,17 @@ describe('encrypted aggregate bridge objects', () => {
                 'SharedWitnessZeroKnowledgeResponseDistributionChecked',
             slotCount: 32_768,
             thresholdProfileHash: baseFields.thresholdProfileHash,
-            thresholdDecryptable: false,
+            thresholdDecryptable: true,
             topKEvaluatorInputLayoutHash:
                 baseFields.topKEvaluatorInputLayoutHash,
             votingClosedBoardHeadHash: baseFields.votingClosedBoardHeadHash,
         });
+        const bridgeProofChallengeContextHash =
+            deriveBridgeProofChallengeContextHash({
+                bridgeProofProfileHash,
+                bridgeProofStatementHash,
+                bridgeProofTargetContractHash,
+            });
         const aggregateRelationChallengeHex = '1'.repeat(48);
         const aggregateRelationCommitmentHash = hash(
             'aggregate-relation-commitment-1',
@@ -260,6 +269,7 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofProfileHash,
                 bridgeProofRoot,
                 bridgeSharedWitnessProofHash,
+                bridgeProofChallengeContextHash,
                 bridgeProofStatementHash,
                 bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
@@ -268,7 +278,7 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateDerivationVerificationScope:
                     'AggregateDerivationFullVerificationPreconditionNotBound' as const,
                 plaintextCanonicalLiftProofStatus:
-                    'PlaintextCanonicalLiftProofMissing' as const,
+                    'PlaintextCanonicalLiftProofChecked' as const,
                 sharedWitnessZeroKnowledgeStatusHash,
                 bgvRandomnessBoundProofStatusHash,
                 canonicalByteLength,
@@ -294,7 +304,7 @@ describe('encrypted aggregate bridge objects', () => {
                 sampledPublicRelationCheckPolicy,
                 sampledPublicRelationChecks,
                 slotCount: 32_768,
-                thresholdDecryptable: false,
+                thresholdDecryptable: true,
             };
         const bridgeEvidenceVerification: PendingBridgeProofRecordFromEvidenceInput['bridgeEvidenceVerification'] =
             {
@@ -313,6 +323,7 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofProfileHash,
                 bridgeProofRoot,
                 bridgeSharedWitnessProofHash,
+                bridgeProofChallengeContextHash,
                 bridgeProofStatementHash,
                 bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
@@ -321,7 +332,7 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateDerivationVerificationScope:
                     'AggregateDerivationFullVerificationPreconditionNotBound' as const,
                 plaintextCanonicalLiftProofStatus:
-                    'PlaintextCanonicalLiftProofMissing' as const,
+                    'PlaintextCanonicalLiftProofChecked' as const,
                 sharedWitnessZeroKnowledgeStatusHash,
                 bgvRandomnessBoundProofStatusHash,
                 encryptedAggregateInputRoot:
@@ -334,7 +345,7 @@ describe('encrypted aggregate bridge objects', () => {
                 encryptionRandomnessSeedSource: 'fresh-csprng',
                 randomnessSourceEvidence,
                 ok: true as const,
-                thresholdDecryptable: false,
+                thresholdDecryptable: true,
             };
 
         const bridgeProofRecord =
@@ -357,6 +368,7 @@ describe('encrypted aggregate bridge objects', () => {
             encryptedAggregateShareCiphertextRoot,
             proofSizeBytes: bridgeProofBytesHex.length / 2,
             proofStatementHash: bridgeProofStatementHash,
+            bridgeProofChallengeContextHash,
             bridgeProofTargetContractHash,
         });
         expect(bridgeProofRecord.proofSizeBytes).toBeGreaterThan(
@@ -414,6 +426,29 @@ describe('encrypted aggregate bridge objects', () => {
                 setupPackage,
             }),
         ).toThrow(/canonical bridge proof statement hash/u);
+        expect(() =>
+            createPendingBridgeProofRecordFromBridgeEvidence({
+                aggregateDerivationComponent,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
+                bridgeEncryptionEvidence: {
+                    ...bridgeEncryptionEvidence,
+                    bridgeProofChallengeContextHash: hash(
+                        'wrong-bridge-proof-challenge-context',
+                    ),
+                },
+                bridgeEvidenceVerification: {
+                    ...bridgeEvidenceVerification,
+                    bridgeProofChallengeContextHash: hash(
+                        'wrong-bridge-proof-challenge-context',
+                    ),
+                },
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
+                setupPackage,
+            }),
+        ).toThrow(/canonical bridge proof challenge context hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,

@@ -103,6 +103,7 @@ reserved_root_namespaces! {
     TOP_K_DECRYPTION_SHARE_HASH_NAMESPACE => "sealed-lattice-root/top-k-decryption-share-hash-v1",
     THRESHOLD_DECRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/threshold-decryption-profile-hash-v1",
     KLLPS_TARGET_DECRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/kllps-target-decryption-profile-hash-v1",
+    TARGET_THRESHOLD_DECRYPTABILITY_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/target-threshold-decryptability-certificate-hash-v1",
     BRIDGE_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/bridge-proof-profile-hash-v1",
     BRIDGE_PROOF_RECORD_HASH_NAMESPACE => "sealed-lattice-root/bridge-proof-record-hash-v1",
     CANONICAL_CIPHERTEXT_CONVENTION_HASH_NAMESPACE => "sealed-lattice-root/canonical-ciphertext-convention-hash-v1",

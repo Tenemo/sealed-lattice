@@ -286,6 +286,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                 &[
                     "aggregateDerivationComponentHash",
                     "aggregateDerivationStatementHash",
+                    "aggregateDerivationVerificationScope",
                     "aggregateQuotientCoordinateCount",
                     "aggregateReducedCoordinateCount",
                     "aggregateRelationChallengeHex",
@@ -300,6 +301,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "bridgeClaimClosureVerified",
                     "bridgeClaimVerificationStatus",
                     "claimBearingBridgeEncryption",
+                    "bridgeProofChallengeContextHash",
                     "bridgeProofProfileHash",
                     "bridgeProofStatement",
                     "bridgeProofStatementHash",
@@ -340,6 +342,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                 "bridgeProof.bridgeSharedWitnessProof",
                 &[
                     "bridgeProofStatementHash",
+                    "bridgeProofChallengeContextHash",
                     "challengeHex",
                     "checks",
                     "maskAbsoluteBoundExclusive",

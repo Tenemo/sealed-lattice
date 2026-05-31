@@ -4,7 +4,9 @@ use super::*;
 pub(super) fn bridge_proof_target_contract_value(
     aggregate_reduced_coordinate_count: u64,
     aggregate_quotient_coordinate_count: u64,
+    aggregate_derivation_verification_scope: &str,
 ) -> CanonicalResult<Value> {
+    validate_aggregate_derivation_verification_scope(aggregate_derivation_verification_scope)?;
     let polynomial_degree = POLYNOMIAL_DEGREE as u64;
     let data_prime_count = DATA_PRIMES.len() as u64;
     let ciphertext_component_count = BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT;
@@ -47,7 +49,7 @@ pub(super) fn bridge_proof_target_contract_value(
         "separateSubproofsAcceptedForClosure": false,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
         "proofFriendlyPlaintextBindingRequired": true,
-        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_MISSING_STATUS,
+        "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
         "publicPlaintextRootAcceptedAsClosureEvidence": false,
         "sharedWitnessLayout": shared_witness_layout,
         "sharedWitnessLayoutHash": shared_witness_layout_hash,
@@ -55,6 +57,7 @@ pub(super) fn bridge_proof_target_contract_value(
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
         "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "aggregateDerivationVerificationScope": aggregate_derivation_verification_scope,
         "hwangPiopStatus": HWANG_PIOP_DEFERRED_STATUS,
         "naiveLinearExpansionBackendStatus": NAIVE_LINEAR_EXPANSION_BACKEND_STATUS,
     });
@@ -245,9 +248,15 @@ pub(super) fn validate_bridge_proof_target_contract(
         "aggregateQuotientCoordinateCount",
         "bridgeProofStatement.relationRequirements",
     )?;
+    let aggregate_derivation_verification_scope = required_string_field(
+        relation_requirements,
+        "aggregateDerivationVerificationScope",
+        "bridgeProofStatement.relationRequirements",
+    )?;
     let expected_target_contract = bridge_proof_target_contract_value(
         aggregate_reduced_coordinate_count,
         aggregate_quotient_coordinate_count,
+        aggregate_derivation_verification_scope,
     )?;
     let target_contract = required_json_field(
         bridge_proof_statement,

@@ -3,6 +3,9 @@ use super::*;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setup_certificates(
     input: &PassiveSetupInput,
+    setup_inputs: &Value,
+    collective_public_key: &Value,
+    threshold_verification_material: &Value,
     collective_secret_distribution_certificate: &Value,
     collective_secret_distribution_certificate_hash: &str,
     error_distribution_certificate: &Value,
@@ -28,6 +31,18 @@ pub(super) fn setup_certificates(
     )?;
     let evaluation_key_streaming_commitment =
         evaluation_key_streaming_commitment(evaluation_keys, &evaluation_key_size_certificate)?;
+    let target_threshold_decryptability_certificate =
+        target_threshold_decryptability_certificate_for_setup_parts(
+            setup_inputs,
+            collective_public_key,
+            threshold_verification_material,
+            threshold_decryption_profile_hash,
+            kllps_target_decryption_profile_hash,
+        )?;
+    let target_threshold_decryptability_certificate_hash = derive_protocol_hash(
+        "TargetThresholdDecryptabilityCertificateHash",
+        &target_threshold_decryptability_certificate,
+    )?;
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
@@ -53,6 +68,7 @@ pub(super) fn setup_certificates(
         "evaluationKeyStreamingCommitmentHash": evaluation_key_streaming_commitment["commitmentHash"],
         "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
         "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
         "securityEstimatorInputHash": security_estimator_input_hash()?,
         "HEStdPostQuantumRow": {
             "status": "setup-input-recorded-final-row-pending-Q-target",
@@ -80,6 +96,8 @@ pub(super) fn setup_certificates(
         "publicRlweSamplesByBasis": public_samples,
         "setupParameterCertificate": setup_parameter_certificate,
         "setupParameterCertificateHash": setup_parameter_certificate_hash,
+        "targetThresholdDecryptabilityCertificate": target_threshold_decryptability_certificate,
+        "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
         "evaluationKeySizeCertificate": evaluation_key_size_certificate,
         "evaluationKeySizeProfileHash": evaluation_key_size_profile_hash,
         "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
@@ -89,6 +107,7 @@ pub(super) fn setup_certificates(
             "ActualErrorDistributionRecorded",
             "PublicRlweSampleCountsRecorded",
             "LargestExposedModulusWithoutQTargetRecorded",
+            "TargetThresholdDecryptabilityCompatibilityRecorded",
             "EvaluationKeySizeCertificateRecorded",
             "FinalSecurityPendingQTarget"
         ],
@@ -215,6 +234,112 @@ pub(super) fn threshold_decryption_profile(profile_hash: &str) -> CanonicalResul
         "finDecImplemented": false,
         "c1ThroughC4Certified": false,
         "qTargetKnown": false,
+    }))
+}
+
+pub(super) fn target_threshold_decryptability_certificate_from_setup_package(
+    setup_package: &Value,
+) -> CanonicalResult<Value> {
+    target_threshold_decryptability_certificate_for_setup_parts(
+        value_at_path(setup_package, &["setupInputs"])?,
+        value_at_path(setup_package, &["collectivePublicKey"])?,
+        value_at_path(setup_package, &["thresholdVerificationMaterial"])?,
+        string_at_path(
+            setup_package,
+            &["kllpsStatus", "thresholdDecryptionProfileHash"],
+        )?,
+        string_at_path(
+            setup_package,
+            &["kllpsStatus", "kllpsTargetDecryptionProfileHash"],
+        )?,
+    )
+}
+
+pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
+    setup_inputs: &Value,
+    collective_public_key: &Value,
+    threshold_verification_material: &Value,
+    threshold_decryption_profile_hash: &str,
+    kllps_target_decryption_profile_hash: &str,
+) -> CanonicalResult<Value> {
+    let setup_binding = json!({
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "bgvProfileId": PROFILE_ID,
+        "backendProfileId": BACKEND_PROFILE_ID,
+        "bgvProfileHash": profile_hash()?,
+        "rustBgvBackendProfileHash": backend_profile_hash()?,
+        "ceremonyId": string_at_path(setup_inputs, &["ceremonyId"])?,
+        "manifestHash": string_at_path(setup_inputs, &["manifestHash"])?,
+        "rosterHash": string_at_path(setup_inputs, &["rosterHash"])?,
+        "thresholdProfileHash": string_at_path(setup_inputs, &["thresholdProfileHash"])?,
+        "participantCount": unsigned_at_path(setup_inputs, &["participantCount"])?,
+    });
+    let key_binding = json!({
+        "collectivePublicKeyRoot": string_at_path(
+            collective_public_key,
+            &["collectivePublicKeyRoot"],
+        )?,
+        "collectivePublicKeyCoefficientRoot": string_at_path(
+            collective_public_key,
+            &["collectivePublicKeyCoefficientRoot"],
+        )?,
+        "bgvPublicKeyRoot": string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?,
+        "publicKeyConvention": "b = p * e - a * s",
+        "decryptableCiphertextEquation": "c0 + c1 * s = m + p * noise",
+    });
+    let ciphertext_profile = json!({
+        "plaintextModulus": PLAINTEXT_MODULUS,
+        "polynomialDegree": POLYNOMIAL_DEGREE,
+        "basisId": BgvBasisKind::Data.basis_id(),
+        "level": DATA_PRIMES.len() - 1,
+        "dataPrimeCount": DATA_PRIMES.len(),
+        "ciphertextComponentCount": 2,
+        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
+        "batchEncoderHash": batch_encoder_hash()?,
+        "encryptedAggregateInputLayoutHash": layout_hash()?,
+        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+    });
+    let threshold_binding = json!({
+        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "thresholdShareVerificationKeyRoot": string_at_path(
+            threshold_verification_material,
+            &["thresholdShareVerificationKeyRoot"],
+        )?,
+        "thresholdShareVerificationKeyHash": string_at_path(
+            threshold_verification_material,
+            &["thresholdShareVerificationKeyHash"],
+        )?,
+        "trusteeThresholdVerificationKeyHashes": value_at_path(
+            threshold_verification_material,
+            &["trusteeThresholdVerificationKeyHashes"],
+        )?,
+        "participantInterpolationUniverse": value_at_path(
+            threshold_verification_material,
+            &["verificationKeySet", "participantInterpolationUniverse"],
+        )?,
+    });
+
+    Ok(json!({
+        "objectType": "TargetThresholdDecryptabilityCertificate",
+        "objectVersion": 1,
+        "certificateScope": "setup-key-and-ciphertext-profile-compatibility-only",
+        "setupBinding": setup_binding,
+        "keyBinding": key_binding,
+        "ciphertextProfile": ciphertext_profile,
+        "thresholdBinding": threshold_binding,
+        "ciphertextCompatibilityStatus": "TargetThresholdDecryptabilityCompatibilityCertified",
+        "semanticDecryptionPolicy": "only-an-accepted-target-ciphertext-after-target-finality-and-evaluation-proof-may-request-threshold-decryption",
+        "bridgeCiphertextPolicy": "encrypted-aggregate-input-ciphertexts-are-threshold-key-compatible-but-never-authorized-semantic-decryption-targets",
+        "downstreamProtocolStatus": "TargetDecryptionShareProtocolStillDownstream",
+        "statusLabels": [
+            "TargetThresholdDecryptabilityCompatibilityCertified",
+            "CollectivePublicKeyRootBound",
+            "ThresholdVerificationMaterialBound",
+            "DecryptableBgvCiphertextConvention",
+            "TargetDecryptionShareProtocolStillDownstream"
+        ],
     }))
 }
 

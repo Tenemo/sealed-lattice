@@ -24,7 +24,7 @@ export const deriveBridgeProofProfileHash = (input: {
     readonly claimBearingBridgeEncryption: false;
     readonly developmentKeyOnly: false;
     readonly proofBackend: 'SealedLatticeBridgeRelation';
-    readonly thresholdDecryptable: false;
+    readonly thresholdDecryptable: true;
 }): ProtocolHash =>
     deriveProtocolHash('BridgeProofProfileHash', {
         bgvEncryptionKeyMaterialKind: input.bgvEncryptionKeyMaterialKind,
@@ -72,6 +72,9 @@ const bridgeSharedWitnessEffectiveBindingSoundnessBitsFloor = 165;
 const bridgeSharedWitnessEffectiveBindingBelowTarget = false;
 const bgvEncryptionKeyMaterialKind =
     'passive-transcript-derived-collective-public-key';
+export type AggregateDerivationVerificationScope =
+    | 'AggregateDerivationFullVerificationPreconditionNotBound'
+    | 'AggregateDerivationFullVerificationChecked';
 
 type BridgeSharedWitnessLayout = {
     readonly aggregateIntegerShareCoordinateCount: number;
@@ -163,6 +166,7 @@ const deriveBridgeSharedWitnessLayoutHash = (
 export const deriveBridgeProofTargetContractHash = (input: {
     readonly aggregateQuotientCoordinateCount: number;
     readonly aggregateReducedCoordinateCount: number;
+    readonly aggregateDerivationVerificationScope: AggregateDerivationVerificationScope;
 }): ProtocolHash => {
     const sharedWitnessLayout = createBridgeSharedWitnessLayout(input);
     const sharedWitnessLayoutHash =
@@ -177,6 +181,8 @@ export const deriveBridgeProofTargetContractHash = (input: {
             aggregateReductionRowCount: input.aggregateReducedCoordinateCount,
             aggregateToPlaintextBindingStatus:
                 'AggregateToPlaintextModularBindingChecked',
+            aggregateDerivationVerificationScope:
+                input.aggregateDerivationVerificationScope,
             bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
             bgvEncryptionProofSubrelation:
                 'SealedLatticePassiveCollectiveCiphertextEquationRelation',
@@ -206,7 +212,7 @@ export const deriveBridgeProofTargetContractHash = (input: {
             plaintextCoefficientCount: bridgePlaintextCoefficientCount,
             plaintextEncodingRelation: bridgeSharedWitnessWeakestRelation,
             plaintextCanonicalLiftProofStatus:
-                'PlaintextCanonicalLiftProofMissing',
+                'PlaintextCanonicalLiftProofChecked',
             polynomialDegree: bridgePlaintextCoefficientCount,
             proofFriendlyPlaintextBindingRequired: true,
             proofBackend: 'SealedLatticeBridgeRelation',
@@ -260,11 +266,23 @@ export const deriveBridgeProofTargetContractHash = (input: {
                 bridgeBatchIntegerLiftProofModulusProductBitsFloor,
             sharedWitnessZeroKnowledgeStatus:
                 'SharedWitnessZeroKnowledgeResponseDistributionChecked',
-            thresholdDecryptable: false,
+            thresholdDecryptable: true,
         },
         purpose: 'sealed-lattice-aggregate-bridge-proof-target-contract-v1',
     });
 };
+
+export const deriveBridgeProofChallengeContextHash = (input: {
+    readonly bridgeProofProfileHash: ProtocolHash;
+    readonly bridgeProofStatementHash: ProtocolHash;
+    readonly bridgeProofTargetContractHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('BridgeProofRecordHash', {
+        bridgeProofProfileHash: input.bridgeProofProfileHash,
+        bridgeProofStatementHash: input.bridgeProofStatementHash,
+        bridgeProofTargetContractHash: input.bridgeProofTargetContractHash,
+        purpose: 'sealed-lattice-aggregate-bridge-proof-challenge-context-v1',
+    });
 
 type BridgeProofStatementHashInput = {
     readonly aggregateDerivationComponentHash: ProtocolHash;
@@ -317,8 +335,8 @@ type BridgeProofStatementHashInput = {
     readonly hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze';
     readonly level: number;
     readonly manifestHash: ProtocolHash;
-    readonly aggregateDerivationVerificationScope: 'AggregateDerivationFullVerificationPreconditionNotBound';
-    readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofMissing';
+    readonly aggregateDerivationVerificationScope: AggregateDerivationVerificationScope;
+    readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked';
     readonly plaintextEncodingBoundCertificateHash: ProtocolHash;
     readonly plaintextEncodingProofModuli: typeof bridgeBatchIntegerLiftProofModuli;
     readonly plaintextEncodingProofModulusProduct: typeof bridgeBatchIntegerLiftProofModulusProduct;
@@ -358,7 +376,7 @@ type BridgeProofStatementHashInput = {
     readonly coefficientDomainCanonical: true;
     readonly slotCount: number;
     readonly thresholdProfileHash: ProtocolHash;
-    readonly thresholdDecryptable: false;
+    readonly thresholdDecryptable: true;
     readonly topKEvaluatorInputLayoutHash: ProtocolHash;
     readonly votingClosedBoardHeadHash: ProtocolHash;
 };
@@ -427,6 +445,7 @@ const bridgeProofStatementRelationStringHashFieldNames = [
     'sharedWitnessBindingStatus',
     'sharedWitnessZeroKnowledgeStatus',
     'aggregateToPlaintextBindingStatus',
+    'aggregateDerivationVerificationScope',
     'bgvEncryptionKeyMaterialKind',
     'bgvEncryptionProofStatus',
     'bgvRandomnessBoundProofStatus',

@@ -51,6 +51,7 @@ export type NegativeCheck = {
 
 export type ShapeConfigRow = {
     readonly aggregateInputLayoutHash: ProtocolHash;
+    readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly claimTier: string;
