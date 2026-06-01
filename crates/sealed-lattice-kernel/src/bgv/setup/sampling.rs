@@ -13,6 +13,7 @@ pub(super) fn sample_public_residues(seed_hash: &str, label: &str, modulus: u64)
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn sample_small_distribution(
     seed_hash: &str,
     identity: &str,
@@ -33,6 +34,48 @@ pub(super) fn sample_small_distribution(
                 "position": position,
                 "value": value,
             })
+        })
+        .collect()
+}
+
+pub(super) fn sample_bounded_collective_secret_share_distribution(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+) -> CanonicalResult<Vec<Value>> {
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            Ok(json!({
+                "position": position,
+                "value": bounded_collective_secret_share_coefficient(
+                    seed_hash,
+                    participant_identities,
+                    participant_identity,
+                    position,
+                )?,
+            }))
+        })
+        .collect()
+}
+
+pub(super) fn sample_bounded_collective_error_share_distribution(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+) -> CanonicalResult<Vec<Value>> {
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            Ok(json!({
+                "position": position,
+                "value": bounded_collective_error_share_coefficient(
+                    seed_hash,
+                    participant_identities,
+                    participant_identity,
+                    position,
+                )?,
+            }))
         })
         .collect()
 }
@@ -71,6 +114,124 @@ pub(super) fn sample_small_distribution_offset(
     }
 }
 
+pub(super) fn bounded_collective_secret_share_coefficient(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+    position: usize,
+) -> CanonicalResult<i64> {
+    if !is_collective_share_owner(
+        seed_hash,
+        participant_identities,
+        participant_identity,
+        "local-secret-share",
+        position,
+    )? {
+        return Ok(0);
+    }
+
+    match sample_small_distribution_offset(
+        seed_hash,
+        participant_identity,
+        "local-secret-share",
+        position,
+        64,
+    ) {
+        0 => Ok(-1),
+        1 => Ok(1),
+        _ => Ok(0),
+    }
+}
+
+pub(super) fn bounded_collective_error_share_coefficient(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+    position: usize,
+) -> CanonicalResult<i64> {
+    if !is_collective_share_owner(
+        seed_hash,
+        participant_identities,
+        participant_identity,
+        "local-error",
+        position,
+    )? {
+        return Ok(0);
+    }
+
+    Ok(centered_binomial_eta2_coefficient(
+        seed_hash,
+        participant_identity,
+        "local-error",
+        position,
+    ))
+}
+
+fn is_collective_share_owner(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+    label: &str,
+    position: usize,
+) -> CanonicalResult<bool> {
+    let participant_index = participant_identities
+        .iter()
+        .position(|identity| identity == participant_identity)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "collective share owner schedule references an unknown participant identity",
+            )
+        })?;
+    let owner_index =
+        collective_share_owner_index(seed_hash, label, position, participant_identities.len())?;
+
+    Ok(participant_index == owner_index)
+}
+
+fn collective_share_owner_index(
+    seed_hash: &str,
+    label: &str,
+    position: usize,
+    participant_count: usize,
+) -> CanonicalResult<usize> {
+    if participant_count == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective share owner schedule requires at least one participant",
+        ));
+    }
+    let participant_count_u64 =
+        u64::try_from(participant_count).expect("participant count fits u64");
+    let position_text = position.to_string();
+    let mut block_index = 0_u64;
+    loop {
+        let block_index_text = block_index.to_string();
+        let output = hash512(
+            "sealed-lattice-bgv-rns/bounded-collective-share-owner-v1",
+            &[
+                seed_hash.as_bytes(),
+                label.as_bytes(),
+                position_text.as_bytes(),
+                block_index_text.as_bytes(),
+            ],
+        );
+        for chunk in output.chunks_exact(8) {
+            let mut word = [0_u8; 8];
+            word.copy_from_slice(chunk);
+            if let Some(reduced_value) =
+                reduce_unbiased_u64(u64::from_le_bytes(word), participant_count_u64)
+            {
+                return Ok(usize::try_from(reduced_value).expect("owner index fits usize"));
+            }
+        }
+        block_index = block_index
+            .checked_add(1)
+            .expect("collective share owner rejection block index overflowed");
+    }
+}
+
+#[cfg(test)]
 pub(super) fn sample_centered_binomial_eta2(
     seed_hash: &str,
     identity: &str,
@@ -79,17 +240,7 @@ pub(super) fn sample_centered_binomial_eta2(
     sample_positions()
         .into_iter()
         .map(|position| {
-            let position_text = position.to_string();
-            let output = hash512(
-                "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
-                &[
-                    seed_hash.as_bytes(),
-                    identity.as_bytes(),
-                    label.as_bytes(),
-                    position_text.as_bytes(),
-                ],
-            );
-            let value = centered_binomial_eta2_from_bits(output[0]);
+            let value = centered_binomial_eta2_coefficient(seed_hash, identity, label, position);
             json!({
                 "position": position,
                 "value": value,
@@ -157,6 +308,26 @@ pub(super) fn dense_centered_binomial_coefficients(
     }
 
     coefficients
+}
+
+fn centered_binomial_eta2_coefficient(
+    seed_hash: &str,
+    identity: &str,
+    label: &str,
+    position: usize,
+) -> i64 {
+    let position_text = position.to_string();
+    let output = hash512(
+        "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
+        &[
+            seed_hash.as_bytes(),
+            identity.as_bytes(),
+            label.as_bytes(),
+            position_text.as_bytes(),
+        ],
+    );
+
+    centered_binomial_eta2_from_bits(output[0])
 }
 
 // Centered binomial distribution with eta=2, support [-2, 2]: takes 4 random

@@ -16,9 +16,9 @@ const RANDOMIZER_SUPPORT_POLYNOMIAL: &str = "x*(x-1)*(x+1)";
 const ERROR_SUPPORT_POLYNOMIAL: &str = "x*(x-2)*(x-1)*(x+1)*(x+2)";
 const RANDOMIZER_EXPANSION_COEFFICIENT_COUNT: usize = 3;
 const ERROR_EXPANSION_COEFFICIENT_COUNT: usize = 5;
-const BGV_BOUND_SUPPORT_MODULUS_COUNT: usize = DATA_PRIMES.len();
+const BGV_BOUND_SUPPORT_MODULUS_COUNT: usize = 1;
 // 6 bytes = 48 bits holds any residue mod a <2^48 data prime; boundedness is checked
-// independently in every RNS limb (one support polynomial per data prime).
+// in the weakest-relation proof field while the BGV ciphertext equation still covers the full RNS basis.
 const BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH: usize = 6;
 
 pub(super) struct BridgeBgvRandomnessBoundCommitmentInput<'value> {
@@ -218,7 +218,7 @@ pub(super) fn validate_bridge_bgv_randomness_bound_commitment(
     check: &Value,
     bridge_proof_statement_hash: &str,
     check_index: usize,
-    challenge_scalar: u64,
+    challenge_scalar: u128,
     randomizer_response: &[BigInt],
     perturbation_zero_response: &[BigInt],
     perturbation_one_response: &[BigInt],
@@ -368,7 +368,7 @@ fn validate_support_polynomial_for_role(
     role: &str,
     modulus: u64,
     support_kind: BgvSupportKind,
-    challenge_scalar: u64,
+    challenge_scalar: u128,
     responses: &[BigInt],
     expansion_commitments: &[u64],
 ) -> CanonicalResult<()> {
@@ -379,7 +379,13 @@ fn validate_support_polynomial_for_role(
             "encrypted aggregate bridge BGV boundedness expansion commitment length is invalid",
         ));
     }
-    let challenge_residue = challenge_scalar % modulus;
+    let challenge_residue =
+        u64::try_from(challenge_scalar % u128::from(modulus)).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "encrypted aggregate bridge BGV boundedness challenge residue does not fit u64",
+            )
+        })?;
     let modulus_bigint = BigInt::from(modulus);
     for (coefficient_index, (response, expansion)) in responses
         .iter()
@@ -714,9 +720,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn boundedness_support_checks_cover_every_data_prime_with_compact_residue_encoding() {
-        assert_eq!(support_moduli(), DATA_PRIMES.as_slice());
-        assert_eq!(BGV_BOUND_SUPPORT_MODULUS_COUNT, 16);
+    fn boundedness_support_checks_use_the_weakest_relation_field_with_compact_residue_encoding() {
+        assert_eq!(support_moduli(), &DATA_PRIMES[..1]);
+        assert_eq!(BGV_BOUND_SUPPORT_MODULUS_COUNT, 1);
         assert!(
             support_moduli()
                 .iter()
@@ -775,7 +781,7 @@ mod tests {
 
     #[test]
     fn error_support_expansion_matches_challenged_response() {
-        let modulus = support_moduli()[1];
+        let modulus = support_moduli()[0];
         let modulus_bigint = BigInt::from(modulus);
         for mask in [-11_i64, -2, 0, 5, 23] {
             for witness in [-2_i64, -1, 0, 1, 2] {
@@ -825,7 +831,7 @@ mod tests {
     #[test]
     fn support_check_rejects_coefficientwise_invalid_randomizer() {
         let modulus = support_moduli()[0];
-        let challenge = 17_u64;
+        let challenge = 17_u128;
         let masks = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
         let mut witnesses = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
         witnesses[0] = BigInt::from(2_i8);

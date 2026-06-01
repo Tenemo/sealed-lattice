@@ -2,13 +2,18 @@ use super::*;
 use super::{
     boundedness::validate_bridge_bgv_randomness_bound_status,
     dimensions::bridge_variant_dimensions,
+    plaintext_binding::plaintext_coefficient_binding_commitment_hash,
+    plaintext_lift::{
+        proof_friendly_plaintext_lift_binding_hash, proof_friendly_plaintext_lift_binding_value,
+    },
     shared_witness::{
         bridge_shared_witness_proof_hash, validate_bridge_shared_witness_zero_knowledge_status,
         verify_bridge_shared_witness_proof,
     },
     statement::{
-        BridgeProofStatementInput, bridge_proof_challenge_context_hash, bridge_proof_profile_hash,
-        bridge_proof_statement_hash, build_bridge_proof_statement,
+        AggregateBridgeRelationHandoffRootInput, BridgeProofStatementInput,
+        aggregate_bridge_relation_handoff_root, bridge_proof_challenge_context_hash,
+        bridge_proof_profile_hash, bridge_proof_statement_hash, build_bridge_proof_statement,
     },
     validation::{
         parse_bridge_proof_value, read_u64_object_field, require_equal_bool, require_equal_string,
@@ -49,12 +54,6 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "thresholdDecryptable",
         THRESHOLD_DECRYPTABLE,
         "threshold-decryptable flag",
-    )?;
-    require_equal_bool(
-        bridge_encryption,
-        "claimBearingBridgeEncryption",
-        CLAIM_BEARING_BRIDGE_ENCRYPTION,
-        "claim-bearing bridge encryption flag",
     )?;
     let aggregate_selection_policy_hash = required_protocol_hash_field(
         request,
@@ -264,7 +263,33 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             component,
             "verifyAggregateBridgeEncryption",
         )?;
-    let bridge_proof_profile_hash = bridge_proof_profile_hash()?;
+    let prover_randomness_source = required_string_field(
+        bridge_encryption,
+        "proverRandomnessSource",
+        "bridgeEncryption",
+    )?;
+    validate_bridge_randomness_source(prover_randomness_source, "proverRandomnessSource")?;
+    let encryption_randomness_seed_source = required_string_field(
+        bridge_encryption,
+        "encryptionRandomnessSeedSource",
+        "bridgeEncryption",
+    )?;
+    validate_bridge_randomness_source(
+        encryption_randomness_seed_source,
+        "encryptionRandomnessSeedSource",
+    )?;
+    let claim_status = bridge_claim_status(
+        aggregate_derivation_verification_scope,
+        prover_randomness_source,
+        encryption_randomness_seed_source,
+    );
+    require_equal_bool(
+        bridge_encryption,
+        "claimBearingBridgeEncryption",
+        claim_status.claim_bearing_bridge_encryption,
+        "claim-bearing bridge encryption flag",
+    )?;
+    let bridge_proof_profile_hash = bridge_proof_profile_hash(claim_status)?;
     let bridge_proof_statement = build_bridge_proof_statement(BridgeProofStatementInput {
         component,
         setup_package,
@@ -274,6 +299,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         bridge_witness_privacy_profile_hash,
         he_param_hash,
         aggregate_derivation_verification_scope,
+        claim_status,
     })?;
     let bridge_proof_statement_hash = bridge_proof_statement_hash(&bridge_proof_statement)?;
     let bridge_proof_target_contract_hash = required_string_field(
@@ -342,6 +368,40 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "encrypted aggregate bridge proof statement does not match its canonical public inputs",
         ));
     }
+    let plaintext_coefficient_binding_commitment = required_json_field(
+        bridge_encryption,
+        "plaintextCoefficientBindingCommitment",
+        "bridgeEncryption",
+    )?;
+    let plaintext_coefficient_binding_commitment_hash =
+        plaintext_coefficient_binding_commitment_hash(plaintext_coefficient_binding_commitment)?;
+    require_equal_string(
+        bridge_encryption,
+        "plaintextCoefficientBindingCommitmentHash",
+        &plaintext_coefficient_binding_commitment_hash,
+        "plaintext coefficient binding commitment hash",
+    )?;
+    let expected_plaintext_lift_binding =
+        proof_friendly_plaintext_lift_binding_value(setup_package, bridge_encryption)?;
+    let expected_plaintext_lift_binding_hash =
+        proof_friendly_plaintext_lift_binding_hash(&expected_plaintext_lift_binding)?;
+    let plaintext_lift_binding = required_json_field(
+        bridge_encryption,
+        "proofFriendlyPlaintextLiftBinding",
+        "bridgeEncryption",
+    )?;
+    if plaintext_lift_binding != &expected_plaintext_lift_binding {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge proof-friendly plaintext lift binding does not match its public inputs",
+        ));
+    }
+    require_equal_string(
+        bridge_encryption,
+        "proofFriendlyPlaintextLiftBindingHash",
+        &expected_plaintext_lift_binding_hash,
+        "proof-friendly plaintext lift binding hash",
+    )?;
     let relation_requirements = required_json_field(
         &bridge_proof_statement,
         "relationRequirements",
@@ -420,6 +480,8 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     for field_name in [
         "plaintextRoot",
         "ciphertextRoot",
+        "plaintextCoefficientBindingCommitmentHash",
+        "proofFriendlyPlaintextLiftBindingHash",
         "encryptedAggregateShareCiphertextRoot",
         "collectivePublicKeyRoot",
         "collectivePublicKeyCoefficientRoot",
@@ -438,16 +500,6 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         validate_bridge_randomness_source(randomness_source, field_name)?;
         require_equal_string(&proof_value, field_name, randomness_source, field_name)?;
     }
-    let prover_randomness_source = required_string_field(
-        bridge_encryption,
-        "proverRandomnessSource",
-        "bridgeEncryption",
-    )?;
-    let encryption_randomness_seed_source = required_string_field(
-        bridge_encryption,
-        "encryptionRandomnessSeedSource",
-        "bridgeEncryption",
-    )?;
     let proof_randomness_source_evidence =
         required_json_field(&proof_value, "randomnessSourceEvidence", "bridgeProof")?;
     validate_bridge_randomness_source_evidence(
@@ -509,7 +561,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         || proof_value
             .get("claimBearingBridgeEncryption")
             .and_then(Value::as_bool)
-            != Some(CLAIM_BEARING_BRIDGE_ENCRYPTION)
+            != Some(claim_status.claim_bearing_bridge_encryption)
         || string_field(&proof_value, "relationScope")
             != Some("sealed-lattice-aggregate-bridge-relation")
     {
@@ -563,6 +615,7 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             component,
             setup_package,
             bridge_encryption,
+            &bridge_proof_statement,
             &bridge_proof_statement_hash,
             &expected_bridge_proof_challenge_context_hash,
             contributor_identity,
@@ -581,6 +634,8 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "bridgeProofStatementHash": bridge_proof_statement_hash,
             "bridgeProofChallengeContextHash": expected_bridge_proof_challenge_context_hash,
             "proofBytesHash": bridge_proof_bytes_hash,
+            "plaintextCoefficientBindingCommitmentHash": bridge_encryption["plaintextCoefficientBindingCommitmentHash"],
+            "proofFriendlyPlaintextLiftBindingHash": bridge_encryption["proofFriendlyPlaintextLiftBindingHash"],
             "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
             "collectivePublicKeyRoot": bridge_encryption["collectivePublicKeyRoot"],
             "collectivePublicKeyCoefficientRoot": bridge_encryption["collectivePublicKeyCoefficientRoot"],
@@ -617,6 +672,63 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         &bridge_proof_root,
         "bridge proof root",
     )?;
+    let bridge_proof_verification_status = if shared_witness_verification.is_some() {
+        BRIDGE_PROOF_CHECKED_STATUS
+    } else {
+        BRIDGE_PROOF_PENDING_STATUS
+    };
+    let aggregate_bridge_relation_handoff_root = if let (
+        Some(shared_witness_proof_hash),
+        Some(shared_witness_zero_knowledge_status_hash),
+        Some(bgv_randomness_bound_proof_status_hash),
+    ) = (
+        shared_witness_proof_hash.as_deref(),
+        shared_witness_zero_knowledge_status_hash.as_deref(),
+        bgv_randomness_bound_proof_status_hash.as_deref(),
+    ) {
+        aggregate_bridge_relation_handoff_root(AggregateBridgeRelationHandoffRootInput {
+            bridge_proof_statement: &bridge_proof_statement,
+            bridge_public_values: &proof_value,
+            aggregate_derivation_statement_hash: statement_hash,
+            aggregate_relation_challenge_hex: &aggregate_relation_verification.challenge_hex,
+            aggregate_relation_commitment_hash: &aggregate_relation_verification
+                .relation_commitment_hash,
+            aggregate_relation_subproof_size_bytes: u64::try_from(
+                aggregate_relation_verification.proof_size_bytes,
+            )
+            .map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "encrypted aggregate bridge aggregate relation subproof size does not fit u64",
+                )
+            })?,
+            bridge_proof_statement_hash: &bridge_proof_statement_hash,
+            bridge_proof_bytes_hash: &bridge_proof_bytes_hash,
+            bridge_shared_witness_proof_hash: shared_witness_proof_hash,
+            shared_witness_zero_knowledge_status_hash,
+            bgv_randomness_bound_proof_status_hash,
+            bridge_proof_verification_status,
+            bgv_passive_setup_verification_precondition_checked: true,
+            claim_bearing_bridge_encryption: claim_status.claim_bearing_bridge_encryption,
+            relation_checked: true,
+            same_witness_linkage_verified: true,
+            effective_soundness_accepted: !BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET,
+            zk_distribution_accepted: true,
+            bgv_support_bounds_verified: true,
+            entropy_ownership_verified: claim_status.bridge_claim_closure_verified,
+            key_status_accepted: claim_status.bridge_claim_closure_verified,
+        })?
+    } else {
+        String::new()
+    };
+    if !aggregate_bridge_relation_handoff_root.is_empty() {
+        require_equal_string(
+            bridge_encryption,
+            "aggregateBridgeRelationHandoffRoot",
+            &aggregate_bridge_relation_handoff_root,
+            "aggregate bridge relation handoff root",
+        )?;
+    }
     if let Some(hash) = &shared_witness_proof_hash {
         require_equal_string(
             bridge_encryption,
@@ -641,17 +753,12 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             "BGV randomness-bound status hash",
         )?;
     }
-    let bridge_proof_verification_status = if shared_witness_verification.is_some() {
-        BRIDGE_PROOF_CHECKED_STATUS
-    } else {
-        BRIDGE_PROOF_PENDING_STATUS
-    };
     let mut status_labels = if shared_witness_verification.is_some() {
         vec![
             "BridgeProofEvidenceChecked",
             "BridgeProofRelationChecked",
             "EncryptedAggregateSingleContributionBridgeRelationChecked",
-            "BridgeProofImplementationEvidenceOnly",
+            claim_status.bridge_claim_verification_status,
             "BgvPublicKeyCoefficientMaterialBound",
             DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS,
             TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS,
@@ -659,14 +766,12 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
             BGV_RANDOMNESS_BOUND_PROOF_STATUS,
             PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
             aggregate_derivation_verification_scope,
-            "BridgeProofClaimClosureMissing",
-            "FinalBridgeTheoremPending",
         ]
     } else {
         vec![
             "BridgeProofEvidenceChecked",
             "BridgeProofBackendStillRequired",
-            "FinalBridgeTheoremPending",
+            BRIDGE_CLAIM_MISSING_STATUS,
         ]
     };
     status_labels.push(match dimensions.evidence_tier {
@@ -691,6 +796,22 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         Value::String(
             required_string_field(
                 bridge_encryption,
+                "plaintextCoefficientBindingCommitmentHash",
+                "bridgeEncryption",
+            )?
+            .to_string(),
+        ),
+        Value::String(
+            required_string_field(
+                bridge_encryption,
+                "proofFriendlyPlaintextLiftBindingHash",
+                "bridgeEncryption",
+            )?
+            .to_string(),
+        ),
+        Value::String(
+            required_string_field(
+                bridge_encryption,
                 "collectivePublicKeyCoefficientRoot",
                 "bridgeEncryption",
             )?
@@ -706,6 +827,11 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
     if let Some(hash) = &bgv_randomness_bound_proof_status_hash {
         accepted_hashes.push(Value::String(hash.clone()));
     }
+    if !aggregate_bridge_relation_handoff_root.is_empty() {
+        accepted_hashes.push(Value::String(
+            aggregate_bridge_relation_handoff_root.clone(),
+        ));
+    }
 
     Ok(json!({
         "ok": true,
@@ -719,15 +845,15 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeEvidenceVerificationStatus": "BridgeProofEvidenceChecked",
         "aggregateDerivationVerificationScope": aggregate_derivation_verification_scope,
         "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
-        "bridgeClaimClosureVerified": false,
-        "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bridgeClaimClosureVerified": claim_status.bridge_claim_closure_verified,
+        "bridgeClaimVerificationStatus": claim_status.bridge_claim_verification_status,
         "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
         "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
         "proverRandomnessSource": bridge_encryption["proverRandomnessSource"],
         "encryptionRandomnessSeedSource": bridge_encryption["encryptionRandomnessSeedSource"],
         "randomnessSourceEvidence": bridge_encryption["randomnessSourceEvidence"],
         "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
-        "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
+        "claimBearingBridgeEncryption": claim_status.claim_bearing_bridge_encryption,
         "bridgeVariantEvidenceStatus": dimensions.evidence_tier,
         "bridgeProofProfileHash": bridge_proof_profile_hash,
         "bridgeProofStatementHash": bridge_proof_statement_hash,
@@ -735,6 +861,13 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeProofTargetContractHash": bridge_proof_target_contract_hash,
         "bridgeProofBytesHash": bridge_proof_bytes_hash,
         "bridgeProofRoot": bridge_proof_root,
+        "plaintextCoefficientBindingCommitmentHash": bridge_encryption["plaintextCoefficientBindingCommitmentHash"],
+        "proofFriendlyPlaintextLiftBindingHash": bridge_encryption["proofFriendlyPlaintextLiftBindingHash"],
+        "aggregateBridgeRelationHandoffRoot": if aggregate_bridge_relation_handoff_root.is_empty() {
+            Value::Null
+        } else {
+            Value::String(aggregate_bridge_relation_handoff_root)
+        },
         "bridgeSharedWitnessProofHash": shared_witness_proof_hash,
         "sharedWitnessZeroKnowledgeStatusHash": shared_witness_zero_knowledge_status_hash,
         "bgvRandomnessBoundProofStatusHash": bgv_randomness_bound_proof_status_hash,

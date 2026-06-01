@@ -15,8 +15,8 @@ const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object-v1";
 const CANONICAL_OBJECT_VERSION: u64 = 1;
 // Max polynomial components in a BGV object: a degree-2 ciphertext has 3.
 const MAXIMUM_COMPONENT_COUNT: usize = 3;
-// Max RNS limbs: 16 data primes + 1 special prime (the extended basis).
-const MAXIMUM_MODULUS_COUNT: usize = 17;
+// Max RNS limbs: 17 data primes + 1 special prime (the extended basis).
+const MAXIMUM_MODULUS_COUNT: usize = 18;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BgvObjectKind {

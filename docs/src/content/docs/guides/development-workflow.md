@@ -19,6 +19,7 @@ The workspace is only in a good state when the checks, docs, smoke tests, and Ru
 ```bash
 pnpm install
 pnpm run build
+pnpm run api-surface:generate
 pnpm run api-surface:update
 pnpm run api-surface:check
 pnpm run check
@@ -31,6 +32,8 @@ pnpm run test
 pnpm run test:proof-benchmark
 pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
+pnpm run test:aggregate-derivation-kernel
+pnpm run test:encrypted-aggregate-evaluator:representative
 pnpm run test:encrypted-aggregate-bridge
 pnpm run test:encrypted-aggregate-bridge:representative
 pnpm run verify:docs
@@ -40,9 +43,10 @@ pnpm run smoke:pack:npm
 ## What each command proves
 
 - `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
-- `pnpm run api-surface:update`: runs the full build and updates the compact public API snapshot
-- `pnpm run api-surface:check`: runs the full build and verifies it against the compact public API snapshot
-- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API snapshot verification, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane; the first failing lane aborts the remaining work
+- `pnpm run api-surface:generate`: runs the full build and regenerates the public API surface summary for PR review
+- `pnpm run api-surface:update`: alias for `pnpm run api-surface:generate`
+- `pnpm run api-surface:check`: compatibility alias for `pnpm run api-surface:generate`; it does not compare against a pinned API baseline
+- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API surface summary generation, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane; the first failing lane aborts the remaining work
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
 - `pnpm run test:node:protocol`: slow protocol relation and proof-record generation input tests that remain part of the default Node gate without running under coverage instrumentation
@@ -52,6 +56,8 @@ pnpm run smoke:pack:npm
 - `pnpm run test:proof-benchmark:node`: Node proof benchmark lane, suitable for a separate CI worker
 - `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane, suitable for a separate CI worker
 - `pnpm run coverage:badge`: runs the fast Node coverage lane and writes the Shields-compatible badge and summary JSON that GitHub Pages publishes for the README badge
+- `pnpm run test:aggregate-derivation-kernel`: fast aggregate-derivation, aggregate bridge, and aggregate-ready iteration with representative selected contributors, 8 workers by default, opportunistic checkpoint reuse, and latest setup/input/request-base files under the checkpoint directory; it intentionally does not provide full-matrix, encrypted-evaluator, all-`K`, no-resume, or require-checkpoint modes
+- `pnpm run test:encrypted-aggregate-evaluator:representative`: reads the latest aggregate request-base artifact, prepares root-bound public evaluation-key material in process, and runs one representative accepted-input encrypted evaluator slice; it is manual and does not replace the all-supported-top-count closure sweep
 - `pnpm run test:encrypted-aggregate-bridge`: builds once, runs the cheap all-row bridge shape/config guardrail, then runs the full encrypted aggregate bridge matrix with 8 workers
 - `pnpm run test:encrypted-aggregate-bridge:representative`: builds once, then runs the selected representative bridge rows with 4 workers
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
@@ -84,7 +90,7 @@ The checkpoint set currently covers relation requests, lowered statements, gener
 ## Heavy gate policy
 
 The default Node runner can execute selected Vitest projects side by side, and the proof benchmark command runs its Node and desktop lanes concurrently; the merged kernel project keeps its heavy work sequential on one machine.
-The full encrypted aggregate bridge matrix first runs the cheap all-row shape/config guardrail, then uses 8 workers; the representative bridge matrix uses 4 workers.
+Use `pnpm run test:aggregate-derivation-kernel` as the default aggregate and bridge readiness loop. It reuses valid checkpoints, ignores stale or corrupt checkpoints, recomputes only the affected stage, and writes the latest setup package, selected encrypted aggregate inputs, aggregate-ready record, and evaluator request base under the checkpoint directory for later manual evaluator slices. Use `pnpm run test:encrypted-aggregate-evaluator:representative` only when an accepted-input evaluator slice is needed. The full encrypted aggregate bridge matrix first runs the cheap all-row shape/config guardrail, then uses 8 workers; the representative bridge matrix uses 4 workers. Full matrix and all-supported-`K` evaluator runs are closure or release evidence, not normal iteration checks.
 
 ## Release-facing rule
 

@@ -1,7 +1,10 @@
 use serde_json::{Map, Value, json};
 
 use crate::{
-    ballot_privacy::component::ParsedSparseComponentProofStatement,
+    ballot_privacy::component::{
+        ParsedSparseComponentProofStatement, derive_share_commitment_message_matrix,
+        derive_share_commitment_randomness_matrix,
+    },
     bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{
@@ -15,14 +18,14 @@ use super::protocol_constants::{
     BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, BALLOT_PRIVACY_FIELD_MODULUS,
     BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT, BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT,
     BALLOT_PRIVACY_MINIMUM_OPTION_COUNT, BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
-    BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT,
+    BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT, SHARE_COMMITMENT_MODULUS,
 };
 use super::{
-    PolynomialVector, SHARE_COMMITMENT_MODULE_RANK, SHARE_COMMITMENT_OPENING_DIMENSION,
-    check_aggregate_derivation_witness_relation, is_protocol_hash, required_json_field,
-    required_string_field, sparse_matrix_from_sparse_component_statement, string_field,
-    structural_refusal, structural_rejection,
-    verify_aggregate_derivation_proof_from_command_request,
+    PolynomialRing, PolynomialVector, SHARE_COMMITMENT_MODULE_DEGREE, SHARE_COMMITMENT_MODULE_RANK,
+    SHARE_COMMITMENT_OPENING_DIMENSION, check_aggregate_derivation_witness_relation,
+    is_protocol_hash, required_json_field, required_string_field,
+    sparse_matrix_from_sparse_component_statement, string_field, structural_refusal,
+    structural_rejection, verify_aggregate_derivation_proof_from_command_request,
     verify_aggregate_derivation_relation_subproof_for_component,
 };
 
@@ -31,13 +34,8 @@ const BRIDGE_PROOF_BACKEND: &str = "SealedLatticeBridgeRelation";
 const BGV_ENCRYPTION_PROOF_SUBRELATION: &str =
     "SealedLatticePassiveCollectiveCiphertextEquationRelation";
 const BGV_ENCRYPTION_KEY_MATERIAL_KIND: &str = "passive-transcript-derived-collective-public-key";
-// Deliberate proof gaps for this implementation stage (not bugs): bridge
-// ciphertexts use the decryptable BGV convention and are bound to target-
-// threshold-compatible setup material, but final bridge acceptance is still
-// gated by aggregate-derivation preconditions and downstream proof closure.
 const DEVELOPMENT_KEY_ONLY: bool = false;
 const THRESHOLD_DECRYPTABLE: bool = true;
-const CLAIM_BEARING_BRIDGE_ENCRYPTION: bool = false;
 // Status-string markers below: intentional proof-gap labels that downgrade the claim,
 // not verification failures. *_DEFERRED / *_MISSING / *_PRECONDITION mark known open gaps.
 const BRIDGE_PROOF_PENDING_STATUS: &str = "BridgeProofBackendPending";
@@ -56,10 +54,18 @@ const SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS: &str =
     "SharedWitnessZeroKnowledgeResponseDistributionChecked";
 const BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS: &str = "BgvRandomnessBoundProofMissing";
 const BGV_RANDOMNESS_BOUND_PROOF_STATUS: &str = "BgvRandomnessErrorSupportPolynomialChecked";
+const PROOF_FRIENDLY_PLAINTEXT_BINDING_STATUS: &str =
+    "ProofFriendlyPlaintextCoefficientBindingRelationChecked";
+const PROOF_FRIENDLY_PLAINTEXT_LIFT_BINDING_STATUS: &str =
+    "ProofFriendlyPlaintextCoefficientLiftBindingChecked";
+const PLAINTEXT_COEFFICIENT_BINDING_SCHEME: &str =
+    "ChunkedAdditiveModuleSisPlaintextCoefficientCommitment";
+const PLAINTEXT_BINDING_OPENING_INFINITY_NORM_BOUND: i64 = 1_024;
 const DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS: &str = "DecryptableBgvCiphertextConvention";
 const TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS: &str =
     "TargetThresholdDecryptabilityCompatibilityCertified";
-const BRIDGE_CLAIM_CLOSURE_STATUS: &str = "BridgeProofClaimClosureMissing";
+const BRIDGE_CLAIM_MISSING_STATUS: &str = "BridgeProofClaimClosureMissing";
+const BRIDGE_CLAIM_VERIFIED_STATUS: &str = "BridgeProofClaimClosureVerified";
 const BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG: &str = "fresh-csprng";
 const BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC: &str =
     "development-deterministic-fixture";
@@ -74,22 +80,26 @@ const AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS: &str =
     "AggregateDerivationFullVerificationPreconditionNotBound";
 const AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS: &str =
     "AggregateDerivationFullVerificationChecked";
-// Soundness-bit budget. 64 challenge bits per check x 2 checks = 128-bit challenge entropy.
-// Rejection-sampling (limit 64 attempts) costs a 6-bit-per-check grinding discount.
-// The weakest checked relation is the integer-lifted plaintext/batch link reduced modulo the
-// first two BGV data primes, not the 65537 plaintext field.
-const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = 64;
-const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 2;
+// Soundness-bit budget. The Fiat-Shamir challenge is sampled in the two-prime BGV CRT product
+// (93-bit floor), but the global bridge binding budget is limited by the aggregate proof ring,
+// currently treated as a 46-bit effective relation per independent check. Five checks leave a
+// 159-bit floor after rejection-attempt grinding, a 2^32 Fiat-Shamir query bound, and the
+// full-matrix union bound.
+const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 5;
 const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
 const SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK: u64 = 6;
-const BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS: u64 =
-    SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
 const BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI: [u64; 2] = [DATA_PRIMES[0], DATA_PRIMES[1]];
 const BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT: u128 =
     (DATA_PRIMES[0] as u128) * (DATA_PRIMES[1] as u128);
-const BRIDGE_SHARED_WITNESS_PROOF_MODULUS_PRODUCT_BITS_FLOOR: u64 = 93;
+const BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT_BITS_FLOOR: u64 = 93;
+const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK;
+const BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS: u64 =
+    SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+const BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK: u64 = 46;
+const BRIDGE_WEAKEST_ACTIVE_RELATION_MODEL: &str =
+    "aggregate-proof-ring-effective-binding-floor-v1";
 const BRIDGE_FULL_MATRIX_UNION_BOUND_BITS: u64 = 9;
-const BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS: u64 = 0;
+const BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS: u64 = 32;
 const BRIDGE_PROOF_SYSTEM_LOSS_BITS: u64 = 0;
 const BRIDGE_CHALLENGE_BIAS_BITS: u64 = 0;
 const BRIDGE_TARGET_BINDING_SOUNDNESS_BITS: u64 = 128;
@@ -97,8 +107,7 @@ const BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS: u64 =
     SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK
         * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
 const BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR: u64 =
-    BRIDGE_SHARED_WITNESS_PROOF_MODULUS_PRODUCT_BITS_FLOOR
-        * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+    BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
 const BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR: u64 =
     BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR
         - BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS
@@ -111,6 +120,42 @@ const BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET: bool =
         < BRIDGE_TARGET_BINDING_SOUNDNESS_BITS;
 const BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT: u64 = 2;
 
+#[derive(Clone, Copy)]
+struct BridgeClaimStatus {
+    claim_bearing_bridge_encryption: bool,
+    scoped_bridge_relation_closure: bool,
+    bridge_claim_closure_verified: bool,
+    bridge_claim_verification_status: &'static str,
+}
+
+fn bridge_claim_status(
+    aggregate_derivation_verification_scope: &str,
+    prover_randomness_source: &str,
+    encryption_randomness_seed_source: &str,
+) -> BridgeClaimStatus {
+    let bridge_claim_verified = aggregate_derivation_verification_scope
+        == AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS
+        && prover_randomness_source == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
+        && encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
+        && !BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET;
+
+    if bridge_claim_verified {
+        return BridgeClaimStatus {
+            claim_bearing_bridge_encryption: true,
+            scoped_bridge_relation_closure: true,
+            bridge_claim_closure_verified: true,
+            bridge_claim_verification_status: BRIDGE_CLAIM_VERIFIED_STATUS,
+        };
+    }
+
+    BridgeClaimStatus {
+        claim_bearing_bridge_encryption: false,
+        scoped_bridge_relation_closure: false,
+        bridge_claim_closure_verified: false,
+        bridge_claim_verification_status: BRIDGE_CLAIM_MISSING_STATUS,
+    }
+}
+
 fn bridge_batch_integer_lift_proof_modulus_product_decimal() -> String {
     BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT.to_string()
 }
@@ -119,6 +164,9 @@ mod boundedness;
 mod dimensions;
 mod evaluation;
 mod generation;
+mod plaintext_binding;
+mod plaintext_lift;
+mod plaintext_root_relation;
 mod shared_witness;
 mod statement;
 mod target_contract;
@@ -150,12 +198,6 @@ pub(crate) fn verify_aggregate_bridge_encryption_from_command_request(request: &
             vec![structural_refusal(error.message, None)],
         ),
     }
-}
-
-pub(crate) fn verify_aggregate_bridge_encryption_for_evaluator(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    verify_aggregate_bridge_encryption(request)
 }
 
 pub(crate) fn evaluate_aggregate_bridge_relation_from_command_request(request: &Value) -> Value {
@@ -215,6 +257,24 @@ fn aggregate_derivation_verification_scope_from_request(
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "aggregate-derivation verification did not check the relation",
+        ));
+    }
+    if !labels
+        .iter()
+        .any(|label| label.as_str() == Some("AggregateDerivationFullVerificationChecked"))
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "aggregate-derivation verification did not bind the full close/counting context",
+        ));
+    }
+    if !labels
+        .iter()
+        .any(|label| label.as_str() == Some("AggregateDerivationProofVerified"))
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "aggregate-derivation verification did not accept the scoped aggregate proof",
         ));
     }
 

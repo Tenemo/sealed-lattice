@@ -153,6 +153,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "encryptedComparisonInputHash": evaluator_context_bindings["encryptedComparisonInputHash"],
             "bitSlicedComparatorHash": evaluator_context_bindings["bitSlicedComparatorHash"],
             "encryptedSparseTargetProjectionHash": evaluator_context_bindings["encryptedSparseTargetProjectionHash"],
+            "targetLayoutHash": evaluator_context_bindings["targetLayoutHash"],
             "passiveSetupEvaluatorContextBindingHash": evaluator_context_bindings["passiveSetupEvaluatorContextBindingHash"],
         },
         "participants": participant_records,

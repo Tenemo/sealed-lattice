@@ -1,6 +1,7 @@
 import type {
     ActionContext,
     AggregateDerivationComponent,
+    BridgeClaimVerificationStatus,
     BridgeProofRecord,
     ProtocolHash,
     ProtocolSignatureEnvelope,
@@ -67,11 +68,14 @@ export type BridgeEncryptionEvidence = {
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
-    readonly claimBearingBridgeEncryption: false;
+    readonly claimBearingBridgeEncryption: boolean;
+    readonly plaintextCoefficientBindingCommitmentHash: ProtocolHash;
+    readonly proofFriendlyPlaintextLiftBindingHash: ProtocolHash;
+    readonly aggregateBridgeRelationHandoffRoot?: ProtocolHash | null;
     readonly aggregateDerivationVerificationScope?: AggregateDerivationVerificationScope;
     readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofChecked';
-    readonly bridgeClaimClosureVerified?: false;
-    readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
+    readonly bridgeClaimClosureVerified?: boolean;
+    readonly bridgeClaimVerificationStatus?: BridgeClaimVerificationStatus;
     readonly bridgeVariantEvidenceStatus?:
         | 'representative-row-evidence'
         | 'full-matrix-row-evidence-missing';
@@ -125,11 +129,14 @@ export type BridgeEvidenceVerification = {
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
-    readonly claimBearingBridgeEncryption: false;
+    readonly claimBearingBridgeEncryption: boolean;
+    readonly plaintextCoefficientBindingCommitmentHash: ProtocolHash;
+    readonly proofFriendlyPlaintextLiftBindingHash: ProtocolHash;
+    readonly aggregateBridgeRelationHandoffRoot?: ProtocolHash | null;
     readonly aggregateDerivationVerificationScope?: AggregateDerivationVerificationScope;
     readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofChecked';
-    readonly bridgeClaimClosureVerified?: false;
-    readonly bridgeClaimVerificationStatus?: 'BridgeProofClaimClosureMissing';
+    readonly bridgeClaimClosureVerified?: boolean;
+    readonly bridgeClaimVerificationStatus?: BridgeClaimVerificationStatus;
     readonly bridgeVariantEvidenceStatus?:
         | 'representative-row-evidence'
         | 'full-matrix-row-evidence-missing';
@@ -345,10 +352,10 @@ export const requireMatchingValue = (
 };
 
 export const requireProtocolHash = (
-    value: ProtocolHash,
+    value: unknown,
     description: string,
 ): ProtocolHash => {
-    if (!protocolHashPattern.test(value)) {
+    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
         throw new RangeError(
             `${description} must be a canonical protocol hash.`,
         );

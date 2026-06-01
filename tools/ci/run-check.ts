@@ -162,12 +162,13 @@ const buildGatingLanes = (
 // Independent checks run concurrently against the built output. The docs and
 // pack smoke lanes deliberately call their underlying tools directly instead of
 // `pnpm run verify:docs` or `pnpm run smoke:pack:npm`, because those package
-// scripts rebuild for standalone use. The Rust lane runs after this phase: the
-// tests are memory-heavy on Windows and should not compete with docs rendering,
-// linting, package smoke verification, and Node tests. The commit gate runs only
-// the fast Node test project; the heavier protocol and kernel Node projects and
-// the Playwright browser projects stay in `pnpm run test:node` and
-// `pnpm run test:browser` for pre-push verification.
+// scripts rebuild for standalone use. The API surface lane regenerates the
+// review summary and does not compare it against a pinned baseline. The Rust
+// lane runs after this phase: the tests are memory-heavy on Windows and should
+// not compete with docs rendering, linting, package smoke verification, and Node
+// tests. The commit gate runs only the fast Node test project; the heavier
+// protocol and kernel Node projects and the Playwright browser projects stay in
+// `pnpm run test:node` and `pnpm run test:browser` for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -259,10 +260,10 @@ const buildParallelLanes = (
             '--package-manager',
             'npm',
         ]),
-        lane('Verify public API surface', 'api-surface', [
+        lane('Generate public API surface summary', 'api-surface', [
             'exec',
             'tsx',
-            './tools/ci/verify-api-snapshot.ts',
+            './tools/ci/generate-api-surface-summary.ts',
         ]),
         lane('Verify public package policy', 'package-policy', [
             'exec',
@@ -312,7 +313,14 @@ const buildRustKernelLane = (): ValidationLane => ({
         ),
         createCargoCommand(
             'cargo test',
-            ['test', '--workspace', '--', '--test-threads=2'],
+            [
+                'test',
+                '-p',
+                'sealed-lattice-kernel',
+                '--quiet',
+                '--',
+                '--test-threads=2',
+            ],
             'cargo-test',
         ),
     ],

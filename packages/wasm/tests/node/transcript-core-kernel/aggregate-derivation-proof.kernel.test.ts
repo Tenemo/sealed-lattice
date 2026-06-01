@@ -805,7 +805,8 @@ describe.sequential(
                         });
                         expect(verification.statusLabels).toEqual([
                             'AggregateDerivationRelationChecked',
-                            'AggregateDerivationProofClaimClosureMissing',
+                            'AggregateDerivationFullVerificationChecked',
+                            'AggregateDerivationProofVerified',
                         ]);
                         await verifyAggregateSubcase(
                             'missing counted ballot package list',

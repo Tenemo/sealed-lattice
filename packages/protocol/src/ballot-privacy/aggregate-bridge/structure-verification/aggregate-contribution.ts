@@ -153,6 +153,15 @@ const collectBridgeProofRecordRefusals = (
     const expectedBridgeProofRecordHash = deriveBridgeProofRecordHash(
         proofRecordWithoutHash,
     );
+    const expectedBridgeClaimVerificationStatus =
+        proofRecord.claimBearingBridgeEncryption
+            ? 'BridgeProofClaimClosureVerified'
+            : 'BridgeProofClaimClosureMissing';
+    const bridgeClaimStatusIsConsistent =
+        proofRecord.bridgeClaimClosureVerified ===
+            proofRecord.claimBearingBridgeEncryption &&
+        proofRecord.bridgeClaimVerificationStatus ===
+            expectedBridgeClaimVerificationStatus;
 
     if (
         proofRecord.objectType !== 'BridgeProofRecord' ||
@@ -165,7 +174,7 @@ const collectBridgeProofRecordRefusals = (
             'passive-transcript-derived-collective-public-key' ||
         proofRecord.developmentKeyOnly !== false ||
         proofRecord.thresholdDecryptable !== true ||
-        proofRecord.claimBearingBridgeEncryption !== false ||
+        !bridgeClaimStatusIsConsistent ||
         !['BridgeProofBackendPending', 'BridgeProofRelationChecked'].includes(
             proofRecord.bridgeProofVerificationStatus,
         ) ||

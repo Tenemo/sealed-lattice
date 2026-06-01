@@ -16,15 +16,19 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
             "setupSeed must not be empty when supplied",
         ));
     }
-    let setup_seed_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/passive-setup-seed-hash-v1",
-        &[
-            ceremony_id.as_bytes(),
-            manifest_hash.as_bytes(),
-            roster_hash.as_bytes(),
-            threshold_profile_hash.as_bytes(),
-            setup_seed.as_bytes(),
-        ],
+    let setup_seed_hash = passive_setup_seed_hash(
+        &ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        &threshold_profile_hash,
+        setup_seed,
+    );
+    let private_setup_seed_hash = private_passive_setup_seed_hash(
+        &ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        &threshold_profile_hash,
+        setup_seed,
     );
     let participants = read_setup_participants(request)?;
     if participants.len() < MINIMUM_PASSIVE_SETUP_ROSTER_SIZE {
@@ -65,8 +69,85 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
         threshold_profile_hash,
         setup_seed_provided,
         setup_seed_hash,
+        private_setup_seed_hash,
         participants,
     })
+}
+
+pub(super) fn passive_setup_seed_hash(
+    ceremony_id: &str,
+    manifest_hash: &str,
+    roster_hash: &str,
+    threshold_profile_hash: &str,
+    setup_seed: &str,
+) -> String {
+    hash512_hex(
+        "sealed-lattice-bgv-rns/passive-setup-seed-hash-v1",
+        &[
+            ceremony_id.as_bytes(),
+            manifest_hash.as_bytes(),
+            roster_hash.as_bytes(),
+            threshold_profile_hash.as_bytes(),
+            setup_seed.as_bytes(),
+        ],
+    )
+}
+
+pub(super) fn private_passive_setup_seed_hash(
+    ceremony_id: &str,
+    manifest_hash: &str,
+    roster_hash: &str,
+    threshold_profile_hash: &str,
+    setup_seed: &str,
+) -> String {
+    hash512_hex(
+        "sealed-lattice-bgv-rns/passive-setup-private-seed-hash-v1",
+        &[
+            ceremony_id.as_bytes(),
+            manifest_hash.as_bytes(),
+            roster_hash.as_bytes(),
+            threshold_profile_hash.as_bytes(),
+            setup_seed.as_bytes(),
+        ],
+    )
+}
+
+pub(super) fn private_passive_setup_seed_hash_from_package_witness(
+    setup_package: &Value,
+    setup_seed: &str,
+) -> CanonicalResult<String> {
+    if setup_seed.trim().is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setup private witness seed must not be empty",
+        ));
+    }
+    let setup_inputs = value_at_path(setup_package, &["setupInputs"])?;
+    let ceremony_id = string_at_path(setup_inputs, &["ceremonyId"])?;
+    let manifest_hash = string_at_path(setup_inputs, &["manifestHash"])?;
+    let roster_hash = string_at_path(setup_inputs, &["rosterHash"])?;
+    let threshold_profile_hash = string_at_path(setup_inputs, &["thresholdProfileHash"])?;
+    let expected_setup_seed_hash = passive_setup_seed_hash(
+        ceremony_id,
+        manifest_hash,
+        roster_hash,
+        threshold_profile_hash,
+        setup_seed,
+    );
+    compare_hash_at_path(
+        setup_inputs,
+        &["setupSeedHash"],
+        &expected_setup_seed_hash,
+        "private setup witness seed commitment",
+    )?;
+
+    Ok(private_passive_setup_seed_hash(
+        ceremony_id,
+        manifest_hash,
+        roster_hash,
+        threshold_profile_hash,
+        setup_seed,
+    ))
 }
 
 fn is_nfc_normalized(value: &str) -> bool {

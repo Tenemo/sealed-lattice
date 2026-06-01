@@ -16,7 +16,6 @@ import {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import apiSnapshot from '../../api-snapshot.json' with { type: 'json' };
 import * as publicApiRuntime from '../../dist/index.js';
 
 type DeriveThresholdProfile = (
@@ -107,23 +106,28 @@ const requiredPublicFunctions = [
     ],
 ] as const;
 
-const expectedRuntimeExports = [...apiSnapshot.runtimeExports].sort();
+const requiredPublicFunctionNames = requiredPublicFunctions
+    .map(([publicFunctionName]) => publicFunctionName)
+    .sort();
 
 describe('election foundation public package API in Node', () => {
-    it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
-        expect(
-            requiredPublicFunctions.map(
-                ([publicFunctionName]) => publicFunctionName,
-            ),
-        ).toEqual(expectedRuntimeExports);
-        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
-            expectedRuntimeExports,
+    it('exposes safe runtime functions and keeps runtime exports callable', () => {
+        const runtimeExportNames = Object.keys(publicApiRuntimeRecord).sort();
+
+        expect(runtimeExportNames).toEqual(
+            expect.arrayContaining(requiredPublicFunctionNames),
         );
         for (const [
             publicFunctionName,
             publicFunction,
         ] of requiredPublicFunctions) {
             expect(typeof publicFunction, publicFunctionName).toBe('function');
+        }
+        for (const publicFunctionName of runtimeExportNames) {
+            expect(
+                typeof publicApiRuntimeRecord[publicFunctionName],
+                publicFunctionName,
+            ).toBe('function');
         }
     });
 

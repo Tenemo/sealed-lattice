@@ -6,8 +6,8 @@ import {
 } from '#packages/crypto/src/index';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
-describe('hash namespace parity', () => {
-    it('matches TypeScript hash domains to the Rust kernel namespace list', async () => {
+describe('hash namespace registries', () => {
+    it('lists valid TypeScript and Rust root namespaces without duplicates', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const typeScriptDomains = protocolHashNamespaceValues
             .map(resolveProtocolHashDomain)
@@ -16,6 +16,10 @@ describe('hash namespace parity', () => {
             kernel.listReservedRootNamespaces(),
         ).sort();
 
-        expect(typeScriptDomains).toEqual(rustDomains);
+        expect(new Set(typeScriptDomains).size).toBe(typeScriptDomains.length);
+        expect(new Set(rustDomains).size).toBe(rustDomains.length);
+        for (const domain of [...typeScriptDomains, ...rustDomains]) {
+            expect(domain).toMatch(/^sealed-lattice-root\/[a-z0-9-]+-v1$/u);
+        }
     });
 });

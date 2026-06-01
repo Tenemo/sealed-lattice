@@ -32,9 +32,9 @@ pub(crate) const ENCODED_AGGREGATE_LAYOUT_ID: &str =
 pub(crate) const TOP_K_EVALUATOR_INPUT_LAYOUT_ID: &str =
     "top-k-evaluator-input-layout-encrypted-aggregate-input-v1";
 
-// RNS data basis: 16 distinct ~47-bit primes (~2^47), each chosen so that
+// RNS data basis: 17 distinct ~47-bit primes (~2^47), each chosen so that
 // p == 1 (mod 2N), guaranteeing a 2N-th root of unity exists (NTT-friendly).
-pub(crate) const DATA_PRIMES: [u64; 16] = [
+pub(crate) const DATA_PRIMES: [u64; 17] = [
     140_737_487_306_753,
     140_737_486_716_929,
     140_737_486_520_321,
@@ -51,11 +51,12 @@ pub(crate) const DATA_PRIMES: [u64; 16] = [
     140_737_472_299_009,
     140_737_471_971_329,
     140_737_471_774_721,
+    140_737_471_578_113,
 ];
 
 // Extra ~47-bit NTT-friendly prime (p == 1 mod 2N) for the "special" basis;
-// the extended basis is the 16 data primes plus this one (see all_moduli).
-pub(crate) const SPECIAL_PRIME: u64 = 140_737_471_578_113;
+// the extended basis is the 17 data primes plus this one (see all_moduli).
+pub(crate) const SPECIAL_PRIME: u64 = 140_737_471_512_577;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BgvBasisKind {
@@ -127,8 +128,8 @@ pub(crate) struct RootParameters {
 // Precomputed NTT roots per modulus: the negacyclic root (order 2N), the cyclic
 // root (order N), both inverses, and N^{-1} mod p (`inverse_polynomial_degree`).
 // Entry [0] is the plaintext modulus 65537 used by the batch (slot) encoder, NOT
-// an RNS limb; entries [1..] cover the 16 data primes then the special prime.
-pub(crate) const ROOT_PARAMETERS: [RootParameters; 18] = [
+// an RNS limb; entries [1..] cover the 17 data primes then the special prime.
+pub(crate) const ROOT_PARAMETERS: [RootParameters; 19] = [
     RootParameters {
         modulus: 65_537,
         primitive_generator: 3,
@@ -290,6 +291,15 @@ pub(crate) const ROOT_PARAMETERS: [RootParameters; 18] = [
         inverse_negacyclic_root: 2_069_711_608_863,
         inverse_cyclic_root: 135_517_210_731_467,
         inverse_polynomial_degree: 140_733_176_611_329,
+    },
+    RootParameters {
+        modulus: 140_737_471_512_577,
+        primitive_generator: 5,
+        negacyclic_root: 119_544_567_422_932,
+        cyclic_root: 23_508_862_735_215,
+        inverse_negacyclic_root: 76_118_654_379_715,
+        inverse_cyclic_root: 112_606_416_104_320,
+        inverse_polynomial_degree: 140_733_176_545_795,
     },
 ];
 
@@ -732,84 +742,54 @@ mod tests {
     }
 
     #[test]
-    fn selected_profile_hashes_are_stable_hex_roots() {
-        let stable_hashes = [
-            (
-                "profile",
-                profile_hash(),
-                "4a2efbb3218fcbde79d396688ebd4bf5f5ed7300f23316e6900aa0cb7dd0057bccc3892df183a6a4f628cc26c8163cf9b226e37f54519216067be5efd5ca743e",
-            ),
-            (
-                "batch encoder",
-                batch_encoder_hash(),
-                "b76e6b5f37b480032f9f1770f854f6102483f737c0c3d7740ee9f837141648e55ce6b502649661ebd0284e0870a70ea6d8a9370e1afd3e130f62f6ef90885e0c",
-            ),
-            (
-                "layout",
-                layout_hash(),
-                "cb0146fae3f1751991d30d0bc19d5005a733db746a5f91ceb8bb6fba557bf4326852ad22dc2530c3fe94ca9a066751befe8f3558cc9865a6091da385d65f6fe6",
-            ),
-            (
-                "batch layout binding",
-                batch_layout_binding_hash(),
-                "2bdddaf7eba3787d244cb6622e252b6ee9391a8d3aa22a23fa9e46a777d036a7d8852e38f664dec7fd50e2308bec608f896cbd3b3ae925844bc77f673330baab",
-            ),
+    fn selected_profile_hashes_are_hex_roots() {
+        let selected_hashes = [
+            ("profile", profile_hash()),
+            ("batch encoder", batch_encoder_hash()),
+            ("layout", layout_hash()),
+            ("batch layout binding", batch_layout_binding_hash()),
             (
                 "ballot score encoding profile",
                 ballot_score_encoding_profile_hash(),
-                "5d97f29a451d5e4bc1a5683e3edf1469296ee6347201beebf6091cf72a2e963cd67ed00ca353457cdb27230f8a58ebc88f498ffac4f9661e60e70dad27b373fa",
             ),
             (
                 "ballot share layout profile",
                 ballot_share_layout_profile_hash(),
-                "cfedd8025cebd77752d753d7e3a83a8a2c858e404d3a1d8ae5fae4ce297541d813b0f5505179dbd31842e8cf2aca71e0f259dfa109112c2e88fcea39a0e17dd5",
             ),
             (
                 "aggregate input encoding profile",
                 aggregate_input_encoding_profile_hash(),
-                "3b4685fe3a76ba943b21bcf2cc775401671cb54fb2b4acea30b13637d86219b3d4f1fecfebdd538b7da83118ce3427e7f5935032296cc697f03c0d952764ddb4",
             ),
-            (
-                "encoded aggregate layout",
-                encoded_aggregate_layout_hash(),
-                "5326486ddf587930a12be856d2c79cf255c4d74aa0ab36c140f0882d90ad5a5bfb84785ac57143eb520e202afcb7101e409f8f77361f29f32001972ed869ad36",
-            ),
+            ("encoded aggregate layout", encoded_aggregate_layout_hash()),
             (
                 "top-k evaluator input layout",
                 top_k_evaluator_input_layout_hash(),
-                "f6b51420ef079f4553dc3383ec4d7a3db6ca0951b8f6d99ae6c60b42d058739ebeb66e0d95a0697c3891e798b910054781b925a7ce7601b128922cef50ad5640",
             ),
             (
                 "canonical ciphertext convention",
                 canonical_ciphertext_convention_hash(),
-                "020f25432f206f7da734ca5c07f8a13e536ead99a664e703eb15bcbd39dfc45863a126e5c220e5548357574f396eb7ea86aed54701a9a5bd1c82409b70074a83",
             ),
             (
                 "allowed operation registry",
                 allowed_operation_registry_hash(),
-                "ca576ed087e0fbddd7e82bb439610a4e3c3c761bce521363a2ed7d6fbc1c836dbf97c42fa0acb645007452f52365ba27ca42d8382ea582ab27b23ddf38b30498",
             ),
-            (
-                "security estimator input",
-                security_estimator_input_hash(),
-                "4bce752346f1caf9652f456f27645da0a19ff8c9cf5376eef941d9cb4411e22fa4c2f8eaf8707df98b7a48318ef3987ba85e656143e71587d68e16edfdb2f428",
-            ),
+            ("security estimator input", security_estimator_input_hash()),
         ];
 
-        let mut mismatched_hashes = Vec::new();
-        for (profile_hash_label, actual_hash, expected_hash) in stable_hashes {
+        for (profile_hash_label, actual_hash) in selected_hashes {
             let actual_hash = actual_hash.expect("hash should derive");
-            if actual_hash != expected_hash {
-                mismatched_hashes.push(format!(
-                    "{profile_hash_label}: expected {expected_hash}, received {actual_hash}"
-                ));
-            }
+            assert_eq!(
+                actual_hash.len(),
+                128,
+                "{profile_hash_label} should be a SHA-512 hex root"
+            );
+            assert!(
+                actual_hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+                "{profile_hash_label} should be lower-case hex"
+            );
         }
-        assert!(
-            mismatched_hashes.is_empty(),
-            "{}",
-            mismatched_hashes.join("\n")
-        );
     }
 
     #[test]

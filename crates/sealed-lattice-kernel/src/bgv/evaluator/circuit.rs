@@ -23,9 +23,10 @@ use crate::{
 // keys are generated for every level from one up to the working level so a
 // multiplication at any reachable level can relinearize.
 pub(crate) struct EvaluatorContext {
-    key: DevelopmentBgvKey,
+    key: Option<DevelopmentBgvKey>,
     relinearization_keys: Vec<Option<KeySwitchKey>>,
     rotation_key_seeds: BTreeMap<(usize, usize), String>,
+    rotation_keys: BTreeMap<(usize, usize), KeySwitchKey>,
 }
 
 impl EvaluatorContext {
@@ -74,38 +75,55 @@ impl EvaluatorContext {
         }
 
         Ok(Self {
-            key,
+            key: Some(key),
             relinearization_keys,
             rotation_key_seeds,
+            rotation_keys: BTreeMap::new(),
         })
     }
 
-    pub(crate) fn from_passive_setup_package(
+    pub(crate) fn from_passive_setup_public_material(
         setup_package: &serde_json::Value,
+        evaluation_key_material: &serde_json::Value,
         working_level: usize,
     ) -> CanonicalResult<Self> {
-        let key = super::super::setup::development_evaluator_key_from_passive_setup_package(
+        let key_material = super::super::setup::public_evaluation_keys_from_material(
             setup_package,
-        )?;
-        let seed_material = super::super::setup::evaluation_key_seeds_from_passive_setup_package(
-            setup_package,
+            evaluation_key_material,
             working_level,
         )?;
 
-        Self::from_key_material(
-            key,
-            seed_material.relinearization_key_seeds,
-            seed_material.rotation_key_seeds,
-            working_level,
-        )
+        Ok(Self {
+            key: None,
+            relinearization_keys: key_material.relinearization_keys,
+            rotation_key_seeds: BTreeMap::new(),
+            rotation_keys: key_material.rotation_keys,
+        })
+    }
+
+    pub(crate) fn from_passive_setup_public_keys(
+        key_material: super::super::setup::PassiveSetupPublicEvaluationKeys,
+    ) -> Self {
+        Self {
+            key: None,
+            relinearization_keys: key_material.relinearization_keys,
+            rotation_key_seeds: BTreeMap::new(),
+            rotation_keys: key_material.rotation_keys,
+        }
     }
 
     pub(crate) fn key(&self) -> &DevelopmentBgvKey {
-        &self.key
+        self.key.as_ref().expect(
+            "development evaluator key is unavailable in a public evaluation-key material context",
+        )
     }
 
     pub(crate) fn working_level(&self) -> usize {
         self.relinearization_keys.len() - 1
+    }
+
+    pub(crate) fn has_public_rotation_key(&self, galois_element: usize, level: usize) -> bool {
+        self.rotation_keys.contains_key(&(galois_element, level))
     }
 
     fn relinearization_key(&self, level: usize) -> CanonicalResult<&KeySwitchKey> {
@@ -126,6 +144,9 @@ impl EvaluatorContext {
         level: usize,
         fallback_seed_hex: &str,
     ) -> CanonicalResult<KeySwitchKey> {
+        if let Some(rotation_key) = self.rotation_keys.get(&(galois_element, level)) {
+            return Ok(rotation_key.clone());
+        }
         let seed = match self.rotation_key_seeds.get(&(galois_element, level)) {
             Some(seed) => seed.as_str(),
             None if self.rotation_key_seeds.is_empty() => fallback_seed_hex,
@@ -137,7 +158,50 @@ impl EvaluatorContext {
             }
         };
 
-        generate_galois_key(&self.key, galois_element, level, seed)
+        let key = self.key.as_ref().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "public evaluation-key material is missing the requested rotation key",
+            )
+        })?;
+
+        generate_galois_key(key, galois_element, level, seed)
+    }
+
+    pub(crate) fn rotate_ciphertext(
+        &self,
+        ciphertext: &Ciphertext,
+        galois_element: usize,
+        level: usize,
+        fallback_seed_hex: &str,
+    ) -> CanonicalResult<Ciphertext> {
+        if let Some(rotation_key) = self.rotation_keys.get(&(galois_element, level)) {
+            return rotate(ciphertext, galois_element, rotation_key);
+        }
+
+        let generated_rotation_key =
+            self.generate_galois_key(galois_element, level, fallback_seed_hex)?;
+
+        rotate(ciphertext, galois_element, &generated_rotation_key)
+    }
+
+    pub(crate) fn validation_rotation_parameters(&self, requested_level: usize) -> (usize, usize) {
+        self.rotation_key_seeds
+            .keys()
+            .find_map(|(galois_element, level)| {
+                if *level == requested_level {
+                    Some((*galois_element, *level))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.rotation_key_seeds
+                    .keys()
+                    .next()
+                    .map(|(galois_element, level)| (*galois_element, *level))
+            })
+            .unwrap_or((3, requested_level))
     }
 }
 
@@ -226,20 +290,19 @@ pub(crate) fn validate_evaluation_keys(
     let product_slots = context.key().decrypt_to_slots(&product)?;
     let relinearization_correct = product_slots[0] == 4 && product_slots[1] == 9;
 
-    let galois_element = 3_usize;
-    let galois_key = generate_galois_key(
-        context.key(),
-        galois_element,
-        level,
-        &format!("{seed_hex}-vk-galois"),
-    )?;
+    let (galois_element, rotation_level) = context.validation_rotation_parameters(level);
     let source = modulus_switch_to(
         &context
             .key()
             .encrypt_slots(&[7, 8, 9, 10], &format!("{seed_hex}-vk-rotation"))?,
-        level,
+        rotation_level,
     )?;
-    let rotated = rotate(&source, galois_element, &galois_key)?;
+    let rotated = context.rotate_ciphertext(
+        &source,
+        galois_element,
+        rotation_level,
+        &format!("{seed_hex}-vk-galois"),
+    )?;
     let rotation_runs = context.key().decrypt_to_slots(&rotated).is_ok();
 
     Ok(relinearization_correct && rotation_runs)
@@ -270,16 +333,18 @@ pub(crate) fn evaluate_polynomial(
     evaluate_polynomial_by_power_table(context, input, coefficients)
 }
 
-// Evaluate a polynomial with the minimum multiplication depth implied by its
-// degree. This intentionally keeps all powers instead of using a
-// Paterson-Stockmeyer split, because the full top-k comparison profile is
-// depth-bound rather than multiplication-count-bound.
-pub(crate) fn evaluate_polynomial_depth_optimized(
+pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count(
     context: &EvaluatorContext,
     input: &Ciphertext,
     coefficients: &[u64],
+    baby_step_count: usize,
 ) -> CanonicalResult<Ciphertext> {
-    evaluate_polynomial_by_power_table(context, input, coefficients)
+    evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
+        context,
+        input,
+        coefficients,
+        baby_step_count,
+    )
 }
 
 fn evaluate_polynomial_by_power_table(
@@ -305,9 +370,9 @@ fn evaluate_polynomial_by_power_table(
         }
         let low = power / 2;
         let high = power - low;
-        let low_power = powers[low].clone().ok_or_else(missing_power)?;
-        let high_power = powers[high].clone().ok_or_else(missing_power)?;
-        powers[power] = Some(multiply(context, &low_power, &high_power)?);
+        let low_power = powers[low].as_ref().ok_or_else(missing_power)?;
+        let high_power = powers[high].as_ref().ok_or_else(missing_power)?;
+        powers[power] = Some(multiply(context, low_power, high_power)?);
     }
 
     let target_level = (1..=degree)
@@ -343,18 +408,40 @@ fn evaluate_polynomial_paterson_stockmeyer(
     input: &Ciphertext,
     coefficients: &[u64],
 ) -> CanonicalResult<Ciphertext> {
+    let degree = coefficients.len().saturating_sub(1);
+    let baby_step_count = integer_square_root_ceil(degree + 1).max(2);
+
+    evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
+        context,
+        input,
+        coefficients,
+        baby_step_count,
+    )
+}
+
+fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
+    context: &EvaluatorContext,
+    input: &Ciphertext,
+    coefficients: &[u64],
+    baby_step_count: usize,
+) -> CanonicalResult<Ciphertext> {
     if coefficients.is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "polynomial evaluation requires at least the constant coefficient",
         ));
     }
+    if baby_step_count < 2 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Paterson-Stockmeyer baby-step count must be at least two",
+        ));
+    }
     let degree = coefficients.len() - 1;
-    if degree == 0 {
+    if degree == 0 || degree < baby_step_count {
         return evaluate_polynomial_by_power_table(context, input, coefficients);
     }
 
-    let baby_step_count = integer_square_root_ceil(degree + 1).max(2);
     let block_count = coefficients.len().div_ceil(baby_step_count);
     let working_input = modulus_switch_to(input, context.working_level())?;
 
@@ -415,9 +502,9 @@ fn build_power_table(
     for power in 2..=highest_power {
         let low = power / 2;
         let high = power - low;
-        let low_power = powers[low].clone().ok_or_else(missing_power)?;
-        let high_power = powers[high].clone().ok_or_else(missing_power)?;
-        powers[power] = Some(multiply(context, &low_power, &high_power)?);
+        let low_power = powers[low].as_ref().ok_or_else(missing_power)?;
+        let high_power = powers[high].as_ref().ok_or_else(missing_power)?;
+        powers[power] = Some(multiply(context, low_power, high_power)?);
     }
 
     Ok(powers)

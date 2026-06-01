@@ -293,6 +293,10 @@ const syntheticBridgeProofStatementHash = (input: {
         aggregateDerivationVerificationScope:
             'AggregateDerivationFullVerificationPreconditionNotBound',
         plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked',
+        plaintextCoefficientBindingCommitmentHash: syntheticHash(
+            'BridgeProofRecordHash',
+            `plaintext-binding-${input.variant.rosterSize}-${input.variant.optionCount}`,
+        ),
         plaintextEncodingBoundCertificateHash: syntheticHash(
             'BridgeProofRecordHash',
             `batch-lift-bound-${input.variant.rosterSize}-${input.variant.optionCount}`,
@@ -311,6 +315,14 @@ const syntheticBridgeProofStatementHash = (input: {
         pollSpecHash: input.statement.pollSpecHash,
         postVotingClosedContextHash:
             input.statement.postVotingClosedContextHash,
+        proofFriendlyPlaintextBindingStatus:
+            'ProofFriendlyPlaintextCoefficientBindingRelationChecked',
+        proofFriendlyPlaintextLiftBindingHash: syntheticHash(
+            'BridgeProofRecordHash',
+            `plaintext-lift-binding-${input.variant.rosterSize}-${input.variant.optionCount}`,
+        ),
+        proofFriendlyPlaintextLiftBindingStatus:
+            'ProofFriendlyPlaintextCoefficientLiftBindingChecked',
         proofProfileHash: bridgeProofProfileHash,
         rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
         rosterHash: input.statement.rosterHash,
@@ -332,27 +344,33 @@ const syntheticBridgeProofStatementHash = (input: {
         shareVectorWidth: input.statement.shareVectorWidth,
         sharedWitnessBindingRequired: true,
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
-        sharedWitnessChallengeBitsPerCheck: 64,
-        sharedWitnessCheckCount: 2,
-        sharedWitnessChallengeEntropyBits: 128,
+        sharedWitnessChallengeBitsPerCheck: 46,
+        sharedWitnessCheckCount: 5,
+        sharedWitnessChallengeEntropyBits: 230,
+        sharedWitnessChallengeSamplingModel:
+            'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
         sharedWitnessRejectionAttemptLimit: 64,
         sharedWitnessGrindingDiscountBitsPerCheck: 6,
-        sharedWitnessRejectionRetryLossBits: 12,
+        sharedWitnessRejectionRetryLossBits: 30,
         sharedWitnessFullMatrixUnionBoundBits: 9,
-        sharedWitnessRandomOracleQueryBoundBits: 0,
+        sharedWitnessRandomOracleQueryBoundBits: 32,
         sharedWitnessProofSystemLossBits: 0,
         sharedWitnessChallengeBiasBits: 0,
         sharedWitnessTargetBindingSoundnessBits: 128,
-        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
-        sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
         sharedWitnessEffectiveBindingBelowTarget: false,
         sharedWitnessWeakestRelation:
             'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+        sharedWitnessWeakestRelationModel:
+            'aggregate-proof-ring-effective-binding-floor-v1',
+        sharedWitnessWeakestRelationBitsPerCheck: 46,
         sharedWitnessWeakestRelationModuli: [
             140_737_487_306_753, 140_737_486_716_929,
         ],
-        sharedWitnessWeakestRelationModulusProduct:
-            '19807040250408114080301121537',
+        batchIntegerLiftProofModuli: [140_737_487_306_753, 140_737_486_716_929],
+        batchIntegerLiftProofModulusProduct: '19807040250408114080301121537',
+        batchIntegerLiftProofModulusProductBitsFloor: 93,
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
@@ -448,6 +466,8 @@ export const buildShapeConfigRow = (variant: Variant): ShapeConfigRow => {
                 aggregateReducedCoordinateCount: statement.shareVectorWidth,
                 aggregateDerivationVerificationScope:
                     'AggregateDerivationFullVerificationPreconditionNotBound',
+                bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
+                claimBearingBridgeEncryption: false,
             });
         const bridgeProofStatementHash = syntheticBridgeProofStatementHash({
             aggregateInputLayoutHash,

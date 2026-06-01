@@ -229,6 +229,10 @@ export type TranscriptCoreKernel = {
         readonly proverRandomnessHex?: string;
         readonly encryptionRandomnessSeedHex?: string;
         readonly developmentRandomnessOverrideAcknowledged?: boolean;
+        readonly closeRecord?: unknown;
+        readonly contributorActionContext?: unknown;
+        readonly countedBallotPackages?: readonly unknown[];
+        readonly casualMicroRosterAcknowledged?: boolean;
     }): AggregateBridgeRelationEvaluation | BallotPrivacyKernelVerification;
     verifyAggregateBridgeEncryption(input: {
         readonly aggregateSelectionPolicyHash: ProtocolHash;
@@ -253,6 +257,28 @@ export type TranscriptCoreKernel = {
         readonly participants: readonly BgvPassiveSetupParticipantInput[];
         readonly setupSeed?: string;
     }): BgvPassiveSetupPackage;
+    generateBgvEvaluationKeyMaterial(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly setupPrivateWitness: {
+            readonly setupSeed: string;
+        };
+        readonly workingLevel?: number;
+        readonly rotationKeys?: readonly {
+            readonly rotation: number;
+            readonly level: number;
+        }[];
+    }): Record<string, unknown>;
+    prepareBgvEvaluationKeyMaterial(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly setupPrivateWitness: {
+            readonly setupSeed: string;
+        };
+        readonly workingLevel?: number;
+        readonly rotationKeys?: readonly {
+            readonly rotation: number;
+            readonly level: number;
+        }[];
+    }): Record<string, unknown>;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -360,18 +386,16 @@ export type TopKEvaluatorEncryptedAggregateInput = {
 
 export type TopKEvaluatorEncryptedAggregateEvaluationInput = {
     readonly setupPackage: BgvPassiveSetupPackage;
-    readonly aggregateReadyRecord?: unknown;
-    readonly aggregateSelectionPolicyHash?: ProtocolHash;
-    readonly bridgeWitnessPrivacyProfileHash?: ProtocolHash;
-    readonly heParamHash?: ProtocolHash;
-    readonly encryptedAggregateInputs?: readonly TopKEvaluatorEncryptedAggregateInput[];
-    readonly encryptedAggregateScoreInputs?: readonly TopKEvaluatorEncryptedAggregateInput[];
+    readonly evaluationKeyMaterial?: unknown;
+    readonly preparedEvaluationKeyMaterialHandle?: string;
+    readonly aggregateReadyRecord: unknown;
+    readonly encryptedAggregateInputs: readonly TopKEvaluatorEncryptedAggregateInput[];
     readonly topCount: number;
     readonly scoreDomainMax: number;
     readonly workingLevel?: number;
-    readonly canonicalBallotSetHash?: string;
-    readonly preTargetBoardHead?: string;
-    readonly evaluatorSignature?: string;
+    readonly canonicalBallotSetHash: string;
+    readonly preTargetBoardHead: string;
+    readonly evaluatorSignature: string;
 };
 
 export type TopKEvaluatorEncryptedAggregateEvaluation = {
@@ -383,6 +407,8 @@ export type TopKEvaluatorEncryptedAggregateEvaluation = {
     readonly evaluationContextHash: string;
     readonly evaluationNoiseCertificate: Record<string, unknown>;
     readonly topKEvaluationRecord: Record<string, unknown>;
+    readonly encryptedTopKBundle: Record<string, unknown>;
+    readonly encryptedSparseTarget: Record<string, unknown>;
     readonly targetProposalHash: string;
     readonly appendixDPublicInputStatement: Record<string, unknown>;
     readonly statusLabels: readonly string[];
@@ -571,6 +597,10 @@ type TranscriptCoreKernelCommand =
           readonly encryptionRandomnessSeedHex: string;
           readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
           readonly developmentRandomnessOverrideAcknowledged?: boolean;
+          readonly closeRecord?: unknown;
+          readonly contributorActionContext?: unknown;
+          readonly countedBallotPackages?: readonly unknown[];
+          readonly casualMicroRosterAcknowledged?: boolean;
       }
     | {
           readonly command: 'VerifyAggregateBridgeEncryption';
@@ -606,6 +636,30 @@ type TranscriptCoreKernelCommand =
           readonly thresholdProfileHash: ProtocolHash;
           readonly participants: readonly BgvPassiveSetupParticipantInput[];
           readonly setupSeed?: string;
+      }
+    | {
+          readonly command: 'GenerateBgvEvaluationKeyMaterial';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly setupPrivateWitness: {
+              readonly setupSeed: string;
+          };
+          readonly workingLevel?: number;
+          readonly rotationKeys?: readonly {
+              readonly rotation: number;
+              readonly level: number;
+          }[];
+      }
+    | {
+          readonly command: 'PrepareBgvEvaluationKeyMaterial';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly setupPrivateWitness: {
+              readonly setupSeed: string;
+          };
+          readonly workingLevel?: number;
+          readonly rotationKeys?: readonly {
+              readonly rotation: number;
+              readonly level: number;
+          }[];
       }
     | {
           readonly command: 'VerifyBgvPassiveSetup';

@@ -1,6 +1,7 @@
 use super::*;
 use super::{
     dimensions::bridge_variant_dimensions,
+    plaintext_lift, shared_witness,
     target_contract::{
         bridge_proof_target_contract_hash, bridge_proof_target_contract_value,
         validate_bridge_proof_target_contract,
@@ -11,7 +12,9 @@ use super::{
     },
 };
 
-pub(super) fn bridge_proof_profile_hash() -> CanonicalResult<String> {
+pub(super) fn bridge_proof_profile_hash(
+    claim_status: BridgeClaimStatus,
+) -> CanonicalResult<String> {
     derive_protocol_hash(
         "BridgeProofProfileHash",
         &json!({
@@ -22,7 +25,7 @@ pub(super) fn bridge_proof_profile_hash() -> CanonicalResult<String> {
             "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
             "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
             "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
-            "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
+            "claimBearingBridgeEncryption": claim_status.claim_bearing_bridge_encryption,
         }),
     )
 }
@@ -36,6 +39,7 @@ pub(super) struct BridgeProofStatementInput<'a> {
     pub(super) bridge_witness_privacy_profile_hash: &'a str,
     pub(super) he_param_hash: &'a str,
     pub(super) aggregate_derivation_verification_scope: &'a str,
+    pub(super) claim_status: BridgeClaimStatus,
 }
 
 pub(super) fn build_bridge_proof_statement(
@@ -334,6 +338,16 @@ pub(super) fn build_bridge_proof_statement(
     let ciphertext_binding = json!({
         "plaintextRoot": required_string_field(bridge_encryption, "plaintextRoot", "bridgeEncryption")?,
         "ciphertextRoot": required_string_field(bridge_encryption, "ciphertextRoot", "bridgeEncryption")?,
+        "plaintextCoefficientBindingCommitmentHash": required_string_field(
+            bridge_encryption,
+            "plaintextCoefficientBindingCommitmentHash",
+            "bridgeEncryption",
+        )?,
+        "proofFriendlyPlaintextLiftBindingHash": required_string_field(
+            bridge_encryption,
+            "proofFriendlyPlaintextLiftBindingHash",
+            "bridgeEncryption",
+        )?,
         "canonicalBytesHash512": required_string_field(
             bridge_encryption,
             "canonicalBytesHash512",
@@ -353,6 +367,57 @@ pub(super) fn build_bridge_proof_statement(
         )?,
         "slotCount": read_u64_object_field(bridge_encryption, "slotCount", "bridgeEncryption")?,
     });
+    let expected_batch_encoding_bound_certificate =
+        crate::bgv::encrypted_aggregate_bridge_batch_lift_bound_certificate_value(
+            dimensions.share_vector_width,
+        )?;
+    let expected_batch_encoding_bound_certificate_hash =
+        crate::bgv::encrypted_aggregate_bridge_batch_lift_bound_certificate_hash(
+            &expected_batch_encoding_bound_certificate,
+        )?;
+    let batch_encoding_bound_certificate = required_json_field(
+        bridge_encryption,
+        "batchEncodingBoundCertificate",
+        "bridgeEncryption",
+    )?;
+    if batch_encoding_bound_certificate != &expected_batch_encoding_bound_certificate {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge batch encoding bound certificate does not match the variant dimensions",
+        ));
+    }
+    require_matching_string_field(
+        bridge_encryption,
+        "batchEncodingBoundCertificateHash",
+        &expected_batch_encoding_bound_certificate_hash,
+        "batch encoding bound certificate hash",
+    )?;
+    let expected_plaintext_lift_binding =
+        plaintext_lift::proof_friendly_plaintext_lift_binding_value(
+            setup_package,
+            bridge_encryption,
+        )?;
+    let expected_plaintext_lift_binding_hash =
+        plaintext_lift::proof_friendly_plaintext_lift_binding_hash(
+            &expected_plaintext_lift_binding,
+        )?;
+    let plaintext_lift_binding = required_json_field(
+        bridge_encryption,
+        "proofFriendlyPlaintextLiftBinding",
+        "bridgeEncryption",
+    )?;
+    if plaintext_lift_binding != &expected_plaintext_lift_binding {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge proof-friendly plaintext lift binding does not match the public inputs",
+        ));
+    }
+    require_matching_string_field(
+        bridge_encryption,
+        "proofFriendlyPlaintextLiftBindingHash",
+        &expected_plaintext_lift_binding_hash,
+        "proof-friendly plaintext lift binding hash",
+    )?;
     let sampled_public_relation_check_policy = required_json_field(
         bridge_encryption,
         "sampledPublicRelationCheckPolicy",
@@ -375,11 +440,23 @@ pub(super) fn build_bridge_proof_statement(
         "sharedWitnessChallengeEntropyBits": BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS,
         "sharedWitnessWeakestRelation": PLAINTEXT_ENCODING_RELATION,
         "sharedWitnessWeakestRelationModuli": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI,
-        "sharedWitnessWeakestRelationModulusProduct": bridge_batch_integer_lift_proof_modulus_product_decimal(),
+        "sharedWitnessWeakestRelationModel": BRIDGE_WEAKEST_ACTIVE_RELATION_MODEL,
+        "sharedWitnessWeakestRelationBitsPerCheck": BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK,
+        "batchIntegerLiftProofModuli": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI,
+        "batchIntegerLiftProofModulusProduct": bridge_batch_integer_lift_proof_modulus_product_decimal(),
+        "batchIntegerLiftProofModulusProductBitsFloor": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT_BITS_FLOOR,
         "plaintextEncodingProofModuli": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI,
         "plaintextEncodingProofModulusProduct": bridge_batch_integer_lift_proof_modulus_product_decimal(),
-        "plaintextEncodingProofModulusProductBitsFloor": BRIDGE_SHARED_WITNESS_PROOF_MODULUS_PRODUCT_BITS_FLOOR,
+        "plaintextEncodingProofModulusProductBitsFloor": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT_BITS_FLOOR,
         "plaintextEncodingBoundCertificateHash": batch_encoding_bound_certificate_hash,
+        "proofFriendlyPlaintextBindingStatus": PROOF_FRIENDLY_PLAINTEXT_BINDING_STATUS,
+        "proofFriendlyPlaintextLiftBindingStatus": PROOF_FRIENDLY_PLAINTEXT_LIFT_BINDING_STATUS,
+        "proofFriendlyPlaintextLiftBindingHash": required_string_field(
+            bridge_encryption,
+            "proofFriendlyPlaintextLiftBindingHash",
+            "bridgeEncryption",
+        )?,
+        "sharedWitnessChallengeSamplingModel": shared_witness::BRIDGE_SHARED_WITNESS_CHALLENGE_SAMPLING_MODEL,
         "sharedWitnessRejectionAttemptLimit": BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT as u64,
         "sharedWitnessRejectionRetryLossBits": BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS,
         "sharedWitnessFullMatrixUnionBoundBits": BRIDGE_FULL_MATRIX_UNION_BOUND_BITS,
@@ -398,10 +475,10 @@ pub(super) fn build_bridge_proof_statement(
         "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
         "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
         "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
-        "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
+        "claimBearingBridgeEncryption": input.claim_status.claim_bearing_bridge_encryption,
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
-        "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bridgeClaimClosureStatus": input.claim_status.bridge_claim_verification_status,
         "aggregateDerivationVerificationScope": input.aggregate_derivation_verification_scope,
         "sampledOnlyBridgeVerificationAccepted": false,
         "coefficientDomainCanonical": true,
@@ -411,6 +488,7 @@ pub(super) fn build_bridge_proof_statement(
         share_vector_width,
         share_vector_width,
         input.aggregate_derivation_verification_scope,
+        input.claim_status,
     )?;
     let bridge_proof_target_contract_hash =
         bridge_proof_target_contract_hash(&bridge_proof_target_contract)?;
@@ -679,6 +757,28 @@ pub(super) fn build_bridge_proof_statement(
         ),
     );
     bridge_statement.insert(
+        "plaintextCoefficientBindingCommitmentHash".to_string(),
+        Value::String(
+            required_string_field(
+                bridge_encryption,
+                "plaintextCoefficientBindingCommitmentHash",
+                "bridgeEncryption",
+            )?
+            .to_string(),
+        ),
+    );
+    bridge_statement.insert(
+        "proofFriendlyPlaintextLiftBindingHash".to_string(),
+        Value::String(
+            required_string_field(
+                bridge_encryption,
+                "proofFriendlyPlaintextLiftBindingHash",
+                "bridgeEncryption",
+            )?
+            .to_string(),
+        ),
+    );
+    bridge_statement.insert(
         "ciphertextRoot".to_string(),
         Value::String(
             required_string_field(bridge_encryption, "ciphertextRoot", "bridgeEncryption")?
@@ -793,10 +893,12 @@ pub(super) fn bridge_proof_statement_hash(
         "encryptedAggregateShareCiphertextRoot",
         "encryptedAggregateTargetBasisRoot",
         "heParamHash",
+        "plaintextCoefficientBindingCommitmentHash",
         "manifestHash",
         "plaintextRoot",
         "pollSpecHash",
         "postVotingClosedContextHash",
+        "proofFriendlyPlaintextLiftBindingHash",
         "rosterHash",
         "rustBgvBackendProfileHash",
         "sampledPublicRelationCheckPolicyHash",
@@ -861,10 +963,15 @@ pub(super) fn bridge_proof_statement_hash(
         "rnsCrtConsistencyProofStatus",
         "bridgeClaimClosureStatus",
         "hwangPiopStatus",
+        "batchIntegerLiftProofModulusProduct",
         "plaintextEncodingBoundCertificateHash",
         "plaintextEncodingProofModulusProduct",
+        "proofFriendlyPlaintextBindingStatus",
+        "proofFriendlyPlaintextLiftBindingHash",
+        "proofFriendlyPlaintextLiftBindingStatus",
+        "sharedWitnessChallengeSamplingModel",
         "sharedWitnessWeakestRelation",
-        "sharedWitnessWeakestRelationModulusProduct",
+        "sharedWitnessWeakestRelationModel",
     ] {
         hash_input.insert(
             field_name.to_string(),
@@ -884,6 +991,8 @@ pub(super) fn bridge_proof_statement_hash(
         "sharedWitnessChallengeBitsPerCheck",
         "sharedWitnessCheckCount",
         "sharedWitnessChallengeEntropyBits",
+        "sharedWitnessWeakestRelationBitsPerCheck",
+        "batchIntegerLiftProofModulusProductBitsFloor",
         "plaintextEncodingProofModulusProductBitsFloor",
         "sharedWitnessRejectionAttemptLimit",
         "sharedWitnessRejectionRetryLossBits",
@@ -924,6 +1033,7 @@ pub(super) fn bridge_proof_statement_hash(
         );
     }
     for field_name in [
+        "batchIntegerLiftProofModuli",
         "plaintextEncodingProofModuli",
         "sharedWitnessWeakestRelationModuli",
     ] {
@@ -939,6 +1049,261 @@ pub(super) fn bridge_proof_statement_hash(
     }
 
     derive_protocol_hash("BridgeProofRecordHash", &Value::Object(hash_input))
+}
+
+pub(super) struct AggregateBridgeRelationHandoffRootInput<'a> {
+    pub(super) bridge_proof_statement: &'a Value,
+    pub(super) bridge_public_values: &'a Value,
+    pub(super) aggregate_derivation_statement_hash: &'a str,
+    pub(super) aggregate_relation_challenge_hex: &'a str,
+    pub(super) aggregate_relation_commitment_hash: &'a str,
+    pub(super) aggregate_relation_subproof_size_bytes: u64,
+    pub(super) bridge_proof_statement_hash: &'a str,
+    pub(super) bridge_proof_bytes_hash: &'a str,
+    pub(super) bridge_shared_witness_proof_hash: &'a str,
+    pub(super) shared_witness_zero_knowledge_status_hash: &'a str,
+    pub(super) bgv_randomness_bound_proof_status_hash: &'a str,
+    pub(super) bridge_proof_verification_status: &'a str,
+    pub(super) bgv_passive_setup_verification_precondition_checked: bool,
+    pub(super) claim_bearing_bridge_encryption: bool,
+    pub(super) relation_checked: bool,
+    pub(super) same_witness_linkage_verified: bool,
+    pub(super) effective_soundness_accepted: bool,
+    pub(super) zk_distribution_accepted: bool,
+    pub(super) bgv_support_bounds_verified: bool,
+    pub(super) entropy_ownership_verified: bool,
+    pub(super) key_status_accepted: bool,
+}
+
+pub(super) fn aggregate_bridge_relation_handoff_root(
+    input: AggregateBridgeRelationHandoffRootInput<'_>,
+) -> CanonicalResult<String> {
+    let relation_requirements = required_json_field(
+        input.bridge_proof_statement,
+        "relationRequirements",
+        "bridgeProofStatement",
+    )?;
+    let mut payload = Map::new();
+    payload.insert(
+        "purpose".to_string(),
+        Value::String("sealed-lattice-aggregate-bridge-relation-handoff-root-v1".to_string()),
+    );
+    for field_name in [
+        "aggregateDerivationComponentHash",
+        "aggregateInputEncodingProfileHash",
+        "aggregateSelectionPolicyHash",
+        "aggregateShareCommitmentHash",
+        "ballotScoreEncodingProfileHash",
+        "ballotSetHash",
+        "ballotShareLayoutProfileHash",
+        "basisId",
+        "bgvBatchEncoderHash",
+        "bgvProfileHash",
+        "bgvPublicKeyRoot",
+        "bridgeLayoutHash",
+        "bridgeProofProfileHash",
+        "bridgeProofTargetContractHash",
+        "bridgeWitnessPrivacyProfileHash",
+        "canonicalBytesHash512",
+        "canonicalCiphertextConventionHash",
+        "ceremonyId",
+        "ciphertextRoot",
+        "collectivePublicKeyCoefficientRoot",
+        "collectivePublicKeyRoot",
+        "contributorActionContextHash",
+        "contributorIdentity",
+        "contributorRosterExternalAcceptanceHash",
+        "encodedAggregateLayoutHash",
+        "encodedShareVectorLayoutHash",
+        "encryptedAggregateBridgeHash",
+        "encryptedAggregateInputLayoutHash",
+        "encryptedAggregateInputRoot",
+        "encryptedAggregateReconstructionHash",
+        "encryptedAggregateShareCiphertextRoot",
+        "encryptedAggregateTargetBasisRoot",
+        "heParamHash",
+        "manifestHash",
+        "plaintextCoefficientBindingCommitmentHash",
+        "plaintextRoot",
+        "pollSpecHash",
+        "postVotingClosedContextHash",
+        "proofFriendlyPlaintextLiftBindingHash",
+        "rosterHash",
+        "rustBgvBackendProfileHash",
+        "setupPackageHash",
+        "shareCommitmentMessageBoundCertHash",
+        "thresholdProfileHash",
+        "topKEvaluatorInputLayoutHash",
+        "votingClosedBoardHeadHash",
+    ] {
+        payload.insert(
+            field_name.to_string(),
+            Value::String(
+                required_string_field(
+                    input.bridge_proof_statement,
+                    field_name,
+                    "bridgeProofStatement",
+                )?
+                .to_string(),
+            ),
+        );
+    }
+    for field_name in [
+        "canonicalByteLength",
+        "coefficientCount",
+        "contributorRosterPosition",
+        "level",
+        "optionCount",
+        "participantCount",
+        "shareVectorWidth",
+        "slotCount",
+    ] {
+        payload.insert(
+            field_name.to_string(),
+            json!(read_u64_object_field(
+                input.bridge_proof_statement,
+                field_name,
+                "bridgeProofStatement",
+            )?),
+        );
+    }
+    for field_name in [
+        "aggregateQuotientCoordinateCount",
+        "aggregateReducedCoordinateCount",
+        "sharedWitnessCheckCount",
+        "sharedWitnessEffectiveBindingSoundnessBitsFloor",
+        "sharedWitnessTargetBindingSoundnessBits",
+    ] {
+        payload.insert(
+            field_name.to_string(),
+            json!(read_u64_object_field(
+                relation_requirements,
+                field_name,
+                "bridgeProofStatement.relationRequirements",
+            )?),
+        );
+    }
+    payload.insert(
+        "encryptionRandomnessSeedSource".to_string(),
+        Value::String(
+            required_string_field(
+                input.bridge_public_values,
+                "encryptionRandomnessSeedSource",
+                "bridgeProof",
+            )?
+            .to_string(),
+        ),
+    );
+    payload.insert(
+        "proverRandomnessSource".to_string(),
+        Value::String(
+            required_string_field(
+                input.bridge_public_values,
+                "proverRandomnessSource",
+                "bridgeProof",
+            )?
+            .to_string(),
+        ),
+    );
+    payload.insert(
+        "randomnessSourceEvidence".to_string(),
+        required_json_field(
+            input.bridge_public_values,
+            "randomnessSourceEvidence",
+            "bridgeProof",
+        )?
+        .clone(),
+    );
+    payload.insert(
+        "aggregateDerivationStatementHash".to_string(),
+        Value::String(input.aggregate_derivation_statement_hash.to_string()),
+    );
+    payload.insert(
+        "aggregateRelationChallengeHex".to_string(),
+        Value::String(input.aggregate_relation_challenge_hex.to_string()),
+    );
+    payload.insert(
+        "aggregateRelationCommitmentHash".to_string(),
+        Value::String(input.aggregate_relation_commitment_hash.to_string()),
+    );
+    payload.insert(
+        "aggregateRelationSubproofSizeBytes".to_string(),
+        json!(input.aggregate_relation_subproof_size_bytes),
+    );
+    payload.insert(
+        "bridgeProofBytesHash".to_string(),
+        Value::String(input.bridge_proof_bytes_hash.to_string()),
+    );
+    payload.insert(
+        "bridgeProofStatementHash".to_string(),
+        Value::String(input.bridge_proof_statement_hash.to_string()),
+    );
+    payload.insert(
+        "bridgeProofVerificationStatus".to_string(),
+        Value::String(input.bridge_proof_verification_status.to_string()),
+    );
+    payload.insert(
+        "bridgeSharedWitnessProofHash".to_string(),
+        Value::String(input.bridge_shared_witness_proof_hash.to_string()),
+    );
+    payload.insert(
+        "sharedWitnessZeroKnowledgeStatusHash".to_string(),
+        Value::String(input.shared_witness_zero_knowledge_status_hash.to_string()),
+    );
+    payload.insert(
+        "bgvRandomnessBoundProofStatusHash".to_string(),
+        Value::String(input.bgv_randomness_bound_proof_status_hash.to_string()),
+    );
+    payload.insert(
+        "bgvEncryptionKeyMaterialKind".to_string(),
+        Value::String(BGV_ENCRYPTION_KEY_MATERIAL_KIND.to_string()),
+    );
+    payload.insert(
+        "developmentKeyOnly".to_string(),
+        Value::Bool(DEVELOPMENT_KEY_ONLY),
+    );
+    payload.insert(
+        "thresholdDecryptable".to_string(),
+        Value::Bool(THRESHOLD_DECRYPTABLE),
+    );
+    payload.insert(
+        "claimBearingBridgeEncryption".to_string(),
+        Value::Bool(input.claim_bearing_bridge_encryption),
+    );
+    payload.insert(
+        "bgvPassiveSetupVerificationPreconditionChecked".to_string(),
+        Value::Bool(input.bgv_passive_setup_verification_precondition_checked),
+    );
+    payload.insert(
+        "relationChecked".to_string(),
+        Value::Bool(input.relation_checked),
+    );
+    payload.insert(
+        "sameWitnessLinkageVerified".to_string(),
+        Value::Bool(input.same_witness_linkage_verified),
+    );
+    payload.insert(
+        "effectiveSoundnessAccepted".to_string(),
+        Value::Bool(input.effective_soundness_accepted),
+    );
+    payload.insert(
+        "zkDistributionAccepted".to_string(),
+        Value::Bool(input.zk_distribution_accepted),
+    );
+    payload.insert(
+        "bgvSupportBoundsVerified".to_string(),
+        Value::Bool(input.bgv_support_bounds_verified),
+    );
+    payload.insert(
+        "entropyOwnershipVerified".to_string(),
+        Value::Bool(input.entropy_ownership_verified),
+    );
+    payload.insert(
+        "keyStatusAccepted".to_string(),
+        Value::Bool(input.key_status_accepted),
+    );
+
+    derive_protocol_hash("BridgeProofRecordHash", &Value::Object(payload))
 }
 
 pub(super) fn bridge_proof_challenge_context_hash(

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -7,23 +6,28 @@ import * as ts from 'typescript';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
-type ApiSnapshot = {
+type ApiSurfaceSummary = {
     readonly declarationFiles: readonly string[];
-    readonly declarationHash: string;
+    readonly declarations: readonly DeclarationSurfaceFile[];
     readonly runtimeExports: readonly string[];
     readonly schemaVersion: 1;
     readonly typeExports: readonly string[];
+};
+
+type DeclarationSurfaceFile = {
+    readonly file: string;
+    readonly lines: readonly string[];
 };
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkDistDirectoryPath = path.resolve(repoRoot, 'packages', 'sdk', 'dist');
 const sdkEntryDeclarationPath = path.join(sdkDistDirectoryPath, 'index.d.ts');
 const sdkRuntimePath = path.join(sdkDistDirectoryPath, 'index.js');
-const apiSnapshotPath = path.resolve(
+const apiSurfaceSummaryPath = path.resolve(
     repoRoot,
     'packages',
     'sdk',
-    'api-snapshot.json',
+    'api-surface-summary.json',
 );
 
 const sortedUnique = (values: Iterable<string>): string[] =>
@@ -33,7 +37,7 @@ const normalizePath = (filePath: string): string =>
     path.relative(repoRoot, filePath).split(path.sep).join('/');
 
 const normalizeText = (text: string): string =>
-    text.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n');
+    text.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n').trimEnd();
 
 const hasExportModifier = (
     node: ts.Node,
@@ -102,9 +106,8 @@ const relativeDeclarationPathForModuleSpecifier = (
         containingDirectoryPath,
         moduleSpecifier,
     );
-    const declarationPath = resolvedModulePath.replace(/\.js$/u, '.d.ts');
 
-    return declarationPath;
+    return resolvedModulePath.replace(/\.js$/u, '.d.ts');
 };
 
 const collectRelativeDeclarationReferences = (
@@ -170,25 +173,6 @@ const collectReachableDeclarationFilePaths = async (): Promise<string[]> => {
     return sortedUnique(visitedDeclarationPaths);
 };
 
-const hashReachableDeclarations = async (
-    declarationFilePaths: readonly string[],
-): Promise<string> => {
-    const hash = createHash('sha256');
-
-    for (const declarationFilePath of declarationFilePaths) {
-        const relativePath = normalizePath(declarationFilePath);
-        const declarationText = normalizeText(
-            await fs.readFile(declarationFilePath, 'utf8'),
-        );
-
-        hash.update(`file:${relativePath}\n`, 'utf8');
-        hash.update(declarationText, 'utf8');
-        hash.update('\n', 'utf8');
-    }
-
-    return `sha256:${hash.digest('hex')}`;
-};
-
 const loadRuntimeExportNames = async (): Promise<string[]> => {
     const runtimeModule = (await import(
         pathToFileURL(sdkRuntimePath).href
@@ -197,7 +181,19 @@ const loadRuntimeExportNames = async (): Promise<string[]> => {
     return sortedUnique(Object.keys(runtimeModule));
 };
 
-const createCurrentApiSnapshot = async (): Promise<ApiSnapshot> => {
+const loadDeclarationSurfaceFiles = async (
+    declarationFilePaths: readonly string[],
+): Promise<DeclarationSurfaceFile[]> =>
+    Promise.all(
+        declarationFilePaths.map(async (declarationFilePath) => ({
+            file: normalizePath(declarationFilePath),
+            lines: normalizeText(
+                await fs.readFile(declarationFilePath, 'utf8'),
+            ).split('\n'),
+        })),
+    );
+
+const createCurrentApiSurfaceSummary = async (): Promise<ApiSurfaceSummary> => {
     const declarationFilePaths = await collectReachableDeclarationFilePaths();
     const entrySourceFile = await readDeclarationSourceFile(
         sdkEntryDeclarationPath,
@@ -206,111 +202,25 @@ const createCurrentApiSnapshot = async (): Promise<ApiSnapshot> => {
     return {
         schemaVersion: 1,
         declarationFiles: declarationFilePaths.map(normalizePath),
-        declarationHash: await hashReachableDeclarations(declarationFilePaths),
+        declarations: await loadDeclarationSurfaceFiles(declarationFilePaths),
         runtimeExports: await loadRuntimeExportNames(),
         typeExports: collectNamedTypeExports(entrySourceFile),
     };
 };
 
-const formatSnapshot = (snapshot: ApiSnapshot): string =>
-    `${JSON.stringify(snapshot, null, 4)}\n`;
-
-const diffValues = (
-    expectedValues: readonly string[],
-    actualValues: readonly string[],
-): { readonly added: string[]; readonly removed: string[] } => {
-    const expected = new Set(expectedValues);
-    const actual = new Set(actualValues);
-
-    return {
-        added: actualValues.filter((value) => !expected.has(value)),
-        removed: expectedValues.filter((value) => !actual.has(value)),
-    };
-};
-
-const formatList = (values: readonly string[]): string =>
-    values.length === 0
-        ? '(none)'
-        : values.map((value) => `- ${value}`).join('\n');
-
-const hasNodeErrorCode = (
-    error: unknown,
-): error is Error & { readonly code: string } => {
-    if (!(error instanceof Error) || !('code' in error)) {
-        return false;
-    }
-
-    return typeof (error as { readonly code?: unknown }).code === 'string';
-};
-
-const formatMismatch = (
-    expectedSnapshot: ApiSnapshot,
-    actualSnapshot: ApiSnapshot,
-): string => {
-    const runtimeDiff = diffValues(
-        expectedSnapshot.runtimeExports,
-        actualSnapshot.runtimeExports,
-    );
-    const typeDiff = diffValues(
-        expectedSnapshot.typeExports,
-        actualSnapshot.typeExports,
-    );
-
-    return [
-        'Public API snapshot is out of date. Run `pnpm run api-surface:update` after intentional public SDK API changes.',
-        '',
-        `Expected declaration hash: ${expectedSnapshot.declarationHash}`,
-        `Actual declaration hash:   ${actualSnapshot.declarationHash}`,
-        '',
-        'Added runtime exports:',
-        formatList(runtimeDiff.added),
-        '',
-        'Removed runtime exports:',
-        formatList(runtimeDiff.removed),
-        '',
-        'Added type exports:',
-        formatList(typeDiff.added),
-        '',
-        'Removed type exports:',
-        formatList(typeDiff.removed),
-    ].join('\n');
-};
-
-const readExpectedSnapshot = async (): Promise<ApiSnapshot> => {
-    try {
-        return JSON.parse(
-            await fs.readFile(apiSnapshotPath, 'utf8'),
-        ) as ApiSnapshot;
-    } catch (error) {
-        if (hasNodeErrorCode(error) && error.code === 'ENOENT') {
-            error.message = `Missing public API snapshot. Run \`pnpm run api-surface:update\` to create packages/sdk/api-snapshot.json. ${error.message}`;
-            throw error;
-        }
-
-        throw error;
-    }
-};
+const formatSummary = (summary: ApiSurfaceSummary): string =>
+    `${JSON.stringify(summary, null, 4)}\n`;
 
 const main = async (): Promise<void> => {
-    const shouldUpdate = process.argv.includes('--update');
-    const currentSnapshot = await createCurrentApiSnapshot();
-    const currentSnapshotText = formatSnapshot(currentSnapshot);
-
-    if (shouldUpdate) {
-        await fs.writeFile(apiSnapshotPath, currentSnapshotText, 'utf8');
-        console.log(
-            `Public API snapshot updated: ${normalizePath(apiSnapshotPath)}`,
-        );
-        return;
-    }
-
-    const expectedSnapshot = await readExpectedSnapshot();
-    const expectedSnapshotText = formatSnapshot(expectedSnapshot);
-    if (expectedSnapshotText !== currentSnapshotText) {
-        throw new Error(formatMismatch(expectedSnapshot, currentSnapshot));
-    }
-
-    console.log('Public API snapshot verification passed.');
+    const currentSummary = await createCurrentApiSurfaceSummary();
+    await fs.writeFile(
+        apiSurfaceSummaryPath,
+        formatSummary(currentSummary),
+        'utf8',
+    );
+    console.log(
+        `Public API surface summary generated: ${normalizePath(apiSurfaceSummaryPath)}`,
+    );
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {

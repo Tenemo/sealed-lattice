@@ -4,6 +4,8 @@
 //! allocation functions below. Proof internals are crate-private and should be
 //! reached through transcript-core commands so claim boundaries stay centralized.
 
+#![recursion_limit = "256"]
+
 pub(crate) mod ballot_privacy;
 pub(crate) mod bgv;
 mod encoding;

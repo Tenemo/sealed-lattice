@@ -123,10 +123,14 @@ export type WorkerResult =
       });
 
 export type RunnerSummary = {
+    readonly aggregateReadyRequestBasePath: string;
     readonly aggregateReadyRecordHash: string;
+    readonly aggregateReadyRecordPath: string;
     readonly bridgeContributorCount: number;
     readonly checkpointDir: string;
     readonly durationMilliseconds: number;
+    readonly selectedEncryptedAggregateInputsPath: string;
+    readonly setupPackagePath: string;
     readonly aggregateReadyVerificationStatus: string;
     readonly objectType: 'AggregateDerivationKernelRunSummary';
     readonly objectVersion: 1;

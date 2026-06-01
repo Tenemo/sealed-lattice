@@ -1,7 +1,10 @@
 use super::*;
 use crate::bgv::evaluator::{
     records::MAXIMUM_OPTION_COUNT,
-    top_k::{aggregate_score_packing_galois_elements, packed_rank_galois_elements},
+    top_k::{
+        aggregate_score_packing_basis_galois_elements, packed_rank_forward_basis_galois_elements,
+        packed_rank_return_basis_galois_elements,
+    },
 };
 use crate::bgv::setup::key_material::expected_evaluation_key_material_binding;
 
@@ -219,7 +222,11 @@ fn validate_required_rotation_groups(
             ));
         }
     }
-    for purpose in ["aggregate-score-packing", "generator-ordered-packed-rank"] {
+    for purpose in [
+        "aggregate-score-packing-generator-basis",
+        "generator-ordered-packed-rank-forward-basis",
+        "generator-ordered-packed-rank-return-basis",
+    ] {
         if !seen_purposes.contains(purpose) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
@@ -233,16 +240,27 @@ fn validate_required_rotation_groups(
 
 fn expected_required_rotation_group(purpose: &str) -> Option<BTreeSet<i64>> {
     let rotations = match purpose {
-        "aggregate-score-packing" => aggregate_score_packing_galois_elements(MAXIMUM_OPTION_COUNT)
-            .ok()?
-            .into_iter()
-            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
-            .collect::<Vec<_>>(),
-        "generator-ordered-packed-rank" => packed_rank_galois_elements(MAXIMUM_OPTION_COUNT)
-            .ok()?
-            .into_iter()
-            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
-            .collect::<Vec<_>>(),
+        "aggregate-score-packing-generator-basis" => {
+            aggregate_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)
+                .ok()?
+                .into_iter()
+                .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+                .collect::<Vec<_>>()
+        }
+        "generator-ordered-packed-rank-forward-basis" => {
+            packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)
+                .ok()?
+                .into_iter()
+                .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+                .collect::<Vec<_>>()
+        }
+        "generator-ordered-packed-rank-return-basis" => {
+            packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)
+                .ok()?
+                .into_iter()
+                .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+                .collect::<Vec<_>>()
+        }
         _ => return None,
     };
 

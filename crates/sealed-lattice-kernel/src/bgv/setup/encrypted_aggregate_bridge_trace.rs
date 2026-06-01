@@ -1,5 +1,6 @@
 use super::validation;
 use super::*;
+use crate::bgv::serialization::CanonicalBgvObject;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -19,6 +20,12 @@ pub(crate) struct EncryptedAggregateBridgeCiphertextRelationTrace {
     pub(crate) encryption_randomness_coefficients: Vec<i64>,
     pub(crate) encryption_error_zero_coefficients: Vec<i64>,
     pub(crate) encryption_error_one_coefficients: Vec<i64>,
+}
+
+pub(crate) struct EncryptedAggregateBridgeCiphertextCommitmentContext {
+    ciphertext: CanonicalBgvObject,
+    collective_key_coefficients_by_modulus:
+        Vec<super::key_material::CollectivePublicKeyCoefficients>,
 }
 
 impl EncryptedAggregateBridgeCiphertextRelationTrace {
@@ -171,6 +178,10 @@ pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
     let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
+    let manifest_hash = string_at_path(setup_package, &["setupInputs", "manifestHash"])?;
+    let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
+    let threshold_profile_hash =
+        string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
     let collective_public_key_root = string_at_path(
         setup_package,
         &["collectivePublicKey", "collectivePublicKeyRoot"],
@@ -181,10 +192,6 @@ pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from
     )?;
     let bgv_public_key_root =
         string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?;
-    let manifest_hash = string_at_path(setup_package, &["setupInputs", "manifestHash"])?;
-    let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
-    let threshold_profile_hash =
-        string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
     let target_threshold_decryptability_certificate_hash = string_at_path(
         setup_package,
         &[
@@ -762,30 +769,12 @@ fn batch_encoding_quotient_bound(active_slot_count: usize) -> CanonicalResult<u6
         })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
+pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_context(
     setup_package: &Value,
-    _contributor_identity: &str,
-    _aggregate_derivation_statement_hash: &str,
     bridge_encryption: &Value,
-    challenge_scalar: u64,
-    plaintext_coefficient_response: &[BigInt],
-    randomizer_response: &[BigInt],
-    perturbation_zero_response: &[BigInt],
-    perturbation_one_response: &[BigInt],
-) -> CanonicalResult<String> {
+) -> CanonicalResult<EncryptedAggregateBridgeCiphertextCommitmentContext> {
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
-    if plaintext_coefficient_response.len() != POLYNOMIAL_DEGREE
-        || randomizer_response.len() != POLYNOMIAL_DEGREE
-        || perturbation_zero_response.len() != POLYNOMIAL_DEGREE
-        || perturbation_one_response.len() != POLYNOMIAL_DEGREE
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "encrypted aggregate bridge ciphertext proof response dimensions are invalid",
-        ));
-    }
     let canonical_bytes_hex = string_at_path(bridge_encryption, &["canonicalBytesHex"])?;
     let ciphertext = parse_bgv_object_hex(canonical_bytes_hex)?;
     if ciphertext.object_kind != BgvObjectKind::Ciphertext || ciphertext.components.len() != 2 {
@@ -808,16 +797,43 @@ pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_respons
         }
     }
 
-    let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
-    let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
     let collective_key_coefficients_by_modulus =
         super::key_material::collective_public_key_coefficients_by_modulus_from_setup_package(
             setup_package,
         )?;
 
+    Ok(EncryptedAggregateBridgeCiphertextCommitmentContext {
+        ciphertext,
+        collective_key_coefficients_by_modulus,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_context(
+    context: &EncryptedAggregateBridgeCiphertextCommitmentContext,
+    challenge_scalar: u128,
+    plaintext_coefficient_response: &[BigInt],
+    randomizer_response: &[BigInt],
+    perturbation_zero_response: &[BigInt],
+    perturbation_one_response: &[BigInt],
+) -> CanonicalResult<String> {
+    if plaintext_coefficient_response.len() != POLYNOMIAL_DEGREE
+        || randomizer_response.len() != POLYNOMIAL_DEGREE
+        || perturbation_zero_response.len() != POLYNOMIAL_DEGREE
+        || perturbation_one_response.len() != POLYNOMIAL_DEGREE
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "encrypted aggregate bridge ciphertext proof response dimensions are invalid",
+        ));
+    }
+    let mut component_zero_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
+    let mut component_one_residues_by_modulus = Vec::with_capacity(DATA_PRIMES.len());
+
     for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         let modulus_bigint = BigInt::from(modulus);
-        let collective_key_coefficients = collective_key_coefficients_by_modulus
+        let collective_key_coefficients = context
+            .collective_key_coefficients_by_modulus
             .get(modulus_index)
             .ok_or_else(|| {
                 CanonicalError::new(
@@ -851,8 +867,14 @@ pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_respons
             negacyclic_product_mod(public_key_coefficients, &randomizer_residues, modulus)?;
         let public_sample_product =
             negacyclic_product_mod(public_sample_coefficients, &randomizer_residues, modulus)?;
-        let challenge_residue = challenge_scalar % modulus;
-        let ciphertext_component_zero = ciphertext.components[0]
+        let challenge_residue =
+            u64::try_from(challenge_scalar % u128::from(modulus)).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "encrypted aggregate bridge ciphertext challenge residue does not fit u64",
+                )
+            })?;
+        let ciphertext_component_zero = context.ciphertext.components[0]
             .residues_by_modulus
             .get(modulus_index)
             .ok_or_else(|| {
@@ -861,7 +883,7 @@ pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_respons
                     "encrypted aggregate bridge proof ciphertext component zero is missing a data limb",
                 )
             })?;
-        let ciphertext_component_one = ciphertext.components[1]
+        let ciphertext_component_one = context.ciphertext.components[1]
             .residues_by_modulus
             .get(modulus_index)
             .ok_or_else(|| {
@@ -976,10 +998,6 @@ pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
     )?;
     let bgv_public_key_root =
         string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?;
-    let manifest_hash = string_at_path(setup_package, &["setupInputs", "manifestHash"])?;
-    let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
-    let threshold_profile_hash =
-        string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
     let target_threshold_decryptability_certificate_hash = string_at_path(
         setup_package,
         &[
@@ -987,29 +1005,14 @@ pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
             "targetThresholdDecryptabilityCertificateHash",
         ],
     )?;
-    let plaintext_root = string_at_path(bridge_encryption, &["plaintextRoot"])?;
-    let ciphertext_root = string_at_path(bridge_encryption, &["ciphertextRoot"])?;
-    let expected_encrypted_aggregate_share_ciphertext_root = derive_protocol_hash(
-        "EncryptedAggregateShareCiphertextRoot",
-        &json!({
-            "purpose": "sealed-lattice-encrypted-aggregate-share-ciphertext-root-v1",
-            "aggregateDerivationComponentHash": aggregate_derivation_component_hash,
-            "aggregateDerivationStatementHash": aggregate_derivation_statement_hash,
-            "postVotingClosedContextHash": post_voting_closed_context_hash,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "thresholdProfileHash": threshold_profile_hash,
-            "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
-            "collectivePublicKeyRoot": collective_public_key_root,
-            "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
-            "bgvPublicKeyRoot": bgv_public_key_root,
-            "plaintextRoot": plaintext_root,
-            "ciphertextRoot": ciphertext_root,
-            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
-            "bgvProfileHash": profile_hash()?,
-            "rustBgvBackendProfileHash": backend_profile_hash()?,
-        }),
-    )?;
+    let expected_encrypted_aggregate_share_ciphertext_root =
+        encrypted_aggregate_share_ciphertext_root_with_plaintext_binding(
+            setup_package,
+            aggregate_derivation_component_hash,
+            aggregate_derivation_statement_hash,
+            post_voting_closed_context_hash,
+            bridge_encryption,
+        )?;
 
     compare_encrypted_aggregate_bridge_string_at_path(
         bridge_encryption,
@@ -1113,6 +1116,73 @@ pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
     )?;
 
     Ok(())
+}
+
+pub(crate) fn encrypted_aggregate_share_ciphertext_root_with_plaintext_binding(
+    setup_package: &Value,
+    aggregate_derivation_component_hash: &str,
+    aggregate_derivation_statement_hash: &str,
+    post_voting_closed_context_hash: &str,
+    bridge_encryption: &Value,
+) -> CanonicalResult<String> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+
+    let collective_public_key_root = string_at_path(
+        setup_package,
+        &["collectivePublicKey", "collectivePublicKeyRoot"],
+    )?;
+    let collective_public_key_coefficient_root = string_at_path(
+        setup_package,
+        &["collectivePublicKey", "collectivePublicKeyCoefficientRoot"],
+    )?;
+    let bgv_public_key_root =
+        string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?;
+    let manifest_hash = string_at_path(setup_package, &["setupInputs", "manifestHash"])?;
+    let roster_hash = string_at_path(setup_package, &["setupInputs", "rosterHash"])?;
+    let threshold_profile_hash =
+        string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
+    let target_threshold_decryptability_certificate_hash = string_at_path(
+        setup_package,
+        &[
+            "certificates",
+            "targetThresholdDecryptabilityCertificateHash",
+        ],
+    )?;
+    let plaintext_root = string_at_path(bridge_encryption, &["plaintextRoot"])?;
+    let ciphertext_root = string_at_path(bridge_encryption, &["ciphertextRoot"])?;
+    let plaintext_coefficient_binding_commitment_hash = string_at_path(
+        bridge_encryption,
+        &["plaintextCoefficientBindingCommitmentHash"],
+    )?;
+    let proof_friendly_plaintext_lift_binding_hash = string_at_path(
+        bridge_encryption,
+        &["proofFriendlyPlaintextLiftBindingHash"],
+    )?;
+
+    derive_protocol_hash(
+        "EncryptedAggregateShareCiphertextRoot",
+        &json!({
+            "purpose": "sealed-lattice-encrypted-aggregate-share-ciphertext-root-v1",
+            "aggregateDerivationComponentHash": aggregate_derivation_component_hash,
+            "aggregateDerivationStatementHash": aggregate_derivation_statement_hash,
+            "postVotingClosedContextHash": post_voting_closed_context_hash,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "thresholdProfileHash": threshold_profile_hash,
+            "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
+            "collectivePublicKeyRoot": collective_public_key_root,
+            "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
+            "bgvPublicKeyRoot": bgv_public_key_root,
+            "plaintextRoot": plaintext_root,
+            "plaintextCoefficientBindingCommitmentHash": plaintext_coefficient_binding_commitment_hash,
+            "proofFriendlyPlaintextLiftBindingHash": proof_friendly_plaintext_lift_binding_hash,
+            "ciphertextRoot": ciphertext_root,
+            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
+            "bgvProfileHash": profile_hash()?,
+            "rustBgvBackendProfileHash": backend_profile_hash()?,
+        }),
+    )
 }
 
 fn compare_encrypted_aggregate_bridge_string_at_path(
@@ -1228,27 +1298,18 @@ mod tests {
     }
 
     fn collective_secret_coefficients(setup_package: &Value) -> Vec<i64> {
-        let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])
-            .expect("setup seed hash");
-        let participants = array_at_path(setup_package, &["participants"]).expect("participants");
-        let mut collective_secret_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
-        for participant in participants {
-            let trustee_identity =
-                string_at_path(participant, &["trusteeIdentity"]).expect("trustee identity");
-            let local_secret_coefficients = dense_small_coefficients(
-                setup_seed_hash,
-                trustee_identity,
-                "local-secret-share",
-                -1,
-                1,
+        let private_setup_seed_hash =
+            super::super::input::private_passive_setup_seed_hash_from_package_witness(
+                setup_package,
+                "bridge-decryptability-test-seed",
+            )
+            .expect("private setup seed hash");
+        let participant_identities = participant_identities(setup_package);
+        let (collective_secret_coefficients, _) =
+            super::super::key_material::collective_signed_secret_and_error_coefficients(
+                &private_setup_seed_hash,
+                &participant_identities,
             );
-            for (collective_coefficient, local_coefficient) in collective_secret_coefficients
-                .iter_mut()
-                .zip(local_secret_coefficients.iter())
-            {
-                *collective_coefficient += *local_coefficient;
-            }
-        }
 
         collective_secret_coefficients
     }
@@ -1269,10 +1330,16 @@ mod tests {
         let data_modulus = DATA_PRIMES[0];
         let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])
             .expect("setup seed hash");
+        let private_setup_seed_hash =
+            super::super::input::private_passive_setup_seed_hash_from_package_witness(
+                setup_package,
+                "bridge-decryptability-test-seed",
+            )
+            .expect("private setup seed hash");
         let identities = participant_identities(setup_package);
         let (collective_secret_coefficients, collective_error_coefficients) =
             super::super::key_material::collective_signed_secret_and_error_coefficients(
-                setup_seed_hash,
+                &private_setup_seed_hash,
                 &identities,
             );
         let collective_key_coefficients =

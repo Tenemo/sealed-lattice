@@ -209,11 +209,22 @@ export const createAggregateContributionFixture = (
     const encryptedAggregateShareCiphertextRoot =
         input.encryptedAggregateShareCiphertextRoot ??
         hash(`aggregate-share-ciphertext-${input.rosterPosition}`);
+    const plaintextCoefficientBindingCommitmentHash = hash(
+        `plaintext-coefficient-binding-${input.rosterPosition}`,
+    );
+    const proofFriendlyPlaintextLiftBindingHash = hash(
+        `plaintext-lift-binding-${input.rosterPosition}`,
+    );
+    const aggregateBridgeRelationHandoffRoot = hash(
+        `aggregate-bridge-relation-handoff-${input.rosterPosition}`,
+    );
     const bridgeProofTargetContractHash = deriveBridgeProofTargetContractHash({
         aggregateQuotientCoordinateCount: 220,
         aggregateReducedCoordinateCount: 220,
         aggregateDerivationVerificationScope:
-            'AggregateDerivationFullVerificationPreconditionNotBound',
+            'AggregateDerivationFullVerificationChecked',
+        bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
+        claimBearingBridgeEncryption: false,
     });
     const actionContext = createActionContext({
         actionSequence,
@@ -290,8 +301,9 @@ export const createAggregateContributionFixture = (
         level: 15,
         manifestHash: baseFields.manifestHash,
         aggregateDerivationVerificationScope:
-            'AggregateDerivationFullVerificationPreconditionNotBound',
+            'AggregateDerivationFullVerificationChecked',
         plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked',
+        plaintextCoefficientBindingCommitmentHash,
         plaintextEncodingBoundCertificateHash: hash(
             `batch-encoding-bound-certificate-${input.rosterPosition}`,
         ),
@@ -303,6 +315,11 @@ export const createAggregateContributionFixture = (
         plaintextRoot: hash(`bridge-plaintext-${input.rosterPosition}`),
         pollSpecHash: baseFields.pollSpecHash,
         postVotingClosedContextHash,
+        proofFriendlyPlaintextBindingStatus:
+            'ProofFriendlyPlaintextCoefficientBindingRelationChecked',
+        proofFriendlyPlaintextLiftBindingHash,
+        proofFriendlyPlaintextLiftBindingStatus:
+            'ProofFriendlyPlaintextCoefficientLiftBindingChecked',
         proofProfileHash: bridgeProofProfileHash,
         rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
         rosterHash: baseFields.rosterHash,
@@ -315,27 +332,33 @@ export const createAggregateContributionFixture = (
         shareVectorWidth: baseFields.shareVectorWidth,
         sharedWitnessBindingRequired: true,
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
-        sharedWitnessChallengeBitsPerCheck: 64,
-        sharedWitnessCheckCount: 2,
-        sharedWitnessChallengeEntropyBits: 128,
+        sharedWitnessChallengeBitsPerCheck: 46,
+        sharedWitnessCheckCount: 5,
+        sharedWitnessChallengeEntropyBits: 230,
+        sharedWitnessChallengeSamplingModel:
+            'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
         sharedWitnessRejectionAttemptLimit: 64,
         sharedWitnessGrindingDiscountBitsPerCheck: 6,
-        sharedWitnessRejectionRetryLossBits: 12,
+        sharedWitnessRejectionRetryLossBits: 30,
         sharedWitnessFullMatrixUnionBoundBits: 9,
-        sharedWitnessRandomOracleQueryBoundBits: 0,
+        sharedWitnessRandomOracleQueryBoundBits: 32,
         sharedWitnessProofSystemLossBits: 0,
         sharedWitnessChallengeBiasBits: 0,
         sharedWitnessTargetBindingSoundnessBits: 128,
-        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
-        sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
         sharedWitnessEffectiveBindingBelowTarget: false,
         sharedWitnessWeakestRelation:
             'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+        sharedWitnessWeakestRelationModel:
+            'aggregate-proof-ring-effective-binding-floor-v1',
+        sharedWitnessWeakestRelationBitsPerCheck: 46,
         sharedWitnessWeakestRelationModuli: [
             140_737_487_306_753, 140_737_486_716_929,
         ],
-        sharedWitnessWeakestRelationModulusProduct:
-            '19807040250408114080301121537',
+        batchIntegerLiftProofModuli: [140_737_487_306_753, 140_737_486_716_929],
+        batchIntegerLiftProofModulusProduct: '19807040250408114080301121537',
+        batchIntegerLiftProofModulusProductBitsFloor: 93,
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: 32_768,
@@ -357,7 +380,8 @@ export const createAggregateContributionFixture = (
         ...baseFields,
         aggregateDerivationComponentHash,
         aggregateDerivationVerificationScope:
-            'AggregateDerivationFullVerificationPreconditionNotBound',
+            'AggregateDerivationFullVerificationChecked',
+        aggregateBridgeRelationHandoffRoot,
         aggregateShareCommitmentHash,
         bgvEncryptionKeyMaterialKind:
             'passive-transcript-derived-collective-public-key',
@@ -369,6 +393,8 @@ export const createAggregateContributionFixture = (
         bridgeProofTargetContractHash,
         bridgeProofVerificationStatus:
             input.proofStatus ?? 'BridgeProofRelationChecked',
+        bridgeClaimClosureVerified: false,
+        bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing',
         claimBearingBridgeEncryption: false,
         contributorActionContextHash: actionContext.actionContextHash,
         contributorIdentity,

@@ -632,6 +632,9 @@ const bridgeContributor = async (input: {
         cachedFreshCsprngArtifact: true,
         checkpointDir: input.config.checkpointDir,
         compute: () => {
+            console.log(
+                `bridge contributor ${receiver}: generating encryption`,
+            );
             const bridgeEncryption =
                 input.componentContext.kernel.generateAggregateBridgeEncryption(
                     {
@@ -661,6 +664,7 @@ const bridgeContributor = async (input: {
                     `Bridge encryption generation failed: ${canonicalJson(bridgeEncryption)}`,
                 );
             }
+            console.log(`bridge contributor ${receiver}: verifying encryption`);
             const bridgeVerification =
                 input.componentContext.kernel.verifyAggregateBridgeEncryption({
                     aggregateDerivationComponent:
@@ -686,6 +690,9 @@ const bridgeContributor = async (input: {
                     `Bridge verification failed: ${canonicalJson(bridgeVerification)}`,
                 );
             }
+            console.log(
+                `bridge contributor ${receiver}: creating proof record`,
+            );
             const bridgeProofRecord =
                 createPendingBridgeProofRecordFromBridgeEvidence({
                     aggregateDerivationComponent:
@@ -704,6 +711,9 @@ const bridgeContributor = async (input: {
                 });
             const actionContext = input.componentContext.postCloseEvidence
                 .contributorActionContext as ActionContext;
+            console.log(
+                `bridge contributor ${receiver}: creating contribution`,
+            );
             const contribution =
                 createAggregateContributionFromBridgeProofRecord({
                     actionContext,
@@ -921,11 +931,51 @@ const runMain = async (config: RunnerConfig): Promise<void> => {
             )}`,
         );
     }
+    const selectedEncryptedAggregateInputs = bridgeResults.map(
+        (result) => result.encryptedAggregateInput,
+    );
+    const setupPackagePath = path.join(
+        config.checkpointDir,
+        'aggregate-derivation-kernel-last-setup-package.json',
+    );
+    const aggregateReadyRecordPath = path.join(
+        config.checkpointDir,
+        'aggregate-derivation-kernel-last-aggregate-ready-record.json',
+    );
+    const selectedEncryptedAggregateInputsPath = path.join(
+        config.checkpointDir,
+        'aggregate-derivation-kernel-last-selected-encrypted-aggregate-inputs.json',
+    );
+    const aggregateReadyRequestBasePath = path.join(
+        config.checkpointDir,
+        'aggregate-derivation-kernel-last-evaluator-request-base.json',
+    );
+    await writeJsonFileAtomic(setupPackagePath, setupPackage);
+    await writeJsonFileAtomic(aggregateReadyRecordPath, aggregateReadyRecord);
+    await writeJsonFileAtomic(
+        selectedEncryptedAggregateInputsPath,
+        selectedEncryptedAggregateInputs,
+    );
+    await writeJsonFileAtomic(aggregateReadyRequestBasePath, {
+        aggregateReadyRecord,
+        canonicalBallotSetHash: statementBuild.statement.ballotSetHash,
+        encryptedAggregateInputs: selectedEncryptedAggregateInputs,
+        evaluatorSignature: hash('accepted-evaluator-signature'),
+        objectType: 'EncryptedAggregateTopKEvaluationRequestBase',
+        objectVersion: 1,
+        preTargetBoardHead:
+            ballotPackageContext.postCloseEvidence.closeRecordHash,
+        scoreDomainMax: 200,
+        setupPackage,
+        topCount: 1,
+    });
 
     const summary = {
+        aggregateReadyRequestBasePath,
         aggregateReadyRecordHash: String(
             aggregateReadyRecord.aggregateReadyRecordHash,
         ),
+        aggregateReadyRecordPath,
         aggregateReadyVerificationStatus:
             aggregateReadyVerification.statusLabels[0] ??
             'AggregateReadyRecordVerified',
@@ -937,6 +987,8 @@ const runMain = async (config: RunnerConfig): Promise<void> => {
         reusedCachedFreshCsprngArtifacts: bridgeResults.some(
             (result) => result.cachedFreshCsprngArtifact,
         ),
+        selectedEncryptedAggregateInputsPath,
+        setupPackagePath,
         target: config.target,
         workerCount: config.workers,
     } satisfies RunnerSummary;
@@ -948,7 +1000,7 @@ const runMain = async (config: RunnerConfig): Promise<void> => {
     console.log(
         `aggregate derivation kernel summary: ${canonicalJson(summary)}`,
     );
-    console.log(`summary wrote: ${summaryPath}`);
+    console.log(`summary written: ${summaryPath}`);
 };
 
 const runWorkerMain = async (config: WorkerConfig): Promise<void> => {

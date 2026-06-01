@@ -4,11 +4,15 @@ use crate::{
             engine::{Ciphertext, DevelopmentBgvKey, negacyclic_mul, signed_residue},
             prg::DeterministicSampler,
         },
-        modular_arithmetic::{add_mod, sub_mod},
+        modular_arithmetic::{add_mod, add_mod_fast, mul_mod_fast, sub_mod},
+        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
 
 const PLAINTEXT_MODULUS_I64: i64 = 65_537;
 pub(crate) const KEY_SWITCH_ERROR_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-error-v1";
@@ -23,14 +27,49 @@ type LimbMatrix = Vec<Vec<u64>>;
 // gadget is the CRT idempotent (one modulo prime j, zero elsewhere). Switching a
 // ciphertext term that multiplies `src` re-expresses it as a term that
 // multiplies the secret instead, the core of relinearization and rotation.
+#[derive(Clone)]
 pub(crate) struct KeySwitchKey {
-    level: usize,
-    components: Vec<KeySwitchComponent>,
+    pub(crate) level: usize,
+    pub(crate) components: Vec<KeySwitchComponent>,
 }
 
-struct KeySwitchComponent {
-    component_b: Vec<Vec<u64>>,
-    component_a: Vec<Vec<u64>>,
+#[derive(Clone)]
+pub(crate) struct KeySwitchComponent {
+    pub(crate) component_b: Vec<Vec<u64>>,
+    component_b_ntt: Vec<Vec<u64>>,
+    component_a_ntt: Vec<Vec<u64>>,
+}
+
+impl KeySwitchComponent {
+    fn from_coefficients(
+        component_b: Vec<Vec<u64>>,
+        component_a: Vec<Vec<u64>>,
+        primes: &[u64],
+    ) -> CanonicalResult<Self> {
+        let component_b_ntt = ntt_limbs(&component_b, primes)?;
+        let component_a_ntt = ntt_limbs(&component_a, primes)?;
+
+        Ok(Self {
+            component_b,
+            component_b_ntt,
+            component_a_ntt,
+        })
+    }
+}
+
+fn ntt_limbs(limbs: &[Vec<u64>], primes: &[u64]) -> CanonicalResult<Vec<Vec<u64>>> {
+    if limbs.len() != primes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "key-switch component limb count does not match its modulus level",
+        ));
+    }
+
+    limbs
+        .iter()
+        .zip(primes.iter())
+        .map(|(limb, modulus)| forward_negacyclic_ntt(limb, *modulus))
+        .collect()
 }
 
 fn secret_residues_for_level(secret: &[i64], level: usize) -> Vec<Vec<u64>> {
@@ -101,10 +140,68 @@ fn generate_key_switch_key(
             component_b.push(limb);
             component_a.push(public_sample);
         }
-        components.push(KeySwitchComponent {
+        components.push(KeySwitchComponent::from_coefficients(
             component_b,
             component_a,
-        });
+            primes,
+        )?);
+    }
+
+    Ok(KeySwitchKey { level, components })
+}
+
+pub(crate) fn key_switch_key_from_public_component_b(
+    level: usize,
+    domain: &str,
+    seed_hex: &str,
+    component_b_by_digit: Vec<Vec<Vec<u64>>>,
+) -> CanonicalResult<KeySwitchKey> {
+    let primes = DATA_PRIMES.get(..=level).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public key-switch material level is outside the selected data basis",
+        )
+    })?;
+    if component_b_by_digit.len() != primes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public key-switch material digit count does not match its level",
+        ));
+    }
+    let mut components = Vec::with_capacity(primes.len());
+    for (digit_index, component_b) in component_b_by_digit.into_iter().enumerate() {
+        if component_b.len() != primes.len()
+            || component_b
+                .iter()
+                .any(|limb| limb.len() != POLYNOMIAL_DEGREE)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public key-switch material component shape does not match its level",
+            ));
+        }
+        let digit_bytes = (digit_index as u64).to_le_bytes();
+        let mut component_a = Vec::with_capacity(primes.len());
+        for modulus in primes {
+            let modulus_bytes = modulus.to_le_bytes();
+            component_a.push(
+                DeterministicSampler::new(
+                    KEY_SWITCH_SAMPLE_DOMAIN,
+                    &[
+                        domain.as_bytes(),
+                        seed_hex.as_bytes(),
+                        &digit_bytes,
+                        &modulus_bytes,
+                    ],
+                )
+                .uniform_residues(*modulus, POLYNOMIAL_DEGREE),
+            );
+        }
+        components.push(KeySwitchComponent::from_coefficients(
+            component_b,
+            component_a,
+            primes,
+        )?);
     }
 
     Ok(KeySwitchKey { level, components })
@@ -126,35 +223,70 @@ fn key_switch_component(
     }
     let mut switched_zero = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
     let mut switched_one = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
-    for (digit_index, component) in key_switch_key.components.iter().enumerate() {
-        // The RNS digit is the residue vector at prime `digit_index`, reused as a
-        // small integer polynomial and reduced into every active prime.
-        let digit = &term[digit_index];
-        for (limb_index, modulus) in primes.iter().enumerate() {
-            let digit_in_limb = digit
-                .iter()
-                .map(|value| value % modulus)
-                .collect::<Vec<_>>();
-            let product_b =
-                negacyclic_mul(&digit_in_limb, &component.component_b[limb_index], *modulus)?;
-            let product_a =
-                negacyclic_mul(&digit_in_limb, &component.component_a[limb_index], *modulus)?;
-            for coefficient_index in 0..POLYNOMIAL_DEGREE {
-                switched_zero[limb_index][coefficient_index] = add_mod(
-                    switched_zero[limb_index][coefficient_index],
-                    product_b[coefficient_index],
-                    *modulus,
-                )?;
-                switched_one[limb_index][coefficient_index] = add_mod(
-                    switched_one[limb_index][coefficient_index],
-                    product_a[coefficient_index],
-                    *modulus,
-                )?;
-            }
-        }
+    #[cfg(not(target_arch = "wasm32"))]
+    let partials = key_switch_key
+        .components
+        .par_iter()
+        .enumerate()
+        .map(|(digit_index, component)| {
+            key_switch_component_digit(term, primes, digit_index, component)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
+    let partials = key_switch_key
+        .components
+        .iter()
+        .enumerate()
+        .map(|(digit_index, component)| {
+            key_switch_component_digit(term, primes, digit_index, component)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    for (partial_zero, partial_one) in partials {
+        add_component_in_place(&mut switched_zero, &partial_zero, key_switch_key.level)?;
+        add_component_in_place(&mut switched_one, &partial_one, key_switch_key.level)?;
     }
 
     Ok((switched_zero, switched_one))
+}
+
+fn key_switch_component_digit(
+    term: &[Vec<u64>],
+    primes: &[u64],
+    digit_index: usize,
+    component: &KeySwitchComponent,
+) -> CanonicalResult<(LimbMatrix, LimbMatrix)> {
+    let digit = &term[digit_index];
+    let mut switched_zero = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
+    let mut switched_one = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
+    for (limb_index, modulus) in primes.iter().enumerate() {
+        let digit_in_limb = digit
+            .iter()
+            .map(|value| value % modulus)
+            .collect::<Vec<_>>();
+        let digit_ntt = forward_negacyclic_ntt(&digit_in_limb, *modulus)?;
+        let product_b =
+            multiply_ntt_by_ntt(&digit_ntt, &component.component_b_ntt[limb_index], *modulus)?;
+        let product_a =
+            multiply_ntt_by_ntt(&digit_ntt, &component.component_a_ntt[limb_index], *modulus)?;
+        switched_zero[limb_index] = product_b;
+        switched_one[limb_index] = product_a;
+    }
+
+    Ok((switched_zero, switched_one))
+}
+
+fn multiply_ntt_by_ntt(
+    left_ntt: &[u64],
+    right_ntt: &[u64],
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    let product_ntt = left_ntt
+        .iter()
+        .zip(right_ntt.iter())
+        .map(|(left_value, right_value)| mul_mod_fast(*left_value, *right_value, modulus))
+        .collect::<Vec<_>>();
+
+    inverse_negacyclic_ntt(&product_ntt, modulus)
 }
 
 fn add_component_in_place(
@@ -164,11 +296,11 @@ fn add_component_in_place(
 ) -> CanonicalResult<()> {
     for (limb_index, modulus) in DATA_PRIMES[..=level].iter().enumerate() {
         for coefficient_index in 0..POLYNOMIAL_DEGREE {
-            target[limb_index][coefficient_index] = add_mod(
+            target[limb_index][coefficient_index] = add_mod_fast(
                 target[limb_index][coefficient_index],
                 addend[limb_index][coefficient_index],
                 *modulus,
-            )?;
+            );
         }
     }
 

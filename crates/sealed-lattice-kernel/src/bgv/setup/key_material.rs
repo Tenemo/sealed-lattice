@@ -4,8 +4,8 @@ use crate::bgv::evaluator::{
     prg::DeterministicSampler,
     records::MAXIMUM_OPTION_COUNT,
     top_k::{
-        DIRECT_COMPARISON_OUTPUT_LEVEL, aggregate_score_packing_galois_elements, galois_power,
-        inverse_galois_element, packed_rank_galois_elements,
+        DIRECT_COMPARISON_OUTPUT_LEVEL, aggregate_score_packing_basis_galois_elements,
+        packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
     },
 };
 
@@ -38,10 +38,10 @@ struct RotationScheduleEntry {
 
 struct EvaluationKeyMaterialInput<'a> {
     setup_seed_hash: &'a str,
+    sampled_relation_checks: Value,
     ceremony_id: &'a str,
     manifest_hash: &'a str,
     roster_hash: &'a str,
-    participant_identities: &'a [String],
     collective_public_key: &'a Value,
     key_switch_decomposition_hash: &'a str,
     rot_set: &'a Value,
@@ -74,6 +74,7 @@ pub(super) fn collective_public_key(
         .collect::<Vec<_>>();
     let coefficient_material = collective_public_key_coefficient_material(
         &input.setup_seed_hash,
+        &input.private_setup_seed_hash,
         public_common_random_polynomial_root,
         public_key_share_roots,
         participant_descriptors,
@@ -95,7 +96,7 @@ pub(super) fn collective_public_key(
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "aggregationRule": "coefficient-wise-public-key-share-sum-with-shared-crp",
         "publicKeyComponentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
-        "publicKeyCoefficientMaterialBinding": "passive-transcript-derived-from-setup-seed-hash-and-public-key-share-roots",
+        "publicKeyCoefficientMaterialBinding": "public-coefficients-bound-in-setup-package-with-private-share-derivation-unexported",
         "participantCount": public_key_share_roots.len(),
         "centralizedSecretReconstruction": false,
         "rawSecretShareExported": false,
@@ -132,69 +133,55 @@ pub(super) fn collective_public_key(
 pub(super) fn collective_public_key_coefficients_by_modulus_from_setup_package(
     setup_package: &Value,
 ) -> CanonicalResult<Vec<CollectivePublicKeyCoefficients>> {
-    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
-    let participants = array_at_path(setup_package, &["participants"])?;
-    let participant_identities = participants
-        .iter()
-        .map(|participant| {
-            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let (collective_secret_coefficients, collective_error_coefficients) =
-        collective_signed_secret_and_error_coefficients(setup_seed_hash, &participant_identities);
-
-    DATA_PRIMES
-        .iter()
-        .copied()
-        .map(|modulus| {
-            collective_public_key_coefficients_from_signed(
-                setup_seed_hash,
-                &collective_secret_coefficients,
-                &collective_error_coefficients,
-                modulus,
-            )
-        })
-        .collect()
-}
-
-pub(super) fn expected_collective_public_key_coefficient_material(
-    setup_package: &Value,
-    participant_bindings: &[VerifiedParticipantSetupBinding],
-) -> CanonicalResult<Value> {
-    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
-    let collective_public_key = value_at_path(setup_package, &["collectivePublicKey"])?;
-    let collective_public_key_record = value_at_path(collective_public_key, &["record"])?;
-    let public_common_random_polynomial_root = string_at_path(
-        collective_public_key_record,
-        &["publicCommonRandomPolynomialRoot"],
+    let coefficient_tables = array_at_path(
+        setup_package,
+        &[
+            "collectivePublicKey",
+            "coefficientMaterial",
+            "coefficientTables",
+        ],
     )?;
-    let public_key_share_roots = participant_bindings
+    if coefficient_tables.len() != DATA_PRIMES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public key coefficient table count does not match the selected data basis",
+        ));
+    }
+
+    coefficient_tables
         .iter()
-        .map(|participant| participant.public_key_share_root.clone())
-        .collect::<Vec<_>>();
-    let participant_descriptors = participant_bindings
-        .iter()
-        .map(|participant| {
-            json!({
-                "trusteeIdentity": participant.trustee_identity,
-                "rosterPosition": participant.roster_position,
-                "recoveryEpoch": participant.recovery_epoch,
-                "deviceEpoch": participant.device_epoch,
+        .enumerate()
+        .map(|(modulus_index, table)| {
+            let modulus = unsigned_at_path(table, &["modulus"])?;
+            if modulus != DATA_PRIMES[modulus_index] {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "collective public key coefficient table modulus does not match the selected data basis",
+                ));
+            }
+            let component_zero_coefficients =
+                read_public_key_coefficient_vector(table, "componentZeroCoefficients")?;
+            let component_one_coefficients =
+                read_public_key_coefficient_vector(table, "componentOneCoefficients")?;
+            compare_hash_at_path(
+                table,
+                &["componentZeroCoefficientHash512"],
+                &coefficient_vector_hash512(&component_zero_coefficients),
+                "collective public key component-zero coefficient hash",
+            )?;
+            compare_hash_at_path(
+                table,
+                &["componentOneCoefficientHash512"],
+                &coefficient_vector_hash512(&component_one_coefficients),
+                "collective public key component-one coefficient hash",
+            )?;
+
+            Ok(CollectivePublicKeyCoefficients {
+                component_zero_coefficients,
+                component_one_coefficients,
             })
         })
-        .collect::<Vec<_>>();
-    let participant_identities = participant_bindings
-        .iter()
-        .map(|participant| participant.trustee_identity.clone())
-        .collect::<Vec<_>>();
-
-    collective_public_key_coefficient_material(
-        setup_seed_hash,
-        public_common_random_polynomial_root,
-        &public_key_share_roots,
-        participant_descriptors,
-        &participant_identities,
-    )
+        .collect()
 }
 
 pub(super) fn collective_public_key_coefficient_root(
@@ -205,21 +192,46 @@ pub(super) fn collective_public_key_coefficient_root(
 
 fn collective_public_key_coefficient_material(
     setup_seed_hash: &str,
+    private_setup_seed_hash: &str,
     public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
     participant_descriptors: Vec<Value>,
     participant_identities: &[String],
 ) -> CanonicalResult<Value> {
-    let modulus_summaries = DATA_PRIMES
+    let (collective_secret_coefficients, collective_error_coefficients) =
+        collective_signed_secret_and_error_coefficients(
+            private_setup_seed_hash,
+            participant_identities,
+        );
+    let coefficient_tables = DATA_PRIMES
         .iter()
         .copied()
         .map(|modulus| {
+            let coefficients = collective_public_key_coefficients_from_signed(
+                setup_seed_hash,
+                &collective_secret_coefficients,
+                &collective_error_coefficients,
+                modulus,
+            )?;
+            Ok(json!({
+                "modulus": modulus,
+                "componentZeroCoefficientHash512": coefficient_vector_hash512(&coefficients.component_zero_coefficients),
+                "componentOneCoefficientHash512": coefficient_vector_hash512(&coefficients.component_one_coefficients),
+                "componentZeroCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
+                "componentOneCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_one_coefficients),
+                "coefficientByteLength": POLYNOMIAL_DEGREE * 8,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let modulus_summaries = coefficient_tables
+        .iter()
+        .map(|table| {
             collective_public_key_coefficient_derivation_summary(
                 setup_seed_hash,
                 public_common_random_polynomial_root,
                 public_key_share_roots,
                 participant_identities,
-                modulus,
+                table,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -232,14 +244,15 @@ fn collective_public_key_coefficient_material(
         "level": DATA_PRIMES.len() - 1,
         "coefficientCount": POLYNOMIAL_DEGREE,
         "componentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
-        "componentDerivation": "passive-transcript-derived-from-setup-seed-hash",
-        "fullCoefficientVectorHashesComputed": false,
-        "fullCoefficientExpansionOwner": "encrypted aggregate bridge relation arithmetic",
+        "componentDerivation": "public-coefficients-generated-from-private-setup-witness-and-bound-in-setup-package",
+        "fullCoefficientVectorHashesComputed": true,
+        "fullCoefficientExpansionOwner": "passive setup package public key material",
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
         "participantCount": participant_identities.len(),
         "participants": participant_descriptors,
         "modulusSummaries": modulus_summaries,
+        "coefficientTables": coefficient_tables,
         "algebraicPublicKeyProofStatus": "BgvAlgebraicPublicKeyProofMissing",
         "rawSecretShareExported": false,
     }))
@@ -250,8 +263,9 @@ fn collective_public_key_coefficient_derivation_summary(
     public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
     participant_identities: &[String],
-    modulus: u64,
+    coefficient_table: &Value,
 ) -> CanonicalResult<Value> {
+    let modulus = unsigned_at_path(coefficient_table, &["modulus"])?;
     let modulus_bytes = modulus.to_le_bytes();
     let participant_count_bytes = (participant_identities.len() as u64).to_le_bytes();
     let public_key_share_root_count_bytes = (public_key_share_roots.len() as u64).to_le_bytes();
@@ -291,34 +305,97 @@ fn collective_public_key_coefficient_derivation_summary(
         "componentOneCoefficientDerivationHash512": component_one_derivation_hash,
         "sampledComponentZeroDerivationResidues": sampled_component_zero_derivation_residues,
         "sampledComponentOneCoefficients": sampled_component_one_coefficients,
-        "fullCoefficientVectorHashStatus": "deferred-to-bridge-arithmetic-expansion",
+        "componentZeroCoefficientHash512": string_at_path(
+            coefficient_table,
+            &["componentZeroCoefficientHash512"],
+        )?,
+        "componentOneCoefficientHash512": string_at_path(
+            coefficient_table,
+            &["componentOneCoefficientHash512"],
+        )?,
+        "fullCoefficientVectorHashStatus": "bound-in-setup-package",
     }))
 }
 
+fn read_public_key_coefficient_vector(
+    table: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<u64>> {
+    let hex_field_name = match field_name {
+        "componentZeroCoefficients" => "componentZeroCoefficientsLeHex",
+        "componentOneCoefficients" => "componentOneCoefficientsLeHex",
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "unknown collective public key coefficient vector field",
+            ));
+        }
+    };
+    let bytes = crate::transcript_core::decode_hex(string_at_path(table, &[hex_field_name])?)?;
+    if bytes.len() != POLYNOMIAL_DEGREE * 8 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public key coefficient vector width does not match the selected BGV profile",
+        ));
+    }
+    let coefficients = bytes
+        .chunks_exact(8)
+        .map(|chunk| {
+            let mut coefficient_bytes = [0_u8; 8];
+            coefficient_bytes.copy_from_slice(chunk);
+            u64::from_le_bytes(coefficient_bytes)
+        })
+        .collect::<Vec<_>>();
+
+    Ok(coefficients)
+}
+
+fn coefficient_vector_bytes(coefficients: &[u64]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(coefficients.len() * 8);
+    for coefficient in coefficients {
+        bytes.extend(coefficient.to_le_bytes());
+    }
+
+    bytes
+}
+
+fn coefficient_vector_le_hex(coefficients: &[u64]) -> String {
+    crate::transcript_core::encode_hex(&coefficient_vector_bytes(coefficients))
+}
+
+fn coefficient_vector_hash512(coefficients: &[u64]) -> String {
+    let bytes = coefficient_vector_bytes(coefficients);
+
+    hash512_hex(
+        "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1",
+        &[&bytes],
+    )
+}
+
 pub(super) fn collective_signed_secret_and_error_coefficients(
-    setup_seed_hash: &str,
+    private_setup_seed_hash: &str,
     participant_identities: &[String],
 ) -> (Vec<i64>, Vec<i64>) {
     let mut collective_secret_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
     let mut collective_error_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
     for participant_identity in participant_identities {
-        let local_secret_coefficients = dense_small_coefficients(
-            setup_seed_hash,
-            participant_identity,
-            "local-secret-share",
-            -1,
-            1,
-        );
-        let local_error_coefficients = dense_centered_binomial_coefficients(
-            setup_seed_hash,
-            participant_identity,
-            "local-error",
-        );
         for coefficient_index in 0..POLYNOMIAL_DEGREE {
             collective_secret_coefficients[coefficient_index] +=
-                local_secret_coefficients[coefficient_index];
+                bounded_collective_secret_share_coefficient(
+                    private_setup_seed_hash,
+                    participant_identities,
+                    participant_identity,
+                    coefficient_index,
+                )
+                .expect("participant identity is drawn from the owner schedule");
             collective_error_coefficients[coefficient_index] +=
-                local_error_coefficients[coefficient_index];
+                bounded_collective_error_share_coefficient(
+                    private_setup_seed_hash,
+                    participant_identities,
+                    participant_identity,
+                    coefficient_index,
+                )
+                .expect("participant identity is drawn from the owner schedule");
         }
     }
 
@@ -441,14 +518,8 @@ pub(super) fn expected_evaluation_key_material_binding(
     setup_package: &Value,
 ) -> CanonicalResult<Value> {
     let setup_inputs = value_at_path(setup_package, &["setupInputs"])?;
-    let participants = array_at_path(setup_package, &["participants"])?;
-    let participant_identities = participants
-        .iter()
-        .map(|participant| {
-            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
     let evaluation_keys = value_at_path(setup_package, &["evaluationKeys"])?;
+    let actual_material = value_at_path(evaluation_keys, &["evaluationKeyMaterialCommitment"])?;
     let collective_public_key = value_at_path(setup_package, &["collectivePublicKey"])?;
     let key_switch_decomposition_hash =
         string_at_path(evaluation_keys, &["keySwitchDecompositionHash"])?;
@@ -457,10 +528,14 @@ pub(super) fn expected_evaluation_key_material_binding(
 
     evaluation_key_material_binding(EvaluationKeyMaterialInput {
         setup_seed_hash: string_at_path(setup_inputs, &["setupSeedHash"])?,
+        sampled_relation_checks: value_at_path(
+            actual_material,
+            &["record", "sampledRelationChecks"],
+        )?
+        .clone(),
         ceremony_id: string_at_path(setup_inputs, &["ceremonyId"])?,
         manifest_hash: string_at_path(setup_inputs, &["manifestHash"])?,
         roster_hash: string_at_path(setup_inputs, &["rosterHash"])?,
-        participant_identities: &participant_identities,
         collective_public_key,
         key_switch_decomposition_hash,
         rot_set,
@@ -559,12 +634,7 @@ fn evaluation_key_material_binding(
     )?;
     let rotation_stream_digest =
         evaluation_key_stream_digest("rotation-material-stream", &rotation_stream_record)?;
-    let sampled_relation_checks = sampled_evaluation_key_relation_checks(
-        input.setup_seed_hash,
-        input.participant_identities,
-        &relinearization_levels,
-        &rotation_schedule,
-    )?;
+    let sampled_relation_checks = input.sampled_relation_checks;
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
         "objectVersion": 1,
@@ -711,21 +781,21 @@ fn selected_relinearization_levels() -> CanonicalResult<Vec<usize>> {
 
 fn selected_rotation_schedule_entries() -> CanonicalResult<Vec<RotationScheduleEntry>> {
     let mut entries_by_rotation_and_level = BTreeMap::new();
-    for rotation in aggregate_score_packing_galois_elements(MAXIMUM_OPTION_COUNT)? {
-        entries_by_rotation_and_level
-            .insert((rotation, DATA_PRIMES.len() - 1), "aggregate-score-packing");
-    }
-    for shift in 1..MAXIMUM_OPTION_COUNT {
-        let forward = galois_power(shift);
-        entries_by_rotation_and_level
-            .entry((forward, DATA_PRIMES.len() - 1))
-            .or_insert("generator-ordered-packed-rank-forward");
+    for rotation in aggregate_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level.insert(
-            (
-                inverse_galois_element(forward)?,
-                DIRECT_COMPARISON_OUTPUT_LEVEL,
-            ),
-            "generator-ordered-packed-rank-return",
+            (rotation, DATA_PRIMES.len() - 1),
+            "aggregate-score-packing-generator-basis",
+        );
+    }
+    for rotation in packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
+        entries_by_rotation_and_level
+            .entry((rotation, DATA_PRIMES.len() - 1))
+            .or_insert("generator-ordered-packed-rank-forward-basis");
+    }
+    for rotation in packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
+        entries_by_rotation_and_level.insert(
+            (rotation, DIRECT_COMPARISON_OUTPUT_LEVEL),
+            "generator-ordered-packed-rank-return-basis",
         );
     }
 
@@ -778,13 +848,16 @@ fn evaluation_key_stream_digest(
 }
 
 fn sampled_evaluation_key_relation_checks(
+    private_setup_seed_hash: &str,
     setup_seed_hash: &str,
     participant_identities: &[String],
     relinearization_levels: &[usize],
     rotation_schedule: &[RotationScheduleEntry],
 ) -> CanonicalResult<Vec<Value>> {
-    let (collective_secret_coefficients, _) =
-        collective_signed_secret_and_error_coefficients(setup_seed_hash, participant_identities);
+    let (collective_secret_coefficients, _) = collective_signed_secret_and_error_coefficients(
+        private_setup_seed_hash,
+        participant_identities,
+    );
     let mut checks = Vec::new();
     let mut sampled_relinearization_levels = BTreeSet::new();
     if let Some(first_level) = relinearization_levels.first() {
@@ -814,9 +887,9 @@ fn sampled_evaluation_key_relation_checks(
         sampled_rotation_indexes.insert(rotation_schedule.len() - 1);
     }
     for required_purpose in [
-        "aggregate-score-packing",
-        "generator-ordered-packed-rank-forward",
-        "generator-ordered-packed-rank-return",
+        "aggregate-score-packing-generator-basis",
+        "generator-ordered-packed-rank-forward-basis",
+        "generator-ordered-packed-rank-return-basis",
     ] {
         if let Some((rotation_index, _)) = rotation_schedule
             .iter()
@@ -1037,12 +1110,21 @@ pub(super) fn evaluation_keys(
         .iter()
         .map(|participant| participant.trustee_identity.clone())
         .collect::<Vec<_>>();
+    let relinearization_levels = selected_relinearization_levels()?;
+    let rotation_schedule = selected_rotation_schedule_entries()?;
+    let sampled_relation_checks = sampled_evaluation_key_relation_checks(
+        &input.private_setup_seed_hash,
+        &input.setup_seed_hash,
+        &participant_identities,
+        &relinearization_levels,
+        &rotation_schedule,
+    )?;
     let material_binding = evaluation_key_material_binding(EvaluationKeyMaterialInput {
         setup_seed_hash: &input.setup_seed_hash,
+        sampled_relation_checks: Value::Array(sampled_relation_checks),
         ceremony_id: &input.ceremony_id,
         manifest_hash: &input.manifest_hash,
         roster_hash: &input.roster_hash,
-        participant_identities: &participant_identities,
         collective_public_key,
         key_switch_decomposition_hash,
         rot_set: &rot_set,
@@ -1063,7 +1145,7 @@ pub(super) fn evaluation_keys(
         "relinearizationKeyRoot": material_binding.relinearization_key_root,
         "rotationKeyRoots": material_binding.rotation_key_roots,
         "keySwitchKeyRoot": material_binding.key_switch_key_root,
-        "generatedFor": "aggregate-score-packing-direct-encrypted-score-comparison-generator-ordered-rank-packing",
+        "generatedFor": "aggregate-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalRotSetClosure": "encrypted-aggregate-evaluator-closure",
         "regenerateIfRotSetChanges": true,
         "maliciousEvaluationKeyProofIncluded": false,
@@ -1101,17 +1183,24 @@ pub(super) fn evaluation_keys(
 
 fn selected_rotation_set() -> CanonicalResult<Value> {
     let aggregate_score_packing_rotations =
-        aggregate_score_packing_galois_elements(MAXIMUM_OPTION_COUNT)?
+        aggregate_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
             .into_iter()
             .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
             .collect::<Vec<_>>();
-    let packed_rank_rotations = packed_rank_galois_elements(MAXIMUM_OPTION_COUNT)?
-        .into_iter()
-        .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
-        .collect::<Vec<_>>();
+    let packed_rank_forward_rotations =
+        packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
+            .into_iter()
+            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+            .collect::<Vec<_>>();
+    let packed_rank_return_rotations =
+        packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
+            .into_iter()
+            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+            .collect::<Vec<_>>();
     let rotations = aggregate_score_packing_rotations
         .iter()
-        .chain(packed_rank_rotations.iter())
+        .chain(packed_rank_forward_rotations.iter())
+        .chain(packed_rank_return_rotations.iter())
         .copied()
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -1119,7 +1208,7 @@ fn selected_rotation_set() -> CanonicalResult<Value> {
     Ok(json!({
         "rotSetId": SELECTED_ROT_SET_ID,
         "sourceRdr": "internal-design-note-top-k-circuit-and-sparse-target",
-        "generatedFor": "aggregate-score-packing-direct-encrypted-score-comparison-generator-ordered-rank-packing",
+        "generatedFor": "aggregate-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalizedBy": "encrypted-aggregate-evaluator-closure",
         "regeneratePassiveSetupKeysIfChanged": true,
         "rotations": rotations.clone(),
@@ -1132,12 +1221,16 @@ fn selected_rotation_set() -> CanonicalResult<Value> {
         ],
         "requiredRotationGroups": [
             {
-                "purpose": "aggregate-score-packing",
+                "purpose": "aggregate-score-packing-generator-basis",
                 "rotations": aggregate_score_packing_rotations
             },
             {
-                "purpose": "generator-ordered-packed-rank",
-                "rotations": packed_rank_rotations
+                "purpose": "generator-ordered-packed-rank-forward-basis",
+                "rotations": packed_rank_forward_rotations
+            },
+            {
+                "purpose": "generator-ordered-packed-rank-return-basis",
+                "rotations": packed_rank_return_rotations
             }
         ],
     }))

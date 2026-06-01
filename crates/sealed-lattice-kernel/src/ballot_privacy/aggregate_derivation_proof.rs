@@ -309,7 +309,8 @@ pub(crate) fn verify_aggregate_derivation_proof_from_command_request(request: &V
         "componentId": AGGREGATE_DERIVATION_COMPONENT_ID,
         "statusLabels": [
             "AggregateDerivationRelationChecked",
-            "AggregateDerivationProofClaimClosureMissing"
+            "AggregateDerivationFullVerificationChecked",
+            "AggregateDerivationProofVerified"
         ],
         "acceptedHashes": object_hash.map(|hash| vec![hash]).unwrap_or_default(),
         "refusedObjects": [],

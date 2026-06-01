@@ -26,7 +26,7 @@ fn bridge_relation_gap_status_value() -> Value {
         "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_PENDING_STATUS,
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_MISSING_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS,
-        "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bridgeClaimClosureStatus": BRIDGE_CLAIM_MISSING_STATUS,
         "sampledOnlyBridgeVerificationAccepted": false,
         "hwangPiopStatus": HWANG_PIOP_DEFERRED_STATUS,
     })
@@ -60,7 +60,7 @@ fn minimal_verify_request(bridge_encryption: Value) -> Value {
         );
         object.insert(
             "claimBearingBridgeEncryption".to_string(),
-            Value::Bool(CLAIM_BEARING_BRIDGE_ENCRYPTION),
+            Value::Bool(false),
         );
     }
     json!({
@@ -103,17 +103,36 @@ fn target_contract_relation_requirements() -> Value {
         "aggregateReducedCoordinateCount": 220,
         "aggregateQuotientCoordinateCount": 220,
         "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        "bridgeClaimClosureStatus": BRIDGE_CLAIM_MISSING_STATUS,
+        "claimBearingBridgeEncryption": false,
     })
+}
+
+fn missing_bridge_claim_status() -> BridgeClaimStatus {
+    bridge_claim_status(
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC,
+        BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC,
+    )
+}
+
+fn checked_aggregate_derivation_bridge_claim_status() -> BridgeClaimStatus {
+    bridge_claim_status(
+        AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS,
+        BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG,
+        BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG,
+    )
 }
 
 fn minimal_checked_relation_proof_value() -> Value {
     json!({
         "objectType": "SealedLatticeAggregateBridgeRelationProof",
         "bridgeSharedWitnessProof": {},
+        "singleContributionBridgeRelationChecked": true,
         "scopedBridgeRelationClosure": false,
-        "finalBridgeTheoremClosure": false,
         "bridgeClaimClosureVerified": false,
-        "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bridgeClaimVerificationStatus": BRIDGE_CLAIM_MISSING_STATUS,
+        "claimBearingBridgeEncryption": false,
         "privateMaterialDisclosure": private_material_disclosure(),
     })
 }
@@ -137,6 +156,29 @@ fn bridge_proof_bytes_hash(proof_bytes_hex: &str) -> String {
         }),
     )
     .expect("proof bytes hash should derive")
+}
+
+#[test]
+fn checked_fresh_bridge_inputs_produce_verified_claim_status() {
+    let claim_status = checked_aggregate_derivation_bridge_claim_status();
+
+    assert!(claim_status.claim_bearing_bridge_encryption);
+    assert!(claim_status.scoped_bridge_relation_closure);
+    assert!(claim_status.bridge_claim_closure_verified);
+    assert_eq!(
+        claim_status.bridge_claim_verification_status,
+        BRIDGE_CLAIM_VERIFIED_STATUS
+    );
+
+    let mut proof_value = minimal_checked_relation_proof_value();
+    proof_value["scopedBridgeRelationClosure"] = Value::Bool(true);
+    proof_value["bridgeClaimClosureVerified"] = Value::Bool(true);
+    proof_value["bridgeClaimVerificationStatus"] =
+        Value::String(BRIDGE_CLAIM_VERIFIED_STATUS.to_string());
+    proof_value["claimBearingBridgeEncryption"] = Value::Bool(true);
+
+    validate_bridge_proof_public_shell(&proof_value)
+        .expect("coherent claim-bearing bridge proof shell should validate");
 }
 
 fn first_refusal_message(value: &Value) -> &str {
@@ -215,6 +257,7 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             width,
             width,
             AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+            missing_bridge_claim_status(),
         )
         .expect("target contract");
         let shared_witness_layout = target_contract["sharedWitnessLayout"]
@@ -238,12 +281,19 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(
             shared_witness_layout["sharedResponseScalarCount"],
-            json!(3 * width + 64 + 5 * 32_768)
+            json!(
+                3 * width
+                    + 64
+                    + 5 * 32_768
+                    + plaintext_binding::plaintext_binding_opening_scalar_count()
+                        .expect("plaintext binding opening count should fit")
+                        as u64
+            )
         );
-        assert_eq!(target_contract["sharedWitnessCheckCount"], json!(2));
+        assert_eq!(target_contract["sharedWitnessCheckCount"], json!(5));
         assert_eq!(
             target_contract["sharedWitnessChallengeEntropyBits"],
-            json!(128)
+            json!(230)
         );
         assert_eq!(
             target_contract["sharedWitnessWeakestRelation"],
@@ -254,7 +304,7 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI)
         );
         assert_eq!(
-            target_contract["sharedWitnessWeakestRelationModulusProduct"],
+            target_contract["batchIntegerLiftProofModulusProduct"],
             json!(bridge_batch_integer_lift_proof_modulus_product_decimal())
         );
         assert_eq!(
@@ -267,7 +317,7 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(
             target_contract["sharedWitnessEffectiveBindingSoundnessBitsFloor"],
-            json!(165)
+            json!(159)
         );
         assert_eq!(
             target_contract["sharedWitnessRejectionAttemptLimit"],
@@ -279,7 +329,7 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(
             target_contract["sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor"],
-            json!(186)
+            json!(230)
         );
         assert_eq!(
             target_contract["sharedWitnessFullMatrixUnionBoundBits"],
@@ -324,12 +374,13 @@ fn bridge_proof_target_contract_soundness_uses_weakest_relation_modulus() {
         220,
         220,
         AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        missing_bridge_claim_status(),
     )
     .expect("target contract");
     let relation_modulus_product_bits_floor =
         127_u64 - BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT.leading_zeros() as u64;
     let unadjusted_weakest_relation_soundness =
-        relation_modulus_product_bits_floor * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+        BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
     let retry_loss = SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK
         * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
     let effective_soundness = unadjusted_weakest_relation_soundness
@@ -340,6 +391,7 @@ fn bridge_proof_target_contract_soundness_uses_weakest_relation_modulus() {
         - BRIDGE_CHALLENGE_BIAS_BITS;
 
     assert_eq!(relation_modulus_product_bits_floor, 93);
+    assert_eq!(BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK, 46);
     assert_eq!(
         target_contract["plaintextEncodingProofModulusProductBitsFloor"],
         json!(relation_modulus_product_bits_floor)
@@ -379,6 +431,7 @@ fn bridge_proof_target_contract_binds_aggregate_derivation_scope() {
         220,
         220,
         AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS,
+        checked_aggregate_derivation_bridge_claim_status(),
     )
     .expect("target contract with checked aggregate derivation scope");
     let target_contract_hash =
@@ -387,6 +440,8 @@ fn bridge_proof_target_contract_binds_aggregate_derivation_scope() {
         "aggregateReducedCoordinateCount": 220,
         "aggregateQuotientCoordinateCount": 220,
         "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS,
+        "bridgeClaimClosureStatus": BRIDGE_CLAIM_VERIFIED_STATUS,
+        "claimBearingBridgeEncryption": true,
     });
     let bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
@@ -400,6 +455,8 @@ fn bridge_proof_target_contract_binds_aggregate_derivation_scope() {
         "aggregateReducedCoordinateCount": 220,
         "aggregateQuotientCoordinateCount": 220,
         "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        "bridgeClaimClosureStatus": BRIDGE_CLAIM_VERIFIED_STATUS,
+        "claimBearingBridgeEncryption": true,
     });
     let error =
         validate_bridge_proof_target_contract(&bridge_statement, &mismatched_relation_requirements)
@@ -538,7 +595,7 @@ fn bridge_randomness_source_evidence_must_match_sources() {
 
 #[test]
 fn bridge_shared_witness_response_bound_rejects_out_of_range_response() {
-    let response_bound = (BigInt::one() << 240_u32) - (BigInt::one() << 112_u32);
+    let response_bound = (BigInt::one() << 240_u32) - (BigInt::one() << 128_u32);
     let in_range = &response_bound - BigInt::one();
     shared_witness::validate_response_vector_bounds(
         "test",
@@ -670,6 +727,7 @@ fn bridge_proof_target_contract_rejects_dimension_mutation() {
         220,
         220,
         AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        missing_bridge_claim_status(),
     )
     .expect("target contract");
     let target_contract_hash =
@@ -696,6 +754,7 @@ fn bridge_proof_target_contract_rejects_hash_mutation() {
         220,
         220,
         AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        missing_bridge_claim_status(),
     )
     .expect("target contract");
     let bridge_statement = json!({
@@ -719,6 +778,7 @@ fn bridge_proof_target_contract_rejects_separate_subproof_closure() {
         220,
         220,
         AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        missing_bridge_claim_status(),
     )
     .expect("target contract");
     let target_contract_hash =
@@ -746,6 +806,7 @@ fn bridge_proof_target_contract_rejects_shared_witness_layout_mutation() {
         220,
         220,
         AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        missing_bridge_claim_status(),
     )
     .expect("target contract");
     let target_contract_hash =
@@ -773,6 +834,7 @@ fn bridge_proof_target_contract_rejects_shared_witness_layout_hash_mutation() {
         220,
         220,
         AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
+        missing_bridge_claim_status(),
     )
     .expect("target contract");
     let target_contract_hash =
@@ -898,7 +960,7 @@ fn bridge_proof_shell_rejects_closure_field_injection() {
         (
             "finalBridgeTheoremClosure",
             Value::Bool(true),
-            "final bridge theorem closure flag",
+            "unsupported field",
         ),
         (
             "bridgeClaimClosureVerified",
@@ -907,8 +969,13 @@ fn bridge_proof_shell_rejects_closure_field_injection() {
         ),
         (
             "bridgeClaimVerificationStatus",
-            Value::String("BridgeProofClaimClosureVerified".to_string()),
+            Value::String("UnsupportedBridgeClaimClosureStatus".to_string()),
             "bridge claim verification status",
+        ),
+        (
+            "claimBearingBridgeEncryption",
+            Value::Bool(true),
+            "scoped bridge relation closure flag",
         ),
     ] {
         let mut proof_value = minimal_checked_relation_proof_value();

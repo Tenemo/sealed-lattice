@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::evaluator::records::target_layout_hash;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setup_certificates(
@@ -117,58 +118,50 @@ pub(super) fn setup_certificates(
 pub(super) fn collective_secret_distribution_certificate(
     participant_count: usize,
 ) -> CanonicalResult<Value> {
-    let mut weights = vec![1_u128];
-    for _ in 0..participant_count {
-        let mut next = vec![0_u128; weights.len() + 2];
-        for (index, weight) in weights.iter().enumerate() {
-            next[index] += weight;
-            next[index + 1] += weight;
-            next[index + 2] += weight;
-        }
-        weights = next;
+    if participant_count == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective secret distribution requires at least one participant",
+        ));
     }
-    let support_offset = i64::try_from(participant_count).map_err(|_| {
+    let participant_count_u64 = u64::try_from(participant_count).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "participant count does not fit signed distribution support",
+            "participant count does not fit collective secret owner schedule",
         )
     })?;
-    let support = weights
-        .iter()
-        .enumerate()
-        .map(|(index, weight)| {
-            json!({
-                "secretCoefficientSum": i64::try_from(index).expect("support index fits i64") - support_offset,
-                "weight": weight.to_string(),
-            })
-        })
-        .collect::<Vec<_>>();
 
     Ok(json!({
         "objectType": "CollectiveSecretDistributionCertificate",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "localShareSampler": {
-            "samplerId": "hash-derived-rejection-sampled-balanced-ternary-local-share-v2",
+            "samplerId": "hash-derived-owner-routed-sparse-ternary-collective-share-v1",
             "support": [-1, 0, 1],
-            "probabilityNumeratorBySupport": [1, 1, 1],
-            "probabilityDenominator": 3,
+            "probabilityNumeratorBySupport": [1, 62, 1],
+            "probabilityDenominator": 64,
             "candidateBits": 64,
             "rejectionRule": "reject-candidates-outside-largest-multiple-of-support-width",
+            "ownerSelectionRule": "one-deterministic-participant-owner-per-coefficient; non-owner local shares are zero",
+            "ownerSelectionParticipantCount": participant_count_u64,
             "rawShareExported": false
         },
-        "localShareDistribution": "balanced-ternary-local-share",
-        "aggregationRule": "coefficient-wise-sum-of-all-full-roster-local-shares",
+        "localShareDistribution": "owner-routed-sparse-ternary-local-share",
+        "aggregationRule": "coefficient-wise-owner-routed-share-sum",
         "participantCount": participant_count,
         "resultingGlobalSecretDistribution": {
-            "distributionKind": "sum-of-full-roster-balanced-ternary-local-shares",
-            "support": support,
-            "totalWeightExpression": format!("3^{participant_count}"),
-            "isPlainDenseTernary": participant_count == 1,
+            "distributionKind": "owner-routed-sparse-ternary-collective-secret",
+            "support": [
+                { "secretCoefficientSum": -1, "weight": "1" },
+                { "secretCoefficientSum": 0, "weight": "62" },
+                { "secretCoefficientSum": 1, "weight": "1" }
+            ],
+            "totalWeightExpression": "64",
+            "isPlainDenseTernary": false,
         },
-        "estimatorSecretModel": "full-roster-balanced-ternary-share-sum-convolution",
-        "noiseModelSecretModel": "full-roster-balanced-ternary-share-sum-convolution",
-        "sparseSecretFlag": false,
+        "estimatorSecretModel": "owner-routed-sparse-ternary-hamming-weight-about-N-over-32",
+        "noiseModelSecretModel": "owner-routed-sparse-ternary-hamming-weight-about-N-over-32",
+        "sparseSecretFlag": true,
         "fixedHammingSecretFlag": false,
         "rejectionReasonIfUncertified": null,
     }))
@@ -188,6 +181,11 @@ pub(super) fn error_distribution_certificate() -> CanonicalResult<Value> {
         "errorDistribution": {
             "distributionKind": "centered-binomial-eta2",
             "support": [-2, -1, 0, 1, 2]
+        },
+        "collectiveKeyErrorShareDistribution": {
+            "distributionKind": "owner-routed-centered-binomial-eta2-collective-error",
+            "nonOwnerShare": 0,
+            "ownerSupport": [-2, -1, 0, 1, 2]
         },
         "encryptionRandomnessDistribution": {
             "distributionKind": "balanced-ternary-local-randomness",
@@ -468,14 +466,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "targetLayoutHash": derive_protocol_hash(
-            "TargetLayoutHash",
-            &json!({
-                "profileId": PROFILE_ID,
-                "targetLayout": "sparse-top-k-target-over-bgv-rns-canonical-ciphertext-convention",
-                "finalizedBy": "evaluator-and-decryption-closure",
-            }),
-        )?,
+        "targetLayoutHash": target_layout_hash(MAXIMUM_OPTION_COUNT)?,
         "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
         "claimUsePendingEncryptedAggregateEvaluator": true,
     });
@@ -522,6 +513,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "encryptedComparisonInputHash": encrypted_comparison_input_hash,
         "bitSlicedComparatorHash": bit_sliced_comparator_hash,
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
+        "targetLayoutHash": sparse_target_projection_record["targetLayoutHash"],
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
         "directComparisonInputDerivationStatus": "active-profile-candidate",
         "scoreBitSlicedStatus": "development-evidence-rejected-at-full-depth",
@@ -539,6 +531,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "encryptedComparisonInputHash": binding_record["encryptedComparisonInputHash"],
         "bitSlicedComparatorHash": binding_record["bitSlicedComparatorHash"],
         "encryptedSparseTargetProjectionHash": binding_record["encryptedSparseTargetProjectionHash"],
+        "targetLayoutHash": binding_record["targetLayoutHash"],
         "passiveSetupEvaluatorContextBindingHash": derive_protocol_hash(
             "EvaluationContextHash",
             &binding_record,

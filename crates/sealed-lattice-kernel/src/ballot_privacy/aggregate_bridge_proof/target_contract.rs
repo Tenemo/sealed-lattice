@@ -1,10 +1,14 @@
-use super::validation::{read_u64_object_field, require_matching_string_field};
+use super::validation::{
+    read_bool_object_field, read_u64_object_field, require_matching_string_field,
+};
 use super::*;
+use super::{plaintext_binding, shared_witness};
 
 pub(super) fn bridge_proof_target_contract_value(
     aggregate_reduced_coordinate_count: u64,
     aggregate_quotient_coordinate_count: u64,
     aggregate_derivation_verification_scope: &str,
+    claim_status: BridgeClaimStatus,
 ) -> CanonicalResult<Value> {
     validate_aggregate_derivation_verification_scope(aggregate_derivation_verification_scope)?;
     let polynomial_degree = POLYNOMIAL_DEGREE as u64;
@@ -14,7 +18,7 @@ pub(super) fn bridge_proof_target_contract_value(
     let shared_witness_layout = shared_witness_layout_value(
         aggregate_reduced_coordinate_count,
         aggregate_quotient_coordinate_count,
-    );
+    )?;
     let shared_witness_layout_hash = shared_witness_layout_hash(&shared_witness_layout)?;
 
     let mut target_contract = json!({
@@ -49,6 +53,11 @@ pub(super) fn bridge_proof_target_contract_value(
         "separateSubproofsAcceptedForClosure": false,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
         "proofFriendlyPlaintextBindingRequired": true,
+        "proofFriendlyPlaintextBindingStatus": PROOF_FRIENDLY_PLAINTEXT_BINDING_STATUS,
+        "proofFriendlyPlaintextBindingScheme": PLAINTEXT_COEFFICIENT_BINDING_SCHEME,
+        "proofFriendlyPlaintextBindingOpeningCoordinateCount": plaintext_binding::plaintext_binding_opening_scalar_count()? as u64,
+        "proofFriendlyPlaintextLiftBindingRequired": true,
+        "proofFriendlyPlaintextLiftBindingStatus": PROOF_FRIENDLY_PLAINTEXT_LIFT_BINDING_STATUS,
         "plaintextCanonicalLiftProofStatus": PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
         "publicPlaintextRootAcceptedAsClosureEvidence": false,
         "sharedWitnessLayout": shared_witness_layout,
@@ -56,7 +65,7 @@ pub(super) fn bridge_proof_target_contract_value(
         "bgvEncryptionProofStatus": BGV_ENCRYPTION_PROOF_CHECKED_STATUS,
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         "rnsCrtConsistencyProofStatus": RNS_CRT_CONSISTENCY_PROOF_CHECKED_STATUS,
-        "bridgeClaimClosureStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "bridgeClaimClosureStatus": claim_status.bridge_claim_verification_status,
         "aggregateDerivationVerificationScope": aggregate_derivation_verification_scope,
         "hwangPiopStatus": HWANG_PIOP_DEFERRED_STATUS,
         "naiveLinearExpansionBackendStatus": NAIVE_LINEAR_EXPANSION_BACKEND_STATUS,
@@ -76,7 +85,7 @@ pub(super) fn bridge_proof_target_contract_value(
         ("thresholdDecryptable", Value::Bool(THRESHOLD_DECRYPTABLE)),
         (
             "claimBearingBridgeEncryption",
-            Value::Bool(CLAIM_BEARING_BRIDGE_ENCRYPTION),
+            Value::Bool(claim_status.claim_bearing_bridge_encryption),
         ),
         (
             "sharedWitnessChallengeEntropyBits",
@@ -87,12 +96,28 @@ pub(super) fn bridge_proof_target_contract_value(
             Value::String(PLAINTEXT_ENCODING_RELATION.to_string()),
         ),
         (
+            "sharedWitnessWeakestRelationModel",
+            Value::String(BRIDGE_WEAKEST_ACTIVE_RELATION_MODEL.to_string()),
+        ),
+        (
+            "sharedWitnessWeakestRelationBitsPerCheck",
+            json!(BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK),
+        ),
+        (
             "sharedWitnessWeakestRelationModuli",
             json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI),
         ),
         (
-            "sharedWitnessWeakestRelationModulusProduct",
+            "batchIntegerLiftProofModulusProduct",
             Value::String(bridge_batch_integer_lift_proof_modulus_product_decimal()),
+        ),
+        (
+            "batchIntegerLiftProofModuli",
+            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI),
+        ),
+        (
+            "batchIntegerLiftProofModulusProductBitsFloor",
+            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT_BITS_FLOOR),
         ),
         (
             "plaintextEncodingProofModuli",
@@ -104,7 +129,13 @@ pub(super) fn bridge_proof_target_contract_value(
         ),
         (
             "plaintextEncodingProofModulusProductBitsFloor",
-            json!(BRIDGE_SHARED_WITNESS_PROOF_MODULUS_PRODUCT_BITS_FLOOR),
+            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT_BITS_FLOOR),
+        ),
+        (
+            "sharedWitnessChallengeSamplingModel",
+            Value::String(
+                shared_witness::BRIDGE_SHARED_WITNESS_CHALLENGE_SAMPLING_MODEL.to_string(),
+            ),
         ),
         (
             "sharedWitnessRejectionAttemptLimit",
@@ -160,7 +191,7 @@ pub(super) fn bridge_proof_target_contract_value(
 fn shared_witness_layout_value(
     aggregate_reduced_coordinate_count: u64,
     aggregate_quotient_coordinate_count: u64,
-) -> Value {
+) -> CanonicalResult<Value> {
     let polynomial_degree = POLYNOMIAL_DEGREE as u64;
     let data_prime_count = DATA_PRIMES.len() as u64;
     let ciphertext_component_count = BRIDGE_BGV_CIPHERTEXT_COMPONENT_COUNT;
@@ -168,6 +199,15 @@ fn shared_witness_layout_value(
     let commitment_opening_coordinate_count = SHARE_COMMITMENT_OPENING_DIMENSION as u64;
     let plaintext_coefficient_count = polynomial_degree;
     let plaintext_encoding_quotient_count = polynomial_degree;
+    let plaintext_binding_opening_coordinate_count = u64::try_from(
+        plaintext_binding::plaintext_binding_opening_scalar_count()?,
+    )
+    .map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "encrypted aggregate bridge plaintext binding opening count does not fit u64",
+        )
+    })?;
     let encryption_randomizer_coefficient_count = polynomial_degree;
     let encryption_error_coefficient_count = ciphertext_component_count * polynomial_degree;
     // Single shared response vector = concatenation of all witness blocks: integer share coords,
@@ -179,10 +219,11 @@ fn shared_witness_layout_value(
         + aggregate_quotient_coordinate_count
         + plaintext_coefficient_count
         + plaintext_encoding_quotient_count
+        + plaintext_binding_opening_coordinate_count
         + encryption_randomizer_coefficient_count
         + encryption_error_coefficient_count;
 
-    json!({
+    Ok(json!({
         "objectType": "AggregateBridgeSharedWitnessLayout",
         "objectVersion": 1,
         "bridgeProofProfileId": BRIDGE_PROOF_PROFILE_ID,
@@ -193,6 +234,7 @@ fn shared_witness_layout_value(
         "aggregateQuotientCoordinateCount": aggregate_quotient_coordinate_count,
         "plaintextCoefficientCount": plaintext_coefficient_count,
         "plaintextEncodingQuotientCount": plaintext_encoding_quotient_count,
+        "plaintextBindingOpeningCoordinateCount": plaintext_binding_opening_coordinate_count,
         "encryptionRandomizerCoefficientCount": encryption_randomizer_coefficient_count,
         "encryptionErrorCoefficientCount": encryption_error_coefficient_count,
         // Row counts per sub-relation: commitment rows (module rank) + one per reduced coord;
@@ -209,7 +251,7 @@ fn shared_witness_layout_value(
         "plaintextCoefficientColumnRole": "bgv-batch-encoding-and-bgv-encryption-message",
         "sameWitnessLinkageModel": SAME_WITNESS_LINKAGE_MODEL,
         "separateSubproofsAcceptedForClosure": false,
-    })
+    }))
 }
 
 fn shared_witness_layout_hash(layout: &Value) -> CanonicalResult<String> {
@@ -253,10 +295,38 @@ pub(super) fn validate_bridge_proof_target_contract(
         "aggregateDerivationVerificationScope",
         "bridgeProofStatement.relationRequirements",
     )?;
+    let claim_bearing_bridge_encryption = read_bool_object_field(
+        relation_requirements,
+        "claimBearingBridgeEncryption",
+        "bridgeProofStatement.relationRequirements",
+    )?;
+    let bridge_claim_verification_status = required_string_field(
+        relation_requirements,
+        "bridgeClaimClosureStatus",
+        "bridgeProofStatement.relationRequirements",
+    )?;
+    let expected_bridge_claim_verification_status = if claim_bearing_bridge_encryption {
+        BRIDGE_CLAIM_VERIFIED_STATUS
+    } else {
+        BRIDGE_CLAIM_MISSING_STATUS
+    };
+    if bridge_claim_verification_status != expected_bridge_claim_verification_status {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge claim status does not match the relation requirements",
+        ));
+    }
+    let claim_status = BridgeClaimStatus {
+        claim_bearing_bridge_encryption,
+        scoped_bridge_relation_closure: claim_bearing_bridge_encryption,
+        bridge_claim_closure_verified: claim_bearing_bridge_encryption,
+        bridge_claim_verification_status: expected_bridge_claim_verification_status,
+    };
     let expected_target_contract = bridge_proof_target_contract_value(
         aggregate_reduced_coordinate_count,
         aggregate_quotient_coordinate_count,
         aggregate_derivation_verification_scope,
+        claim_status,
     )?;
     let target_contract = required_json_field(
         bridge_proof_statement,

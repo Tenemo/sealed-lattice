@@ -469,6 +469,12 @@ export const createTranscriptCoreKernelLoader = (
                             encryptionRandomness.randomnessSource,
                         developmentRandomnessOverrideAcknowledged:
                             input.developmentRandomnessOverrideAcknowledged,
+                        closeRecord: input.closeRecord,
+                        contributorActionContext:
+                            input.contributorActionContext,
+                        countedBallotPackages: input.countedBallotPackages,
+                        casualMicroRosterAcknowledged:
+                            input.casualMicroRosterAcknowledged,
                     });
                 },
                 verifyAggregateBridgeEncryption: (input) =>
@@ -518,6 +524,26 @@ export const createTranscriptCoreKernelLoader = (
                         thresholdProfileHash: input.thresholdProfileHash,
                         participants: input.participants,
                         setupSeed: input.setupSeed,
+                    }),
+                generateBgvEvaluationKeyMaterial: (
+                    input,
+                ): Record<string, unknown> =>
+                    executeCommand<Record<string, unknown>>({
+                        command: 'GenerateBgvEvaluationKeyMaterial',
+                        setupPackage: input.setupPackage,
+                        setupPrivateWitness: input.setupPrivateWitness,
+                        workingLevel: input.workingLevel,
+                        rotationKeys: input.rotationKeys,
+                    }),
+                prepareBgvEvaluationKeyMaterial: (
+                    input,
+                ): Record<string, unknown> =>
+                    executeCommand<Record<string, unknown>>({
+                        command: 'PrepareBgvEvaluationKeyMaterial',
+                        setupPackage: input.setupPackage,
+                        setupPrivateWitness: input.setupPrivateWitness,
+                        workingLevel: input.workingLevel,
+                        rotationKeys: input.rotationKeys,
                     }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({

@@ -4,19 +4,23 @@ use num_traits::{ToPrimitive, Zero};
 use crate::{
     bgv::{
         evaluator::prg::DeterministicSampler,
-        modular_arithmetic::{add_mod, inverse_mod, mul_mod, sub_mod},
+        modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         profile::{BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, layout_hash},
         rns::RnsPolynomial,
         serialization::{
-            BgvObjectKind, ciphertext_root, parse_bgv_object_hex, serialize_bgv_object,
+            BgvObjectKind, canonical_bytes_hex, ciphertext_root, parse_bgv_object_hex,
+            serialize_bgv_object,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 // Highest modulus-chain level: index of the last data prime, so a fresh
-// ciphertext at this level uses all 16 data primes (q = product of all primes).
+// ciphertext at this level uses all data primes (q = product of all primes).
 pub(crate) const EVALUATOR_FULL_LEVEL: usize = DATA_PRIMES.len() - 1;
 
 // Reduce a signed integer coefficient into the canonical residue range
@@ -41,8 +45,8 @@ pub(crate) fn negacyclic_mul(
     let product = left_ntt
         .iter()
         .zip(right_ntt.iter())
-        .map(|(left_value, right_value)| mul_mod(*left_value, *right_value, modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
+        .map(|(left_value, right_value)| mul_mod_fast(*left_value, *right_value, modulus))
+        .collect::<Vec<_>>();
 
     inverse_negacyclic_ntt(&product, modulus)
 }
@@ -434,6 +438,18 @@ pub(crate) fn encode_slots_to_coefficients(slots: &[u64]) -> CanonicalResult<Vec
 // coefficient-domain components as a canonical BGV ciphertext object and root
 // the bytes. Used to bind evaluator output ciphertexts into the records.
 pub(crate) fn ciphertext_object_root(ciphertext: &Ciphertext) -> CanonicalResult<String> {
+    let canonical_bytes = ciphertext_canonical_bytes(ciphertext)?;
+
+    Ok(ciphertext_root(&canonical_bytes))
+}
+
+pub(crate) fn ciphertext_canonical_bytes_hex(ciphertext: &Ciphertext) -> CanonicalResult<String> {
+    Ok(canonical_bytes_hex(&ciphertext_canonical_bytes(
+        ciphertext,
+    )?))
+}
+
+fn ciphertext_canonical_bytes(ciphertext: &Ciphertext) -> CanonicalResult<Vec<u8>> {
     let canonical_layout = layout_hash()?;
     let components = ciphertext
         .components
@@ -447,9 +463,8 @@ pub(crate) fn ciphertext_object_root(ciphertext: &Ciphertext) -> CanonicalResult
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let canonical_bytes = serialize_bgv_object(BgvObjectKind::Ciphertext, &components)?;
 
-    Ok(ciphertext_root(&canonical_bytes))
+    serialize_bgv_object(BgvObjectKind::Ciphertext, &components)
 }
 
 fn require_same_level(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<()> {
@@ -598,30 +613,78 @@ pub(crate) fn plaintext_mul(
     plaintext_coefficients: &[u64],
 ) -> CanonicalResult<Ciphertext> {
     let primes = ciphertext.primes();
-    let components = ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            component
-                .iter()
-                .enumerate()
-                .map(|(limb_index, limb)| {
-                    let modulus = primes[limb_index];
-                    let lifted = plaintext_coefficients
-                        .iter()
-                        .map(|coefficient| coefficient % modulus)
-                        .collect::<Vec<_>>();
-                    negacyclic_mul(limb, &lifted, modulus)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
+    #[cfg(not(target_arch = "wasm32"))]
+    let limb_products = primes
+        .par_iter()
+        .enumerate()
+        .map(|(limb_index, modulus)| {
+            plaintext_mul_limb(ciphertext, plaintext_coefficients, limb_index, *modulus)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
+    let limb_products = primes
+        .iter()
+        .enumerate()
+        .map(|(limb_index, modulus)| {
+            plaintext_mul_limb(ciphertext, plaintext_coefficients, limb_index, *modulus)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut components = (0..ciphertext.components.len())
+        .map(|_| Vec::with_capacity(limb_products.len()))
+        .collect::<Vec<_>>();
+    for limb_product in limb_products {
+        for (component_index, product) in limb_product.into_iter().enumerate() {
+            components[component_index].push(product);
+        }
+    }
 
     Ok(Ciphertext {
         components,
         level: ciphertext.level,
         decrypt_scaling: ciphertext.decrypt_scaling,
     })
+}
+
+fn plaintext_mul_limb(
+    ciphertext: &Ciphertext,
+    plaintext_coefficients: &[u64],
+    limb_index: usize,
+    modulus: u64,
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    let lifted_plaintext = plaintext_coefficients
+        .iter()
+        .map(|coefficient| centered_plaintext_lift(*coefficient, modulus))
+        .collect::<Vec<_>>();
+    let plaintext_ntt = forward_negacyclic_ntt(&lifted_plaintext, modulus)?;
+    ciphertext
+        .components
+        .iter()
+        .map(|component| {
+            let component_ntt = forward_negacyclic_ntt(&component[limb_index], modulus)?;
+            let product_ntt = component_ntt
+                .iter()
+                .zip(plaintext_ntt.iter())
+                .map(|(component_value, plaintext_value)| {
+                    mul_mod_fast(*component_value, *plaintext_value, modulus)
+                })
+                .collect::<Vec<_>>();
+
+            inverse_negacyclic_ntt(&product_ntt, modulus)
+        })
+        .collect()
+}
+
+fn centered_plaintext_lift(coefficient: u64, modulus: u64) -> u64 {
+    let coefficient = coefficient % PLAINTEXT_MODULUS;
+    if coefficient > PLAINTEXT_MODULUS / 2 {
+        signed_residue(
+            i64::try_from(coefficient).expect("plaintext coefficient fits i64")
+                - i64::try_from(PLAINTEXT_MODULUS).expect("plaintext modulus fits i64"),
+            modulus,
+        )
+    } else {
+        coefficient % modulus
+    }
 }
 
 // Homomorphic ciphertext multiplication (tensor product) of two two-component
@@ -636,36 +699,25 @@ pub(crate) fn ciphertext_tensor(
     right.assert_two_components()?;
     let primes = left.primes();
 
-    let mut component_zero = Vec::with_capacity(primes.len());
-    let mut component_one = Vec::with_capacity(primes.len());
-    let mut component_two = Vec::with_capacity(primes.len());
-    for (limb_index, modulus) in primes.iter().enumerate() {
-        let left_zero_ntt = forward_negacyclic_ntt(&left.components[0][limb_index], *modulus)?;
-        let left_one_ntt = forward_negacyclic_ntt(&left.components[1][limb_index], *modulus)?;
-        let right_zero_ntt = forward_negacyclic_ntt(&right.components[0][limb_index], *modulus)?;
-        let right_one_ntt = forward_negacyclic_ntt(&right.components[1][limb_index], *modulus)?;
-
-        let mut zero_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
-        let mut one_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
-        let mut two_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
-        for evaluation_index in 0..POLYNOMIAL_DEGREE {
-            let a0 = left_zero_ntt[evaluation_index];
-            let a1 = left_one_ntt[evaluation_index];
-            let b0 = right_zero_ntt[evaluation_index];
-            let b1 = right_one_ntt[evaluation_index];
-            zero_ntt.push(mul_mod(a0, b0, *modulus)?);
-            let cross = add_mod(
-                mul_mod(a0, b1, *modulus)?,
-                mul_mod(a1, b0, *modulus)?,
-                *modulus,
-            )?;
-            one_ntt.push(cross);
-            two_ntt.push(mul_mod(a1, b1, *modulus)?);
-        }
-
-        component_zero.push(inverse_negacyclic_ntt(&zero_ntt, *modulus)?);
-        component_one.push(inverse_negacyclic_ntt(&one_ntt, *modulus)?);
-        component_two.push(inverse_negacyclic_ntt(&two_ntt, *modulus)?);
+    #[cfg(not(target_arch = "wasm32"))]
+    let tensor_limbs = primes
+        .par_iter()
+        .enumerate()
+        .map(|(limb_index, modulus)| ciphertext_tensor_limb(left, right, limb_index, *modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
+    let tensor_limbs = primes
+        .iter()
+        .enumerate()
+        .map(|(limb_index, modulus)| ciphertext_tensor_limb(left, right, limb_index, *modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut component_zero = Vec::with_capacity(tensor_limbs.len());
+    let mut component_one = Vec::with_capacity(tensor_limbs.len());
+    let mut component_two = Vec::with_capacity(tensor_limbs.len());
+    for (zero, one, two) in tensor_limbs {
+        component_zero.push(zero);
+        component_one.push(one);
+        component_two.push(two);
     }
 
     Ok(Ciphertext {
@@ -677,6 +729,42 @@ pub(crate) fn ciphertext_tensor(
             PLAINTEXT_MODULUS,
         )?,
     })
+}
+
+fn ciphertext_tensor_limb(
+    left: &Ciphertext,
+    right: &Ciphertext,
+    limb_index: usize,
+    modulus: u64,
+) -> CanonicalResult<(Vec<u64>, Vec<u64>, Vec<u64>)> {
+    let left_zero_ntt = forward_negacyclic_ntt(&left.components[0][limb_index], modulus)?;
+    let left_one_ntt = forward_negacyclic_ntt(&left.components[1][limb_index], modulus)?;
+    let right_zero_ntt = forward_negacyclic_ntt(&right.components[0][limb_index], modulus)?;
+    let right_one_ntt = forward_negacyclic_ntt(&right.components[1][limb_index], modulus)?;
+
+    let mut zero_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
+    let mut one_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
+    let mut two_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
+    for evaluation_index in 0..POLYNOMIAL_DEGREE {
+        let left_zero = left_zero_ntt[evaluation_index];
+        let left_one = left_one_ntt[evaluation_index];
+        let right_zero = right_zero_ntt[evaluation_index];
+        let right_one = right_one_ntt[evaluation_index];
+        zero_ntt.push(mul_mod_fast(left_zero, right_zero, modulus));
+        let cross = add_mod_fast(
+            mul_mod_fast(left_zero, right_one, modulus),
+            mul_mod_fast(left_one, right_zero, modulus),
+            modulus,
+        );
+        one_ntt.push(cross);
+        two_ntt.push(mul_mod_fast(left_one, right_one, modulus));
+    }
+
+    Ok((
+        inverse_negacyclic_ntt(&zero_ntt, modulus)?,
+        inverse_negacyclic_ntt(&one_ntt, modulus)?,
+        inverse_negacyclic_ntt(&two_ntt, modulus)?,
+    ))
 }
 
 // RNS modulus switch dropping the top prime, reducing noise and moving the

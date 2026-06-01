@@ -329,6 +329,8 @@ enum TranscriptCoreCommand {
     DescribeBgvPassiveSetupObjectModel,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
+    GenerateBgvEvaluationKeyMaterial,
+    PrepareBgvEvaluationKeyMaterial,
     EncodeBgvBatchPlaintext,
     ValidateBgvPlaintextObject,
     ValidateBgvCiphertextObject,
@@ -519,6 +521,8 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
+        | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
+        | TranscriptCoreCommand::PrepareBgvEvaluationKeyMaterial
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
         | TranscriptCoreCommand::ValidateBgvPlaintextObject
         | TranscriptCoreCommand::ValidateBgvCiphertextObject
@@ -652,6 +656,12 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::VerifyBgvPassiveSetup => {
             crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
+        }
+        TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial => {
+            crate::bgv::commands::generate_bgv_evaluation_key_material_from_request(request)
+        }
+        TranscriptCoreCommand::PrepareBgvEvaluationKeyMaterial => {
+            crate::bgv::evaluator::commands::prepare_bgv_evaluation_key_material_handle(request)
         }
         TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
             crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)

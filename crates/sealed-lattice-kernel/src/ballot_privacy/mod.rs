@@ -24,6 +24,8 @@ mod sparse_polynomial_matrix;
 mod sparse_polynomial_vector;
 mod tbox_relations;
 
+pub(crate) use protocol_constants::BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
@@ -56,9 +58,8 @@ use self::{
     polynomial_vector::PolynomialVector,
     protocol_constants::{
         BALLOT_PRIVACY_ENCODED_COORDINATES_PER_OPTION, BALLOT_PRIVACY_FIELD_MODULUS,
-        BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT, BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT,
-        BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT, BALLOT_PRIVACY_MINIMUM_OPTION_COUNT,
-        BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
+        BALLOT_PRIVACY_MAXIMUM_OPTION_COUNT, BALLOT_PRIVACY_MAXIMUM_PARTICIPANT_COUNT,
+        BALLOT_PRIVACY_MINIMUM_OPTION_COUNT, BALLOT_PRIVACY_MINIMUM_SAFE_PARTICIPANT_COUNT,
         BALLOT_PRIVACY_MINIMUM_UNSAFE_PARTICIPANT_COUNT, SHARE_COMMITMENT_MODULUS,
     },
     receiver_key::{
@@ -193,7 +194,6 @@ pub(crate) mod linear_proof {
 pub(crate) use aggregate_bridge_proof::{
     evaluate_aggregate_bridge_relation_from_command_request,
     generate_aggregate_bridge_encryption_from_command_request,
-    verify_aggregate_bridge_encryption_for_evaluator,
     verify_aggregate_bridge_encryption_from_command_request,
 };
 pub(crate) use aggregate_derivation_proof::{

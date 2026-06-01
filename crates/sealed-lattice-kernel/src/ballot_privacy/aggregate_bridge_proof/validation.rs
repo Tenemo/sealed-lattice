@@ -376,9 +376,10 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "encryptionRandomnessSeedSource",
                     "encryptedAggregateInputRoot",
                     "encryptedAggregateShareCiphertextRoot",
-                    "finalBridgeTheoremClosure",
                     "objectType",
                     "objectVersion",
+                    "plaintextCoefficientBindingCommitmentHash",
+                    "proofFriendlyPlaintextLiftBindingHash",
                     "plaintextRoot",
                     "postVotingClosedContextHash",
                     "privateMaterialDisclosure",
@@ -395,7 +396,7 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                     "thresholdDecryptable",
                 ],
             )?;
-            validate_bridge_relation_proof_nonclosure_status(proof_value)?;
+            validate_bridge_relation_proof_claim_status(proof_value)?;
             let shared_witness_proof =
                 required_json_field(proof_value, "bridgeSharedWitnessProof", "bridgeProof")?;
             reject_unexpected_object_fields(
@@ -404,7 +405,9 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                 &[
                     "bridgeProofStatementHash",
                     "bridgeProofChallengeContextHash",
+                    "challengeContextHash",
                     "challengeHex",
+                    "challengeSamplingModel",
                     "checks",
                     "maskAbsoluteBoundExclusive",
                     "objectType",
@@ -444,6 +447,8 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
                             "challengeScalarHex",
                             "checkIndex",
                             "cipherRandomizerResponseHex",
+                            "plaintextBindingCommitmentHash",
+                            "plaintextBindingOpeningResponseHex",
                             "rejectionAttemptIndex",
                         ],
                     )?;
@@ -496,30 +501,57 @@ pub(super) fn validate_bridge_proof_public_shell(proof_value: &Value) -> Canonic
     validate_bridge_private_material_disclosure(proof_value)
 }
 
-fn validate_bridge_relation_proof_nonclosure_status(proof_value: &Value) -> CanonicalResult<()> {
+fn validate_bridge_relation_proof_claim_status(proof_value: &Value) -> CanonicalResult<()> {
+    require_equal_bool(
+        proof_value,
+        "singleContributionBridgeRelationChecked",
+        true,
+        "single-contribution bridge relation flag",
+    )?;
+    let claim_bearing_bridge_encryption = read_bool_object_field(
+        proof_value,
+        "claimBearingBridgeEncryption",
+        "bridge proof claim status",
+    )?;
+
+    if claim_bearing_bridge_encryption {
+        require_equal_bool(
+            proof_value,
+            "scopedBridgeRelationClosure",
+            true,
+            "scoped bridge relation closure flag",
+        )?;
+        require_equal_string(
+            proof_value,
+            "bridgeClaimVerificationStatus",
+            BRIDGE_CLAIM_VERIFIED_STATUS,
+            "bridge claim verification status",
+        )?;
+        return require_equal_bool(
+            proof_value,
+            "bridgeClaimClosureVerified",
+            true,
+            "bridge claim closure flag",
+        );
+    }
+
     require_equal_bool(
         proof_value,
         "scopedBridgeRelationClosure",
         false,
         "scoped bridge relation closure flag",
     )?;
-    require_equal_bool(
+    require_equal_string(
         proof_value,
-        "finalBridgeTheoremClosure",
-        false,
-        "final bridge theorem closure flag",
+        "bridgeClaimVerificationStatus",
+        BRIDGE_CLAIM_MISSING_STATUS,
+        "bridge claim verification status",
     )?;
     require_equal_bool(
         proof_value,
         "bridgeClaimClosureVerified",
         false,
         "bridge claim closure flag",
-    )?;
-    require_equal_string(
-        proof_value,
-        "bridgeClaimVerificationStatus",
-        BRIDGE_CLAIM_CLOSURE_STATUS,
-        "bridge claim verification status",
     )
 }
 
@@ -604,7 +636,7 @@ pub(super) fn validate_bridge_relation_gap_status(proof_value: &Value) -> Canoni
         || string_field(relation_gap_status, "rnsCrtConsistencyProofStatus")
             != Some(RNS_CRT_CONSISTENCY_PROOF_PENDING_STATUS)
         || string_field(relation_gap_status, "bridgeClaimClosureStatus")
-            != Some(BRIDGE_CLAIM_CLOSURE_STATUS)
+            != Some(BRIDGE_CLAIM_MISSING_STATUS)
         || relation_gap_status
             .get("sampledOnlyBridgeVerificationAccepted")
             .and_then(Value::as_bool)

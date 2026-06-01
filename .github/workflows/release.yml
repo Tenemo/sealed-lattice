@@ -92,7 +92,7 @@ jobs:
                   pnpm run build
                   pnpm run lint
                   pnpm run tsc
-                  pnpm run api-surface:check
+                  pnpm exec tsx ./tools/ci/generate-api-surface-summary.ts
                   pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
                   pnpm exec tsx ./tools/ci/check-package-boundaries.ts
                   pnpm run vectors

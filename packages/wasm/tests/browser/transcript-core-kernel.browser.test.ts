@@ -41,13 +41,13 @@ const fullyVerifiedPassiveMhePrototypeFixture = findFixture(
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 const browserBgvRnsVectors = {
     profileHash:
-        '4a2efbb3218fcbde79d396688ebd4bf5f5ed7300f23316e6900aa0cb7dd0057bccc3892df183a6a4f628cc26c8163cf9b226e37f54519216067be5efd5ca743e',
+        '7071099482aac9e76a6728bd47a3906d55a3d39dc86ba5376323c3cb099326a9bdf072e1189983d04e74b648567bf069b6844fd3c167f0b31df3c5eff4ebb58d',
     batchLayoutBindingHash:
-        '2bdddaf7eba3787d244cb6622e252b6ee9391a8d3aa22a23fa9e46a777d036a7d8852e38f664dec7fd50e2308bec608f896cbd3b3ae925844bc77f673330baab',
+        '0ff4161d3e74b6f02134e2c86240d8e61139889bad65ab2b5615d7919e7562c97c45fe4ed031076beea6f76e1c485257fb521f4eab65056c77f1cd06aa39b1c6',
     encodedPlaintextRoot:
-        '58c345519637224053f85635ecd8493f74a42bc6b44fcd889571bf73e44ea0534de25677efec1b2efff76f64d17735debb527c787db0b8057a59458e004bfb3c',
+        'ea3c780b8c7834f070b3d4bc70ef6715dc39abd5c10ce2cf4e503a16fafa98a4c0c3a25246d3227c448fb1005ef2bd26924c396e83ac9c74008c0387288b1208',
     encodedPlaintextHash:
-        '02dd5e48be07c2bc343db89c7566f907b0bc319b56feb4ea0d6fa9a40a9f65829346a2ea08a576342c8dccce1a098e31f553c60726b1a76c1a77ae4a57cf426e',
+        'be87cf264df69ed4379194ee0112dd903a58b4c2bf9e097fde0a1281175b6463d73fae17d35b5cfe2c6842ec2da9dac397452eb19b86944f3ff42673c288e99a',
 } as const;
 
 describe('transcript-core kernel in browsers', () => {

@@ -117,6 +117,7 @@ pub(super) fn validate_setup_package_internal_bindings(
             "encryptedSparseTargetProjectionHash",
             "encrypted sparse target projection hash",
         ),
+        ("targetLayoutHash", "target layout hash"),
         (
             "passiveSetupEvaluatorContextBindingHash",
             "passive setup evaluator context binding hash",

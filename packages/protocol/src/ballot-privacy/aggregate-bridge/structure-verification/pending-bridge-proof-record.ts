@@ -1,6 +1,7 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import {
     encryptedAggregateBridgeProfileId,
+    type BridgeClaimVerificationStatus,
     type BridgeProofRecord,
     type ProtocolHash,
 } from '@sealed-lattice/types';
@@ -89,10 +90,46 @@ const requireBridgeRandomnessSource = (
     }
 };
 
+const requireConsistentBridgeClaimStatus = (input: {
+    readonly bridgeClaimClosureVerified?: boolean;
+    readonly bridgeClaimVerificationStatus?: BridgeClaimVerificationStatus;
+    readonly claimBearingBridgeEncryption: boolean;
+}): {
+    readonly bridgeClaimClosureVerified: boolean;
+    readonly bridgeClaimVerificationStatus: BridgeClaimVerificationStatus;
+    readonly claimBearingBridgeEncryption: boolean;
+} => {
+    const bridgeClaimClosureVerified =
+        input.bridgeClaimClosureVerified ?? false;
+    const bridgeClaimVerificationStatus =
+        input.bridgeClaimVerificationStatus ?? 'BridgeProofClaimClosureMissing';
+    const expectedStatus = input.claimBearingBridgeEncryption
+        ? 'BridgeProofClaimClosureVerified'
+        : 'BridgeProofClaimClosureMissing';
+
+    if (
+        bridgeClaimClosureVerified !== input.claimBearingBridgeEncryption ||
+        bridgeClaimVerificationStatus !== expectedStatus
+    ) {
+        throw new RangeError(
+            'Bridge proof record evidence has inconsistent bridge claim status.',
+        );
+    }
+
+    return {
+        bridgeClaimClosureVerified,
+        bridgeClaimVerificationStatus,
+        claimBearingBridgeEncryption: input.claimBearingBridgeEncryption,
+    };
+};
+
 export const createPendingBridgeProofRecordFromBridgeEvidence = (
     input: PendingBridgeProofRecordFromEvidenceInput,
 ): BridgeProofRecord => {
     const { aggregateDerivationComponent, bridgeEncryptionEvidence } = input;
+    const bridgeClaimStatus = requireConsistentBridgeClaimStatus(
+        bridgeEncryptionEvidence,
+    );
     const { statement } = aggregateDerivationComponent;
     const { profileBindings } = input.setupPackage;
     const bridgeProofProfileHash = deriveBridgeProofProfileHash({
@@ -101,7 +138,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bgvEncryptionProofSubrelation:
             'SealedLatticePassiveCollectiveCiphertextEquationRelation',
         bridgeProofProfileId: encryptedAggregateBridgeProfileId,
-        claimBearingBridgeEncryption: false,
+        claimBearingBridgeEncryption:
+            bridgeClaimStatus.claimBearingBridgeEncryption,
         developmentKeyOnly: false,
         proofBackend: 'SealedLatticeBridgeRelation',
         thresholdDecryptable: true,
@@ -224,6 +262,10 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         aggregateQuotientCoordinateCount: statement.shareVectorWidth,
         aggregateReducedCoordinateCount: statement.shareVectorWidth,
         aggregateDerivationVerificationScope,
+        bridgeClaimClosureStatus:
+            bridgeClaimStatus.bridgeClaimVerificationStatus,
+        claimBearingBridgeEncryption:
+            bridgeClaimStatus.claimBearingBridgeEncryption,
     });
     const bridgeSharedWitnessProofHash = requireProtocolHash(
         bridgeEncryptionEvidence.bridgeSharedWitnessProofHash,
@@ -252,6 +294,26 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     const encryptedAggregateInputRoot = requireProtocolHash(
         bridgeEncryptionEvidence.encryptedAggregateInputRoot,
         'encrypted aggregate input root',
+    );
+    const aggregateBridgeRelationHandoffRoot = requireProtocolHash(
+        bridgeEncryptionEvidence.aggregateBridgeRelationHandoffRoot,
+        'aggregate bridge relation handoff root',
+    );
+    requireMatchingValue(
+        aggregateBridgeRelationHandoffRoot,
+        input.bridgeEvidenceVerification.aggregateBridgeRelationHandoffRoot,
+        'verified aggregate bridge relation handoff root',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.plaintextCoefficientBindingCommitmentHash,
+        input.bridgeEvidenceVerification
+            .plaintextCoefficientBindingCommitmentHash,
+        'verified plaintext coefficient binding commitment hash',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.proofFriendlyPlaintextLiftBindingHash,
+        input.bridgeEvidenceVerification.proofFriendlyPlaintextLiftBindingHash,
+        'verified proof-friendly plaintext lift binding hash',
     );
     requireMatchingValue(
         encryptedAggregateInputRoot,
@@ -288,7 +350,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             input.setupPackage.collectivePublicKey.bgvPublicKeyRoot,
         bgvRandomnessBoundProofStatus:
             'BgvRandomnessErrorSupportPolynomialChecked',
-        bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
+        bridgeClaimClosureStatus:
+            bridgeClaimStatus.bridgeClaimVerificationStatus,
         bridgeLayoutHash: encryptedAggregateInputLayoutHash,
         bridgeProofTargetContractHash,
         bridgeWitnessPrivacyProfileHash: requireProtocolHash(
@@ -300,7 +363,8 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         canonicalCiphertextConventionHash,
         ceremonyId: statement.ceremonyId,
         ciphertextRoot: bridgeEncryptionEvidence.ciphertextRoot,
-        claimBearingBridgeEncryption: false,
+        claimBearingBridgeEncryption:
+            bridgeClaimStatus.claimBearingBridgeEncryption,
         coefficientDomainCanonical: true,
         coefficientCount: bridgeEncryptionEvidence.coefficientCount,
         collectivePublicKeyRoot:
@@ -334,6 +398,10 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         manifestHash: statement.manifestHash,
         aggregateDerivationVerificationScope,
         plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked',
+        plaintextCoefficientBindingCommitmentHash: requireProtocolHash(
+            bridgeEncryptionEvidence.plaintextCoefficientBindingCommitmentHash,
+            'plaintext coefficient binding commitment hash',
+        ),
         plaintextEncodingBoundCertificateHash:
             bridgeEncryptionEvidence.batchEncodingBoundCertificateHash,
         plaintextEncodingProofModuli: [
@@ -344,6 +412,14 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         plaintextRoot: bridgeEncryptionEvidence.plaintextRoot,
         pollSpecHash: statement.pollSpecHash,
         postVotingClosedContextHash: statement.postVotingClosedContextHash,
+        proofFriendlyPlaintextBindingStatus:
+            'ProofFriendlyPlaintextCoefficientBindingRelationChecked',
+        proofFriendlyPlaintextLiftBindingHash: requireProtocolHash(
+            bridgeEncryptionEvidence.proofFriendlyPlaintextLiftBindingHash,
+            'proof-friendly plaintext lift binding hash',
+        ),
+        proofFriendlyPlaintextLiftBindingStatus:
+            'ProofFriendlyPlaintextCoefficientLiftBindingChecked',
         proofProfileHash: bridgeProofProfileHash,
         rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
         rosterHash: statement.rosterHash,
@@ -359,27 +435,33 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         shareVectorWidth: statement.shareVectorWidth,
         sharedWitnessBindingRequired: true,
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
-        sharedWitnessChallengeBitsPerCheck: 64,
-        sharedWitnessCheckCount: 2,
-        sharedWitnessChallengeEntropyBits: 128,
+        sharedWitnessChallengeBitsPerCheck: 46,
+        sharedWitnessCheckCount: 5,
+        sharedWitnessChallengeEntropyBits: 230,
+        sharedWitnessChallengeSamplingModel:
+            'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
         sharedWitnessRejectionAttemptLimit: 64,
         sharedWitnessGrindingDiscountBitsPerCheck: 6,
-        sharedWitnessRejectionRetryLossBits: 12,
+        sharedWitnessRejectionRetryLossBits: 30,
         sharedWitnessFullMatrixUnionBoundBits: 9,
-        sharedWitnessRandomOracleQueryBoundBits: 0,
+        sharedWitnessRandomOracleQueryBoundBits: 32,
         sharedWitnessProofSystemLossBits: 0,
         sharedWitnessChallengeBiasBits: 0,
         sharedWitnessTargetBindingSoundnessBits: 128,
-        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
-        sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
         sharedWitnessEffectiveBindingBelowTarget: false,
         sharedWitnessWeakestRelation:
             'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+        sharedWitnessWeakestRelationModel:
+            'aggregate-proof-ring-effective-binding-floor-v1',
+        sharedWitnessWeakestRelationBitsPerCheck: 46,
         sharedWitnessWeakestRelationModuli: [
             140_737_487_306_753, 140_737_486_716_929,
         ],
-        sharedWitnessWeakestRelationModulusProduct:
-            '19807040250408114080301121537',
+        batchIntegerLiftProofModuli: [140_737_487_306_753, 140_737_486_716_929],
+        batchIntegerLiftProofModulusProduct: '19807040250408114080301121537',
+        batchIntegerLiftProofModulusProductBitsFloor: 93,
         sharedWitnessZeroKnowledgeStatus:
             'SharedWitnessZeroKnowledgeResponseDistributionChecked',
         slotCount: bridgeEncryptionEvidence.slotCount,
@@ -422,8 +504,18 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.claimBearingBridgeEncryption,
-        false,
-        'claim-bearing bridge encryption evidence flag',
+        bridgeClaimStatus.claimBearingBridgeEncryption,
+        'bridge encryption evidence claim status flag',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.bridgeClaimClosureVerified,
+        bridgeClaimStatus.bridgeClaimClosureVerified,
+        'bridge proof claim closure evidence flag',
+    );
+    requireMatchingValue(
+        bridgeEncryptionEvidence.bridgeClaimVerificationStatus,
+        bridgeClaimStatus.bridgeClaimVerificationStatus,
+        'bridge proof claim verification evidence status',
     );
     requireMatchingValue(
         bridgeEncryptionEvidence.aggregateDerivationVerificationScope ??
@@ -458,8 +550,18 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.claimBearingBridgeEncryption,
-        false,
-        'verified claim-bearing bridge encryption flag',
+        bridgeClaimStatus.claimBearingBridgeEncryption,
+        'verified bridge encryption claim status flag',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.bridgeClaimClosureVerified,
+        bridgeClaimStatus.bridgeClaimClosureVerified,
+        'verified bridge proof claim closure flag',
+    );
+    requireMatchingValue(
+        input.bridgeEvidenceVerification.bridgeClaimVerificationStatus,
+        bridgeClaimStatus.bridgeClaimVerificationStatus,
+        'verified bridge proof claim verification status',
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.aggregateDerivationVerificationScope ??
@@ -861,6 +963,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             input.aggregateSelectionPolicyHash,
             'aggregate selection policy hash',
         ),
+        aggregateBridgeRelationHandoffRoot,
         aggregateShareCommitmentHash:
             aggregateDerivationComponent.aggregateCommitment
                 .aggregateShareCommitmentHash,
@@ -887,7 +990,12 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             input.bridgeWitnessPrivacyProfileHash,
             'bridge witness privacy profile hash',
         ),
-        claimBearingBridgeEncryption: false,
+        bridgeClaimClosureVerified:
+            bridgeClaimStatus.bridgeClaimClosureVerified,
+        bridgeClaimVerificationStatus:
+            bridgeClaimStatus.bridgeClaimVerificationStatus,
+        claimBearingBridgeEncryption:
+            bridgeClaimStatus.claimBearingBridgeEncryption,
         canonicalCiphertextConventionHash,
         ceremonyId: statement.ceremonyId,
         collectivePublicKeyRoot:

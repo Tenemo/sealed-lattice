@@ -640,6 +640,10 @@ export type BridgeProofVerificationStatus =
     | 'BridgeProofBackendPending'
     | 'BridgeProofRelationChecked';
 
+export type BridgeClaimVerificationStatus =
+    | 'BridgeProofClaimClosureMissing'
+    | 'BridgeProofClaimClosureVerified';
+
 export type AggregateDerivationVerificationScope =
     | 'AggregateDerivationFullVerificationPreconditionNotBound'
     | 'AggregateDerivationFullVerificationChecked';
@@ -651,6 +655,7 @@ export type BridgeProofRecord = {
     readonly aggregateDerivationVerificationScope: AggregateDerivationVerificationScope;
     readonly aggregateSelectionPolicyHash: ProtocolHash;
     readonly aggregateShareCommitmentHash: ProtocolHash;
+    readonly aggregateBridgeRelationHandoffRoot: ProtocolHash;
     readonly aggregateInputEncodingProfileHash: ProtocolHash;
     readonly ballotScoreEncodingProfileHash: ProtocolHash;
     readonly ballotSetHash: ProtocolHash;
@@ -668,7 +673,9 @@ export type BridgeProofRecord = {
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: BridgeProofVerificationStatus;
     readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
-    readonly claimBearingBridgeEncryption: false;
+    readonly bridgeClaimClosureVerified: boolean;
+    readonly bridgeClaimVerificationStatus: BridgeClaimVerificationStatus;
+    readonly claimBearingBridgeEncryption: boolean;
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly collectivePublicKeyRoot: ProtocolHash;

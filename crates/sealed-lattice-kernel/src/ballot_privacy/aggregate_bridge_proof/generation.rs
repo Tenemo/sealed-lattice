@@ -2,14 +2,23 @@ use super::*;
 use super::{
     boundedness::{bridge_bgv_randomness_bound_status, bridge_bgv_randomness_bound_status_hash},
     dimensions::bridge_variant_dimensions,
+    plaintext_binding::generate_plaintext_coefficient_binding,
+    plaintext_lift::{
+        proof_friendly_plaintext_lift_binding_hash, proof_friendly_plaintext_lift_binding_value,
+    },
+    plaintext_root_relation::{
+        PlaintextRootRelationPublicInputs, PlaintextRootRelationWitness,
+        check_plaintext_root_relation,
+    },
     shared_witness::{
-        BridgeSharedWitnessProverInput, bridge_shared_witness_proof_hash,
-        bridge_shared_witness_zero_knowledge_status,
+        BridgeSharedWitnessProverInput, bridge_shared_witness_challenge_context_hash,
+        bridge_shared_witness_proof_hash, bridge_shared_witness_zero_knowledge_status,
         bridge_shared_witness_zero_knowledge_status_hash, generate_bridge_shared_witness_proof,
     },
     statement::{
-        BridgeProofStatementInput, bridge_proof_challenge_context_hash, bridge_proof_profile_hash,
-        bridge_proof_statement_hash, build_bridge_proof_statement,
+        AggregateBridgeRelationHandoffRootInput, BridgeProofStatementInput,
+        aggregate_bridge_relation_handoff_root, bridge_proof_challenge_context_hash,
+        bridge_proof_profile_hash, bridge_proof_statement_hash, build_bridge_proof_statement,
     },
     validation::{
         read_i64_array, read_u64_array, read_u64_object_field, required_protocol_hash_field,
@@ -114,6 +123,9 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "aggregateDerivationComponent.statement",
     )?;
     let dimensions = bridge_variant_dimensions(statement)?;
+    crate::bgv::commands::verify_bgv_passive_setup_from_request(&json!({
+        "setupPackage": setup_package,
+    }))?;
     let aggregate_integer_share_vector =
         read_u64_array(witness, "aggregateIntegerShareVector", "aggregateWitness")?;
     let aggregate_opening_randomness =
@@ -149,30 +161,107 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         include_canonical_bytes_hex,
     )?;
     let mut encryption = trace.public_artifact.clone();
-    let encrypted_aggregate_share_ciphertext_root = required_string_field(
-        &encryption,
-        "encryptedAggregateShareCiphertextRoot",
-        "bridgeEncryption",
-    )?
-    .to_string();
     let aggregate_derivation_verification_scope =
-        requested_aggregate_derivation_verification_scope(
+        aggregate_derivation_verification_scope_from_request(
             request,
+            component,
             "generateAggregateBridgeEncryption",
         )?;
-    encryption
-        .as_object_mut()
-        .ok_or_else(|| {
+    let claim_status = bridge_claim_status(
+        aggregate_derivation_verification_scope,
+        prover_randomness_source,
+        encryption_randomness_seed_source,
+    );
+    let bridge_proof_profile_hash = bridge_proof_profile_hash(claim_status)?;
+    let plaintext_coefficient_binding = generate_plaintext_coefficient_binding(
+        &trace.plaintext_coefficients_mod_plaintext,
+        &bridge_proof_profile_hash,
+        required_string_field(&encryption, "plaintextRoot", "bridgeEncryption")?,
+        required_string_field(&encryption, "ciphertextRoot", "bridgeEncryption")?,
+        prover_randomness_hex,
+    )?;
+    let plaintext_root_relation_check = check_plaintext_root_relation(
+        PlaintextRootRelationPublicInputs {
+            plaintext_root: required_string_field(
+                &encryption,
+                "plaintextRoot",
+                "bridgeEncryption",
+            )?,
+            plaintext_coefficient_binding_commitment: &plaintext_coefficient_binding.commitment,
+            plaintext_coefficient_binding_commitment_hash: &plaintext_coefficient_binding
+                .commitment_hash,
+        },
+        PlaintextRootRelationWitness {
+            plaintext_coefficients: &trace.plaintext_coefficients_mod_plaintext,
+            plaintext_binding_opening_witness: &plaintext_coefficient_binding.opening_witness,
+        },
+    )?;
+    if plaintext_root_relation_check.canonical_plaintext_byte_length == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "encrypted aggregate bridge plaintext root relation produced empty canonical plaintext bytes",
+        ));
+    }
+    {
+        let encryption_object = encryption.as_object_mut().ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "encrypted aggregate bridge encryption trace must be an object",
             )
-        })?
-        .insert(
+        })?;
+        encryption_object.insert(
+            "plaintextCoefficientBindingCommitment".to_string(),
+            plaintext_coefficient_binding.commitment.clone(),
+        );
+        encryption_object.insert(
+            "plaintextCoefficientBindingCommitmentHash".to_string(),
+            Value::String(plaintext_coefficient_binding.commitment_hash.clone()),
+        );
+    }
+    let proof_friendly_plaintext_lift_binding =
+        proof_friendly_plaintext_lift_binding_value(setup_package, &encryption)?;
+    let proof_friendly_plaintext_lift_binding_hash =
+        proof_friendly_plaintext_lift_binding_hash(&proof_friendly_plaintext_lift_binding)?;
+    {
+        let encryption_object = encryption.as_object_mut().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "encrypted aggregate bridge encryption trace must be an object",
+            )
+        })?;
+        encryption_object.insert(
+            "proofFriendlyPlaintextLiftBinding".to_string(),
+            proof_friendly_plaintext_lift_binding,
+        );
+        encryption_object.insert(
+            "proofFriendlyPlaintextLiftBindingHash".to_string(),
+            Value::String(proof_friendly_plaintext_lift_binding_hash),
+        );
+    }
+    let encrypted_aggregate_share_ciphertext_root =
+        crate::bgv::commands::encrypted_aggregate_share_ciphertext_root_with_plaintext_binding(
+            setup_package,
+            component_hash,
+            statement_hash,
+            post_voting_closed_context_hash,
+            &encryption,
+        )?;
+    {
+        let encryption_object = encryption.as_object_mut().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "encrypted aggregate bridge encryption trace must be an object",
+            )
+        })?;
+        encryption_object.insert(
+            "encryptedAggregateShareCiphertextRoot".to_string(),
+            Value::String(encrypted_aggregate_share_ciphertext_root.clone()),
+        );
+        encryption_object.insert(
             "encryptedAggregateInputRoot".to_string(),
             Value::String(encrypted_aggregate_share_ciphertext_root.clone()),
         );
-    let bridge_proof_profile_hash = bridge_proof_profile_hash()?;
+    }
     let bridge_proof_statement = build_bridge_proof_statement(BridgeProofStatementInput {
         component,
         setup_package,
@@ -182,6 +271,7 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         bridge_witness_privacy_profile_hash,
         he_param_hash,
         aggregate_derivation_verification_scope,
+        claim_status,
     })?;
     let bridge_proof_statement_hash = bridge_proof_statement_hash(&bridge_proof_statement)?;
     let bridge_proof_target_contract_hash = required_string_field(
@@ -194,6 +284,11 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         &bridge_proof_statement_hash,
         bridge_proof_target_contract_hash,
     )?;
+    let bridge_shared_witness_challenge_context_hash =
+        bridge_shared_witness_challenge_context_hash(
+            &bridge_proof_statement,
+            &bridge_proof_statement_hash,
+        )?;
     let shared_witness_proof =
         generate_bridge_shared_witness_proof(BridgeSharedWitnessProverInput {
             setup_package,
@@ -201,13 +296,14 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
             proof_input,
             bridge_proof_statement_hash: &bridge_proof_statement_hash,
             bridge_proof_challenge_context_hash: &bridge_proof_challenge_context_hash,
-            contributor_identity,
-            aggregate_derivation_statement_hash: statement_hash,
+            bridge_shared_witness_challenge_context_hash:
+                &bridge_shared_witness_challenge_context_hash,
             aggregate_integer_share_vector: &aggregate_integer_share_vector,
             aggregate_opening_randomness: &aggregate_opening_randomness,
             aggregate_reduced_coordinates: &witness_relation_check.reduced_field_vector,
             aggregate_quotient_vector: &witness_relation_check.quotient_vector,
             trace: &trace,
+            plaintext_binding_opening_witness: &plaintext_coefficient_binding.opening_witness,
             prover_randomness_hex,
         })?;
     let shared_witness_proof_hash = bridge_shared_witness_proof_hash(&shared_witness_proof)?;
@@ -312,6 +408,14 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         ("plaintextRoot", encryption["plaintextRoot"].clone()),
         ("ciphertextRoot", encryption["ciphertextRoot"].clone()),
         (
+            "plaintextCoefficientBindingCommitmentHash",
+            encryption["plaintextCoefficientBindingCommitmentHash"].clone(),
+        ),
+        (
+            "proofFriendlyPlaintextLiftBindingHash",
+            encryption["proofFriendlyPlaintextLiftBindingHash"].clone(),
+        ),
+        (
             "encryptedAggregateInputRoot",
             encryption["encryptedAggregateShareCiphertextRoot"].clone(),
         ),
@@ -365,12 +469,17 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
             Value::String("sealed-lattice-aggregate-bridge-relation".to_string()),
         ),
         ("singleContributionBridgeRelationChecked", Value::Bool(true)),
-        ("scopedBridgeRelationClosure", Value::Bool(false)),
-        ("finalBridgeTheoremClosure", Value::Bool(false)),
-        ("bridgeClaimClosureVerified", Value::Bool(false)),
+        (
+            "scopedBridgeRelationClosure",
+            Value::Bool(claim_status.scoped_bridge_relation_closure),
+        ),
+        (
+            "bridgeClaimClosureVerified",
+            Value::Bool(claim_status.bridge_claim_closure_verified),
+        ),
         (
             "bridgeClaimVerificationStatus",
-            Value::String(BRIDGE_CLAIM_CLOSURE_STATUS.to_string()),
+            Value::String(claim_status.bridge_claim_verification_status.to_string()),
         ),
         (
             "bridgeVariantEvidenceStatus",
@@ -393,7 +502,7 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
     );
     proof_object.insert(
         "claimBearingBridgeEncryption".to_string(),
-        Value::Bool(CLAIM_BEARING_BRIDGE_ENCRYPTION),
+        Value::Bool(claim_status.claim_bearing_bridge_encryption),
     );
     let proof_json = canonical_json(&proof_value)?;
     let proof_bytes_hex = to_hex(proof_json.as_bytes());
@@ -416,12 +525,50 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
             "sharedWitnessZeroKnowledgeStatusHash": proof_value["sharedWitnessZeroKnowledgeStatusHash"],
             "bgvRandomnessBoundProofStatusHash": proof_value["bgvRandomnessBoundProofStatusHash"],
             "proofBytesHash": proof_bytes_hash,
+            "plaintextCoefficientBindingCommitmentHash": encryption["plaintextCoefficientBindingCommitmentHash"],
+            "proofFriendlyPlaintextLiftBindingHash": encryption["proofFriendlyPlaintextLiftBindingHash"],
             "encryptedAggregateShareCiphertextRoot": encryption["encryptedAggregateShareCiphertextRoot"],
             "collectivePublicKeyRoot": encryption["collectivePublicKeyRoot"],
             "collectivePublicKeyCoefficientRoot": encryption["collectivePublicKeyCoefficientRoot"],
             "bgvPublicKeyRoot": encryption["bgvPublicKeyRoot"],
         }),
     )?;
+    let aggregate_bridge_relation_handoff_root =
+        aggregate_bridge_relation_handoff_root(AggregateBridgeRelationHandoffRootInput {
+            bridge_proof_statement: &bridge_proof_statement,
+            bridge_public_values: &proof_value,
+            aggregate_derivation_statement_hash: statement_hash,
+            aggregate_relation_challenge_hex: required_string_field(
+                &proof_value,
+                "aggregateRelationChallengeHex",
+                "bridgeProof",
+            )?,
+            aggregate_relation_commitment_hash: required_string_field(
+                &proof_value,
+                "aggregateRelationCommitmentHash",
+                "bridgeProof",
+            )?,
+            aggregate_relation_subproof_size_bytes: read_u64_object_field(
+                &proof_value,
+                "aggregateRelationSubproofSizeBytes",
+                "bridgeProof",
+            )?,
+            bridge_proof_statement_hash: &bridge_proof_statement_hash,
+            bridge_proof_bytes_hash: &proof_bytes_hash,
+            bridge_shared_witness_proof_hash: &shared_witness_proof_hash,
+            shared_witness_zero_knowledge_status_hash: &shared_witness_zero_knowledge_status_hash,
+            bgv_randomness_bound_proof_status_hash: &bgv_randomness_bound_proof_status_hash,
+            bridge_proof_verification_status: BRIDGE_PROOF_CHECKED_STATUS,
+            bgv_passive_setup_verification_precondition_checked: true,
+            claim_bearing_bridge_encryption: claim_status.claim_bearing_bridge_encryption,
+            relation_checked: true,
+            same_witness_linkage_verified: true,
+            effective_soundness_accepted: !BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET,
+            zk_distribution_accepted: true,
+            bgv_support_bounds_verified: true,
+            entropy_ownership_verified: claim_status.bridge_claim_closure_verified,
+            key_status_accepted: claim_status.bridge_claim_closure_verified,
+        })?;
 
     let object = encryption.as_object_mut().ok_or_else(|| {
         CanonicalError::new(
@@ -429,6 +576,10 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
             "encrypted aggregate bridge encryption result must be an object",
         )
     })?;
+    object.insert(
+        "aggregateBridgeRelationHandoffRoot".to_string(),
+        Value::String(aggregate_bridge_relation_handoff_root),
+    );
     object.insert(
         "aggregateDerivationComponentHash".to_string(),
         Value::String(component_hash.to_string()),
@@ -519,6 +670,10 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         Value::String(BGV_ENCRYPTION_KEY_MATERIAL_KIND.to_string()),
     );
     object.insert(
+        "bgvPassiveSetupVerificationPreconditionChecked".to_string(),
+        Value::Bool(true),
+    );
+    object.insert(
         "developmentKeyOnly".to_string(),
         Value::Bool(DEVELOPMENT_KEY_ONLY),
     );
@@ -528,7 +683,7 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
     );
     object.insert(
         "claimBearingBridgeEncryption".to_string(),
-        Value::Bool(CLAIM_BEARING_BRIDGE_ENCRYPTION),
+        Value::Bool(claim_status.claim_bearing_bridge_encryption),
     );
     object.insert(
         "aggregateDerivationVerificationScope".to_string(),
@@ -538,10 +693,13 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "plaintextCanonicalLiftProofStatus".to_string(),
         Value::String(PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS.to_string()),
     );
-    object.insert("bridgeClaimClosureVerified".to_string(), Value::Bool(false));
+    object.insert(
+        "bridgeClaimClosureVerified".to_string(),
+        Value::Bool(claim_status.bridge_claim_closure_verified),
+    );
     object.insert(
         "bridgeClaimVerificationStatus".to_string(),
-        Value::String(BRIDGE_CLAIM_CLOSURE_STATUS.to_string()),
+        Value::String(claim_status.bridge_claim_verification_status.to_string()),
     );
     object.insert(
         "bridgeVariantEvidenceStatus".to_string(),
@@ -554,14 +712,15 @@ pub(super) fn generate_aggregate_bridge_encryption(request: &Value) -> Canonical
         "BgvPublicKeyCoefficientMaterialBound",
         DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS,
         TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS,
+        PROOF_FRIENDLY_PLAINTEXT_BINDING_STATUS,
+        PROOF_FRIENDLY_PLAINTEXT_LIFT_BINDING_STATUS,
         "CoefficientDomainCanonical",
         "BridgeProofRelationChecked",
-        "BridgeProofImplementationEvidenceOnly",
+        claim_status.bridge_claim_verification_status,
         SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
         BGV_RANDOMNESS_BOUND_PROOF_STATUS,
         PLAINTEXT_CANONICAL_LIFT_PROOF_CHECKED_STATUS,
         aggregate_derivation_verification_scope,
-        "BridgeProofClaimClosureMissing",
     ];
     status_labels.push(match dimensions.evidence_tier {
         "representative-row-evidence" => "RepresentativeBridgeMatrixRowEvidence",

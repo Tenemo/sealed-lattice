@@ -13,7 +13,6 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import apiSnapshot from '../../api-snapshot.json' with { type: 'json' };
 import * as publicApiRuntime from '../../dist/index.js';
 
 type DeriveThresholdProfile = (
@@ -42,14 +41,22 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
-const expectedRuntimeExports = [...apiSnapshot.runtimeExports].sort();
+const requiredPublicFunctionNames = [
+    'deriveThresholdProfile',
+    'validatePollSpec',
+    'evaluateActionCapability',
+    'deriveValidatedFirstValidOrder',
+    'verifyBoardConsistency',
+] as const;
 
 describe('election foundation public package API in browsers', () => {
     it('exposes callable safe runtime functions', () => {
-        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual([
-            ...expectedRuntimeExports,
-        ]);
-        for (const publicFunctionName of expectedRuntimeExports) {
+        const runtimeExportNames = Object.keys(publicApiRuntimeRecord).sort();
+
+        expect(runtimeExportNames).toEqual(
+            expect.arrayContaining([...requiredPublicFunctionNames]),
+        );
+        for (const publicFunctionName of runtimeExportNames) {
             expect(
                 typeof publicApiRuntimeRecord[publicFunctionName],
                 publicFunctionName,

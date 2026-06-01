@@ -2,6 +2,7 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     AggregateContribution,
     AggregateReadyRecord,
+    BridgeClaimVerificationStatus,
     BridgeProofRecord,
     ProtocolHash,
 } from '@sealed-lattice/types';
@@ -21,7 +22,7 @@ export const deriveBridgeProofProfileHash = (input: {
         | 'HwangPiopCandidate';
     readonly bgvEncryptionKeyMaterialKind: 'passive-transcript-derived-collective-public-key';
     readonly bridgeProofProfileId: string;
-    readonly claimBearingBridgeEncryption: false;
+    readonly claimBearingBridgeEncryption: boolean;
     readonly developmentKeyOnly: false;
     readonly proofBackend: 'SealedLatticeBridgeRelation';
     readonly thresholdDecryptable: true;
@@ -38,19 +39,34 @@ export const deriveBridgeProofProfileHash = (input: {
     });
 
 const bridgePlaintextCoefficientCount = 32_768; // BGV ring degree (polynomial slots).
-const bridgeDataPrimeCount = 16; // RNS data primes in the BGV ciphertext modulus.
+const bridgeDataPrimeCount = 17; // RNS data primes in the BGV ciphertext modulus.
 const bridgeCiphertextComponentCount = 2;
 const shareCommitmentModuleRank = 4;
+const shareCommitmentModuleDegree = 256;
 const shareCommitmentOpeningCoordinateCount = 64;
+const plaintextBindingOpeningCoordinateCount =
+    (bridgePlaintextCoefficientCount / shareCommitmentModuleDegree) *
+    shareCommitmentOpeningCoordinateCount;
+const plaintextCoefficientBindingScheme =
+    'ChunkedAdditiveModuleSisPlaintextCoefficientCommitment';
+const proofFriendlyPlaintextBindingStatus =
+    'ProofFriendlyPlaintextCoefficientBindingRelationChecked';
+const proofFriendlyPlaintextLiftBindingStatus =
+    'ProofFriendlyPlaintextCoefficientLiftBindingChecked';
 const ballotPrivacyFieldModulus = 65_537;
 const sameWitnessLinkageModel =
     'SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired';
-const bridgeSharedWitnessCheckCount = 2;
-const bridgeSharedWitnessChallengeBitsPerCheck = 64;
+const bridgeSharedWitnessCheckCount = 5;
+const bridgeSharedWitnessChallengeBitsPerCheck = 46;
 const bridgeSharedWitnessChallengeEntropyBits =
     bridgeSharedWitnessCheckCount * bridgeSharedWitnessChallengeBitsPerCheck;
 const bridgeSharedWitnessWeakestRelation =
     'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt';
+const bridgeSharedWitnessWeakestRelationModel =
+    'aggregate-proof-ring-effective-binding-floor-v1';
+const bridgeSharedWitnessWeakestRelationBitsPerCheck = 46;
+const bridgeSharedWitnessChallengeSamplingModel =
+    'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1';
 const bridgeBatchIntegerLiftProofModuli = [
     140_737_487_306_753, 140_737_486_716_929,
 ] as const;
@@ -59,16 +75,26 @@ const bridgeBatchIntegerLiftProofModulusProduct =
 const bridgeBatchIntegerLiftProofModulusProductBitsFloor = 93;
 const bridgeSharedWitnessRejectionAttemptLimit = 64;
 // Soundness accounting for the same-witness linkage between the two bridge sub-proofs:
-// the integer-lifted batch relation is checked modulo the first two BGV data primes.
+// the challenge budget is capped at the weakest active relation floor.
 const bridgeSharedWitnessGrindingDiscountBitsPerCheck = 6;
-const bridgeSharedWitnessRejectionRetryLossBits = 12;
+const bridgeSharedWitnessRejectionRetryLossBits =
+    bridgeSharedWitnessGrindingDiscountBitsPerCheck *
+    bridgeSharedWitnessCheckCount;
 const bridgeSharedWitnessFullMatrixUnionBoundBits = 9;
-const bridgeSharedWitnessRandomOracleQueryBoundBits = 0;
+const bridgeSharedWitnessRandomOracleQueryBoundBits = 32;
 const bridgeSharedWitnessProofSystemLossBits = 0;
 const bridgeSharedWitnessChallengeBiasBits = 0;
 const bridgeSharedWitnessTargetBindingSoundnessBits = 128;
-const bridgeSharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor = 186;
-const bridgeSharedWitnessEffectiveBindingSoundnessBitsFloor = 165;
+const bridgeSharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor =
+    bridgeSharedWitnessWeakestRelationBitsPerCheck *
+    bridgeSharedWitnessCheckCount;
+const bridgeSharedWitnessEffectiveBindingSoundnessBitsFloor =
+    bridgeSharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor -
+    bridgeSharedWitnessRejectionRetryLossBits -
+    bridgeSharedWitnessFullMatrixUnionBoundBits -
+    bridgeSharedWitnessRandomOracleQueryBoundBits -
+    bridgeSharedWitnessProofSystemLossBits -
+    bridgeSharedWitnessChallengeBiasBits;
 const bridgeSharedWitnessEffectiveBindingBelowTarget = false;
 const bgvEncryptionKeyMaterialKind =
     'passive-transcript-derived-collective-public-key';
@@ -91,6 +117,7 @@ type BridgeSharedWitnessLayout = {
     readonly objectVersion: 1;
     readonly plaintextCoefficientColumnRole: 'bgv-batch-encoding-and-bgv-encryption-message';
     readonly plaintextCoefficientCount: number;
+    readonly plaintextBindingOpeningCoordinateCount: number;
     readonly plaintextEncodingQuotientCount: number;
     readonly plaintextEncodingRelationRowCount: number;
     readonly sameWitnessLinkageModel: typeof sameWitnessLinkageModel;
@@ -133,6 +160,7 @@ const createBridgeSharedWitnessLayout = (input: {
         plaintextCoefficientColumnRole:
             'bgv-batch-encoding-and-bgv-encryption-message',
         plaintextCoefficientCount: bridgePlaintextCoefficientCount,
+        plaintextBindingOpeningCoordinateCount,
         plaintextEncodingQuotientCount,
         plaintextEncodingRelationRowCount: bridgePlaintextCoefficientCount,
         sameWitnessLinkageModel,
@@ -150,6 +178,7 @@ const createBridgeSharedWitnessLayout = (input: {
             input.aggregateQuotientCoordinateCount +
             bridgePlaintextCoefficientCount +
             plaintextEncodingQuotientCount +
+            plaintextBindingOpeningCoordinateCount +
             encryptionRandomizerCoefficientCount +
             encryptionErrorCoefficientCount,
     };
@@ -167,6 +196,8 @@ export const deriveBridgeProofTargetContractHash = (input: {
     readonly aggregateQuotientCoordinateCount: number;
     readonly aggregateReducedCoordinateCount: number;
     readonly aggregateDerivationVerificationScope: AggregateDerivationVerificationScope;
+    readonly bridgeClaimClosureStatus: BridgeClaimVerificationStatus;
+    readonly claimBearingBridgeEncryption: boolean;
 }): ProtocolHash => {
     const sharedWitnessLayout = createBridgeSharedWitnessLayout(input);
     const sharedWitnessLayoutHash =
@@ -189,9 +220,9 @@ export const deriveBridgeProofTargetContractHash = (input: {
             bgvEncryptionKeyMaterialKind,
             bgvRandomnessBoundProofStatus:
                 'BgvRandomnessErrorSupportPolynomialChecked',
-            bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
+            bridgeClaimClosureStatus: input.bridgeClaimClosureStatus,
             bridgeProofProfileId: 'EncryptedAggregateBridge-v1',
-            claimBearingBridgeEncryption: false,
+            claimBearingBridgeEncryption: input.claimBearingBridgeEncryption,
             ciphertextCoefficientEquationCount:
                 bridgeDataPrimeCount *
                 bridgePlaintextCoefficientCount *
@@ -215,6 +246,13 @@ export const deriveBridgeProofTargetContractHash = (input: {
                 'PlaintextCanonicalLiftProofChecked',
             polynomialDegree: bridgePlaintextCoefficientCount,
             proofFriendlyPlaintextBindingRequired: true,
+            proofFriendlyPlaintextBindingStatus,
+            proofFriendlyPlaintextBindingScheme:
+                plaintextCoefficientBindingScheme,
+            proofFriendlyPlaintextBindingOpeningCoordinateCount:
+                plaintextBindingOpeningCoordinateCount,
+            proofFriendlyPlaintextLiftBindingRequired: true,
+            proofFriendlyPlaintextLiftBindingStatus,
             proofBackend: 'SealedLatticeBridgeRelation',
             publicPlaintextRootAcceptedAsClosureEvidence: false,
             relationScope: 'sealed-lattice-aggregate-bridge-relation',
@@ -230,6 +268,8 @@ export const deriveBridgeProofTargetContractHash = (input: {
             sharedWitnessCheckCount: bridgeSharedWitnessCheckCount,
             sharedWitnessChallengeEntropyBits:
                 bridgeSharedWitnessChallengeEntropyBits,
+            sharedWitnessChallengeSamplingModel:
+                bridgeSharedWitnessChallengeSamplingModel,
             sharedWitnessGrindingDiscountBitsPerCheck:
                 bridgeSharedWitnessGrindingDiscountBitsPerCheck,
             sharedWitnessRejectionRetryLossBits:
@@ -255,10 +295,17 @@ export const deriveBridgeProofTargetContractHash = (input: {
             sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor:
                 bridgeSharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor,
             sharedWitnessWeakestRelation: bridgeSharedWitnessWeakestRelation,
+            sharedWitnessWeakestRelationModel:
+                bridgeSharedWitnessWeakestRelationModel,
+            sharedWitnessWeakestRelationBitsPerCheck:
+                bridgeSharedWitnessWeakestRelationBitsPerCheck,
             sharedWitnessWeakestRelationModuli:
                 bridgeBatchIntegerLiftProofModuli,
-            sharedWitnessWeakestRelationModulusProduct:
+            batchIntegerLiftProofModuli: bridgeBatchIntegerLiftProofModuli,
+            batchIntegerLiftProofModulusProduct:
                 bridgeBatchIntegerLiftProofModulusProduct,
+            batchIntegerLiftProofModulusProductBitsFloor:
+                bridgeBatchIntegerLiftProofModulusProductBitsFloor,
             plaintextEncodingProofModuli: bridgeBatchIntegerLiftProofModuli,
             plaintextEncodingProofModulusProduct:
                 bridgeBatchIntegerLiftProofModulusProduct,
@@ -303,7 +350,7 @@ type BridgeProofStatementHashInput = {
     readonly bgvProfileHash: ProtocolHash;
     readonly bgvPublicKeyRoot: ProtocolHash;
     readonly bgvRandomnessBoundProofStatus: 'BgvRandomnessErrorSupportPolynomialChecked';
-    readonly bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing';
+    readonly bridgeClaimClosureStatus: BridgeClaimVerificationStatus;
     readonly bridgeLayoutHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
     readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
@@ -312,7 +359,7 @@ type BridgeProofStatementHashInput = {
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly ciphertextRoot: ProtocolHash;
-    readonly claimBearingBridgeEncryption: false;
+    readonly claimBearingBridgeEncryption: boolean;
     readonly coefficientCount: number;
     readonly collectivePublicKeyRoot: ProtocolHash;
     readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
@@ -337,6 +384,7 @@ type BridgeProofStatementHashInput = {
     readonly manifestHash: ProtocolHash;
     readonly aggregateDerivationVerificationScope: AggregateDerivationVerificationScope;
     readonly plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked';
+    readonly plaintextCoefficientBindingCommitmentHash: ProtocolHash;
     readonly plaintextEncodingBoundCertificateHash: ProtocolHash;
     readonly plaintextEncodingProofModuli: typeof bridgeBatchIntegerLiftProofModuli;
     readonly plaintextEncodingProofModulusProduct: typeof bridgeBatchIntegerLiftProofModulusProduct;
@@ -344,6 +392,9 @@ type BridgeProofStatementHashInput = {
     readonly plaintextRoot: ProtocolHash;
     readonly pollSpecHash: ProtocolHash;
     readonly postVotingClosedContextHash: ProtocolHash;
+    readonly proofFriendlyPlaintextBindingStatus: typeof proofFriendlyPlaintextBindingStatus;
+    readonly proofFriendlyPlaintextLiftBindingHash: ProtocolHash;
+    readonly proofFriendlyPlaintextLiftBindingStatus: typeof proofFriendlyPlaintextLiftBindingStatus;
     readonly proofProfileHash: ProtocolHash;
     readonly rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked';
     readonly rosterHash: ProtocolHash;
@@ -355,23 +406,28 @@ type BridgeProofStatementHashInput = {
     readonly shareVectorWidth: number;
     readonly sharedWitnessBindingRequired: true;
     readonly sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked';
-    readonly sharedWitnessChallengeBitsPerCheck: 64;
-    readonly sharedWitnessCheckCount: 2;
-    readonly sharedWitnessChallengeEntropyBits: 128;
+    readonly sharedWitnessChallengeBitsPerCheck: 46;
+    readonly sharedWitnessCheckCount: 5;
+    readonly sharedWitnessChallengeEntropyBits: 230;
+    readonly sharedWitnessChallengeSamplingModel: typeof bridgeSharedWitnessChallengeSamplingModel;
     readonly sharedWitnessRejectionAttemptLimit: 64;
-    readonly sharedWitnessRejectionRetryLossBits: 12;
+    readonly sharedWitnessRejectionRetryLossBits: 30;
     readonly sharedWitnessFullMatrixUnionBoundBits: 9;
-    readonly sharedWitnessRandomOracleQueryBoundBits: 0;
+    readonly sharedWitnessRandomOracleQueryBoundBits: 32;
     readonly sharedWitnessProofSystemLossBits: 0;
     readonly sharedWitnessChallengeBiasBits: 0;
     readonly sharedWitnessTargetBindingSoundnessBits: 128;
     readonly sharedWitnessGrindingDiscountBitsPerCheck: 6;
-    readonly sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186;
-    readonly sharedWitnessEffectiveBindingSoundnessBitsFloor: 165;
+    readonly sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230;
+    readonly sharedWitnessEffectiveBindingSoundnessBitsFloor: 159;
     readonly sharedWitnessEffectiveBindingBelowTarget: false;
     readonly sharedWitnessWeakestRelation: typeof bridgeSharedWitnessWeakestRelation;
+    readonly sharedWitnessWeakestRelationModel: typeof bridgeSharedWitnessWeakestRelationModel;
+    readonly sharedWitnessWeakestRelationBitsPerCheck: 46;
     readonly sharedWitnessWeakestRelationModuli: typeof bridgeBatchIntegerLiftProofModuli;
-    readonly sharedWitnessWeakestRelationModulusProduct: typeof bridgeBatchIntegerLiftProofModulusProduct;
+    readonly batchIntegerLiftProofModuli: typeof bridgeBatchIntegerLiftProofModuli;
+    readonly batchIntegerLiftProofModulusProduct: typeof bridgeBatchIntegerLiftProofModulusProduct;
+    readonly batchIntegerLiftProofModulusProductBitsFloor: 93;
     readonly sharedWitnessZeroKnowledgeStatus: 'SharedWitnessZeroKnowledgeResponseDistributionChecked';
     readonly coefficientDomainCanonical: true;
     readonly slotCount: number;
@@ -416,9 +472,11 @@ const bridgeProofStatementStringHashFieldNames = [
     'encryptedAggregateTargetBasisRoot',
     'heParamHash',
     'manifestHash',
+    'plaintextCoefficientBindingCommitmentHash',
     'plaintextRoot',
     'pollSpecHash',
     'postVotingClosedContextHash',
+    'proofFriendlyPlaintextLiftBindingHash',
     'proofProfileHash',
     'rosterHash',
     'rustBgvBackendProfileHash',
@@ -452,10 +510,15 @@ const bridgeProofStatementRelationStringHashFieldNames = [
     'rnsCrtConsistencyProofStatus',
     'bridgeClaimClosureStatus',
     'hwangPiopStatus',
+    'batchIntegerLiftProofModulusProduct',
     'plaintextEncodingBoundCertificateHash',
     'plaintextEncodingProofModulusProduct',
+    'proofFriendlyPlaintextBindingStatus',
+    'proofFriendlyPlaintextLiftBindingHash',
+    'proofFriendlyPlaintextLiftBindingStatus',
+    'sharedWitnessChallengeSamplingModel',
     'sharedWitnessWeakestRelation',
-    'sharedWitnessWeakestRelationModulusProduct',
+    'sharedWitnessWeakestRelationModel',
 ] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];
 
 const bridgeProofStatementRelationNumberHashFieldNames = [
@@ -464,6 +527,8 @@ const bridgeProofStatementRelationNumberHashFieldNames = [
     'sharedWitnessChallengeBitsPerCheck',
     'sharedWitnessCheckCount',
     'sharedWitnessChallengeEntropyBits',
+    'sharedWitnessWeakestRelationBitsPerCheck',
+    'batchIntegerLiftProofModulusProductBitsFloor',
     'plaintextEncodingProofModulusProductBitsFloor',
     'sharedWitnessRejectionAttemptLimit',
     'sharedWitnessRejectionRetryLossBits',
@@ -488,6 +553,7 @@ const bridgeProofStatementRelationBooleanHashFieldNames = [
 ] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];
 
 const bridgeProofStatementRelationArrayHashFieldNames = [
+    'batchIntegerLiftProofModuli',
     'plaintextEncodingProofModuli',
     'sharedWitnessWeakestRelationModuli',
 ] as const satisfies readonly (keyof BridgeProofStatementHashInput)[];

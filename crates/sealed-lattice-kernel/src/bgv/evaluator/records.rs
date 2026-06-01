@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::{
-        evaluator::top_k::{TIE_POLICY, score_bit_count},
+        evaluator::top_k::{DIRECT_COMPARISON_BABY_STEP_COUNT, TIE_POLICY, score_bit_count},
         profile::{
             DATA_PRIMES, POLYNOMIAL_DEGREE, aggregate_input_encoding_profile_hash,
             allowed_operation_registry_hash, ballot_score_encoding_profile_hash,
@@ -30,6 +30,7 @@ pub(crate) const EVALUATION_PROOF_PROFILE_ID: &str =
 // The maximum supported option count and top-count, matching the protocol
 // envelope 1 <= K_top <= m <= 20.
 pub(crate) const MAXIMUM_OPTION_COUNT: usize = 20;
+pub(crate) const SELECTED_TOP_K_SCORE_DOMAIN_MAXIMUM: u64 = 200;
 const POWER_TABLE_COEFFICIENT_LIMIT: u64 = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -298,7 +299,7 @@ fn rank_packing_hash(parameters: &EvaluationParameters) -> CanonicalResult<Strin
     )
 }
 
-fn target_layout_hash(option_count: usize) -> CanonicalResult<String> {
+pub(crate) fn target_layout_hash(option_count: usize) -> CanonicalResult<String> {
     derive_protocol_hash(
         "TargetLayoutHash",
         &json!({
@@ -540,9 +541,10 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
     let domain_points = parameters.score_domain_max + 1;
     // The score-bit path uses the default high-degree polynomial schedule:
     // depth-optimal power tables for small polynomials and Paterson-Stockmeyer
-    // for high-degree polynomials. The direct comparison path uses the
-    // depth-optimized power-table schedule because the full score-domain-200
-    // comparison is depth-bound under the selected modulus chain.
+    // for high-degree polynomials. The direct comparison path uses a fixed
+    // baby-step Paterson-Stockmeyer split selected for the score-domain-200
+    // profile: it keeps the comparator inside the available chain while
+    // reducing the per-comparison multiplication count.
     let extraction_depth = implemented_polynomial_depth(domain_points - 1);
     let comparator_depth = bit_count as u64 + 2;
     let indicator_depth = ceil_log2(option_count as u64);
@@ -553,15 +555,17 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
     let projection_depth = 0_u64;
     let multiplicative_depth = extraction_depth + comparator_depth + indicator_depth;
     // The comparison-input path compares via one difference polynomial over
-    // [0, 2*score_domain_max] with no per-bit extraction. The selected
-    // schedule uses the multiplication-heavy all-powers table because it
-    // reaches the depth floor ceil(log2(2*max+1)).
+    // [0, 2*score_domain_max] with no per-bit extraction.
     let comparison_polynomial_degree = 2 * parameters.score_domain_max;
     let comparison_input_depth_optimal_comparator_depth =
         ceil_log2(comparison_polynomial_degree + 1);
-    let comparison_input_comparator_depth = comparison_input_depth_optimal_comparator_depth;
+    let comparison_input_comparator_depth =
+        fixed_baby_step_paterson_stockmeyer_depth(comparison_polynomial_degree);
+    let comparison_input_pre_comparison_refresh_level_drop = 1_u64;
     let comparison_input_multiplicative_depth =
         comparison_input_comparator_depth + indicator_depth + projection_depth;
+    let comparison_input_level_drop_count =
+        comparison_input_pre_comparison_refresh_level_drop + comparison_input_multiplicative_depth;
     let comparison_input_depth_optimal_multiplicative_depth =
         comparison_input_depth_optimal_comparator_depth + indicator_depth + projection_depth;
     let comparison_input_polynomial_evaluations = match parameters.rank_packing_method {
@@ -570,8 +574,7 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
     };
     let comparison_input_polynomial_ciphertext_multiplication_estimate =
         comparison_input_polynomial_evaluations
-            * usize::try_from(comparison_polynomial_degree.saturating_sub(1))
-                .expect("comparison degree fits usize");
+            * fixed_baby_step_paterson_stockmeyer_multiplications(comparison_polynomial_degree);
 
     json!({
         "scoreBitCount": bit_count,
@@ -583,16 +586,19 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
         "indicatorDepth": indicator_depth,
         "projectionDepth": projection_depth,
         "comparisonInputComparatorDepth": comparison_input_comparator_depth,
+        "comparisonInputPreComparisonRefreshLevelDrop": comparison_input_pre_comparison_refresh_level_drop,
         "comparisonInputMultiplicativeDepth": comparison_input_multiplicative_depth,
+        "comparisonInputLevelDropCount": comparison_input_level_drop_count,
         "comparisonInputDepthOptimalComparatorDepth": comparison_input_depth_optimal_comparator_depth,
         "comparisonInputDepthOptimalMultiplicativeDepth": comparison_input_depth_optimal_multiplicative_depth,
         "comparisonInputPolynomialEvaluationCount": comparison_input_polynomial_evaluations,
         "comparisonInputPolynomialCiphertextMultiplicationEstimate": comparison_input_polynomial_ciphertext_multiplication_estimate,
         "scoreBitHighDegreePolynomialSchedule": "paterson-stockmeyer",
         "comparisonInputPolynomialSchedule": match parameters.rank_packing_method {
-            RankPackingMethod::PerOptionBroadcast => "per-pair-depth-optimized-power-table",
-            RankPackingMethod::GeneratorOrdered => "per-shift-depth-optimized-power-table",
+            RankPackingMethod::PerOptionBroadcast => "per-pair-fixed-baby-step-paterson-stockmeyer",
+            RankPackingMethod::GeneratorOrdered => "per-shift-fixed-baby-step-paterson-stockmeyer",
         },
+        "comparisonInputBabyStepCount": DIRECT_COMPARISON_BABY_STEP_COUNT,
         "highDegreePolynomialSchedule": "mixed-by-selected-profile",
         "rankPackingMethod": parameters.rank_packing_method.profile_id(),
         "rotationCount": parameters.rank_packing_method.rotation_count(parameters.option_count),
@@ -623,6 +629,46 @@ fn paterson_stockmeyer_depth(degree: u64) -> u64 {
     }
 }
 
+fn fixed_baby_step_paterson_stockmeyer_depth(degree: u64) -> u64 {
+    paterson_stockmeyer_depth_for_baby_step_count(
+        degree,
+        u64::try_from(DIRECT_COMPARISON_BABY_STEP_COUNT).expect("baby-step count fits u64"),
+    )
+}
+
+fn paterson_stockmeyer_depth_for_baby_step_count(degree: u64, baby_step_count: u64) -> u64 {
+    if degree == 0 {
+        return 0;
+    }
+    if degree < baby_step_count {
+        return ceil_log2(degree + 1);
+    }
+    let block_count = (degree + 1).div_ceil(baby_step_count);
+    let baby_depth = ceil_log2(baby_step_count);
+    if block_count <= 1 {
+        baby_depth
+    } else {
+        baby_depth + ceil_log2(block_count - 1) + 1
+    }
+}
+
+fn fixed_baby_step_paterson_stockmeyer_multiplications(degree: u64) -> usize {
+    if degree == 0 {
+        return 0;
+    }
+    let baby_step_count =
+        u64::try_from(DIRECT_COMPARISON_BABY_STEP_COUNT).expect("baby-step count fits u64");
+    if degree < baby_step_count {
+        return usize::try_from(degree.saturating_sub(1)).expect("degree fits usize");
+    }
+    let block_count = (degree + 1).div_ceil(baby_step_count);
+    let baby_multiplications = baby_step_count.saturating_sub(1);
+    let giant_multiplications = block_count.saturating_sub(2);
+    let block_multiplications = block_count.saturating_sub(1);
+    usize::try_from(baby_multiplications + giant_multiplications + block_multiplications)
+        .expect("multiplication count fits usize")
+}
+
 fn integer_square_root_ceil(value: u64) -> u64 {
     let mut root = 1_u64;
     while root.saturating_mul(root) < value {
@@ -651,17 +697,17 @@ pub(crate) fn evaluation_noise_certificate(
     let depth = counts["multiplicativeDepth"].as_u64().unwrap_or(u64::MAX);
     let available_levels = DATA_PRIMES.len() as u64;
     // One ciphertext component limb is N u64 values; a two-component ciphertext
-    // at the full data basis is 2 * 16 * N * 8 bytes. A key-switching key at the
+    // at the full data basis is 2 * levels * N * 8 bytes. A key-switching key at the
     // full level is quadratic in the number of primes.
     let full_ciphertext_bytes = 2 * DATA_PRIMES.len() * POLYNOMIAL_DEGREE * 8;
     let full_key_switch_key_bytes =
         DATA_PRIMES.len() * 2 * DATA_PRIMES.len() * POLYNOMIAL_DEGREE * 8;
-    // A depth-D circuit still needs one retained limb after the final modulus
-    // switch: the full-rank-domain target tail passes at level 6 and fails at
-    // bottom level in the development evaluator, so a depth-14 direct
-    // comparison schedule can fit the 16-prime chain while a depth-15 schedule
-    // cannot.
-    let noise_headroom_levels = 1_u64;
+    // The active direct-comparison schedule spends one explicit modulus-switch
+    // refresh before the comparison polynomial, exits the comparison at level 5,
+    // and the full-rank-domain target tail decrypts at level 0 in development
+    // evidence. The certificate therefore counts both ciphertext
+    // multiplication depth and non-multiplicative level drops.
+    let noise_headroom_levels = 0_u64;
     let usable_multiplicative_depth = (available_levels - 1).saturating_sub(noise_headroom_levels);
     let depth_fits = depth <= usable_multiplicative_depth;
     let bit_sliced_profile_label = if depth_fits {
@@ -674,7 +720,11 @@ pub(crate) fn evaluation_noise_certificate(
     let comparison_input_depth = counts["comparisonInputMultiplicativeDepth"]
         .as_u64()
         .unwrap_or(u64::MAX);
-    let comparison_input_depth_fits = comparison_input_depth <= usable_multiplicative_depth;
+    let comparison_input_level_drops = counts["comparisonInputLevelDropCount"]
+        .as_u64()
+        .unwrap_or(u64::MAX);
+    let comparison_input_depth_fits = comparison_input_depth <= usable_multiplicative_depth
+        && comparison_input_level_drops <= usable_multiplicative_depth;
     let comparison_input_label = if comparison_input_depth_fits {
         "DirectScoreComparisonProfileFitsDepthBudget"
     } else {
@@ -698,7 +748,7 @@ pub(crate) fn evaluation_noise_certificate(
         "depthFitsModulusChain": selected_depth_fits,
         "bitSlicedDepthFitsModulusChain": depth_fits,
         "noiseHeadroomLevels": noise_headroom_levels,
-        "noiseHeadroomJustification": "development full-rank-domain projection tail requires one retained level beyond nominal multiplicative depth for exact decryption",
+        "noiseHeadroomJustification": "development full-rank-domain projection tail decrypts from comparison output level five through final level zero under the fixed baby-step direct-comparison schedule after one pre-comparison modulus-switch refresh",
         "usableMultiplicativeDepth": usable_multiplicative_depth,
         "bitSlicedProfileLabel": bit_sliced_profile_label,
         "comparisonInputProfileLabel": comparison_input_label,
@@ -808,13 +858,25 @@ pub(crate) fn top_k_ciphertext_hash(roots: &EvaluatorOutputRoots) -> CanonicalRe
     )
 }
 
-pub(crate) fn target_ciphertext_hash(roots: &EvaluatorOutputRoots) -> CanonicalResult<String> {
+pub(crate) fn target_ciphertext_hash(
+    parameters: &EvaluationParameters,
+    roots: &EvaluatorOutputRoots,
+) -> CanonicalResult<String> {
+    parameters.validate()?;
     derive_protocol_hash(
         "TargetCiphertextHash",
         &json!({
+            "optionCount": parameters.option_count,
+            "topCount": parameters.top_count,
+            "targetLayoutHash": target_layout_hash(parameters.option_count)?,
+            "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash(
+                parameters.option_count,
+                parameters.top_count,
+            )?,
             "targetIdRoot": roots.target_id_root,
             "targetOrderRoot": roots.target_order_root,
             "publicSlotMaskHash": roots.public_slot_mask_hash,
+            "outputEncodingHash": roots.output_encoding_hash,
         }),
     )
 }
@@ -827,7 +889,7 @@ pub(crate) fn top_k_evaluation_record(
 ) -> CanonicalResult<Value> {
     let evaluation_context = evaluation_context_hash(parameters)?;
     let top_k_ciphertext = top_k_ciphertext_hash(roots)?;
-    let target_ciphertext = target_ciphertext_hash(roots)?;
+    let target_ciphertext = target_ciphertext_hash(parameters, roots)?;
     let record = json!({
         "objectType": "TopKEvaluationRecord",
         "objectVersion": 1,
@@ -858,6 +920,7 @@ pub(crate) fn top_k_evaluation_record(
         },
         "encryptedRankAccumulationHash": encrypted_rank_accumulation_hash(parameters.option_count)?,
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash(parameters.option_count, parameters.top_count)?,
+        "targetLayoutHash": target_layout_hash(parameters.option_count)?,
         "topKCircuitHash": top_k_circuit_hash(parameters)?,
         "rotSetHash": parameters.rot_set_hash,
         "acceptedOutputCiphertextRoots": {
@@ -925,8 +988,9 @@ mod tests {
     use super::{
         EvaluationComparisonProfile, EvaluationParameters, EvaluatorOutputRoots, RankPackingMethod,
         appendix_d_public_input_statement, evaluation_context_hash, evaluation_noise_certificate,
-        target_proposal_hash, top_k_evaluation_record,
+        target_ciphertext_hash, target_proposal_hash, top_k_evaluation_record,
     };
+    use crate::bgv::evaluator::top_k::DIRECT_COMPARISON_BABY_STEP_COUNT;
 
     fn parameters() -> EvaluationParameters {
         EvaluationParameters {
@@ -986,12 +1050,124 @@ mod tests {
 
     #[test]
     fn target_proposal_changes_with_every_finality_bound_field() {
-        let parameters = parameters();
-        let mut record = top_k_evaluation_record(&parameters, &roots()).expect("record");
-        let proposal = target_proposal_hash(&parameters, &record).expect("proposal");
-        record["targetCiphertextHash"] = serde_json::Value::String("ff".repeat(64));
-        let mutated = target_proposal_hash(&parameters, &record).expect("mutated proposal");
-        assert_ne!(proposal, mutated);
+        let evaluation_parameters = parameters();
+        let output_roots = roots();
+        let record =
+            top_k_evaluation_record(&evaluation_parameters, &output_roots).expect("record");
+        let proposal = target_proposal_hash(&evaluation_parameters, &record).expect("proposal");
+
+        let mut different_canonical_ballot_set = parameters();
+        different_canonical_ballot_set.canonical_ballot_set_hash = "fa".repeat(64);
+        let different_canonical_ballot_set_record =
+            top_k_evaluation_record(&different_canonical_ballot_set, &output_roots)
+                .expect("canonical ballot set record");
+        assert_ne!(
+            proposal,
+            target_proposal_hash(
+                &different_canonical_ballot_set,
+                &different_canonical_ballot_set_record
+            )
+            .expect("canonical ballot set proposal")
+        );
+
+        let mut different_pre_target_head_roots = roots();
+        different_pre_target_head_roots.pre_target_board_head = "fb".repeat(64);
+        let different_pre_target_head_record =
+            top_k_evaluation_record(&evaluation_parameters, &different_pre_target_head_roots)
+                .expect("pre-target head record");
+        assert_ne!(
+            proposal,
+            target_proposal_hash(&evaluation_parameters, &different_pre_target_head_record)
+                .expect("pre-target head proposal")
+        );
+
+        let mut different_signature_roots = roots();
+        different_signature_roots.evaluator_signature = "fc".repeat(64);
+        let different_signature_record =
+            top_k_evaluation_record(&evaluation_parameters, &different_signature_roots)
+                .expect("signature record");
+        assert_ne!(
+            proposal,
+            target_proposal_hash(&evaluation_parameters, &different_signature_record)
+                .expect("signature proposal")
+        );
+
+        let mut different_top_count = parameters();
+        different_top_count.top_count = 4;
+        let different_top_count_record =
+            top_k_evaluation_record(&different_top_count, &output_roots).expect("top-count record");
+        assert_ne!(
+            proposal,
+            target_proposal_hash(&different_top_count, &different_top_count_record)
+                .expect("top-count proposal")
+        );
+
+        let mut different_mask_roots = roots();
+        different_mask_roots.public_slot_mask_hash = "fd".repeat(64);
+        let different_mask_record =
+            top_k_evaluation_record(&evaluation_parameters, &different_mask_roots)
+                .expect("mask record");
+        assert_ne!(
+            proposal,
+            target_proposal_hash(&evaluation_parameters, &different_mask_record)
+                .expect("mask proposal")
+        );
+
+        let mut different_target_record = record;
+        different_target_record["targetCiphertextHash"] =
+            serde_json::Value::String("ff".repeat(64));
+        assert_ne!(
+            proposal,
+            target_proposal_hash(&evaluation_parameters, &different_target_record)
+                .expect("target ciphertext proposal")
+        );
+    }
+
+    #[test]
+    fn target_ciphertext_hash_binds_layout_projection_mask_and_encoding() {
+        let evaluation_parameters = parameters();
+        let output_roots = roots();
+        let target_ciphertext = target_ciphertext_hash(&evaluation_parameters, &output_roots)
+            .expect("target ciphertext hash");
+        let record =
+            top_k_evaluation_record(&evaluation_parameters, &output_roots).expect("record");
+        assert_eq!(
+            record["targetCiphertextHash"],
+            serde_json::Value::String(target_ciphertext.clone())
+        );
+        assert!(record["targetLayoutHash"].as_str().is_some());
+
+        let mut different_top_count = parameters();
+        different_top_count.top_count = 4;
+        assert_ne!(
+            target_ciphertext,
+            target_ciphertext_hash(&different_top_count, &output_roots)
+                .expect("different projection hash")
+        );
+
+        let mut different_layout = parameters();
+        different_layout.option_count = 19;
+        assert_ne!(
+            target_ciphertext,
+            target_ciphertext_hash(&different_layout, &output_roots)
+                .expect("different layout hash")
+        );
+
+        let mut different_mask = roots();
+        different_mask.public_slot_mask_hash = "fe".repeat(64);
+        assert_ne!(
+            target_ciphertext,
+            target_ciphertext_hash(&evaluation_parameters, &different_mask)
+                .expect("different mask hash")
+        );
+
+        let mut different_encoding = roots();
+        different_encoding.output_encoding_hash = "fd".repeat(64);
+        assert_ne!(
+            target_ciphertext,
+            target_ciphertext_hash(&evaluation_parameters, &different_encoding)
+                .expect("different encoding hash")
+        );
     }
 
     #[test]
@@ -1068,9 +1244,9 @@ mod tests {
 
     #[test]
     fn noise_certificate_flags_depth_feasibility() {
-        // The full 200-domain direct-comparison profile fits the conservative
-        // usable-depth budget only with the depth-optimized comparison schedule.
-        // The bit-sliced profile remains rejected.
+        // The full 200-domain direct-comparison profile fits the usable-depth
+        // budget with the fixed baby-step comparison schedule. The bit-sliced
+        // profile remains rejected.
         let heavy = evaluation_noise_certificate(&parameters()).expect("heavy certificate");
         assert_eq!(
             heavy["profileLabel"],
@@ -1086,13 +1262,47 @@ mod tests {
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputMultiplicativeDepth"],
-            14
+            15
+        );
+        assert_eq!(
+            heavy["operationCounts"]["comparisonInputPreComparisonRefreshLevelDrop"],
+            1
+        );
+        assert_eq!(
+            heavy["operationCounts"]["comparisonInputLevelDropCount"],
+            16
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputDepthOptimalMultiplicativeDepth"],
             14
         );
-        assert_eq!(heavy["usableMultiplicativeDepth"], 14);
+        assert_eq!(heavy["usableMultiplicativeDepth"], 16);
+        assert_eq!(
+            heavy["operationCounts"]["comparisonInputBabyStepCount"],
+            DIRECT_COMPARISON_BABY_STEP_COUNT
+        );
+        assert_eq!(
+            heavy["operationCounts"]["comparisonInputPolynomialCiphertextMultiplicationEstimate"],
+            1007
+        );
+        for top_count in 1..=20 {
+            let mut top_count_parameters = parameters();
+            top_count_parameters.top_count = top_count;
+            let certificate =
+                evaluation_noise_certificate(&top_count_parameters).expect("top-count certificate");
+            assert_eq!(
+                certificate["profileLabel"], "DirectScoreComparisonProfileFitsDepthBudget",
+                "top_count={top_count}"
+            );
+            assert_eq!(
+                certificate["operationCounts"]["comparisonInputMultiplicativeDepth"], 15,
+                "top_count={top_count}"
+            );
+            assert_eq!(
+                certificate["operationCounts"]["comparisonInputLevelDropCount"], 16,
+                "top_count={top_count}"
+            );
+        }
         // A tiny domain fits the chain and is accepted.
         let mut small = parameters();
         small.score_domain_max = 3;

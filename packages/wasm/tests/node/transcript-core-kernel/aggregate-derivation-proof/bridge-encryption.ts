@@ -206,14 +206,15 @@ export const registerAggregateBridgeEncryptionTest = (
                         'BgvPublicKeyCoefficientMaterialBound',
                         'DecryptableBgvCiphertextConvention',
                         'TargetThresholdDecryptabilityCompatibilityCertified',
+                        'ProofFriendlyPlaintextCoefficientBindingRelationChecked',
+                        'ProofFriendlyPlaintextCoefficientLiftBindingChecked',
                         'CoefficientDomainCanonical',
                         'BridgeProofRelationChecked',
-                        'BridgeProofImplementationEvidenceOnly',
+                        'BridgeProofClaimClosureMissing',
                         'SharedWitnessZeroKnowledgeResponseDistributionChecked',
                         'BgvRandomnessErrorSupportPolynomialChecked',
                         'PlaintextCanonicalLiftProofChecked',
                         'AggregateDerivationFullVerificationPreconditionNotBound',
-                        'BridgeProofClaimClosureMissing',
                         'RepresentativeBridgeMatrixRowEvidence',
                     ]);
                     expect(bridgeEncryption).toMatchObject({
@@ -284,6 +285,9 @@ export const registerAggregateBridgeEncryptionTest = (
                             aggregateReducedCoordinateCount: 220,
                             aggregateDerivationVerificationScope:
                                 'AggregateDerivationFullVerificationPreconditionNotBound',
+                            bridgeClaimClosureStatus:
+                                'BridgeProofClaimClosureMissing',
+                            claimBearingBridgeEncryption: false,
                         });
                     const expectedChallengeContextHash =
                         deriveBridgeProofChallengeContextHash({
@@ -330,11 +334,11 @@ export const registerAggregateBridgeEncryptionTest = (
                             objectType: 'AggregateBridgeSharedWitnessProof',
                             proofModel:
                                 'fiat-shamir-linear-shared-response-rejection-sampled-v1',
-                            relationCheckCount: 2,
+                            relationCheckCount: 5,
                             maskAbsoluteBoundExclusive:
                                 '1766847064778384329583297500742918515827483896875618958121606201292619776',
                             responseAbsoluteBoundExclusive:
-                                '1766847064778384329583297500742918515822291600017084130493075704963399680',
+                                '1766847064778384329583297500742918175545116975937155494746998769524408320',
                             responseBoundModel:
                                 'uniform-240-bit-mask-common-output-rejection-sampled-v1',
                             responseBoundStatus:
@@ -344,7 +348,7 @@ export const registerAggregateBridgeEncryptionTest = (
                             responseEncoding:
                                 'signed-i256-little-endian-hex-v1',
                             responseShiftBoundExclusive:
-                                '5192296858534827628530496329220096',
+                                '340282366920938463463374607431768211456',
                             sameHiddenAggregateCoordinatesLinked: true,
                         },
                         bgvRandomnessBoundProofStatusEvidence: {
@@ -425,34 +429,44 @@ export const registerAggregateBridgeEncryptionTest = (
                         heParamHash,
                         objectType: 'AggregateBridgeProofStatement',
                         bridgeProofTargetContract: {
-                            ciphertextCoefficientEquationCount: 1_048_576,
-                            dataPrimeCount: 16,
+                            ciphertextCoefficientEquationCount: 1_114_112,
+                            dataPrimeCount: 17,
                             naiveLinearExpansionBackendStatus:
                                 'InfeasibleForEncryptedAggregateBridgeClaim',
                             plaintextCanonicalLiftProofStatus:
                                 'PlaintextCanonicalLiftProofChecked',
                             proofFriendlyPlaintextBindingRequired: true,
+                            proofFriendlyPlaintextBindingStatus:
+                                'ProofFriendlyPlaintextCoefficientBindingRelationChecked',
+                            proofFriendlyPlaintextBindingScheme:
+                                'ChunkedAdditiveModuleSisPlaintextCoefficientCommitment',
+                            proofFriendlyPlaintextLiftBindingRequired: true,
+                            proofFriendlyPlaintextLiftBindingStatus:
+                                'ProofFriendlyPlaintextCoefficientLiftBindingChecked',
                             publicPlaintextRootAcceptedAsClosureEvidence: false,
-                            sharedWitnessCheckCount: 2,
-                            sharedWitnessChallengeEntropyBits: 128,
+                            sharedWitnessCheckCount: 5,
+                            sharedWitnessChallengeEntropyBits: 230,
+                            sharedWitnessChallengeSamplingModel:
+                                'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
                             sharedWitnessRejectionAttemptLimit: 64,
                             sharedWitnessGrindingDiscountBitsPerCheck: 6,
-                            sharedWitnessRejectionRetryLossBits: 12,
+                            sharedWitnessRejectionRetryLossBits: 30,
                             sharedWitnessFullMatrixUnionBoundBits: 9,
-                            sharedWitnessRandomOracleQueryBoundBits: 0,
+                            sharedWitnessRandomOracleQueryBoundBits: 32,
                             sharedWitnessProofSystemLossBits: 0,
                             sharedWitnessChallengeBiasBits: 0,
                             sharedWitnessTargetBindingSoundnessBits: 128,
-                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
-                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230,
+                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
                             sharedWitnessEffectiveBindingBelowTarget: false,
                             sharedWitnessWeakestRelation:
                                 'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+                            sharedWitnessWeakestRelationModel:
+                                'aggregate-proof-ring-effective-binding-floor-v1',
+                            sharedWitnessWeakestRelationBitsPerCheck: 46,
                             sharedWitnessWeakestRelationModuli: [
                                 140_737_487_306_753, 140_737_486_716_929,
                             ],
-                            sharedWitnessWeakestRelationModulusProduct:
-                                '19807040250408114080301121537',
                             plaintextEncodingProofModuli: [
                                 140_737_487_306_753, 140_737_486_716_929,
                             ],
@@ -481,7 +495,7 @@ export const registerAggregateBridgeEncryptionTest = (
                                 aggregateQuotientCoordinateCount: 220,
                                 aggregateReducedCoordinateCount: 220,
                                 aggregateRelationRowCount: 224,
-                                bgvCiphertextEquationRowCount: 1_048_576,
+                                bgvCiphertextEquationRowCount: 1_114_112,
                                 bridgeProofProfileId:
                                     'EncryptedAggregateBridge-v1',
                                 commitmentOpeningCoordinateCount: 64,
@@ -495,13 +509,14 @@ export const registerAggregateBridgeEncryptionTest = (
                                     'bgv-batch-encoding-and-bgv-encryption-message',
                                 plaintextCoefficientCount: 32_768,
                                 plaintextEncodingQuotientCount: 32_768,
+                                plaintextBindingOpeningCoordinateCount: 8192,
                                 plaintextEncodingRelationRowCount: 32_768,
                                 sameWitnessLinkageModel:
                                     'SingleTranscriptSharedWitnessOrExplicitSameWitnessLinkRequired',
                                 separateSubproofsAcceptedForClosure: false,
                                 sharedReducedCoordinateColumnRole:
                                     'aggregate-reduction-and-bgv-plaintext-slot',
-                                sharedResponseScalarCount: 164_564,
+                                sharedResponseScalarCount: 172_756,
                             },
                             sharedWitnessLayoutHash: expect.any(
                                 String,
@@ -518,31 +533,40 @@ export const registerAggregateBridgeEncryptionTest = (
                             claimBearingBridgeEncryption: false,
                             sampledOnlyBridgeVerificationAccepted: false,
                             sharedWitnessBindingRequired: true,
-                            sharedWitnessChallengeEntropyBits: 128,
+                            sharedWitnessChallengeEntropyBits: 230,
+                            sharedWitnessChallengeSamplingModel:
+                                'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
                             sharedWitnessRejectionAttemptLimit: 64,
                             sharedWitnessGrindingDiscountBitsPerCheck: 6,
-                            sharedWitnessRejectionRetryLossBits: 12,
+                            sharedWitnessRejectionRetryLossBits: 30,
                             sharedWitnessFullMatrixUnionBoundBits: 9,
-                            sharedWitnessRandomOracleQueryBoundBits: 0,
+                            sharedWitnessRandomOracleQueryBoundBits: 32,
                             sharedWitnessProofSystemLossBits: 0,
                             sharedWitnessChallengeBiasBits: 0,
                             sharedWitnessTargetBindingSoundnessBits: 128,
-                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
-                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+                            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230,
+                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
                             sharedWitnessEffectiveBindingBelowTarget: false,
                             sharedWitnessWeakestRelation:
                                 'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+                            sharedWitnessWeakestRelationModel:
+                                'aggregate-proof-ring-effective-binding-floor-v1',
+                            sharedWitnessWeakestRelationBitsPerCheck: 46,
                             sharedWitnessWeakestRelationModuli: [
                                 140_737_487_306_753, 140_737_486_716_929,
                             ],
-                            sharedWitnessWeakestRelationModulusProduct:
-                                '19807040250408114080301121537',
                             plaintextEncodingProofModuli: [
                                 140_737_487_306_753, 140_737_486_716_929,
                             ],
                             plaintextEncodingProofModulusProduct:
                                 '19807040250408114080301121537',
                             plaintextEncodingProofModulusProductBitsFloor: 93,
+                            batchIntegerLiftProofModuli: [
+                                140_737_487_306_753, 140_737_486_716_929,
+                            ],
+                            batchIntegerLiftProofModulusProduct:
+                                '19807040250408114080301121537',
+                            batchIntegerLiftProofModulusProductBitsFloor: 93,
                         },
                     });
                     expect(
@@ -595,7 +619,7 @@ export const registerAggregateBridgeEncryptionTest = (
                         'BridgeProofEvidenceChecked',
                         'BridgeProofRelationChecked',
                         'EncryptedAggregateSingleContributionBridgeRelationChecked',
-                        'BridgeProofImplementationEvidenceOnly',
+                        'BridgeProofClaimClosureMissing',
                         'BgvPublicKeyCoefficientMaterialBound',
                         'DecryptableBgvCiphertextConvention',
                         'TargetThresholdDecryptabilityCompatibilityCertified',
@@ -603,8 +627,6 @@ export const registerAggregateBridgeEncryptionTest = (
                         'BgvRandomnessErrorSupportPolynomialChecked',
                         'PlaintextCanonicalLiftProofChecked',
                         'AggregateDerivationFullVerificationPreconditionNotBound',
-                        'BridgeProofClaimClosureMissing',
-                        'FinalBridgeTheoremPending',
                         'RepresentativeBridgeMatrixRowEvidence',
                     ]);
                     expect(bridgeVerification).toMatchObject({

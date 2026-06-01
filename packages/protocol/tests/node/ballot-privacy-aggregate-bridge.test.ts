@@ -80,7 +80,9 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateReducedCoordinateCount:
                     aggregateDerivationComponent.statement.shareVectorWidth,
                 aggregateDerivationVerificationScope:
-                    'AggregateDerivationFullVerificationPreconditionNotBound',
+                    'AggregateDerivationFullVerificationChecked',
+                bridgeClaimClosureStatus: 'BridgeProofClaimClosureMissing',
+                claimBearingBridgeEncryption: false,
             });
         const batchEncodingBoundCertificateHash = hash(
             'batch-encoding-bound-certificate-1',
@@ -158,9 +160,12 @@ describe('encrypted aggregate bridge objects', () => {
             level: 15,
             manifestHash: baseFields.manifestHash,
             aggregateDerivationVerificationScope:
-                'AggregateDerivationFullVerificationPreconditionNotBound',
+                'AggregateDerivationFullVerificationChecked',
             plaintextCanonicalLiftProofStatus:
                 'PlaintextCanonicalLiftProofChecked',
+            plaintextCoefficientBindingCommitmentHash: hash(
+                'plaintext-coefficient-binding-1',
+            ),
             plaintextEncodingBoundCertificateHash:
                 batchEncodingBoundCertificateHash,
             plaintextEncodingProofModuli: [
@@ -172,6 +177,13 @@ describe('encrypted aggregate bridge objects', () => {
             plaintextRoot: hash('bridge-plaintext-1'),
             pollSpecHash: baseFields.pollSpecHash,
             postVotingClosedContextHash: baseFields.postVotingClosedContextHash,
+            proofFriendlyPlaintextBindingStatus:
+                'ProofFriendlyPlaintextCoefficientBindingRelationChecked',
+            proofFriendlyPlaintextLiftBindingHash: hash(
+                'plaintext-lift-binding-1',
+            ),
+            proofFriendlyPlaintextLiftBindingStatus:
+                'ProofFriendlyPlaintextCoefficientLiftBindingChecked',
             proofProfileHash: bridgeProofProfileHash,
             rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
             rosterHash: baseFields.rosterHash,
@@ -185,27 +197,36 @@ describe('encrypted aggregate bridge objects', () => {
                 aggregateDerivationComponent.statement.shareVectorWidth,
             sharedWitnessBindingRequired: true,
             sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
-            sharedWitnessChallengeBitsPerCheck: 64,
-            sharedWitnessCheckCount: 2,
-            sharedWitnessChallengeEntropyBits: 128,
+            sharedWitnessChallengeBitsPerCheck: 46,
+            sharedWitnessCheckCount: 5,
+            sharedWitnessChallengeEntropyBits: 230,
+            sharedWitnessChallengeSamplingModel:
+                'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
             sharedWitnessRejectionAttemptLimit: 64,
             sharedWitnessGrindingDiscountBitsPerCheck: 6,
-            sharedWitnessRejectionRetryLossBits: 12,
+            sharedWitnessRejectionRetryLossBits: 30,
             sharedWitnessFullMatrixUnionBoundBits: 9,
-            sharedWitnessRandomOracleQueryBoundBits: 0,
+            sharedWitnessRandomOracleQueryBoundBits: 32,
             sharedWitnessProofSystemLossBits: 0,
             sharedWitnessChallengeBiasBits: 0,
             sharedWitnessTargetBindingSoundnessBits: 128,
-            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 186,
-            sharedWitnessEffectiveBindingSoundnessBitsFloor: 165,
+            sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230,
+            sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
             sharedWitnessEffectiveBindingBelowTarget: false,
             sharedWitnessWeakestRelation:
                 'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+            sharedWitnessWeakestRelationModel:
+                'aggregate-proof-ring-effective-binding-floor-v1',
+            sharedWitnessWeakestRelationBitsPerCheck: 46,
             sharedWitnessWeakestRelationModuli: [
                 140_737_487_306_753, 140_737_486_716_929,
             ],
-            sharedWitnessWeakestRelationModulusProduct:
+            batchIntegerLiftProofModuli: [
+                140_737_487_306_753, 140_737_486_716_929,
+            ],
+            batchIntegerLiftProofModulusProduct:
                 '19807040250408114080301121537',
+            batchIntegerLiftProofModulusProductBitsFloor: 93,
             sharedWitnessZeroKnowledgeStatus:
                 'SharedWitnessZeroKnowledgeResponseDistributionChecked',
             slotCount: 32_768,
@@ -237,6 +258,15 @@ describe('encrypted aggregate bridge objects', () => {
         );
         const bgvRandomnessBoundProofStatusHash = hash(
             'bridge-bgv-randomness-bound-status-1',
+        );
+        const plaintextCoefficientBindingCommitmentHash = hash(
+            'plaintext-coefficient-binding-1',
+        );
+        const proofFriendlyPlaintextLiftBindingHash = hash(
+            'plaintext-lift-binding-1',
+        );
+        const aggregateBridgeRelationHandoffRoot = hash(
+            'aggregate-bridge-relation-handoff-1',
         );
         const randomnessSourceEvidence = {
             callerSuppliedDevelopmentRandomness: false,
@@ -274,9 +304,15 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
+                bridgeClaimClosureVerified: false,
+                bridgeClaimVerificationStatus:
+                    'BridgeProofClaimClosureMissing' as const,
                 claimBearingBridgeEncryption: false,
+                plaintextCoefficientBindingCommitmentHash,
+                proofFriendlyPlaintextLiftBindingHash,
+                aggregateBridgeRelationHandoffRoot,
                 aggregateDerivationVerificationScope:
-                    'AggregateDerivationFullVerificationPreconditionNotBound' as const,
+                    'AggregateDerivationFullVerificationChecked' as const,
                 plaintextCanonicalLiftProofStatus:
                     'PlaintextCanonicalLiftProofChecked' as const,
                 sharedWitnessZeroKnowledgeStatusHash,
@@ -328,9 +364,15 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofTargetContractHash,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
+                bridgeClaimClosureVerified: false,
+                bridgeClaimVerificationStatus:
+                    'BridgeProofClaimClosureMissing' as const,
                 claimBearingBridgeEncryption: false,
+                plaintextCoefficientBindingCommitmentHash,
+                proofFriendlyPlaintextLiftBindingHash,
+                aggregateBridgeRelationHandoffRoot,
                 aggregateDerivationVerificationScope:
-                    'AggregateDerivationFullVerificationPreconditionNotBound' as const,
+                    'AggregateDerivationFullVerificationChecked' as const,
                 plaintextCanonicalLiftProofStatus:
                     'PlaintextCanonicalLiftProofChecked' as const,
                 sharedWitnessZeroKnowledgeStatusHash,

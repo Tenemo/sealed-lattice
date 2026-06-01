@@ -105,7 +105,7 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         ));
     }
 
-    let expected_bridge_encryption = generate_aggregate_bridge_encryption(&json!({
+    let mut generation_request = json!({
         "aggregateDerivationComponent": component,
         "setupPackage": setup_package,
         "aggregateWitness": witness,
@@ -121,21 +121,43 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "bridgeWitnessPrivacyProfileHash": bridge_witness_privacy_profile_hash,
         "heParamHash": he_param_hash,
         "includeCanonicalBytesHex": true,
-    }))?;
+    });
+    for field_name in [
+        "countedBallotPackages",
+        "closeRecord",
+        "contributorActionContext",
+        "casualMicroRosterAcknowledged",
+    ] {
+        if let Some(field_value) = request.get(field_name) {
+            generation_request[field_name] = field_value.clone();
+        }
+    }
+    let expected_bridge_encryption = generate_aggregate_bridge_encryption(&generation_request)?;
     compare_bridge_relation_public_artifacts(
         bridge_encryption,
         &expected_bridge_encryption,
         "bridgeEncryption",
     )?;
 
-    let public_verification = verify_aggregate_bridge_encryption(&json!({
+    let mut verification_request = json!({
         "aggregateDerivationComponent": component,
         "setupPackage": setup_package,
         "bridgeEncryption": bridge_encryption,
         "aggregateSelectionPolicyHash": aggregate_selection_policy_hash,
         "bridgeWitnessPrivacyProfileHash": bridge_witness_privacy_profile_hash,
         "heParamHash": he_param_hash,
-    }))?;
+    });
+    for field_name in [
+        "countedBallotPackages",
+        "closeRecord",
+        "contributorActionContext",
+        "casualMicroRosterAcknowledged",
+    ] {
+        if let Some(field_value) = request.get(field_name) {
+            verification_request[field_name] = field_value.clone();
+        }
+    }
+    let public_verification = verify_aggregate_bridge_encryption(&verification_request)?;
     let proof_bytes_hex =
         required_string_field(bridge_encryption, "bridgeProofBytesHex", "bridgeEncryption")?;
     let proof_byte_length = u64::try_from(proof_bytes_hex.len() / 2).map_err(|_| {
@@ -191,26 +213,45 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
     )?;
     let public_verifier_checked_relation =
         public_verification["bridgeProofVerificationStatus"] == BRIDGE_PROOF_CHECKED_STATUS;
+    let bridge_claim_verification_status = required_string_field(
+        &public_verification,
+        "bridgeClaimVerificationStatus",
+        "bridgeVerification",
+    )?;
+    let bridge_claim_closure_verified = public_verification["bridgeClaimClosureVerified"]
+        .as_bool()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "bridge verification claim closure flag must be a boolean",
+            )
+        })?;
+    let claim_bearing_bridge_encryption = public_verification["claimBearingBridgeEncryption"]
+        .as_bool()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "bridge verification claim-bearing flag must be a boolean",
+            )
+        })?;
     let private_relation_status_labels = if public_verifier_checked_relation {
         vec![
             "AggregateBridgePrivateRelationSatisfied",
             "EncryptedAggregateBridgePrivateRelationEvaluator",
             "BridgeProofRelationChecked",
-            "BridgeProofImplementationEvidenceOnly",
+            bridge_claim_verification_status,
             "BgvPublicKeyCoefficientMaterialBound",
             DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS,
             TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS,
             SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
             BGV_RANDOMNESS_BOUND_PROOF_STATUS,
-            "BridgeProofClaimClosureMissing",
-            "FinalBridgeTheoremPending",
         ]
     } else {
         vec![
             "AggregateBridgePrivateRelationSatisfied",
             "EncryptedAggregateBridgePrivateRelationEvaluator",
             "BridgeProofBackendStillRequired",
-            "FinalBridgeTheoremPending",
+            BRIDGE_CLAIM_MISSING_STATUS,
         ]
     };
     let mut private_relation_status_labels = private_relation_status_labels;
@@ -227,16 +268,16 @@ pub(super) fn evaluate_aggregate_bridge_relation(request: &Value) -> CanonicalRe
         "bridgeEvidenceVerificationStatus": public_verification["bridgeEvidenceVerificationStatus"],
         "publicArtifactWitnessCleanResult": true,
         "bridgeProofBackendStillRequired": !public_verifier_checked_relation,
-        "scopedBridgeRelationClosure": false,
-        "bridgeClaimClosureVerified": false,
-        "bridgeClaimVerificationStatus": BRIDGE_CLAIM_CLOSURE_STATUS,
+        "scopedBridgeRelationClosure": bridge_claim_closure_verified,
+        "bridgeClaimClosureVerified": bridge_claim_closure_verified,
+        "bridgeClaimVerificationStatus": bridge_claim_verification_status,
         "bgvEncryptionKeyMaterialKind": BGV_ENCRYPTION_KEY_MATERIAL_KIND,
         "developmentKeyOnly": DEVELOPMENT_KEY_ONLY,
         "proverRandomnessSource": prover_randomness_source,
         "encryptionRandomnessSeedSource": encryption_randomness_seed_source,
         "randomnessSourceEvidence": bridge_encryption["randomnessSourceEvidence"],
         "thresholdDecryptable": THRESHOLD_DECRYPTABLE,
-        "claimBearingBridgeEncryption": CLAIM_BEARING_BRIDGE_ENCRYPTION,
+        "claimBearingBridgeEncryption": claim_bearing_bridge_encryption,
         "participantCount": dimensions.participant_count,
         "optionCount": dimensions.option_count,
         "claimTier": dimensions.claim_tier,
