@@ -5,7 +5,8 @@ use crate::{
         evaluator::{
             circuit::{
                 EvaluatorContext, evaluate_polynomial,
-                evaluate_polynomial_with_fixed_baby_step_count, modulus_switch_to, multiply,
+                evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch,
+                modulus_switch_to, multiply, multiply_without_immediate_modulus_switch,
                 normalize_scaling,
             },
             engine::{
@@ -28,6 +29,11 @@ pub(crate) const DIRECT_COMPARISON_BABY_STEP_COUNT: usize = 31;
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
 const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;
 const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
+
+pub(crate) struct PackedRankEvaluation {
+    pub(crate) packed_ranks: Ciphertext,
+    exact_rank_indicators: Vec<Ciphertext>,
+}
 
 // Number of score bits for the certified score domain [0, score_domain_max].
 pub(crate) fn score_bit_count(score_domain_max: u64) -> usize {
@@ -296,113 +302,37 @@ pub(crate) fn top_k_indicator_and_order_value(
         return Ok((selected_every_slot, rank_plus_one));
     }
 
-    let zero_product =
-        rank_zero_suffix_product(context, &normalized_rank, top_count, option_count)?;
-    let indicator_prefix_values = vec![1_u64; top_count];
-    let order_prefix_values = (1..=top_count)
-        .map(|rank_value| u64::try_from(rank_value).expect("top_count fits u64"))
+    let indicator_values = (0..option_count)
+        .map(|rank_value| u64::from(rank_value < top_count))
         .collect::<Vec<_>>();
-    let indicator = evaluate_rank_prefix_quotient(
-        context,
-        &zero_product,
-        &normalized_rank,
-        option_count,
-        top_count,
-        &indicator_prefix_values,
-    )?;
-    let order_value = evaluate_rank_prefix_quotient(
-        context,
-        &zero_product,
-        &normalized_rank,
-        option_count,
-        top_count,
-        &order_prefix_values,
-    )?;
+    let order_values = (0..option_count)
+        .map(|rank_value| {
+            if rank_value < top_count {
+                u64::try_from(rank_value + 1).expect("rank value fits u64")
+            } else {
+                0
+            }
+        })
+        .collect::<Vec<_>>();
+    let indicator = evaluate_rank_lookup(context, &normalized_rank, &indicator_values)?;
+    let order_value = evaluate_rank_lookup(context, &normalized_rank, &order_values)?;
 
     Ok((indicator, order_value))
 }
 
-fn evaluate_rank_prefix_quotient(
+fn evaluate_rank_lookup(
     context: &EvaluatorContext,
-    zero_product: &Ciphertext,
     normalized_rank: &Ciphertext,
-    option_count: usize,
-    top_count: usize,
-    prefix_values: &[u64],
+    values: &[u64],
 ) -> CanonicalResult<Ciphertext> {
-    if prefix_values.len() != top_count {
+    if values.is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "rank prefix values must contain exactly one value per selected rank",
+            "rank lookup values must contain at least one value",
         ));
     }
-    let quotient_values = (0..top_count)
-        .map(|rank_value| {
-            let denominator = (top_count..option_count).try_fold(1_u64, |product, root| {
-                mul_mod(
-                    product,
-                    signed_residue(rank_value as i64 - root as i64, PLAINTEXT_MODULUS),
-                    PLAINTEXT_MODULUS,
-                )
-            })?;
-            let inverse = inverse_mod(denominator, PLAINTEXT_MODULUS)?;
-            mul_mod(prefix_values[rank_value], inverse, PLAINTEXT_MODULUS)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let quotient_polynomial = interpolate_coefficients(&quotient_values)?;
-    if quotient_polynomial.len() == 1 {
-        return scalar_mul(
-            zero_product,
-            i64::try_from(quotient_polynomial[0]).expect("coefficient fits i64"),
-        );
-    }
-    let quotient = evaluate_polynomial(context, normalized_rank, &quotient_polynomial)?;
-
-    multiply(context, zero_product, &quotient)
-}
-
-fn rank_zero_suffix_product(
-    context: &EvaluatorContext,
-    normalized_rank: &Ciphertext,
-    top_count: usize,
-    option_count: usize,
-) -> CanonicalResult<Ciphertext> {
-    let mut linear_factors = Vec::with_capacity(option_count - top_count);
-    for root in top_count..option_count {
-        let negated_root = signed_residue(-(root as i64), PLAINTEXT_MODULUS);
-        linear_factors.push(add_plaintext_coefficients(
-            normalized_rank,
-            &broadcast_constant(negated_root),
-        )?);
-    }
-
-    multiply_balanced(context, linear_factors)
-}
-
-fn multiply_balanced(
-    context: &EvaluatorContext,
-    factors: Vec<Ciphertext>,
-) -> CanonicalResult<Ciphertext> {
-    if factors.is_empty() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "rank prefix product requires at least one zero factor",
-        ));
-    }
-    let mut current = factors;
-    while current.len() > 1 {
-        let mut next = Vec::with_capacity(current.len().div_ceil(2));
-        for pair in current.chunks(2) {
-            if pair.len() == 1 {
-                next.push(pair[0].clone());
-            } else {
-                next.push(multiply(context, &pair[0], &pair[1])?);
-            }
-        }
-        current = next;
-    }
-
-    Ok(current.pop().expect("non-empty product has one result"))
+    let polynomial = interpolate_coefficients(values)?;
+    evaluate_polynomial(context, normalized_rank, &polynomial)
 }
 
 // The plaintext selector polynomial placing a broadcast value into a single
@@ -822,6 +752,25 @@ pub(crate) fn evaluate_packed_ranks_from_packed_scores(
     score_domain_max: u64,
     seed_hex: &str,
 ) -> CanonicalResult<Ciphertext> {
+    Ok(evaluate_packed_rank_evaluation_from_packed_scores(
+        context,
+        packed_scores,
+        option_count,
+        score_domain_max,
+        seed_hex,
+        0,
+    )?
+    .packed_ranks)
+}
+
+pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores(
+    context: &EvaluatorContext,
+    packed_scores: &Ciphertext,
+    option_count: usize,
+    score_domain_max: u64,
+    seed_hex: &str,
+    exact_rank_count: usize,
+) -> CanonicalResult<PackedRankEvaluation> {
     if option_count < 2 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -834,9 +783,16 @@ pub(crate) fn evaluate_packed_ranks_from_packed_scores(
             "packed top-k rank evaluation exceeds the generator-ordered slot window",
         ));
     }
+    if exact_rank_count > option_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "exact rank derivation cannot request more ranks than options",
+        ));
+    }
     let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_max)?;
     let shift_constant = broadcast_constant(score_domain_max);
     let mut rank_terms = Vec::with_capacity(2 * (option_count - 1));
+    let mut ahead_terms_by_option = vec![Vec::with_capacity(option_count - 1); option_count];
     for shift in 1..option_count {
         let galois_element = galois_power(shift);
         let shifted_scores = rotate_with_compact_positive_generator_basis(
@@ -849,9 +805,13 @@ pub(crate) fn evaluate_packed_ranks_from_packed_scores(
         let difference = ciphertext_sub(packed_scores, &shifted_scores)?;
         let shifted_difference =
             add_plaintext_coefficients(&normalize_scaling(&difference)?, &shift_constant)?;
+        let refreshed_shifted_difference = modulus_switch_to(
+            &shifted_difference,
+            shifted_difference.level.saturating_sub(1),
+        )?;
         let greater_or_equal = evaluate_direct_comparison_polynomial(
             context,
-            &shifted_difference,
+            &refreshed_shifted_difference,
             &greater_or_equal_polynomial,
         )?;
         let lower_pair_mask = packed_pair_lower_mask(option_count, shift)?;
@@ -870,11 +830,162 @@ pub(crate) fn evaluate_packed_ranks_from_packed_scores(
             lower_beats_higher_for_return.level,
             &format!("{seed_hex}-packed-rank-inverse-galois-{shift}"),
         )?;
+        for lower_option in 0..(option_count - shift) {
+            let higher_option = lower_option + shift;
+            ahead_terms_by_option[lower_option].push(higher_beats_lower.clone());
+            ahead_terms_by_option[higher_option].push(lower_beats_higher_at_higher_slot.clone());
+        }
         rank_terms.push(higher_beats_lower);
         rank_terms.push(lower_beats_higher_at_higher_slot);
     }
 
-    sum_aligned(&rank_terms)
+    let packed_ranks = sum_aligned(&rank_terms)?;
+    let exact_rank_indicators = if exact_rank_count == 0 {
+        Vec::new()
+    } else {
+        exact_rank_indicators_from_ahead_terms(
+            context,
+            &ahead_terms_by_option,
+            option_count,
+            exact_rank_count,
+        )?
+    };
+
+    Ok(PackedRankEvaluation {
+        packed_ranks,
+        exact_rank_indicators,
+    })
+}
+
+fn exact_rank_indicators_from_ahead_terms(
+    context: &EvaluatorContext,
+    ahead_terms_by_option: &[Vec<Ciphertext>],
+    option_count: usize,
+    exact_rank_count: usize,
+) -> CanonicalResult<Vec<Ciphertext>> {
+    let mut masked_terms_by_rank = vec![Vec::with_capacity(option_count); exact_rank_count];
+    for (option_index, ahead_terms) in ahead_terms_by_option.iter().enumerate() {
+        if ahead_terms.len() != option_count - 1 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "exact rank derivation requires one ahead indicator for every other option",
+            ));
+        }
+        let option_rank_indicators =
+            exact_rank_indicators_for_option(context, ahead_terms, exact_rank_count)?;
+        let option_selector = packed_score_slot_selector(&[option_index])?;
+        for (rank_value, indicator) in option_rank_indicators.iter().enumerate() {
+            masked_terms_by_rank[rank_value].push(plaintext_mul(
+                &normalize_scaling(indicator)?,
+                &option_selector,
+            )?);
+        }
+    }
+
+    masked_terms_by_rank
+        .into_iter()
+        .map(|rank_terms| sum_aligned(&rank_terms))
+        .collect()
+}
+
+fn exact_rank_indicators_for_option(
+    context: &EvaluatorContext,
+    ahead_terms: &[Ciphertext],
+    exact_rank_count: usize,
+) -> CanonicalResult<Vec<Ciphertext>> {
+    if exact_rank_count == 0 {
+        return Ok(Vec::new());
+    }
+    let factors = ahead_terms
+        .iter()
+        .map(|ahead| {
+            let bit = normalize_scaling(ahead)?;
+            let one = encrypted_one_like(&bit)?;
+            let not_bit = ciphertext_sub(&one, &bit)?;
+
+            Ok(vec![not_bit, bit])
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    multiply_ciphertext_polynomials_balanced(context, factors, exact_rank_count - 1)
+}
+
+fn multiply_ciphertext_polynomials_balanced(
+    context: &EvaluatorContext,
+    factors: Vec<Vec<Ciphertext>>,
+    max_degree: usize,
+) -> CanonicalResult<Vec<Ciphertext>> {
+    if factors.is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "exact rank derivation requires at least one factor",
+        ));
+    }
+    let mut current = factors;
+    while current.len() > 1 {
+        let defer_terminal_switch = current.len() == 2;
+        let mut next = Vec::with_capacity(current.len().div_ceil(2));
+        for pair in current.chunks(2) {
+            if pair.len() == 1 {
+                next.push(pair[0].clone());
+            } else {
+                next.push(multiply_ciphertext_polynomials(
+                    context,
+                    &pair[0],
+                    &pair[1],
+                    max_degree,
+                    defer_terminal_switch,
+                )?);
+            }
+        }
+        current = next;
+    }
+
+    let mut coefficients = current.pop().expect("non-empty product has one result");
+    while coefficients.len() <= max_degree {
+        coefficients.push(scalar_mul(&coefficients[0], 0)?);
+    }
+
+    Ok(coefficients)
+}
+
+fn multiply_ciphertext_polynomials(
+    context: &EvaluatorContext,
+    left: &[Ciphertext],
+    right: &[Ciphertext],
+    max_degree: usize,
+    defer_modulus_switch: bool,
+) -> CanonicalResult<Vec<Ciphertext>> {
+    let mut products_by_degree = vec![Vec::new(); max_degree + 1];
+    for (left_degree, left_coefficient) in left.iter().enumerate() {
+        for (right_degree, right_coefficient) in right.iter().enumerate() {
+            let degree = left_degree + right_degree;
+            if degree > max_degree {
+                continue;
+            }
+            let product = if defer_modulus_switch {
+                multiply_without_immediate_modulus_switch(
+                    context,
+                    left_coefficient,
+                    right_coefficient,
+                )?
+            } else {
+                multiply(context, left_coefficient, right_coefficient)?
+            };
+            products_by_degree[degree].push(product);
+        }
+    }
+
+    products_by_degree
+        .into_iter()
+        .map(|products| {
+            if products.is_empty() {
+                scalar_mul(&left[0], 0)
+            } else {
+                sum_aligned(&products)
+            }
+        })
+        .collect()
 }
 
 // Encrypted sparse target projection result.
@@ -889,8 +1000,55 @@ pub(crate) fn project_packed_sparse_target(
     option_count: usize,
     top_count: usize,
 ) -> CanonicalResult<EncryptedSparseTarget> {
-    let (indicators, order_values) =
-        top_k_indicator_and_order_value(context, packed_ranks, option_count, top_count)?;
+    let rank_evaluation = PackedRankEvaluation {
+        packed_ranks: packed_ranks.clone(),
+        exact_rank_indicators: Vec::new(),
+    };
+    project_packed_sparse_target_from_rank_evaluation(
+        context,
+        &rank_evaluation,
+        option_count,
+        top_count,
+    )
+}
+
+pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
+    context: &EvaluatorContext,
+    rank_evaluation: &PackedRankEvaluation,
+    option_count: usize,
+    top_count: usize,
+) -> CanonicalResult<EncryptedSparseTarget> {
+    let (indicators, order_values) = if top_count == option_count {
+        top_k_indicator_and_order_value(
+            context,
+            &rank_evaluation.packed_ranks,
+            option_count,
+            top_count,
+        )?
+    } else if rank_evaluation.exact_rank_indicators.len() >= top_count {
+        let indicator_terms = rank_evaluation.exact_rank_indicators[..top_count].to_vec();
+        let indicators = sum_aligned(&indicator_terms)?;
+        let order_terms = rank_evaluation.exact_rank_indicators[..top_count]
+            .iter()
+            .enumerate()
+            .map(|(rank_value, indicator)| {
+                scalar_mul(
+                    &normalize_scaling(indicator)?,
+                    i64::try_from(rank_value + 1).expect("rank value fits i64"),
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let order_values = sum_aligned(&order_terms)?;
+
+        (indicators, order_values)
+    } else {
+        top_k_indicator_and_order_value(
+            context,
+            &rank_evaluation.packed_ranks,
+            option_count,
+            top_count,
+        )?
+    };
     let id_weights = (0..option_count)
         .map(|option| {
             (
@@ -1063,7 +1221,7 @@ pub(crate) fn evaluate_direct_comparison_polynomial(
     comparison_input: &Ciphertext,
     polynomial: &[u64],
 ) -> CanonicalResult<Ciphertext> {
-    evaluate_polynomial_with_fixed_baby_step_count(
+    evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
         context,
         comparison_input,
         polynomial,
@@ -1143,11 +1301,12 @@ mod tests {
         aggregate_score_slot, ahead_indicator, bit_extraction_polynomials,
         bit_sliced_greater_than_and_equal, broadcast_constant, comparison_polynomials,
         derive_score_bits, evaluate_direct_comparison_polynomial,
-        evaluate_packed_ranks_via_difference, evaluate_top_k_via_difference,
-        galois_element_moving_slot_to_target, galois_power, generator_exponent_or_conjugated,
-        generator_power_basis_for_exponent, interpolate_coefficients, pack_broadcast_scores,
-        packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
-        packed_score_slot, project_packed_sparse_target, project_sparse_target, score_bit_count,
+        evaluate_packed_rank_evaluation_from_packed_scores, evaluate_packed_ranks_via_difference,
+        evaluate_top_k_via_difference, galois_element_moving_slot_to_target, galois_power,
+        generator_exponent_or_conjugated, generator_power_basis_for_exponent,
+        interpolate_coefficients, pack_broadcast_scores, packed_rank_forward_basis_galois_elements,
+        packed_rank_return_basis_galois_elements, packed_score_slot,
+        project_packed_sparse_target_from_rank_evaluation, project_sparse_target, score_bit_count,
         selected_evaluator_rotation_key_schedule, top_k_indicator, top_k_order_value,
     };
     use crate::bgv::evaluator::{
@@ -1545,16 +1704,18 @@ mod tests {
             &[282, 118]
         );
 
-        let packed_ranks = evaluate_packed_ranks_via_difference(
+        let packed_rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores(
             &context,
-            &score_ciphertexts,
+            &packed_scores,
+            scores.len(),
             200,
             "packed-target-test",
+            1,
         )
-        .expect("packed ranks");
+        .expect("packed rank evaluation");
         let rank_slots = context
             .key()
-            .decrypt_to_slots(&packed_ranks)
+            .decrypt_to_slots(&packed_rank_evaluation.packed_ranks)
             .expect("packed rank slots");
         assert_eq!(
             (0..scores.len())
@@ -1562,8 +1723,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0, 1]
         );
-        let target =
-            project_packed_sparse_target(&context, &packed_ranks, scores.len(), 1).expect("target");
+        let target = project_packed_sparse_target_from_rank_evaluation(
+            &context,
+            &packed_rank_evaluation,
+            scores.len(),
+            1,
+        )
+        .expect("target");
         let id_slots = context
             .key()
             .decrypt_to_slots(&target.target_id)
@@ -1594,15 +1760,23 @@ mod tests {
             .enumerate()
             .map(|(option, score)| encrypt_broadcast(&context, *score, &format!("score-{option}")))
             .collect::<Vec<_>>();
-        let packed_ranks = evaluate_packed_ranks_via_difference(
+        let packed_scores = pack_broadcast_scores(&score_ciphertexts).expect("packed scores");
+        let packed_rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores(
             &context,
-            &score_ciphertexts,
+            &packed_scores,
+            scores.len(),
             4,
             "packed-rank-target-four",
+            2,
         )
         .expect("ranks");
-        let packed_target =
-            project_packed_sparse_target(&context, &packed_ranks, scores.len(), 2).expect("target");
+        let packed_target = project_packed_sparse_target_from_rank_evaluation(
+            &context,
+            &packed_rank_evaluation,
+            scores.len(),
+            2,
+        )
+        .expect("target");
         let target_id_slots = key
             .decrypt_to_slots(&packed_target.target_id)
             .expect("target id");
@@ -1640,28 +1814,5 @@ mod tests {
         assert_eq!(&order_slots[..5], &[1, 2, 10, 0, 0]);
         assert_eq!(indicator.level, 1);
         assert_eq!(order_value.level, 1);
-    }
-
-    #[test]
-    #[ignore = "heavy full-rank-domain projection tail; run with --ignored"]
-    fn full_rank_domain_projection_tail_decrypts_from_level_five() {
-        let context =
-            EvaluatorContext::new("full-rank-domain-tail-level-five", 5).expect("context");
-        let key = context.key();
-        let rank_ciphertext = modulus_switch_to(
-            &key.encrypt_slots(&[0, 1, 9, 10, 19], "full-rank-domain-level-five-values")
-                .expect("encrypt ranks"),
-            5,
-        )
-        .expect("level");
-        let indicator = top_k_indicator(&context, &rank_ciphertext, 20, 10).expect("indicator");
-        let order_value = top_k_order_value(&context, &rank_ciphertext, 20, 10).expect("order");
-        let indicator_slots = key.decrypt_to_slots(&indicator).expect("indicator slots");
-        let order_slots = key.decrypt_to_slots(&order_value).expect("order slots");
-
-        assert_eq!(&indicator_slots[..5], &[1, 1, 1, 0, 0]);
-        assert_eq!(&order_slots[..5], &[1, 2, 10, 0, 0]);
-        assert_eq!(indicator.level, 0);
-        assert_eq!(order_value.level, 0);
     }
 }

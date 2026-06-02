@@ -543,15 +543,17 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
     // depth-optimal power tables for small polynomials and Paterson-Stockmeyer
     // for high-degree polynomials. The active direct comparison path uses a
     // fixed baby-step Paterson-Stockmeyer split for the score-domain-200
-    // profile and keeps the comparison input at the full data level so the
-    // packed ranks exit one level above the rank-prefix projection tail.
+    // profile, refreshes the comparison input once, and defers only the
+    // terminal PS product modulus switch so packed ranks exit one level above
+    // the rank-prefix projection tail.
     let extraction_depth = implemented_polynomial_depth(domain_points - 1);
     let comparator_depth = bit_count as u64 + 2;
     let indicator_depth = ceil_log2(option_count as u64);
     // The sparse projection itself is a plaintext mask/scalar assembly. Target
-    // order is evaluated as a factored rank-prefix polynomial, so projection
-    // does not add a ciphertext multiplication beyond the rank indicator/order
-    // depth.
+    // indicator/order values are derived from exact encrypted rank indicators
+    // computed as a balanced Boolean product over per-pair ahead indicators, so
+    // projection does not add a ciphertext multiplication beyond the rank
+    // indicator/order depth.
     let projection_depth = 0_u64;
     let multiplicative_depth = extraction_depth + comparator_depth + indicator_depth;
     // The comparison-input path compares via one difference polynomial over
@@ -561,11 +563,17 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
         ceil_log2(comparison_polynomial_degree + 1);
     let comparison_input_comparator_depth =
         fixed_baby_step_paterson_stockmeyer_depth(comparison_polynomial_degree);
-    let comparison_input_pre_comparison_refresh_level_drop = 0_u64;
+    let comparison_input_pre_comparison_refresh_level_drop = 1_u64;
     let comparison_input_multiplicative_depth =
         comparison_input_comparator_depth + indicator_depth + projection_depth;
-    let comparison_input_level_drop_count =
-        comparison_input_pre_comparison_refresh_level_drop + comparison_input_multiplicative_depth;
+    let comparison_input_rank_projection_level_drop = if parameters.top_count == option_count {
+        0
+    } else {
+        indicator_depth.saturating_sub(1)
+    };
+    let comparison_input_level_drop_count = comparison_input_pre_comparison_refresh_level_drop
+        + comparison_input_comparator_depth
+        + comparison_input_rank_projection_level_drop;
     let comparison_input_depth_optimal_multiplicative_depth =
         comparison_input_depth_optimal_comparator_depth + indicator_depth + projection_depth;
     let comparison_input_polynomial_evaluations = match parameters.rank_packing_method {
@@ -575,6 +583,12 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
     let comparison_input_polynomial_ciphertext_multiplication_estimate =
         comparison_input_polynomial_evaluations
             * fixed_baby_step_paterson_stockmeyer_multiplications(comparison_polynomial_degree);
+    let comparison_input_rank_projection_ciphertext_multiplication_estimate =
+        if parameters.top_count == option_count {
+            0
+        } else {
+            exact_rank_projection_multiplications(option_count, parameters.top_count)
+        };
 
     json!({
         "scoreBitCount": bit_count,
@@ -589,10 +603,12 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
         "comparisonInputPreComparisonRefreshLevelDrop": comparison_input_pre_comparison_refresh_level_drop,
         "comparisonInputMultiplicativeDepth": comparison_input_multiplicative_depth,
         "comparisonInputLevelDropCount": comparison_input_level_drop_count,
+        "comparisonInputRankProjectionLevelDrop": comparison_input_rank_projection_level_drop,
         "comparisonInputDepthOptimalComparatorDepth": comparison_input_depth_optimal_comparator_depth,
         "comparisonInputDepthOptimalMultiplicativeDepth": comparison_input_depth_optimal_multiplicative_depth,
         "comparisonInputPolynomialEvaluationCount": comparison_input_polynomial_evaluations,
         "comparisonInputPolynomialCiphertextMultiplicationEstimate": comparison_input_polynomial_ciphertext_multiplication_estimate,
+        "comparisonInputRankProjectionCiphertextMultiplicationEstimate": comparison_input_rank_projection_ciphertext_multiplication_estimate,
         "scoreBitHighDegreePolynomialSchedule": "paterson-stockmeyer",
         "comparisonInputPolynomialSchedule": match parameters.rank_packing_method {
             RankPackingMethod::PerOptionBroadcast => "per-pair-fixed-baby-step-paterson-stockmeyer",
@@ -630,10 +646,16 @@ fn paterson_stockmeyer_depth(degree: u64) -> u64 {
 }
 
 fn fixed_baby_step_paterson_stockmeyer_depth(degree: u64) -> u64 {
-    paterson_stockmeyer_depth_for_baby_step_count(
+    let base_depth = paterson_stockmeyer_depth_for_baby_step_count(
         degree,
         u64::try_from(DIRECT_COMPARISON_BABY_STEP_COUNT).expect("baby-step count fits u64"),
-    )
+    );
+    if degree < u64::try_from(DIRECT_COMPARISON_BABY_STEP_COUNT).expect("baby-step count fits u64")
+    {
+        base_depth
+    } else {
+        base_depth.saturating_sub(1)
+    }
 }
 
 fn paterson_stockmeyer_depth_for_baby_step_count(degree: u64, baby_step_count: u64) -> u64 {
@@ -670,6 +692,37 @@ fn fixed_baby_step_paterson_stockmeyer_multiplications(degree: u64) -> usize {
         .expect("multiplication count fits usize")
 }
 
+fn exact_rank_projection_multiplications(option_count: usize, exact_rank_count: usize) -> usize {
+    if option_count < 2 || exact_rank_count == 0 {
+        return 0;
+    }
+    let max_degree = exact_rank_count - 1;
+    let mut degrees = vec![1_usize; option_count - 1];
+    let mut multiplications = 0_usize;
+    while degrees.len() > 1 {
+        let mut next = Vec::with_capacity(degrees.len().div_ceil(2));
+        for pair in degrees.chunks(2) {
+            if pair.len() == 1 {
+                next.push(pair[0]);
+                continue;
+            }
+            let left_degree = pair[0];
+            let right_degree = pair[1];
+            for left in 0..=left_degree {
+                for right in 0..=right_degree {
+                    if left + right <= max_degree {
+                        multiplications += 1;
+                    }
+                }
+            }
+            next.push((left_degree + right_degree).min(max_degree));
+        }
+        degrees = next;
+    }
+
+    multiplications * option_count
+}
+
 fn integer_square_root_ceil(value: u64) -> u64 {
     let mut root = 1_u64;
     while root.saturating_mul(root) < value {
@@ -703,9 +756,9 @@ pub(crate) fn evaluation_noise_certificate(
     let full_ciphertext_bytes = 2 * DATA_PRIMES.len() * POLYNOMIAL_DEGREE * 8;
     let full_key_switch_key_bytes =
         DATA_PRIMES.len() * 2 * DATA_PRIMES.len() * POLYNOMIAL_DEGREE * 8;
-    // The active direct-comparison schedule keeps the comparison input at the
-    // full data level, exits the comparison at level 6, and reserves one level
-    // of headroom for the rank-prefix projection tail.
+    // The active direct-comparison schedule refreshes the comparison input once,
+    // exits the comparison at level 6 by deferring the terminal PS product switch,
+    // and reserves one level of headroom for the rank-prefix projection tail.
     // The certificate therefore counts both ciphertext multiplication depth and
     // non-multiplicative level drops.
     let noise_headroom_levels = 1_u64;
@@ -749,7 +802,7 @@ pub(crate) fn evaluation_noise_certificate(
         "depthFitsModulusChain": selected_depth_fits,
         "bitSlicedDepthFitsModulusChain": depth_fits,
         "noiseHeadroomLevels": noise_headroom_levels,
-        "noiseHeadroomJustification": "depth-optimal direct-comparison power-table schedule exits at comparison output level six after one pre-comparison modulus-switch refresh, leaving one reserved level for the rank-prefix target projection tail",
+        "noiseHeadroomJustification": "fixed-baby-step direct-comparison schedule refreshes the comparison input once, defers only the terminal Paterson-Stockmeyer product switch, exits at comparison output level six, and derives target indicator/order values from exact encrypted rank indicators instead of a lookup polynomial over the noisy rank sum",
         "usableMultiplicativeDepth": usable_multiplicative_depth,
         "bitSlicedProfileLabel": bit_sliced_profile_label,
         "comparisonInputProfileLabel": comparison_input_label,
@@ -1246,8 +1299,9 @@ mod tests {
     #[test]
     fn noise_certificate_flags_depth_feasibility() {
         // The full 200-domain direct-comparison profile fits the usable-depth
-        // budget with the no-refresh fixed-split comparison schedule. The bit-sliced
-        // profile remains rejected.
+        // budget with one comparison-input refresh plus the deferred-terminal
+        // fixed-split comparison schedule. The bit-sliced profile remains
+        // rejected.
         let heavy = evaluation_noise_certificate(&parameters()).expect("heavy certificate");
         assert_eq!(
             heavy["profileLabel"],
@@ -1263,15 +1317,15 @@ mod tests {
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputMultiplicativeDepth"],
-            15
+            14
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputPreComparisonRefreshLevelDrop"],
-            0
+            1
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputLevelDropCount"],
-            15
+            14
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputDepthOptimalMultiplicativeDepth"],
@@ -1291,16 +1345,18 @@ mod tests {
             top_count_parameters.top_count = top_count;
             let certificate =
                 evaluation_noise_certificate(&top_count_parameters).expect("top-count certificate");
+            let expected_level_drop_count = if top_count == 20 { 10 } else { 14 };
             assert_eq!(
                 certificate["profileLabel"], "DirectScoreComparisonProfileFitsDepthBudget",
                 "top_count={top_count}"
             );
             assert_eq!(
-                certificate["operationCounts"]["comparisonInputMultiplicativeDepth"], 15,
+                certificate["operationCounts"]["comparisonInputMultiplicativeDepth"], 14,
                 "top_count={top_count}"
             );
             assert_eq!(
-                certificate["operationCounts"]["comparisonInputLevelDropCount"], 15,
+                certificate["operationCounts"]["comparisonInputLevelDropCount"],
+                expected_level_drop_count,
                 "top_count={top_count}"
             );
         }

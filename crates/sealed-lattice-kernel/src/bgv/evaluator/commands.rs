@@ -24,10 +24,12 @@ use crate::{
                 top_k_evaluation_record,
             },
             top_k::{
-                AGGREGATE_SCORE_COORDINATES_PER_OPTION, evaluate_packed_ranks_from_packed_scores,
+                AGGREGATE_SCORE_COORDINATES_PER_OPTION, PackedRankEvaluation,
+                evaluate_packed_rank_evaluation_from_packed_scores,
                 evaluate_packed_ranks_via_difference, evaluate_top_k,
                 evaluate_top_k_via_difference, pack_reconstructed_aggregate_scores,
                 packed_score_slot, project_packed_sparse_target,
+                project_packed_sparse_target_from_rank_evaluation,
                 selected_evaluator_rotation_key_schedule,
             },
         },
@@ -2223,12 +2225,13 @@ fn run_aggregate_ready_top_k_evaluation(
                 option_count,
                 &aggregate_ready_record.aggregate_ready_record_hash,
             )?;
-            let packed_ranks = evaluate_packed_ranks_from_packed_scores(
+            let packed_rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores(
                 context,
                 &packed_scores,
                 option_count,
                 score_domain_max,
                 &aggregate_ready_record.aggregate_ready_record_hash,
+                exact_rank_count_for_top_counts(&[top_count], option_count),
             )?;
             let (evaluation, _) = build_aggregate_ready_top_k_evaluation_artifacts(
                 request,
@@ -2242,7 +2245,7 @@ fn run_aggregate_ready_top_k_evaluation(
                 input_binding_status,
                 &reconstructed_aggregate,
                 &packed_scores,
-                &packed_ranks,
+                &packed_rank_evaluation,
                 true,
             )?;
 
@@ -2257,7 +2260,7 @@ struct AggregateReadySharedInputs<'a> {
     input_binding_status: String,
     reconstructed_aggregate: Ciphertext,
     packed_scores: Ciphertext,
-    packed_ranks: Ciphertext,
+    packed_rank_evaluation: PackedRankEvaluation,
     request: &'a Value,
     setup_package: &'a Value,
 }
@@ -2265,6 +2268,7 @@ struct AggregateReadySharedInputs<'a> {
 fn read_aggregate_ready_shared_inputs<'a>(
     request: &'a Value,
     setup_package: &'a Value,
+    requested_top_counts: &[usize],
 ) -> CanonicalResult<(AggregateReadySharedInputs<'a>, usize, u64)> {
     let score_domain_max = read_selected_score_domain_max(request)?;
     require_finality_bound_fields_for_aggregate_ready_evaluation(request)?;
@@ -2342,6 +2346,7 @@ fn read_aggregate_ready_shared_inputs<'a>(
 
     let option_count = aggregate_ready_record.option_count;
     require_setup_target_layout_for_aggregate_ready_evaluation(setup_package, option_count)?;
+    let exact_rank_count = exact_rank_count_for_top_counts(requested_top_counts, option_count);
     let shared_inputs = with_aggregate_ready_evaluator_context(
         request,
         setup_package,
@@ -2365,12 +2370,13 @@ fn read_aggregate_ready_shared_inputs<'a>(
                 option_count,
                 &aggregate_ready_record.aggregate_ready_record_hash,
             )?;
-            let packed_ranks = evaluate_packed_ranks_from_packed_scores(
+            let packed_rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores(
                 context,
                 &packed_scores,
                 option_count,
                 score_domain_max,
                 &aggregate_ready_record.aggregate_ready_record_hash,
+                exact_rank_count,
             )?;
 
             Ok(AggregateReadySharedInputs {
@@ -2383,7 +2389,7 @@ fn read_aggregate_ready_shared_inputs<'a>(
                 input_binding_status: input_binding_status.to_string(),
                 reconstructed_aggregate,
                 packed_scores,
-                packed_ranks,
+                packed_rank_evaluation,
                 request,
                 setup_package,
             })
@@ -2391,6 +2397,15 @@ fn read_aggregate_ready_shared_inputs<'a>(
     )?;
 
     Ok((shared_inputs, option_count, score_domain_max))
+}
+
+fn exact_rank_count_for_top_counts(top_counts: &[usize], option_count: usize) -> usize {
+    top_counts
+        .iter()
+        .copied()
+        .filter(|top_count| *top_count < option_count)
+        .max()
+        .unwrap_or(0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2406,11 +2421,16 @@ fn build_aggregate_ready_top_k_evaluation_artifacts(
     input_binding_status: &str,
     reconstructed_aggregate: &Ciphertext,
     packed_scores: &Ciphertext,
-    packed_ranks: &Ciphertext,
+    packed_rank_evaluation: &PackedRankEvaluation,
     include_encrypted_top_k_bundle: bool,
 ) -> CanonicalResult<(Value, Value)> {
-    let packed_target =
-        project_packed_sparse_target(context, packed_ranks, option_count, top_count)?;
+    let packed_ranks = &packed_rank_evaluation.packed_ranks;
+    let packed_target = project_packed_sparse_target_from_rank_evaluation(
+        context,
+        packed_rank_evaluation,
+        option_count,
+        top_count,
+    )?;
     let parameters = setup_bound_parameters(
         request,
         setup_package,
@@ -2571,7 +2591,7 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation_sweep(
         ));
     }
     let (shared_inputs, option_count, score_domain_max) =
-        read_aggregate_ready_shared_inputs(request, setup_package)?;
+        read_aggregate_ready_shared_inputs(request, setup_package, &requested_top_counts)?;
     let top_counts = validate_top_counts_against_option_count(requested_top_counts, option_count)?;
     with_aggregate_ready_evaluator_context(
         request,
@@ -2595,7 +2615,7 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation_sweep(
                         &shared_inputs.input_binding_status,
                         &shared_inputs.reconstructed_aggregate,
                         &shared_inputs.packed_scores,
-                        &shared_inputs.packed_ranks,
+                        &shared_inputs.packed_rank_evaluation,
                         false,
                     )?;
                 if index == 0 {
@@ -3714,6 +3734,10 @@ mod tests {
             "accepted-encrypted-aggregate-evaluator-test-seed",
         )
         .expect("test-only setup secret");
+        let projection_context =
+            EvaluatorContext::from_key(evaluator_key, "accepted-input-oracle-projection", 1)
+                .expect("projection context");
+        let evaluator_key = projection_context.key();
         let request_base = load_checkpoint_json(
             "temp/test-checkpoints/aggregate-derivation-kernel-last-evaluator-request-base.json",
         );
@@ -3746,7 +3770,6 @@ mod tests {
             actual_ranks, expected_ranks,
             "shared packed ranks must match the deterministic fixture oracle before target projection"
         );
-
         let mut observed_top_counts = Vec::with_capacity(evaluations.len());
         for evaluation in evaluations {
             let top_count = evaluation["appendixDPublicInputStatement"]["topCount"]
@@ -3782,7 +3805,6 @@ mod tests {
                 packed_target_slots(&decrypted_target_order_slots, option_count);
             let (expected_target_ids, expected_target_orders) =
                 expected_variant_fixture_sparse_target(option_count, top_count);
-
             assert_eq!(
                 actual_target_ids, expected_target_ids,
                 "target identifiers must match the deterministic fixture oracle for topCount={top_count}"

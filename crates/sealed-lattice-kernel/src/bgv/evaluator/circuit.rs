@@ -333,7 +333,7 @@ pub(crate) fn evaluate_polynomial(
     evaluate_polynomial_by_power_table(context, input, coefficients)
 }
 
-pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count(
+pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
     context: &EvaluatorContext,
     input: &Ciphertext,
     coefficients: &[u64],
@@ -344,6 +344,7 @@ pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count(
         input,
         coefficients,
         baby_step_count,
+        true,
     )
 }
 
@@ -416,6 +417,7 @@ fn evaluate_polynomial_paterson_stockmeyer(
         input,
         coefficients,
         baby_step_count,
+        false,
     )
 }
 
@@ -424,6 +426,7 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
     input: &Ciphertext,
     coefficients: &[u64],
     baby_step_count: usize,
+    defer_terminal_modulus_switch: bool,
 ) -> CanonicalResult<Ciphertext> {
     if coefficients.is_empty() {
         return Err(CanonicalError::new(
@@ -479,7 +482,12 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
                 i64::try_from(block_coefficients[0]).expect("coefficient fits i64"),
             )?);
         } else {
-            terms.push(multiply(context, &block_value, giant_power)?);
+            let product = if defer_terminal_modulus_switch {
+                multiply_without_immediate_modulus_switch(context, &block_value, giant_power)?
+            } else {
+                multiply(context, &block_value, giant_power)?
+            };
+            terms.push(product);
         }
     }
 
@@ -488,6 +496,19 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
     }
 
     sum_ciphertexts_at_common_level(&terms)
+}
+
+pub(crate) fn multiply_without_immediate_modulus_switch(
+    context: &EvaluatorContext,
+    left: &Ciphertext,
+    right: &Ciphertext,
+) -> CanonicalResult<Ciphertext> {
+    let target_level = left.level.min(right.level);
+    let left_matched = modulus_switch_to(left, target_level)?;
+    let right_matched = modulus_switch_to(right, target_level)?;
+    let product = ciphertext_tensor(&left_matched, &right_matched)?;
+
+    relinearize(&product, context.relinearization_key(target_level)?)
 }
 
 fn build_power_table(
