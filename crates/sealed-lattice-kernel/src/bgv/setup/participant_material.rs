@@ -48,7 +48,7 @@ pub(super) fn participant_setup_material(
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "localSecretShareCommitmentHash": local_secret_share_commitment_hash,
         "localErrorCommitmentHash": local_error_commitment_hash,
-        "publicShareConstruction": "sparse-bounded-coordinated-share-b_i=p*e_i-a*s_i-over-selected-BGV-RNS-profile",
+        "publicShareConstruction": "owner-routed-standard-ternary-share-b_i=p*e_i-a*s_i-over-selected-BGV-RNS-profile",
         "rawSecretShareExported": false,
         "centralizedSecretReconstruction": false,
         "sampledLocalSecretCoefficients": sample_bounded_collective_secret_share_distribution(

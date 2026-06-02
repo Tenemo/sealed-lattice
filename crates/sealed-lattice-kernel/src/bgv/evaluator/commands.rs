@@ -34,6 +34,7 @@ use crate::{
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         setup::{
             generate_passive_setup_public_evaluation_keys_from_request,
+            validate_passive_setup_package_for_encrypted_evaluation,
             verify_encrypted_aggregate_bridge_ciphertext_public_bindings,
         },
         setup_helpers::{array_at_path, integer_at_path, string_at_path, value_at_path},
@@ -114,12 +115,18 @@ fn encrypted_top_k_bundle_artifact(
 pub(crate) fn prepare_bgv_evaluation_key_material_handle(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let prepared = generate_passive_setup_public_evaluation_keys_from_request(
+    let mut prepared = generate_passive_setup_public_evaluation_keys_from_request(
         request,
         "prepareBgvEvaluationKeyMaterial",
     )?;
     let mut record = prepared.record;
     let handle = derive_protocol_hash("EvaluationKeySetDigest", &record)?;
+    for relinearization_key in prepared.keys.relinearization_keys.iter_mut().flatten() {
+        relinearization_key.drop_component_b();
+    }
+    for rotation_key in prepared.keys.rotation_keys.values_mut() {
+        rotation_key.drop_component_b();
+    }
     let context = EvaluatorContext::from_passive_setup_public_keys(prepared.keys);
     let prepared_context = PreparedEvaluationKeyContext {
         setup_package_hash: string_at_path(&record, &["setupPackageHash"])?.to_string(),
@@ -276,6 +283,69 @@ fn read_top_count(request: &Value, option_count: usize) -> CanonicalResult<usize
     }
 
     Ok(top_count)
+}
+
+fn read_top_count_values(request: &Value) -> CanonicalResult<Vec<usize>> {
+    let top_counts = request
+        .get("topCounts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "topCounts must be a non-empty array of top-count values",
+            )
+        })?;
+    if top_counts.is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "topCounts must be a non-empty array of top-count values",
+        ));
+    }
+    let mut seen = BTreeMap::new();
+    let mut parsed = Vec::with_capacity(top_counts.len());
+    for (index, value) in top_counts.iter().enumerate() {
+        let top_count = value.as_u64().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "topCounts entries must be non-negative integers",
+            )
+        })?;
+        let top_count = usize::try_from(top_count).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "topCounts entry does not fit usize",
+            )
+        })?;
+        if top_count == 0 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "topCounts entries must be between one and the number of encrypted aggregate inputs",
+            ));
+        }
+        if seen.insert(top_count, index).is_some() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "topCounts must not contain duplicate values",
+            ));
+        }
+        parsed.push(top_count);
+    }
+
+    Ok(parsed)
+}
+
+fn validate_top_counts_against_option_count(
+    top_counts: Vec<usize>,
+    option_count: usize,
+) -> CanonicalResult<Vec<usize>> {
+    if top_counts.iter().any(|top_count| *top_count > option_count) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "topCounts entries must be between one and the number of encrypted aggregate inputs",
+        ));
+    }
+
+    Ok(top_counts)
 }
 
 fn read_selected_score_domain_max(request: &Value) -> CanonicalResult<u64> {
@@ -2125,6 +2195,7 @@ fn run_aggregate_ready_top_k_evaluation(
             "aggregateReadyRecord selected contribution hashes do not match the verified bridge inputs",
         ));
     }
+    validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
 
     let option_count = aggregate_ready_record.option_count;
     require_setup_target_layout_for_aggregate_ready_evaluation(setup_package, option_count)?;
@@ -2159,93 +2230,270 @@ fn run_aggregate_ready_top_k_evaluation(
                 score_domain_max,
                 &aggregate_ready_record.aggregate_ready_record_hash,
             )?;
-            let packed_target =
-                project_packed_sparse_target(context, &packed_ranks, option_count, top_count)?;
-            let parameters = setup_bound_parameters(
+            let (evaluation, _) = build_aggregate_ready_top_k_evaluation_artifacts(
                 request,
                 setup_package,
+                context,
                 option_count,
                 top_count,
                 score_domain_max,
-                aggregate_ready_record.encrypted_aggregate_bridge_hash,
-                aggregate_ready_record.aggregate_ready_record_hash,
-            )?;
-            let parameters = EvaluationParameters {
-                rank_packing_method: RankPackingMethod::GeneratorOrdered,
-                ..parameters
-            };
-            let output_roots = EvaluatorOutputRoots {
-                encrypted_aggregate_reconstruction_root: ciphertext_object_root(
-                    &reconstructed_aggregate,
-                )?,
-                encrypted_score_bit_input_root: ciphertext_object_root(&packed_scores)?,
-                greater_than_root: ciphertext_object_root(&packed_ranks)?,
-                equal_root: ciphertext_object_root(&packed_ranks)?,
-                ahead_root: ciphertext_object_root(&packed_ranks)?,
-                rank_root: ciphertext_object_root(&packed_ranks)?,
-                target_id_root: ciphertext_object_root(&packed_target.target_id)?,
-                target_order_root: ciphertext_object_root(&packed_target.target_order)?,
-                public_slot_mask_hash: public_slot_mask_hash()?,
-                output_encoding_hash: output_encoding_hash()?,
-                pre_target_board_head: read_required_protocol_hash(request, "preTargetBoardHead")?,
-                evaluator_signature: read_required_protocol_hash(request, "evaluatorSignature")?,
-            };
-            let certificate = evaluation_noise_certificate(&parameters)?;
-            let record = top_k_evaluation_record(&parameters, &output_roots)?;
-            let proposal = target_proposal_hash(&parameters, &record)?;
-            let top_k_ciphertext_hash =
-                string_at_path(&record, &["topKCiphertextHash"])?.to_string();
-            let target_ciphertext_hash =
-                string_at_path(&record, &["targetCiphertextHash"])?.to_string();
-            let encrypted_top_k_bundle = encrypted_top_k_bundle_artifact(
-                &parameters,
-                &output_roots,
+                &aggregate_ready_record.encrypted_aggregate_bridge_hash,
+                &aggregate_ready_record.aggregate_ready_record_hash,
+                input_binding_status,
+                &reconstructed_aggregate,
+                &packed_scores,
                 &packed_ranks,
-                &top_k_ciphertext_hash,
-            )?;
-            let encrypted_sparse_target = encrypted_sparse_target_artifact(
-                &parameters,
-                &output_roots,
-                &packed_target.target_id,
-                &packed_target.target_order,
-                &target_ciphertext_hash,
-            )?;
-            let appendix_d = appendix_d_public_input_statement(
-                &parameters,
-                &top_k_ciphertext_hash,
-                &target_ciphertext_hash,
-                &output_roots.public_slot_mask_hash,
-                &proposal,
+                true,
             )?;
 
-            Ok(json!({
-                "ok": true,
-                "operation": "runEncryptedAggregateTopKEvaluation",
-                "comparisonProfile": parameters.comparison_profile.profile_id(),
-                "rankPackingMethod": parameters.rank_packing_method.profile_id(),
-                "inputBindingStatus": input_binding_status,
-                "evaluationContextHash": evaluation_context_hash(&parameters)?,
-                "evaluationNoiseCertificate": certificate,
-                "topKEvaluationRecord": record,
-                "encryptedTopKBundle": encrypted_top_k_bundle,
-                "encryptedSparseTarget": encrypted_sparse_target,
-                "targetProposalHash": proposal,
-                "appendixDPublicInputStatement": appendix_d,
-                "statusLabels": [
-                    "EncryptedAggregateTopKEvaluationCompleted",
-                    "PublicEvaluationKeyMaterialConsumed",
-                    "AggregateReadyRecordVerified",
-                    "EncryptedAggregateReconstructionEvaluated",
-                    "EncryptedEvaluatorCiphertextsEmitted",
-                    "GeneratorOrderedRankPackingUsed",
-                    "TopKEvaluationProposalGenerated",
-                    "NotAcceptedTarget",
-                    "EvaluationProofRequiredForAcceptance",
-                    "NotSupportedPhoneCertified"
-                ],
-            }))
+            Ok(evaluation)
         },
     )
+}
+
+struct AggregateReadySharedInputs<'a> {
+    aggregate_ready_record_hash: String,
+    encrypted_aggregate_bridge_hash: String,
+    input_binding_status: String,
+    reconstructed_aggregate: Ciphertext,
+    packed_scores: Ciphertext,
+    packed_ranks: Ciphertext,
+    request: &'a Value,
+    setup_package: &'a Value,
+}
+
+fn read_aggregate_ready_shared_inputs<'a>(
+    request: &'a Value,
+    setup_package: &'a Value,
+) -> CanonicalResult<(AggregateReadySharedInputs<'a>, usize, u64)> {
+    let score_domain_max = read_selected_score_domain_max(request)?;
+    require_finality_bound_fields_for_aggregate_ready_evaluation(request)?;
+    let SetupBoundAggregateCiphertexts {
+        aggregate_ciphertexts,
+        ciphertext_roots,
+        encrypted_aggregate_share_ciphertext_roots,
+        selected_aggregate_contribution_hashes,
+        selected_contributor_identities,
+        selected_contributor_roster_positions,
+        bridge_inputs,
+    } = read_setup_bound_aggregate_ciphertexts(request, setup_package)?;
+    let setup_package_hash = string_at_path(setup_package, &["setupPackageHash"])?;
+    let encrypted_aggregate_bridge_hash = derive_protocol_hash(
+        "EncryptedAggregateBridgeHash",
+        &json!({
+            "objectType": "EncryptedAggregateBridgeInputSet",
+            "objectVersion": 1,
+            "setupPackageHash": setup_package_hash,
+            "collectivePublicKeyRoot": string_at_path(
+                setup_package,
+                &["collectivePublicKey", "collectivePublicKeyRoot"],
+            )?,
+            "evaluationKeyRoot": string_at_path(
+                setup_package,
+                &["evaluationKeys", "evaluationKeyRoot"],
+            )?,
+            "ciphertextRoots": ciphertext_roots,
+            "bridgeInputs": bridge_inputs,
+            "bridgeProofStatus": "aggregate-bridge-proof-relation-verified",
+        }),
+    )?;
+    let (aggregate_ready_record_hash, bound_encrypted_aggregate_bridge_hash, input_binding_status) =
+        aggregate_ready_binding_from_request(
+            request,
+            setup_package,
+            &encrypted_aggregate_share_ciphertext_roots,
+            &encrypted_aggregate_bridge_hash,
+        )?;
+    let aggregate_ready_record = aggregate_ready_record_from_request(
+        request,
+        &aggregate_ready_record_hash,
+        &bound_encrypted_aggregate_bridge_hash,
+    )?;
+    if aggregate_ready_record.interpolation_coefficients.len() != aggregate_ciphertexts.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "aggregateReadyRecord interpolation coefficients do not match the supplied encrypted aggregate inputs",
+        ));
+    }
+    if aggregate_ready_record.selected_contributor_roster_positions
+        != selected_contributor_roster_positions
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "aggregateReadyRecord selected contributor positions do not match the verified bridge inputs",
+        ));
+    }
+    if aggregate_ready_record.selected_contributor_identities != selected_contributor_identities {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "aggregateReadyRecord selected contributor identities do not match the verified bridge inputs",
+        ));
+    }
+    if !selected_aggregate_contribution_hashes.is_empty()
+        && aggregate_ready_record.selected_aggregate_contribution_hashes
+            != selected_aggregate_contribution_hashes
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "aggregateReadyRecord selected contribution hashes do not match the verified bridge inputs",
+        ));
+    }
+    validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
+
+    let option_count = aggregate_ready_record.option_count;
+    require_setup_target_layout_for_aggregate_ready_evaluation(setup_package, option_count)?;
+    let shared_inputs = with_aggregate_ready_evaluator_context(
+        request,
+        setup_package,
+        DATA_PRIMES.len() - 1,
+        option_count,
+        |context| {
+            let contributors = aggregate_ciphertexts
+                .into_iter()
+                .zip(aggregate_ready_record.interpolation_coefficients.iter())
+                .map(
+                    |(encrypted_share, interpolation_coefficient)| AggregateContributor {
+                        interpolation_coefficient: *interpolation_coefficient,
+                        encrypted_share,
+                    },
+                )
+                .collect::<Vec<_>>();
+            let reconstructed_aggregate = reconstruct_aggregate(&contributors)?;
+            let packed_scores = pack_reconstructed_aggregate_scores(
+                context,
+                &reconstructed_aggregate,
+                option_count,
+                &aggregate_ready_record.aggregate_ready_record_hash,
+            )?;
+            let packed_ranks = evaluate_packed_ranks_from_packed_scores(
+                context,
+                &packed_scores,
+                option_count,
+                score_domain_max,
+                &aggregate_ready_record.aggregate_ready_record_hash,
+            )?;
+
+            Ok(AggregateReadySharedInputs {
+                aggregate_ready_record_hash: aggregate_ready_record
+                    .aggregate_ready_record_hash
+                    .clone(),
+                encrypted_aggregate_bridge_hash: aggregate_ready_record
+                    .encrypted_aggregate_bridge_hash
+                    .clone(),
+                input_binding_status: input_binding_status.to_string(),
+                reconstructed_aggregate,
+                packed_scores,
+                packed_ranks,
+                request,
+                setup_package,
+            })
+        },
+    )?;
+
+    Ok((shared_inputs, option_count, score_domain_max))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_aggregate_ready_top_k_evaluation_artifacts(
+    request: &Value,
+    setup_package: &Value,
+    context: &EvaluatorContext,
+    option_count: usize,
+    top_count: usize,
+    score_domain_max: u64,
+    encrypted_aggregate_bridge_hash: &str,
+    aggregate_ready_record_hash: &str,
+    input_binding_status: &str,
+    reconstructed_aggregate: &Ciphertext,
+    packed_scores: &Ciphertext,
+    packed_ranks: &Ciphertext,
+    include_encrypted_top_k_bundle: bool,
+) -> CanonicalResult<(Value, Value)> {
+    let packed_target =
+        project_packed_sparse_target(context, packed_ranks, option_count, top_count)?;
+    let parameters = setup_bound_parameters(
+        request,
+        setup_package,
+        option_count,
+        top_count,
+        score_domain_max,
+        encrypted_aggregate_bridge_hash.to_string(),
+        aggregate_ready_record_hash.to_string(),
+    )?;
+    let parameters = EvaluationParameters {
+        rank_packing_method: RankPackingMethod::GeneratorOrdered,
+        ..parameters
+    };
+    let output_roots = EvaluatorOutputRoots {
+        encrypted_aggregate_reconstruction_root: ciphertext_object_root(reconstructed_aggregate)?,
+        encrypted_score_bit_input_root: ciphertext_object_root(packed_scores)?,
+        greater_than_root: ciphertext_object_root(packed_ranks)?,
+        equal_root: ciphertext_object_root(packed_ranks)?,
+        ahead_root: ciphertext_object_root(packed_ranks)?,
+        rank_root: ciphertext_object_root(packed_ranks)?,
+        target_id_root: ciphertext_object_root(&packed_target.target_id)?,
+        target_order_root: ciphertext_object_root(&packed_target.target_order)?,
+        public_slot_mask_hash: public_slot_mask_hash()?,
+        output_encoding_hash: output_encoding_hash()?,
+        pre_target_board_head: read_required_protocol_hash(request, "preTargetBoardHead")?,
+        evaluator_signature: read_required_protocol_hash(request, "evaluatorSignature")?,
+    };
+    let certificate = evaluation_noise_certificate(&parameters)?;
+    let record = top_k_evaluation_record(&parameters, &output_roots)?;
+    let proposal = target_proposal_hash(&parameters, &record)?;
+    let top_k_ciphertext_hash = string_at_path(&record, &["topKCiphertextHash"])?.to_string();
+    let target_ciphertext_hash = string_at_path(&record, &["targetCiphertextHash"])?.to_string();
+    let encrypted_top_k_bundle = encrypted_top_k_bundle_artifact(
+        &parameters,
+        &output_roots,
+        packed_ranks,
+        &top_k_ciphertext_hash,
+    )?;
+    let encrypted_sparse_target = encrypted_sparse_target_artifact(
+        &parameters,
+        &output_roots,
+        &packed_target.target_id,
+        &packed_target.target_order,
+        &target_ciphertext_hash,
+    )?;
+    let appendix_d = appendix_d_public_input_statement(
+        &parameters,
+        &top_k_ciphertext_hash,
+        &target_ciphertext_hash,
+        &output_roots.public_slot_mask_hash,
+        &proposal,
+    )?;
+    let status_labels = json!([
+        "EncryptedAggregateTopKEvaluationCompleted",
+        "PublicEvaluationKeyMaterialConsumed",
+        "AggregateReadyRecordVerified",
+        "EncryptedAggregateReconstructionEvaluated",
+        "EncryptedEvaluatorCiphertextsEmitted",
+        "GeneratorOrderedRankPackingUsed",
+        "TopKEvaluationProposalGenerated",
+        "NotAcceptedTarget",
+        "EvaluationProofRequiredForAcceptance",
+        "NotSupportedPhoneCertified"
+    ]);
+    let mut evaluation = json!({
+        "ok": true,
+        "operation": "runEncryptedAggregateTopKEvaluation",
+        "comparisonProfile": parameters.comparison_profile.profile_id(),
+        "rankPackingMethod": parameters.rank_packing_method.profile_id(),
+        "inputBindingStatus": input_binding_status,
+        "evaluationContextHash": evaluation_context_hash(&parameters)?,
+        "evaluationNoiseCertificate": certificate,
+        "topKEvaluationRecord": record,
+        "encryptedSparseTarget": encrypted_sparse_target,
+        "targetProposalHash": proposal,
+        "appendixDPublicInputStatement": appendix_d,
+        "statusLabels": status_labels,
+    });
+    if include_encrypted_top_k_bundle {
+        evaluation["encryptedTopKBundle"] = encrypted_top_k_bundle.clone();
+    }
+
+    Ok((evaluation, encrypted_top_k_bundle))
 }
 
 pub(crate) fn run_encrypted_aggregate_top_k_evaluation(request: &Value) -> CanonicalResult<Value> {
@@ -2282,20 +2530,121 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation(request: &Value) -> Canon
     run_aggregate_ready_top_k_evaluation(request, setup_package, working_level)
 }
 
+pub(crate) fn run_encrypted_aggregate_top_k_evaluation_sweep(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_forbidden_accepted_evaluator_fields(request)?;
+    reject_unexpected_bgv_request_fields(
+        request,
+        &[
+            "setupPackage",
+            "evaluationKeyMaterial",
+            "preparedEvaluationKeyMaterialHandle",
+            "aggregateReadyRecord",
+            "encryptedAggregateInputs",
+            "topCounts",
+            "scoreDomainMax",
+            "workingLevel",
+            "canonicalBallotSetHash",
+            "preTargetBoardHead",
+            "evaluatorSignature",
+        ],
+        "runEncryptedAggregateTopKEvaluationSweep",
+    )?;
+    let requested_top_counts = read_top_count_values(request)?;
+    let setup_package = value_at_path(request, &["setupPackage"])?;
+    if request.get("encryptedAggregateInputs").is_none() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "encrypted aggregate evaluation sweep requires accepted encrypted aggregate inputs",
+        ));
+    }
+    let working_level = request
+        .get("workingLevel")
+        .and_then(Value::as_u64)
+        .and_then(|level| usize::try_from(level).ok())
+        .unwrap_or(DATA_PRIMES.len() - 1);
+    if working_level != DATA_PRIMES.len() - 1 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "aggregate-ready encrypted evaluation sweep requires the full selected data level",
+        ));
+    }
+    let (shared_inputs, option_count, score_domain_max) =
+        read_aggregate_ready_shared_inputs(request, setup_package)?;
+    let top_counts = validate_top_counts_against_option_count(requested_top_counts, option_count)?;
+    with_aggregate_ready_evaluator_context(
+        request,
+        setup_package,
+        working_level,
+        option_count,
+        |context| {
+            let mut evaluations = Vec::with_capacity(top_counts.len());
+            let mut shared_encrypted_rank_bundle = Value::Null;
+            for (index, top_count) in top_counts.iter().enumerate() {
+                let (evaluation, encrypted_top_k_bundle) =
+                    build_aggregate_ready_top_k_evaluation_artifacts(
+                        shared_inputs.request,
+                        shared_inputs.setup_package,
+                        context,
+                        option_count,
+                        *top_count,
+                        score_domain_max,
+                        &shared_inputs.encrypted_aggregate_bridge_hash,
+                        &shared_inputs.aggregate_ready_record_hash,
+                        &shared_inputs.input_binding_status,
+                        &shared_inputs.reconstructed_aggregate,
+                        &shared_inputs.packed_scores,
+                        &shared_inputs.packed_ranks,
+                        false,
+                    )?;
+                if index == 0 {
+                    shared_encrypted_rank_bundle = encrypted_top_k_bundle;
+                }
+                evaluations.push(evaluation);
+            }
+
+            Ok(json!({
+                "ok": true,
+                "operation": "runEncryptedAggregateTopKEvaluationSweep",
+                "comparisonProfile": EvaluationComparisonProfile::DirectScoreComparison.profile_id(),
+                "rankPackingMethod": RankPackingMethod::GeneratorOrdered.profile_id(),
+                "inputBindingStatus": shared_inputs.input_binding_status,
+                "topCounts": top_counts,
+                "sharedEncryptedRankBundle": shared_encrypted_rank_bundle,
+                "evaluations": evaluations,
+                "statusLabels": [
+                    "EncryptedAggregateTopKEvaluationSweepCompleted",
+                    "PublicEvaluationKeyMaterialConsumed",
+                    "AggregateReadyRecordVerified",
+                    "EncryptedAggregateReconstructionEvaluated",
+                    "EncryptedEvaluatorCiphertextsEmitted",
+                    "GeneratorOrderedRankPackingUsed",
+                    "TopKEvaluationProposalGenerated",
+                    "NotAcceptedTarget",
+                    "EvaluationProofRequiredForAcceptance",
+                    "NotSupportedPhoneCertified"
+                ],
+            }))
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT, aggregate_contribution_hash_for_evaluation,
         aggregate_ready_binding_from_request, aggregate_ready_record_from_request,
         aggregate_ready_record_hash, bridge_proof_record_hash_for_evaluation,
-        encrypted_ciphertext_artifact, read_selected_score_domain_max,
+        encrypted_ciphertext_artifact, read_selected_score_domain_max, read_top_count_values,
         reject_forbidden_accepted_evaluator_fields,
         require_public_rotation_keys_for_aggregate_ready_evaluation,
         require_setup_target_layout_for_aggregate_ready_evaluation,
         required_generator_ordered_rotation_keys, run_encrypted_aggregate_top_k_evaluation,
+        run_encrypted_aggregate_top_k_evaluation_sweep, target_layout_hash,
         validate_compact_bridge_bindings_for_evaluation,
         validate_compact_bridge_randomness_for_evaluation,
-        validate_compact_bridge_status_for_evaluation,
+        validate_compact_bridge_status_for_evaluation, validate_top_counts_against_option_count,
         verify_compact_aggregate_bridge_input_for_evaluation,
     };
     use crate::{
@@ -2303,11 +2652,12 @@ mod tests {
             evaluator::{
                 circuit::{EvaluatorContext, modulus_switch_to, multiply, normalize_scaling},
                 engine::{
-                    DevelopmentBgvKey, add_plaintext_coefficients, ciphertext_from_canonical_hex,
-                    ciphertext_object_root, ciphertext_sub,
+                    Ciphertext, DevelopmentBgvKey, add_plaintext_coefficients,
+                    ciphertext_from_canonical_hex, ciphertext_object_root, ciphertext_sub,
                 },
                 top_k::{
-                    DIRECT_COMPARISON_OUTPUT_LEVEL, aggregate_score_slot, comparison_polynomials,
+                    AGGREGATE_SCORE_COORDINATES_PER_OPTION, DIRECT_COMPARISON_OUTPUT_LEVEL,
+                    aggregate_score_slot, comparison_polynomials,
                     evaluate_direct_comparison_polynomial, galois_power,
                     pack_reconstructed_aggregate_scores, packed_score_slot,
                     selected_evaluator_rotation_key_schedule,
@@ -2320,13 +2670,13 @@ mod tests {
                 generate_passive_setup_public_evaluation_key_material_from_request,
             },
         },
-        encoding::CanonicalErrorCode,
+        encoding::{CanonicalErrorCode, CanonicalResult},
         hashing::derive_protocol_hash,
     };
     use serde_json::{Value, json};
     use std::sync::OnceLock;
 
-    static SETUP_PACKAGE_FIXTURE: OnceLock<Value> = OnceLock::new();
+    static REAL_SETUP_PACKAGE_FIXTURE: OnceLock<Value> = OnceLock::new();
 
     fn setup_request() -> Value {
         let participants = (0..BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT)
@@ -2361,13 +2711,139 @@ mod tests {
         })
     }
 
-    fn setup_package_fixture() -> Value {
-        SETUP_PACKAGE_FIXTURE
+    fn real_setup_package_fixture() -> Value {
+        REAL_SETUP_PACKAGE_FIXTURE
             .get_or_init(|| {
                 generate_passive_setup_package_from_request(&setup_request())
                     .expect("setup package")
             })
             .clone()
+    }
+
+    fn load_checkpoint_json(path: &str) -> Value {
+        let checkpoint_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join(path);
+        let checkpoint_text = std::fs::read_to_string(checkpoint_path)
+            .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
+
+        serde_json::from_str(&checkpoint_text)
+            .unwrap_or_else(|error| panic!("failed to parse {path}: {error}"))
+    }
+
+    fn ciphertext_from_checkpoint_artifact(artifact: &Value) -> CanonicalResult<Ciphertext> {
+        let canonical_bytes_hex = artifact["canonicalBytesHex"]
+            .as_str()
+            .expect("ciphertext canonical bytes");
+        let ciphertext_root = artifact["ciphertextRoot"]
+            .as_str()
+            .expect("ciphertext root");
+
+        ciphertext_from_canonical_hex(canonical_bytes_hex, Some(ciphertext_root))
+    }
+
+    fn expected_variant_fixture_ranks(option_count: usize) -> Vec<usize> {
+        let scores = (0..option_count)
+            .map(|option_index| u64::try_from((option_index % 10) + 1).expect("score fits u64"))
+            .collect::<Vec<_>>();
+        (0..option_count)
+            .map(|option_index| {
+                scores
+                    .iter()
+                    .enumerate()
+                    .filter(|(challenger_index, challenger_score)| {
+                        **challenger_score > scores[option_index]
+                            || (**challenger_score == scores[option_index]
+                                && *challenger_index < option_index)
+                    })
+                    .count()
+            })
+            .collect()
+    }
+
+    fn expected_variant_fixture_sparse_target(
+        option_count: usize,
+        top_count: usize,
+    ) -> (Vec<u64>, Vec<u64>) {
+        let ranks = expected_variant_fixture_ranks(option_count);
+        let target_ids = ranks
+            .iter()
+            .enumerate()
+            .map(|(option_index, rank)| {
+                if *rank < top_count {
+                    u64::try_from(option_index + 1).expect("option identifier fits u64")
+                } else {
+                    0
+                }
+            })
+            .collect::<Vec<_>>();
+        let target_orders = ranks
+            .iter()
+            .map(|rank| {
+                if *rank < top_count {
+                    u64::try_from(rank + 1).expect("rank order fits u64")
+                } else {
+                    0
+                }
+            })
+            .collect::<Vec<_>>();
+
+        (target_ids, target_orders)
+    }
+
+    fn expected_variant_fixture_share_slots(option_count: usize) -> Vec<u64> {
+        let mut slots = Vec::with_capacity(option_count * AGGREGATE_SCORE_COORDINATES_PER_OPTION);
+        for option_index in 0..option_count {
+            let score = u64::try_from((option_index % 10) + 1).expect("fixture score fits u64");
+            slots.push(score);
+            for score_value in 1..=10 {
+                slots.push(if score == score_value { 1 } else { 0 });
+            }
+        }
+
+        slots
+    }
+
+    fn packed_target_slots(decrypted_slots: &[u64], option_count: usize) -> Vec<u64> {
+        (0..option_count)
+            .map(|option_index| decrypted_slots[packed_score_slot(option_index)])
+            .collect()
+    }
+
+    fn binding_setup_package_with_participant_count(participant_count: usize) -> Value {
+        json!({
+            "setupPackageHash": valid_hash("0"),
+            "setupInputs": {
+                "ceremonyId": "encrypted-aggregate-evaluator-test",
+                "manifestHash": valid_hash("1"),
+                "rosterHash": valid_hash("2"),
+                "thresholdProfileHash": valid_hash("3"),
+                "participantCount": participant_count,
+            },
+            "collectivePublicKey": {
+                "collectivePublicKeyRoot": valid_hash("4"),
+                "collectivePublicKeyCoefficientRoot": valid_hash("5"),
+                "bgvPublicKeyRoot": valid_hash("6"),
+            },
+            "evaluationKeys": {
+                "evaluationKeyRoot": valid_hash("7"),
+                "rotSetHash": valid_hash("8"),
+            },
+            "profileBindings": {
+                "batchEncoderHash": valid_hash("9"),
+                "profileHash": valid_hash("a"),
+                "encryptedAggregateInputLayoutHash": valid_hash("b"),
+                "encryptedAggregateReconstructionHash": valid_hash("c"),
+                "encryptedAggregateTargetBasisRoot": valid_hash("d"),
+                "targetLayoutHash": target_layout_hash(20).expect("target layout hash"),
+                "topKEvaluatorInputLayoutHash": valid_hash("e"),
+            },
+        })
+    }
+
+    fn binding_setup_package_fixture() -> Value {
+        binding_setup_package_with_participant_count(BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT)
     }
 
     #[test]
@@ -2402,22 +2878,6 @@ mod tests {
             ciphertext_object_root(&parsed_ciphertext).expect("parsed root"),
             ciphertext_root
         );
-    }
-
-    fn minimal_wrong_key_bridge_input(setup_package: &Value) -> Value {
-        json!({
-            "aggregateDerivationComponentHash": "11".repeat(64),
-            "aggregateDerivationStatementHash": "22".repeat(64),
-            "postVotingClosedContextHash": "33".repeat(64),
-            "bridgeEncryption": {
-                "profileHash": setup_package["profileBindings"]["profileHash"],
-                "rustBgvBackendProfileHash": setup_package["profileBindings"]["backendProfileHash"],
-                "canonicalCiphertextConventionHash": setup_package["profileBindings"]["canonicalCiphertextConventionHash"],
-                "plaintextRoot": "44".repeat(64),
-                "ciphertextRoot": "55".repeat(64),
-                "collectivePublicKeyRoot": "66".repeat(64)
-            },
-        })
     }
 
     fn aggregate_ready_record(setup_package: &Value, selected_roots: &[String]) -> Value {
@@ -2920,7 +3380,7 @@ mod tests {
 
     #[test]
     fn compact_bridge_bindings_reject_wrong_context_or_key_roots() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         let (bridge_encryption, bridge_verification, bridge_proof_record) =
             compact_bridge_binding_objects(&setup_package);
         validate_compact_bridge_bindings_for_evaluation(
@@ -2963,7 +3423,7 @@ mod tests {
 
     #[test]
     fn compact_bridge_input_rejects_contributor_identity_or_position_drift() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
 
         for (field_name, replacement, expected_message) in [
             (
@@ -2998,7 +3458,7 @@ mod tests {
 
     #[test]
     fn compact_bridge_input_rejects_rehashed_contribution_or_proof_record_drift() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
 
         for (path, replacement, expected_message) in [
             (
@@ -3037,7 +3497,7 @@ mod tests {
 
     #[test]
     fn compact_bridge_input_rejects_aggregate_contribution_public_field_drift() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         let mut input =
             compact_bridge_input_with_contributor_binding(&setup_package, "receiver-1", 1);
         input["aggregateContribution"]["bridgeProofRecord"]["ballotSetHash"] =
@@ -3091,22 +3551,8 @@ mod tests {
 
     #[test]
     fn aggregate_ready_evaluator_rejects_public_material_missing_selected_rotations() {
-        let setup_package = setup_package_fixture();
-        let public_material =
-            generate_passive_setup_public_evaluation_key_material_from_request(&json!({
-                "setupPackage": setup_package.clone(),
-                "setupPrivateWitness": {
-                    "setupSeed": "encrypted-aggregate-evaluator-test-seed",
-                },
-                "workingLevel": 1,
-            }))
-            .expect("low-level public material");
-        let context = EvaluatorContext::from_passive_setup_public_material(
-            &setup_package,
-            &public_material,
-            1,
-        )
-        .expect("public evaluator context");
+        let context = EvaluatorContext::new("missing-selected-rotations", 1)
+            .expect("evaluator context without public rotation keys");
 
         let error = require_public_rotation_keys_for_aggregate_ready_evaluation(&context, 20)
             .expect_err("mandatory evaluator schedule must reject missing setup rotations");
@@ -3121,7 +3567,7 @@ mod tests {
     #[test]
     #[ignore = "heavy setup-bound packed evaluator primitive; run selectively"]
     fn setup_public_evaluation_keys_run_packed_full_domain_target_primitives() {
-        let setup_package = setup_package_fixture();
+        let setup_package = real_setup_package_fixture();
         let option_count = 20;
         let score_domain_max = 200;
         let rotation_keys =
@@ -3243,6 +3689,114 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "checkpoint-bound accepted-input evaluator evidence; run after representative evaluator generation"]
+    fn accepted_input_representative_targets_decrypt_to_fixture_oracle() {
+        let sweep = load_checkpoint_json(
+            "temp/test-checkpoints/encrypted-aggregate-evaluator-representative-top-counts-10-20.json",
+        );
+        assert_eq!(
+            sweep["comparisonProfile"].as_str(),
+            Some("direct-encrypted-score-comparison-v1")
+        );
+        assert_eq!(
+            sweep["rankPackingMethod"].as_str(),
+            Some("generator-ordered")
+        );
+
+        let option_count = 20;
+        let evaluations = sweep["evaluations"].as_array().expect("sweep evaluations");
+        assert_eq!(evaluations.len(), 2);
+        let setup_package = load_checkpoint_json(
+            "temp/test-checkpoints/aggregate-derivation-kernel-last-setup-package.json",
+        );
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            "accepted-encrypted-aggregate-evaluator-test-seed",
+        )
+        .expect("test-only setup secret");
+        let request_base = load_checkpoint_json(
+            "temp/test-checkpoints/aggregate-derivation-kernel-last-evaluator-request-base.json",
+        );
+        let first_bridge_ciphertext = ciphertext_from_checkpoint_artifact(
+            &request_base["encryptedAggregateInputs"][0]["bridgeEncryption"],
+        )
+        .expect("first accepted bridge ciphertext");
+        let first_bridge_slots = evaluator_key
+            .decrypt_to_slots(&first_bridge_ciphertext)
+            .expect("first accepted bridge slots");
+        let expected_bridge_slots = expected_variant_fixture_share_slots(option_count);
+        assert_eq!(
+            &first_bridge_slots[..expected_bridge_slots.len()],
+            expected_bridge_slots.as_slice(),
+            "accepted bridge input must decrypt to the deterministic aggregate-share fixture before evaluation"
+        );
+        let packed_rank_ciphertext = ciphertext_from_checkpoint_artifact(
+            &sweep["sharedEncryptedRankBundle"]["packedRankCiphertext"],
+        )
+        .expect("shared packed-rank ciphertext");
+        let packed_rank_slots = evaluator_key
+            .decrypt_to_slots(&packed_rank_ciphertext)
+            .expect("shared packed-rank slots");
+        let actual_ranks = packed_target_slots(&packed_rank_slots, option_count);
+        let expected_ranks = expected_variant_fixture_ranks(option_count)
+            .into_iter()
+            .map(|rank| u64::try_from(rank).expect("rank fits u64"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_ranks, expected_ranks,
+            "shared packed ranks must match the deterministic fixture oracle before target projection"
+        );
+
+        let mut observed_top_counts = Vec::with_capacity(evaluations.len());
+        for evaluation in evaluations {
+            let top_count = evaluation["appendixDPublicInputStatement"]["topCount"]
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .expect("top-count value");
+            observed_top_counts.push(top_count);
+            let labels = evaluation["statusLabels"]
+                .as_array()
+                .expect("evaluation status labels");
+            assert!(
+                labels
+                    .iter()
+                    .any(|label| label.as_str() == Some("NotAcceptedTarget")),
+                "representative evaluator output must remain a target proposal"
+            );
+
+            let encrypted_target = &evaluation["encryptedSparseTarget"];
+            let target_id_ciphertext =
+                ciphertext_from_checkpoint_artifact(&encrypted_target["targetIdCiphertext"])
+                    .expect("target-id ciphertext");
+            let target_order_ciphertext =
+                ciphertext_from_checkpoint_artifact(&encrypted_target["targetOrderCiphertext"])
+                    .expect("target-order ciphertext");
+            let decrypted_target_id_slots = evaluator_key
+                .decrypt_to_slots(&target_id_ciphertext)
+                .expect("target-id slots");
+            let decrypted_target_order_slots = evaluator_key
+                .decrypt_to_slots(&target_order_ciphertext)
+                .expect("target-order slots");
+            let actual_target_ids = packed_target_slots(&decrypted_target_id_slots, option_count);
+            let actual_target_orders =
+                packed_target_slots(&decrypted_target_order_slots, option_count);
+            let (expected_target_ids, expected_target_orders) =
+                expected_variant_fixture_sparse_target(option_count, top_count);
+
+            assert_eq!(
+                actual_target_ids, expected_target_ids,
+                "target identifiers must match the deterministic fixture oracle for topCount={top_count}"
+            );
+            assert_eq!(
+                actual_target_orders, expected_target_orders,
+                "target order values must match the deterministic fixture oracle for topCount={top_count}"
+            );
+        }
+
+        assert_eq!(observed_top_counts, vec![10, 20]);
+    }
+
+    #[test]
     fn aggregate_ready_evaluator_rejects_non_selected_score_domain() {
         let error = read_selected_score_domain_max(&json!({
             "scoreDomainMax": 10,
@@ -3260,7 +3814,7 @@ mod tests {
 
     #[test]
     fn aggregate_ready_evaluator_rejects_wrong_setup_target_layout() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         require_setup_target_layout_for_aggregate_ready_evaluation(&setup_package, 20)
             .expect("generated setup target layout should match the selected evaluator layout");
 
@@ -3280,7 +3834,7 @@ mod tests {
 
     #[test]
     fn aggregate_ready_binding_rejects_selected_ciphertext_root_drift() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         let selected_roots = vec![valid_hash("1"), valid_hash("2")];
         let record = aggregate_ready_record(&setup_package, &selected_roots);
         let request = json!({
@@ -3346,7 +3900,7 @@ mod tests {
 
     #[test]
     fn aggregate_ready_record_rejects_rehashed_order_or_reconstruction_drift() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         let selected_roots = vec![valid_hash("1"), valid_hash("2")];
         let record = aggregate_ready_record(&setup_package, &selected_roots);
         let record_hash = record["aggregateReadyRecordHash"]
@@ -3442,7 +3996,7 @@ mod tests {
 
     #[test]
     fn aggregate_ready_binding_requires_supplied_record() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         let request = json!({});
 
         let error = aggregate_ready_binding_from_request(
@@ -3462,7 +4016,7 @@ mod tests {
 
     #[test]
     fn aggregate_ready_record_rejects_reduced_option_count_on_accepted_path() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         let mut record =
             aggregate_ready_record(&setup_package, &[valid_hash("a"), valid_hash("b")]);
         record["optionCount"] = json!(2);
@@ -3498,7 +4052,7 @@ mod tests {
 
     #[test]
     fn aggregate_ready_record_rejects_reduced_roster_size_on_accepted_path() {
-        let setup_package = setup_package_fixture();
+        let setup_package = binding_setup_package_fixture();
         let selected_roots = vec![valid_hash("a"), valid_hash("b")];
         let mut record = aggregate_ready_record(&setup_package, &selected_roots);
         let selected_aggregate_contribution_hashes = record["selectedAggregateContributionHashes"]
@@ -3569,14 +4123,7 @@ mod tests {
 
     #[test]
     fn aggregate_ready_binding_rejects_reduced_setup_roster_on_accepted_path() {
-        let mut reduced_setup_request = setup_request();
-        let reduced_participants = reduced_setup_request["participants"]
-            .as_array()
-            .expect("participants")[..3]
-            .to_vec();
-        reduced_setup_request["participants"] = Value::Array(reduced_participants);
-        let setup_package = generate_passive_setup_package_from_request(&reduced_setup_request)
-            .expect("reduced setup package");
+        let setup_package = binding_setup_package_with_participant_count(3);
         let selected_roots = vec![valid_hash("a"), valid_hash("b")];
         let record = aggregate_ready_record(&setup_package, &selected_roots);
 
@@ -3635,7 +4182,7 @@ mod tests {
                 "topCount": 1,
                 "scoreDomainMax": 200,
             });
-            request[field_name] = field_value;
+            request[field_name] = field_value.clone();
             let error = run_encrypted_aggregate_top_k_evaluation(&request).expect_err(
                 "accepted evaluator request should reject forbidden witness fields first",
             );
@@ -3650,6 +4197,27 @@ mod tests {
                 error.message.contains(field_name),
                 "{field_name}: {}",
                 error.message
+            );
+
+            let mut sweep_request = json!({
+                "topCounts": [1],
+            });
+            sweep_request[field_name] = field_value;
+            let sweep_error = run_encrypted_aggregate_top_k_evaluation_sweep(&sweep_request)
+                .expect_err(
+                    "accepted evaluator sweep should reject forbidden witness fields first",
+                );
+
+            assert_eq!(
+                sweep_error.code,
+                CanonicalErrorCode::InvalidFixture,
+                "{field_name}: {}",
+                sweep_error.message
+            );
+            assert!(
+                sweep_error.message.contains(field_name),
+                "{field_name}: {}",
+                sweep_error.message
             );
         }
 
@@ -3675,6 +4243,52 @@ mod tests {
             "{}",
             nested_error.message
         );
+    }
+
+    #[test]
+    fn encrypted_aggregate_top_count_sweep_parser_accepts_only_unique_supported_counts() {
+        assert_eq!(
+            validate_top_counts_against_option_count(
+                read_top_count_values(&json!({ "topCounts": [1, 10, 20] }))
+                    .expect("valid top-count sweep"),
+                20,
+            )
+            .expect("valid top-count range"),
+            vec![1, 10, 20]
+        );
+
+        for (case_name, request) in [
+            ("missing", json!({})),
+            ("empty", json!({ "topCounts": [] })),
+            ("zero", json!({ "topCounts": [0] })),
+            ("duplicate", json!({ "topCounts": [1, 1] })),
+            ("fractional", json!({ "topCounts": [1.5] })),
+            ("string", json!({ "topCounts": ["1"] })),
+        ] {
+            let error =
+                read_top_count_values(&request).expect_err("invalid top-count sweep should reject");
+
+            assert_eq!(
+                error.code,
+                CanonicalErrorCode::InvalidFixture,
+                "{case_name}: {}",
+                error.message
+            );
+            assert!(
+                error.message.contains("topCounts"),
+                "{case_name}: {}",
+                error.message
+            );
+        }
+
+        let range_error = validate_top_counts_against_option_count(
+            read_top_count_values(&json!({ "topCounts": [21] }))
+                .expect("syntactically valid top-count sweep"),
+            20,
+        )
+        .expect_err("out-of-range top-count sweep should reject");
+        assert_eq!(range_error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(range_error.message.contains("topCounts"));
     }
 
     #[test]
@@ -3744,12 +4358,11 @@ mod tests {
 
     #[test]
     fn encrypted_aggregate_evaluator_rejects_proofless_aggregate_ready_inputs() {
-        let setup_package = setup_package_fixture();
         let request = json!({
-            "setupPackage": setup_package,
+            "setupPackage": {},
             "encryptedAggregateInputs": [
-                minimal_wrong_key_bridge_input(&setup_package),
-                minimal_wrong_key_bridge_input(&setup_package)
+                { "bridgeEncryption": {} },
+                { "bridgeEncryption": {} }
             ],
             "topCount": 1,
             "scoreDomainMax": 200,
@@ -3772,9 +4385,8 @@ mod tests {
 
     #[test]
     fn encrypted_aggregate_evaluator_requires_accepted_inputs() {
-        let setup_package = setup_package_fixture();
         let request = json!({
-            "setupPackage": setup_package,
+            "setupPackage": {},
             "topCount": 1,
             "scoreDomainMax": 200,
         });

@@ -29,6 +29,12 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         hash_at_path(certificates, &["evaluationKeySizeProfileHash"])?,
         "evaluation key size profile hash",
     )?;
+    compare_derived_hash(
+        "BGVHeSecurityCertificateHash",
+        value_at_path(certificates, &["heSecurityCertificate"])?,
+        hash_at_path(certificates, &["heSecurityCertificateHash"])?,
+        "HE security certificate hash",
+    )?;
     let evaluation_key_streaming_commitment_hash =
         validate_evaluation_key_streaming_commitment(certificates)?;
     compare_hash_at_path(
@@ -66,6 +72,12 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
             &["targetThresholdDecryptabilityCertificateHash"],
         )?,
         "setup parameter target-threshold decryptability certificate hash",
+    )?;
+    compare_hash_at_path(
+        value_at_path(certificates, &["setupParameterCertificate"])?,
+        &["heSecurityCertificateHash"],
+        hash_at_path(certificates, &["heSecurityCertificateHash"])?,
+        "setup parameter HE security certificate hash",
     )?;
     compare_derived_hash(
         "BGVSetupParameterCertificateHash",

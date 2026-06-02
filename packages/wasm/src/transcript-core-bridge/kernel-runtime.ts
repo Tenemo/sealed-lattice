@@ -21,6 +21,8 @@ import {
     wasmHeaderByteLength,
 } from './kernel-contracts.js';
 
+const wasmPageByteLength = 65_536;
+
 // Excludes WASM custom sections (debug / producers / name) from the integrity hash:
 // they vary by toolchain but do not affect execution, so dropping them keeps the
 // hash reproducible across build environments.
@@ -234,13 +236,21 @@ const copyIntoKernelMemory = (
         return 0;
     }
 
-    const pointer = allocate(input.length);
+    const pointer = allocate(input.length) >>> 0;
     if (pointer === 0) {
         throw new Error(
             'The transcript-core kernel returned a null pointer for a non-empty allocation.',
         );
     }
 
+    const requiredByteLength = pointer + input.length;
+    if (requiredByteLength > memory.buffer.byteLength) {
+        const missingByteLength = requiredByteLength - memory.buffer.byteLength;
+        const missingPageCount = Math.ceil(
+            missingByteLength / wasmPageByteLength,
+        );
+        memory.grow(missingPageCount);
+    }
     new Uint8Array(memory.buffer).set(input, pointer);
 
     return pointer;
@@ -255,13 +265,16 @@ const copyFromKernelMemory = (
     if (length === 0) {
         return new Uint8Array();
     }
-    if (pointer === 0) {
+    const unsignedPointer = pointer >>> 0;
+    if (unsignedPointer === 0) {
         throw new Error(
             `The transcript-core kernel returned a null pointer for a non-empty ${operationName} result.`,
         );
     }
 
-    return Uint8Array.from(new Uint8Array(memory.buffer, pointer, length));
+    return Uint8Array.from(
+        new Uint8Array(memory.buffer, unsignedPointer, length),
+    );
 };
 
 // The kernel writes the response byte length as a little-endian u32 into this
@@ -270,7 +283,7 @@ const readKernelOutputLength = (
     memory: WebAssembly.Memory,
     pointer: number,
 ): number =>
-    new DataView(memory.buffer, pointer, wasm32UsizeByteLength).getUint32(
+    new DataView(memory.buffer, pointer >>> 0, wasm32UsizeByteLength).getUint32(
         0,
         true,
     );
@@ -309,17 +322,18 @@ const runKernelCommand = <T>(
 
     try {
         inputPointer = copyIntoKernelMemory(memory, allocate, requestBytes);
-        outputLengthPointer = allocate(wasm32UsizeByteLength);
+        outputLengthPointer = allocate(wasm32UsizeByteLength) >>> 0;
         if (outputLengthPointer === 0) {
             throw new Error(
                 'The transcript-core kernel returned a null pointer for the output-length allocation.',
             );
         }
-        outputPointer = commandWithLength(
-            inputPointer,
-            requestBytes.length,
-            outputLengthPointer,
-        );
+        outputPointer =
+            commandWithLength(
+                inputPointer,
+                requestBytes.length,
+                outputLengthPointer,
+            ) >>> 0;
         outputLength = readKernelOutputLength(memory, outputLengthPointer);
         const outputBytes = copyFromKernelMemory(
             memory,

@@ -10,10 +10,44 @@ type VendoredProtocolRuntimeEntryExport = {
 };
 
 type PublicPackagePolicy = {
+    readonly forbiddenTypeExports: readonly string[];
     readonly forbiddenRuntimeExports: readonly string[];
     readonly vendoredProtocolRuntimeEntryExports: readonly VendoredProtocolRuntimeEntryExport[];
     readonly vendoredProtocolRuntimeModules: readonly string[];
 };
+
+export const forbiddenTypeExports = [
+    'AggregateBridgeRandomnessSource',
+    'AggregateBridgeRandomnessSourceEvidence',
+    'AggregateContribution',
+    'AggregateContributionSelection',
+    'AggregateContributionSelectionInput',
+    'AggregateContributionVerification',
+    'AggregateReadyRecord',
+    'AggregateReadyRecordBuildInput',
+    'BgvBatchPlaintextEncoding',
+    'BgvCanonicalObjectAnalysis',
+    'BgvObjectValidation',
+    'BgvPassiveSetupPackage',
+    'BgvPassiveSetupParticipantInput',
+    'BgvPassiveSetupVerification',
+    'BgvPublicEvaluationKeyMaterial',
+    'BgvReferenceOracleRejection',
+    'BridgeClaimVerificationStatus',
+    'BridgeProofRecord',
+    'BridgeProofVerificationStatus',
+    'BridgeRandomnessSource',
+    'BridgeRandomnessSourceEvidence',
+    'PreparedBgvPublicEvaluationKeyMaterial',
+    'TestAggregateShare',
+    'TestAggregateShareSet',
+    'TestAggregateShareWitness',
+    'TopKEvaluatorDevelopmentEvaluation',
+    'TopKEvaluatorDevelopmentEvaluationInput',
+    'TopKEvaluatorEncryptedAggregateEvaluation',
+    'TopKEvaluatorEncryptedAggregateEvaluationInput',
+    'TopKEvaluatorEncryptedAggregateInput',
+] as const;
 
 export const forbiddenRuntimeExports = [
     'bootstrap',
@@ -188,6 +222,7 @@ export const vendoredProtocolRuntimeEntryExports = [
 ] as const satisfies readonly VendoredProtocolRuntimeEntryExport[];
 
 const publicPackagePolicy = {
+    forbiddenTypeExports,
     forbiddenRuntimeExports,
     vendoredProtocolRuntimeEntryExports,
     vendoredProtocolRuntimeModules,
@@ -317,9 +352,21 @@ const validateVendoredProtocolRuntime = async (
 export const validatePublicPackagePolicy = async (
     policy: PublicPackagePolicy,
     runtimeExports: readonly string[],
+    typeExports: readonly string[] = [],
 ): Promise<string[]> => {
     const failures: string[] = [];
     const runtimeExportSet = new Set(runtimeExports);
+    const typeExportSet = new Set(typeExports);
+
+    failures.push(
+        ...validateUnique('forbiddenTypeExports', policy.forbiddenTypeExports),
+    );
+
+    for (const exportName of policy.forbiddenTypeExports) {
+        if (typeExportSet.has(exportName)) {
+            failures.push(`Forbidden type export is public: ${exportName}`);
+        }
+    }
 
     failures.push(
         ...validateUnique(
@@ -341,6 +388,51 @@ export const validatePublicPackagePolicy = async (
     return sortedUnique(failures);
 };
 
+export const collectEntryPointTypeExportNames = (
+    declarationText: string,
+): string[] => {
+    const exportNames: string[] = [];
+    const namedExportPattern =
+        /export\s+type\s*\{(?<body>[^}]+)\}\s*from\s*['"][^'"]+['"]/gu;
+    const typeDeclarationPattern =
+        /export\s+(?:declare\s+)?(?:type|interface)\s+(?<name>[A-Za-z_$][\w$]*)/gu;
+
+    for (const match of declarationText.matchAll(namedExportPattern)) {
+        const body = match.groups?.body;
+        if (body === undefined) {
+            continue;
+        }
+        exportNames.push(
+            ...body
+                .split(',')
+                .map((part) => part.trim())
+                .filter((part) => part.length > 0)
+                .map((part) => {
+                    const [exportName] = part.split(/\s+as\s+/u);
+
+                    return exportName.trim();
+                }),
+        );
+    }
+
+    for (const match of declarationText.matchAll(typeDeclarationPattern)) {
+        const exportName = match.groups?.name;
+        if (exportName !== undefined) {
+            exportNames.push(exportName);
+        }
+    }
+
+    return sortedUnique(exportNames);
+};
+
+const loadEntryPointTypeExportNames = async (): Promise<string[]> =>
+    collectEntryPointTypeExportNames(
+        await fs.readFile(
+            path.resolve(repoRoot, 'packages', 'sdk', 'dist', 'index.d.ts'),
+            'utf8',
+        ),
+    );
+
 const loadRuntimeExportNames = async (): Promise<string[]> => {
     const runtimeModule = (await import(
         pathToFileURL(sdkRuntimePath).href
@@ -355,6 +447,7 @@ const main = async (): Promise<void> => {
     const failures = await validatePublicPackagePolicy(
         publicPackagePolicy,
         await loadRuntimeExportNames(),
+        await loadEntryPointTypeExportNames(),
     );
 
     if (failures.length > 0) {

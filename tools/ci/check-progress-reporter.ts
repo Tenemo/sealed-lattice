@@ -123,7 +123,9 @@ type LaneState = {
     startedAtMilliseconds?: number;
     status: CheckProgressStatus;
     libtestCompletedTestCount: number;
+    libtestCompletedTestCountBeforeCurrentBatch: number;
     libtestDiscoveredTestCount: number;
+    libtestObservedCompactTestCountInCurrentBatch: number;
     libtestRunningTestCount?: number;
     turboTaskIdsSeen: Set<string>;
 };
@@ -685,7 +687,9 @@ export class CheckProgressReporter {
             secondaryProgress: cloneProgressMetric(lane.progress?.secondary),
             status: 'waiting',
             libtestCompletedTestCount: 0,
+            libtestCompletedTestCountBeforeCurrentBatch: 0,
             libtestDiscoveredTestCount: 0,
+            libtestObservedCompactTestCountInCurrentBatch: 0,
             turboTaskIdsSeen: new Set<string>(),
         }));
         this.#now = input.now ?? performance.now.bind(performance);
@@ -975,12 +979,13 @@ export class CheckProgressReporter {
         line: string,
     ): void {
         const lane = this.#requiredLane(laneName);
-        if (this.#consumeProgressLine(lane, line)) {
+        const outputLine = this.#consumeProgressLine(lane, line);
+        if (outputLine === undefined) {
             return;
         }
 
         const outputPrefix = `${laneName}`;
-        const lineWithTerminator = `${line}\n`;
+        const lineWithTerminator = `${outputLine}\n`;
         command.recentOutput.append(outputPrefix, lineWithTerminator);
         this.#latestOutput.append(outputPrefix, lineWithTerminator);
     }
@@ -1043,20 +1048,20 @@ export class CheckProgressReporter {
         return lines;
     }
 
-    #consumeProgressLine(lane: LaneState, line: string): boolean {
+    #consumeProgressLine(lane: LaneState, line: string): string | undefined {
         if (line.startsWith(progressEventPrefix)) {
             this.#consumeStructuredProgressLine(lane, line);
 
-            return true;
+            return undefined;
         }
         if (lane.progressSource === 'turbo') {
             this.#consumeTurboProgressLine(lane, line);
         }
         if (lane.progressSource === 'libtest') {
-            this.#consumeLibtestProgressLine(lane, line);
+            return this.#consumeLibtestProgressLine(lane, line);
         }
 
-        return false;
+        return line;
     }
 
     #consumeStructuredProgressLine(lane: LaneState, line: string): void {
@@ -1137,36 +1142,162 @@ export class CheckProgressReporter {
         }
     }
 
-    #consumeLibtestProgressLine(lane: LaneState, line: string): void {
-        const runningMatch = /^running (\d+) tests$/u.exec(line.trim());
+    #beginLibtestBatch(lane: LaneState, runningTestCount: number): void {
+        lane.libtestRunningTestCount = runningTestCount;
+        lane.libtestCompletedTestCountBeforeCurrentBatch =
+            lane.libtestCompletedTestCount;
+        lane.libtestObservedCompactTestCountInCurrentBatch = 0;
+        lane.libtestDiscoveredTestCount += runningTestCount;
+        this.#refreshLibtestSecondaryProgress(lane);
+    }
+
+    #recordLibtestCompletedTests(
+        lane: LaneState,
+        completedTestCount: number,
+    ): void {
+        lane.libtestCompletedTestCount += completedTestCount;
+        lane.libtestObservedCompactTestCountInCurrentBatch = Math.max(
+            lane.libtestObservedCompactTestCountInCurrentBatch,
+            lane.libtestCompletedTestCount -
+                lane.libtestCompletedTestCountBeforeCurrentBatch,
+        );
+        this.#refreshLibtestSecondaryProgress(lane);
+    }
+
+    #recordLibtestCurrentBatchProgress(
+        lane: LaneState,
+        completedTestCountInCurrentBatch: number,
+        totalTestCountInCurrentBatch?: number,
+    ): void {
+        if (totalTestCountInCurrentBatch !== undefined) {
+            if (lane.libtestRunningTestCount === undefined) {
+                lane.libtestRunningTestCount = totalTestCountInCurrentBatch;
+                lane.libtestCompletedTestCountBeforeCurrentBatch =
+                    lane.libtestCompletedTestCount;
+                lane.libtestDiscoveredTestCount += totalTestCountInCurrentBatch;
+            } else if (
+                totalTestCountInCurrentBatch > lane.libtestRunningTestCount
+            ) {
+                lane.libtestDiscoveredTestCount +=
+                    totalTestCountInCurrentBatch - lane.libtestRunningTestCount;
+                lane.libtestRunningTestCount = totalTestCountInCurrentBatch;
+            }
+        }
+
+        const currentBatchTotal =
+            lane.libtestRunningTestCount ?? totalTestCountInCurrentBatch;
+        const boundedCompletedTestCount =
+            currentBatchTotal === undefined
+                ? completedTestCountInCurrentBatch
+                : Math.min(completedTestCountInCurrentBatch, currentBatchTotal);
+        lane.libtestObservedCompactTestCountInCurrentBatch = Math.max(
+            lane.libtestObservedCompactTestCountInCurrentBatch,
+            boundedCompletedTestCount,
+        );
+        lane.libtestCompletedTestCount = Math.max(
+            lane.libtestCompletedTestCount,
+            lane.libtestCompletedTestCountBeforeCurrentBatch +
+                lane.libtestObservedCompactTestCountInCurrentBatch,
+        );
+        this.#refreshLibtestSecondaryProgress(lane);
+    }
+
+    #refreshLibtestSecondaryProgress(lane: LaneState): void {
+        const discoveredTestCount =
+            lane.libtestDiscoveredTestCount === 0
+                ? lane.secondaryProgress?.total
+                : lane.libtestDiscoveredTestCount;
+        lane.secondaryProgress = {
+            completed: lane.libtestCompletedTestCount,
+            total: discoveredTestCount,
+            unit: 'test',
+        };
+    }
+
+    #consumeLibtestProgressLine(
+        lane: LaneState,
+        line: string,
+    ): string | undefined {
+        const trimmedLine = line.trim();
+        const runningMatch = /^running (\d+) tests?$/u.exec(trimmedLine);
         if (runningMatch?.[1] !== undefined) {
-            const runningTestCount = Number(runningMatch[1]);
-            lane.libtestRunningTestCount = runningTestCount;
-            lane.libtestDiscoveredTestCount += runningTestCount;
-            lane.secondaryProgress = {
-                completed: lane.libtestCompletedTestCount,
-                total: Math.max(
-                    lane.secondaryProgress?.total ?? 0,
-                    lane.libtestDiscoveredTestCount,
-                ),
-                unit: 'test',
-            };
+            this.#beginLibtestBatch(lane, Number(runningMatch[1]));
 
-            return;
+            return undefined;
         }
 
-        if (/^test .+ \.\.\. (?:ok|ignored|FAILED)$/u.test(line.trim())) {
-            lane.libtestCompletedTestCount += 1;
-            const discoveredTestCount =
-                lane.libtestDiscoveredTestCount === 0
-                    ? lane.secondaryProgress?.total
-                    : lane.libtestDiscoveredTestCount;
-            lane.secondaryProgress = {
-                completed: lane.libtestCompletedTestCount,
-                total: discoveredTestCount,
-                unit: 'test',
-            };
+        const compactProgressMatch = /^([.iF]+)\s+(\d+)\/(\d+)$/u.exec(
+            trimmedLine,
+        );
+        if (
+            compactProgressMatch?.[2] !== undefined &&
+            compactProgressMatch[3] !== undefined
+        ) {
+            this.#recordLibtestCurrentBatchProgress(
+                lane,
+                Number(compactProgressMatch[2]),
+                Number(compactProgressMatch[3]),
+            );
+
+            return undefined;
         }
+
+        const compactProgressOnlyMatch = /^[.iF]+$/u.exec(trimmedLine);
+        if (compactProgressOnlyMatch !== null) {
+            this.#recordLibtestCurrentBatchProgress(
+                lane,
+                lane.libtestObservedCompactTestCountInCurrentBatch +
+                    trimmedLine.length,
+            );
+
+            return undefined;
+        }
+
+        const compactProgressPrefixMatch = /^([.iF]+)(test .+)$/u.exec(
+            trimmedLine,
+        );
+        if (
+            compactProgressPrefixMatch?.[1] !== undefined &&
+            compactProgressPrefixMatch[2] !== undefined
+        ) {
+            this.#recordLibtestCurrentBatchProgress(
+                lane,
+                lane.libtestObservedCompactTestCountInCurrentBatch +
+                    compactProgressPrefixMatch[1].length,
+            );
+
+            return compactProgressPrefixMatch[2];
+        }
+
+        if (/^test .+ \.\.\. (?:ok|ignored|FAILED)$/u.test(trimmedLine)) {
+            this.#recordLibtestCompletedTests(lane, 1);
+
+            return line;
+        }
+
+        const finalResultMatch =
+            /^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured; \d+ filtered out/u.exec(
+                trimmedLine,
+            );
+        if (
+            finalResultMatch?.[1] !== undefined &&
+            finalResultMatch[2] !== undefined &&
+            finalResultMatch[3] !== undefined &&
+            finalResultMatch[4] !== undefined
+        ) {
+            const completedTestCount =
+                Number(finalResultMatch[1]) +
+                Number(finalResultMatch[2]) +
+                Number(finalResultMatch[3]) +
+                Number(finalResultMatch[4]);
+            this.#recordLibtestCurrentBatchProgress(
+                lane,
+                completedTestCount,
+                lane.libtestRunningTestCount ?? completedTestCount,
+            );
+        }
+
+        return line;
     }
 
     #requestRender(): void {

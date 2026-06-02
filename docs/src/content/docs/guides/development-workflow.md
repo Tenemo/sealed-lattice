@@ -20,8 +20,6 @@ The workspace is only in a good state when the checks, docs, smoke tests, and Ru
 pnpm install
 pnpm run build
 pnpm run api-surface:generate
-pnpm run api-surface:update
-pnpm run api-surface:check
 pnpm run check
 pnpm run vectors
 pnpm exec playwright install chromium firefox webkit
@@ -44,8 +42,6 @@ pnpm run smoke:pack:npm
 
 - `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
 - `pnpm run api-surface:generate`: runs the full build and regenerates the public API surface summary for PR review
-- `pnpm run api-surface:update`: alias for `pnpm run api-surface:generate`
-- `pnpm run api-surface:check`: compatibility alias for `pnpm run api-surface:generate`; it does not compare against a pinned API baseline
 - `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API surface summary generation, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane; the first failing lane aborts the remaining work
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites

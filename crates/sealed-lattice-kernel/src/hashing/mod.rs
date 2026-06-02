@@ -83,6 +83,7 @@ reserved_root_namespaces! {
     EVALUATION_KEY_SIZE_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/evaluation-key-size-profile-hash-v1",
     COLLECTIVE_SECRET_DISTRIBUTION_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/collective-secret-distribution-certificate-hash-v1",
     ERROR_DISTRIBUTION_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/error-distribution-certificate-hash-v1",
+    BGV_HE_SECURITY_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/bgv-he-security-certificate-hash-v1",
     BGV_SETUP_PARAMETER_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/bgv-setup-parameter-certificate-hash-v1",
     BGV_DEVELOPMENT_ENCRYPTION_FIXTURE_HASH_NAMESPACE => "sealed-lattice-root/bgv-development-encryption-fixture-hash-v1",
     TOP_K_CIRCUIT_HASH_NAMESPACE => "sealed-lattice-root/top-k-circuit-hash-v1",

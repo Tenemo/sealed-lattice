@@ -325,6 +325,9 @@ export type TranscriptCoreKernel = {
     runEncryptedAggregateTopKEvaluation(
         input: TopKEvaluatorEncryptedAggregateEvaluationInput,
     ): TopKEvaluatorEncryptedAggregateEvaluation;
+    runEncryptedAggregateTopKEvaluationSweep(
+        input: TopKEvaluatorEncryptedAggregateEvaluationSweepInput,
+    ): TopKEvaluatorEncryptedAggregateEvaluationSweep;
 };
 
 export type TopKEvaluatorDevelopmentEvaluationInput = {
@@ -398,6 +401,13 @@ export type TopKEvaluatorEncryptedAggregateEvaluationInput = {
     readonly evaluatorSignature: string;
 };
 
+export type TopKEvaluatorEncryptedAggregateEvaluationSweepInput = Omit<
+    TopKEvaluatorEncryptedAggregateEvaluationInput,
+    'topCount'
+> & {
+    readonly topCounts: readonly number[];
+};
+
 export type TopKEvaluatorEncryptedAggregateEvaluation = {
     readonly ok: true;
     readonly operation: 'runEncryptedAggregateTopKEvaluation';
@@ -411,6 +421,21 @@ export type TopKEvaluatorEncryptedAggregateEvaluation = {
     readonly encryptedSparseTarget: Record<string, unknown>;
     readonly targetProposalHash: string;
     readonly appendixDPublicInputStatement: Record<string, unknown>;
+    readonly statusLabels: readonly string[];
+};
+
+export type TopKEvaluatorEncryptedAggregateEvaluationSweep = {
+    readonly ok: true;
+    readonly operation: 'runEncryptedAggregateTopKEvaluationSweep';
+    readonly comparisonProfile: string;
+    readonly rankPackingMethod: string;
+    readonly inputBindingStatus: string;
+    readonly topCounts: readonly number[];
+    readonly sharedEncryptedRankBundle: Record<string, unknown>;
+    readonly evaluations: readonly Omit<
+        TopKEvaluatorEncryptedAggregateEvaluation,
+        'encryptedTopKBundle'
+    >[];
     readonly statusLabels: readonly string[];
 };
 
@@ -711,7 +736,10 @@ type TranscriptCoreKernelCommand =
       } & TopKEvaluatorDevelopmentEvaluationInput)
     | ({
           readonly command: 'RunEncryptedAggregateTopKEvaluation';
-      } & TopKEvaluatorEncryptedAggregateEvaluationInput);
+      } & TopKEvaluatorEncryptedAggregateEvaluationInput)
+    | ({
+          readonly command: 'RunEncryptedAggregateTopKEvaluationSweep';
+      } & TopKEvaluatorEncryptedAggregateEvaluationSweepInput);
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;

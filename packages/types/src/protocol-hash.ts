@@ -64,6 +64,7 @@ export const protocolHashNamespaceValues = [
     'EvaluationKeySizeProfileHash',
     'CollectiveSecretDistributionCertificateHash',
     'ErrorDistributionCertificateHash',
+    'BGVHeSecurityCertificateHash',
     'BGVSetupParameterCertificateHash',
     'BGVDevelopmentEncryptionFixtureHash',
     'TopKCircuitHash',

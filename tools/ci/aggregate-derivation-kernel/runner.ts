@@ -48,6 +48,7 @@ import {
     createProtocolSignatureFixture,
     deriveProtocolHash,
 } from '#packages/crypto/src/index';
+import { deriveSelectedEncryptedAggregateBridgeHash } from '#packages/protocol/src/ballot-privacy/aggregate-bridge/hashes';
 import { createPendingBridgeProofRecordFromBridgeEvidence } from '#packages/protocol/src/ballot-privacy/aggregate-bridge/structure-verification.js';
 import {
     aggregateWitnessFromReceiverPlaintext,
@@ -81,6 +82,32 @@ const hash = (label: string): string =>
         /[^a-f0-9]/gu,
         'a',
     );
+
+const requiredNestedString = (
+    value: unknown,
+    pathSegments: readonly string[],
+): string => {
+    let currentValue = value;
+    for (const pathSegment of pathSegments) {
+        if (
+            currentValue === null ||
+            typeof currentValue !== 'object' ||
+            !(pathSegment in currentValue)
+        ) {
+            throw new Error(
+                `Missing required field ${pathSegments.join('.')}.`,
+            );
+        }
+        currentValue = (currentValue as Record<string, unknown>)[pathSegment];
+    }
+    if (typeof currentValue !== 'string') {
+        throw new Error(
+            `Required field ${pathSegments.join('.')} must be a string.`,
+        );
+    }
+
+    return currentValue;
+};
 
 const fixtureCertificate = (
     fixture: AggregateFixture,
@@ -916,11 +943,53 @@ const runMain = async (config: RunnerConfig): Promise<void> => {
             `Contribution selection failed: ${canonicalJson(selection)}`,
         );
     }
+    const encryptedInputByContributionHash = new Map(
+        bridgeResults.map((result) => [
+            result.contribution.aggregateContributionHash,
+            result.encryptedAggregateInput,
+        ]),
+    );
+    const selectedEncryptedAggregateInputs =
+        selection.selectedContributions.map((contribution) => {
+            const encryptedAggregateInput =
+                encryptedInputByContributionHash.get(
+                    contribution.aggregateContributionHash,
+                );
+            if (encryptedAggregateInput === undefined) {
+                throw new Error(
+                    `Missing encrypted aggregate input for selected contribution ${contribution.aggregateContributionHash}.`,
+                );
+            }
+
+            return encryptedAggregateInput;
+        });
+    const selectedEncryptedAggregateBridgeHash =
+        deriveSelectedEncryptedAggregateBridgeHash({
+            bridgeInputs: selectedEncryptedAggregateInputs,
+            ciphertextRoots: selectedEncryptedAggregateInputs.map((input) =>
+                requiredNestedString(input, [
+                    'bridgeEncryption',
+                    'ciphertextRoot',
+                ]),
+            ),
+            collectivePublicKeyRoot: requiredNestedString(setupPackage, [
+                'collectivePublicKey',
+                'collectivePublicKeyRoot',
+            ]),
+            evaluationKeyRoot: requiredNestedString(setupPackage, [
+                'evaluationKeys',
+                'evaluationKeyRoot',
+            ]),
+            setupPackageHash: requiredNestedString(setupPackage, [
+                'setupPackageHash',
+            ]),
+        });
     const aggregateReadyRecord = createAggregateReadyRecord({
         aggregateContributionQuorum: contributorCount,
         firstValidOrderHash: selection.firstValidOrderHash,
         rosterSize: statementBuild.statement.participantCount,
         selectedContributions: selection.selectedContributions,
+        selectedEncryptedAggregateBridgeHash,
     });
     const aggregateReadyVerification =
         verifyAggregateReadyRecordStructure(aggregateReadyRecord);
@@ -931,9 +1000,6 @@ const runMain = async (config: RunnerConfig): Promise<void> => {
             )}`,
         );
     }
-    const selectedEncryptedAggregateInputs = bridgeResults.map(
-        (result) => result.encryptedAggregateInput,
-    );
     const setupPackagePath = path.join(
         config.checkpointDir,
         'aggregate-derivation-kernel-last-setup-package.json',

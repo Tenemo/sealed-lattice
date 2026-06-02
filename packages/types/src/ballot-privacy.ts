@@ -648,10 +648,24 @@ export type AggregateDerivationVerificationScope =
     | 'AggregateDerivationFullVerificationPreconditionNotBound'
     | 'AggregateDerivationFullVerificationChecked';
 
+export type AggregateBridgeRandomnessSource =
+    | 'fresh-csprng'
+    | 'development-deterministic-fixture';
+
+export type AggregateBridgeRandomnessSourceEvidence = {
+    readonly objectType: 'AggregateBridgeRandomnessSourceEvidence';
+    readonly objectVersion: 1;
+    readonly proverRandomnessSource: AggregateBridgeRandomnessSource;
+    readonly encryptionRandomnessSeedSource: AggregateBridgeRandomnessSource;
+    readonly callerSuppliedDevelopmentRandomness: boolean;
+    readonly claimBearingEntropyEvidence: boolean;
+};
+
 export type BridgeProofRecord = {
     readonly objectType: 'BridgeProofRecord';
     readonly objectVersion: 1;
     readonly aggregateDerivationComponentHash: ProtocolHash;
+    readonly aggregateDerivationStatementHash: ProtocolHash;
     readonly aggregateDerivationVerificationScope: AggregateDerivationVerificationScope;
     readonly aggregateSelectionPolicyHash: ProtocolHash;
     readonly aggregateShareCommitmentHash: ProtocolHash;
@@ -697,6 +711,7 @@ export type BridgeProofRecord = {
     readonly manifestHash: ProtocolHash;
     readonly optionCount: number;
     readonly participantCount: number;
+    readonly plaintextCoefficientBindingCommitmentHash: ProtocolHash;
     readonly pollSpecHash: ProtocolHash;
     readonly postVotingClosedContextHash: ProtocolHash;
     readonly proofBackend: 'SealedLatticeBridgeRelation';
@@ -705,8 +720,12 @@ export type BridgeProofRecord = {
     readonly proofParameterSetHash: ProtocolHash;
     readonly proofRoot: ProtocolHash;
     readonly proofSizeBytes: number;
+    readonly proofFriendlyPlaintextLiftBindingHash: ProtocolHash;
     readonly proofStatementHash: ProtocolHash;
+    readonly proverRandomnessSource: AggregateBridgeRandomnessSource;
     readonly publicRandomnessHash: ProtocolHash;
+    readonly encryptionRandomnessSeedSource: AggregateBridgeRandomnessSource;
+    readonly randomnessSourceEvidence: AggregateBridgeRandomnessSourceEvidence;
     readonly rosterHash: ProtocolHash;
     readonly rustBgvBackendProfileHash: ProtocolHash;
     readonly setupPackageHash: ProtocolHash;
@@ -805,6 +824,7 @@ export type AggregateReadyRecordBuildInput = {
     readonly firstValidOrderHash: ProtocolHash;
     readonly rosterSize: number;
     readonly selectedContributions: readonly AggregateContribution[];
+    readonly selectedEncryptedAggregateBridgeHash?: ProtocolHash;
     readonly suppliedInterpolationCoefficientReport?: InterpolationCoefficientReport;
 };
 

@@ -236,11 +236,11 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
             "setupParameterCertificate",
             "finalSecurityStatus",
         ],
-    )? != "pendingQTarget"
+    )? != "acceptedForSetupBridgeEvaluatorTargetPending"
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must keep final final setup security pending target modulus",
+            "passive BGV setup package must accept setup-bridge-evaluator HE security while keeping target modulus downstream",
         ));
     }
     let participants = setup_package

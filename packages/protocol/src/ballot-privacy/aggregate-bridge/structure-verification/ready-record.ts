@@ -207,6 +207,7 @@ export const createAggregateReadyRecord = (
         collectivePublicKeyCoefficientRoot:
             firstContribution.collectivePublicKeyCoefficientRoot,
         encryptedAggregateBridgeHash:
+            input.selectedEncryptedAggregateBridgeHash ??
             firstContribution.encryptedAggregateBridgeHash,
         encryptedAggregateInputLayoutHash:
             firstContribution.encryptedAggregateInputLayoutHash,

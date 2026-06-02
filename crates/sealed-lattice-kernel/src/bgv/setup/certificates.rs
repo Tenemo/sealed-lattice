@@ -1,5 +1,7 @@
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
+use crate::bgv::profile::SPECIAL_PRIME;
+use num_bigint::BigUint;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setup_certificates(
@@ -19,7 +21,7 @@ pub(super) fn setup_certificates(
     development_encryption_fixture: &Value,
 ) -> CanonicalResult<Value> {
     let q_data_bits = data_basis_modulus_bits();
-    let qp_public_bits = extended_basis_modulus_bits();
+    let q_extended_utility_bits = extended_basis_modulus_bits();
     let rotation_key_roots = evaluation_keys["rotationKeyRoots"]
         .as_array()
         .expect("rotation key roots use array");
@@ -44,6 +46,13 @@ pub(super) fn setup_certificates(
         "TargetThresholdDecryptabilityCertificateHash",
         &target_threshold_decryptability_certificate,
     )?;
+    let he_security_certificate = he_security_certificate_for_setup_profile(
+        collective_secret_distribution_certificate,
+        error_distribution_certificate,
+        &public_samples,
+    )?;
+    let he_security_certificate_hash =
+        derive_protocol_hash("BGVHeSecurityCertificateHash", &he_security_certificate)?;
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
@@ -55,13 +64,20 @@ pub(super) fn setup_certificates(
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "qDataBits": q_data_bits,
-        "qpPublicBits": qp_public_bits,
+        "qDataProductDecimal": modulus_product_decimal(DATA_PRIMES.iter().copied()),
+        "qSpecialPrime": SPECIAL_PRIME,
+        "qExtendedUtilityBits": q_extended_utility_bits,
+        "qExtendedUtilityProductDecimal": modulus_product_decimal(
+            DATA_PRIMES.iter().copied().chain([SPECIAL_PRIME]),
+        ),
+        "qpPublicBits": null,
         "qTargetBits": null,
-        "publicEvaluationKeyBasis": BgvBasisKind::Extended.basis_id(),
-        "largestExposedModulusBitsWithoutQTarget": qp_public_bits,
-        "largestExposedBasisClassWithoutQTarget": "QP_public",
-        "largestExposedModulusBits": null,
-        "finalSecurityStatus": "pendingQTarget",
+        "publicEvaluationKeyBasis": BgvBasisKind::Data.basis_id(),
+        "largestExposedModulusBitsWithoutQTarget": q_data_bits,
+        "largestExposedBasisClassWithoutQTarget": "Q_data",
+        "largestExposedModulusBits": q_data_bits,
+        "finalSecurityStatus": "acceptedForSetupBridgeEvaluatorTargetPending",
+        "specialPrimeExposureStatus": "not-exposed-by-current-setup-bridge-evaluator-public-material",
         "collectiveSecretDistributionCertificateHash": collective_secret_distribution_certificate_hash,
         "errorDistributionCertificateHash": error_distribution_certificate_hash,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
@@ -70,17 +86,11 @@ pub(super) fn setup_certificates(
         "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
         "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
         "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
+        "heSecurityCertificateHash": he_security_certificate_hash,
         "securityEstimatorInputHash": security_estimator_input_hash()?,
-        "HEStdPostQuantumRow": {
-            "status": "setup-input-recorded-final-row-pending-Q-target",
-            "largestKnownExposedModulusBits": qp_public_bits
-        },
-        "CurrentEstimatorRow": {
-            "status": "setup-input-recorded-run-pending-final-estimator-policy",
-            "largestKnownExposedModulusBits": qp_public_bits,
-            "secretModel": collective_secret_distribution_certificate["resultingGlobalSecretDistribution"]["distributionKind"],
-            "errorModel": error_distribution_certificate["errorDistribution"]["distributionKind"]
-        }
+        "HEStdPostQuantumRow": he_security_certificate["standardRows"]["postQuantumTernary128"],
+        "HEStdClassicalRow": he_security_certificate["standardRows"]["classicalTernary128"],
+        "CurrentEstimatorRow": he_security_certificate["estimatorBinding"],
     });
     let setup_parameter_certificate_hash = derive_protocol_hash(
         "BGVSetupParameterCertificateHash",
@@ -95,6 +105,8 @@ pub(super) fn setup_certificates(
         "keySwitchDecomposition": key_switch_decomposition,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicRlweSamplesByBasis": public_samples,
+        "heSecurityCertificate": he_security_certificate,
+        "heSecurityCertificateHash": he_security_certificate_hash,
         "setupParameterCertificate": setup_parameter_certificate,
         "setupParameterCertificateHash": setup_parameter_certificate_hash,
         "targetThresholdDecryptabilityCertificate": target_threshold_decryptability_certificate,
@@ -107,11 +119,156 @@ pub(super) fn setup_certificates(
             "ActualSecretDistributionRecorded",
             "ActualErrorDistributionRecorded",
             "PublicRlweSampleCountsRecorded",
-            "LargestExposedModulusWithoutQTargetRecorded",
+            "LargestExposedModulusAcceptedForSetupBridgeEvaluator",
+            "SetupBridgeEvaluatorHeSecurityAccepted",
             "TargetThresholdDecryptabilityCompatibilityRecorded",
             "EvaluationKeySizeCertificateRecorded",
-            "FinalSecurityPendingQTarget"
+            "FinalTargetSecurityPendingQTarget"
         ],
+    }))
+}
+
+fn modulus_product_decimal(moduli: impl IntoIterator<Item = u64>) -> String {
+    let mut product = BigUint::from(1_u8);
+    for modulus in moduli {
+        product *= BigUint::from(modulus);
+    }
+
+    product.to_str_radix(10)
+}
+
+fn he_security_certificate_for_setup_profile(
+    collective_secret_distribution_certificate: &Value,
+    error_distribution_certificate: &Value,
+    public_samples: &Value,
+) -> CanonicalResult<Value> {
+    let largest_exposed_modulus_bits = data_basis_modulus_bits();
+    let post_quantum_max_logq = 827_usize;
+    let classical_max_logq = 881_usize;
+    let post_quantum_accepted = largest_exposed_modulus_bits <= post_quantum_max_logq;
+    let classical_accepted = largest_exposed_modulus_bits <= classical_max_logq;
+    let global_secret_distribution = value_at_path(
+        collective_secret_distribution_certificate,
+        &["resultingGlobalSecretDistribution"],
+    )?;
+    compare_string_at_path(
+        global_secret_distribution,
+        &["distributionKind"],
+        "standard-ternary-collective-secret",
+        "HE security collective secret distribution",
+    )?;
+    if !bool_at_path(global_secret_distribution, &["isPlainDenseTernary"])? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "HE security certificate requires the setup global secret to match the HE-standard ternary row",
+        ));
+    }
+
+    Ok(json!({
+        "objectType": "BgvHeSecurityCertificate",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "profileId": PROFILE_ID,
+        "backendProfileId": BACKEND_PROFILE_ID,
+        "reference": {
+            "document": "ACC18 Homomorphic Encryption Standard",
+            "localReferencePath": "reference-documents/ACC18_Homomorphic Encryption Standard.txt",
+            "sections": [
+                "Section 2.1.3 secret key distribution",
+                "Table 1 BKZ.sieve ternary n=32768 row",
+                "Table 2 BKZ.qsieve ternary n=32768 row"
+            ],
+            "tableScope": "power-of-two cyclotomic RLWE parameter table"
+        },
+        "assessedRing": {
+            "polynomialDegree": POLYNOMIAL_DEGREE,
+            "plaintextModulus": PLAINTEXT_MODULUS,
+            "dataBasisId": BgvBasisKind::Data.basis_id(),
+            "dataPrimeCount": DATA_PRIMES.len(),
+            "dataPrimeProductDecimal": modulus_product_decimal(DATA_PRIMES.iter().copied()),
+            "dataPrimeCeilLog2Product": data_basis_modulus_bits(),
+            "specialPrime": SPECIAL_PRIME,
+            "extendedUtilityCeilLog2Product": extended_basis_modulus_bits(),
+            "extendedUtilityExposureStatus": "not-exposed-by-current-setup-bridge-evaluator-public-material",
+            "largestExposedBasisClass": "Q_data",
+            "largestExposedModulusBits": largest_exposed_modulus_bits
+        },
+        "secretDistribution": {
+            "certificate": global_secret_distribution,
+            "estimatorModel": collective_secret_distribution_certificate["estimatorSecretModel"],
+            "HEStandardRow": "ternary",
+        },
+        "errorDistribution": {
+            "certificate": error_distribution_certificate["errorDistribution"],
+            "sampler": error_distribution_certificate["errorSampler"],
+            "estimatorNote": "the HE-standard table is the accepted published parameter row for the ring and secret distribution; the implemented centered-binomial eta2 sampler remains separately recorded for noise/correctness analysis"
+        },
+        "publicSampleAccounting": public_samples,
+        "standardRows": {
+            "postQuantumTernary128": {
+                "status": if post_quantum_accepted {
+                    "accepted"
+                } else {
+                    "rejected-largest-exposed-modulus-exceeds-row"
+                },
+                "costModel": "BKZ.qsieve",
+                "secretDistribution": "ternary",
+                "polynomialDegree": 32768,
+                "securityLevelBits": 128,
+                "maximumLogQ": post_quantum_max_logq,
+                "largestExposedModulusBits": largest_exposed_modulus_bits,
+                "marginBits": post_quantum_max_logq.saturating_sub(largest_exposed_modulus_bits),
+                "uSVPBits": "128.1",
+                "decodingBits": "128.7",
+                "dualBits": "128.4"
+            },
+            "classicalTernary128": {
+                "status": if classical_accepted {
+                    "accepted"
+                } else {
+                    "rejected-largest-exposed-modulus-exceeds-row"
+                },
+                "costModel": "BKZ.sieve",
+                "secretDistribution": "ternary",
+                "polynomialDegree": 32768,
+                "securityLevelBits": 128,
+                "maximumLogQ": classical_max_logq,
+                "largestExposedModulusBits": largest_exposed_modulus_bits,
+                "marginBits": classical_max_logq.saturating_sub(largest_exposed_modulus_bits),
+                "uSVPBits": "128.5",
+                "decodingBits": "129.1",
+                "dualBits": "128.5"
+            }
+        },
+        "estimatorBinding": {
+            "status": if post_quantum_accepted && classical_accepted {
+                "accepted-by-local-HE-standard-table-row"
+            } else {
+                "rejected-by-local-HE-standard-table-row"
+            },
+            "tool": "HE-standard published parameter table",
+            "toolVersion": "ACC18 local text reference",
+            "securityEstimatorInputHash": security_estimator_input_hash()?,
+            "secretModel": "standard-ternary",
+            "errorModel": error_distribution_certificate["errorDistribution"]["distributionKind"],
+            "largestExposedModulusBits": largest_exposed_modulus_bits,
+            "publicSamplesBound": true,
+        },
+        "targetModulusStatus": "target-decryption-Q-target-not-part-of-setup-bridge-evaluator-closure",
+        "acceptedForSetupBridgeEvaluator": post_quantum_accepted && classical_accepted,
+        "statusLabels": if post_quantum_accepted && classical_accepted {
+            vec![
+                "HEStandardPostQuantum128Accepted",
+                "HEStandardClassical128Accepted",
+                "DataBasisLargestExposedModulusAccepted",
+                "SpecialPrimeNotPubliclyExposedOnAcceptedPath",
+            ]
+        } else {
+            vec![
+                "HEStandardSecurityRejected",
+                "DataBasisLargestExposedModulusRejected",
+            ]
+        },
     }))
 }
 
@@ -136,32 +293,32 @@ pub(super) fn collective_secret_distribution_certificate(
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "localShareSampler": {
-            "samplerId": "hash-derived-owner-routed-sparse-ternary-collective-share-v1",
+            "samplerId": "hash-derived-owner-routed-standard-ternary-collective-share-v1",
             "support": [-1, 0, 1],
-            "probabilityNumeratorBySupport": [1, 62, 1],
-            "probabilityDenominator": 64,
+            "probabilityNumeratorBySupport": [1, 1, 1],
+            "probabilityDenominator": 3,
             "candidateBits": 64,
             "rejectionRule": "reject-candidates-outside-largest-multiple-of-support-width",
-            "ownerSelectionRule": "one-deterministic-participant-owner-per-coefficient; non-owner local shares are zero",
+            "ownerSelectionRule": "one-deterministic-participant-owner-per-coefficient; owner samples one standard ternary coefficient; non-owner local shares are zero",
             "ownerSelectionParticipantCount": participant_count_u64,
             "rawShareExported": false
         },
-        "localShareDistribution": "owner-routed-sparse-ternary-local-share",
+        "localShareDistribution": "owner-routed-standard-ternary-local-share",
         "aggregationRule": "coefficient-wise-owner-routed-share-sum",
         "participantCount": participant_count,
         "resultingGlobalSecretDistribution": {
-            "distributionKind": "owner-routed-sparse-ternary-collective-secret",
+            "distributionKind": "standard-ternary-collective-secret",
             "support": [
                 { "secretCoefficientSum": -1, "weight": "1" },
-                { "secretCoefficientSum": 0, "weight": "62" },
+                { "secretCoefficientSum": 0, "weight": "1" },
                 { "secretCoefficientSum": 1, "weight": "1" }
             ],
-            "totalWeightExpression": "64",
-            "isPlainDenseTernary": false,
+            "totalWeightExpression": "3",
+            "isPlainDenseTernary": true,
         },
-        "estimatorSecretModel": "owner-routed-sparse-ternary-hamming-weight-about-N-over-32",
-        "noiseModelSecretModel": "owner-routed-sparse-ternary-hamming-weight-about-N-over-32",
-        "sparseSecretFlag": true,
+        "estimatorSecretModel": "HE-standard-ternary",
+        "noiseModelSecretModel": "standard-ternary",
+        "sparseSecretFlag": false,
         "fixedHammingSecretFlag": false,
         "rejectionReasonIfUncertified": null,
     }))
@@ -214,10 +371,10 @@ pub(super) fn key_switch_decomposition_profile() -> CanonicalResult<Value> {
         "objectType": "BgvKeySwitchDecompositionProfile",
         "objectVersion": 1,
         "profileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
-        "basisId": BgvBasisKind::Extended.basis_id(),
+        "basisId": BgvBasisKind::Data.basis_id(),
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
-        "decompositionStatus": "provisional-passive-setup-for-encrypted-evaluator",
+        "decompositionStatus": "setup-bridge-evaluator-data-basis-key-switch-material",
         "genericKeySwitchApiExported": false,
     }))
 }
@@ -565,7 +722,7 @@ pub(super) fn public_common_random_polynomial_root(
 
 fn public_rlwe_samples_by_basis(participant_count: usize, rotation_key_count: usize) -> Value {
     let q_data_bits = data_basis_modulus_bits();
-    let qp_public_bits = extended_basis_modulus_bits();
+    let q_extended_utility_bits = extended_basis_modulus_bits();
 
     json!({
         "QData": {
@@ -574,13 +731,18 @@ fn public_rlwe_samples_by_basis(participant_count: usize, rotation_key_count: us
             "publicKeyShares": participant_count,
             "collectivePublicKey": 1,
             "developmentEncryptionFixtures": 1,
+            "relinearizationKeys": DATA_PRIMES.len() - 1,
+            "rotationKeys": rotation_key_count,
+            "keySwitchKeys": 1,
         },
         "QPPublic": {
             "basisId": BgvBasisKind::Extended.basis_id(),
-            "modulusBits": qp_public_bits,
-            "relinearizationKeys": 2,
-            "rotationKeys": rotation_key_count,
-            "keySwitchKeys": 1,
+            "modulusBits": q_extended_utility_bits,
+            "exposedOnAcceptedSetupBridgeEvaluatorPath": false,
+            "relinearizationKeys": 0,
+            "rotationKeys": 0,
+            "keySwitchKeys": 0,
+            "exposurePolicy": "special-prime utility basis is not public key-switch material in the current accepted setup-bridge-evaluator path",
         },
         "QTarget": {
             "modulusBits": null,

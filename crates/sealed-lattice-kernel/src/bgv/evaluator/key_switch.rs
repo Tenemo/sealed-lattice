@@ -35,9 +35,26 @@ pub(crate) struct KeySwitchKey {
 
 #[derive(Clone)]
 pub(crate) struct KeySwitchComponent {
-    pub(crate) component_b: Vec<Vec<u64>>,
+    pub(crate) component_b: Option<Vec<Vec<u64>>>,
     component_b_ntt: Vec<Vec<u64>>,
-    component_a_ntt: Vec<Vec<u64>>,
+    component_a_ntt: Option<Vec<Vec<u64>>>,
+    component_a_domain: String,
+    component_a_seed_hex: String,
+    digit_index: usize,
+}
+
+impl KeySwitchKey {
+    pub(crate) fn drop_component_b(&mut self) {
+        for component in &mut self.components {
+            component.component_b = None;
+        }
+    }
+
+    pub(crate) fn drop_component_a_ntt(&mut self) {
+        for component in &mut self.components {
+            component.component_a_ntt = None;
+        }
+    }
 }
 
 impl KeySwitchComponent {
@@ -45,15 +62,46 @@ impl KeySwitchComponent {
         component_b: Vec<Vec<u64>>,
         component_a: Vec<Vec<u64>>,
         primes: &[u64],
+        domain: &str,
+        seed_hex: &str,
+        digit_index: usize,
     ) -> CanonicalResult<Self> {
         let component_b_ntt = ntt_limbs(&component_b, primes)?;
         let component_a_ntt = ntt_limbs(&component_a, primes)?;
+        drop(component_a);
 
         Ok(Self {
-            component_b,
+            component_b: Some(component_b),
             component_b_ntt,
-            component_a_ntt,
+            component_a_ntt: Some(component_a_ntt),
+            component_a_domain: domain.to_string(),
+            component_a_seed_hex: seed_hex.to_string(),
+            digit_index,
         })
+    }
+
+    fn component_a_ntt_for_limb(
+        &self,
+        limb_index: usize,
+        modulus: u64,
+    ) -> CanonicalResult<Vec<u64>> {
+        if let Some(component_a_ntt) = &self.component_a_ntt {
+            return Ok(component_a_ntt[limb_index].clone());
+        }
+        let digit_bytes = (self.digit_index as u64).to_le_bytes();
+        let modulus_bytes = modulus.to_le_bytes();
+        let public_sample = DeterministicSampler::new(
+            KEY_SWITCH_SAMPLE_DOMAIN,
+            &[
+                self.component_a_domain.as_bytes(),
+                self.component_a_seed_hex.as_bytes(),
+                &digit_bytes,
+                &modulus_bytes,
+            ],
+        )
+        .uniform_residues(modulus, POLYNOMIAL_DEGREE);
+
+        forward_negacyclic_ntt(&public_sample, modulus)
     }
 }
 
@@ -144,6 +192,9 @@ fn generate_key_switch_key(
             component_b,
             component_a,
             primes,
+            domain,
+            seed_hex,
+            digit_index,
         )?);
     }
 
@@ -201,6 +252,9 @@ pub(crate) fn key_switch_key_from_public_component_b(
             component_b,
             component_a,
             primes,
+            domain,
+            seed_hex,
+            digit_index,
         )?);
     }
 
@@ -266,8 +320,8 @@ fn key_switch_component_digit(
         let digit_ntt = forward_negacyclic_ntt(&digit_in_limb, *modulus)?;
         let product_b =
             multiply_ntt_by_ntt(&digit_ntt, &component.component_b_ntt[limb_index], *modulus)?;
-        let product_a =
-            multiply_ntt_by_ntt(&digit_ntt, &component.component_a_ntt[limb_index], *modulus)?;
+        let component_a_ntt = component.component_a_ntt_for_limb(limb_index, *modulus)?;
+        let product_a = multiply_ntt_by_ntt(&digit_ntt, &component_a_ntt, *modulus)?;
         switched_zero[limb_index] = product_b;
         switched_one[limb_index] = product_a;
     }

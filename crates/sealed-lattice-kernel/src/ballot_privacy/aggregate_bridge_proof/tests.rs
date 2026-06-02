@@ -292,16 +292,26 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(target_contract["sharedWitnessCheckCount"], json!(5));
         assert_eq!(
-            target_contract["sharedWitnessChallengeEntropyBits"],
+            target_contract["sharedWitnessRawWeakestRelationSoundnessBitsFloor"],
             json!(230)
+        );
+        assert!(
+            target_contract
+                .get("sharedWitnessChallengeEntropyBits")
+                .is_none()
         );
         assert_eq!(
             target_contract["sharedWitnessWeakestRelation"],
-            json!(PLAINTEXT_ENCODING_RELATION)
+            json!(BRIDGE_WEAKEST_ACTIVE_RELATION)
         );
         assert_eq!(
-            target_contract["sharedWitnessWeakestRelationModuli"],
-            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI)
+            target_contract["sharedWitnessWeakestRelationEffectiveModulus"],
+            json!(bridge_weakest_active_relation_effective_modulus_decimal())
+        );
+        assert!(
+            target_contract
+                .get("sharedWitnessWeakestRelationModuli")
+                .is_none()
         );
         assert_eq!(
             target_contract["batchIntegerLiftProofModulusProduct"],
@@ -328,12 +338,24 @@ fn bridge_proof_target_contract_is_variant_parametric() {
             json!(6)
         );
         assert_eq!(
-            target_contract["sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor"],
+            target_contract["sharedWitnessRawWeakestRelationSoundnessBitsFloor"],
             json!(230)
         );
         assert_eq!(
             target_contract["sharedWitnessFullMatrixUnionBoundBits"],
             json!(9)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessRandomOracleAccountingModel"],
+            json!(BRIDGE_RANDOM_ORACLE_ACCOUNTING_MODEL)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessQromAccountingStatus"],
+            json!(BRIDGE_QROM_ACCOUNTING_STATUS)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessChallengeBiasAccountingModel"],
+            json!(BRIDGE_CHALLENGE_BIAS_ACCOUNTING_MODEL)
         );
         assert_eq!(
             target_contract["sharedWitnessEffectiveBindingBelowTarget"],
@@ -379,11 +401,11 @@ fn bridge_proof_target_contract_soundness_uses_weakest_relation_modulus() {
     .expect("target contract");
     let relation_modulus_product_bits_floor =
         127_u64 - BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT.leading_zeros() as u64;
-    let unadjusted_weakest_relation_soundness =
+    let raw_weakest_relation_soundness =
         BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
     let retry_loss = SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK
         * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
-    let effective_soundness = unadjusted_weakest_relation_soundness
+    let effective_soundness = raw_weakest_relation_soundness
         - retry_loss
         - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS
         - BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS
@@ -396,13 +418,15 @@ fn bridge_proof_target_contract_soundness_uses_weakest_relation_modulus() {
         target_contract["plaintextEncodingProofModulusProductBitsFloor"],
         json!(relation_modulus_product_bits_floor)
     );
-    assert_eq!(
-        target_contract["sharedWitnessChallengeEntropyBits"],
-        json!(BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS)
+    assert!(
+        target_contract
+            .get("sharedWitnessChallengeEntropyBits")
+            .is_none(),
+        "same-witness soundness must not be reported as challenge entropy"
     );
     assert_eq!(
-        target_contract["sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor"],
-        json!(unadjusted_weakest_relation_soundness)
+        target_contract["sharedWitnessRawWeakestRelationSoundnessBitsFloor"],
+        json!(raw_weakest_relation_soundness)
     );
     assert_eq!(
         target_contract["sharedWitnessRejectionRetryLossBits"],
@@ -418,10 +442,8 @@ fn bridge_proof_target_contract_soundness_uses_weakest_relation_modulus() {
     );
     assert_ne!(
         effective_soundness,
-        BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS
-            - BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS
-            - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS,
-        "bridge soundness must not be derived from challenge entropy alone"
+        relation_modulus_product_bits_floor - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS,
+        "bridge soundness must not be derived from the batch-lift product alone"
     );
 }
 

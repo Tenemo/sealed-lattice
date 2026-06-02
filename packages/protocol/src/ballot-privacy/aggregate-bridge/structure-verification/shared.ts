@@ -178,6 +178,7 @@ export type AggregateContributionFromBridgeProofRecordInput = {
 
 export const bridgeHashFieldNames = [
     'aggregateDerivationComponentHash',
+    'aggregateDerivationStatementHash',
     'aggregateShareCommitmentHash',
     'shareCommitmentMessageBoundCertHash',
     'encryptedAggregateBridgeHash',
@@ -216,6 +217,8 @@ export const bridgeHashFieldNames = [
     'votingClosedBoardHeadHash',
     'contributorActionContextHash',
     'contributorRosterExternalAcceptanceHash',
+    'plaintextCoefficientBindingCommitmentHash',
+    'proofFriendlyPlaintextLiftBindingHash',
     'proofStatementHash',
     'proofRoot',
     'proofBytesHash',

@@ -172,7 +172,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     assert_eq!(first["kllpsStatus"]["KLLPSPartDecStatusImplemented"], false);
     assert_eq!(
         first["certificates"]["setupParameterCertificate"]["finalSecurityStatus"],
-        "pendingQTarget"
+        "acceptedForSetupBridgeEvaluatorTargetPending"
     );
     assert_eq!(
         first["certificates"]["targetThresholdDecryptabilityCertificate"]["ciphertextCompatibilityStatus"],
@@ -814,7 +814,16 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
     let package = setup_package();
     assert_eq!(
         package["certificates"]["collectiveSecretDistributionCertificate"]["localShareSampler"]["samplerId"],
-        "hash-derived-owner-routed-sparse-ternary-collective-share-v1"
+        "hash-derived-owner-routed-standard-ternary-collective-share-v1"
+    );
+    assert_eq!(
+        package["certificates"]["collectiveSecretDistributionCertificate"]["resultingGlobalSecretDistribution"]
+            ["isPlainDenseTernary"],
+        true
+    );
+    assert_eq!(
+        package["certificates"]["heSecurityCertificate"]["acceptedForSetupBridgeEvaluator"],
+        true
     );
     assert_eq!(
         package["certificates"]["errorDistributionCertificate"]["crpPublicSampleDistribution"]["distributionKind"],
@@ -1212,7 +1221,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
         let minimally_shaped_package = serde_json::json!({
             "certificates": {
                 "setupParameterCertificate": {
-                    "finalSecurityStatus": "pendingQTarget",
+                    "finalSecurityStatus": "acceptedForSetupBridgeEvaluatorTargetPending",
                 },
             },
             "kllpsStatus": {
@@ -1237,6 +1246,39 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             "participant count {invalid_participant_count} must be rejected by verification shape checks"
         );
     }
+
+    let stale_security_status_package = serde_json::json!({
+        "certificates": {
+            "setupParameterCertificate": {
+                "finalSecurityStatus": "pendingQTarget",
+            },
+        },
+        "kllpsStatus": {
+            "KLLPSC1C4StatusAccepted": false,
+            "KLLPSPartDecStatusImplemented": false,
+            "setupMaterialMatchesKLLPS": true,
+        },
+        "objectType": "BgvPassiveSetupPackage",
+        "objectVersion": 1,
+        "participants": vec![serde_json::json!({}); 3],
+        "setupInputs": {
+            "participantCount": 3,
+        },
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "trustedDealerBoundary": {
+            "rawSecretSharesExported": false,
+            "transcriptValidCentralizedSecretReconstruction": false,
+        },
+    });
+    let stale_status_error = validate_setup_package_shape(&stale_security_status_package)
+        .expect_err("stale setup security status must be refused before encrypted evaluation");
+    assert!(
+        stale_status_error
+            .message
+            .contains("accept setup-bridge-evaluator HE security"),
+        "{}",
+        stale_status_error.message
+    );
 
     let mut malformed_threshold_hash_request = request();
     malformed_threshold_hash_request["thresholdProfileHash"] = serde_json::json!("not-a-hash");

@@ -10,6 +10,9 @@ const BGV_RANDOMNESS_BOUND_PROOF_MODEL: &str = "fiat-shamir-same-response-suppor
 const BGV_RANDOMNESS_SUPPORT: &str = "balanced-ternary-coefficients-minus-one-to-one";
 const BGV_ERROR_SUPPORT: &str = "centered-binomial-eta2-coefficients-minus-two-to-two";
 const BGV_BOUND_SUPPORT_CHECK_MODEL: &str = "coefficientwise-support-expansion-v1";
+const BGV_BOUND_SUPPORT_SOUNDNESS_MODEL: &str = "coefficientwise-support-polynomial-fiat-shamir-v1";
+const BGV_BOUND_SUPPORT_CHALLENGE_DISTRIBUTION: &str =
+    "same-direct-weakest-relation-challenge-as-shared-witness-v1";
 // Vanishing polynomials whose roots are exactly the legal support: x(x-1)(x+1) vanishes on
 // the ternary {-1,0,1} randomizer support; x(x-2)(x-1)(x+1)(x+2) on the CBD-eta2 {-2..2} errors.
 const RANDOMIZER_SUPPORT_POLYNOMIAL: &str = "x*(x-1)*(x+1)";
@@ -17,6 +20,16 @@ const ERROR_SUPPORT_POLYNOMIAL: &str = "x*(x-2)*(x-1)*(x+1)*(x+2)";
 const RANDOMIZER_EXPANSION_COEFFICIENT_COUNT: usize = 3;
 const ERROR_EXPANSION_COEFFICIENT_COUNT: usize = 5;
 const BGV_BOUND_SUPPORT_MODULUS_COUNT: usize = 1;
+const BGV_BOUND_SUPPORT_MAXIMUM_POLYNOMIAL_DEGREE: u64 = 5;
+const BGV_BOUND_SUPPORT_POLYNOMIAL_DEGREE_LOSS_BITS: u64 = 3;
+const BGV_BOUND_SUPPORT_COEFFICIENT_UNION_BOUND_BITS: u64 = 17;
+const BGV_BOUND_SUPPORT_EFFECTIVE_SOUNDNESS_BITS_FLOOR: u64 =
+    BRIDGE_SHARED_WITNESS_RAW_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR
+        - BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS
+        - BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS
+        - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS
+        - BGV_BOUND_SUPPORT_POLYNOMIAL_DEGREE_LOSS_BITS
+        - BGV_BOUND_SUPPORT_COEFFICIENT_UNION_BOUND_BITS;
 // 6 bytes = 48 bits holds any residue mod a <2^48 data prime; boundedness is checked
 // in the weakest-relation proof field while the BGV ciphertext equation still covers the full RNS basis.
 const BGV_BOUND_SUPPORT_RESIDUE_BYTE_LENGTH: usize = 6;
@@ -65,7 +78,25 @@ pub(super) fn bridge_bgv_randomness_bound_status(
         "randomizerSupportPolynomial": RANDOMIZER_SUPPORT_POLYNOMIAL,
         "errorSupportPolynomial": ERROR_SUPPORT_POLYNOMIAL,
         "supportCheckModel": BGV_BOUND_SUPPORT_CHECK_MODEL,
+        "supportSoundnessModel": BGV_BOUND_SUPPORT_SOUNDNESS_MODEL,
+        "supportChallengeDistribution": BGV_BOUND_SUPPORT_CHALLENGE_DISTRIBUTION,
         "supportModulusCount": BGV_BOUND_SUPPORT_MODULUS_COUNT,
+        "supportRelationModuli": support_moduli(),
+        "supportCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64,
+        "supportCoefficientChecksPerSharedWitnessCheck": error_coefficient_count
+            .checked_add(polynomial_degree)
+            .expect("support coefficient count fits in u64"),
+        "supportMaximumPolynomialDegree": BGV_BOUND_SUPPORT_MAXIMUM_POLYNOMIAL_DEGREE,
+        "supportPolynomialDegreeLossBits": BGV_BOUND_SUPPORT_POLYNOMIAL_DEGREE_LOSS_BITS,
+        "supportCoefficientUnionBoundBits": BGV_BOUND_SUPPORT_COEFFICIENT_UNION_BOUND_BITS,
+        "supportRejectionRetryLossBits": BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS,
+        "supportRandomOracleQueryBoundBits": BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS,
+        "supportFullMatrixUnionBoundBits": BRIDGE_FULL_MATRIX_UNION_BOUND_BITS,
+        "supportCancellationProbabilityModel": "per-coefficient-degree-bound-no-cross-coefficient-batching-v1",
+        "supportEffectiveSoundnessBitsFloor": BGV_BOUND_SUPPORT_EFFECTIVE_SOUNDNESS_BITS_FLOOR,
+        "supportSoundnessIncludedInBridgeReport": true,
+        "supportSoundnessTargetMet": BGV_BOUND_SUPPORT_EFFECTIVE_SOUNDNESS_BITS_FLOOR
+            >= BRIDGE_TARGET_BINDING_SOUNDNESS_BITS,
         "sameSharedWitnessResponseTranscript": true,
         "verifierBoundednessProofChecked": true,
         "bgvRandomnessBoundProofStatus": BGV_RANDOMNESS_BOUND_PROOF_STATUS,

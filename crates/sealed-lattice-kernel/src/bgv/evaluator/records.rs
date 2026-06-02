@@ -541,10 +541,10 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
     let domain_points = parameters.score_domain_max + 1;
     // The score-bit path uses the default high-degree polynomial schedule:
     // depth-optimal power tables for small polynomials and Paterson-Stockmeyer
-    // for high-degree polynomials. The direct comparison path uses a fixed
-    // baby-step Paterson-Stockmeyer split selected for the score-domain-200
-    // profile: it keeps the comparator inside the available chain while
-    // reducing the per-comparison multiplication count.
+    // for high-degree polynomials. The active direct comparison path uses a
+    // fixed baby-step Paterson-Stockmeyer split for the score-domain-200
+    // profile and keeps the comparison input at the full data level so the
+    // packed ranks exit one level above the rank-prefix projection tail.
     let extraction_depth = implemented_polynomial_depth(domain_points - 1);
     let comparator_depth = bit_count as u64 + 2;
     let indicator_depth = ceil_log2(option_count as u64);
@@ -561,7 +561,7 @@ fn operation_counts(parameters: &EvaluationParameters) -> Value {
         ceil_log2(comparison_polynomial_degree + 1);
     let comparison_input_comparator_depth =
         fixed_baby_step_paterson_stockmeyer_depth(comparison_polynomial_degree);
-    let comparison_input_pre_comparison_refresh_level_drop = 1_u64;
+    let comparison_input_pre_comparison_refresh_level_drop = 0_u64;
     let comparison_input_multiplicative_depth =
         comparison_input_comparator_depth + indicator_depth + projection_depth;
     let comparison_input_level_drop_count =
@@ -665,6 +665,7 @@ fn fixed_baby_step_paterson_stockmeyer_multiplications(degree: u64) -> usize {
     let baby_multiplications = baby_step_count.saturating_sub(1);
     let giant_multiplications = block_count.saturating_sub(2);
     let block_multiplications = block_count.saturating_sub(1);
+
     usize::try_from(baby_multiplications + giant_multiplications + block_multiplications)
         .expect("multiplication count fits usize")
 }
@@ -702,12 +703,12 @@ pub(crate) fn evaluation_noise_certificate(
     let full_ciphertext_bytes = 2 * DATA_PRIMES.len() * POLYNOMIAL_DEGREE * 8;
     let full_key_switch_key_bytes =
         DATA_PRIMES.len() * 2 * DATA_PRIMES.len() * POLYNOMIAL_DEGREE * 8;
-    // The active direct-comparison schedule spends one explicit modulus-switch
-    // refresh before the comparison polynomial, exits the comparison at level 5,
-    // and the full-rank-domain target tail decrypts at level 0 in development
-    // evidence. The certificate therefore counts both ciphertext
-    // multiplication depth and non-multiplicative level drops.
-    let noise_headroom_levels = 0_u64;
+    // The active direct-comparison schedule keeps the comparison input at the
+    // full data level, exits the comparison at level 6, and reserves one level
+    // of headroom for the rank-prefix projection tail.
+    // The certificate therefore counts both ciphertext multiplication depth and
+    // non-multiplicative level drops.
+    let noise_headroom_levels = 1_u64;
     let usable_multiplicative_depth = (available_levels - 1).saturating_sub(noise_headroom_levels);
     let depth_fits = depth <= usable_multiplicative_depth;
     let bit_sliced_profile_label = if depth_fits {
@@ -748,7 +749,7 @@ pub(crate) fn evaluation_noise_certificate(
         "depthFitsModulusChain": selected_depth_fits,
         "bitSlicedDepthFitsModulusChain": depth_fits,
         "noiseHeadroomLevels": noise_headroom_levels,
-        "noiseHeadroomJustification": "development full-rank-domain projection tail decrypts from comparison output level five through final level zero under the fixed baby-step direct-comparison schedule after one pre-comparison modulus-switch refresh",
+        "noiseHeadroomJustification": "depth-optimal direct-comparison power-table schedule exits at comparison output level six after one pre-comparison modulus-switch refresh, leaving one reserved level for the rank-prefix target projection tail",
         "usableMultiplicativeDepth": usable_multiplicative_depth,
         "bitSlicedProfileLabel": bit_sliced_profile_label,
         "comparisonInputProfileLabel": comparison_input_label,
@@ -1245,7 +1246,7 @@ mod tests {
     #[test]
     fn noise_certificate_flags_depth_feasibility() {
         // The full 200-domain direct-comparison profile fits the usable-depth
-        // budget with the fixed baby-step comparison schedule. The bit-sliced
+        // budget with the no-refresh fixed-split comparison schedule. The bit-sliced
         // profile remains rejected.
         let heavy = evaluation_noise_certificate(&parameters()).expect("heavy certificate");
         assert_eq!(
@@ -1266,17 +1267,17 @@ mod tests {
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputPreComparisonRefreshLevelDrop"],
-            1
+            0
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputLevelDropCount"],
-            16
+            15
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputDepthOptimalMultiplicativeDepth"],
             14
         );
-        assert_eq!(heavy["usableMultiplicativeDepth"], 16);
+        assert_eq!(heavy["usableMultiplicativeDepth"], 15);
         assert_eq!(
             heavy["operationCounts"]["comparisonInputBabyStepCount"],
             DIRECT_COMPARISON_BABY_STEP_COUNT
@@ -1299,7 +1300,7 @@ mod tests {
                 "top_count={top_count}"
             );
             assert_eq!(
-                certificate["operationCounts"]["comparisonInputLevelDropCount"], 16,
+                certificate["operationCounts"]["comparisonInputLevelDropCount"], 15,
                 "top_count={top_count}"
             );
         }

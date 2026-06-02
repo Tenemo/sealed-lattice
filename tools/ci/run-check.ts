@@ -159,15 +159,16 @@ const buildGatingLanes = (
     ),
 ];
 
-// Independent checks run concurrently against the built output. The docs and
-// pack smoke lanes deliberately call their underlying tools directly instead of
-// `pnpm run verify:docs` or `pnpm run smoke:pack:npm`, because those package
-// scripts rebuild for standalone use. The API surface lane regenerates the
-// review summary and does not compare it against a pinned baseline. The Rust
-// lane runs after this phase: the tests are memory-heavy on Windows and should
-// not compete with docs rendering, linting, package smoke verification, and Node
-// tests. The commit gate runs only the fast Node test project; the heavier
-// protocol and kernel Node projects and the Playwright browser projects stay in
+// Independent checks run concurrently against the built output. The docs lane
+// uses the same build script as standalone verification so TypeDoc generation
+// and postprocessing stay in one package-script sequence on Windows. The pack
+// smoke lane still calls its underlying tool directly because its package script
+// rebuilds for standalone use. The API surface lane regenerates the review
+// summary and does not compare it against a pinned baseline. The Rust lane runs
+// after this phase: the tests are memory-heavy on Windows and should not compete
+// with docs rendering, linting, package smoke verification, and Node tests. The
+// commit gate runs only the fast Node test project; the heavier protocol and
+// kernel Node projects and the Playwright browser projects stay in
 // `pnpm run test:node` and `pnpm run test:browser` for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
@@ -189,48 +190,10 @@ const buildParallelLanes = (
         {
             commands: [
                 createPackageManagerCommand(
-                    'Clean generated API docs',
-                    ['exec', 'del-cli', 'docs/src/content/docs/api/reference'],
+                    'Build docs',
+                    ['run', 'docs:build'],
                     {
-                        logFileSlug: 'docs-api-clean',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Generate API docs',
-                    [
-                        'exec',
-                        'tsx',
-                        './node_modules/typedoc/bin/typedoc',
-                        '--options',
-                        'typedoc.config.mjs',
-                    ],
-                    {
-                        logFileSlug: 'docs-api-generate',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Postprocess API docs',
-                    ['exec', 'tsx', './docs/typedoc/postprocess-site-docs.ts'],
-                    {
-                        logFileSlug: 'docs-api-postprocess',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Clean rendered docs',
-                    ['exec', 'del-cli', 'docs/dist'],
-                    {
-                        logFileSlug: 'docs-site-clean',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Build docs site',
-                    ['exec', 'astro', 'build', '--root', 'docs', '--silent'],
-                    {
-                        logFileSlug: 'docs-site-build',
+                        logFileSlug: 'docs-build',
                         packageManagerRunner,
                     },
                 ),

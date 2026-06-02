@@ -135,11 +135,12 @@ pub(super) fn bounded_collective_secret_share_coefficient(
         participant_identity,
         "local-secret-share",
         position,
-        64,
+        3,
     ) {
         0 => Ok(-1),
-        1 => Ok(1),
-        _ => Ok(0),
+        1 => Ok(0),
+        2 => Ok(1),
+        _ => unreachable!("ternary secret offset is sampled modulo three"),
     }
 }
 

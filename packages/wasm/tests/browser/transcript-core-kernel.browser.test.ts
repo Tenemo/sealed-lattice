@@ -113,6 +113,63 @@ describe('transcript-core kernel in browsers', () => {
         ).toThrow(TranscriptCoreKernelCommandError);
     });
 
+    it('rejects malformed encrypted aggregate evaluation sweep requests before setup loading', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(() =>
+            kernel.runEncryptedAggregateTopKEvaluationSweep({
+                topCounts: [1, 1],
+            } as unknown as Parameters<
+                typeof kernel.runEncryptedAggregateTopKEvaluationSweep
+            >[0]),
+        ).toThrow(
+            new TranscriptCoreKernelCommandError({
+                code: 'InvalidFixture',
+                message: 'topCounts must not contain duplicate values',
+            }),
+        );
+    });
+
+    it('rejects accepted evaluator witness fields before setup loading', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const forbiddenFieldCases = [
+            ['developmentKeySet', { keySeed: 'not-on-this-path' }],
+            ['trustedDealerSecret', { secret: 'not-on-this-path' }],
+            ['plaintextRanks', [0, 1]],
+            ['decodedTargetIdSlots', [1, 0]],
+            ['targetDecryptionShare', { share: 'not-yet-owned' }],
+        ] as const;
+
+        for (const [fieldName, fieldValue] of forbiddenFieldCases) {
+            expect(() =>
+                kernel.runEncryptedAggregateTopKEvaluation({
+                    [fieldName]: fieldValue,
+                } as unknown as Parameters<
+                    typeof kernel.runEncryptedAggregateTopKEvaluation
+                >[0]),
+            ).toThrow(
+                new TranscriptCoreKernelCommandError({
+                    code: 'InvalidFixture',
+                    message: `accepted encrypted aggregate evaluation rejects forbidden witness field ${fieldName}`,
+                }),
+            );
+
+            expect(() =>
+                kernel.runEncryptedAggregateTopKEvaluationSweep({
+                    topCounts: [1],
+                    [fieldName]: fieldValue,
+                } as unknown as Parameters<
+                    typeof kernel.runEncryptedAggregateTopKEvaluationSweep
+                >[0]),
+            ).toThrow(
+                new TranscriptCoreKernelCommandError({
+                    code: 'InvalidFixture',
+                    message: `accepted encrypted aggregate evaluation rejects forbidden witness field ${fieldName}`,
+                }),
+            );
+        }
+    });
+
     it('produces byte-identical BGV canonical roots through browser WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeBgvRnsProfile();

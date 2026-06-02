@@ -340,6 +340,7 @@ enum TranscriptCoreCommand {
     RejectBgvReferenceOracleArtifact,
     RunDevelopmentTopKEvaluation,
     RunEncryptedAggregateTopKEvaluation,
+    RunEncryptedAggregateTopKEvaluationSweep,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -531,7 +532,8 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
         | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
         | TranscriptCoreCommand::RunDevelopmentTopKEvaluation
-        | TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluation => {
+        | TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluation
+        | TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluationSweep => {
             run_bgv_command(command, &request)
         }
     }
@@ -689,6 +691,9 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluation => {
             crate::bgv::evaluator::commands::run_encrypted_aggregate_top_k_evaluation(request)
+        }
+        TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluationSweep => {
+            crate::bgv::evaluator::commands::run_encrypted_aggregate_top_k_evaluation_sweep(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }
@@ -892,6 +897,22 @@ mod tests {
         assert_eq!(response["greaterThan"], 1);
         assert_eq!(response["equal"], 0);
         assert_eq!(response["scoreDifference"], 1);
+    }
+
+    #[test]
+    fn command_rejects_duplicate_encrypted_evaluation_sweep_counts_before_setup_loading() {
+        let error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "RunEncryptedAggregateTopKEvaluationSweep",
+                "topCounts": [1, 1],
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("duplicate sweep top-counts should fail before setup loading");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.message, "topCounts must not contain duplicate values");
     }
 
     #[test]

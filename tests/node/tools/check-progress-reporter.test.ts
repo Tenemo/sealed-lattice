@@ -625,4 +625,100 @@ describe('check progress reporter state', () => {
             ],
         });
     });
+
+    it('uses compact libtest output as secondary Rust progress', async () => {
+        let nowMilliseconds = 1_000;
+        const writtenChunks: string[] = [];
+        const reporter = new CheckProgressReporter({
+            lanes: [
+                {
+                    commands: [
+                        {
+                            description: 'cargo test',
+                        },
+                    ],
+                    name: 'Rust kernel (fmt, clippy, test)',
+                    progress: {
+                        source: 'libtest',
+                    },
+                },
+            ],
+            now: () => nowMilliseconds,
+            output: {
+                columns: 180,
+                isTTY: true,
+                write: (chunk: string | Uint8Array): boolean => {
+                    writtenChunks.push(chunk.toString());
+
+                    return true;
+                },
+            },
+            redrawEnabled: true,
+            renderIntervalMilliseconds: 60_000,
+        });
+        const observer = reporter.createCommandObserver(
+            'Rust kernel (fmt, clippy, test)',
+        );
+        const testInvocation = {
+            args: [],
+            command: 'cargo',
+            description: 'cargo test',
+        };
+
+        reporter.start();
+        observer.onCommandStart?.({
+            invocation: testInvocation,
+            startedAtMilliseconds: nowMilliseconds,
+        });
+        observer.onCommandOutput?.({
+            chunk: [
+                'running 398 tests',
+                '....................................................................................... 87/398',
+                '',
+            ].join('\n'),
+            invocation: testInvocation,
+            streamName: 'stdout',
+        });
+        nowMilliseconds = 1_100;
+        await waitForTimeout(150);
+        observer.onCommandOutput?.({
+            chunk: [
+                '......................................................................i......test bgv::setup::tests::slow_case has been running for over 60 seconds',
+                '........................................................................................................................................................................................................................................................ 398/398',
+                'test result: ok. 397 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 245.00s',
+                '',
+            ].join('\n'),
+            invocation: testInvocation,
+            streamName: 'stdout',
+        });
+        nowMilliseconds = 1_150;
+        await waitForTimeout(150);
+        reporter.stop();
+
+        const terminalOutput = writtenChunks.join('');
+        expect(terminalOutput).toContain('87/398 tests');
+        expect(terminalOutput).toContain('398/398 tests');
+        expect(terminalOutput).not.toContain(
+            '....................................................................................... 87/398',
+        );
+        expect(terminalOutput).not.toContain(
+            '......test bgv::setup::tests::slow_case',
+        );
+        expect(terminalOutput).toContain(
+            'Rust kernel (fmt, clippy, test) > test bgv::setup::tests::slow_case has been running for over 60 seconds',
+        );
+        expect(reporter.createTimingDetails()).toMatchObject({
+            lanes: [
+                {
+                    progress: {
+                        secondary: {
+                            completed: 398,
+                            total: 398,
+                            unit: 'test',
+                        },
+                    },
+                },
+            ],
+        });
+    });
 });

@@ -9,6 +9,7 @@ import {
 import type {
     BgvPassiveSetupPackage,
     TopKEvaluatorEncryptedAggregateEvaluationInput,
+    TopKEvaluatorEncryptedAggregateEvaluationSweepInput,
     TopKEvaluatorEncryptedAggregateInput,
 } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
@@ -178,8 +179,10 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             readonly publicRlweSamplesByBasis: {
                 readonly QData: {
                     readonly publicKeyShares: number;
+                    readonly rotationKeys: number;
                 };
                 readonly QPPublic: {
+                    readonly exposedOnAcceptedSetupBridgeEvaluatorPath: boolean;
                     readonly rotationKeys: number;
                 };
                 readonly QTarget: {
@@ -196,7 +199,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'CollectivePublicKeyRootBound',
                 'EvaluationKeyRootBound',
                 'PassiveSetupInputReady',
-                'FinalSetupSecurityPendingTargetModulus',
+                'SetupBridgeEvaluatorHeSecurityAccepted',
+                'FinalTargetSecurityPendingTargetModulus',
             ]),
         );
         expect(setup.nonClaims).toContain('KLLPSPartDecNotImplemented');
@@ -208,15 +212,19 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             KLLPSC1C4StatusAccepted: false,
         });
         expect(certificates.setupParameterCertificate).toMatchObject({
-            finalSecurityStatus: 'pendingQTarget',
-            largestExposedModulusBitsWithoutQTarget: 846,
+            finalSecurityStatus: 'acceptedForSetupBridgeEvaluatorTargetPending',
+            largestExposedModulusBitsWithoutQTarget: 799,
         });
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,
         });
         expect(
-            certificates.publicRlweSamplesByBasis.QPPublic.rotationKeys,
+            certificates.publicRlweSamplesByBasis.QData.rotationKeys,
         ).toBeGreaterThan(0);
+        expect(certificates.publicRlweSamplesByBasis.QPPublic).toMatchObject({
+            exposedOnAcceptedSetupBridgeEvaluatorPath: false,
+            rotationKeys: 0,
+        });
         expect(
             certificates.publicRlweSamplesByBasis.QTarget.sampleCountStatus,
         ).toBe('pendingUntilFinalNoiseAnalysis');
@@ -355,12 +363,14 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             objectType: 'PreparedBgvPublicEvaluationKeyMaterial',
             setupPackageHash: setup.setupPackageHash,
             evaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
-            preparedEvaluationKeyMaterialHandle: expect.any(String),
             rawSecretMaterialExported: false,
             relinearizationKeyCount: 1,
             rotationKeyCount: 0,
             workingLevel: 1,
         });
+        expect(
+            typeof preparedMaterial.preparedEvaluationKeyMaterialHandle,
+        ).toBe('string');
         expect(preparedMaterial.statusLabels).toEqual(
             expect.arrayContaining([
                 'PreparedPublicEvaluationKeyMaterialGenerated',
@@ -606,7 +616,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                             'setupParameterCertificate',
                             'finalSecurityStatus',
                         ],
-                        'accepted',
+                        'pendingQTarget',
                     ),
             ],
             [
@@ -815,6 +825,15 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             );
             expect(error.code).toBe('InvalidFixture');
             expect(error.message).toContain(fieldName);
+
+            const sweepError = expectKernelCommandError(() =>
+                kernel.runEncryptedAggregateTopKEvaluationSweep({
+                    topCounts: [1],
+                    [fieldName]: fieldValue,
+                } as unknown as TopKEvaluatorEncryptedAggregateEvaluationSweepInput),
+            );
+            expect(sweepError.code).toBe('InvalidFixture');
+            expect(sweepError.message).toContain(fieldName);
         }
 
         const nestedError = expectKernelCommandError(() =>
@@ -864,6 +883,24 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         );
         expect(error.code).toBe('InvalidFixture');
         expect(error.message).toContain('unboundDebugArtifact');
+    });
+
+    it('exposes the encrypted aggregate evaluation sweep and rejects malformed top-count sets before evaluation work', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(typeof kernel.runEncryptedAggregateTopKEvaluationSweep).toBe(
+            'function',
+        );
+
+        const error = expectKernelCommandError(() =>
+            kernel.runEncryptedAggregateTopKEvaluationSweep({
+                topCounts: [1, 1],
+            } as unknown as TopKEvaluatorEncryptedAggregateEvaluationSweepInput),
+        );
+        expect(error.code).toBe('InvalidFixture');
+        expect(error.message).toBe(
+            'InvalidFixture: topCounts must not contain duplicate values',
+        );
     });
 
     it('refuses accepted bridge inputs with development randomness evidence', async () => {

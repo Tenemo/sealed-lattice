@@ -27,6 +27,7 @@ import type {
     BgvRnsProfileDescription,
     TopKEvaluatorDevelopmentEvaluation,
     TopKEvaluatorEncryptedAggregateEvaluation,
+    TopKEvaluatorEncryptedAggregateEvaluationSweep,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -639,6 +640,15 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'RunEncryptedAggregateTopKEvaluation',
                         ...input,
                     }),
+                runEncryptedAggregateTopKEvaluationSweep: (
+                    input,
+                ): TopKEvaluatorEncryptedAggregateEvaluationSweep =>
+                    executeCommand<TopKEvaluatorEncryptedAggregateEvaluationSweep>(
+                        {
+                            command: 'RunEncryptedAggregateTopKEvaluationSweep',
+                            ...input,
+                        },
+                    ),
             };
         })().catch((error: unknown) => {
             // Clear the cached promise on failure so a later call can retry

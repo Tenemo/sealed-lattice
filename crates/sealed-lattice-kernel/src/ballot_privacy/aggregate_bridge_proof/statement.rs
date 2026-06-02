@@ -437,10 +437,9 @@ pub(super) fn build_bridge_proof_statement(
         "sharedWitnessBindingStatus": SHARED_WITNESS_BINDING_CHECKED_STATUS,
         "sharedWitnessChallengeBitsPerCheck": SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK,
         "sharedWitnessCheckCount": BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64,
-        "sharedWitnessChallengeEntropyBits": BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS,
-        "sharedWitnessWeakestRelation": PLAINTEXT_ENCODING_RELATION,
-        "sharedWitnessWeakestRelationModuli": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI,
+        "sharedWitnessWeakestRelation": BRIDGE_WEAKEST_ACTIVE_RELATION,
         "sharedWitnessWeakestRelationModel": BRIDGE_WEAKEST_ACTIVE_RELATION_MODEL,
+        "sharedWitnessWeakestRelationEffectiveModulus": bridge_weakest_active_relation_effective_modulus_decimal(),
         "sharedWitnessWeakestRelationBitsPerCheck": BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK,
         "batchIntegerLiftProofModuli": BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI,
         "batchIntegerLiftProofModulusProduct": bridge_batch_integer_lift_proof_modulus_product_decimal(),
@@ -461,12 +460,15 @@ pub(super) fn build_bridge_proof_statement(
         "sharedWitnessRejectionRetryLossBits": BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS,
         "sharedWitnessFullMatrixUnionBoundBits": BRIDGE_FULL_MATRIX_UNION_BOUND_BITS,
         "sharedWitnessRandomOracleQueryBoundBits": BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS,
+        "sharedWitnessRandomOracleAccountingModel": BRIDGE_RANDOM_ORACLE_ACCOUNTING_MODEL,
+        "sharedWitnessQromAccountingStatus": BRIDGE_QROM_ACCOUNTING_STATUS,
         "sharedWitnessProofSystemLossBits": BRIDGE_PROOF_SYSTEM_LOSS_BITS,
+        "sharedWitnessChallengeBiasAccountingModel": BRIDGE_CHALLENGE_BIAS_ACCOUNTING_MODEL,
         "sharedWitnessChallengeBiasBits": BRIDGE_CHALLENGE_BIAS_BITS,
         "sharedWitnessTargetBindingSoundnessBits": BRIDGE_TARGET_BINDING_SOUNDNESS_BITS,
         "sharedWitnessEffectiveBindingBelowTarget": BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET,
         "sharedWitnessGrindingDiscountBitsPerCheck": SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK,
-        "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR,
+        "sharedWitnessRawWeakestRelationSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_RAW_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR,
         "sharedWitnessEffectiveBindingSoundnessBitsFloor": BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR,
         "sharedWitnessZeroKnowledgeStatus": SHARED_WITNESS_ZERO_KNOWLEDGE_STATUS,
         "aggregateToPlaintextBindingStatus": AGGREGATE_TO_PLAINTEXT_BINDING_CHECKED_STATUS,
@@ -969,8 +971,12 @@ pub(super) fn bridge_proof_statement_hash(
         "proofFriendlyPlaintextBindingStatus",
         "proofFriendlyPlaintextLiftBindingHash",
         "proofFriendlyPlaintextLiftBindingStatus",
+        "sharedWitnessChallengeBiasAccountingModel",
         "sharedWitnessChallengeSamplingModel",
+        "sharedWitnessQromAccountingStatus",
+        "sharedWitnessRandomOracleAccountingModel",
         "sharedWitnessWeakestRelation",
+        "sharedWitnessWeakestRelationEffectiveModulus",
         "sharedWitnessWeakestRelationModel",
     ] {
         hash_input.insert(
@@ -990,7 +996,6 @@ pub(super) fn bridge_proof_statement_hash(
         "aggregateQuotientCoordinateCount",
         "sharedWitnessChallengeBitsPerCheck",
         "sharedWitnessCheckCount",
-        "sharedWitnessChallengeEntropyBits",
         "sharedWitnessWeakestRelationBitsPerCheck",
         "batchIntegerLiftProofModulusProductBitsFloor",
         "plaintextEncodingProofModulusProductBitsFloor",
@@ -1002,7 +1007,7 @@ pub(super) fn bridge_proof_statement_hash(
         "sharedWitnessChallengeBiasBits",
         "sharedWitnessTargetBindingSoundnessBits",
         "sharedWitnessGrindingDiscountBitsPerCheck",
-        "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor",
+        "sharedWitnessRawWeakestRelationSoundnessBitsFloor",
         "sharedWitnessEffectiveBindingSoundnessBitsFloor",
     ] {
         hash_input.insert(
@@ -1035,7 +1040,6 @@ pub(super) fn bridge_proof_statement_hash(
     for field_name in [
         "batchIntegerLiftProofModuli",
         "plaintextEncodingProofModuli",
-        "sharedWitnessWeakestRelationModuli",
     ] {
         hash_input.insert(
             field_name.to_string(),

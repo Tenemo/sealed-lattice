@@ -186,7 +186,8 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "EvaluationKeyRootBound",
             "KllpsSetupMaterialMatched",
             "PassiveSetupInputReady",
-            "FinalSetupSecurityPendingTargetModulus"
+            "SetupBridgeEvaluatorHeSecurityAccepted",
+            "FinalTargetSecurityPendingTargetModulus"
         ],
         "nonClaims": [
             "ActiveMaliciousSetupProofMissing",
@@ -194,7 +195,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "MaliciousEvaluationKeyProofMissing",
             "KLLPSPartDecNotImplemented",
             "KLLPSC1C4NotCertified",
-            "FinalSetupSecurityPendingTargetModulus",
+            "FinalTargetSecurityPendingTargetModulus",
             "FinalEvaluatorNoisePendingEncryptedAggregateEvaluatorClosure",
             "EvaluationProofNotClosed",
             "TargetDecryptionNotClosed",

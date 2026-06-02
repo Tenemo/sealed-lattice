@@ -80,11 +80,10 @@ const AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS: &str =
     "AggregateDerivationFullVerificationPreconditionNotBound";
 const AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS: &str =
     "AggregateDerivationFullVerificationChecked";
-// Soundness-bit budget. The Fiat-Shamir challenge is sampled in the two-prime BGV CRT product
-// (93-bit floor), but the global bridge binding budget is limited by the aggregate proof ring,
-// currently treated as a 46-bit effective relation per independent check. Five checks leave a
-// 159-bit floor after rejection-attempt grinding, a 2^32 Fiat-Shamir query bound, and the
-// full-matrix union bound.
+// Soundness-bit budget. The Fiat-Shamir challenge is sampled directly into the weakest
+// active relation's 46-bit effective modulus, so the global bridge binding budget is not
+// derived from the two-prime batch-lift product. Five checks leave a 159-bit floor after
+// rejection-attempt grinding, a 2^32 Fiat-Shamir query bound, and the full-matrix union bound.
 const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 5;
 const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
 const SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK: u64 = 6;
@@ -93,8 +92,9 @@ const BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT: u128 =
     (DATA_PRIMES[0] as u128) * (DATA_PRIMES[1] as u128);
 const BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT_BITS_FLOOR: u64 = 93;
 const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK;
-const BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS: u64 =
-    SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
+const BRIDGE_WEAKEST_ACTIVE_RELATION: &str = "AggregateReductionFieldRelation";
+const BRIDGE_WEAKEST_ACTIVE_RELATION_EFFECTIVE_MODULUS: u128 =
+    1_u128 << BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK;
 const BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK: u64 = 46;
 const BRIDGE_WEAKEST_ACTIVE_RELATION_MODEL: &str =
     "aggregate-proof-ring-effective-binding-floor-v1";
@@ -102,14 +102,19 @@ const BRIDGE_FULL_MATRIX_UNION_BOUND_BITS: u64 = 9;
 const BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS: u64 = 32;
 const BRIDGE_PROOF_SYSTEM_LOSS_BITS: u64 = 0;
 const BRIDGE_CHALLENGE_BIAS_BITS: u64 = 0;
+const BRIDGE_CHALLENGE_BIAS_ACCOUNTING_MODEL: &str =
+    "direct-rejection-sampling-into-effective-weakest-relation-modulus-v1";
+const BRIDGE_RANDOM_ORACLE_ACCOUNTING_MODEL: &str =
+    "classical-random-oracle-query-loss-with-explicit-bound-v1";
+const BRIDGE_QROM_ACCOUNTING_STATUS: &str = "QromAccountingNotProvidedForHandoff";
 const BRIDGE_TARGET_BINDING_SOUNDNESS_BITS: u64 = 128;
 const BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS: u64 =
     SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK
         * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
-const BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR: u64 =
+const BRIDGE_SHARED_WITNESS_RAW_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR: u64 =
     BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK * BRIDGE_SHARED_WITNESS_CHECK_COUNT as u64;
 const BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR: u64 =
-    BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR
+    BRIDGE_SHARED_WITNESS_RAW_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR
         - BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS
         - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS
         - BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS
@@ -158,6 +163,10 @@ fn bridge_claim_status(
 
 fn bridge_batch_integer_lift_proof_modulus_product_decimal() -> String {
     BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT.to_string()
+}
+
+fn bridge_weakest_active_relation_effective_modulus_decimal() -> String {
+    BRIDGE_WEAKEST_ACTIVE_RELATION_EFFECTIVE_MODULUS.to_string()
 }
 
 mod boundedness;

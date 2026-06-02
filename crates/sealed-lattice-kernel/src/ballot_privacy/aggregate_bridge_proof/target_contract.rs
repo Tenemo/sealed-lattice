@@ -88,24 +88,20 @@ pub(super) fn bridge_proof_target_contract_value(
             Value::Bool(claim_status.claim_bearing_bridge_encryption),
         ),
         (
-            "sharedWitnessChallengeEntropyBits",
-            json!(BRIDGE_SHARED_WITNESS_CHALLENGE_ENTROPY_BITS),
-        ),
-        (
             "sharedWitnessWeakestRelation",
-            Value::String(PLAINTEXT_ENCODING_RELATION.to_string()),
+            Value::String(BRIDGE_WEAKEST_ACTIVE_RELATION.to_string()),
         ),
         (
             "sharedWitnessWeakestRelationModel",
             Value::String(BRIDGE_WEAKEST_ACTIVE_RELATION_MODEL.to_string()),
         ),
         (
-            "sharedWitnessWeakestRelationBitsPerCheck",
-            json!(BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK),
+            "sharedWitnessWeakestRelationEffectiveModulus",
+            Value::String(bridge_weakest_active_relation_effective_modulus_decimal()),
         ),
         (
-            "sharedWitnessWeakestRelationModuli",
-            json!(BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULI),
+            "sharedWitnessWeakestRelationBitsPerCheck",
+            json!(BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK),
         ),
         (
             "batchIntegerLiftProofModulusProduct",
@@ -154,8 +150,20 @@ pub(super) fn bridge_proof_target_contract_value(
             json!(BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS),
         ),
         (
+            "sharedWitnessRandomOracleAccountingModel",
+            Value::String(BRIDGE_RANDOM_ORACLE_ACCOUNTING_MODEL.to_string()),
+        ),
+        (
+            "sharedWitnessQromAccountingStatus",
+            Value::String(BRIDGE_QROM_ACCOUNTING_STATUS.to_string()),
+        ),
+        (
             "sharedWitnessProofSystemLossBits",
             json!(BRIDGE_PROOF_SYSTEM_LOSS_BITS),
+        ),
+        (
+            "sharedWitnessChallengeBiasAccountingModel",
+            Value::String(BRIDGE_CHALLENGE_BIAS_ACCOUNTING_MODEL.to_string()),
         ),
         (
             "sharedWitnessChallengeBiasBits",
@@ -174,8 +182,8 @@ pub(super) fn bridge_proof_target_contract_value(
             json!(SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK),
         ),
         (
-            "sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor",
-            json!(BRIDGE_SHARED_WITNESS_UNADJUSTED_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR),
+            "sharedWitnessRawWeakestRelationSoundnessBitsFloor",
+            json!(BRIDGE_SHARED_WITNESS_RAW_WEAKEST_RELATION_SOUNDNESS_BITS_FLOOR),
         ),
         (
             "sharedWitnessEffectiveBindingSoundnessBitsFloor",

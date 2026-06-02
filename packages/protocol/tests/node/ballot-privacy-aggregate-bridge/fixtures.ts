@@ -334,7 +334,6 @@ export const createAggregateContributionFixture = (
         sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
         sharedWitnessChallengeBitsPerCheck: 46,
         sharedWitnessCheckCount: 5,
-        sharedWitnessChallengeEntropyBits: 230,
         sharedWitnessChallengeSamplingModel:
             'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
         sharedWitnessRejectionAttemptLimit: 64,
@@ -342,20 +341,23 @@ export const createAggregateContributionFixture = (
         sharedWitnessRejectionRetryLossBits: 30,
         sharedWitnessFullMatrixUnionBoundBits: 9,
         sharedWitnessRandomOracleQueryBoundBits: 32,
+        sharedWitnessRandomOracleAccountingModel:
+            'classical-random-oracle-query-loss-with-explicit-bound-v1',
+        sharedWitnessQromAccountingStatus:
+            'QromAccountingNotProvidedForHandoff',
         sharedWitnessProofSystemLossBits: 0,
+        sharedWitnessChallengeBiasAccountingModel:
+            'direct-rejection-sampling-into-effective-weakest-relation-modulus-v1',
         sharedWitnessChallengeBiasBits: 0,
         sharedWitnessTargetBindingSoundnessBits: 128,
-        sharedWitnessUnadjustedWeakestRelationSoundnessBitsFloor: 230,
+        sharedWitnessRawWeakestRelationSoundnessBitsFloor: 230,
         sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
         sharedWitnessEffectiveBindingBelowTarget: false,
-        sharedWitnessWeakestRelation:
-            'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt',
+        sharedWitnessWeakestRelation: 'AggregateReductionFieldRelation',
         sharedWitnessWeakestRelationModel:
             'aggregate-proof-ring-effective-binding-floor-v1',
+        sharedWitnessWeakestRelationEffectiveModulus: '70368744177664',
         sharedWitnessWeakestRelationBitsPerCheck: 46,
-        sharedWitnessWeakestRelationModuli: [
-            140_737_487_306_753, 140_737_486_716_929,
-        ],
         batchIntegerLiftProofModuli: [140_737_487_306_753, 140_737_486_716_929],
         batchIntegerLiftProofModulusProduct: '19807040250408114080301121537',
         batchIntegerLiftProofModulusProductBitsFloor: 93,
@@ -379,6 +381,9 @@ export const createAggregateContributionFixture = (
     > = {
         ...baseFields,
         aggregateDerivationComponentHash,
+        aggregateDerivationStatementHash: hash(
+            `aggregate-derivation-statement-${input.rosterPosition}`,
+        ),
         aggregateDerivationVerificationScope:
             'AggregateDerivationFullVerificationChecked',
         aggregateBridgeRelationHandoffRoot,
@@ -406,16 +411,28 @@ export const createAggregateContributionFixture = (
         objectType: 'BridgeProofRecord',
         objectVersion: 1,
         postVotingClosedContextHash,
+        plaintextCoefficientBindingCommitmentHash,
         proofBackend: 'SealedLatticeBridgeRelation',
         proofBytesHash: hash(`bridge-proof-bytes-${input.rosterPosition}`),
         proofEncodingProfileHash: hash('bridge-proof-encoding'),
         proofParameterSetHash: hash('bridge-proof-parameters'),
         proofRoot: hash(`bridge-proof-root-${input.rosterPosition}`),
         proofSizeBytes: 128,
+        proofFriendlyPlaintextLiftBindingHash,
         proofStatementHash,
+        proverRandomnessSource: 'development-deterministic-fixture',
         publicRandomnessHash: hash(
             `bridge-proof-randomness-${input.rosterPosition}`,
         ),
+        encryptionRandomnessSeedSource: 'development-deterministic-fixture',
+        randomnessSourceEvidence: {
+            callerSuppliedDevelopmentRandomness: true,
+            claimBearingEntropyEvidence: false,
+            encryptionRandomnessSeedSource: 'development-deterministic-fixture',
+            objectType: 'AggregateBridgeRandomnessSourceEvidence',
+            objectVersion: 1,
+            proverRandomnessSource: 'development-deterministic-fixture',
+        },
         thresholdDecryptable: true,
     };
     const bridgeProofRecord = {

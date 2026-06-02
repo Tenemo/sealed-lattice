@@ -184,6 +184,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "EvaluationKeySizeProfileHash",
             "CollectiveSecretDistributionCertificateHash",
             "ErrorDistributionCertificateHash",
+            "BGVHeSecurityCertificateHash",
             "BGVSetupParameterCertificateHash",
             "BGVDevelopmentEncryptionFixtureHash",
             "RotSetHash",
@@ -343,9 +344,17 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
             "EvaluationKeyRootBound",
             "PassiveSetupInputReady",
             "BgvAlgebraicPublicKeyProofMissing",
-            "FinalSetupSecurityPendingTargetModulus"
+            "SetupBridgeEvaluatorHeSecurityAccepted",
+            "FinalTargetSecurityPendingTargetModulus"
         ],
     }))
+}
+
+pub(crate) fn validate_passive_setup_package_for_encrypted_evaluation(
+    setup_package: &Value,
+) -> CanonicalResult<()> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)
 }
 
 pub(crate) fn development_evaluator_key_from_passive_setup_package(
@@ -578,7 +587,8 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
                     "missing setup-bound relinearization key stream seed",
                 )
             })?;
-        let key = generate_relinearization_key(&evaluator_key, level, seed)?;
+        let mut key = generate_relinearization_key(&evaluator_key, level, seed)?;
+        key.drop_component_a_ntt();
         relinearization_keys.push(Some(key));
     }
     let mut rotation_keys = BTreeMap::new();
@@ -592,7 +602,8 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
                     "requested public rotation key is not part of the selected setup rotation set",
                 )
             })?;
-        let key = generate_galois_key(&evaluator_key, rotation, level, seed)?;
+        let mut key = generate_galois_key(&evaluator_key, rotation, level, seed)?;
+        key.drop_component_a_ntt();
         rotation_keys.insert((rotation, level), key);
     }
     let record = json!({
@@ -888,8 +899,13 @@ fn public_key_switch_material_entry(
         .iter()
         .enumerate()
         .map(|(digit_index, component)| {
-            let limbs = component
-                .component_b
+            let component_b = component.component_b.as_ref().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "public key-switch material serialization requires component-b coefficient limbs",
+                )
+            })?;
+            let limbs = component_b
                 .iter()
                 .enumerate()
                 .map(|(limb_index, coefficients)| {
@@ -901,12 +917,12 @@ fn public_key_switch_material_entry(
                     })
                 })
                 .collect::<Vec<_>>();
-            json!({
+            Ok(json!({
                 "digitIndex": digit_index,
                 "limbs": limbs,
-            })
+            }))
         })
-        .collect::<Vec<_>>();
+        .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok(json!({
         "keyKind": key_kind,

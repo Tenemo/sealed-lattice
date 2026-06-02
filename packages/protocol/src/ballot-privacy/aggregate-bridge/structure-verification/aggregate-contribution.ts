@@ -162,6 +162,34 @@ const collectBridgeProofRecordRefusals = (
             proofRecord.claimBearingBridgeEncryption &&
         proofRecord.bridgeClaimVerificationStatus ===
             expectedBridgeClaimVerificationStatus;
+    const randomnessSourceEvidence = proofRecord.randomnessSourceEvidence;
+    const bridgeRandomnessSourcesAreSupported =
+        ['fresh-csprng', 'development-deterministic-fixture'].includes(
+            proofRecord.proverRandomnessSource,
+        ) &&
+        ['fresh-csprng', 'development-deterministic-fixture'].includes(
+            proofRecord.encryptionRandomnessSeedSource,
+        );
+    const bridgeRandomnessUsesDevelopmentSource =
+        proofRecord.proverRandomnessSource ===
+            'development-deterministic-fixture' ||
+        proofRecord.encryptionRandomnessSeedSource ===
+            'development-deterministic-fixture';
+    const bridgeRandomnessEvidenceIsConsistent =
+        typeof randomnessSourceEvidence === 'object' &&
+        randomnessSourceEvidence !== null &&
+        randomnessSourceEvidence.objectType ===
+            'AggregateBridgeRandomnessSourceEvidence' &&
+        randomnessSourceEvidence.objectVersion === 1 &&
+        randomnessSourceEvidence.proverRandomnessSource ===
+            proofRecord.proverRandomnessSource &&
+        randomnessSourceEvidence.encryptionRandomnessSeedSource ===
+            proofRecord.encryptionRandomnessSeedSource &&
+        randomnessSourceEvidence.callerSuppliedDevelopmentRandomness ===
+            bridgeRandomnessUsesDevelopmentSource &&
+        randomnessSourceEvidence.claimBearingEntropyEvidence ===
+            (proofRecord.proverRandomnessSource === 'fresh-csprng' &&
+                proofRecord.encryptionRandomnessSeedSource === 'fresh-csprng');
 
     if (
         proofRecord.objectType !== 'BridgeProofRecord' ||
@@ -178,6 +206,8 @@ const collectBridgeProofRecordRefusals = (
         !['BridgeProofBackendPending', 'BridgeProofRelationChecked'].includes(
             proofRecord.bridgeProofVerificationStatus,
         ) ||
+        !bridgeRandomnessSourcesAreSupported ||
+        !bridgeRandomnessEvidenceIsConsistent ||
         proofRecord.bridgeProofRecordHash !== expectedBridgeProofRecordHash
     ) {
         refusedObjects.push(

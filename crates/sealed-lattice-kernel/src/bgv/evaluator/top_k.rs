@@ -25,7 +25,7 @@ use crate::{
 pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
 pub(crate) const AGGREGATE_SCORE_COORDINATES_PER_OPTION: usize = 11;
 pub(crate) const DIRECT_COMPARISON_BABY_STEP_COUNT: usize = 31;
-pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 5;
+pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
 const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;
 const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
 
@@ -849,10 +849,6 @@ pub(crate) fn evaluate_packed_ranks_from_packed_scores(
         let difference = ciphertext_sub(packed_scores, &shifted_scores)?;
         let shifted_difference =
             add_plaintext_coefficients(&normalize_scaling(&difference)?, &shift_constant)?;
-        let shifted_difference = modulus_switch_to(
-            &shifted_difference,
-            shifted_difference.level.saturating_sub(1),
-        )?;
         let greater_or_equal = evaluate_direct_comparison_polynomial(
             context,
             &shifted_difference,
