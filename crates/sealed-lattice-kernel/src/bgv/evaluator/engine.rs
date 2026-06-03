@@ -93,6 +93,7 @@ impl Ciphertext {
 // plaintext lives in the least-significant residue and decryption is exact mod
 // the plaintext modulus. The secret is retained only for development decryption
 // and correctness certificates; it is never exported through the public surface.
+#[derive(Clone)]
 pub(crate) struct DevelopmentBgvKey {
     secret: Vec<i64>,
     public_b: Vec<Vec<u64>>,
@@ -136,41 +137,81 @@ impl DevelopmentBgvKey {
         )
         .centered_binomial_eta2(POLYNOMIAL_DEGREE);
 
-        let mut public_b = Vec::with_capacity(DATA_PRIMES.len());
-        let mut public_a = Vec::with_capacity(DATA_PRIMES.len());
-        for modulus in DATA_PRIMES {
-            let modulus_bytes = modulus.to_le_bytes();
-            // The public random sample `a` is uniform over the ring, so sampling
-            // each RNS limb independently is a valid uniform-mod-q polynomial.
-            let public_sample = DeterministicSampler::new(
-                "sealed-lattice-bgv-evaluator/development-public-sample-v1",
-                &[seed_hex.as_bytes(), &modulus_bytes],
-            )
-            .uniform_residues(modulus, POLYNOMIAL_DEGREE);
+        #[cfg(not(target_arch = "wasm32"))]
+        let public_key_components = DATA_PRIMES
+            .par_iter()
+            .copied()
+            .map(|modulus| {
+                let modulus_bytes = modulus.to_le_bytes();
+                // The public random sample `a` is uniform over the ring, so sampling
+                // each RNS limb independently is a valid uniform-mod-q polynomial.
+                let public_sample = DeterministicSampler::new(
+                    "sealed-lattice-bgv-evaluator/development-public-sample-v1",
+                    &[seed_hex.as_bytes(), &modulus_bytes],
+                )
+                .uniform_residues(modulus, POLYNOMIAL_DEGREE);
 
-            let secret_residues = secret
-                .iter()
-                .map(|coefficient| signed_residue(*coefficient, modulus))
-                .collect::<Vec<_>>();
-            let public_sample_secret_product =
-                negacyclic_mul(&public_sample, &secret_residues, modulus)?;
-            // b = p*e - a*s, so that c0 + c1*s = m + p*(noise) and decryption
-            // recovers m exactly modulo the plaintext modulus.
-            let component_b = public_error
-                .iter()
-                .zip(public_sample_secret_product.iter())
-                .map(|(error_coefficient, product)| {
-                    let scaled_error = signed_residue(
-                        error_coefficient * i64::from(PLAINTEXT_MODULUS_I32),
-                        modulus,
-                    );
-                    sub_mod(scaled_error, *product, modulus)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
+                let secret_residues = secret
+                    .iter()
+                    .map(|coefficient| signed_residue(*coefficient, modulus))
+                    .collect::<Vec<_>>();
+                let public_sample_secret_product =
+                    negacyclic_mul(&public_sample, &secret_residues, modulus)?;
+                // b = p*e - a*s, so that c0 + c1*s = m + p*(noise) and decryption
+                // recovers m exactly modulo the plaintext modulus.
+                let component_b = public_error
+                    .iter()
+                    .zip(public_sample_secret_product.iter())
+                    .map(|(error_coefficient, product)| {
+                        let scaled_error = signed_residue(
+                            error_coefficient * i64::from(PLAINTEXT_MODULUS_I32),
+                            modulus,
+                        );
+                        sub_mod(scaled_error, *product, modulus)
+                    })
+                    .collect::<CanonicalResult<Vec<_>>>()?;
 
-            public_b.push(component_b);
-            public_a.push(public_sample);
-        }
+                Ok((component_b, public_sample))
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        #[cfg(target_arch = "wasm32")]
+        let public_key_components = DATA_PRIMES
+            .iter()
+            .copied()
+            .map(|modulus| {
+                let modulus_bytes = modulus.to_le_bytes();
+                // The public random sample `a` is uniform over the ring, so sampling
+                // each RNS limb independently is a valid uniform-mod-q polynomial.
+                let public_sample = DeterministicSampler::new(
+                    "sealed-lattice-bgv-evaluator/development-public-sample-v1",
+                    &[seed_hex.as_bytes(), &modulus_bytes],
+                )
+                .uniform_residues(modulus, POLYNOMIAL_DEGREE);
+
+                let secret_residues = secret
+                    .iter()
+                    .map(|coefficient| signed_residue(*coefficient, modulus))
+                    .collect::<Vec<_>>();
+                let public_sample_secret_product =
+                    negacyclic_mul(&public_sample, &secret_residues, modulus)?;
+                // b = p*e - a*s, so that c0 + c1*s = m + p*(noise) and decryption
+                // recovers m exactly modulo the plaintext modulus.
+                let component_b = public_error
+                    .iter()
+                    .zip(public_sample_secret_product.iter())
+                    .map(|(error_coefficient, product)| {
+                        let scaled_error = signed_residue(
+                            error_coefficient * i64::from(PLAINTEXT_MODULUS_I32),
+                            modulus,
+                        );
+                        sub_mod(scaled_error, *product, modulus)
+                    })
+                    .collect::<CanonicalResult<Vec<_>>>()?;
+
+                Ok((component_b, public_sample))
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let (public_b, public_a) = public_key_components.into_iter().unzip();
 
         Ok(Self {
             secret,

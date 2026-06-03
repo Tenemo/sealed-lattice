@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 pub(super) fn sample_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<Value> {
     sample_positions()
         .into_iter()
@@ -251,9 +254,19 @@ pub(super) fn sample_centered_binomial_eta2(
 }
 
 pub(super) fn dense_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<u64> {
-    (0..POLYNOMIAL_DEGREE)
-        .map(|position| sample_residue(seed_hash, label, position, modulus))
-        .collect()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .into_par_iter()
+            .map(|position| sample_residue(seed_hash, label, position, modulus))
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .map(|position| sample_residue(seed_hash, label, position, modulus))
+            .collect()
+    }
 }
 
 pub(super) fn dense_small_coefficients(
@@ -264,15 +277,31 @@ pub(super) fn dense_small_coefficients(
     maximum: i64,
 ) -> Vec<i64> {
     let width = u64::try_from(maximum - minimum + 1).expect("small distribution width fits u64");
-    (0..POLYNOMIAL_DEGREE)
-        .map(|position| {
-            minimum
-                + i64::try_from(sample_small_distribution_offset(
-                    seed_hash, identity, label, position, width,
-                ))
-                .expect("small distribution offset fits i64")
-        })
-        .collect()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .into_par_iter()
+            .map(|position| {
+                minimum
+                    + i64::try_from(sample_small_distribution_offset(
+                        seed_hash, identity, label, position, width,
+                    ))
+                    .expect("small distribution offset fits i64")
+            })
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .map(|position| {
+                minimum
+                    + i64::try_from(sample_small_distribution_offset(
+                        seed_hash, identity, label, position, width,
+                    ))
+                    .expect("small distribution offset fits i64")
+            })
+            .collect()
+    }
 }
 
 pub(super) fn dense_centered_binomial_coefficients(

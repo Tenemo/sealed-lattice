@@ -10,6 +10,9 @@ use super::{
     participant_material::participant_setup_material,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> CanonicalResult<Value> {
     let profile_hash = profile_hash()?;
     let backend_profile_hash = backend_profile_hash()?;
@@ -41,6 +44,23 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         }),
     )?;
     let public_common_random_polynomial_root = public_common_random_polynomial_root(input)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let participant_material = input
+        .participants
+        .par_iter()
+        .map(|participant| {
+            participant_setup_material(
+                input,
+                participant,
+                &profile_hash,
+                &backend_profile_hash,
+                &public_common_random_polynomial_root,
+                &threshold_decryption_profile_hash,
+                &kllps_target_decryption_profile_hash,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
     let participant_material = input
         .participants
         .iter()

@@ -22,7 +22,14 @@ use std::sync::OnceLock;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "a959a2f9a1dd7ba83e690f43ca5b5f664967e65eed09d6f162fa31f5b37309bc66dc67ce31fbeea33bdeec6b0dd7b16f25e97b0c3b04fbad5ebe4ac930e4e747";
+
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
+static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
+static PASSIVE_SETUP_LEVEL_ONE_PUBLIC_MATERIAL: OnceLock<serde_json::Value> = OnceLock::new();
+static PASSIVE_SETUP_LEVEL_ONE_PUBLIC_CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();
+static PASSIVE_SETUP_ROTATION_PUBLIC_MATERIAL: OnceLock<serde_json::Value> = OnceLock::new();
+static PASSIVE_SETUP_ROTATION_PUBLIC_CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();
 
 fn request() -> serde_json::Value {
     serde_json::json!({
@@ -48,10 +55,13 @@ fn request() -> serde_json::Value {
     })
 }
 
-fn setup_package() -> serde_json::Value {
+fn setup_package_ref() -> &'static serde_json::Value {
     PASSIVE_SETUP_TEST_PACKAGE
         .get_or_init(|| generate_passive_setup_package_from_request(&request()).expect("setup"))
-        .clone()
+}
+
+fn setup_package() -> serde_json::Value {
+    setup_package_ref().clone()
 }
 
 fn rebind_setup_package_hash(package: &mut serde_json::Value) {
@@ -70,7 +80,14 @@ fn valid_hash(fill: char) -> String {
     fill.to_string().repeat(128)
 }
 
-fn setup_derived_evaluator_key(package: &serde_json::Value) -> DevelopmentBgvKey {
+fn setup_derived_evaluator_key() -> &'static DevelopmentBgvKey {
+    PASSIVE_SETUP_TEST_EVALUATOR_KEY.get_or_init(|| {
+        let package = setup_package_ref();
+        setup_derived_evaluator_key_from_package(package)
+    })
+}
+
+fn setup_derived_evaluator_key_from_package(package: &serde_json::Value) -> DevelopmentBgvKey {
     let private_setup_seed_hash =
         super::input::private_passive_setup_seed_hash_from_package_witness(
             package,
@@ -109,6 +126,86 @@ fn setup_derived_evaluator_key(package: &serde_json::Value) -> DevelopmentBgvKey
 
     DevelopmentBgvKey::from_collective_components(collective_secret, public_b, public_a)
         .expect("setup-derived evaluator key")
+}
+
+fn level_one_public_material() -> &'static serde_json::Value {
+    PASSIVE_SETUP_LEVEL_ONE_PUBLIC_MATERIAL.get_or_init(|| {
+        super::generate_passive_setup_public_evaluation_key_material_from_request(
+            &serde_json::json!({
+                "setupPackage": setup_package_ref().clone(),
+                "setupPrivateWitness": {
+                    "setupSeed": "passive-bgv-setup-test-seed",
+                },
+                "workingLevel": 1,
+            }),
+        )
+        .expect("public evaluation-key material")
+    })
+}
+
+fn level_one_public_context() -> &'static EvaluatorContext {
+    PASSIVE_SETUP_LEVEL_ONE_PUBLIC_CONTEXT.get_or_init(|| {
+        EvaluatorContext::from_passive_setup_public_material(
+            setup_package_ref(),
+            level_one_public_material(),
+            1,
+        )
+        .expect("public evaluator context")
+    })
+}
+
+fn direct_comparison_rotation_request() -> (usize, usize) {
+    let rotation_request = setup_package_ref()["evaluationKeys"]["rotationKeyRoots"]
+        .as_array()
+        .expect("rotation key roots")
+        .iter()
+        .find(|entry| entry["level"].as_u64() == Some(DIRECT_COMPARISON_OUTPUT_LEVEL as u64))
+        .expect("direct-comparison return rotation key");
+    let galois_element = rotation_request["rotation"]
+        .as_u64()
+        .expect("rotation")
+        .try_into()
+        .expect("rotation fits usize");
+    let level = rotation_request["level"]
+        .as_u64()
+        .expect("level")
+        .try_into()
+        .expect("level fits usize");
+
+    (galois_element, level)
+}
+
+fn rotation_public_material() -> &'static serde_json::Value {
+    PASSIVE_SETUP_ROTATION_PUBLIC_MATERIAL.get_or_init(|| {
+        let (galois_element, level) = direct_comparison_rotation_request();
+        super::generate_passive_setup_public_evaluation_key_material_from_request(
+            &serde_json::json!({
+                "setupPackage": setup_package_ref().clone(),
+                "setupPrivateWitness": {
+                    "setupSeed": "passive-bgv-setup-test-seed",
+                },
+                "workingLevel": 1,
+                "rotationKeys": [
+                    {
+                        "rotation": galois_element,
+                        "level": level,
+                    }
+                ],
+            }),
+        )
+        .expect("public evaluation-key material")
+    })
+}
+
+fn rotation_public_context() -> &'static EvaluatorContext {
+    PASSIVE_SETUP_ROTATION_PUBLIC_CONTEXT.get_or_init(|| {
+        EvaluatorContext::from_passive_setup_public_material(
+            setup_package_ref(),
+            rotation_public_material(),
+            1,
+        )
+        .expect("public evaluator context")
+    })
 }
 
 fn rebind_public_evaluation_key_material_hash(material: &mut serde_json::Value) {
@@ -164,10 +261,12 @@ fn assert_rebound_package_is_rejected(mut package: serde_json::Value, mutation_d
 
 #[test]
 fn passive_setup_generation_is_deterministic_and_verifiable() {
-    let first = generate_passive_setup_package_from_request(&request()).expect("first setup");
-    let second = generate_passive_setup_package_from_request(&request()).expect("second setup");
+    let first = setup_package_ref();
 
-    assert_eq!(first["setupPackageHash"], second["setupPackageHash"]);
+    assert_eq!(
+        first["setupPackageHash"], EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH,
+        "passive setup generation must remain deterministic for the fixed test seed"
+    );
     assert_eq!(first["kllpsStatus"]["setupMaterialMatchesKLLPS"], true);
     assert_eq!(first["kllpsStatus"]["KLLPSPartDecStatusImplemented"], false);
     assert_eq!(
@@ -220,7 +319,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     assert!(first.get("privateSetupSeedHash").is_none());
 
     let verification = verify_passive_setup_package_from_request(&serde_json::json!({
-        "setupPackage": first,
+        "setupPackage": first.clone(),
         "expectedRosterHash": request()["rosterHash"],
     }))
     .expect("verify setup package");
@@ -229,8 +328,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
 
 #[test]
 fn passive_setup_collective_key_uses_evaluator_decryptable_contract() {
-    let package = setup_package();
-    let evaluator_key = setup_derived_evaluator_key(&package);
+    let evaluator_key = setup_derived_evaluator_key();
 
     let ciphertext = evaluator_key
         .encrypt_slots(&[13, 21, 34, 55], "setup-derived-evaluator-encryption")
@@ -271,22 +369,9 @@ fn passive_setup_private_witness_is_required_for_test_decryption_key() {
 
 #[test]
 fn passive_setup_public_evaluation_key_material_drives_relinearization_without_private_witness() {
-    let package = setup_package();
-    let evaluator_key = setup_derived_evaluator_key(&package);
-    let public_material =
-        super::generate_passive_setup_public_evaluation_key_material_from_request(
-            &serde_json::json!({
-                "setupPackage": package,
-                "setupPrivateWitness": {
-                    "setupSeed": "passive-bgv-setup-test-seed",
-                },
-                "workingLevel": 1,
-            }),
-        )
-        .expect("public evaluation-key material");
-    let public_context =
-        EvaluatorContext::from_passive_setup_public_material(&package, &public_material, 1)
-            .expect("public evaluator context");
+    let evaluator_key = setup_derived_evaluator_key();
+    let public_material = level_one_public_material();
+    let public_context = level_one_public_context();
     let left = modulus_switch_to(
         &evaluator_key
             .encrypt_slots(&[2, 3, 4], "public-material-left")
@@ -302,7 +387,7 @@ fn passive_setup_public_evaluation_key_material_drives_relinearization_without_p
     )
     .expect("right level");
 
-    let product = multiply(&public_context, &left, &right).expect("public material multiply");
+    let product = multiply(public_context, &left, &right).expect("public material multiply");
     let decrypted = evaluator_key
         .decrypt_to_slots(&product)
         .expect("decrypt public material product");
@@ -314,44 +399,9 @@ fn passive_setup_public_evaluation_key_material_drives_relinearization_without_p
 
 #[test]
 fn passive_setup_public_evaluation_key_material_drives_rotation_without_private_witness() {
-    let package = setup_package();
-    let evaluator_key = setup_derived_evaluator_key(&package);
-    let rotation_request = package["evaluationKeys"]["rotationKeyRoots"]
-        .as_array()
-        .expect("rotation key roots")
-        .iter()
-        .find(|entry| entry["level"].as_u64() == Some(DIRECT_COMPARISON_OUTPUT_LEVEL as u64))
-        .expect("direct-comparison return rotation key");
-    let galois_element = rotation_request["rotation"]
-        .as_u64()
-        .expect("rotation")
-        .try_into()
-        .expect("rotation fits usize");
-    let level = rotation_request["level"]
-        .as_u64()
-        .expect("level")
-        .try_into()
-        .expect("level fits usize");
-    let public_material =
-        super::generate_passive_setup_public_evaluation_key_material_from_request(
-            &serde_json::json!({
-                "setupPackage": package,
-                "setupPrivateWitness": {
-                    "setupSeed": "passive-bgv-setup-test-seed",
-                },
-                "workingLevel": 1,
-                "rotationKeys": [
-                    {
-                        "rotation": galois_element,
-                        "level": level,
-                    }
-                ],
-            }),
-        )
-        .expect("public evaluation-key material");
-    let public_context =
-        EvaluatorContext::from_passive_setup_public_material(&package, &public_material, 1)
-            .expect("public evaluator context");
+    let evaluator_key = setup_derived_evaluator_key();
+    let (galois_element, level) = direct_comparison_rotation_request();
+    let public_context = rotation_public_context();
     let slots = [11_u64, 22, 33, 44, 55, 66, 77, 88];
     let source = modulus_switch_to(
         &evaluator_key
@@ -381,7 +431,7 @@ fn passive_setup_public_evaluation_key_material_drives_rotation_without_private_
 fn passive_setup_representative_full_level_public_evaluation_key_material_exercises_selected_keys()
 {
     let package = setup_package();
-    let evaluator_key = setup_derived_evaluator_key(&package);
+    let evaluator_key = setup_derived_evaluator_key();
     let full_level = DATA_PRIMES.len() - 1;
     let expected_rotation_schedule = selected_public_evaluation_key_rotation_requests(full_level)
         .expect("selected full rotation schedule");
@@ -592,17 +642,7 @@ fn public_evaluation_key_rotation_request_rejects_duplicates_before_generation()
 #[test]
 fn passive_setup_public_evaluation_key_material_rejects_wrong_roots() {
     let package = setup_package();
-    let mut public_material =
-        super::generate_passive_setup_public_evaluation_key_material_from_request(
-            &serde_json::json!({
-                "setupPackage": package,
-                "setupPrivateWitness": {
-                    "setupSeed": "passive-bgv-setup-test-seed",
-                },
-                "workingLevel": 1,
-            }),
-        )
-        .expect("public evaluation-key material");
+    let mut public_material = level_one_public_material().clone();
     public_material["evaluationKeyRoot"] = serde_json::json!("0".repeat(128));
 
     let error =
@@ -623,17 +663,7 @@ fn passive_setup_public_evaluation_key_material_rejects_wrong_roots() {
 #[test]
 fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_secret_leaks() {
     let package = setup_package();
-    let public_material =
-        super::generate_passive_setup_public_evaluation_key_material_from_request(
-            &serde_json::json!({
-                "setupPackage": package,
-                "setupPrivateWitness": {
-                    "setupSeed": "passive-bgv-setup-test-seed",
-                },
-                "workingLevel": 1,
-            }),
-        )
-        .expect("public evaluation-key material");
+    let public_material = level_one_public_material();
 
     let mut wrong_collective_root = public_material.clone();
     wrong_collective_root["collectivePublicKeyRoot"] = serde_json::json!("0".repeat(128));
@@ -700,8 +730,7 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
 
 #[test]
 fn passive_setup_collective_key_drives_evaluator_key_switch_primitives() {
-    let package = setup_package();
-    let evaluator_key = setup_derived_evaluator_key(&package);
+    let evaluator_key = setup_derived_evaluator_key().clone();
     let context =
         EvaluatorContext::from_key(evaluator_key, "setup-derived-evaluation-key-switch", 3)
             .expect("setup-derived evaluator context");
@@ -715,7 +744,7 @@ fn passive_setup_collective_key_drives_evaluator_key_switch_primitives() {
 #[test]
 fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
     let package = setup_package();
-    let evaluator_key = setup_derived_evaluator_key(&package);
+    let evaluator_key = setup_derived_evaluator_key();
     let sampled_checks = package["evaluationKeys"]["evaluationKeyMaterialCommitment"]["record"]
         ["sampledRelationChecks"]
         .as_array()
@@ -760,7 +789,7 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
     )
     .expect("right level");
     let relinearization_key = generate_relinearization_key(
-        &evaluator_key,
+        evaluator_key,
         DIRECT_COMPARISON_OUTPUT_LEVEL,
         relinearization_seed,
     )
@@ -776,7 +805,7 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
     assert_eq!(&product_slots[..4], &[14, 24, 36, 50]);
 
     let rotation_key = generate_galois_key(
-        &evaluator_key,
+        evaluator_key,
         rotation,
         DIRECT_COMPARISON_OUTPUT_LEVEL,
         rotation_seed,

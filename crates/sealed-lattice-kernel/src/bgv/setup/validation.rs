@@ -169,12 +169,6 @@ pub(super) fn validate_setup_package_internal_bindings(
         &threshold_decryption_profile_hash,
         &kllps_target_decryption_profile_hash,
     )?;
-    validate_collective_public_key(
-        setup_package,
-        &participant_bindings,
-        &profile_hash,
-        &backend_profile_hash,
-    )?;
     validate_threshold_verification_material(
         setup_package,
         &participant_bindings,
@@ -183,6 +177,12 @@ pub(super) fn validate_setup_package_internal_bindings(
     )?;
     validate_evaluation_keys(setup_package)?;
     validate_setup_certificates(setup_package)?;
+    validate_collective_public_key(
+        setup_package,
+        &participant_bindings,
+        &profile_hash,
+        &backend_profile_hash,
+    )?;
 
     Ok(())
 }

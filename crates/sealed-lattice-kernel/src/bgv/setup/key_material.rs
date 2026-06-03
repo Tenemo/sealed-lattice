@@ -9,6 +9,9 @@ use crate::bgv::evaluator::{
     },
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 const DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL: &str =
     "componentZero=sum_i(-a*s_i+p*e_i),componentOne=a-over-selected-BGV-RNS-data-basis";
 const EVALUATION_KEY_STREAM_POLICY: &str =
@@ -148,40 +151,60 @@ pub(super) fn collective_public_key_coefficients_by_modulus_from_setup_package(
         ));
     }
 
-    coefficient_tables
-        .iter()
-        .enumerate()
-        .map(|(modulus_index, table)| {
-            let modulus = unsigned_at_path(table, &["modulus"])?;
-            if modulus != DATA_PRIMES[modulus_index] {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "collective public key coefficient table modulus does not match the selected data basis",
-                ));
-            }
-            let component_zero_coefficients =
-                read_public_key_coefficient_vector(table, "componentZeroCoefficients")?;
-            let component_one_coefficients =
-                read_public_key_coefficient_vector(table, "componentOneCoefficients")?;
-            compare_hash_at_path(
-                table,
-                &["componentZeroCoefficientHash512"],
-                &coefficient_vector_hash512(&component_zero_coefficients),
-                "collective public key component-zero coefficient hash",
-            )?;
-            compare_hash_at_path(
-                table,
-                &["componentOneCoefficientHash512"],
-                &coefficient_vector_hash512(&component_one_coefficients),
-                "collective public key component-one coefficient hash",
-            )?;
-
-            Ok(CollectivePublicKeyCoefficients {
-                component_zero_coefficients,
-                component_one_coefficients,
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        coefficient_tables
+            .par_iter()
+            .enumerate()
+            .map(|(modulus_index, table)| {
+                collective_public_key_coefficients_from_table(modulus_index, table)
             })
-        })
-        .collect()
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        coefficient_tables
+            .iter()
+            .enumerate()
+            .map(|(modulus_index, table)| {
+                collective_public_key_coefficients_from_table(modulus_index, table)
+            })
+            .collect()
+    }
+}
+
+fn collective_public_key_coefficients_from_table(
+    modulus_index: usize,
+    table: &Value,
+) -> CanonicalResult<CollectivePublicKeyCoefficients> {
+    let modulus = unsigned_at_path(table, &["modulus"])?;
+    if modulus != DATA_PRIMES[modulus_index] {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient table modulus does not match the selected data basis",
+        ));
+    }
+    let component_zero_coefficients =
+        read_public_key_coefficient_vector(table, "componentZeroCoefficients")?;
+    let component_one_coefficients =
+        read_public_key_coefficient_vector(table, "componentOneCoefficients")?;
+    compare_hash_at_path(
+        table,
+        &["componentZeroCoefficientHash512"],
+        &coefficient_vector_hash512(&component_zero_coefficients),
+        "collective public key component-zero coefficient hash",
+    )?;
+    compare_hash_at_path(
+        table,
+        &["componentOneCoefficientHash512"],
+        &coefficient_vector_hash512(&component_one_coefficients),
+        "collective public key component-one coefficient hash",
+    )?;
+
+    Ok(CollectivePublicKeyCoefficients {
+        component_zero_coefficients,
+        component_one_coefficients,
+    })
 }
 
 pub(super) fn collective_public_key_coefficient_root(
@@ -203,26 +226,46 @@ fn collective_public_key_coefficient_material(
             private_setup_seed_hash,
             participant_identities,
         );
+    #[cfg(not(target_arch = "wasm32"))]
     let coefficient_tables = DATA_PRIMES
-        .iter()
+        .par_iter()
         .copied()
         .map(|modulus| {
-            let coefficients = collective_public_key_coefficients_from_signed(
+            collective_public_key_coefficient_table(
                 setup_seed_hash,
                 &collective_secret_coefficients,
                 &collective_error_coefficients,
                 modulus,
-            )?;
-            Ok(json!({
-                "modulus": modulus,
-                "componentZeroCoefficientHash512": coefficient_vector_hash512(&coefficients.component_zero_coefficients),
-                "componentOneCoefficientHash512": coefficient_vector_hash512(&coefficients.component_one_coefficients),
-                "componentZeroCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
-                "componentOneCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_one_coefficients),
-                "coefficientByteLength": POLYNOMIAL_DEGREE * 8,
-            }))
+            )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
+    let coefficient_tables = DATA_PRIMES
+        .iter()
+        .copied()
+        .map(|modulus| {
+            collective_public_key_coefficient_table(
+                setup_seed_hash,
+                &collective_secret_coefficients,
+                &collective_error_coefficients,
+                modulus,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let modulus_summaries = coefficient_tables
+        .par_iter()
+        .map(|table| {
+            collective_public_key_coefficient_derivation_summary(
+                setup_seed_hash,
+                public_common_random_polynomial_root,
+                public_key_share_roots,
+                participant_identities,
+                table,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
     let modulus_summaries = coefficient_tables
         .iter()
         .map(|table| {
@@ -255,6 +298,29 @@ fn collective_public_key_coefficient_material(
         "coefficientTables": coefficient_tables,
         "algebraicPublicKeyProofStatus": "BgvAlgebraicPublicKeyProofMissing",
         "rawSecretShareExported": false,
+    }))
+}
+
+fn collective_public_key_coefficient_table(
+    setup_seed_hash: &str,
+    collective_secret_coefficients: &[i64],
+    collective_error_coefficients: &[i64],
+    modulus: u64,
+) -> CanonicalResult<Value> {
+    let coefficients = collective_public_key_coefficients_from_signed(
+        setup_seed_hash,
+        collective_secret_coefficients,
+        collective_error_coefficients,
+        modulus,
+    )?;
+
+    Ok(json!({
+        "modulus": modulus,
+        "componentZeroCoefficientHash512": coefficient_vector_hash512(&coefficients.component_zero_coefficients),
+        "componentOneCoefficientHash512": coefficient_vector_hash512(&coefficients.component_one_coefficients),
+        "componentZeroCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
+        "componentOneCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_one_coefficients),
+        "coefficientByteLength": POLYNOMIAL_DEGREE * 8,
     }))
 }
 
@@ -376,33 +442,78 @@ pub(super) fn collective_signed_secret_and_error_coefficients(
     private_setup_seed_hash: &str,
     participant_identities: &[String],
 ) -> (Vec<i64>, Vec<i64>) {
-    let mut collective_secret_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
-    let mut collective_error_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
-    for participant_identity in participant_identities {
-        for coefficient_index in 0..POLYNOMIAL_DEGREE {
-            collective_secret_coefficients[coefficient_index] +=
-                bounded_collective_secret_share_coefficient(
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let coefficient_pairs = (0..POLYNOMIAL_DEGREE)
+            .into_par_iter()
+            .map(|coefficient_index| {
+                collective_signed_secret_and_error_coefficient_pair(
                     private_setup_seed_hash,
                     participant_identities,
-                    participant_identity,
                     coefficient_index,
                 )
-                .expect("participant identity is drawn from the owner schedule");
-            collective_error_coefficients[coefficient_index] +=
-                bounded_collective_error_share_coefficient(
-                    private_setup_seed_hash,
-                    participant_identities,
-                    participant_identity,
-                    coefficient_index,
-                )
-                .expect("participant identity is drawn from the owner schedule");
+            })
+            .collect::<Vec<_>>();
+
+        coefficient_pairs.into_iter().unzip()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut collective_secret_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
+        let mut collective_error_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
+        for participant_identity in participant_identities {
+            for coefficient_index in 0..POLYNOMIAL_DEGREE {
+                collective_secret_coefficients[coefficient_index] +=
+                    bounded_collective_secret_share_coefficient(
+                        private_setup_seed_hash,
+                        participant_identities,
+                        participant_identity,
+                        coefficient_index,
+                    )
+                    .expect("participant identity is drawn from the owner schedule");
+                collective_error_coefficients[coefficient_index] +=
+                    bounded_collective_error_share_coefficient(
+                        private_setup_seed_hash,
+                        participant_identities,
+                        participant_identity,
+                        coefficient_index,
+                    )
+                    .expect("participant identity is drawn from the owner schedule");
+            }
         }
+
+        (
+            collective_secret_coefficients,
+            collective_error_coefficients,
+        )
+    }
+}
+
+fn collective_signed_secret_and_error_coefficient_pair(
+    private_setup_seed_hash: &str,
+    participant_identities: &[String],
+    coefficient_index: usize,
+) -> (i64, i64) {
+    let mut collective_secret_coefficient = 0_i64;
+    let mut collective_error_coefficient = 0_i64;
+    for participant_identity in participant_identities {
+        collective_secret_coefficient += bounded_collective_secret_share_coefficient(
+            private_setup_seed_hash,
+            participant_identities,
+            participant_identity,
+            coefficient_index,
+        )
+        .expect("participant identity is drawn from the owner schedule");
+        collective_error_coefficient += bounded_collective_error_share_coefficient(
+            private_setup_seed_hash,
+            participant_identities,
+            participant_identity,
+            coefficient_index,
+        )
+        .expect("participant identity is drawn from the owner schedule");
     }
 
-    (
-        collective_secret_coefficients,
-        collective_error_coefficients,
-    )
+    (collective_secret_coefficient, collective_error_coefficient)
 }
 
 pub(super) fn collective_public_key_coefficients_from_signed(
@@ -1049,11 +1160,28 @@ fn key_switch_source_limbs(
         })
         .collect::<Vec<_>>();
     match key_kind {
-        "relinearization" => secret_residues
-            .iter()
-            .enumerate()
-            .map(|(limb_index, limb)| negacyclic_product_mod(limb, limb, DATA_PRIMES[limb_index]))
-            .collect(),
+        "relinearization" => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                secret_residues
+                    .par_iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        negacyclic_product_mod(limb, limb, DATA_PRIMES[limb_index])
+                    })
+                    .collect()
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                secret_residues
+                    .iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        negacyclic_product_mod(limb, limb, DATA_PRIMES[limb_index])
+                    })
+                    .collect()
+            }
+        }
         "rotation" => {
             let galois_element = rotation.ok_or_else(|| {
                 CanonicalError::new(

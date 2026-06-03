@@ -1,6 +1,9 @@
 use super::*;
 use crate::bgv::setup::key_material::collective_public_key_coefficient_root;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 pub(super) fn validate_collective_public_key(
     setup_package: &Value,
     participant_bindings: &[VerifiedParticipantSetupBinding],
@@ -183,35 +186,62 @@ fn validate_collective_public_key_coefficient_material(
             "collective public key coefficient material must include one table and summary per data prime",
         ));
     }
-    for (modulus_index, modulus) in DATA_PRIMES.iter().enumerate() {
-        validate_coefficient_table(&coefficient_tables[modulus_index], *modulus)?;
-        let summary = &modulus_summaries[modulus_index];
-        if unsigned_at_path(summary, &["modulus"])? != *modulus {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "collective public key coefficient summary modulus does not match the selected data basis",
-            ));
-        }
-        for field_name in [
-            "componentZeroCoefficientHash512",
-            "componentOneCoefficientHash512",
-        ] {
-            compare_hash_at_path(
-                summary,
-                &[field_name],
-                string_at_path(&coefficient_tables[modulus_index], &[field_name])?,
-                "collective public key coefficient summary hash",
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        DATA_PRIMES
+            .par_iter()
+            .enumerate()
+            .try_for_each(|(modulus_index, modulus)| {
+                validate_coefficient_table_and_summary(
+                    &coefficient_tables[modulus_index],
+                    &modulus_summaries[modulus_index],
+                    *modulus,
+                )
+            })?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        for (modulus_index, modulus) in DATA_PRIMES.iter().enumerate() {
+            validate_coefficient_table_and_summary(
+                &coefficient_tables[modulus_index],
+                &modulus_summaries[modulus_index],
+                *modulus,
             )?;
         }
-        compare_string_at_path(
-            summary,
-            &["fullCoefficientVectorHashStatus"],
-            "bound-in-setup-package",
-            "collective public key coefficient vector hash status",
-        )?;
     }
 
     Ok(())
+}
+
+fn validate_coefficient_table_and_summary(
+    coefficient_table: &Value,
+    summary: &Value,
+    modulus: u64,
+) -> CanonicalResult<()> {
+    validate_coefficient_table(coefficient_table, modulus)?;
+    if unsigned_at_path(summary, &["modulus"])? != modulus {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient summary modulus does not match the selected data basis",
+        ));
+    }
+    for field_name in [
+        "componentZeroCoefficientHash512",
+        "componentOneCoefficientHash512",
+    ] {
+        compare_hash_at_path(
+            summary,
+            &[field_name],
+            string_at_path(coefficient_table, &[field_name])?,
+            "collective public key coefficient summary hash",
+        )?;
+    }
+    compare_string_at_path(
+        summary,
+        &["fullCoefficientVectorHashStatus"],
+        "bound-in-setup-package",
+        "collective public key coefficient vector hash status",
+    )
 }
 
 fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> CanonicalResult<()> {
