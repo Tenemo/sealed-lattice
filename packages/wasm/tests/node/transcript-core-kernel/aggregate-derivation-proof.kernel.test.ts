@@ -1030,7 +1030,7 @@ describe.sequential(
                                     'AggregateDerivationFullVerificationChecked',
                                 randomnessSourceEvidence: {
                                     callerSuppliedDevelopmentRandomness: false,
-                                    claimBearingEntropyEvidence: true,
+                                    claimBearingEntropyEvidence: false,
                                 },
                             });
 
@@ -1071,7 +1071,7 @@ describe.sequential(
                                     'AggregateDerivationFullVerificationChecked',
                                 randomnessSourceEvidence: {
                                     callerSuppliedDevelopmentRandomness: false,
-                                    claimBearingEntropyEvidence: true,
+                                    claimBearingEntropyEvidence: false,
                                 },
                             });
 

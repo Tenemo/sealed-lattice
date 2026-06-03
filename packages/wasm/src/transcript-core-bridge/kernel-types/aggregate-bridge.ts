@@ -4,9 +4,7 @@ export type BridgeRandomnessSource =
     | 'fresh-csprng'
     | 'development-deterministic-fixture';
 
-export type BridgeClaimVerificationStatus =
-    | 'BridgeProofClaimClosureMissing'
-    | 'BridgeProofClaimClosureVerified';
+export type BridgeClaimVerificationStatus = 'BridgeProofClaimClosureMissing';
 
 export type BridgeRandomnessSourceEvidence = {
     readonly objectType: 'AggregateBridgeRandomnessSourceEvidence';

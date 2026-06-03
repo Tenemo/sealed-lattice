@@ -10,7 +10,6 @@ import {
     buildAggregateDerivationStatement,
     createAggregateDerivationComponent,
     deriveBridgeProofChallengeContextHash,
-    deriveBridgeProofTargetContractHash,
     sumAggregateDerivationWitnesses,
 } from '#packages/protocol/src/ballot-privacy/index';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
@@ -279,16 +278,14 @@ export const registerAggregateBridgeEncryptionTest = (
                             string,
                             unknown
                         >;
-                    const expectedTargetContractHash =
-                        deriveBridgeProofTargetContractHash({
-                            aggregateQuotientCoordinateCount: 220,
-                            aggregateReducedCoordinateCount: 220,
-                            aggregateDerivationVerificationScope:
-                                'AggregateDerivationFullVerificationPreconditionNotBound',
-                            bridgeClaimClosureStatus:
-                                'BridgeProofClaimClosureMissing',
-                            claimBearingBridgeEncryption: false,
-                        });
+                    const expectedTargetContractHash = deriveProtocolHash(
+                        'BridgeProofRecordHash',
+                        {
+                            contract: bridgeProofTargetContract,
+                            purpose:
+                                'sealed-lattice-aggregate-bridge-proof-target-contract-v1',
+                        },
+                    );
                     const expectedChallengeContextHash =
                         deriveBridgeProofChallengeContextHash({
                             bridgeProofProfileHash: String(
@@ -318,13 +315,6 @@ export const registerAggregateBridgeEncryptionTest = (
                     ).toBe(bridgeEncryption.bridgeProofTargetContractHash);
                     expect(
                         bridgeProofPayload.bridgeProofTargetContractHash,
-                    ).toBe(expectedTargetContractHash);
-                    expect(
-                        deriveProtocolHash('BridgeProofRecordHash', {
-                            contract: bridgeProofTargetContract,
-                            purpose:
-                                'sealed-lattice-aggregate-bridge-proof-target-contract-v1',
-                        }),
                     ).toBe(expectedTargetContractHash);
                     expect(bridgeProofPayload).toMatchObject({
                         objectType: 'SealedLatticeAggregateBridgeRelationProof',
@@ -458,18 +448,26 @@ export const registerAggregateBridgeEncryptionTest = (
                                 'QromAccountingNotProvidedForHandoff',
                             sharedWitnessProofSystemLossBits: 0,
                             sharedWitnessChallengeBiasAccountingModel:
-                                'direct-rejection-sampling-into-effective-weakest-relation-modulus-v1',
-                            sharedWitnessChallengeBiasBits: 0,
+                                'crt-product-challenge-reduced-to-aggregate-field-with-one-bit-loss-v1',
+                            sharedWitnessChallengeBiasBits: 1,
+                            sharedWitnessAdditionalRelationLossBits: 9,
+                            sharedWitnessBgvSupportRelation:
+                                'BgvRandomnessErrorSupportPolynomialBatchRelation',
+                            sharedWitnessBgvSupportChallengeDistribution:
+                                'shared-witness-challenge-reduced-modulo-bgv-support-prime-v1',
+                            sharedWitnessBgvSupportCancellationModel:
+                                'random-linear-batched-support-cancellation-accounted-by-union-loss-v1',
+                            sharedWitnessBgvSupportUnionBoundBits: 9,
                             sharedWitnessTargetBindingSoundnessBits: 128,
                             sharedWitnessRawWeakestRelationSoundnessBitsFloor: 230,
-                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
+                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 149,
                             sharedWitnessEffectiveBindingBelowTarget: false,
                             sharedWitnessWeakestRelation:
                                 'AggregateReductionFieldRelation',
                             sharedWitnessWeakestRelationModel:
                                 'aggregate-proof-ring-effective-binding-floor-v1',
                             sharedWitnessWeakestRelationEffectiveModulus:
-                                '70368744177664',
+                                '70368744177829',
                             sharedWitnessWeakestRelationBitsPerCheck: 46,
                             plaintextEncodingProofModuli: [
                                 140_737_487_306_753, 140_737_486_716_929,
@@ -550,18 +548,26 @@ export const registerAggregateBridgeEncryptionTest = (
                                 'QromAccountingNotProvidedForHandoff',
                             sharedWitnessProofSystemLossBits: 0,
                             sharedWitnessChallengeBiasAccountingModel:
-                                'direct-rejection-sampling-into-effective-weakest-relation-modulus-v1',
-                            sharedWitnessChallengeBiasBits: 0,
+                                'crt-product-challenge-reduced-to-aggregate-field-with-one-bit-loss-v1',
+                            sharedWitnessChallengeBiasBits: 1,
+                            sharedWitnessAdditionalRelationLossBits: 9,
+                            sharedWitnessBgvSupportRelation:
+                                'BgvRandomnessErrorSupportPolynomialBatchRelation',
+                            sharedWitnessBgvSupportChallengeDistribution:
+                                'shared-witness-challenge-reduced-modulo-bgv-support-prime-v1',
+                            sharedWitnessBgvSupportCancellationModel:
+                                'random-linear-batched-support-cancellation-accounted-by-union-loss-v1',
+                            sharedWitnessBgvSupportUnionBoundBits: 9,
                             sharedWitnessTargetBindingSoundnessBits: 128,
                             sharedWitnessRawWeakestRelationSoundnessBitsFloor: 230,
-                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
+                            sharedWitnessEffectiveBindingSoundnessBitsFloor: 149,
                             sharedWitnessEffectiveBindingBelowTarget: false,
                             sharedWitnessWeakestRelation:
                                 'AggregateReductionFieldRelation',
                             sharedWitnessWeakestRelationModel:
                                 'aggregate-proof-ring-effective-binding-floor-v1',
                             sharedWitnessWeakestRelationEffectiveModulus:
-                                '70368744177664',
+                                '70368744177829',
                             sharedWitnessWeakestRelationBitsPerCheck: 46,
                             plaintextEncodingProofModuli: [
                                 140_737_487_306_753, 140_737_486_716_929,

@@ -84,6 +84,8 @@ const actionContextForContributor = (input: {
     };
 };
 
+type ContributionMode = 'checked-accepted-counted-package' | 'relation-only';
+
 const signatureForContributor = (input: {
     readonly actionContext: ActionContext;
     readonly objectRoot: ProtocolHash;
@@ -432,30 +434,50 @@ export const createContribution = (input: {
         typeof createShareCommitmentMessageBoundCert
     >;
     readonly contributorRosterPosition: number;
+    readonly fixture: ReturnType<
+        typeof createVariantBallotProofRecordGenerationFixture
+    >;
     readonly heParamHash: ProtocolHash;
     readonly kernel: TranscriptCoreKernel;
     readonly setupPackage: Record<string, unknown>;
     readonly casualMicroRosterAcknowledged: boolean;
+    readonly contributionMode: ContributionMode;
     readonly variant: Variant;
 }): ContributionBuild => {
     const statement = input.ballotPackage.ballotProofStatement;
     const contributorIdentity = `receiver-${input.contributorRosterPosition}`;
     const contributorRosterExternalAcceptanceHash =
         statement.rosterExternalAcceptanceHash;
-    const closeRecordHash = deriveProtocolHash('CloseRecordHash', {
+    const votingClosedBoardHeadHash = lowerHexHash('closed-board-head');
+    const closeRecordPayload = {
+        boardPosition: 0,
+        boardSequence: 7,
         ceremonyId: statement.ceremonyId,
         closeKind: 'VotingClosed',
-        votingClosedBoardHeadHash: lowerHexHash('closed-board-head'),
-    });
+        closedBoardHeadHash: votingClosedBoardHeadHash,
+        electionManifestHash: statement.manifestHash,
+        objectType: 'CloseRecord',
+        objectVersion: 1,
+        organizerIdentity: 'organizer-1',
+    };
+    const closeRecordHash = deriveProtocolHash(
+        'CloseRecordHash',
+        closeRecordPayload,
+    );
     const postVotingClosedContextHash = deriveProtocolHash(
         'PostVotingClosedContextHash',
         {
             ceremonyId: statement.ceremonyId,
             closeRecordHash,
             electionManifestHash: statement.manifestHash,
-            votingClosedBoardHeadHash: lowerHexHash('closed-board-head'),
+            votingClosedBoardHeadHash,
         },
     );
+    const closeRecord = {
+        ...closeRecordPayload,
+        closeRecordHash,
+        postVotingClosedContextHash,
+    };
     const actionContext = actionContextForContributor({
         contributorIdentity,
         contributorRosterExternalAcceptanceHash,
@@ -464,10 +486,7 @@ export const createContribution = (input: {
     });
     const aggregateWitness = aggregateWitnessForContributor({
         contributorRosterPosition: input.contributorRosterPosition,
-        fixture: createVariantBallotProofRecordGenerationFixture({
-            optionCount: input.variant.optionCount,
-            rosterSize: input.variant.rosterSize,
-        }),
+        fixture: input.fixture,
     });
     const aggregateDerivationComponent = createAggregateComponentForContributor(
         {
@@ -482,10 +501,18 @@ export const createContribution = (input: {
             postVotingClosedContextHash,
             proverRandomnessHex: '66'.repeat(32),
             casualMicroRosterAcknowledged: input.casualMicroRosterAcknowledged,
-            votingClosedBoardHeadHash: lowerHexHash('closed-board-head'),
+            votingClosedBoardHeadHash,
             witness: aggregateWitness,
         },
     );
+    const aggregateDerivationVerificationContext =
+        input.contributionMode === 'checked-accepted-counted-package'
+            ? {
+                  closeRecord,
+                  contributorActionContext: actionContext,
+                  countedBallotPackages: [input.ballotPackage],
+              }
+            : {};
     const bridgeGeneration = measure(() =>
         input.kernel.generateAggregateBridgeEncryption({
             aggregateDerivationComponent,
@@ -493,6 +520,7 @@ export const createContribution = (input: {
             aggregateWitness,
             bridgeWitnessPrivacyProfileHash:
                 input.bridgeWitnessPrivacyProfileHash,
+            ...aggregateDerivationVerificationContext,
             heParamHash: input.heParamHash,
             includeCanonicalBytesHex: true,
             proverRandomnessHex: '77'.repeat(32),
@@ -514,6 +542,7 @@ export const createContribution = (input: {
             bridgeEncryption,
             bridgeWitnessPrivacyProfileHash:
                 input.bridgeWitnessPrivacyProfileHash,
+            ...aggregateDerivationVerificationContext,
             heParamHash: input.heParamHash,
             setupPackage: input.setupPackage,
         }),
@@ -527,36 +556,42 @@ export const createContribution = (input: {
             `Bridge proof verification failed: ${canonicalJson(bridgeVerificationResult)}`,
         );
     }
-    const bridgeProofRecord = createPendingBridgeProofRecordFromBridgeEvidence({
-        aggregateDerivationComponent,
-        aggregateSelectionPolicyHash: input.aggregateSelectionPolicyHash,
-        bridgeEncryptionEvidence:
-            bridgeEncryption as PendingBridgeProofRecordFromEvidenceInput['bridgeEncryptionEvidence'],
-        bridgeEvidenceVerification:
-            bridgeVerificationResult as PendingBridgeProofRecordFromEvidenceInput['bridgeEvidenceVerification'],
-        bridgeWitnessPrivacyProfileHash: input.bridgeWitnessPrivacyProfileHash,
-        heParamHash: input.heParamHash,
-        setupPackage:
-            input.setupPackage as PendingBridgeProofRecordFromEvidenceInput['setupPackage'],
-    });
     const aggregateContribution =
-        createAggregateContributionFromBridgeProofRecord({
-            actionContext,
-            boardPosition: input.contributorRosterPosition,
-            bridgeProofRecord,
-            closeRecordHash,
-            signature: ({ aggregateContributionHash }) =>
-                signatureForContributor({
-                    actionContext,
-                    objectRoot: aggregateContributionHash,
-                    statement,
-                }),
-        });
-    const contributionVerification = verifyAggregateContributionStructure(
-        aggregateContribution,
-    );
-    if (!contributionVerification.ok) {
-        throw new Error('Aggregate contribution structure did not verify.');
+        input.contributionMode === 'checked-accepted-counted-package'
+            ? createAggregateContributionFromBridgeProofRecord({
+                  actionContext,
+                  boardPosition: input.contributorRosterPosition,
+                  bridgeProofRecord:
+                      createPendingBridgeProofRecordFromBridgeEvidence({
+                          aggregateDerivationComponent,
+                          aggregateSelectionPolicyHash:
+                              input.aggregateSelectionPolicyHash,
+                          bridgeEncryptionEvidence:
+                              bridgeEncryption as PendingBridgeProofRecordFromEvidenceInput['bridgeEncryptionEvidence'],
+                          bridgeEvidenceVerification:
+                              bridgeVerificationResult as PendingBridgeProofRecordFromEvidenceInput['bridgeEvidenceVerification'],
+                          bridgeWitnessPrivacyProfileHash:
+                              input.bridgeWitnessPrivacyProfileHash,
+                          heParamHash: input.heParamHash,
+                          setupPackage:
+                              input.setupPackage as PendingBridgeProofRecordFromEvidenceInput['setupPackage'],
+                      }),
+                  closeRecordHash,
+                  signature: ({ aggregateContributionHash }) =>
+                      signatureForContributor({
+                          actionContext,
+                          objectRoot: aggregateContributionHash,
+                          statement,
+                      }),
+              })
+            : null;
+    if (aggregateContribution !== null) {
+        const contributionVerification = verifyAggregateContributionStructure(
+            aggregateContribution,
+        );
+        if (!contributionVerification.ok) {
+            throw new Error('Aggregate contribution structure did not verify.');
+        }
     }
 
     return {

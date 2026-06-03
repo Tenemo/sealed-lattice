@@ -98,44 +98,69 @@ export const buildVariant = (input: {
                 bridgeWitnessPrivacyProfileHash,
                 certificate,
                 contributorRosterPosition: contributorIndex + 1,
+                fixture,
                 heParamHash,
                 kernel: input.kernel,
                 setupPackage,
                 casualMicroRosterAcknowledged: input.variant.rosterSize < 10,
+                contributionMode: 'relation-only',
                 variant: input.variant,
             }),
     );
-    const selectedContributionRecords = contributions.map(
-        (contribution) => contribution.aggregateContribution,
+    const selectedContributionRecords = contributions.flatMap((contribution) =>
+        contribution.aggregateContribution === null
+            ? []
+            : [contribution.aggregateContribution],
     );
-    const selection = selectFirstValidAggregateContributions({
-        aggregateContributionQuorum: trusteeAggregateThreshold,
-        contributions: selectedContributionRecords,
-        currentRecoveryEpochMap: currentRecoveryEpochMap(
-            selectedContributionRecords,
-        ),
-        expectedAggregateSelectionPolicyHash: aggregateSelectionPolicyHash,
-        requiredPostVotingClosedContextHash:
-            selectedContributionRecords[0].postVotingClosedContextHash,
-    });
-    if (!selection.ok || selection.firstValidOrderHash === undefined) {
-        throw new Error(
-            `Contribution selection failed: ${canonicalJson(selection)}`,
-        );
-    }
-    const firstValidOrderHash = selection.firstValidOrderHash;
-    const aggregateReadyMeasurement = measure(() =>
-        createAggregateReadyRecord({
-            aggregateContributionQuorum: trusteeAggregateThreshold,
-            firstValidOrderHash,
-            rosterSize: input.variant.rosterSize,
-            selectedContributions: selection.selectedContributions,
-        }),
-    );
-    const aggregateReadyVerificationMeasurement = measure(() =>
-        verifyAggregateReadyRecordStructure(aggregateReadyMeasurement.result),
-    );
-    if (!aggregateReadyVerificationMeasurement.result.ok) {
+    const aggregateReadyMeasurement =
+        selectedContributionRecords.length === trusteeAggregateThreshold
+            ? measure(() => {
+                  const firstContribution = selectedContributionRecords[0];
+                  if (firstContribution === undefined) {
+                      throw new Error(
+                          'Contribution selection requires at least one checked contribution.',
+                      );
+                  }
+                  const selection = selectFirstValidAggregateContributions({
+                      aggregateContributionQuorum: trusteeAggregateThreshold,
+                      contributions: selectedContributionRecords,
+                      currentRecoveryEpochMap: currentRecoveryEpochMap(
+                          selectedContributionRecords,
+                      ),
+                      expectedAggregateSelectionPolicyHash:
+                          aggregateSelectionPolicyHash,
+                      requiredPostVotingClosedContextHash:
+                          firstContribution.postVotingClosedContextHash,
+                  });
+                  if (
+                      !selection.ok ||
+                      selection.firstValidOrderHash === undefined
+                  ) {
+                      throw new Error(
+                          `Contribution selection failed: ${canonicalJson(selection)}`,
+                      );
+                  }
+
+                  return createAggregateReadyRecord({
+                      aggregateContributionQuorum: trusteeAggregateThreshold,
+                      firstValidOrderHash: selection.firstValidOrderHash,
+                      rosterSize: input.variant.rosterSize,
+                      selectedContributions: selection.selectedContributions,
+                  });
+              })
+            : null;
+    const aggregateReadyVerificationMeasurement =
+        aggregateReadyMeasurement === null
+            ? null
+            : measure(() =>
+                  verifyAggregateReadyRecordStructure(
+                      aggregateReadyMeasurement.result,
+                  ),
+              );
+    if (
+        aggregateReadyVerificationMeasurement !== null &&
+        !aggregateReadyVerificationMeasurement.result.ok
+    ) {
         throw new Error(
             `Aggregate-ready verification failed: ${canonicalJson(
                 aggregateReadyVerificationMeasurement.result,
@@ -146,7 +171,7 @@ export const buildVariant = (input: {
     const rowBase = {
         aggregateCoordinateCount: fixture.statement.shareVectorWidth,
         aggregateReadyVerificationTime: roundedMilliseconds(
-            aggregateReadyVerificationMeasurement.elapsedMilliseconds,
+            aggregateReadyVerificationMeasurement?.elapsedMilliseconds ?? 0,
         ),
         claimTier: claimTierForRosterSize(input.variant.rosterSize),
         ciphertextShape: {
@@ -168,7 +193,7 @@ export const buildVariant = (input: {
             0,
         ),
         publicArtifactWitnessCleanResult: publicArtifactIsWitnessClean({
-            aggregateReadyRecord: aggregateReadyMeasurement.result,
+            aggregateReadyRecord: aggregateReadyMeasurement?.result,
             bridgeEncryption: contributions.map(
                 (contribution) => contribution.bridgeEncryption,
             ),
@@ -210,6 +235,19 @@ export const buildVariant = (input: {
             `Private bridge relation failed: ${canonicalJson(privateRelation)}`,
         );
     }
+    const firstSelectedContribution = selectedContributionRecords[0];
+    const selectionNegativeChecks =
+        firstSelectedContribution !== undefined &&
+        selectedContributionRecords.length === trusteeAggregateThreshold
+            ? runSelectionNegativeChecks({
+                  aggregateSelectionPolicyHash,
+                  postVotingClosedContextHash:
+                      firstSelectedContribution.postVotingClosedContextHash,
+                  selectedContributionRecords,
+                  trusteeAggregateThreshold,
+                  variant: input.variant,
+              })
+            : [];
     const negativeChecks = [
         ...runCheapNegativeChecks({
             aggregateSelectionPolicyHash,
@@ -220,14 +258,7 @@ export const buildVariant = (input: {
             setupPackage,
             variant: input.variant,
         }),
-        ...runSelectionNegativeChecks({
-            aggregateSelectionPolicyHash,
-            postVotingClosedContextHash:
-                selectedContributionRecords[0].postVotingClosedContextHash,
-            selectedContributionRecords,
-            trusteeAggregateThreshold,
-            variant: input.variant,
-        }),
+        ...selectionNegativeChecks,
         ...(sentinelVariants.has(variantKey(input.variant))
             ? runSentinelNegativeChecks({
                   aggregateSelectionPolicyHash,
@@ -242,12 +273,16 @@ export const buildVariant = (input: {
     ];
 
     return {
-        aggregateReadyRow: {
-            ...rowBase,
-            aggregateReadyVerificationTime: roundedMilliseconds(
-                aggregateReadyVerificationMeasurement.elapsedMilliseconds,
-            ),
-        },
+        aggregateReadyRow:
+            aggregateReadyMeasurement === null
+                ? null
+                : {
+                      ...rowBase,
+                      aggregateReadyVerificationTime: roundedMilliseconds(
+                          aggregateReadyVerificationMeasurement?.elapsedMilliseconds ??
+                              0,
+                      ),
+                  },
         benchmarkRow: benchmarkVariantKeys.has(variantKey(input.variant))
             ? rowBase
             : null,

@@ -11,7 +11,6 @@ import {
     deriveBridgeProofProfileHash,
     deriveBridgeProofRecordHash,
     deriveBridgeProofStatementHash,
-    deriveBridgeProofTargetContractHash,
 } from '../hashes.js';
 
 import {
@@ -103,23 +102,21 @@ const requireConsistentBridgeClaimStatus = (input: {
         input.bridgeClaimClosureVerified ?? false;
     const bridgeClaimVerificationStatus =
         input.bridgeClaimVerificationStatus ?? 'BridgeProofClaimClosureMissing';
-    const expectedStatus = input.claimBearingBridgeEncryption
-        ? 'BridgeProofClaimClosureVerified'
-        : 'BridgeProofClaimClosureMissing';
 
     if (
-        bridgeClaimClosureVerified !== input.claimBearingBridgeEncryption ||
-        bridgeClaimVerificationStatus !== expectedStatus
+        input.claimBearingBridgeEncryption ||
+        bridgeClaimClosureVerified ||
+        bridgeClaimVerificationStatus !== 'BridgeProofClaimClosureMissing'
     ) {
         throw new RangeError(
-            'Bridge proof record evidence has inconsistent bridge claim status.',
+            'Bridge proof record evidence cannot claim final bridge closure.',
         );
     }
 
     return {
         bridgeClaimClosureVerified,
         bridgeClaimVerificationStatus,
-        claimBearingBridgeEncryption: input.claimBearingBridgeEncryption,
+        claimBearingBridgeEncryption: false,
     };
 };
 
@@ -258,15 +255,10 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     const aggregateDerivationVerificationScope =
         bridgeEncryptionEvidence.aggregateDerivationVerificationScope ??
         'AggregateDerivationFullVerificationPreconditionNotBound';
-    const bridgeProofTargetContractHash = deriveBridgeProofTargetContractHash({
-        aggregateQuotientCoordinateCount: statement.shareVectorWidth,
-        aggregateReducedCoordinateCount: statement.shareVectorWidth,
-        aggregateDerivationVerificationScope,
-        bridgeClaimClosureStatus:
-            bridgeClaimStatus.bridgeClaimVerificationStatus,
-        claimBearingBridgeEncryption:
-            bridgeClaimStatus.claimBearingBridgeEncryption,
-    });
+    const bridgeProofTargetContractHash = requireProtocolHash(
+        bridgeEncryptionEvidence.bridgeProofTargetContractHash,
+        'bridge proof target contract hash',
+    );
     const bridgeSharedWitnessProofHash = requireProtocolHash(
         bridgeEncryptionEvidence.bridgeSharedWitnessProofHash,
         'shared-witness proof hash',
@@ -450,16 +442,24 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             'QromAccountingNotProvidedForHandoff',
         sharedWitnessProofSystemLossBits: 0,
         sharedWitnessChallengeBiasAccountingModel:
-            'direct-rejection-sampling-into-effective-weakest-relation-modulus-v1',
-        sharedWitnessChallengeBiasBits: 0,
+            'crt-product-challenge-reduced-to-aggregate-field-with-one-bit-loss-v1',
+        sharedWitnessChallengeBiasBits: 1,
+        sharedWitnessAdditionalRelationLossBits: 9,
+        sharedWitnessBgvSupportRelation:
+            'BgvRandomnessErrorSupportPolynomialBatchRelation',
+        sharedWitnessBgvSupportChallengeDistribution:
+            'shared-witness-challenge-reduced-modulo-bgv-support-prime-v1',
+        sharedWitnessBgvSupportCancellationModel:
+            'random-linear-batched-support-cancellation-accounted-by-union-loss-v1',
+        sharedWitnessBgvSupportUnionBoundBits: 9,
         sharedWitnessTargetBindingSoundnessBits: 128,
         sharedWitnessRawWeakestRelationSoundnessBitsFloor: 230,
-        sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
+        sharedWitnessEffectiveBindingSoundnessBitsFloor: 149,
         sharedWitnessEffectiveBindingBelowTarget: false,
         sharedWitnessWeakestRelation: 'AggregateReductionFieldRelation',
         sharedWitnessWeakestRelationModel:
             'aggregate-proof-ring-effective-binding-floor-v1',
-        sharedWitnessWeakestRelationEffectiveModulus: '70368744177664',
+        sharedWitnessWeakestRelationEffectiveModulus: '70368744177829',
         sharedWitnessWeakestRelationBitsPerCheck: 46,
         batchIntegerLiftProofModuli: [140_737_487_306_753, 140_737_486_716_929],
         batchIntegerLiftProofModulusProduct: '19807040250408114080301121537',
@@ -724,9 +724,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     requireMatchingValue(
         bridgeEncryptionEvidence.randomnessSourceEvidence
             .claimBearingEntropyEvidence,
-        bridgeEncryptionEvidence.proverRandomnessSource === 'fresh-csprng' &&
-            bridgeEncryptionEvidence.encryptionRandomnessSeedSource ===
-                'fresh-csprng',
+        false,
         'randomness source evidence claim-bearing entropy flag',
     );
     requireMatchingValue(
@@ -907,9 +905,9 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'canonical bridge proof challenge context hash',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.bridgeProofTargetContractHash,
+        input.bridgeEvidenceVerification.bridgeProofTargetContractHash,
         bridgeProofTargetContractHash,
-        'canonical bridge proof target contract hash',
+        'verified bridge proof target contract hash',
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.bridgeProofVerificationStatus,

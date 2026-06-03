@@ -471,6 +471,41 @@ export const runCheapNegativeChecks = (input: {
         });
     const component = input.contribution.aggregateDerivationComponent;
     const bridgeEncryption = input.contribution.bridgeEncryption;
+    const aggregateContribution = input.contribution.aggregateContribution;
+    const aggregateContributionNegativeCases: readonly CheapNegativeCase[] =
+        aggregateContribution === null
+            ? []
+            : [
+                  [
+                      'pending bridge record selected',
+                      expectedVerifierFailure(
+                          'pending bridge proof selection refusal',
+                          /pending|proof-valid|BridgeProofRelationChecked|contribution/iu,
+                      ),
+                      () => {
+                          const pendingContribution: AggregateContribution = {
+                              ...aggregateContribution,
+                              bridgeProofRecord: {
+                                  ...aggregateContribution.bridgeProofRecord,
+                                  bridgeProofVerificationStatus:
+                                      'BridgeProofBackendPending',
+                              },
+                          };
+
+                          return selectFirstValidAggregateContributions({
+                              aggregateContributionQuorum: 1,
+                              contributions: [pendingContribution],
+                              currentRecoveryEpochMap: currentRecoveryEpochMap([
+                                  pendingContribution,
+                              ]),
+                              expectedAggregateSelectionPolicyHash:
+                                  input.aggregateSelectionPolicyHash,
+                              requiredPostVotingClosedContextHash:
+                                  pendingContribution.postVotingClosedContextHash,
+                          });
+                      },
+                  ],
+              ];
     const checks: readonly CheapNegativeCase[] = [
         [
             'wrong n',
@@ -698,7 +733,7 @@ export const runCheapNegativeChecks = (input: {
             'missing score bucket in aggregate layout',
             expectedVerifierFailure(
                 'encoded aggregate layout binding',
-                /aggregate layout|score|profile|target contract|statement/iu,
+                /aggregate layout|proof-friendly plaintext lift binding|public inputs|score|profile|target contract|statement/iu,
             ),
             () =>
                 verifyBridge(
@@ -823,36 +858,7 @@ export const runCheapNegativeChecks = (input: {
                     input.setupPackage,
                 ),
         ],
-        [
-            'pending bridge record selected',
-            expectedVerifierFailure(
-                'pending bridge proof selection refusal',
-                /pending|proof-valid|BridgeProofRelationChecked|contribution/iu,
-            ),
-            () => {
-                const pendingContribution: AggregateContribution = {
-                    ...input.contribution.aggregateContribution,
-                    bridgeProofRecord: {
-                        ...input.contribution.aggregateContribution
-                            .bridgeProofRecord,
-                        bridgeProofVerificationStatus:
-                            'BridgeProofBackendPending',
-                    },
-                };
-
-                return selectFirstValidAggregateContributions({
-                    aggregateContributionQuorum: 1,
-                    contributions: [pendingContribution],
-                    currentRecoveryEpochMap: currentRecoveryEpochMap([
-                        pendingContribution,
-                    ]),
-                    expectedAggregateSelectionPolicyHash:
-                        input.aggregateSelectionPolicyHash,
-                    requiredPostVotingClosedContextHash:
-                        pendingContribution.postVotingClosedContextHash,
-                });
-            },
-        ],
+        ...aggregateContributionNegativeCases,
         [
             'sampled-only bridge evidence accepted',
             expectedVerifierFailure(

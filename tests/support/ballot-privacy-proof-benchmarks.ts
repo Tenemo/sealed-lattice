@@ -8,12 +8,10 @@ import {
     sumAggregateDerivationWitnesses,
     type AggregateDerivationWitnessInput,
 } from '#packages/protocol/src/ballot-privacy/index';
-import {
-    createFixtureRandomnessSource,
-    createReceiverKeyProof,
-    generateReceiverState,
-    type ReceiverEncryptionSecretState,
-} from '#packages/protocol/src/ballot-privacy/lattice-primitives';
+import { createFixtureRandomnessSource } from '#packages/protocol/src/ballot-privacy/lattice-primitives/fixture-randomness';
+import type { ReceiverEncryptionSecretState } from '#packages/protocol/src/ballot-privacy/lattice-primitives/primitive-types';
+import { createReceiverKeyProof } from '#packages/protocol/src/ballot-privacy/lattice-primitives/receiver-key-proofs';
+import { generateReceiverState } from '#packages/protocol/src/ballot-privacy/lattice-primitives/receiver-keys';
 import { createBallotPrivacyProfileSet } from '#packages/protocol/src/ballot-privacy/profiles';
 import { createReceiverKeyLinearProofStatement } from '#packages/protocol/src/ballot-privacy/receiver-key-linear-statement';
 import {

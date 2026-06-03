@@ -17,7 +17,7 @@
 - roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
 - verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM verifier;
 - aggregate derivation component verification for the scoped post-close aggregate derivation relation, without exposing aggregate shares, aggregate histograms, exact aggregate scores, aggregate score bits, openings, quotients, plaintext comparison inputs, receiver plaintexts, or proof witnesses;
-- verification-oriented `verifyBridgeProof` support for encrypted aggregate bridge evidence through the packaged Rust/WASM verifier. Internal bridge evidence includes checked integer-lifted plaintext encoding, proof-friendly plaintext coefficient binding, target-threshold decryptability compatibility under the passive setup key, full aggregate-derivation verification binding when close/counting context is supplied, five-check shared-witness challenge-context binding with a 159-bit effective classical random-oracle handoff floor, explicit QROM-not-provided status for this handoff proof, coefficientwise BGV randomness/error support accounting, relation proof closure-field refusal, and randomness-source evidence consistency checks. Representative selected bridge contributors now verify as decryptable setup-key-compatible bridge handoff evidence; refreshed full-matrix evidence, claim-bearing evaluator integration, and production result release remain unavailable.
+- verification-oriented `verifyBridgeProof` support for encrypted aggregate bridge evidence through the packaged Rust/WASM verifier. Internal bridge evidence includes checked integer-lifted plaintext encoding, proof-friendly plaintext coefficient binding, target-threshold decryptability compatibility under the passive setup key, full aggregate-derivation verification binding when close/counting context is supplied, five-check shared-witness challenge-context binding with a 149-bit effective classical random-oracle handoff floor after the BGV support-relation loss, explicit QROM-not-provided status for this handoff proof, coefficientwise BGV randomness/error support accounting, relation proof closure-field refusal, and randomness-source consistency checks. Bridge outputs are checked relation handoff evidence only: final bridge claim closure, conventional `PlaintextRoot` preimage proof, claim-bearing entropy evidence, app-plausible repeated verification, and production result release remain unavailable.
 
 Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof acceptance, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
 
@@ -47,7 +47,7 @@ Still unavailable:
 
 - public ballot generation or casting APIs;
 - generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
-- refreshed full-matrix encrypted aggregate bridge closure evidence from committed aggregate shares to encrypted aggregate input data, preserving bridge witness privacy;
+- final encrypted aggregate bridge acceptance evidence from committed aggregate shares to encrypted aggregate input data, preserving bridge witness privacy;
 - all-supported-top-count accepted-input top-k evaluation, release-grade runtime evidence for the 20-option evaluator beyond the current representative `topCount = 1` slice, the mandatory post-quantum evaluation proof, target-decryption security, and target acceptance;
 - production target-bound decryption and result release.
 
@@ -145,6 +145,7 @@ pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
 pnpm run test:aggregate-derivation-kernel
 pnpm run test:encrypted-aggregate-evaluator:representative
+pnpm run test:encrypted-aggregate-bridge:accepted-handoff
 pnpm run test:encrypted-aggregate-bridge:representative
 pnpm run test:encrypted-aggregate-bridge
 pnpm run verify:docs
@@ -160,7 +161,8 @@ Heavy checks should run selectively, only when the change touches the matching a
 
 - `pnpm run test:proof-benchmark`, `pnpm run test:proof-benchmark:node`, and `pnpm run test:proof-benchmark:browser:desktop` for proof benchmark evidence;
 - `pnpm run test:encrypted-aggregate-evaluator:representative` for a selected accepted-input evaluator slice after aggregate-ready inputs exist, or `pnpm run test:encrypted-aggregate-evaluator:representative -- --top-counts all` for heavyweight all-top-count release evidence;
-- `pnpm run test:encrypted-aggregate-bridge:representative` for selected encrypted aggregate bridge rows;
+- `pnpm run test:encrypted-aggregate-bridge:accepted-handoff` for the mandatory accepted-package aggregate-ready handoff row;
+- `pnpm run test:encrypted-aggregate-bridge:representative` for selected encrypted aggregate bridge relation rows;
 - `pnpm run test:encrypted-aggregate-bridge` for the full encrypted aggregate bridge matrix;
 - `pnpm run test:node:kernel`, `pnpm run test:node`, and `pnpm run test:browser` for heavy Rust/WASM and browser integration coverage.
 

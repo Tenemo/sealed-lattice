@@ -33,6 +33,7 @@
         "test:aggregate-derivation-kernel": "tsx ./tools/ci/run-aggregate-derivation-kernel.ts",
         "test:encrypted-aggregate-evaluator:representative": "tsx ./tools/ci/run-encrypted-aggregate-evaluator-representative.ts",
         "test:encrypted-aggregate-bridge": "tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts",
+        "test:encrypted-aggregate-bridge:accepted-handoff": "tsx ./tools/ci/run-aggregate-bridge-accepted-handoff-benchmark.ts",
         "test:encrypted-aggregate-bridge:representative": "tsx ./tools/ci/run-encrypted-aggregate-bridge-matrix.ts --representative",
         "test": "pnpm run test:node && pnpm run test:browser",
         "coverage:node": "pnpm run build && vitest --project node --run --coverage",

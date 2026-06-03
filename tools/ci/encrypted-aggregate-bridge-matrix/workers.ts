@@ -20,7 +20,8 @@ import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
 const variantBuildResultPassed = (result: VariantBuildResult): boolean =>
     result.proofRow.status === 'passed' &&
-    result.aggregateReadyRow.status === 'passed' &&
+    (result.aggregateReadyRow === null ||
+        result.aggregateReadyRow.status === 'passed') &&
     result.privateRelationRow.status === 'passed' &&
     result.negativeChecks.every((check) => check.expectedFailureObserved);
 
@@ -32,7 +33,7 @@ const variantBuildStatusSummary = (result: VariantBuildResult): string =>
     [
         `private=${result.privateRelationRow.status}`,
         `proof=${result.proofRow.status}`,
-        `aggregateReady=${result.aggregateReadyRow.status}`,
+        `aggregateReady=${result.aggregateReadyRow?.status ?? 'not produced'}`,
         `negativeFailures=${variantBuildNegativeFailureCount(result)}`,
         `status=${variantBuildResultPassed(result) ? 'passed' : 'failed'}`,
     ].join(', ');

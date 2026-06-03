@@ -22,10 +22,12 @@ use super::protocol_constants::{
 };
 use super::{
     PolynomialRing, PolynomialVector, SHARE_COMMITMENT_MODULE_DEGREE, SHARE_COMMITMENT_MODULE_RANK,
-    SHARE_COMMITMENT_OPENING_DIMENSION, check_aggregate_derivation_witness_relation,
-    is_protocol_hash, required_json_field, required_string_field,
-    sparse_matrix_from_sparse_component_statement, string_field, structural_refusal,
-    structural_rejection, verify_aggregate_derivation_proof_from_command_request,
+    SHARE_COMMITMENT_OPENING_DIMENSION,
+    aggregate_derivation_proof::AGGREGATE_DERIVATION_PROOF_MODULUS,
+    check_aggregate_derivation_witness_relation, is_protocol_hash, required_json_field,
+    required_string_field, sparse_matrix_from_sparse_component_statement, string_field,
+    structural_refusal, structural_rejection,
+    verify_aggregate_derivation_proof_from_command_request,
     verify_aggregate_derivation_relation_subproof_for_component,
 };
 
@@ -65,7 +67,6 @@ const DECRYPTABLE_BGV_CIPHERTEXT_CONVENTION_STATUS: &str = "DecryptableBgvCipher
 const TARGET_THRESHOLD_DECRYPTABILITY_CERTIFIED_STATUS: &str =
     "TargetThresholdDecryptabilityCompatibilityCertified";
 const BRIDGE_CLAIM_MISSING_STATUS: &str = "BridgeProofClaimClosureMissing";
-const BRIDGE_CLAIM_VERIFIED_STATUS: &str = "BridgeProofClaimClosureVerified";
 const BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG: &str = "fresh-csprng";
 const BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC: &str =
     "development-deterministic-fixture";
@@ -80,10 +81,11 @@ const AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS: &str =
     "AggregateDerivationFullVerificationPreconditionNotBound";
 const AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS: &str =
     "AggregateDerivationFullVerificationChecked";
-// Soundness-bit budget. The Fiat-Shamir challenge is sampled directly into the weakest
-// active relation's 46-bit effective modulus, so the global bridge binding budget is not
-// derived from the two-prime batch-lift product. Five checks leave a 159-bit floor after
-// rejection-attempt grinding, a 2^32 Fiat-Shamir query bound, and the full-matrix union bound.
+// Soundness-bit budget. The Fiat-Shamir challenge is sampled against the weakest
+// active relation's 46-bit floor, so the global bridge binding budget is not derived
+// from the two-prime batch-lift product. Five checks leave a 149-bit floor after
+// rejection-attempt grinding, a 2^32 Fiat-Shamir query bound, the full-matrix union
+// bound, one bit of challenge-reduction bias, and the BGV support-relation loss.
 const BRIDGE_SHARED_WITNESS_CHECK_COUNT: usize = 5;
 const BRIDGE_SHARED_WITNESS_REJECTION_ATTEMPT_LIMIT: usize = 64;
 const SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK: u64 = 6;
@@ -94,19 +96,26 @@ const BRIDGE_BATCH_INTEGER_LIFT_PROOF_MODULUS_PRODUCT_BITS_FLOOR: u64 = 93;
 const SHARED_WITNESS_CHALLENGE_BITS_PER_CHECK: u64 = BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK;
 const BRIDGE_WEAKEST_ACTIVE_RELATION: &str = "AggregateReductionFieldRelation";
 const BRIDGE_WEAKEST_ACTIVE_RELATION_EFFECTIVE_MODULUS: u128 =
-    1_u128 << BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK;
+    AGGREGATE_DERIVATION_PROOF_MODULUS as u128;
 const BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK: u64 = 46;
 const BRIDGE_WEAKEST_ACTIVE_RELATION_MODEL: &str =
     "aggregate-proof-ring-effective-binding-floor-v1";
 const BRIDGE_FULL_MATRIX_UNION_BOUND_BITS: u64 = 9;
 const BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS: u64 = 32;
 const BRIDGE_PROOF_SYSTEM_LOSS_BITS: u64 = 0;
-const BRIDGE_CHALLENGE_BIAS_BITS: u64 = 0;
+const BRIDGE_CHALLENGE_BIAS_BITS: u64 = 1;
 const BRIDGE_CHALLENGE_BIAS_ACCOUNTING_MODEL: &str =
-    "direct-rejection-sampling-into-effective-weakest-relation-modulus-v1";
+    "crt-product-challenge-reduced-to-aggregate-field-with-one-bit-loss-v1";
 const BRIDGE_RANDOM_ORACLE_ACCOUNTING_MODEL: &str =
     "classical-random-oracle-query-loss-with-explicit-bound-v1";
 const BRIDGE_QROM_ACCOUNTING_STATUS: &str = "QromAccountingNotProvidedForHandoff";
+const BRIDGE_BGV_SUPPORT_RELATION: &str = "BgvRandomnessErrorSupportPolynomialBatchRelation";
+const BRIDGE_BGV_SUPPORT_CHALLENGE_DISTRIBUTION: &str =
+    "shared-witness-challenge-reduced-modulo-bgv-support-prime-v1";
+const BRIDGE_BGV_SUPPORT_CANCELLATION_MODEL: &str =
+    "random-linear-batched-support-cancellation-accounted-by-union-loss-v1";
+const BRIDGE_BGV_SUPPORT_UNION_BOUND_BITS: u64 = 9;
+const BRIDGE_ADDITIONAL_RELATION_LOSS_BITS: u64 = BRIDGE_BGV_SUPPORT_UNION_BOUND_BITS;
 const BRIDGE_TARGET_BINDING_SOUNDNESS_BITS: u64 = 128;
 const BRIDGE_SHARED_WITNESS_REJECTION_RETRY_LOSS_BITS: u64 =
     SHARED_WITNESS_REJECTION_ATTEMPT_GRINDING_BITS_PER_CHECK
@@ -119,7 +128,8 @@ const BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR: u64 =
         - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS
         - BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS
         - BRIDGE_PROOF_SYSTEM_LOSS_BITS
-        - BRIDGE_CHALLENGE_BIAS_BITS;
+        - BRIDGE_CHALLENGE_BIAS_BITS
+        - BRIDGE_ADDITIONAL_RELATION_LOSS_BITS;
 const BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET: bool =
     BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_SOUNDNESS_BITS_FLOOR
         < BRIDGE_TARGET_BINDING_SOUNDNESS_BITS;
@@ -134,25 +144,13 @@ struct BridgeClaimStatus {
 }
 
 fn bridge_claim_status(
-    aggregate_derivation_verification_scope: &str,
-    prover_randomness_source: &str,
-    encryption_randomness_seed_source: &str,
+    _aggregate_derivation_verification_scope: &str,
+    _prover_randomness_source: &str,
+    _encryption_randomness_seed_source: &str,
 ) -> BridgeClaimStatus {
-    let bridge_claim_verified = aggregate_derivation_verification_scope
-        == AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS
-        && prover_randomness_source == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
-        && encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
-        && !BRIDGE_SHARED_WITNESS_EFFECTIVE_BINDING_BELOW_TARGET;
-
-    if bridge_claim_verified {
-        return BridgeClaimStatus {
-            claim_bearing_bridge_encryption: true,
-            scoped_bridge_relation_closure: true,
-            bridge_claim_closure_verified: true,
-            bridge_claim_verification_status: BRIDGE_CLAIM_VERIFIED_STATUS,
-        };
-    }
-
+    // Full aggregate-derivation context and fresh randomness are prerequisites for
+    // downstream handoff use, but they do not close the conventional plaintext-root,
+    // entropy-ownership, key-status, or final bridge-acceptance gates.
     BridgeClaimStatus {
         claim_bearing_bridge_encryption: false,
         scoped_bridge_relation_closure: false,

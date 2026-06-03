@@ -640,9 +640,7 @@ export type BridgeProofVerificationStatus =
     | 'BridgeProofBackendPending'
     | 'BridgeProofRelationChecked';
 
-export type BridgeClaimVerificationStatus =
-    | 'BridgeProofClaimClosureMissing'
-    | 'BridgeProofClaimClosureVerified';
+export type BridgeClaimVerificationStatus = 'BridgeProofClaimClosureMissing';
 
 export type AggregateDerivationVerificationScope =
     | 'AggregateDerivationFullVerificationPreconditionNotBound'

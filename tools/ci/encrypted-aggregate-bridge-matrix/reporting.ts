@@ -147,7 +147,9 @@ export const appendVariantResult = (input: {
 }): void => {
     input.privateRows.push(input.result.privateRelationRow);
     input.proofRows.push(input.result.proofRow);
-    input.aggregateReadyRows.push(input.result.aggregateReadyRow);
+    if (input.result.aggregateReadyRow !== null) {
+        input.aggregateReadyRows.push(input.result.aggregateReadyRow);
+    }
     input.negativeChecks.push(...input.result.negativeChecks);
     if (input.result.benchmarkRow !== null) {
         input.benchmarkRows.push(input.result.benchmarkRow);
@@ -161,7 +163,7 @@ export const failedVariantResult = (
     const row = failedRow(variant, failureReason);
 
     return {
-        aggregateReadyRow: row,
+        aggregateReadyRow: null,
         benchmarkRow: null,
         negativeChecks: [],
         privateRelationRow: row,

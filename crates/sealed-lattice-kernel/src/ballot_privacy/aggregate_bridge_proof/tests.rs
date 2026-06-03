@@ -159,26 +159,30 @@ fn bridge_proof_bytes_hash(proof_bytes_hex: &str) -> String {
 }
 
 #[test]
-fn checked_fresh_bridge_inputs_produce_verified_claim_status() {
+fn checked_fresh_bridge_inputs_remain_handoff_status() {
     let claim_status = checked_aggregate_derivation_bridge_claim_status();
 
-    assert!(claim_status.claim_bearing_bridge_encryption);
-    assert!(claim_status.scoped_bridge_relation_closure);
-    assert!(claim_status.bridge_claim_closure_verified);
+    assert!(!claim_status.claim_bearing_bridge_encryption);
+    assert!(!claim_status.scoped_bridge_relation_closure);
+    assert!(!claim_status.bridge_claim_closure_verified);
     assert_eq!(
         claim_status.bridge_claim_verification_status,
-        BRIDGE_CLAIM_VERIFIED_STATUS
+        BRIDGE_CLAIM_MISSING_STATUS
     );
 
     let mut proof_value = minimal_checked_relation_proof_value();
     proof_value["scopedBridgeRelationClosure"] = Value::Bool(true);
     proof_value["bridgeClaimClosureVerified"] = Value::Bool(true);
     proof_value["bridgeClaimVerificationStatus"] =
-        Value::String(BRIDGE_CLAIM_VERIFIED_STATUS.to_string());
+        Value::String("BridgeProofClaimClosureVerified".to_string());
     proof_value["claimBearingBridgeEncryption"] = Value::Bool(true);
 
-    validate_bridge_proof_public_shell(&proof_value)
-        .expect("coherent claim-bearing bridge proof shell should validate");
+    let error = validate_bridge_proof_public_shell(&proof_value)
+        .expect_err("claim-bearing bridge proof shell should reject");
+    assert!(
+        error.message.contains("cannot claim final bridge closure"),
+        "{error:?}"
+    );
 }
 
 fn first_refusal_message(value: &Value) -> &str {
@@ -327,7 +331,7 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         );
         assert_eq!(
             target_contract["sharedWitnessEffectiveBindingSoundnessBitsFloor"],
-            json!(159)
+            json!(149)
         );
         assert_eq!(
             target_contract["sharedWitnessRejectionAttemptLimit"],
@@ -356,6 +360,15 @@ fn bridge_proof_target_contract_is_variant_parametric() {
         assert_eq!(
             target_contract["sharedWitnessChallengeBiasAccountingModel"],
             json!(BRIDGE_CHALLENGE_BIAS_ACCOUNTING_MODEL)
+        );
+        assert_eq!(target_contract["sharedWitnessChallengeBiasBits"], json!(1));
+        assert_eq!(
+            target_contract["sharedWitnessAdditionalRelationLossBits"],
+            json!(9)
+        );
+        assert_eq!(
+            target_contract["sharedWitnessBgvSupportRelation"],
+            json!(BRIDGE_BGV_SUPPORT_RELATION)
         );
         assert_eq!(
             target_contract["sharedWitnessEffectiveBindingBelowTarget"],
@@ -410,10 +423,13 @@ fn bridge_proof_target_contract_soundness_uses_weakest_relation_modulus() {
         - BRIDGE_FULL_MATRIX_UNION_BOUND_BITS
         - BRIDGE_RANDOM_ORACLE_QUERY_BOUND_BITS
         - BRIDGE_PROOF_SYSTEM_LOSS_BITS
-        - BRIDGE_CHALLENGE_BIAS_BITS;
+        - BRIDGE_CHALLENGE_BIAS_BITS
+        - BRIDGE_ADDITIONAL_RELATION_LOSS_BITS;
 
     assert_eq!(relation_modulus_product_bits_floor, 93);
     assert_eq!(BRIDGE_WEAKEST_ACTIVE_RELATION_BITS_PER_CHECK, 46);
+    assert_eq!(BRIDGE_CHALLENGE_BIAS_BITS, 1);
+    assert_eq!(BRIDGE_ADDITIONAL_RELATION_LOSS_BITS, 9);
     assert_eq!(
         target_contract["plaintextEncodingProofModulusProductBitsFloor"],
         json!(relation_modulus_product_bits_floor)
@@ -462,8 +478,8 @@ fn bridge_proof_target_contract_binds_aggregate_derivation_scope() {
         "aggregateReducedCoordinateCount": 220,
         "aggregateQuotientCoordinateCount": 220,
         "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_CHECKED_STATUS,
-        "bridgeClaimClosureStatus": BRIDGE_CLAIM_VERIFIED_STATUS,
-        "claimBearingBridgeEncryption": true,
+        "bridgeClaimClosureStatus": BRIDGE_CLAIM_MISSING_STATUS,
+        "claimBearingBridgeEncryption": false,
     });
     let bridge_statement = json!({
         "bridgeProofTargetContract": target_contract,
@@ -477,8 +493,8 @@ fn bridge_proof_target_contract_binds_aggregate_derivation_scope() {
         "aggregateReducedCoordinateCount": 220,
         "aggregateQuotientCoordinateCount": 220,
         "aggregateDerivationVerificationScope": AGGREGATE_DERIVATION_FULL_VERIFICATION_PRECONDITION_STATUS,
-        "bridgeClaimClosureStatus": BRIDGE_CLAIM_VERIFIED_STATUS,
-        "claimBearingBridgeEncryption": true,
+        "bridgeClaimClosureStatus": BRIDGE_CLAIM_MISSING_STATUS,
+        "claimBearingBridgeEncryption": false,
     });
     let error =
         validate_bridge_proof_target_contract(&bridge_statement, &mismatched_relation_requirements)
@@ -533,21 +549,21 @@ fn bridge_randomness_sources_require_explicit_development_acknowledgement() {
 
 #[test]
 fn bridge_randomness_source_evidence_must_match_sources() {
-    let fresh_entropy_evidence = json!({
+    let fresh_source_evidence = json!({
         "objectType": "AggregateBridgeRandomnessSourceEvidence",
         "objectVersion": 1,
         "proverRandomnessSource": "fresh-csprng",
         "encryptionRandomnessSeedSource": "fresh-csprng",
         "callerSuppliedDevelopmentRandomness": false,
-        "claimBearingEntropyEvidence": true,
+        "claimBearingEntropyEvidence": false,
     });
     validate_bridge_randomness_source_evidence(
-        &fresh_entropy_evidence,
+        &fresh_source_evidence,
         "fresh-csprng",
         "fresh-csprng",
         "test.randomnessSourceEvidence",
     )
-    .expect("fresh CSPRNG evidence should validate");
+    .expect("fresh CSPRNG source evidence should validate");
 
     let development_entropy_evidence = json!({
         "objectType": "AggregateBridgeRandomnessSourceEvidence",
@@ -583,11 +599,11 @@ fn bridge_randomness_source_evidence_must_match_sources() {
         ),
         (
             "claimBearingEntropyEvidence",
-            Value::Bool(false),
+            Value::Bool(true),
             "claim-bearing entropy flag",
         ),
     ] {
-        let mut evidence = fresh_entropy_evidence.clone();
+        let mut evidence = fresh_source_evidence.clone();
         evidence[mutated_field] = mutated_value;
         let error = validate_bridge_randomness_source_evidence(
             &evidence,
@@ -603,7 +619,7 @@ fn bridge_randomness_source_evidence_must_match_sources() {
         );
     }
 
-    let mut evidence_with_extra_field = fresh_entropy_evidence;
+    let mut evidence_with_extra_field = fresh_source_evidence;
     evidence_with_extra_field["entropyOracleClaim"] = Value::Bool(true);
     let error = validate_bridge_randomness_source_evidence(
         &evidence_with_extra_field,
@@ -997,7 +1013,7 @@ fn bridge_proof_shell_rejects_closure_field_injection() {
         (
             "claimBearingBridgeEncryption",
             Value::Bool(true),
-            "scoped bridge relation closure flag",
+            "cannot claim final bridge closure",
         ),
     ] {
         let mut proof_value = minimal_checked_relation_proof_value();

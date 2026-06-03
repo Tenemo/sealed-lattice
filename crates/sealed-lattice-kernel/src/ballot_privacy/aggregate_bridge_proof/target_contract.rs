@@ -170,6 +170,26 @@ pub(super) fn bridge_proof_target_contract_value(
             json!(BRIDGE_CHALLENGE_BIAS_BITS),
         ),
         (
+            "sharedWitnessAdditionalRelationLossBits",
+            json!(BRIDGE_ADDITIONAL_RELATION_LOSS_BITS),
+        ),
+        (
+            "sharedWitnessBgvSupportRelation",
+            Value::String(BRIDGE_BGV_SUPPORT_RELATION.to_string()),
+        ),
+        (
+            "sharedWitnessBgvSupportChallengeDistribution",
+            Value::String(BRIDGE_BGV_SUPPORT_CHALLENGE_DISTRIBUTION.to_string()),
+        ),
+        (
+            "sharedWitnessBgvSupportCancellationModel",
+            Value::String(BRIDGE_BGV_SUPPORT_CANCELLATION_MODEL.to_string()),
+        ),
+        (
+            "sharedWitnessBgvSupportUnionBoundBits",
+            json!(BRIDGE_BGV_SUPPORT_UNION_BOUND_BITS),
+        ),
+        (
             "sharedWitnessTargetBindingSoundnessBits",
             json!(BRIDGE_TARGET_BINDING_SOUNDNESS_BITS),
         ),
@@ -313,11 +333,13 @@ pub(super) fn validate_bridge_proof_target_contract(
         "bridgeClaimClosureStatus",
         "bridgeProofStatement.relationRequirements",
     )?;
-    let expected_bridge_claim_verification_status = if claim_bearing_bridge_encryption {
-        BRIDGE_CLAIM_VERIFIED_STATUS
-    } else {
-        BRIDGE_CLAIM_MISSING_STATUS
-    };
+    if claim_bearing_bridge_encryption {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge target contract cannot claim final bridge closure",
+        ));
+    }
+    let expected_bridge_claim_verification_status = BRIDGE_CLAIM_MISSING_STATUS;
     if bridge_claim_verification_status != expected_bridge_claim_verification_status {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,

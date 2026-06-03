@@ -188,10 +188,8 @@ const main = async (): Promise<void> => {
         const matrixRowCountsPassed =
             privateRows.length === expectedRowCount &&
             proofRows.length === expectedRowCount &&
-            aggregateReadyRows.length === expectedRowCount &&
             missingPrivateRowKeys.length === 0 &&
-            missingProofRowKeys.length === 0 &&
-            missingAggregateReadyRowKeys.length === 0;
+            missingProofRowKeys.length === 0;
         const cheapNegativeVariantKeys = new Set(
             negativeChecks
                 .filter((check) => check.suite === 'cheap')
@@ -267,8 +265,11 @@ const main = async (): Promise<void> => {
         const allRowsPassed =
             matrixRowCountsPassed &&
             proofRows.every((row) => row.status === 'passed') &&
-            aggregateReadyRows.every((row) => row.status === 'passed') &&
             privateRows.every((row) => row.status === 'passed');
+        const allAggregateReadyRowsPassed =
+            aggregateReadyRows.length === expectedRowCount &&
+            missingAggregateReadyRowKeys.length === 0 &&
+            aggregateReadyRows.every((row) => row.status === 'passed');
         const allNegativesPassed =
             negativeCoveragePassed &&
             negativeChecks.every((check) => check.expectedFailureObserved);
@@ -288,7 +289,7 @@ const main = async (): Promise<void> => {
             expectedRowCount,
             labels: {
                 aggregateBridgeAggregateReadyFullMatrixLocalEvidence:
-                    allRowsPassed && mode === 'full',
+                    allAggregateReadyRowsPassed && mode === 'full',
                 aggregateBridgePrivateRelationFullMatrixLocalEvidence:
                     allRowsPassed && mode === 'full',
                 aggregateBridgeProofFullMatrixLocalEvidence:

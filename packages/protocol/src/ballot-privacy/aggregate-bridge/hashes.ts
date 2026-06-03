@@ -63,16 +63,23 @@ const bridgePlaintextEncodingRelation =
     'BGVBatchEncode65537IntegerLiftedInverseNegacyclicNtt';
 const bridgeSharedWitnessWeakestRelationModel =
     'aggregate-proof-ring-effective-binding-floor-v1';
-const bridgeSharedWitnessWeakestRelationEffectiveModulus = '70368744177664';
+const bridgeSharedWitnessWeakestRelationEffectiveModulus = '70368744177829';
 const bridgeSharedWitnessWeakestRelationBitsPerCheck = 46;
 const bridgeSharedWitnessChallengeSamplingModel =
     'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1';
 const bridgeSharedWitnessChallengeBiasAccountingModel =
-    'direct-rejection-sampling-into-effective-weakest-relation-modulus-v1';
+    'crt-product-challenge-reduced-to-aggregate-field-with-one-bit-loss-v1';
 const bridgeSharedWitnessRandomOracleAccountingModel =
     'classical-random-oracle-query-loss-with-explicit-bound-v1';
 const bridgeSharedWitnessQromAccountingStatus =
     'QromAccountingNotProvidedForHandoff';
+const bridgeSharedWitnessBgvSupportRelation =
+    'BgvRandomnessErrorSupportPolynomialBatchRelation';
+const bridgeSharedWitnessBgvSupportChallengeDistribution =
+    'shared-witness-challenge-reduced-modulo-bgv-support-prime-v1';
+const bridgeSharedWitnessBgvSupportCancellationModel =
+    'random-linear-batched-support-cancellation-accounted-by-union-loss-v1';
+const bridgeSharedWitnessBgvSupportUnionBoundBits = 9;
 const bridgeBatchIntegerLiftProofModuli = [
     140_737_487_306_753, 140_737_486_716_929,
 ] as const;
@@ -89,7 +96,9 @@ const bridgeSharedWitnessRejectionRetryLossBits =
 const bridgeSharedWitnessFullMatrixUnionBoundBits = 9;
 const bridgeSharedWitnessRandomOracleQueryBoundBits = 32;
 const bridgeSharedWitnessProofSystemLossBits = 0;
-const bridgeSharedWitnessChallengeBiasBits = 0;
+const bridgeSharedWitnessChallengeBiasBits = 1;
+const bridgeSharedWitnessAdditionalRelationLossBits =
+    bridgeSharedWitnessBgvSupportUnionBoundBits;
 const bridgeSharedWitnessTargetBindingSoundnessBits = 128;
 const bridgeSharedWitnessRawWeakestRelationSoundnessBitsFloor =
     bridgeSharedWitnessWeakestRelationBitsPerCheck *
@@ -100,7 +109,8 @@ const bridgeSharedWitnessEffectiveBindingSoundnessBitsFloor =
     bridgeSharedWitnessFullMatrixUnionBoundBits -
     bridgeSharedWitnessRandomOracleQueryBoundBits -
     bridgeSharedWitnessProofSystemLossBits -
-    bridgeSharedWitnessChallengeBiasBits;
+    bridgeSharedWitnessChallengeBiasBits -
+    bridgeSharedWitnessAdditionalRelationLossBits;
 const bridgeSharedWitnessEffectiveBindingBelowTarget = false;
 const bgvEncryptionKeyMaterialKind =
     'passive-transcript-derived-collective-public-key';
@@ -292,6 +302,16 @@ export const deriveBridgeProofTargetContractHash = (input: {
                 bridgeSharedWitnessChallengeBiasAccountingModel,
             sharedWitnessChallengeBiasBits:
                 bridgeSharedWitnessChallengeBiasBits,
+            sharedWitnessAdditionalRelationLossBits:
+                bridgeSharedWitnessAdditionalRelationLossBits,
+            sharedWitnessBgvSupportRelation:
+                bridgeSharedWitnessBgvSupportRelation,
+            sharedWitnessBgvSupportChallengeDistribution:
+                bridgeSharedWitnessBgvSupportChallengeDistribution,
+            sharedWitnessBgvSupportCancellationModel:
+                bridgeSharedWitnessBgvSupportCancellationModel,
+            sharedWitnessBgvSupportUnionBoundBits:
+                bridgeSharedWitnessBgvSupportUnionBoundBits,
             sharedWitnessTargetBindingSoundnessBits:
                 bridgeSharedWitnessTargetBindingSoundnessBits,
             sharedWitnessEffectiveBindingBelowTarget:
@@ -427,11 +447,16 @@ type BridgeProofStatementHashInput = {
     readonly sharedWitnessQromAccountingStatus: typeof bridgeSharedWitnessQromAccountingStatus;
     readonly sharedWitnessProofSystemLossBits: 0;
     readonly sharedWitnessChallengeBiasAccountingModel: typeof bridgeSharedWitnessChallengeBiasAccountingModel;
-    readonly sharedWitnessChallengeBiasBits: 0;
+    readonly sharedWitnessChallengeBiasBits: typeof bridgeSharedWitnessChallengeBiasBits;
+    readonly sharedWitnessAdditionalRelationLossBits: typeof bridgeSharedWitnessAdditionalRelationLossBits;
+    readonly sharedWitnessBgvSupportRelation: typeof bridgeSharedWitnessBgvSupportRelation;
+    readonly sharedWitnessBgvSupportChallengeDistribution: typeof bridgeSharedWitnessBgvSupportChallengeDistribution;
+    readonly sharedWitnessBgvSupportCancellationModel: typeof bridgeSharedWitnessBgvSupportCancellationModel;
+    readonly sharedWitnessBgvSupportUnionBoundBits: typeof bridgeSharedWitnessBgvSupportUnionBoundBits;
     readonly sharedWitnessTargetBindingSoundnessBits: 128;
     readonly sharedWitnessGrindingDiscountBitsPerCheck: 6;
     readonly sharedWitnessRawWeakestRelationSoundnessBitsFloor: 230;
-    readonly sharedWitnessEffectiveBindingSoundnessBitsFloor: 159;
+    readonly sharedWitnessEffectiveBindingSoundnessBitsFloor: 149;
     readonly sharedWitnessEffectiveBindingBelowTarget: false;
     readonly sharedWitnessWeakestRelation: typeof bridgeSharedWitnessWeakestRelation;
     readonly sharedWitnessWeakestRelationModel: typeof bridgeSharedWitnessWeakestRelationModel;
@@ -529,6 +554,9 @@ const bridgeProofStatementRelationStringHashFieldNames = [
     'proofFriendlyPlaintextLiftBindingHash',
     'proofFriendlyPlaintextLiftBindingStatus',
     'sharedWitnessChallengeBiasAccountingModel',
+    'sharedWitnessBgvSupportCancellationModel',
+    'sharedWitnessBgvSupportChallengeDistribution',
+    'sharedWitnessBgvSupportRelation',
     'sharedWitnessChallengeSamplingModel',
     'sharedWitnessQromAccountingStatus',
     'sharedWitnessRandomOracleAccountingModel',
@@ -551,6 +579,8 @@ const bridgeProofStatementRelationNumberHashFieldNames = [
     'sharedWitnessRandomOracleQueryBoundBits',
     'sharedWitnessProofSystemLossBits',
     'sharedWitnessChallengeBiasBits',
+    'sharedWitnessAdditionalRelationLossBits',
+    'sharedWitnessBgvSupportUnionBoundBits',
     'sharedWitnessTargetBindingSoundnessBits',
     'sharedWitnessGrindingDiscountBitsPerCheck',
     'sharedWitnessRawWeakestRelationSoundnessBitsFloor',

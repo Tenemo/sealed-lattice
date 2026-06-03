@@ -624,7 +624,7 @@
                 "    readonly aggregateDerivationComponentHash?: ProtocolHash;",
                 "};",
                 "export type BridgeProofVerificationStatus = 'BridgeProofBackendPending' | 'BridgeProofRelationChecked';",
-                "export type BridgeClaimVerificationStatus = 'BridgeProofClaimClosureMissing' | 'BridgeProofClaimClosureVerified';",
+                "export type BridgeClaimVerificationStatus = 'BridgeProofClaimClosureMissing';",
                 "export type AggregateDerivationVerificationScope = 'AggregateDerivationFullVerificationPreconditionNotBound' | 'AggregateDerivationFullVerificationChecked';",
                 "export type AggregateBridgeRandomnessSource = 'fresh-csprng' | 'development-deterministic-fixture';",
                 "export type AggregateBridgeRandomnessSourceEvidence = {",

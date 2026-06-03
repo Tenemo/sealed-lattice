@@ -779,26 +779,31 @@ fn validate_compact_bridge_status_for_evaluation(
             &["developmentKeyOnly"],
             &format!("development-only {object_name}"),
         )?;
-        require_true(
+        require_false(
             value,
             &["claimBearingBridgeEncryption"],
-            &format!("claim-bearing {object_name}"),
+            &format!("final claim-bearing bridge encryption for {object_name}"),
         )?;
-        require_true(
+        require_false(
             value,
             &["bridgeClaimClosureVerified"],
-            &format!("verified bridge proof claim closure for {object_name}"),
+            &format!("final bridge proof claim closure for {object_name}"),
         )?;
         if string_at_path(value, &["bridgeClaimVerificationStatus"])?
-            != "BridgeProofClaimClosureVerified"
+            != "BridgeProofClaimClosureMissing"
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 format!(
-                    "encrypted aggregate evaluation requires verified bridge proof status for {object_name}"
+                    "encrypted aggregate evaluation requires bridge handoff status without final claim closure for {object_name}"
                 ),
             ));
         }
+        require_aggregate_derivation_full_verification_checked(
+            value,
+            &["aggregateDerivationVerificationScope"],
+            &format!("full aggregate-derivation verification bound to {object_name}"),
+        )?;
         require_true(
             value,
             &["thresholdDecryptable"],
@@ -885,12 +890,12 @@ fn require_compact_bridge_fresh_randomness_for_evaluation(
         ));
     }
     if value_at_path(randomness_source_evidence, &["claimBearingEntropyEvidence"])?.as_bool()
-        != Some(true)
+        != Some(false)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             format!(
-                "encrypted aggregate evaluation requires bridge entropy evidence accepted for {object_name}"
+                "encrypted aggregate evaluation rejects upgraded bridge entropy evidence for {object_name}"
             ),
         ));
     }
@@ -1119,6 +1124,12 @@ fn validate_compact_bridge_bindings_for_evaluation(
             "proofFriendlyPlaintextLiftBindingHash",
             "proofFriendlyPlaintextLiftBindingHash",
             "proof-friendly plaintext lift binding hash",
+        ),
+        (
+            "aggregateBridgeRelationHandoffRoot",
+            "aggregateBridgeRelationHandoffRoot",
+            "aggregateBridgeRelationHandoffRoot",
+            "aggregate bridge relation handoff root",
         ),
     ] {
         require_same_string(
@@ -3002,11 +3013,12 @@ mod tests {
     fn compact_bridge_status() -> Value {
         json!({
             "bgvEncryptionKeyMaterialKind": "passive-transcript-derived-collective-public-key",
+            "aggregateDerivationVerificationScope": "AggregateDerivationFullVerificationChecked",
             "developmentKeyOnly": false,
-            "bridgeClaimClosureVerified": true,
-            "bridgeClaimVerificationStatus": "BridgeProofClaimClosureVerified",
+            "bridgeClaimClosureVerified": false,
+            "bridgeClaimVerificationStatus": "BridgeProofClaimClosureMissing",
             "thresholdDecryptable": true,
-            "claimBearingBridgeEncryption": true,
+            "claimBearingBridgeEncryption": false,
         })
     }
 
@@ -3020,7 +3032,7 @@ mod tests {
                 "proverRandomnessSource": "fresh-csprng",
                 "encryptionRandomnessSeedSource": "fresh-csprng",
                 "callerSuppliedDevelopmentRandomness": false,
-                "claimBearingEntropyEvidence": true,
+                "claimBearingEntropyEvidence": false,
             },
         })
     }
@@ -3037,6 +3049,7 @@ mod tests {
             "encryptedAggregateShareCiphertextRoot": valid_hash("8"),
             "plaintextCoefficientBindingCommitmentHash": valid_hash("9"),
             "proofFriendlyPlaintextLiftBindingHash": valid_hash("a"),
+            "aggregateBridgeRelationHandoffRoot": valid_hash("b"),
             "collectivePublicKeyRoot": setup_package["collectivePublicKey"]["collectivePublicKeyRoot"],
             "collectivePublicKeyCoefficientRoot": setup_package["collectivePublicKey"]["collectivePublicKeyCoefficientRoot"],
             "bgvPublicKeyRoot": setup_package["collectivePublicKey"]["bgvPublicKeyRoot"],
@@ -3052,6 +3065,7 @@ mod tests {
             "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
             "plaintextCoefficientBindingCommitmentHash": bridge_encryption["plaintextCoefficientBindingCommitmentHash"],
             "proofFriendlyPlaintextLiftBindingHash": bridge_encryption["proofFriendlyPlaintextLiftBindingHash"],
+            "aggregateBridgeRelationHandoffRoot": bridge_encryption["aggregateBridgeRelationHandoffRoot"],
             "collectivePublicKeyCoefficientRoot": bridge_encryption["collectivePublicKeyCoefficientRoot"],
         });
         let bridge_proof_record = json!({
@@ -3066,6 +3080,7 @@ mod tests {
             "encryptedAggregateShareCiphertextRoot": bridge_encryption["encryptedAggregateShareCiphertextRoot"],
             "plaintextCoefficientBindingCommitmentHash": bridge_encryption["plaintextCoefficientBindingCommitmentHash"],
             "proofFriendlyPlaintextLiftBindingHash": bridge_encryption["proofFriendlyPlaintextLiftBindingHash"],
+            "aggregateBridgeRelationHandoffRoot": bridge_encryption["aggregateBridgeRelationHandoffRoot"],
             "collectivePublicKeyRoot": bridge_encryption["collectivePublicKeyRoot"],
             "collectivePublicKeyCoefficientRoot": bridge_encryption["collectivePublicKeyCoefficientRoot"],
             "bgvPublicKeyRoot": bridge_encryption["bgvPublicKeyRoot"],
@@ -3101,6 +3116,8 @@ mod tests {
         bridge_verification["bridgeEvidenceVerificationStatus"] =
             Value::String("BridgeProofEvidenceChecked".to_string());
         bridge_verification["aggregateDerivationVerificationScope"] =
+            Value::String("AggregateDerivationFullVerificationChecked".to_string());
+        bridge_encryption["aggregateDerivationVerificationScope"] =
             Value::String("AggregateDerivationFullVerificationChecked".to_string());
         bridge_proof_record["bridgeProofVerificationStatus"] =
             Value::String("BridgeProofRelationChecked".to_string());
@@ -3221,7 +3238,7 @@ mod tests {
             &compact_bridge_status(),
             &compact_bridge_status(),
         )
-        .expect("consistent claim-bearing compact bridge status should validate");
+        .expect("consistent handoff-only compact bridge status should validate");
 
         for (object_index, field_name, mutated_value, expected_message) in [
             (
@@ -3239,20 +3256,20 @@ mod tests {
             (
                 2,
                 "claimBearingBridgeEncryption",
-                Value::Bool(false),
+                Value::Bool(true),
                 "claim-bearing",
             ),
             (
                 0,
                 "bridgeClaimClosureVerified",
-                Value::Bool(false),
-                "verified bridge proof claim closure",
+                Value::Bool(true),
+                "bridge proof claim closure",
             ),
             (
                 2,
                 "bridgeClaimVerificationStatus",
                 Value::String("UnsupportedBridgeClaimClosureStatus".to_string()),
-                "verified bridge proof status",
+                "bridge handoff status",
             ),
             (
                 1,
@@ -3292,7 +3309,7 @@ mod tests {
             &compact_bridge_randomness(),
             &compact_bridge_randomness(),
         )
-        .expect("consistent claim-bearing compact bridge randomness should validate");
+        .expect("consistent compact bridge randomness should validate");
 
         for (object_index, field_name, expected_message) in [
             (
@@ -3308,7 +3325,7 @@ mod tests {
             (
                 2,
                 "claimBearingEntropyEvidence",
-                "bridge entropy evidence accepted",
+                "upgraded bridge entropy evidence",
             ),
             (
                 0,
@@ -3345,7 +3362,7 @@ mod tests {
                         Value::Bool(false);
                 }
                 "claimBearingEntropyEvidence" => {
-                    target["randomnessSourceEvidence"][field_name] = Value::Bool(false);
+                    target["randomnessSourceEvidence"][field_name] = Value::Bool(true);
                 }
                 "callerSuppliedDevelopmentRandomness" => {
                     target["randomnessSourceEvidence"][field_name] = Value::Bool(true);

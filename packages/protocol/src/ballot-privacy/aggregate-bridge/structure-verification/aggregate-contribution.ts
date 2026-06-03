@@ -153,15 +153,14 @@ const collectBridgeProofRecordRefusals = (
     const expectedBridgeProofRecordHash = deriveBridgeProofRecordHash(
         proofRecordWithoutHash,
     );
-    const expectedBridgeClaimVerificationStatus =
-        proofRecord.claimBearingBridgeEncryption
-            ? 'BridgeProofClaimClosureVerified'
-            : 'BridgeProofClaimClosureMissing';
     const bridgeClaimStatusIsConsistent =
-        proofRecord.bridgeClaimClosureVerified ===
-            proofRecord.claimBearingBridgeEncryption &&
+        proofRecord.claimBearingBridgeEncryption === false &&
+        proofRecord.bridgeClaimClosureVerified === false &&
         proofRecord.bridgeClaimVerificationStatus ===
-            expectedBridgeClaimVerificationStatus;
+            'BridgeProofClaimClosureMissing';
+    const aggregateDerivationPreconditionIsChecked =
+        proofRecord.aggregateDerivationVerificationScope ===
+        'AggregateDerivationFullVerificationChecked';
     const randomnessSourceEvidence = proofRecord.randomnessSourceEvidence;
     const bridgeRandomnessSourcesAreSupported =
         ['fresh-csprng', 'development-deterministic-fixture'].includes(
@@ -187,9 +186,7 @@ const collectBridgeProofRecordRefusals = (
             proofRecord.encryptionRandomnessSeedSource &&
         randomnessSourceEvidence.callerSuppliedDevelopmentRandomness ===
             bridgeRandomnessUsesDevelopmentSource &&
-        randomnessSourceEvidence.claimBearingEntropyEvidence ===
-            (proofRecord.proverRandomnessSource === 'fresh-csprng' &&
-                proofRecord.encryptionRandomnessSeedSource === 'fresh-csprng');
+        randomnessSourceEvidence.claimBearingEntropyEvidence === false;
 
     if (
         proofRecord.objectType !== 'BridgeProofRecord' ||
@@ -203,6 +200,7 @@ const collectBridgeProofRecordRefusals = (
         proofRecord.developmentKeyOnly !== false ||
         proofRecord.thresholdDecryptable !== true ||
         !bridgeClaimStatusIsConsistent ||
+        !aggregateDerivationPreconditionIsChecked ||
         !['BridgeProofBackendPending', 'BridgeProofRelationChecked'].includes(
             proofRecord.bridgeProofVerificationStatus,
         ) ||

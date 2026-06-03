@@ -212,16 +212,24 @@ describe('encrypted aggregate bridge objects', () => {
                 'QromAccountingNotProvidedForHandoff',
             sharedWitnessProofSystemLossBits: 0,
             sharedWitnessChallengeBiasAccountingModel:
-                'direct-rejection-sampling-into-effective-weakest-relation-modulus-v1',
-            sharedWitnessChallengeBiasBits: 0,
+                'crt-product-challenge-reduced-to-aggregate-field-with-one-bit-loss-v1',
+            sharedWitnessChallengeBiasBits: 1,
+            sharedWitnessAdditionalRelationLossBits: 9,
+            sharedWitnessBgvSupportRelation:
+                'BgvRandomnessErrorSupportPolynomialBatchRelation',
+            sharedWitnessBgvSupportChallengeDistribution:
+                'shared-witness-challenge-reduced-modulo-bgv-support-prime-v1',
+            sharedWitnessBgvSupportCancellationModel:
+                'random-linear-batched-support-cancellation-accounted-by-union-loss-v1',
+            sharedWitnessBgvSupportUnionBoundBits: 9,
             sharedWitnessTargetBindingSoundnessBits: 128,
             sharedWitnessRawWeakestRelationSoundnessBitsFloor: 230,
-            sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
+            sharedWitnessEffectiveBindingSoundnessBitsFloor: 149,
             sharedWitnessEffectiveBindingBelowTarget: false,
             sharedWitnessWeakestRelation: 'AggregateReductionFieldRelation',
             sharedWitnessWeakestRelationModel:
                 'aggregate-proof-ring-effective-binding-floor-v1',
-            sharedWitnessWeakestRelationEffectiveModulus: '70368744177664',
+            sharedWitnessWeakestRelationEffectiveModulus: '70368744177829',
             sharedWitnessWeakestRelationBitsPerCheck: 46,
             batchIntegerLiftProofModuli: [
                 140_737_487_306_753, 140_737_486_716_929,
@@ -272,7 +280,7 @@ describe('encrypted aggregate bridge objects', () => {
         );
         const randomnessSourceEvidence = {
             callerSuppliedDevelopmentRandomness: false,
-            claimBearingEntropyEvidence: true,
+            claimBearingEntropyEvidence: false,
             encryptionRandomnessSeedSource: 'fresh-csprng',
             objectType: 'AggregateBridgeRandomnessSourceEvidence',
             objectVersion: 1,
@@ -500,9 +508,6 @@ describe('encrypted aggregate bridge objects', () => {
                     baseFields.aggregateSelectionPolicyHash,
                 bridgeEncryptionEvidence: {
                     ...bridgeEncryptionEvidence,
-                    bridgeProofTargetContractHash: hash(
-                        'wrong-bridge-proof-target-contract',
-                    ),
                 },
                 bridgeEvidenceVerification: {
                     ...bridgeEvidenceVerification,
@@ -515,7 +520,30 @@ describe('encrypted aggregate bridge objects', () => {
                 heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof target contract hash/u);
+        ).toThrow(/bridge proof target contract hash/u);
+        expect(() =>
+            createPendingBridgeProofRecordFromBridgeEvidence({
+                aggregateDerivationComponent,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
+                bridgeEncryptionEvidence: {
+                    ...bridgeEncryptionEvidence,
+                    bridgeProofTargetContractHash: hash(
+                        'wrong-agreed-bridge-proof-target-contract',
+                    ),
+                },
+                bridgeEvidenceVerification: {
+                    ...bridgeEvidenceVerification,
+                    bridgeProofTargetContractHash: hash(
+                        'wrong-agreed-bridge-proof-target-contract',
+                    ),
+                },
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
+                setupPackage,
+            }),
+        ).toThrow(/canonical bridge proof statement hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
@@ -573,14 +601,14 @@ describe('encrypted aggregate bridge objects', () => {
                     ...bridgeEncryptionEvidence,
                     randomnessSourceEvidence: {
                         ...bridgeEncryptionEvidence.randomnessSourceEvidence,
-                        claimBearingEntropyEvidence: false,
+                        claimBearingEntropyEvidence: true,
                     },
                 },
                 bridgeEvidenceVerification: {
                     ...bridgeEvidenceVerification,
                     randomnessSourceEvidence: {
                         ...bridgeEvidenceVerification.randomnessSourceEvidence,
-                        claimBearingEntropyEvidence: false,
+                        claimBearingEntropyEvidence: true,
                     },
                 },
                 bridgeWitnessPrivacyProfileHash:

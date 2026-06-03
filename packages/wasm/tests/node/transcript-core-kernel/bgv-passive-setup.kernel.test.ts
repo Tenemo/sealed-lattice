@@ -416,15 +416,14 @@ describe('BGV passive passive BGV setup kernel commands', () => {
     it('rejects duplicate public evaluation-key rotation requests', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const selectedReturnRotation = arrayAtPath(setup, [
+        const selectedRotationKeyRoot = arrayAtPath(setup, [
             'evaluationKeys',
             'rotationKeyRoots',
-        ]).find(
-            (rotationRoot) =>
-                (rotationRoot as { readonly level: number }).level === 5,
-        ) as { readonly rotation: number; readonly level: number } | undefined;
+        ])[0] as
+            | { readonly rotation: number; readonly level: number }
+            | undefined;
 
-        expect(selectedReturnRotation).toBeDefined();
+        expect(selectedRotationKeyRoot).toBeDefined();
         expect(() =>
             kernel.generateBgvEvaluationKeyMaterial({
                 setupPackage: setup,
@@ -433,8 +432,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 },
                 workingLevel: 1,
                 rotationKeys: [
-                    selectedReturnRotation!,
-                    selectedReturnRotation!,
+                    selectedRotationKeyRoot!,
+                    selectedRotationKeyRoot!,
                 ],
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
@@ -910,10 +909,12 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             bgvEncryptionKeyMaterialKind:
                 'passive-transcript-derived-collective-public-key',
             developmentKeyOnly: false,
-            bridgeClaimClosureVerified: true,
-            bridgeClaimVerificationStatus: 'BridgeProofClaimClosureVerified',
+            aggregateDerivationVerificationScope:
+                'AggregateDerivationFullVerificationChecked',
+            bridgeClaimClosureVerified: false,
+            bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing',
             thresholdDecryptable: true,
-            claimBearingBridgeEncryption: true,
+            claimBearingBridgeEncryption: false,
         };
         const developmentRandomnessEvidence = {
             proverRandomnessSource: 'development-deterministic-fixture',
@@ -975,10 +976,12 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             bgvEncryptionKeyMaterialKind:
                 'passive-transcript-derived-collective-public-key',
             developmentKeyOnly: false,
-            bridgeClaimClosureVerified: true,
-            bridgeClaimVerificationStatus: 'BridgeProofClaimClosureVerified',
+            aggregateDerivationVerificationScope:
+                'AggregateDerivationFullVerificationChecked',
+            bridgeClaimClosureVerified: false,
+            bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing',
             thresholdDecryptable: true,
-            claimBearingBridgeEncryption: true,
+            claimBearingBridgeEncryption: false,
         };
         const freshRandomnessEvidence = {
             proverRandomnessSource: 'fresh-csprng',
@@ -989,7 +992,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 proverRandomnessSource: 'fresh-csprng',
                 encryptionRandomnessSeedSource: 'fresh-csprng',
                 callerSuppliedDevelopmentRandomness: false,
-                claimBearingEntropyEvidence: true,
+                claimBearingEntropyEvidence: false,
             },
         };
         const bridgeProofFields = {
@@ -1003,6 +1006,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             encryptedAggregateShareCiphertextRoot: validHash('8'),
             plaintextCoefficientBindingCommitmentHash: validHash('9'),
             proofFriendlyPlaintextLiftBindingHash: validHash('a'),
+            aggregateBridgeRelationHandoffRoot: validHash('b'),
             collectivePublicKeyCoefficientRoot:
                 setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
         };

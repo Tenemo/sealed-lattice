@@ -67,7 +67,7 @@ export type ShapeConfigRow = {
 };
 
 export type ContributionBuild = {
-    readonly aggregateContribution: AggregateContribution;
+    readonly aggregateContribution: AggregateContribution | null;
     readonly aggregateDerivationComponent: AggregateDerivationComponent;
     readonly aggregateWitness: AggregateDerivationWitnessInput;
     readonly bridgeEncryption: Record<string, unknown>;
@@ -78,7 +78,7 @@ export type ContributionBuild = {
 };
 
 export type VariantBuildResult = {
-    readonly aggregateReadyRow: MatrixRow;
+    readonly aggregateReadyRow: MatrixRow | null;
     readonly benchmarkRow: MatrixRow | null;
     readonly negativeChecks: readonly NegativeCheck[];
     readonly privateRelationRow: MatrixRow;

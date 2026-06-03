@@ -118,9 +118,6 @@ pub(super) fn validate_bridge_randomness_source_evidence(
     let caller_supplied_development_randomness = prover_randomness_source
         == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC
         || encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_DEVELOPMENT_DETERMINISTIC;
-    let claim_bearing_entropy_evidence = prover_randomness_source
-        == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG
-        && encryption_randomness_seed_source == BRIDGE_RANDOMNESS_SOURCE_FRESH_CSPRNG;
     require_equal_bool(
         evidence,
         "callerSuppliedDevelopmentRandomness",
@@ -130,7 +127,7 @@ pub(super) fn validate_bridge_randomness_source_evidence(
     require_equal_bool(
         evidence,
         "claimBearingEntropyEvidence",
-        claim_bearing_entropy_evidence,
+        false,
         "randomness source evidence claim-bearing entropy flag",
     )
 }
@@ -515,24 +512,10 @@ fn validate_bridge_relation_proof_claim_status(proof_value: &Value) -> Canonical
     )?;
 
     if claim_bearing_bridge_encryption {
-        require_equal_bool(
-            proof_value,
-            "scopedBridgeRelationClosure",
-            true,
-            "scoped bridge relation closure flag",
-        )?;
-        require_equal_string(
-            proof_value,
-            "bridgeClaimVerificationStatus",
-            BRIDGE_CLAIM_VERIFIED_STATUS,
-            "bridge claim verification status",
-        )?;
-        return require_equal_bool(
-            proof_value,
-            "bridgeClaimClosureVerified",
-            true,
-            "bridge claim closure flag",
-        );
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "encrypted aggregate bridge proof shell cannot claim final bridge closure",
+        ));
     }
 
     require_equal_bool(
