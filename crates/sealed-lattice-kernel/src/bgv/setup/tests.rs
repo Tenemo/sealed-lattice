@@ -16,7 +16,9 @@ use crate::bgv::evaluator::{
 };
 use crate::bgv::modular_arithmetic::{add_mod, sub_mod};
 use crate::bgv::ntt::forward_negacyclic_ntt;
-use crate::bgv::profile::PLAINTEXT_MODULUS;
+use crate::bgv::profile::{
+    PLAINTEXT_MODULUS, data_basis_modulus_bits, extended_basis_modulus_bits,
+};
 use crate::hashing::{derive_protocol_hash, hash512};
 use std::sync::OnceLock;
 
@@ -243,6 +245,63 @@ fn passive_setup_collective_key_uses_evaluator_decryptable_contract() {
 }
 
 #[test]
+fn passive_setup_security_certificate_keeps_special_prime_out_of_public_exposure() {
+    let package = setup_package();
+    let setup_parameter_certificate = &package["certificates"]["setupParameterCertificate"];
+    let he_security_certificate = &package["certificates"]["heSecurityCertificate"];
+    let public_samples = &package["certificates"]["publicRlweSamplesByBasis"];
+
+    assert_eq!(
+        setup_parameter_certificate["qDataBits"],
+        serde_json::json!(data_basis_modulus_bits())
+    );
+    assert_eq!(
+        setup_parameter_certificate["qExtendedUtilityBits"],
+        serde_json::json!(extended_basis_modulus_bits())
+    );
+    assert_eq!(
+        setup_parameter_certificate["largestExposedBasisClassWithoutQTarget"],
+        serde_json::json!("Q_data")
+    );
+    assert_eq!(
+        setup_parameter_certificate["largestExposedModulusBitsWithoutQTarget"],
+        serde_json::json!(data_basis_modulus_bits())
+    );
+    assert_eq!(
+        setup_parameter_certificate["specialPrimeExposureStatus"],
+        serde_json::json!("not-exposed-by-current-setup-bridge-evaluator-public-material")
+    );
+    assert_eq!(
+        he_security_certificate["assessedRing"]["largestExposedBasisClass"],
+        serde_json::json!("Q_data")
+    );
+    assert_eq!(
+        he_security_certificate["assessedRing"]["largestExposedModulusBits"],
+        serde_json::json!(data_basis_modulus_bits())
+    );
+    assert_eq!(
+        he_security_certificate["assessedRing"]["extendedUtilityExposureStatus"],
+        serde_json::json!("not-exposed-by-current-setup-bridge-evaluator-public-material")
+    );
+    assert_eq!(
+        he_security_certificate["standardRows"]["postQuantumTernary128"]["status"],
+        serde_json::json!("accepted")
+    );
+    assert_eq!(
+        public_samples["QPPublic"]["exposedOnAcceptedSetupBridgeEvaluatorPath"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        public_samples["QPPublic"]["relinearizationKeys"],
+        serde_json::json!(0)
+    );
+    assert_eq!(
+        public_samples["QPPublic"]["rotationKeys"],
+        serde_json::json!(0)
+    );
+}
+
+#[test]
 fn passive_setup_private_witness_is_required_for_test_decryption_key() {
     let package = setup_package();
 
@@ -361,7 +420,7 @@ fn passive_setup_public_evaluation_key_material_drives_rotation_without_private_
     )
     .expect("source level");
     let galois_key = public_context
-        .generate_galois_key(galois_element, level, "unused-public-rotation-fallback")
+        .resolve_galois_key(galois_element, level, "unused-public-rotation-fallback")
         .expect("public rotation key");
     let rotated = rotate(&source, galois_element, &galois_key).expect("rotate");
     let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
@@ -474,7 +533,7 @@ fn passive_setup_representative_full_level_public_evaluation_key_material_exerci
         let source_at_level =
             modulus_switch_to(&rotation_source, level).expect("rotation source level");
         let rotation_key = public_context
-            .generate_galois_key(
+            .resolve_galois_key(
                 galois_element,
                 level,
                 "unused-public-full-schedule-rotation",
