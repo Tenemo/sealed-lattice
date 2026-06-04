@@ -693,6 +693,36 @@ pub(crate) fn pack_reconstructed_aggregate_scores(
     sum_aligned(&packed_terms)
 }
 
+pub(crate) fn pack_direct_score_slots(
+    context: &EvaluatorContext,
+    direct_scores: &Ciphertext,
+    option_count: usize,
+    seed_hex: &str,
+) -> CanonicalResult<Ciphertext> {
+    if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "direct score-slot packing requires at least two options and a valid packed window",
+        ));
+    }
+    let normalized_scores = normalize_scaling(direct_scores)?;
+    let mut packed_terms = Vec::with_capacity(option_count * 2);
+    let rotation_seed = format!("{seed_hex}-direct-score-pack-rotation");
+    for option in 0..option_count {
+        for logical_index in [option, option + option_count] {
+            packed_terms.push(move_single_slot_value(
+                context,
+                &normalized_scores,
+                option,
+                packed_score_slot(logical_index),
+                &rotation_seed,
+            )?);
+        }
+    }
+
+    sum_aligned(&packed_terms)
+}
+
 fn packed_score_slot_selector(logical_indices: &[usize]) -> CanonicalResult<Vec<u64>> {
     let weights = logical_indices
         .iter()
@@ -863,6 +893,129 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores(
     })
 }
 
+pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
+    context: &EvaluatorContext,
+    packed_scores: &Ciphertext,
+    option_count: usize,
+    score_domain_max: u64,
+    seed_hex: &str,
+) -> CanonicalResult<PackedRankEvaluation> {
+    if option_count < 2 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "batched packed-rank evaluation requires at least two options",
+        ));
+    }
+    if option_count * 2 > POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "batched packed-rank evaluation exceeds the generator-ordered slot window",
+        ));
+    }
+    let pair_count = option_count * option_count.saturating_sub(1) / 2;
+    if pair_count > GENERATOR_SUBGROUP_ORDER {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "batched packed-rank evaluation exceeds the generator subgroup slot window",
+        ));
+    }
+
+    let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_max)?;
+    let shift_constant = broadcast_constant(score_domain_max);
+    let mut comparison_input_terms = Vec::with_capacity(option_count - 1);
+    let mut pair_windows = Vec::with_capacity(option_count - 1);
+    let mut next_window_offset = 0_usize;
+    for shift in 1..option_count {
+        let pair_window_size = option_count - shift;
+        pair_windows.push((shift, next_window_offset, pair_window_size));
+        let shifted_scores = rotate_with_compact_positive_generator_basis(
+            context,
+            packed_scores,
+            galois_power(shift),
+            packed_scores.level,
+            &format!("{seed_hex}-batched-pair-score-shift-{shift}"),
+        )?;
+        let difference = ciphertext_sub(packed_scores, &shifted_scores)?;
+        let shifted_difference =
+            add_plaintext_coefficients(&normalize_scaling(&difference)?, &shift_constant)?;
+        let lower_pair_inputs = plaintext_mul(
+            &normalize_scaling(&shifted_difference)?,
+            &packed_pair_lower_mask(option_count, shift)?,
+        )?;
+        let windowed_inputs = if next_window_offset == 0 {
+            lower_pair_inputs
+        } else {
+            rotate_with_compact_inverse_generator_basis(
+                context,
+                &lower_pair_inputs,
+                next_window_offset,
+                lower_pair_inputs.level,
+                &format!("{seed_hex}-batched-pair-window-{shift}"),
+            )?
+        };
+        comparison_input_terms.push(windowed_inputs);
+        next_window_offset += pair_window_size;
+    }
+    let comparison_inputs = sum_aligned(&comparison_input_terms)?;
+    let refreshed_comparison_inputs = modulus_switch_to(
+        &comparison_inputs,
+        comparison_inputs.level.saturating_sub(1),
+    )?;
+    let comparison_baby_step_count = direct_comparison_baby_step_count(score_domain_max)?;
+    let comparison_outputs = evaluate_direct_comparison_polynomial_with_baby_step_count(
+        context,
+        &refreshed_comparison_inputs,
+        &greater_or_equal_polynomial,
+        comparison_baby_step_count,
+    )?;
+
+    let mut rank_terms = Vec::with_capacity(2 * (option_count - 1));
+    for (shift, window_offset, pair_window_size) in pair_windows {
+        let window_logical_indices =
+            (window_offset..(window_offset + pair_window_size)).collect::<Vec<_>>();
+        let windowed_lower_beats_higher = plaintext_mul(
+            &normalize_scaling(&comparison_outputs)?,
+            &packed_score_slot_selector(&window_logical_indices)?,
+        )?;
+        let lower_beats_higher = if window_offset == 0 {
+            windowed_lower_beats_higher
+        } else {
+            rotate_with_compact_positive_generator_basis(
+                context,
+                &windowed_lower_beats_higher,
+                galois_power(window_offset),
+                windowed_lower_beats_higher.level,
+                &format!("{seed_hex}-batched-pair-window-return-{shift}"),
+            )?
+        };
+        let lower_pair_mask = packed_pair_lower_mask(option_count, shift)?;
+        let lower_beats_higher_for_lower_slots =
+            plaintext_mul(&normalize_scaling(&lower_beats_higher)?, &lower_pair_mask)?;
+        let higher_beats_lower_for_lower_slots = add_plaintext_coefficients(
+            &ciphertext_negate(&normalize_scaling(&lower_beats_higher_for_lower_slots)?)?,
+            &lower_pair_mask,
+        )?;
+        let lower_beats_higher_for_return = modulus_switch_to(
+            &lower_beats_higher_for_lower_slots,
+            DIRECT_COMPARISON_OUTPUT_LEVEL,
+        )?;
+        let lower_beats_higher_at_higher_slot = rotate_with_compact_inverse_generator_basis(
+            context,
+            &lower_beats_higher_for_return,
+            shift,
+            lower_beats_higher_for_return.level,
+            &format!("{seed_hex}-batched-pair-rank-return-{shift}"),
+        )?;
+        rank_terms.push(higher_beats_lower_for_lower_slots);
+        rank_terms.push(lower_beats_higher_at_higher_slot);
+    }
+
+    Ok(PackedRankEvaluation {
+        packed_ranks: sum_aligned(&rank_terms)?,
+        exact_rank_indicators: Vec::new(),
+    })
+}
+
 fn exact_rank_indicators_from_ahead_terms(
     context: &EvaluatorContext,
     ahead_terms_by_option: &[Vec<Ciphertext>],
@@ -1026,6 +1179,28 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
     option_count: usize,
     top_count: usize,
 ) -> CanonicalResult<EncryptedSparseTarget> {
+    let id_weights = (0..option_count)
+        .map(|option| {
+            (
+                option,
+                u64::try_from(option + 1).expect("option identifier fits u64"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let option_indices = (0..option_count).collect::<Vec<_>>();
+    let id_selector = packed_score_weighted_selector(&id_weights)?;
+    let option_slot_mask = packed_score_slot_selector(&option_indices)?;
+
+    if top_count == option_count {
+        let normalized_ranks = normalize_scaling(&rank_evaluation.packed_ranks)?;
+        let encrypted_zero = scalar_mul(&normalized_ranks, 0)?;
+
+        return Ok(EncryptedSparseTarget {
+            target_id: add_plaintext_coefficients(&encrypted_zero, &id_selector)?,
+            target_order: add_plaintext_coefficients(&normalized_ranks, &option_slot_mask)?,
+        });
+    }
+
     let (indicators, order_values) = if top_count == option_count {
         top_k_indicator_and_order_value(
             context,
@@ -1057,17 +1232,6 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
             top_count,
         )?
     };
-    let id_weights = (0..option_count)
-        .map(|option| {
-            (
-                option,
-                u64::try_from(option + 1).expect("option identifier fits u64"),
-            )
-        })
-        .collect::<Vec<_>>();
-    let option_indices = (0..option_count).collect::<Vec<_>>();
-    let id_selector = packed_score_weighted_selector(&id_weights)?;
-    let option_slot_mask = packed_score_slot_selector(&option_indices)?;
 
     Ok(EncryptedSparseTarget {
         target_id: plaintext_mul(&normalize_scaling(&indicators)?, &id_selector)?,
@@ -1118,6 +1282,31 @@ pub(crate) fn project_sparse_target(
         target_id: sum_aligned(&id_slots)?,
         target_order: sum_aligned(&order_slots)?,
     })
+}
+
+fn move_single_slot_value(
+    context: &EvaluatorContext,
+    ciphertext: &Ciphertext,
+    source_slot: usize,
+    target_slot: usize,
+    seed_hex: &str,
+) -> CanonicalResult<Ciphertext> {
+    if source_slot >= POLYNOMIAL_DEGREE || target_slot >= POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "single-slot move requires source and target slots inside the ring",
+        ));
+    }
+    let selected = plaintext_mul(
+        &normalize_scaling(ciphertext)?,
+        &slot_selector(source_slot)?,
+    )?;
+    if source_slot == target_slot {
+        return Ok(selected);
+    }
+    let galois_element = galois_element_moving_slot_to_target(source_slot, target_slot)?;
+
+    context.rotate_ciphertext(&selected, galois_element, selected.level, seed_hex)
 }
 
 // The encrypted outputs of one top-k evaluation: the per-option ranks, the
@@ -1237,6 +1426,51 @@ pub(crate) fn evaluate_direct_comparison_polynomial(
     )
 }
 
+fn evaluate_direct_comparison_polynomial_with_baby_step_count(
+    context: &EvaluatorContext,
+    comparison_input: &Ciphertext,
+    polynomial: &[u64],
+    baby_step_count: usize,
+) -> CanonicalResult<Ciphertext> {
+    evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
+        context,
+        comparison_input,
+        polynomial,
+        baby_step_count,
+    )
+}
+
+fn direct_comparison_baby_step_count(score_domain_max: u64) -> CanonicalResult<usize> {
+    let point_count = usize::try_from(
+        score_domain_max
+            .checked_mul(2)
+            .and_then(|maximum| maximum.checked_add(1))
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "direct comparison domain overflowed",
+                )
+            })?,
+    )
+    .map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct comparison domain does not fit usize",
+        )
+    })?;
+
+    Ok(integer_square_root_ceil(point_count).max(2))
+}
+
+fn integer_square_root_ceil(value: usize) -> usize {
+    let mut root = 1_usize;
+    while root.saturating_mul(root) < value {
+        root += 1;
+    }
+
+    root
+}
+
 // Run the encrypted top-k evaluation using the depth-efficient difference
 // comparator (the reserved comparison-input derivation path) instead of per-bit
 // extraction plus a bit-sliced comparator. The ahead indicator for an ordered
@@ -1309,14 +1543,15 @@ mod tests {
         aggregate_score_slot, ahead_indicator, bit_extraction_polynomials,
         bit_sliced_greater_than_and_equal, broadcast_constant, comparison_polynomials,
         derive_score_bits, evaluate_direct_comparison_polynomial,
-        evaluate_packed_rank_evaluation_from_packed_scores, evaluate_packed_ranks_via_difference,
-        evaluate_top_k_via_difference, exact_rank_indicators_for_option,
-        galois_element_moving_slot_to_target, galois_power, generator_exponent_or_conjugated,
-        generator_power_basis_for_exponent, interpolate_coefficients, pack_broadcast_scores,
-        packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
-        packed_score_slot, project_packed_sparse_target_from_rank_evaluation,
-        project_sparse_target, score_bit_count, selected_evaluator_rotation_key_schedule,
-        top_k_indicator, top_k_order_value,
+        evaluate_packed_rank_evaluation_from_packed_scores,
+        evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
+        evaluate_packed_ranks_via_difference, evaluate_top_k_via_difference,
+        exact_rank_indicators_for_option, galois_element_moving_slot_to_target, galois_power,
+        generator_exponent_or_conjugated, generator_power_basis_for_exponent,
+        interpolate_coefficients, pack_broadcast_scores, packed_rank_forward_basis_galois_elements,
+        packed_rank_return_basis_galois_elements, packed_score_slot,
+        project_packed_sparse_target_from_rank_evaluation, project_sparse_target, score_bit_count,
+        selected_evaluator_rotation_key_schedule, top_k_indicator, top_k_order_value,
     };
     use crate::bgv::evaluator::{
         circuit::{EvaluatorContext, modulus_switch_to, normalize_scaling},
@@ -1460,6 +1695,60 @@ mod tests {
             .expect("order");
         assert_eq!(&id_slots[..option_count], &[1, 2, 0]);
         assert_eq!(&order_slots[..option_count], &[2, 1, 0]);
+    }
+
+    #[test]
+    #[ignore = "heavy packed batched-pair evaluator smoke; run selectively"]
+    fn packed_batched_pair_ranks_match_oracle_with_tie() {
+        let context = EvaluatorContext::new("packed-batched-pair-target-tie", 7).expect("context");
+        let key = context.key();
+        let scores = [10_u64, 7, 10, 1];
+        let option_count = scores.len();
+        let score_ciphertexts = scores
+            .iter()
+            .enumerate()
+            .map(|(option, value)| {
+                encrypt_broadcast(&context, *value, &format!("packed-batched-score-{option}"))
+            })
+            .collect::<Vec<_>>();
+        let packed_scores = pack_broadcast_scores(&score_ciphertexts).expect("packed scores");
+
+        let rank_evaluation =
+            evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
+                &context,
+                &packed_scores,
+                option_count,
+                9,
+                "packed-batched-pair-target",
+            )
+            .expect("batched rank evaluation");
+
+        let rank_slots = key
+            .decrypt_to_slots(&rank_evaluation.packed_ranks)
+            .expect("decrypt ranks");
+        let decoded_ranks = (0..option_count)
+            .map(|option| rank_slots[packed_score_slot(option)])
+            .collect::<Vec<_>>();
+        assert_eq!(decoded_ranks, vec![0, 2, 1, 3]);
+        let target = project_packed_sparse_target_from_rank_evaluation(
+            &context,
+            &rank_evaluation,
+            option_count,
+            option_count,
+        )
+        .expect("target");
+        let target_id_slots = key.decrypt_to_slots(&target.target_id).expect("target ids");
+        let target_order_slots = key
+            .decrypt_to_slots(&target.target_order)
+            .expect("target orders");
+        let decoded_target_ids = (0..option_count)
+            .map(|option| target_id_slots[packed_score_slot(option)])
+            .collect::<Vec<_>>();
+        let decoded_target_orders = (0..option_count)
+            .map(|option| target_order_slots[packed_score_slot(option)])
+            .collect::<Vec<_>>();
+        assert_eq!(decoded_target_ids, vec![1, 2, 3, 4]);
+        assert_eq!(decoded_target_orders, vec![1, 3, 2, 4]);
     }
 
     #[test]

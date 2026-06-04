@@ -1,10 +1,28 @@
+use std::time::Instant;
+
 use serde_json::{Value, json};
+
+mod relation_proof;
+
+use relation_proof::{
+    direct_ballot_relation_challenge_bits, generate_direct_ballot_relation_proof,
+    verify_direct_ballot_relation_proof,
+};
 
 use crate::{
     bgv::{
-        evaluator::engine::{
-            Ciphertext, DevelopmentBgvKey, EncryptionWitness, ciphertext_canonical_bytes_hex,
-            ciphertext_object_root, encode_slots_to_coefficients, negacyclic_mul, signed_residue,
+        evaluator::{
+            circuit::{EvaluatorContext, modulus_switch_to},
+            engine::{
+                Ciphertext, DevelopmentBgvKey, EncryptionWitness, ciphertext_add,
+                ciphertext_canonical_bytes_hex, ciphertext_object_root,
+                encode_slots_to_coefficients, negacyclic_mul, signed_residue,
+            },
+            top_k::{
+                evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
+                pack_direct_score_slots, packed_score_slot,
+                project_packed_sparse_target_from_rank_evaluation,
+            },
         },
         modular_arithmetic::add_mod,
         profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, PROFILE_ID, profile_hash},
@@ -22,8 +40,10 @@ const DIRECT_BALLOT_OPTION_COUNT: usize = 20;
 const DIRECT_BALLOT_MINIMUM_SCORE: u64 = 1;
 const DIRECT_BALLOT_MAXIMUM_SCORE: u64 = 10;
 const DIRECT_BALLOT_PROOF_RING_DEGREE: usize = 64;
-const DIRECT_BALLOT_FIRST_LIMB_PROOF_COLUMNS: usize = 4;
-const DIRECT_BALLOT_FIRST_LIMB_PROOF_ROWS: usize = 2;
+const DIRECT_BALLOT_RNS_LIMB_PROOF_COLUMNS: usize = 4;
+const DIRECT_BALLOT_RNS_LIMB_PROOF_ROWS: usize = 2;
+const DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL: usize = 15;
+const DIRECT_BALLOT_SINGLE_BALLOT_FULL_TARGET_WORKING_LEVEL: usize = 7;
 
 #[derive(Clone)]
 struct DirectBallotInput {
@@ -45,10 +65,10 @@ struct DirectEncryptedBallot {
     ciphertext_canonical_byte_length: usize,
 }
 
-struct DirectBallotProofAssessment {
-    generation: String,
-    blocker: String,
-    full_rns_coverage: String,
+struct DirectBallotAggregationResult {
+    report: Value,
+    aggregate_ciphertext: Ciphertext,
+    aggregate_scores: Vec<u64>,
 }
 
 pub(crate) fn run_direct_encrypted_ballot_prototype(request: &Value) -> CanonicalResult<Value> {
@@ -60,6 +80,12 @@ pub(crate) fn run_direct_encrypted_ballot_prototype(request: &Value) -> Canonica
         development_evaluator_key_from_passive_setup_package(setup_package, &private_setup_seed)?;
 
     let ballots = read_ballots(request)?;
+    if ballots.len() > 10 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct encrypted ballot proof experiment currently supports at most ten ballots",
+        ));
+    }
     let mut encrypted_ballots = Vec::with_capacity(ballots.len());
     for ballot in ballots {
         let encrypted_ballot = encrypt_direct_ballot(
@@ -72,7 +98,62 @@ pub(crate) fn run_direct_encrypted_ballot_prototype(request: &Value) -> Canonica
         encrypted_ballots.push(encrypted_ballot);
     }
 
-    let proof_assessment = assess_first_limb_encryption_proof();
+    let mut proof_generations = Vec::with_capacity(encrypted_ballots.len());
+    let mut proof_verifications = Vec::with_capacity(encrypted_ballots.len());
+    let mut total_proving_time_milliseconds = 0_u128;
+    let mut total_verification_time_milliseconds = 0_u128;
+    for encrypted_ballot in &encrypted_ballots {
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(&private_setup_seed, encrypted_ballot);
+        let proof_generation_started = Instant::now();
+        let proof_generation = generate_direct_ballot_relation_proof(
+            setup_package,
+            &evaluator_key,
+            encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )?;
+        total_proving_time_milliseconds += proof_generation_started.elapsed().as_millis();
+        let proof_verification_started = Instant::now();
+        let proof_verification = verify_direct_ballot_relation_proof(
+            setup_package,
+            &evaluator_key,
+            encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )?;
+        total_verification_time_milliseconds += proof_verification_started.elapsed().as_millis();
+        proof_generations.push(proof_generation);
+        proof_verifications.push(proof_verification);
+    }
+    let first_proof_generation = proof_generations.first().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct encrypted ballot proof experiment requires at least one proof",
+        )
+    })?;
+    let first_proof_verification = proof_verifications.first().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct encrypted ballot proof experiment requires at least one proof verification",
+        )
+    })?;
+    let total_proof_bytes = proof_generations
+        .iter()
+        .map(|proof_generation| proof_generation.proof_size_bytes)
+        .sum::<usize>();
+    let aggregation_result = verify_direct_ballot_aggregation(&evaluator_key, &encrypted_ballots)?;
+    let evaluator_replay = match optional_direct_ballot_top_count(request)? {
+        Some(top_count) => run_direct_ballot_direct_pair_evaluator(
+            &evaluator_key,
+            &private_setup_seed,
+            &aggregation_result.aggregate_ciphertext,
+            &aggregation_result.aggregate_scores,
+            encrypted_ballots.len(),
+            top_count,
+        )?,
+        None => json!(
+            "Not run in this command. Supply topCount to attempt the direct-pair evaluator route over the direct aggregate."
+        ),
+    };
 
     let ciphertext_byte_lengths = encrypted_ballots
         .iter()
@@ -109,25 +190,48 @@ pub(crate) fn run_direct_encrypted_ballot_prototype(request: &Value) -> Canonica
             "packageHashes": ballot_package_hashes,
             "ciphertextRoots": ciphertext_roots,
             "ciphertextCanonicalByteLengths": ciphertext_byte_lengths,
-            "result": "Direct score slots, one-hot witnesses, batch encoding, encryption algebra, and reserved zero slots passed private preflight."
+            "result": "Direct score slots, one-hot witnesses, batch encoding, all data-limb encryption algebra, and reserved zero slots passed private preflight."
         },
         "proofAttempt": {
-            "relation": "one first-data-prime BGV encryption equation for c0=b*u+p*e0+m and c1=a*u+p*e1",
-            "coverage": "targeted lower-bound relation only: one RNS limb encryption equation is assessed; no complete direct ballot validity proof is generated",
+            "relation": "all BGV data-prime encryption equations for c0=b*u+p*e0+encode(score) and c1=a*u+p*e1, with score-to-encoding carry linkage",
+            "coverage": "all RNS limb encryption equations, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, one-hot Booleanity, randomizer support, and error support are checked by one internal binary transcript; zero-knowledge and claim-bearing soundness accounting are not included yet",
+            "proofEncoding": "internal binary feasibility encoding",
             "sourceRingDegree": POLYNOMIAL_DEGREE,
             "proofRingDegree": DIRECT_BALLOT_PROOF_RING_DEGREE,
-            "statementRows": DIRECT_BALLOT_FIRST_LIMB_PROOF_ROWS,
-            "statementColumns": DIRECT_BALLOT_FIRST_LIMB_PROOF_COLUMNS,
-            "shortResponseVectorLength": direct_ballot_first_limb_short_response_vector_length(),
-            "sourceModulus": DATA_PRIMES[0],
-            "requiredRnsLimbProofCount": DATA_PRIMES.len(),
-            "generation": proof_assessment.generation,
-            "fullRnsCoverage": proof_assessment.full_rns_coverage,
-            "blocker": proof_assessment.blocker
+            "rnsLimbCount": DATA_PRIMES.len(),
+            "statementRowsPerLimb": DIRECT_BALLOT_RNS_LIMB_PROOF_ROWS,
+            "statementColumnsPerLimb": DIRECT_BALLOT_RNS_LIMB_PROOF_COLUMNS,
+            "totalRnsEquationRows": DATA_PRIMES.len() * DIRECT_BALLOT_RNS_LIMB_PROOF_ROWS,
+            "sharedShortResponseVectorLength": direct_ballot_shared_short_response_vector_length(),
+            "duplicatedShortResponseVectorLength": direct_ballot_duplicated_short_response_vector_length(),
+            "binaryRelationCommitmentBytes": first_proof_generation.relation_commitment_bytes,
+            "binarySharedResponseBytes": first_proof_generation.response_bytes,
+            "proofCount": proof_generations.len(),
+            "proofSizeBytes": first_proof_generation.proof_size_bytes,
+            "verifiedProofSizeBytes": first_proof_verification.proof_size_bytes,
+            "totalProofBytes": total_proof_bytes,
+            "proofBytesHash": first_proof_generation.proof_bytes_hash,
+            "statementHash": first_proof_generation.statement_hash_hex,
+            "verifiedStatementHash": first_proof_verification.statement_hash_hex,
+            "relationCommitmentHash": first_proof_generation.relation_commitment_hash_hex,
+            "verifiedRelationCommitmentHash": first_proof_verification.relation_commitment_hash_hex,
+            "challenge": first_proof_generation.challenge.to_string(),
+            "verifiedChallenge": first_proof_verification.challenge.to_string(),
+            "challengeSoundness": format!("single {}-bit challenge for feasibility measurement only; support polynomial checks are present, but zero-knowledge and claim-bearing soundness accounting are still missing", direct_ballot_relation_challenge_bits()),
+            "relationCommitmentPolynomialCount": first_proof_generation.relation_commitment_polynomial_count,
+            "sharedResponsePolynomialCount": first_proof_generation.shared_response_polynomial_count,
+            "sharedScoreResponseScalarCount": first_proof_generation.shared_response_scalar_count,
+            "responseSharing": "one binary response vector is checked against all 17 RNS limb equations, score-linear constraints, and support constraints; response bytes are not duplicated per limb",
+            "provingTimeMilliseconds": total_proving_time_milliseconds.to_string(),
+            "verificationTimeMilliseconds": total_verification_time_milliseconds.to_string(),
+            "proofGate": first_proof_generation.proof_gate,
+            "generation": "Generated and verified one internal binary proof for the all-limb BGV encryption relation, score-linear constraints, and support constraints. This is not claim-bearing ballot validity.",
+            "fullRnsCoverage": "The proof covers all 17 BGV RNS limbs with one shared randomizer, error, encoding-carry, score, and one-hot response vector.",
+            "blocker": "Next missing pieces are zero-knowledge and soundness accounting, practical evaluator replay, and Node/WASM or mobile runtime evidence."
         },
-        "aggregation": "Not run because the direct ballot proof gate is red.",
-        "evaluatorReplay": "Not run because the direct ballot proof gate is red.",
-        "decision": "Direct BGV ballot encryption and private preflight work on the prototype path. Complete claim-bearing ballot proof coverage needs a new proof backend shape before aggregation or evaluator replay should be treated as a closure path."
+        "aggregation": aggregation_result.report,
+        "evaluatorReplay": evaluator_replay,
+        "decision": "Direct BGV ballot encryption, all-limb private preflight, one internal shared-response validity proof, and direct ciphertext aggregation work on the prototype path. The direct-pair evaluator route is used only when topCount is supplied and must match the target oracle before runtime evidence counts."
     }))
 }
 
@@ -282,7 +386,7 @@ fn validate_direct_ballot_preflight(
         ));
     }
     validate_encryption_witness_support(&ballot.encryption_witness)?;
-    validate_first_limb_encryption_relation(evaluator_key, ballot)
+    validate_all_limb_encryption_relation(evaluator_key, ballot)
 }
 
 fn validate_encryption_witness_support(witness: &EncryptionWitness) -> CanonicalResult<()> {
@@ -327,22 +431,58 @@ fn validate_signed_support(
     Ok(())
 }
 
-fn validate_first_limb_encryption_relation(
+fn validate_all_limb_encryption_relation(
     evaluator_key: &DevelopmentBgvKey,
     ballot: &DirectEncryptedBallot,
 ) -> CanonicalResult<()> {
-    let modulus = DATA_PRIMES[0];
     let (public_component_zero, public_component_one) = evaluator_key.public_key_components();
+    if ballot.ciphertext.components.len() != 2
+        || ballot.ciphertext.components[0].len() != DATA_PRIMES.len()
+        || ballot.ciphertext.components[1].len() != DATA_PRIMES.len()
+        || public_component_zero.len() != DATA_PRIMES.len()
+        || public_component_one.len() != DATA_PRIMES.len()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct encrypted ballot RNS limb relation requires two full data-prime ciphertext components and a full public key",
+        ));
+    }
+    for (limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+        validate_limb_encryption_relation(
+            ballot,
+            public_component_zero,
+            public_component_one,
+            limb_index,
+            modulus,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_limb_encryption_relation(
+    ballot: &DirectEncryptedBallot,
+    public_component_zero: &[Vec<u64>],
+    public_component_one: &[Vec<u64>],
+    limb_index: usize,
+    modulus: u64,
+) -> CanonicalResult<()> {
     let randomizer_residues = ballot
         .encryption_witness
         .randomizer_coefficients
         .iter()
         .map(|coefficient| signed_residue(*coefficient, modulus))
         .collect::<Vec<_>>();
-    let public_key_product =
-        negacyclic_mul(&public_component_zero[0], &randomizer_residues, modulus)?;
-    let public_sample_product =
-        negacyclic_mul(&public_component_one[0], &randomizer_residues, modulus)?;
+    let public_key_product = negacyclic_mul(
+        &public_component_zero[limb_index],
+        &randomizer_residues,
+        modulus,
+    )?;
+    let public_sample_product = negacyclic_mul(
+        &public_component_one[limb_index],
+        &randomizer_residues,
+        modulus,
+    )?;
     for coefficient_index in 0..POLYNOMIAL_DEGREE {
         let expected_component_zero = add_mod(
             add_mod(
@@ -357,10 +497,11 @@ fn validate_first_limb_encryption_relation(
             ballot.plaintext_coefficients[coefficient_index],
             modulus,
         )?;
-        if expected_component_zero != ballot.ciphertext.components[0][0][coefficient_index] {
+        if expected_component_zero != ballot.ciphertext.components[0][limb_index][coefficient_index]
+        {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "direct encrypted ballot first-limb c0 relation failed",
+                format!("direct encrypted ballot RNS limb {limb_index} c0 relation failed"),
             ));
         }
         let expected_component_one = add_mod(
@@ -372,10 +513,11 @@ fn validate_first_limb_encryption_relation(
             ),
             modulus,
         )?;
-        if expected_component_one != ballot.ciphertext.components[1][0][coefficient_index] {
+        if expected_component_one != ballot.ciphertext.components[1][limb_index][coefficient_index]
+        {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "direct encrypted ballot first-limb c1 relation failed",
+                format!("direct encrypted ballot RNS limb {limb_index} c1 relation failed"),
             ));
         }
     }
@@ -383,17 +525,285 @@ fn validate_first_limb_encryption_relation(
     Ok(())
 }
 
-fn direct_ballot_first_limb_short_response_vector_length() -> usize {
-    DIRECT_BALLOT_FIRST_LIMB_PROOF_COLUMNS * (POLYNOMIAL_DEGREE / DIRECT_BALLOT_PROOF_RING_DEGREE)
-        + 1
+fn direct_ballot_shared_short_response_vector_length() -> usize {
+    DIRECT_BALLOT_RNS_LIMB_PROOF_COLUMNS * (POLYNOMIAL_DEGREE / DIRECT_BALLOT_PROOF_RING_DEGREE) + 1
 }
 
-fn assess_first_limb_encryption_proof() -> DirectBallotProofAssessment {
-    DirectBallotProofAssessment {
-        generation: "Not generated by the prototype command. The required statement has 2049 short-response polynomials for one BGV limb, and the available generic linear proof profiles do not give a rapid supported encoding for that relation.".to_string(),
-        full_rns_coverage: "A complete direct ballot proof would need all 17 BGV RNS limbs bound to the same plaintext and encryption randomness witnesses.".to_string(),
-        blocker: "Current backend shape is wrong for direct BGV ballot proof coverage: it is single-source-modulus, lacks shared witness binding across RNS limbs, and the aggregate-compatible profile either fails its proof constraints or exceeds the rapid PoC runtime budget for one limb.".to_string(),
+fn direct_ballot_duplicated_short_response_vector_length() -> usize {
+    direct_ballot_shared_short_response_vector_length() * DATA_PRIMES.len()
+}
+
+fn verify_direct_ballot_aggregation(
+    evaluator_key: &DevelopmentBgvKey,
+    encrypted_ballots: &[DirectEncryptedBallot],
+) -> CanonicalResult<DirectBallotAggregationResult> {
+    let mut aggregate_ciphertext = encrypted_ballots
+        .first()
+        .map(|ballot| ballot.ciphertext.clone())
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "direct encrypted ballot aggregation requires at least one ballot",
+            )
+        })?;
+    for encrypted_ballot in encrypted_ballots.iter().skip(1) {
+        aggregate_ciphertext = ciphertext_add(&aggregate_ciphertext, &encrypted_ballot.ciphertext)?;
     }
+
+    let aggregate_slots = evaluator_key.decrypt_to_slots(&aggregate_ciphertext)?;
+    let aggregate_scores = aggregate_slots[..DIRECT_BALLOT_OPTION_COUNT].to_vec();
+    let expected_scores = direct_ballot_plaintext_aggregate_scores(encrypted_ballots)?;
+    if aggregate_scores != expected_scores {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "direct encrypted ballot aggregate scores do not match the plaintext oracle",
+        ));
+    }
+    if aggregate_slots[DIRECT_BALLOT_OPTION_COUNT..]
+        .iter()
+        .any(|slot| *slot != 0)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "direct encrypted ballot aggregate has a non-zero reserved slot",
+        ));
+    }
+    let aggregate_ciphertext_root = ciphertext_object_root(&aggregate_ciphertext)?;
+    let aggregate_ciphertext_canonical_bytes_hex =
+        ciphertext_canonical_bytes_hex(&aggregate_ciphertext)?;
+
+    let report = json!({
+        "result": "Verified the supplied direct ballot proofs, aggregated their ciphertexts, and test-decrypted aggregate score slots to the plaintext oracle.",
+        "ballotCount": encrypted_ballots.len(),
+        "aggregateCiphertextRoot": aggregate_ciphertext_root,
+        "aggregateCiphertextCanonicalByteLength": aggregate_ciphertext_canonical_bytes_hex.len() / 2,
+        "aggregateScores": aggregate_scores,
+        "plaintextOracleScores": expected_scores
+    });
+
+    Ok(DirectBallotAggregationResult {
+        report,
+        aggregate_ciphertext,
+        aggregate_scores,
+    })
+}
+
+fn run_direct_ballot_direct_pair_evaluator(
+    evaluator_key: &DevelopmentBgvKey,
+    private_setup_seed: &str,
+    aggregate_ciphertext: &Ciphertext,
+    aggregate_scores: &[u64],
+    ballot_count: usize,
+    top_count: usize,
+) -> CanonicalResult<Value> {
+    if top_count != DIRECT_BALLOT_OPTION_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "direct encrypted ballot evaluator prefix top counts remain blocked by target projection correctness",
+        ));
+    }
+    let score_domain_max = direct_ballot_comparison_domain_max(ballot_count)?;
+    let aggregate_ciphertext_root = ciphertext_object_root(aggregate_ciphertext)?;
+    let replay_seed = hash512_hex(
+        "sealed-lattice/direct-encrypted-ballot/direct-pair-evaluator-seed-v1",
+        &[
+            private_setup_seed.as_bytes(),
+            aggregate_ciphertext_root.as_bytes(),
+            top_count.to_string().as_bytes(),
+        ],
+    );
+    let working_level = direct_ballot_evaluator_working_level(ballot_count, top_count);
+    let context = EvaluatorContext::from_key(evaluator_key.clone(), &replay_seed, working_level)?;
+    let working_aggregate = modulus_switch_to(aggregate_ciphertext, context.working_level())?;
+    let replay_started = Instant::now();
+    let packed_scores = pack_direct_score_slots(
+        &context,
+        &working_aggregate,
+        DIRECT_BALLOT_OPTION_COUNT,
+        &replay_seed,
+    )?;
+    let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
+        &context,
+        &packed_scores,
+        DIRECT_BALLOT_OPTION_COUNT,
+        score_domain_max,
+        &replay_seed,
+    )?;
+    let target = project_packed_sparse_target_from_rank_evaluation(
+        &context,
+        &rank_evaluation,
+        DIRECT_BALLOT_OPTION_COUNT,
+        top_count,
+    )?;
+    let replay_time_milliseconds = replay_started.elapsed().as_millis();
+    let target_id_slots = evaluator_key.decrypt_to_slots(&target.target_id)?;
+    let target_order_slots = evaluator_key.decrypt_to_slots(&target.target_order)?;
+    let decoded_target_ids = direct_packed_option_slots(&target_id_slots);
+    let decoded_target_orders = direct_packed_option_slots(&target_order_slots);
+    let (oracle_target_ids, oracle_target_orders) =
+        direct_ballot_plaintext_target_slots(aggregate_scores, top_count)?;
+    if decoded_target_ids != oracle_target_ids || decoded_target_orders != oracle_target_orders {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "direct encrypted ballot packed batched-pair evaluator did not match the plaintext target oracle",
+        ));
+    }
+
+    Ok(json!({
+        "result": "Replayed the packed batched-pair encrypted evaluator over the direct aggregate and test-decrypted the sparse target to the plaintext oracle.",
+        "topCount": top_count,
+        "scoreDomainMax": score_domain_max,
+        "workingLevel": context.working_level(),
+        "packedScoreRoot": ciphertext_object_root(&packed_scores)?,
+        "rankRoot": ciphertext_object_root(&rank_evaluation.packed_ranks)?,
+        "targetIdRoot": ciphertext_object_root(&target.target_id)?,
+        "targetOrderRoot": ciphertext_object_root(&target.target_order)?,
+        "decodedTargetIds": decoded_target_ids,
+        "decodedTargetOrders": decoded_target_orders,
+        "plaintextOracleTargetIds": oracle_target_ids,
+        "plaintextOracleTargetOrders": oracle_target_orders,
+        "replayTimeMilliseconds": replay_time_milliseconds.to_string()
+    }))
+}
+
+fn direct_packed_option_slots(slots: &[u64]) -> Vec<u64> {
+    (0..DIRECT_BALLOT_OPTION_COUNT)
+        .map(|option| slots[packed_score_slot(option)])
+        .collect()
+}
+
+fn direct_ballot_evaluator_working_level(ballot_count: usize, top_count: usize) -> usize {
+    if ballot_count == 1 && top_count == DIRECT_BALLOT_OPTION_COUNT {
+        DIRECT_BALLOT_SINGLE_BALLOT_FULL_TARGET_WORKING_LEVEL
+    } else {
+        DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL
+    }
+}
+
+fn direct_ballot_plaintext_aggregate_scores(
+    encrypted_ballots: &[DirectEncryptedBallot],
+) -> CanonicalResult<Vec<u64>> {
+    let mut aggregate_scores = vec![0_u64; DIRECT_BALLOT_OPTION_COUNT];
+    for encrypted_ballot in encrypted_ballots {
+        if encrypted_ballot.input.scores.len() != DIRECT_BALLOT_OPTION_COUNT {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "direct encrypted ballot aggregate oracle requires each ballot to have twenty scores",
+            ));
+        }
+        for (aggregate_score, score) in aggregate_scores
+            .iter_mut()
+            .zip(encrypted_ballot.input.scores.iter())
+        {
+            *aggregate_score = add_mod(*aggregate_score, *score, PLAINTEXT_MODULUS)?;
+        }
+    }
+
+    Ok(aggregate_scores)
+}
+
+fn direct_ballot_comparison_domain_max(ballot_count: usize) -> CanonicalResult<u64> {
+    let ballot_count_u64 = usize_to_u64(ballot_count, "ballot count")?;
+    let score_span = DIRECT_BALLOT_MAXIMUM_SCORE - DIRECT_BALLOT_MINIMUM_SCORE;
+
+    score_span.checked_mul(ballot_count_u64).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct encrypted ballot comparison domain overflowed",
+        )
+    })
+}
+
+fn direct_ballot_plaintext_target_slots(
+    aggregate_scores: &[u64],
+    top_count: usize,
+) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
+    if aggregate_scores.len() != DIRECT_BALLOT_OPTION_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct encrypted ballot target oracle requires twenty aggregate scores",
+        ));
+    }
+    if top_count == 0 || top_count > DIRECT_BALLOT_OPTION_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "topCount must be between one and the direct ballot option count",
+        ));
+    }
+
+    let mut ranked_options = aggregate_scores
+        .iter()
+        .enumerate()
+        .collect::<Vec<(usize, &u64)>>();
+    ranked_options.sort_by(|(left_option, left_score), (right_option, right_score)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left_option.cmp(right_option))
+    });
+    let mut ranks_by_option = vec![0_usize; DIRECT_BALLOT_OPTION_COUNT];
+    for (rank, (option_index, _)) in ranked_options.iter().enumerate() {
+        ranks_by_option[*option_index] = rank;
+    }
+    let mut target_ids = vec![0_u64; DIRECT_BALLOT_OPTION_COUNT];
+    let mut target_orders = vec![0_u64; DIRECT_BALLOT_OPTION_COUNT];
+    for (option_index, rank) in ranks_by_option.iter().enumerate() {
+        if *rank < top_count {
+            target_ids[option_index] = usize_to_u64(option_index + 1, "option identifier")?;
+            target_orders[option_index] = usize_to_u64(rank + 1, "target order")?;
+        }
+    }
+
+    Ok((target_ids, target_orders))
+}
+
+fn optional_direct_ballot_top_count(request: &Value) -> CanonicalResult<Option<usize>> {
+    let Some(value) = request.get("topCount") else {
+        return Ok(None);
+    };
+    let raw_top_count = value.as_u64().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "topCount must be an unsigned integer when supplied",
+        )
+    })?;
+    let top_count = usize::try_from(raw_top_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "topCount does not fit usize",
+        )
+    })?;
+    if top_count == 0 || top_count > DIRECT_BALLOT_OPTION_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "topCount must be between one and the direct ballot option count",
+        ));
+    }
+
+    Ok(Some(top_count))
+}
+
+fn usize_to_u64(value: usize, name: &str) -> CanonicalResult<u64> {
+    u64::try_from(value).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{name} does not fit u64"),
+        )
+    })
+}
+
+fn direct_ballot_proof_randomness_seed(
+    private_setup_seed: &str,
+    ballot: &DirectEncryptedBallot,
+) -> String {
+    hash512_hex(
+        "sealed-lattice/direct-encrypted-ballot/proof-randomness-seed-v1",
+        &[
+            private_setup_seed.as_bytes(),
+            ballot.ciphertext_root.as_bytes(),
+            ballot.input.voter_identity.as_bytes(),
+            ballot.input.action_context_hash.as_bytes(),
+        ],
+    )
 }
 
 fn direct_ballot_slots(scores: &[u64]) -> Vec<u64> {
@@ -594,7 +1004,7 @@ mod tests {
     const DIRECT_BALLOT_TEST_SETUP_SEED: &str = "direct-encrypted-ballot-test-setup-seed";
 
     #[test]
-    fn direct_encrypted_ballot_command_reports_proof_blocker() {
+    fn direct_encrypted_ballot_command_reports_current_proof_status() {
         let setup_package = setup_package();
         let result = run_direct_encrypted_ballot_prototype(&json!({
             "setupPackage": setup_package,
@@ -622,14 +1032,53 @@ mod tests {
         assert_eq!(
             result["proofAttempt"]["coverage"].as_str(),
             Some(
-                "targeted lower-bound relation only: one RNS limb encryption equation is assessed; no complete direct ballot validity proof is generated"
+                "all RNS limb encryption equations, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, one-hot Booleanity, randomizer support, and error support are checked by one internal binary transcript; zero-knowledge and claim-bearing soundness accounting are not included yet"
             )
         );
         assert!(
             result["proofAttempt"]["generation"]
                 .as_str()
                 .expect("proof generation assessment")
-                .starts_with("Not generated by the prototype command")
+                .starts_with("Generated and verified one internal binary proof")
+        );
+        assert_eq!(
+            result["proofAttempt"]["proofSizeBytes"],
+            result["proofAttempt"]["verifiedProofSizeBytes"]
+        );
+        assert_eq!(
+            result["proofAttempt"]["proofSizeBytes"].as_u64(),
+            Some(13_374_704)
+        );
+        assert_eq!(
+            result["proofAttempt"]["responseSharing"].as_str(),
+            Some(
+                "one binary response vector is checked against all 17 RNS limb equations, score-linear constraints, and support constraints; response bytes are not duplicated per limb"
+            )
+        );
+        assert_eq!(
+            result["proofAttempt"]["sharedScoreResponseScalarCount"].as_u64(),
+            Some(
+                u64::try_from(relation_proof::direct_ballot_relation_response_scalar_count())
+                    .expect("response scalar count fits u64")
+            )
+        );
+        assert_eq!(
+            result["proofAttempt"]["rnsLimbCount"].as_u64(),
+            Some(u64::try_from(DATA_PRIMES.len()).expect("limb count fits u64"))
+        );
+        assert_eq!(
+            result["proofAttempt"]["sharedShortResponseVectorLength"].as_u64(),
+            Some(
+                u64::try_from(direct_ballot_shared_short_response_vector_length())
+                    .expect("response length fits u64")
+            )
+        );
+        assert_eq!(
+            result["proofAttempt"]["duplicatedShortResponseVectorLength"].as_u64(),
+            Some(
+                u64::try_from(direct_ballot_duplicated_short_response_vector_length())
+                    .expect("duplicated response length fits u64")
+            )
         );
         assert_eq!(
             result["ballotPackages"]["ciphertextRoots"]
@@ -638,14 +1087,469 @@ mod tests {
                 .len(),
             1
         );
+        assert_eq!(result["aggregation"]["ballotCount"].as_u64(), Some(1));
         assert_eq!(
-            result["aggregation"].as_str(),
-            Some("Not run because the direct ballot proof gate is red.")
+            result["aggregation"]["aggregateScores"].as_array(),
+            result["aggregation"]["plaintextOracleScores"].as_array()
+        );
+        assert_eq!(
+            result["aggregation"]["result"].as_str(),
+            Some(
+                "Verified the supplied direct ballot proofs, aggregated their ciphertexts, and test-decrypted aggregate score slots to the plaintext oracle."
+            )
         );
         assert_eq!(
             result["evaluatorReplay"].as_str(),
-            Some("Not run because the direct ballot proof gate is red.")
+            Some(
+                "Not run in this command. Supply topCount to attempt the direct-pair evaluator route over the direct aggregate."
+            )
         );
+    }
+
+    #[test]
+    fn direct_ballot_shared_rns_relation_proof_verifies() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+
+        let proof_verification = verify_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect("proof verification");
+
+        assert_eq!(
+            proof_verification.relation_commitment_hash_hex,
+            proof_generation.relation_commitment_hash_hex
+        );
+        assert_eq!(proof_verification.challenge, proof_generation.challenge);
+        assert!(proof_generation.proof_size_bytes > 0);
+    }
+
+    #[test]
+    fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let first_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("first encrypted ballot");
+        let mut second_input = valid_ballot_input();
+        second_input.voter_identity = "voter-aggregation-second".to_string();
+        second_input.scores = vec![1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10];
+        let second_ballot = encrypt_direct_ballot(&setup_package, &evaluator_key, second_input, 1)
+            .expect("second encrypted ballot");
+
+        let aggregation_report =
+            verify_direct_ballot_aggregation(&evaluator_key, &[first_ballot, second_ballot])
+                .expect("aggregation report");
+
+        assert_eq!(aggregation_report.report["ballotCount"].as_u64(), Some(2));
+        assert_eq!(
+            aggregation_report.report["aggregateScores"],
+            json!([
+                11, 10, 10, 9, 9, 8, 8, 7, 7, 6, 7, 8, 10, 11, 13, 14, 16, 17, 19, 20
+            ])
+        );
+        assert_eq!(
+            aggregation_report.report["aggregateScores"],
+            aggregation_report.report["plaintextOracleScores"]
+        );
+    }
+
+    #[test]
+    #[ignore = "heavy direct ballot evaluator replay candidate; run selectively"]
+    fn direct_ballot_packed_batched_pair_evaluator_top_count_20_matches_oracle() {
+        let setup_package = setup_package();
+        let result = run_direct_encrypted_ballot_prototype(&json!({
+            "setupPackage": setup_package,
+            "setupPrivateWitness": {
+                "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            },
+            "topCount": DIRECT_BALLOT_OPTION_COUNT,
+            "ballots": [
+                {
+                    "voterIdentity": "voter-validation",
+                    "actionContextHash": "a".repeat(128),
+                    "scores": [
+                        10, 9, 8, 7, 6,
+                        5, 4, 3, 2, 1,
+                        1, 2, 3, 4, 5,
+                        6, 7, 8, 9, 10
+                    ]
+                }
+            ]
+        }))
+        .expect("direct encrypted ballot prototype succeeds");
+
+        assert_eq!(
+            result["evaluatorReplay"]["topCount"].as_u64(),
+            Some(u64::try_from(DIRECT_BALLOT_OPTION_COUNT).expect("option count fits u64"))
+        );
+        assert_eq!(
+            result["evaluatorReplay"]["decodedTargetIds"],
+            result["evaluatorReplay"]["plaintextOracleTargetIds"]
+        );
+        assert_eq!(
+            result["evaluatorReplay"]["decodedTargetOrders"],
+            result["evaluatorReplay"]["plaintextOracleTargetOrders"]
+        );
+    }
+
+    #[test]
+    fn direct_ballot_shared_rns_relation_proof_rejects_last_limb_ciphertext_mutation() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let mut encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+        let last_limb_index = DATA_PRIMES.len() - 1;
+        encrypted_ballot.ciphertext.components[0][last_limb_index][0] = add_mod(
+            encrypted_ballot.ciphertext.components[0][last_limb_index][0],
+            1,
+            DATA_PRIMES[last_limb_index],
+        )
+        .expect("mutated residue");
+
+        let error = verify_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect_err("mutated last limb must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(
+            error.message.contains("not bound to this statement")
+                || error.message.contains("limb 16 c0 response")
+        );
+    }
+
+    #[test]
+    fn direct_ballot_shared_rns_relation_proof_rejects_response_mutation() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let mut proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+        let response_offset =
+            8 + 64 + 8 + relation_proof::direct_ballot_relation_commitment_bytes();
+        proof_generation.proof_bytes[response_offset] ^= 1;
+
+        let error = verify_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect_err("mutated response must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("randomizer support check failed"));
+    }
+
+    #[test]
+    fn direct_ballot_shared_rns_relation_proof_rejects_score_response_mutation() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let mut proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+        let score_response_offset = direct_ballot_score_response_offset();
+        proof_generation.proof_bytes[score_response_offset] ^= 1;
+
+        let error = verify_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect_err("mutated score response must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("direct ballot score proof option 0"));
+    }
+
+    #[test]
+    fn direct_ballot_shared_rns_relation_proof_rejects_one_hot_response_mutation() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let mut proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+        let one_hot_response_offset =
+            direct_ballot_score_response_offset() + DIRECT_BALLOT_OPTION_COUNT * 8;
+        proof_generation.proof_bytes[one_hot_response_offset] ^= 1;
+
+        let error = verify_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect_err("mutated one-hot response must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("direct ballot score proof option 0"));
+    }
+
+    #[test]
+    fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_witness() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let mut encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let mut one_hot_witnesses = one_hot_witnesses_for_scores(&encrypted_ballot.input.scores);
+        one_hot_witnesses[0] = vec![0, 0, 0, 0, 0, 0, 0, 65536, 2, 0];
+        encrypted_ballot.input.one_hot_witnesses = Some(one_hot_witnesses);
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+
+        let error = verify_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect_err("non-Boolean one-hot witness must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(
+            error
+                .message
+                .contains("one-hot Booleanity option 0 support check failed")
+        );
+    }
+
+    #[test]
+    fn direct_ballot_shared_rns_relation_proof_rejects_commitment_mutation() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let mut proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+        let commitment_offset = 8 + 64 + 8;
+        proof_generation.proof_bytes[commitment_offset] ^= 1;
+
+        let error = verify_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect_err("mutated commitment must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(
+            error
+                .message
+                .contains("challenge does not match its commitment")
+        );
+    }
+
+    #[test]
+    fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let proof_randomness_seed_hex =
+            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        let proof_generation = generate_direct_ballot_relation_proof(
+            &setup_package,
+            &evaluator_key,
+            &encrypted_ballot,
+            &proof_randomness_seed_hex,
+        )
+        .expect("proof generation");
+        let wrong_setup_package = setup_package_with_seed("direct-encrypted-ballot-wrong-seed");
+        let wrong_evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &wrong_setup_package,
+            "direct-encrypted-ballot-wrong-seed",
+        )
+        .expect("wrong evaluator key");
+
+        let error = verify_direct_ballot_relation_proof(
+            &wrong_setup_package,
+            &wrong_evaluator_key,
+            &encrypted_ballot,
+            &proof_generation.proof_bytes,
+        )
+        .expect_err("wrong public key must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("not bound to this statement"));
+    }
+
+    #[test]
+    fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let mut encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        let last_limb_index = DATA_PRIMES.len() - 1;
+        encrypted_ballot.ciphertext.components[0][last_limb_index][0] = add_mod(
+            encrypted_ballot.ciphertext.components[0][last_limb_index][0],
+            1,
+            DATA_PRIMES[last_limb_index],
+        )
+        .expect("mutated residue");
+
+        let error = validate_all_limb_encryption_relation(&evaluator_key, &encrypted_ballot)
+            .expect_err("last limb mutation must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("RNS limb 16 c0 relation failed"));
+    }
+
+    #[test]
+    fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let mut encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        encrypted_ballot.plaintext_coefficients[0] += 1;
+
+        let error = validate_all_limb_encryption_relation(&evaluator_key, &encrypted_ballot)
+            .expect_err("different plaintext witness must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("RNS limb 0 c0 relation failed"));
+    }
+
+    #[test]
+    fn direct_ballot_support_rejects_out_of_range_randomizer() {
+        let setup_package = setup_package();
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &setup_package,
+            DIRECT_BALLOT_TEST_SETUP_SEED,
+        )
+        .expect("evaluator key");
+        let mut encrypted_ballot =
+            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input(), 0)
+                .expect("encrypted ballot");
+        encrypted_ballot.encryption_witness.randomizer_coefficients[0] = 2;
+
+        let error = validate_encryption_witness_support(&encrypted_ballot.encryption_witness)
+            .expect_err("out-of-range randomizer must reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains(
+            "direct encrypted ballot randomizer has a coefficient outside the expected support"
+        ));
     }
 
     #[test]
@@ -698,7 +1602,29 @@ mod tests {
         }
     }
 
+    fn one_hot_witnesses_for_scores(scores: &[u64]) -> Vec<Vec<u64>> {
+        scores
+            .iter()
+            .map(|score| {
+                let mut row = vec![0_u64; 10];
+                row[usize::try_from(score - 1).expect("score index fits usize")] = 1;
+                row
+            })
+            .collect()
+    }
+
+    fn direct_ballot_score_response_offset() -> usize {
+        8 + 64
+            + 8
+            + relation_proof::direct_ballot_relation_commitment_bytes()
+            + 4 * POLYNOMIAL_DEGREE * 8
+    }
+
     fn setup_package() -> Value {
+        setup_package_with_seed(DIRECT_BALLOT_TEST_SETUP_SEED)
+    }
+
+    fn setup_package_with_seed(setup_seed: &str) -> Value {
         crate::bgv::commands::generate_bgv_passive_setup_from_request(&json!({
             "ceremonyId": "direct-encrypted-ballot-test-ceremony",
             "manifestHash": derive_protocol_hash(
@@ -718,7 +1644,7 @@ mod tests {
                 { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 1 },
                 { "trusteeIdentity": "trustee-3", "rosterPosition": 2, "boardPosition": 2 }
             ],
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": setup_seed
         }))
         .expect("setup package")
     }

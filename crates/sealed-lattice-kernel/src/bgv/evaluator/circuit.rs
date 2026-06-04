@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::RwLock};
 
 use crate::{
     bgv::{
@@ -27,6 +27,7 @@ pub(crate) struct EvaluatorContext {
     relinearization_keys: Vec<Option<KeySwitchKey>>,
     rotation_key_seeds: BTreeMap<(usize, usize), String>,
     rotation_keys: BTreeMap<(usize, usize), KeySwitchKey>,
+    generated_rotation_keys: RwLock<BTreeMap<(usize, usize, String), KeySwitchKey>>,
 }
 
 impl EvaluatorContext {
@@ -79,6 +80,7 @@ impl EvaluatorContext {
             relinearization_keys,
             rotation_key_seeds,
             rotation_keys: BTreeMap::new(),
+            generated_rotation_keys: RwLock::new(BTreeMap::new()),
         })
     }
 
@@ -98,6 +100,7 @@ impl EvaluatorContext {
             relinearization_keys: key_material.relinearization_keys,
             rotation_key_seeds: BTreeMap::new(),
             rotation_keys: key_material.rotation_keys,
+            generated_rotation_keys: RwLock::new(BTreeMap::new()),
         })
     }
 
@@ -109,6 +112,7 @@ impl EvaluatorContext {
             relinearization_keys: key_material.relinearization_keys,
             rotation_key_seeds: BTreeMap::new(),
             rotation_keys: key_material.rotation_keys,
+            generated_rotation_keys: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -165,7 +169,31 @@ impl EvaluatorContext {
             )
         })?;
 
-        generate_galois_key(key, galois_element, level, seed)
+        let cache_key = (galois_element, level, seed.to_string());
+        {
+            let generated_rotation_keys = self.generated_rotation_keys.read().map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "generated rotation-key cache is poisoned",
+                )
+            })?;
+            if let Some(rotation_key) = generated_rotation_keys.get(&cache_key) {
+                return Ok(rotation_key.clone());
+            }
+        }
+
+        let generated_key = generate_galois_key(key, galois_element, level, seed)?;
+        self.generated_rotation_keys
+            .write()
+            .map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "generated rotation-key cache is poisoned",
+                )
+            })?
+            .insert(cache_key, generated_key.clone());
+
+        Ok(generated_key)
     }
 
     pub(crate) fn rotate_ciphertext(
