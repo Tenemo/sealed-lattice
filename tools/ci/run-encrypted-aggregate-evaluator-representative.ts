@@ -2,7 +2,10 @@ import { Buffer } from 'node:buffer';
 import path from 'node:path';
 
 import {
+    hashJson,
     readJsonFile,
+    runtimeContext,
+    type RuntimeBinding,
     writeJsonFileAtomic,
 } from './aggregate-derivation-kernel/checkpoints.js';
 
@@ -32,6 +35,14 @@ type RunnerConfig = {
     readonly checkpointDir: string;
     readonly requestBasePath: string;
     readonly setupSeed: string;
+    readonly topCounts: readonly number[];
+};
+
+type RepresentativeRunBinding = RuntimeBinding & {
+    readonly objectType: 'EncryptedAggregateEvaluatorRepresentativeRunBinding';
+    readonly objectVersion: 1;
+    readonly requestBaseHash: string;
+    readonly runnerProfile: 'accepted-input-representative-evaluator-sweep-v1';
     readonly topCounts: readonly number[];
 };
 
@@ -138,6 +149,19 @@ export const canonicalCiphertextByteLength = (
 
     return canonicalBytesHex.length / 2;
 };
+
+export const buildRepresentativeRunBinding = (input: {
+    readonly requestBase: RepresentativeEvaluatorRequestBase;
+    readonly runtime: RuntimeBinding;
+    readonly topCounts: readonly number[];
+}): RepresentativeRunBinding => ({
+    ...input.runtime,
+    objectType: 'EncryptedAggregateEvaluatorRepresentativeRunBinding',
+    objectVersion: 1,
+    requestBaseHash: hashJson(input.requestBase),
+    runnerProfile: 'accepted-input-representative-evaluator-sweep-v1',
+    topCounts: input.topCounts,
+});
 
 const argumentValue = (
     argumentsList: readonly string[],
@@ -384,6 +408,7 @@ const main = async (): Promise<void> => {
     }
     const config = parseConfig(process.argv.slice(2));
     const startedAt = Date.now();
+    const runtime = await runtimeContext();
     console.log(`reading evaluator request base: ${config.requestBasePath}`);
     const requestBase = await readJsonFile<RepresentativeEvaluatorRequestBase>(
         config.requestBasePath,
@@ -428,11 +453,20 @@ const main = async (): Promise<void> => {
         setupPackage: requestBase.setupPackage,
         topCounts: config.topCounts,
     });
+    const representativeRunBinding = buildRepresentativeRunBinding({
+        requestBase,
+        runtime,
+        topCounts: sweep.topCounts,
+    });
+    const boundSweep = {
+        ...sweep,
+        representativeRunBinding,
+    };
     const outputPath = outputPathForTopCounts(
         config.checkpointDir,
         config.topCounts,
     );
-    await writeJsonFileAtomic(outputPath, sweep);
+    await writeJsonFileAtomic(outputPath, boundSweep);
     const summary = {
         aggregateReadyRecordHash: requiredNestedString(
             requestBase.aggregateReadyRecord,
@@ -456,6 +490,7 @@ const main = async (): Promise<void> => {
             requestBase,
             sweep,
         }),
+        representativeRunBinding,
         requestBasePath: config.requestBasePath,
         setupKeyMetrics: summarizeSetupKeyMetrics(requestBase.setupPackage),
         statusLabels: sweep.statusLabels,

@@ -1057,7 +1057,7 @@ mod tests {
         appendix_d_public_input_statement, evaluation_context_hash, evaluation_noise_certificate,
         target_ciphertext_hash, target_proposal_hash, top_k_evaluation_record,
     };
-    use crate::bgv::evaluator::top_k::DIRECT_COMPARISON_BABY_STEP_COUNT;
+    use crate::bgv::{evaluator::top_k::DIRECT_COMPARISON_BABY_STEP_COUNT, profile::DATA_PRIMES};
 
     fn parameters() -> EvaluationParameters {
         EvaluationParameters {
@@ -1336,7 +1336,7 @@ mod tests {
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputMultiplicativeDepth"],
-            14
+            13
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputPreComparisonLevelDrop"],
@@ -1344,13 +1344,16 @@ mod tests {
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputLevelDropCount"],
-            15
+            14
         );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputDepthOptimalMultiplicativeDepth"],
-            14
+            13
         );
-        assert_eq!(heavy["usableMultiplicativeDepth"], 15);
+        assert_eq!(
+            heavy["usableMultiplicativeDepth"],
+            u64::try_from(DATA_PRIMES.len().saturating_sub(2)).expect("data-prime count fits u64")
+        );
         assert_eq!(
             heavy["operationCounts"]["comparisonInputBabyStepCount"],
             DIRECT_COMPARISON_BABY_STEP_COUNT
@@ -1364,14 +1367,14 @@ mod tests {
             top_count_parameters.top_count = top_count;
             let certificate =
                 evaluation_noise_certificate(&top_count_parameters).expect("top-count certificate");
-            let expected_level_drop_count = if top_count == 20 { 10 } else { 15 };
+            let expected_level_drop_count = if top_count == 20 { 10 } else { 14 };
             assert_eq!(
                 certificate["profileLabel"], "DirectScoreComparisonDepthBudgetFits",
                 "top_count={top_count}"
             );
             assert_eq!(
                 certificate["operationCounts"]["comparisonInputMultiplicativeDepth"],
-                if top_count == 20 { 9 } else { 14 },
+                if top_count == 20 { 9 } else { 13 },
                 "top_count={top_count}"
             );
             assert_eq!(

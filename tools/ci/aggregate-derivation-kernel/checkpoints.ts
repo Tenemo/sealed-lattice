@@ -196,6 +196,7 @@ const hashExistingFiles = async (
 const computeSourceFingerprint = async (): Promise<string> =>
     hashExistingFiles([
         'tools/ci/run-aggregate-derivation-kernel.ts',
+        'tools/ci/run-encrypted-aggregate-evaluator-representative.ts',
         'tools/ci/aggregate-derivation-kernel/checkpoints.ts',
         'tools/ci/aggregate-derivation-kernel/config.ts',
         'tools/ci/aggregate-derivation-kernel/runner.ts',
@@ -207,6 +208,20 @@ const computeSourceFingerprint = async (): Promise<string> =>
         'packages/protocol/src/ballot-privacy/aggregate-bridge.ts',
         'packages/protocol/src/ballot-privacy/aggregate-bridge/structure-verification/pending-bridge-proof-record.ts',
         'packages/protocol/src/ballot-privacy/aggregate-bridge/structure-verification/ready-record.ts',
+        'crates/sealed-lattice-kernel/src/bgv/profile.rs',
+        'crates/sealed-lattice-kernel/src/bgv/setup.rs',
+        'crates/sealed-lattice-kernel/src/bgv/setup/certificates.rs',
+        'crates/sealed-lattice-kernel/src/bgv/setup/encrypted_aggregate_bridge_trace.rs',
+        'crates/sealed-lattice-kernel/src/bgv/setup/key_material.rs',
+        'crates/sealed-lattice-kernel/src/bgv/evaluator/circuit.rs',
+        'crates/sealed-lattice-kernel/src/bgv/evaluator/commands.rs',
+        'crates/sealed-lattice-kernel/src/bgv/evaluator/engine.rs',
+        'crates/sealed-lattice-kernel/src/bgv/evaluator/key_switch.rs',
+        'crates/sealed-lattice-kernel/src/bgv/evaluator/records.rs',
+        'crates/sealed-lattice-kernel/src/bgv/evaluator/top_k.rs',
+        'crates/sealed-lattice-kernel/src/ballot_privacy/aggregate_bridge_proof.rs',
+        'crates/sealed-lattice-kernel/src/ballot_privacy/aggregate_bridge_proof/statement.rs',
+        'crates/sealed-lattice-kernel/src/ballot_privacy/aggregate_bridge_proof/verification.rs',
     ]);
 
 const computeDependencyArtifactHash = async (): Promise<string> =>

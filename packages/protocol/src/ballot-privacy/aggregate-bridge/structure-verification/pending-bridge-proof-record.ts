@@ -10,8 +10,6 @@ import {
     deriveBridgeProofChallengeContextHash,
     deriveBridgeProofProfileHash,
     deriveBridgeProofRecordHash,
-    deriveBridgeProofStatementHash,
-    deriveBridgeProofTargetContractHash,
 } from '../hashes.js';
 
 import {
@@ -22,7 +20,6 @@ import {
     requireMatchingValue,
     requireProtocolHash,
     requireProtocolHashField,
-    type BridgeEncryptionEvidence,
     type PendingBridgeProofRecordFromEvidenceInput,
 } from './shared.js';
 
@@ -59,15 +56,6 @@ const derivePendingBridgeProofPublicRandomnessHash = (input: {
     deriveProtocolHash('ProofBytesHash', {
         ...input,
         purpose: 'sealed-lattice-pending-bridge-proof-public-randomness-v1',
-    });
-
-const deriveSampledPublicRelationCheckPolicyHash = (
-    policy: BridgeEncryptionEvidence['sampledPublicRelationCheckPolicy'],
-): ProtocolHash =>
-    deriveProtocolHash('BridgeProofRecordHash', {
-        policy,
-        purpose:
-            'sealed-lattice-aggregate-bridge-sampled-public-relation-check-policy-v1',
     });
 
 const bridgeRandomnessSourceValues = [
@@ -251,22 +239,25 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bridgeEncryptionEvidence.sampledPublicRelationChecks.length,
         'sampled public relation check count',
     );
-    const sampledPublicRelationCheckPolicyHash =
-        deriveSampledPublicRelationCheckPolicyHash(
-            sampledPublicRelationCheckPolicy,
-        );
     const aggregateDerivationVerificationScope =
         bridgeEncryptionEvidence.aggregateDerivationVerificationScope ??
         'AggregateDerivationFullVerificationPreconditionNotBound';
-    const bridgeProofTargetContractHash = deriveBridgeProofTargetContractHash({
-        aggregateQuotientCoordinateCount: statement.shareVectorWidth,
-        aggregateReducedCoordinateCount: statement.shareVectorWidth,
-        aggregateDerivationVerificationScope,
-        bridgeClaimClosureStatus:
-            bridgeClaimStatus.bridgeClaimVerificationStatus,
-        claimBearingBridgeEncryption:
-            bridgeClaimStatus.claimBearingBridgeEncryption,
-    });
+    const aggregateSelectionPolicyHash = requireProtocolHash(
+        input.aggregateSelectionPolicyHash,
+        'aggregate selection policy hash',
+    );
+    const bridgeWitnessPrivacyProfileHash = requireProtocolHash(
+        input.bridgeWitnessPrivacyProfileHash,
+        'bridge witness privacy profile hash',
+    );
+    const heParamHash = requireProtocolHash(
+        input.heParamHash,
+        'HE parameter hash',
+    );
+    const bridgeProofTargetContractHash = requireProtocolHash(
+        bridgeEncryptionEvidence.bridgeProofTargetContractHash,
+        'bridge proof target contract hash',
+    );
     const bridgeSharedWitnessProofHash = requireProtocolHash(
         bridgeEncryptionEvidence.bridgeSharedWitnessProofHash,
         'shared-witness proof hash',
@@ -320,162 +311,14 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         bridgeEncryptionEvidence.encryptedAggregateShareCiphertextRoot,
         'prototype encrypted aggregate input root',
     );
-    const expectedBridgeProofStatementHash = deriveBridgeProofStatementHash({
-        aggregateDerivationComponentHash:
-            aggregateDerivationComponent.aggregateDerivationComponentHash,
-        aggregateInputEncodingProfileHash,
-        aggregateQuotientCoordinateCount: statement.shareVectorWidth,
-        aggregateReducedCoordinateCount: statement.shareVectorWidth,
-        aggregateSelectionPolicyHash: requireProtocolHash(
-            input.aggregateSelectionPolicyHash,
-            'aggregate selection policy hash',
-        ),
-        aggregateShareCommitmentHash:
-            aggregateDerivationComponent.aggregateCommitment
-                .aggregateShareCommitmentHash,
-        aggregateToPlaintextBindingStatus:
-            'AggregateToPlaintextModularBindingChecked',
-        ballotScoreEncodingProfileHash,
-        ballotSetHash: statement.ballotSetHash,
-        ballotShareLayoutProfileHash,
-        basisId: bridgeEncryptionEvidence.basisId,
-        batchEncodingBoundCertificateHash:
-            bridgeEncryptionEvidence.batchEncodingBoundCertificateHash,
-        bgvBatchEncoderHash,
-        bgvEncryptionKeyMaterialKind:
-            'passive-transcript-derived-collective-public-key',
-        bgvEncryptionProofStatus: 'BgvCiphertextEquationChecked',
-        bgvProfileHash: profileHash,
-        bgvPublicKeyRoot:
-            input.setupPackage.collectivePublicKey.bgvPublicKeyRoot,
-        bgvRandomnessBoundProofStatus:
-            'BgvRandomnessErrorSupportPolynomialChecked',
-        bridgeClaimClosureStatus:
-            bridgeClaimStatus.bridgeClaimVerificationStatus,
-        bridgeLayoutHash: encryptedAggregateInputLayoutHash,
-        bridgeProofTargetContractHash,
-        bridgeWitnessPrivacyProfileHash: requireProtocolHash(
-            input.bridgeWitnessPrivacyProfileHash,
-            'bridge witness privacy profile hash',
-        ),
-        canonicalByteLength: bridgeEncryptionEvidence.canonicalByteLength,
-        canonicalBytesHash512: bridgeEncryptionEvidence.canonicalBytesHash512,
-        canonicalCiphertextConventionHash,
-        ceremonyId: statement.ceremonyId,
-        ciphertextRoot: bridgeEncryptionEvidence.ciphertextRoot,
-        claimBearingBridgeEncryption:
-            bridgeClaimStatus.claimBearingBridgeEncryption,
-        coefficientDomainCanonical: true,
-        coefficientCount: bridgeEncryptionEvidence.coefficientCount,
-        collectivePublicKeyRoot:
-            input.setupPackage.collectivePublicKey.collectivePublicKeyRoot,
-        collectivePublicKeyCoefficientRoot:
-            input.setupPackage.collectivePublicKey
-                .collectivePublicKeyCoefficientRoot,
-        contributorActionContextHash: statement.contributorActionContextHash,
-        contributorIdentity: statement.contributorIdentity,
-        contributorRosterExternalAcceptanceHash:
-            statement.contributorRosterExternalAcceptanceHash,
-        contributorRosterPosition: statement.contributorRosterPosition,
-        developmentKeyOnly: false,
-        optionCount: statement.optionCount,
-        participantCount: statement.participantCount,
-        encodedAggregateLayoutHash,
-        encodedShareVectorLayoutHash: statement.encodedShareVectorLayoutHash,
-        encryptedAggregateBridgeHash,
-        encryptedAggregateInputLayoutHash,
-        encryptedAggregateInputRoot,
-        encryptedAggregateReconstructionHash,
-        encryptedAggregateShareCiphertextRoot:
-            bridgeEncryptionEvidence.encryptedAggregateShareCiphertextRoot,
-        encryptedAggregateTargetBasisRoot,
-        heParamHash: requireProtocolHash(
-            input.heParamHash,
-            'HE parameter hash',
-        ),
-        hwangPiopStatus: 'DeferredUntilSealedLatticeBgvRnsProfileFreeze',
-        level: bridgeEncryptionEvidence.level,
-        manifestHash: statement.manifestHash,
-        aggregateDerivationVerificationScope,
-        plaintextCanonicalLiftProofStatus: 'PlaintextCanonicalLiftProofChecked',
-        plaintextCoefficientBindingCommitmentHash: requireProtocolHash(
-            bridgeEncryptionEvidence.plaintextCoefficientBindingCommitmentHash,
-            'plaintext coefficient binding commitment hash',
-        ),
-        plaintextEncodingBoundCertificateHash:
-            bridgeEncryptionEvidence.batchEncodingBoundCertificateHash,
-        plaintextEncodingProofModuli: [
-            140_737_487_306_753, 140_737_486_716_929,
-        ],
-        plaintextEncodingProofModulusProduct: '19807040250408114080301121537',
-        plaintextEncodingProofModulusProductBitsFloor: 93,
-        plaintextRoot: bridgeEncryptionEvidence.plaintextRoot,
-        pollSpecHash: statement.pollSpecHash,
-        postVotingClosedContextHash: statement.postVotingClosedContextHash,
-        proofFriendlyPlaintextBindingStatus:
-            'ProofFriendlyPlaintextCoefficientBindingRelationChecked',
-        proofFriendlyPlaintextLiftBindingHash: requireProtocolHash(
-            bridgeEncryptionEvidence.proofFriendlyPlaintextLiftBindingHash,
-            'proof-friendly plaintext lift binding hash',
-        ),
-        proofFriendlyPlaintextLiftBindingStatus:
-            'ProofFriendlyPlaintextCoefficientLiftBindingChecked',
-        proofProfileHash: bridgeProofProfileHash,
-        rnsCrtConsistencyProofStatus: 'RnsCrtConsistencyRelationChecked',
-        rosterHash: statement.rosterHash,
-        rustBgvBackendProfileHash,
-        sampledPublicRelationCheckPolicyHash,
-        sampledOnlyBridgeVerificationAccepted: false,
-        setupPackageHash: requireProtocolHash(
-            input.setupPackage.setupPackageHash,
-            'setup package hash',
-        ),
-        shareCommitmentMessageBoundCertHash:
-            statement.shareCommitmentMessageBoundCertHash,
-        shareVectorWidth: statement.shareVectorWidth,
-        sharedWitnessBindingRequired: true,
-        sharedWitnessBindingStatus: 'SharedWitnessBindingRelationChecked',
-        sharedWitnessChallengeBitsPerCheck: 46,
-        sharedWitnessCheckCount: 5,
-        sharedWitnessChallengeSamplingModel:
-            'nonzero-weakest-relation-46-bit-rejection-sampled-from-64-bit-lanes-v1',
-        sharedWitnessRejectionAttemptLimit: 64,
-        sharedWitnessGrindingDiscountBitsPerCheck: 6,
-        sharedWitnessRejectionRetryLossBits: 30,
-        sharedWitnessFullMatrixUnionBoundBits: 9,
-        sharedWitnessRandomOracleQueryBoundBits: 32,
-        sharedWitnessRandomOracleAccountingModel:
-            'classical-random-oracle-query-loss-with-explicit-bound-v1',
-        sharedWitnessQromAccountingStatus:
-            'QromAccountingNotProvidedForHandoff',
-        sharedWitnessProofSystemLossBits: 0,
-        sharedWitnessChallengeBiasAccountingModel:
-            'direct-rejection-sampling-into-effective-weakest-relation-modulus-v1',
-        sharedWitnessChallengeBiasBits: 0,
-        sharedWitnessTargetBindingSoundnessBits: 128,
-        sharedWitnessRawWeakestRelationSoundnessBitsFloor: 230,
-        sharedWitnessEffectiveBindingSoundnessBitsFloor: 159,
-        sharedWitnessEffectiveBindingBelowTarget: false,
-        sharedWitnessWeakestRelation: 'AggregateReductionFieldRelation',
-        sharedWitnessWeakestRelationModel:
-            'aggregate-proof-ring-effective-binding-floor-v1',
-        sharedWitnessWeakestRelationEffectiveModulus: '70368744177664',
-        sharedWitnessWeakestRelationBitsPerCheck: 46,
-        batchIntegerLiftProofModuli: [140_737_487_306_753, 140_737_486_716_929],
-        batchIntegerLiftProofModulusProduct: '19807040250408114080301121537',
-        batchIntegerLiftProofModulusProductBitsFloor: 93,
-        sharedWitnessZeroKnowledgeStatus:
-            'SharedWitnessZeroKnowledgeResponseDistributionChecked',
-        slotCount: bridgeEncryptionEvidence.slotCount,
-        thresholdProfileHash: statement.thresholdProfileHash,
-        thresholdDecryptable: true,
-        topKEvaluatorInputLayoutHash,
-        votingClosedBoardHeadHash: statement.votingClosedBoardHeadHash,
-    });
+    const bridgeProofStatementHash = requireProtocolHash(
+        bridgeEncryptionEvidence.bridgeProofStatementHash,
+        'bridge proof statement hash',
+    );
     const expectedBridgeProofChallengeContextHash =
         deriveBridgeProofChallengeContextHash({
             bridgeProofProfileHash,
-            bridgeProofStatementHash: expectedBridgeProofStatementHash,
+            bridgeProofStatementHash,
             bridgeProofTargetContractHash,
         });
 
@@ -617,6 +460,15 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         );
     }
     if (
+        !hash512HexPattern.test(
+            input.bridgeEvidenceVerification.canonicalBytesHash512,
+        )
+    ) {
+        throw new RangeError(
+            'Verified canonical ciphertext bytes hash must be lowercase 512-bit hex.',
+        );
+    }
+    if (
         !Number.isSafeInteger(bridgeEncryptionEvidence.canonicalByteLength) ||
         bridgeEncryptionEvidence.canonicalByteLength <= 0
     ) {
@@ -624,6 +476,16 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             'Canonical ciphertext byte length must be a positive safe integer.',
         );
     }
+    requireMatchingValue(
+        bridgeEncryptionEvidence.canonicalBytesHash512,
+        input.bridgeEvidenceVerification.canonicalBytesHash512,
+        'verified canonical ciphertext bytes hash',
+    );
+    requireMatchingSafeInteger(
+        bridgeEncryptionEvidence.canonicalByteLength,
+        input.bridgeEvidenceVerification.canonicalByteLength,
+        'verified canonical ciphertext byte length',
+    );
     if (
         !Number.isSafeInteger(
             bridgeEncryptionEvidence.aggregateRelationSubproofSizeBytes,
@@ -872,6 +734,25 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
     ] as const) {
         requireMatchingValue(bridgeValue, verificationValue, description);
     }
+    for (const [description, recordValue, verificationValue] of [
+        [
+            'aggregate selection policy hash',
+            aggregateSelectionPolicyHash,
+            input.bridgeEvidenceVerification.aggregateSelectionPolicyHash,
+        ],
+        [
+            'bridge witness privacy profile hash',
+            bridgeWitnessPrivacyProfileHash,
+            input.bridgeEvidenceVerification.bridgeWitnessPrivacyProfileHash,
+        ],
+        [
+            'HE parameter hash',
+            heParamHash,
+            input.bridgeEvidenceVerification.heParamHash,
+        ],
+    ] as const) {
+        requireMatchingValue(recordValue, verificationValue, description);
+    }
     for (const [description, bridgeValue, verificationValue] of [
         [
             'aggregate relation subproof size',
@@ -897,19 +778,9 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         'canonical bridge proof profile hash',
     );
     requireMatchingValue(
-        bridgeEncryptionEvidence.bridgeProofStatementHash,
-        expectedBridgeProofStatementHash,
-        'canonical bridge proof statement hash',
-    );
-    requireMatchingValue(
         bridgeEncryptionEvidence.bridgeProofChallengeContextHash,
         expectedBridgeProofChallengeContextHash,
         'canonical bridge proof challenge context hash',
-    );
-    requireMatchingValue(
-        bridgeEncryptionEvidence.bridgeProofTargetContractHash,
-        bridgeProofTargetContractHash,
-        'canonical bridge proof target contract hash',
     );
     requireMatchingValue(
         input.bridgeEvidenceVerification.bridgeProofVerificationStatus,
@@ -925,7 +796,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
                 bridgeProofChallengeContextHash:
                     expectedBridgeProofChallengeContextHash,
                 bridgeProofProfileHash,
-                bridgeProofStatementHash: expectedBridgeProofStatementHash,
+                bridgeProofStatementHash,
             }),
         'proof encoding profile hash',
     );
@@ -936,7 +807,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
                 bridgeProofChallengeContextHash:
                     expectedBridgeProofChallengeContextHash,
                 bridgeProofProfileHash,
-                bridgeProofStatementHash: expectedBridgeProofStatementHash,
+                bridgeProofStatementHash,
                 collectivePublicKeyRoot:
                     bridgeEncryptionEvidence.collectivePublicKeyRoot,
                 collectivePublicKeyCoefficientRoot:
@@ -951,7 +822,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
                     bridgeEncryptionEvidence.bridgeProofBytesHash,
                 bridgeProofChallengeContextHash:
                     expectedBridgeProofChallengeContextHash,
-                bridgeProofStatementHash: expectedBridgeProofStatementHash,
+                bridgeProofStatementHash,
             }),
         'public randomness hash',
     );
@@ -963,10 +834,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             aggregateDerivationComponent.aggregateDerivationComponentHash,
         aggregateDerivationStatementHash:
             statement.aggregateDerivationStatementHash,
-        aggregateSelectionPolicyHash: requireProtocolHash(
-            input.aggregateSelectionPolicyHash,
-            'aggregate selection policy hash',
-        ),
+        aggregateSelectionPolicyHash,
         aggregateBridgeRelationHandoffRoot,
         aggregateShareCommitmentHash:
             aggregateDerivationComponent.aggregateCommitment
@@ -990,10 +858,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
             expectedBridgeProofChallengeContextHash,
         bridgeProofTargetContractHash,
         bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
-        bridgeWitnessPrivacyProfileHash: requireProtocolHash(
-            input.bridgeWitnessPrivacyProfileHash,
-            'bridge witness privacy profile hash',
-        ),
+        bridgeWitnessPrivacyProfileHash,
         bridgeClaimClosureVerified:
             bridgeClaimStatus.bridgeClaimClosureVerified,
         bridgeClaimVerificationStatus:
@@ -1021,10 +886,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         encryptedAggregateShareCiphertextRoot:
             bridgeEncryptionEvidence.encryptedAggregateShareCiphertextRoot,
         encryptedAggregateTargetBasisRoot,
-        heParamHash: requireProtocolHash(
-            input.heParamHash,
-            'HE parameter hash',
-        ),
+        heParamHash,
         manifestHash: statement.manifestHash,
         objectType: 'BridgeProofRecord',
         objectVersion: 1,
@@ -1044,7 +906,7 @@ export const createPendingBridgeProofRecordFromBridgeEvidence = (
         ),
         proofFriendlyPlaintextLiftBindingHash:
             bridgeEncryptionEvidence.proofFriendlyPlaintextLiftBindingHash,
-        proofStatementHash: expectedBridgeProofStatementHash,
+        proofStatementHash: bridgeProofStatementHash,
         proverRandomnessSource: bridgeEncryptionEvidence.proverRandomnessSource,
         publicRandomnessHash,
         encryptionRandomnessSeedSource:

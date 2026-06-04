@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildRepresentativeRunBinding,
     canonicalCiphertextByteLength,
     canonicalJsonByteLength,
     summarizeEvaluations,
@@ -105,5 +106,24 @@ describe('encrypted aggregate evaluator representative summary metrics', () => {
                 topKCiphertextHash: 'top-k-hash',
             }),
         ]);
+        expect(
+            buildRepresentativeRunBinding({
+                requestBase: requestBase as never,
+                runtime: {
+                    dependencyArtifactHash: 'dependency-hash',
+                    kernelHash: 'kernel-hash',
+                    sourceFingerprint: 'source-fingerprint',
+                },
+                topCounts: [1, 10],
+            }),
+        ).toMatchObject({
+            dependencyArtifactHash: 'dependency-hash',
+            kernelHash: 'kernel-hash',
+            objectType: 'EncryptedAggregateEvaluatorRepresentativeRunBinding',
+            objectVersion: 1,
+            runnerProfile: 'accepted-input-representative-evaluator-sweep-v1',
+            sourceFingerprint: 'source-fingerprint',
+            topCounts: [1, 10],
+        });
     });
 });

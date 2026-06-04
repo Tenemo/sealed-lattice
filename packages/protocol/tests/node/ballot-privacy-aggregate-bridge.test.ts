@@ -364,6 +364,11 @@ describe('encrypted aggregate bridge objects', () => {
                 bridgeProofChallengeContextHash,
                 bridgeProofStatementHash,
                 bridgeProofTargetContractHash,
+                aggregateSelectionPolicyHash:
+                    baseFields.aggregateSelectionPolicyHash,
+                bridgeWitnessPrivacyProfileHash:
+                    baseFields.bridgeWitnessPrivacyProfileHash,
+                heParamHash: baseFields.heParamHash,
                 bridgeProofVerificationStatus:
                     'BridgeProofRelationChecked' as const,
                 bridgeClaimClosureVerified: false,
@@ -372,6 +377,8 @@ describe('encrypted aggregate bridge objects', () => {
                 claimBearingBridgeEncryption: false,
                 plaintextCoefficientBindingCommitmentHash,
                 proofFriendlyPlaintextLiftBindingHash,
+                canonicalBytesHash512,
+                canonicalByteLength,
                 aggregateBridgeRelationHandoffRoot,
                 aggregateDerivationVerificationScope:
                     'AggregateDerivationFullVerificationChecked' as const,
@@ -469,7 +476,7 @@ describe('encrypted aggregate bridge objects', () => {
                 heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement hash/u);
+        ).toThrow(/canonical bridge proof challenge context hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
@@ -515,7 +522,7 @@ describe('encrypted aggregate bridge objects', () => {
                 heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof target contract hash/u);
+        ).toThrow(/canonical bridge proof challenge context hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
@@ -655,7 +662,7 @@ describe('encrypted aggregate bridge objects', () => {
                 heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement hash/u);
+        ).toThrow(/verified canonical ciphertext bytes hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
@@ -669,7 +676,7 @@ describe('encrypted aggregate bridge objects', () => {
                 heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement hash/u);
+        ).toThrow(/aggregate selection policy hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
@@ -683,7 +690,7 @@ describe('encrypted aggregate bridge objects', () => {
                 heParamHash: baseFields.heParamHash,
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement hash/u);
+        ).toThrow(/bridge witness privacy profile hash/u);
         expect(() =>
             createPendingBridgeProofRecordFromBridgeEvidence({
                 aggregateDerivationComponent,
@@ -696,7 +703,7 @@ describe('encrypted aggregate bridge objects', () => {
                 heParamHash: hash('wrong-he-param'),
                 setupPackage,
             }),
-        ).toThrow(/canonical bridge proof statement hash/u);
+        ).toThrow(/HE parameter hash/u);
     });
 
     it('creates proof-checked aggregate contributions from checked bridge proof records', () => {

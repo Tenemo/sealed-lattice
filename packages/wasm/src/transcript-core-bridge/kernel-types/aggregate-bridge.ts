@@ -122,8 +122,13 @@ export type AggregateBridgeEncryptionVerification = {
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofChallengeContextHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
+    readonly aggregateSelectionPolicyHash: ProtocolHash;
+    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+    readonly heParamHash: ProtocolHash;
     readonly bridgeProofBytesHash: ProtocolHash;
     readonly bridgeProofRoot: ProtocolHash;
+    readonly canonicalBytesHash512: string;
+    readonly canonicalByteLength: number;
     readonly aggregateBridgeRelationHandoffRoot?: ProtocolHash | null;
     readonly bridgeSharedWitnessProofHash?: ProtocolHash | null;
     readonly sharedWitnessZeroKnowledgeStatusHash?: ProtocolHash | null;

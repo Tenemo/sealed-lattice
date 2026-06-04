@@ -27,13 +27,21 @@ pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
 pub(crate) const AGGREGATE_SCORE_COORDINATES_PER_OPTION: usize = 11;
 pub(crate) const DIRECT_COMPARISON_BABY_STEP_COUNT: usize = 31;
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
-pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
+pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 7;
 const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;
 const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
 
 pub(crate) struct PackedRankEvaluation {
     pub(crate) packed_ranks: Ciphertext,
     exact_rank_indicators: Vec<Ciphertext>,
+    exact_rank_target_ids: Vec<Ciphertext>,
+    exact_rank_target_orders: Vec<Ciphertext>,
+}
+
+struct ExactRankProjectionInputs {
+    indicators: Vec<Ciphertext>,
+    target_ids: Vec<Ciphertext>,
+    target_orders: Vec<Ciphertext>,
 }
 
 // Number of score bits for the certified score domain [0, score_domain_max].
@@ -846,10 +854,14 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores(
     }
 
     let packed_ranks = sum_aligned(&rank_terms)?;
-    let exact_rank_indicators = if exact_rank_count == 0 {
-        Vec::new()
+    let exact_rank_projection_inputs = if exact_rank_count == 0 {
+        ExactRankProjectionInputs {
+            indicators: Vec::new(),
+            target_ids: Vec::new(),
+            target_orders: Vec::new(),
+        }
     } else {
-        exact_rank_indicators_from_ahead_terms(
+        exact_rank_projection_inputs_from_ahead_terms(
             context,
             &ahead_terms_by_option,
             option_count,
@@ -859,17 +871,21 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores(
 
     Ok(PackedRankEvaluation {
         packed_ranks,
-        exact_rank_indicators,
+        exact_rank_indicators: exact_rank_projection_inputs.indicators,
+        exact_rank_target_ids: exact_rank_projection_inputs.target_ids,
+        exact_rank_target_orders: exact_rank_projection_inputs.target_orders,
     })
 }
 
-fn exact_rank_indicators_from_ahead_terms(
+fn exact_rank_projection_inputs_from_ahead_terms(
     context: &EvaluatorContext,
     ahead_terms_by_option: &[Vec<Ciphertext>],
     option_count: usize,
     exact_rank_count: usize,
-) -> CanonicalResult<Vec<Ciphertext>> {
+) -> CanonicalResult<ExactRankProjectionInputs> {
     let mut masked_terms_by_rank = vec![Vec::with_capacity(option_count); exact_rank_count];
+    let mut target_id_terms_by_rank = vec![Vec::with_capacity(option_count); exact_rank_count];
+    let mut target_order_terms_by_rank = vec![Vec::with_capacity(option_count); exact_rank_count];
     for (option_index, ahead_terms) in ahead_terms_by_option.iter().enumerate() {
         if ahead_terms.len() != option_count - 1 {
             return Err(CanonicalError::new(
@@ -881,17 +897,37 @@ fn exact_rank_indicators_from_ahead_terms(
             exact_rank_indicators_for_option(context, ahead_terms, exact_rank_count)?;
         let option_selector = packed_score_slot_selector(&[option_index])?;
         for (rank_value, indicator) in option_rank_indicators.iter().enumerate() {
-            masked_terms_by_rank[rank_value].push(plaintext_mul(
-                &normalize_scaling(indicator)?,
-                &option_selector,
-            )?);
+            let normalized_indicator = normalize_scaling(indicator)?;
+            let masked_indicator = plaintext_mul(&normalized_indicator, &option_selector)?;
+            let option_id_weight =
+                i64::try_from(option_index + 1).expect("option identifier fits i64");
+            let target_order_weight = i64::try_from(rank_value + 1).expect("rank value fits i64");
+            target_id_terms_by_rank[rank_value]
+                .push(scalar_mul(&masked_indicator, option_id_weight)?);
+            target_order_terms_by_rank[rank_value]
+                .push(scalar_mul(&masked_indicator, target_order_weight)?);
+            masked_terms_by_rank[rank_value].push(masked_indicator);
         }
     }
 
-    masked_terms_by_rank
+    let indicators = masked_terms_by_rank
         .into_iter()
         .map(|rank_terms| sum_aligned(&rank_terms))
-        .collect()
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let target_ids = target_id_terms_by_rank
+        .into_iter()
+        .map(|rank_terms| sum_aligned(&rank_terms))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let target_orders = target_order_terms_by_rank
+        .into_iter()
+        .map(|rank_terms| sum_aligned(&rank_terms))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(ExactRankProjectionInputs {
+        indicators,
+        target_ids,
+        target_orders,
+    })
 }
 
 fn exact_rank_indicators_for_option(
@@ -948,6 +984,7 @@ fn multiply_ciphertext_polynomials_balanced(
     }
 
     let mut coefficients = current.pop().expect("non-empty product has one result");
+    coefficients.truncate(max_degree + 1);
     while coefficients.len() <= max_degree {
         coefficients.push(scalar_mul(&coefficients[0], 0)?);
     }
@@ -1011,6 +1048,8 @@ pub(crate) fn project_packed_sparse_target(
     let rank_evaluation = PackedRankEvaluation {
         packed_ranks: packed_ranks.clone(),
         exact_rank_indicators: Vec::new(),
+        exact_rank_target_ids: Vec::new(),
+        exact_rank_target_orders: Vec::new(),
     };
     project_packed_sparse_target_from_rank_evaluation(
         context,
@@ -1033,22 +1072,19 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
             option_count,
             top_count,
         )?
-    } else if rank_evaluation.exact_rank_indicators.len() >= top_count {
-        let indicator_terms = rank_evaluation.exact_rank_indicators[..top_count].to_vec();
-        let indicators = sum_aligned(&indicator_terms)?;
-        let order_terms = rank_evaluation.exact_rank_indicators[..top_count]
-            .iter()
-            .enumerate()
-            .map(|(rank_value, indicator)| {
-                scalar_mul(
-                    &normalize_scaling(indicator)?,
-                    i64::try_from(rank_value + 1).expect("rank value fits i64"),
-                )
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-        let order_values = sum_aligned(&order_terms)?;
+    } else if rank_evaluation.exact_rank_indicators.len() >= top_count
+        && rank_evaluation.exact_rank_target_ids.len() >= top_count
+        && rank_evaluation.exact_rank_target_orders.len() >= top_count
+    {
+        let target_id_terms = rank_evaluation.exact_rank_target_ids[..top_count].to_vec();
+        let target_order_terms = rank_evaluation.exact_rank_target_orders[..top_count].to_vec();
+        let target_id = sum_aligned(&target_id_terms)?;
+        let target_order = sum_aligned(&target_order_terms)?;
 
-        (indicators, order_values)
+        return Ok(EncryptedSparseTarget {
+            target_id,
+            target_order,
+        });
     } else {
         top_k_indicator_and_order_value(
             context,
@@ -1858,7 +1894,7 @@ mod tests {
 
         assert_eq!(&indicator_slots[..5], &[1, 1, 1, 0, 0]);
         assert_eq!(&order_slots[..5], &[1, 2, 10, 0, 0]);
-        assert_eq!(indicator.level, 1);
-        assert_eq!(order_value.level, 1);
+        assert_eq!(indicator.level, 2);
+        assert_eq!(order_value.level, 2);
     }
 }

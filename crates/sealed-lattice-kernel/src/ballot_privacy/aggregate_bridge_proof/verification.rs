@@ -859,8 +859,13 @@ pub(super) fn verify_aggregate_bridge_encryption(request: &Value) -> CanonicalRe
         "bridgeProofStatementHash": bridge_proof_statement_hash,
         "bridgeProofChallengeContextHash": expected_bridge_proof_challenge_context_hash,
         "bridgeProofTargetContractHash": bridge_proof_target_contract_hash,
+        "aggregateSelectionPolicyHash": aggregate_selection_policy_hash,
+        "bridgeWitnessPrivacyProfileHash": bridge_witness_privacy_profile_hash,
+        "heParamHash": he_param_hash,
         "bridgeProofBytesHash": bridge_proof_bytes_hash,
         "bridgeProofRoot": bridge_proof_root,
+        "canonicalBytesHash512": canonical_bytes_hash,
+        "canonicalByteLength": canonical_byte_length,
         "plaintextCoefficientBindingCommitmentHash": bridge_encryption["plaintextCoefficientBindingCommitmentHash"],
         "proofFriendlyPlaintextLiftBindingHash": bridge_encryption["proofFriendlyPlaintextLiftBindingHash"],
         "aggregateBridgeRelationHandoffRoot": if aggregate_bridge_relation_handoff_root.is_empty() {

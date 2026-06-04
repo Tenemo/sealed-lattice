@@ -128,10 +128,15 @@ export type BridgeEvidenceVerification = {
     readonly bgvRandomnessBoundProofStatusHash: ProtocolHash;
     readonly bridgeProofStatementHash: ProtocolHash;
     readonly bridgeProofTargetContractHash: ProtocolHash;
+    readonly aggregateSelectionPolicyHash: ProtocolHash;
+    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
+    readonly heParamHash: ProtocolHash;
     readonly bridgeProofVerificationStatus: 'BridgeProofRelationChecked';
     readonly claimBearingBridgeEncryption: boolean;
     readonly plaintextCoefficientBindingCommitmentHash: ProtocolHash;
     readonly proofFriendlyPlaintextLiftBindingHash: ProtocolHash;
+    readonly canonicalBytesHash512: string;
+    readonly canonicalByteLength: number;
     readonly aggregateBridgeRelationHandoffRoot?: ProtocolHash | null;
     readonly aggregateDerivationVerificationScope?: AggregateDerivationVerificationScope;
     readonly plaintextCanonicalLiftProofStatus?: 'PlaintextCanonicalLiftProofChecked';
@@ -349,7 +354,7 @@ export const requireMatchingValue = (
 ): void => {
     if (actualValue !== expectedValue) {
         throw new RangeError(
-            `Bridge proof record evidence mismatch for ${description}.`,
+            `Bridge proof record evidence mismatch for ${description}: expected ${String(expectedValue)}, got ${String(actualValue)}.`,
         );
     }
 };

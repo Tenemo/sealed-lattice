@@ -55,7 +55,7 @@ pub(crate) const DATA_PRIMES: [u64; 17] = [
 ];
 
 // Extra ~47-bit NTT-friendly prime (p == 1 mod 2N) for the "special" basis;
-// the extended basis is the 17 data primes plus this one (see all_moduli).
+// the extended basis is the data primes plus this one (see all_moduli).
 pub(crate) const SPECIAL_PRIME: u64 = 140_737_471_512_577;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

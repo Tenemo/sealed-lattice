@@ -2231,7 +2231,7 @@ fn run_aggregate_ready_top_k_evaluation(
                 option_count,
                 score_domain_max,
                 &aggregate_ready_record.aggregate_ready_record_hash,
-                0,
+                top_count,
             )?;
             let (evaluation, _) = build_aggregate_ready_top_k_evaluation_artifacts(
                 request,
@@ -2268,6 +2268,7 @@ struct AggregateReadySharedInputs<'a> {
 fn read_aggregate_ready_shared_inputs<'a>(
     request: &'a Value,
     setup_package: &'a Value,
+    exact_rank_count: usize,
 ) -> CanonicalResult<(AggregateReadySharedInputs<'a>, usize, u64)> {
     let score_domain_max = read_selected_score_domain_max(request)?;
     require_finality_bound_fields_for_aggregate_ready_evaluation(request)?;
@@ -2374,7 +2375,7 @@ fn read_aggregate_ready_shared_inputs<'a>(
                 option_count,
                 score_domain_max,
                 &aggregate_ready_record.aggregate_ready_record_hash,
-                0,
+                exact_rank_count,
             )?;
 
             Ok(AggregateReadySharedInputs {
@@ -2579,8 +2580,9 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation_sweep(
             "aggregate-ready encrypted evaluation sweep requires the full selected data level",
         ));
     }
+    let exact_rank_count = requested_top_counts.iter().copied().max().unwrap_or(0);
     let (shared_inputs, option_count, score_domain_max) =
-        read_aggregate_ready_shared_inputs(request, setup_package)?;
+        read_aggregate_ready_shared_inputs(request, setup_package, exact_rank_count)?;
     let top_counts = validate_top_counts_against_option_count(requested_top_counts, option_count)?;
     with_aggregate_ready_evaluator_context(
         request,
@@ -2645,7 +2647,8 @@ mod tests {
         BALLOT_PRIVACY_MANDATORY_RECEIVER_COUNT, aggregate_contribution_hash_for_evaluation,
         aggregate_ready_binding_from_request, aggregate_ready_record_from_request,
         aggregate_ready_record_hash, bridge_proof_record_hash_for_evaluation,
-        encrypted_ciphertext_artifact, read_selected_score_domain_max, read_top_count_values,
+        encrypted_ciphertext_artifact, prepare_bgv_evaluation_key_material_handle,
+        read_selected_score_domain_max, read_top_count_values,
         reject_forbidden_accepted_evaluator_fields,
         require_public_rotation_keys_for_aggregate_ready_evaluation,
         require_setup_target_layout_for_aggregate_ready_evaluation,
@@ -3701,7 +3704,7 @@ mod tests {
     #[ignore = "checkpoint-bound accepted-input evaluator evidence; run after representative evaluator generation"]
     fn accepted_input_representative_ranks_need_refresh_for_sparse_target_oracle() {
         let sweep = load_checkpoint_json(
-            "temp/test-checkpoints/encrypted-aggregate-evaluator-representative-top-counts-10-20.json",
+            "temp/test-checkpoints/encrypted-aggregate-evaluator-representative-top-counts-10.json",
         );
         assert_eq!(
             sweep["comparisonProfile"].as_str(),
@@ -3711,10 +3714,24 @@ mod tests {
             sweep["rankPackingMethod"].as_str(),
             Some("generator-ordered")
         );
-
+        assert_eq!(
+            sweep["representativeRunBinding"]["objectType"].as_str(),
+            Some("EncryptedAggregateEvaluatorRepresentativeRunBinding"),
+            "representative evaluator evidence must carry the runner/kernel/source binding; rerun the representative evaluator slice after source or kernel changes"
+        );
+        assert_eq!(
+            sweep["representativeRunBinding"]["runnerProfile"].as_str(),
+            Some("accepted-input-representative-evaluator-sweep-v1"),
+            "representative evaluator evidence was produced by an unexpected runner profile"
+        );
+        assert_eq!(
+            sweep["representativeRunBinding"]["topCounts"],
+            json!([10]),
+            "representative evaluator evidence must bind the requested top-count coverage"
+        );
         let option_count = 20;
         let evaluations = sweep["evaluations"].as_array().expect("sweep evaluations");
-        assert_eq!(evaluations.len(), 2);
+        assert_eq!(evaluations.len(), 1);
         let setup_package = load_checkpoint_json(
             "temp/test-checkpoints/aggregate-derivation-kernel-last-setup-package.json",
         );
@@ -3844,7 +3861,6 @@ mod tests {
                 expected_target_orders,
                 "test-only refreshed packed ranks must project to the deterministic fixture order for topCount={top_count}"
             );
-
             if top_count == option_count {
                 assert_eq!(
                     rank_lookup_target_ids, expected_target_ids,
@@ -3876,7 +3892,78 @@ mod tests {
             }
         }
 
-        assert_eq!(observed_top_counts, vec![10, 20]);
+        assert_eq!(observed_top_counts, vec![10]);
+    }
+
+    #[test]
+    #[ignore = "checkpoint-bound native accepted-input evaluator diagnostic; run selectively"]
+    fn accepted_input_current_request_sparse_target_still_requires_refresh_top_count_ten() {
+        let request_base = load_checkpoint_json(
+            "temp/test-checkpoints/aggregate-derivation-kernel-last-evaluator-request-base.json",
+        );
+        let setup_package = request_base["setupPackage"].clone();
+        let prepared = prepare_bgv_evaluation_key_material_handle(&json!({
+            "setupPackage": setup_package,
+            "setupPrivateWitness": {
+                "setupSeed": "accepted-encrypted-aggregate-evaluator-test-seed",
+            },
+        }))
+        .expect("prepared public evaluation-key material");
+        let prepared_handle = prepared["preparedEvaluationKeyMaterialHandle"]
+            .as_str()
+            .expect("prepared handle")
+            .to_string();
+        let sweep = run_encrypted_aggregate_top_k_evaluation_sweep(&json!({
+            "aggregateReadyRecord": request_base["aggregateReadyRecord"].clone(),
+            "canonicalBallotSetHash": request_base["canonicalBallotSetHash"].clone(),
+            "encryptedAggregateInputs": request_base["encryptedAggregateInputs"].clone(),
+            "evaluatorSignature": request_base["evaluatorSignature"].clone(),
+            "preTargetBoardHead": request_base["preTargetBoardHead"].clone(),
+            "preparedEvaluationKeyMaterialHandle": prepared_handle,
+            "scoreDomainMax": request_base["scoreDomainMax"].clone(),
+            "setupPackage": request_base["setupPackage"].clone(),
+            "topCounts": [10],
+        }))
+        .expect("accepted-input sweep");
+
+        let option_count = 20;
+        let evaluator_key = development_evaluator_key_from_passive_setup_package(
+            &request_base["setupPackage"],
+            "accepted-encrypted-aggregate-evaluator-test-seed",
+        )
+        .expect("test-only setup secret");
+        let evaluation = sweep["evaluations"]
+            .as_array()
+            .expect("evaluations")
+            .first()
+            .expect("one evaluation");
+        let encrypted_target = &evaluation["encryptedSparseTarget"];
+        let target_id_ciphertext =
+            ciphertext_from_checkpoint_artifact(&encrypted_target["targetIdCiphertext"])
+                .expect("target-id ciphertext");
+        let target_order_ciphertext =
+            ciphertext_from_checkpoint_artifact(&encrypted_target["targetOrderCiphertext"])
+                .expect("target-order ciphertext");
+        let actual_target_ids = packed_target_slots(
+            &evaluator_key
+                .decrypt_to_slots(&target_id_ciphertext)
+                .expect("target-id slots"),
+            option_count,
+        );
+        let actual_target_orders = packed_target_slots(
+            &evaluator_key
+                .decrypt_to_slots(&target_order_ciphertext)
+                .expect("target-order slots"),
+            option_count,
+        );
+        let (expected_target_ids, expected_target_orders) =
+            expected_variant_fixture_sparse_target(option_count, 10);
+
+        assert!(
+            actual_target_ids != expected_target_ids
+                || actual_target_orders != expected_target_orders,
+            "current accepted-input sparse target unexpectedly matched for topCount=10; remove this current-gap assertion and close the projection gate"
+        );
     }
 
     #[test]
