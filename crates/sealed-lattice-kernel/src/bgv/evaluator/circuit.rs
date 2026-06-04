@@ -138,7 +138,7 @@ impl EvaluatorContext {
             })
     }
 
-    pub(crate) fn generate_galois_key(
+    pub(crate) fn resolve_galois_key(
         &self,
         galois_element: usize,
         level: usize,
@@ -180,7 +180,7 @@ impl EvaluatorContext {
         }
 
         let generated_rotation_key =
-            self.generate_galois_key(galois_element, level, fallback_seed_hex)?;
+            self.resolve_galois_key(galois_element, level, fallback_seed_hex)?;
 
         rotate(ciphertext, galois_element, &generated_rotation_key)
     }

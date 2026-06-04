@@ -2242,7 +2242,7 @@ fn run_aggregate_ready_top_k_evaluation(
                 option_count,
                 score_domain_max,
                 &aggregate_ready_record.aggregate_ready_record_hash,
-                exact_rank_count_for_top_counts(&[top_count], option_count),
+                0,
             )?;
             let (evaluation, _) = build_aggregate_ready_top_k_evaluation_artifacts(
                 request,
@@ -2279,7 +2279,6 @@ struct AggregateReadySharedInputs<'a> {
 fn read_aggregate_ready_shared_inputs<'a>(
     request: &'a Value,
     setup_package: &'a Value,
-    requested_top_counts: &[usize],
 ) -> CanonicalResult<(AggregateReadySharedInputs<'a>, usize, u64)> {
     let score_domain_max = read_selected_score_domain_max(request)?;
     require_finality_bound_fields_for_aggregate_ready_evaluation(request)?;
@@ -2357,7 +2356,6 @@ fn read_aggregate_ready_shared_inputs<'a>(
 
     let option_count = aggregate_ready_record.option_count;
     require_setup_target_layout_for_aggregate_ready_evaluation(setup_package, option_count)?;
-    let exact_rank_count = exact_rank_count_for_top_counts(requested_top_counts, option_count);
     let shared_inputs = with_aggregate_ready_evaluator_context(
         request,
         setup_package,
@@ -2387,7 +2385,7 @@ fn read_aggregate_ready_shared_inputs<'a>(
                 option_count,
                 score_domain_max,
                 &aggregate_ready_record.aggregate_ready_record_hash,
-                exact_rank_count,
+                0,
             )?;
 
             Ok(AggregateReadySharedInputs {
@@ -2408,15 +2406,6 @@ fn read_aggregate_ready_shared_inputs<'a>(
     )?;
 
     Ok((shared_inputs, option_count, score_domain_max))
-}
-
-fn exact_rank_count_for_top_counts(top_counts: &[usize], option_count: usize) -> usize {
-    top_counts
-        .iter()
-        .copied()
-        .filter(|top_count| *top_count < option_count)
-        .max()
-        .unwrap_or(0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2602,7 +2591,7 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation_sweep(
         ));
     }
     let (shared_inputs, option_count, score_domain_max) =
-        read_aggregate_ready_shared_inputs(request, setup_package, &requested_top_counts)?;
+        read_aggregate_ready_shared_inputs(request, setup_package)?;
     let top_counts = validate_top_counts_against_option_count(requested_top_counts, option_count)?;
     with_aggregate_ready_evaluator_context(
         request,
@@ -2691,7 +2680,7 @@ mod tests {
                     aggregate_score_slot, comparison_polynomials,
                     evaluate_direct_comparison_polynomial, galois_power,
                     pack_reconstructed_aggregate_scores, packed_score_slot,
-                    selected_evaluator_rotation_key_schedule,
+                    project_packed_sparse_target, selected_evaluator_rotation_key_schedule,
                 },
             },
             profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
@@ -3727,7 +3716,7 @@ mod tests {
 
     #[test]
     #[ignore = "checkpoint-bound accepted-input evaluator evidence; run after representative evaluator generation"]
-    fn accepted_input_representative_targets_decrypt_to_fixture_oracle() {
+    fn accepted_input_representative_ranks_need_refresh_for_sparse_target_oracle() {
         let sweep = load_checkpoint_json(
             "temp/test-checkpoints/encrypted-aggregate-evaluator-representative-top-counts-10-20.json",
         );
@@ -3751,9 +3740,12 @@ mod tests {
             "accepted-encrypted-aggregate-evaluator-test-seed",
         )
         .expect("test-only setup secret");
-        let projection_context =
-            EvaluatorContext::from_key(evaluator_key, "accepted-input-oracle-projection", 1)
-                .expect("projection context");
+        let projection_context = EvaluatorContext::from_key(
+            evaluator_key,
+            "accepted-input-oracle-projection",
+            DATA_PRIMES.len() - 1,
+        )
+        .expect("projection context");
         let evaluator_key = projection_context.key();
         let request_base = load_checkpoint_json(
             "temp/test-checkpoints/aggregate-derivation-kernel-last-evaluator-request-base.json",
@@ -3822,14 +3814,83 @@ mod tests {
                 packed_target_slots(&decrypted_target_order_slots, option_count);
             let (expected_target_ids, expected_target_orders) =
                 expected_variant_fixture_sparse_target(option_count, top_count);
+            let rank_lookup_target = project_packed_sparse_target(
+                &projection_context,
+                &packed_rank_ciphertext,
+                option_count,
+                top_count,
+            )
+            .expect("rank-lookup target from accepted packed ranks");
+            let rank_lookup_target_id_slots = evaluator_key
+                .decrypt_to_slots(&rank_lookup_target.target_id)
+                .expect("rank-lookup target-id slots");
+            let rank_lookup_target_order_slots = evaluator_key
+                .decrypt_to_slots(&rank_lookup_target.target_order)
+                .expect("rank-lookup target-order slots");
+            let rank_lookup_target_ids =
+                packed_target_slots(&rank_lookup_target_id_slots, option_count);
+            let rank_lookup_target_orders =
+                packed_target_slots(&rank_lookup_target_order_slots, option_count);
+
+            let refreshed_packed_ranks = evaluator_key
+                .encrypt_slots(
+                    &packed_rank_slots,
+                    &format!("accepted-input-test-only-refreshed-ranks-{top_count}"),
+                )
+                .expect("test-only refreshed packed ranks");
+            let refreshed_target = project_packed_sparse_target(
+                &projection_context,
+                &refreshed_packed_ranks,
+                option_count,
+                top_count,
+            )
+            .expect("refreshed-rank target projection");
+            let refreshed_target_id_slots = evaluator_key
+                .decrypt_to_slots(&refreshed_target.target_id)
+                .expect("refreshed target-id slots");
+            let refreshed_target_order_slots = evaluator_key
+                .decrypt_to_slots(&refreshed_target.target_order)
+                .expect("refreshed target-order slots");
             assert_eq!(
-                actual_target_ids, expected_target_ids,
-                "target identifiers must match the deterministic fixture oracle for topCount={top_count}"
+                packed_target_slots(&refreshed_target_id_slots, option_count),
+                expected_target_ids,
+                "test-only refreshed packed ranks must project to the deterministic fixture oracle for topCount={top_count}"
             );
             assert_eq!(
-                actual_target_orders, expected_target_orders,
-                "target order values must match the deterministic fixture oracle for topCount={top_count}"
+                packed_target_slots(&refreshed_target_order_slots, option_count),
+                expected_target_orders,
+                "test-only refreshed packed ranks must project to the deterministic fixture order for topCount={top_count}"
             );
+
+            if top_count == option_count {
+                assert_eq!(
+                    rank_lookup_target_ids, expected_target_ids,
+                    "rank lookup projection should be linear for topCount=optionCount"
+                );
+                assert_eq!(
+                    rank_lookup_target_orders, expected_target_orders,
+                    "rank lookup order should be linear for topCount=optionCount"
+                );
+                assert_eq!(
+                    actual_target_ids, expected_target_ids,
+                    "target identifiers should match when every option is selected"
+                );
+                assert_eq!(
+                    actual_target_orders, expected_target_orders,
+                    "target order values should match when every option is selected"
+                );
+            } else {
+                assert!(
+                    rank_lookup_target_ids != expected_target_ids
+                        || rank_lookup_target_orders != expected_target_orders,
+                    "unrefreshed rank-lookup projection unexpectedly matched for topCount={top_count}; remove this current-gap assertion and close the projection gate"
+                );
+                assert!(
+                    actual_target_ids != expected_target_ids
+                        || actual_target_orders != expected_target_orders,
+                    "unrefreshed accepted-input target unexpectedly matched for topCount={top_count}; remove this current-gap assertion and close the projection gate"
+                );
+            }
         }
 
         assert_eq!(observed_top_counts, vec![10, 20]);

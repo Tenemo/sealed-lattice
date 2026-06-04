@@ -27,6 +27,7 @@ pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
 pub(crate) const AGGREGATE_SCORE_COORDINATES_PER_OPTION: usize = 11;
 pub(crate) const DIRECT_COMPARISON_BABY_STEP_COUNT: usize = 31;
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
+pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;
 const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
 
@@ -332,7 +333,12 @@ fn evaluate_rank_lookup(
         ));
     }
     let polynomial = interpolate_coefficients(values)?;
-    evaluate_polynomial(context, normalized_rank, &polynomial)
+    evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
+        context,
+        normalized_rank,
+        &polynomial,
+        RANK_LOOKUP_BABY_STEP_COUNT,
+    )
 }
 
 // The plaintext selector polynomial placing a broadcast value into a single
@@ -956,7 +962,9 @@ fn multiply_ciphertext_polynomials(
     max_degree: usize,
     defer_modulus_switch: bool,
 ) -> CanonicalResult<Vec<Ciphertext>> {
-    let mut products_by_degree = vec![Vec::new(); max_degree + 1];
+    let mut accumulated_products_by_degree = (0..=max_degree)
+        .map(|_| None)
+        .collect::<Vec<Option<Ciphertext>>>();
     for (left_degree, left_coefficient) in left.iter().enumerate() {
         for (right_degree, right_coefficient) in right.iter().enumerate() {
             let degree = left_degree + right_degree;
@@ -972,19 +980,19 @@ fn multiply_ciphertext_polynomials(
             } else {
                 multiply(context, left_coefficient, right_coefficient)?
             };
-            products_by_degree[degree].push(product);
+            accumulated_products_by_degree[degree] =
+                if let Some(accumulated_product) = accumulated_products_by_degree[degree].take() {
+                    let terms = [accumulated_product, product];
+                    Some(sum_aligned(&terms)?)
+                } else {
+                    Some(product)
+                };
         }
     }
 
-    products_by_degree
+    accumulated_products_by_degree
         .into_iter()
-        .map(|products| {
-            if products.is_empty() {
-                scalar_mul(&left[0], 0)
-            } else {
-                sum_aligned(&products)
-            }
-        })
+        .map(|product| product.map_or_else(|| scalar_mul(&left[0], 0), Ok))
         .collect()
 }
 
@@ -1302,12 +1310,13 @@ mod tests {
         bit_sliced_greater_than_and_equal, broadcast_constant, comparison_polynomials,
         derive_score_bits, evaluate_direct_comparison_polynomial,
         evaluate_packed_rank_evaluation_from_packed_scores, evaluate_packed_ranks_via_difference,
-        evaluate_top_k_via_difference, galois_element_moving_slot_to_target, galois_power,
-        generator_exponent_or_conjugated, generator_power_basis_for_exponent,
-        interpolate_coefficients, pack_broadcast_scores, packed_rank_forward_basis_galois_elements,
-        packed_rank_return_basis_galois_elements, packed_score_slot,
-        project_packed_sparse_target_from_rank_evaluation, project_sparse_target, score_bit_count,
-        selected_evaluator_rotation_key_schedule, top_k_indicator, top_k_order_value,
+        evaluate_top_k_via_difference, exact_rank_indicators_for_option,
+        galois_element_moving_slot_to_target, galois_power, generator_exponent_or_conjugated,
+        generator_power_basis_for_exponent, interpolate_coefficients, pack_broadcast_scores,
+        packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
+        packed_score_slot, project_packed_sparse_target_from_rank_evaluation,
+        project_sparse_target, score_bit_count, selected_evaluator_rotation_key_schedule,
+        top_k_indicator, top_k_order_value,
     };
     use crate::bgv::evaluator::{
         circuit::{EvaluatorContext, modulus_switch_to, normalize_scaling},
@@ -1792,6 +1801,43 @@ mod tests {
 
         assert_eq!(target_ids, vec![0, 2, 3, 0]);
         assert_eq!(target_orders, vec![0, 1, 2, 0]);
+    }
+
+    #[test]
+    #[ignore = "diagnostic exact-rank noise check; run selectively"]
+    fn clean_full_option_exact_rank_indicator_decrypts() {
+        let context = EvaluatorContext::new("clean-full-option-exact-rank", 15).expect("context");
+        let key = context.key();
+        let expected_rank = 8;
+        let exact_rank_count = 10;
+        for input_level in [10_usize, 12] {
+            let ahead_terms = (0..19)
+                .map(|ahead_index| {
+                    let bit = u64::from(ahead_index < expected_rank);
+                    let encrypted_bit = key
+                        .encrypt_slots(
+                            &[bit; 4],
+                            &format!("clean-ahead-bit-{input_level}-{ahead_index}"),
+                        )
+                        .expect("encrypted clean ahead bit");
+
+                    modulus_switch_to(&encrypted_bit, input_level).expect("clean ahead bit level")
+                })
+                .collect::<Vec<_>>();
+            let indicators =
+                exact_rank_indicators_for_option(&context, &ahead_terms, exact_rank_count)
+                    .expect("exact rank indicators");
+            let decrypted = indicators
+                .iter()
+                .map(|indicator| key.decrypt_to_slots(indicator).expect("indicator slots")[0])
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                decrypted,
+                vec![0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+                "exact rank indicators must decrypt from clean bits at level {input_level}",
+            );
+        }
     }
 
     #[test]

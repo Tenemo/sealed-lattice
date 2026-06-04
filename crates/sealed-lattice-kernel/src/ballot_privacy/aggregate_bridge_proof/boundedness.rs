@@ -750,6 +750,63 @@ fn mul_small_mod(scalar: u64, value: u64, modulus: u64) -> u64 {
 mod tests {
     use super::*;
 
+    struct ValidSupportCommitmentCheck {
+        check: Value,
+        randomizer_response: Vec<BigInt>,
+        perturbation_zero_response: Vec<BigInt>,
+        perturbation_one_response: Vec<BigInt>,
+    }
+
+    fn valid_support_commitment_check(
+        challenge: u128,
+    ) -> CanonicalResult<ValidSupportCommitmentCheck> {
+        let randomizer_masks = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let perturbation_zero_masks = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let perturbation_one_masks = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let mut randomizer_witness = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let mut perturbation_zero_witness = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let mut perturbation_one_witness = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        randomizer_witness[0] = BigInt::from(1_u8);
+        perturbation_zero_witness[0] = BigInt::from(-2_i8);
+        perturbation_one_witness[0] = BigInt::from(2_u8);
+
+        let randomizer_response = randomizer_witness
+            .iter()
+            .map(|witness| BigInt::from(challenge) * witness)
+            .collect::<Vec<_>>();
+        let perturbation_zero_response = perturbation_zero_witness
+            .iter()
+            .map(|witness| BigInt::from(challenge) * witness)
+            .collect::<Vec<_>>();
+        let perturbation_one_response = perturbation_one_witness
+            .iter()
+            .map(|witness| BigInt::from(challenge) * witness)
+            .collect::<Vec<_>>();
+        let commitment =
+            bridge_bgv_randomness_bound_commitment(BridgeBgvRandomnessBoundCommitmentInput {
+                bridge_proof_statement_hash: "a".repeat(128).as_str(),
+                check_index: 0,
+                randomizer_masks: &randomizer_masks,
+                randomizer_witness: &randomizer_witness,
+                perturbation_zero_masks: &perturbation_zero_masks,
+                perturbation_zero_witness: &perturbation_zero_witness,
+                perturbation_one_masks: &perturbation_one_masks,
+                perturbation_one_witness: &perturbation_one_witness,
+            })?;
+        let commitment_hash = bridge_bgv_randomness_bound_commitment_hash(&commitment)?;
+        let check = json!({
+            "bgvRandomnessBoundCommitment": commitment,
+            "bgvRandomnessBoundCommitmentHash": commitment_hash,
+        });
+
+        Ok(ValidSupportCommitmentCheck {
+            check,
+            randomizer_response,
+            perturbation_zero_response,
+            perturbation_one_response,
+        })
+    }
+
     #[test]
     fn boundedness_support_checks_use_the_weakest_relation_field_with_compact_residue_encoding() {
         assert_eq!(support_moduli(), &DATA_PRIMES[..1]);
@@ -898,6 +955,165 @@ mod tests {
 
         assert!(
             error.message.contains("coefficient 0"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn support_check_rejects_invalid_error_coefficients_without_batch_cancellation() {
+        let modulus = support_moduli()[0];
+        let challenge = 19_u128;
+        let masks = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        let mut witnesses = vec![BigInt::from(0_u8); POLYNOMIAL_DEGREE];
+        witnesses[3] = BigInt::from(3_i8);
+        witnesses[4] = BigInt::from(-3_i8);
+        let responses = witnesses
+            .iter()
+            .map(|witness| BigInt::from(challenge) * witness)
+            .collect::<Vec<_>>();
+        let commitments_hex = support_expansion_commitment_for_role(
+            modulus,
+            BgvSupportKind::Error,
+            &masks,
+            &witnesses,
+        )
+        .expect("commitment should build");
+        let commitments = decode_support_expansion_commitments_hex(
+            &commitments_hex,
+            BgvSupportKind::Error.expansion_coefficient_count(),
+            modulus,
+            "testErrorCommitments",
+        )
+        .expect("commitment should decode");
+
+        let error = validate_support_polynomial_for_role(
+            "bounded-perturbation-zero",
+            modulus,
+            BgvSupportKind::Error,
+            challenge,
+            &responses,
+            &commitments,
+        )
+        .expect_err("out-of-support error coefficients must reject coefficientwise");
+
+        assert!(
+            error.message.contains("coefficient 3"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn support_commitment_rejects_challenge_role_and_modulus_mutations() {
+        let challenge = 17_u128;
+        let ValidSupportCommitmentCheck {
+            check,
+            randomizer_response,
+            perturbation_zero_response,
+            perturbation_one_response,
+        } = valid_support_commitment_check(challenge).expect("valid support commitment check");
+        validate_bridge_bgv_randomness_bound_commitment(
+            &check,
+            &"a".repeat(128),
+            0,
+            challenge,
+            &randomizer_response,
+            &perturbation_zero_response,
+            &perturbation_one_response,
+        )
+        .expect("valid support commitment should verify");
+
+        let challenge_error = validate_bridge_bgv_randomness_bound_commitment(
+            &check,
+            &"a".repeat(128),
+            0,
+            challenge + 1,
+            &randomizer_response,
+            &perturbation_zero_response,
+            &perturbation_one_response,
+        )
+        .expect_err("mutated support challenge must reject");
+        assert!(
+            challenge_error
+                .message
+                .contains("support polynomial check failed"),
+            "unexpected error: {}",
+            challenge_error.message
+        );
+
+        let mut role_mutated_check = check.clone();
+        role_mutated_check["bgvRandomnessBoundCommitment"]["supportCheckModel"] =
+            Value::String("weighted-batch-support-check-v1".to_string());
+        let role_error = validate_bridge_bgv_randomness_bound_commitment(
+            &role_mutated_check,
+            &"a".repeat(128),
+            0,
+            challenge,
+            &randomizer_response,
+            &perturbation_zero_response,
+            &perturbation_one_response,
+        )
+        .expect_err("mutated support role/model must reject");
+        assert!(
+            role_error.message.contains("commitment shell"),
+            "unexpected error: {}",
+            role_error.message
+        );
+
+        let mut modulus_mutated_check = check.clone();
+        modulus_mutated_check["bgvRandomnessBoundCommitment"]["supportModuli"][0] =
+            json!(support_moduli()[0] - 2);
+        let modulus_error = validate_bridge_bgv_randomness_bound_commitment(
+            &modulus_mutated_check,
+            &"a".repeat(128),
+            0,
+            challenge,
+            &randomizer_response,
+            &perturbation_zero_response,
+            &perturbation_one_response,
+        )
+        .expect_err("mutated support modulus must reject");
+        assert!(
+            modulus_error.message.contains("support modulus list"),
+            "unexpected error: {}",
+            modulus_error.message
+        );
+    }
+
+    #[test]
+    fn support_commitment_rejects_replayed_expansion_bytes() {
+        let challenge = 23_u128;
+        let ValidSupportCommitmentCheck {
+            mut check,
+            randomizer_response,
+            perturbation_zero_response,
+            perturbation_one_response,
+        } = valid_support_commitment_check(challenge).expect("valid support commitment check");
+        let randomizer_commitment =
+            check["bgvRandomnessBoundCommitment"]["randomizerExpansionCommitmentsByModulus"][0]
+                .clone();
+        check["bgvRandomnessBoundCommitment"]["errorZeroExpansionCommitmentsByModulus"][0] =
+            randomizer_commitment;
+        check["bgvRandomnessBoundCommitmentHash"] = Value::String(
+            bridge_bgv_randomness_bound_commitment_hash(&check["bgvRandomnessBoundCommitment"])
+                .expect("mutated commitment hash should derive"),
+        );
+
+        let error = validate_bridge_bgv_randomness_bound_commitment(
+            &check,
+            &"a".repeat(128),
+            0,
+            challenge,
+            &randomizer_response,
+            &perturbation_zero_response,
+            &perturbation_one_response,
+        )
+        .expect_err("replayed support expansion bytes must reject");
+
+        assert!(
+            error.message.contains("invalid encoded byte length")
+                || error.message.contains("support polynomial check failed"),
             "unexpected error: {}",
             error.message
         );

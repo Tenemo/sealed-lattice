@@ -596,12 +596,23 @@ pub(crate) fn ciphertext_sub(left: &Ciphertext, right: &Ciphertext) -> Canonical
     ciphertext_add(left, &ciphertext_negate(right)?)
 }
 
+fn centered_plaintext_scalar(scalar: i64) -> i64 {
+    let residue = signed_residue(scalar, PLAINTEXT_MODULUS);
+    if residue > PLAINTEXT_MODULUS / 2 {
+        i64::try_from(i128::from(residue) - i128::from(PLAINTEXT_MODULUS))
+            .expect("centered plaintext scalar fits i64")
+    } else {
+        i64::try_from(residue).expect("centered plaintext scalar fits i64")
+    }
+}
+
 // Multiply a ciphertext by an integer plaintext scalar (the same value in every
-// slot). The scalar is reduced into the plaintext field, so the message becomes
-// scalar*message mod the plaintext modulus.
+// slot). The message is multiplied modulo the plaintext field, but the RNS lift
+// uses the centered representative so negative interpolation coefficients do not
+// inflate ciphertext noise by an unnecessary factor of the plaintext modulus.
 pub(crate) fn scalar_mul(ciphertext: &Ciphertext, scalar: i64) -> CanonicalResult<Ciphertext> {
     let primes = ciphertext.primes();
-    let scalar_field = signed_residue(scalar, PLAINTEXT_MODULUS);
+    let centered_scalar = centered_plaintext_scalar(scalar);
     let components = ciphertext
         .components
         .iter()
@@ -611,8 +622,9 @@ pub(crate) fn scalar_mul(ciphertext: &Ciphertext, scalar: i64) -> CanonicalResul
                 .enumerate()
                 .map(|(limb_index, limb)| {
                     let modulus = primes[limb_index];
+                    let scalar_lift = signed_residue(centered_scalar, modulus);
                     limb.iter()
-                        .map(|value| mul_mod(*value, scalar_field, modulus))
+                        .map(|value| mul_mod(*value, scalar_lift, modulus))
                         .collect::<CanonicalResult<Vec<_>>>()
                 })
                 .collect::<CanonicalResult<Vec<_>>>()
@@ -952,9 +964,10 @@ impl CrtContext {
 #[cfg(test)]
 mod tests {
     use super::{
-        Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_sub, ciphertext_tensor,
-        modulus_switch, plaintext_mul, scalar_mul,
+        Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_negate, ciphertext_sub,
+        ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
     };
+    use crate::bgv::profile::PLAINTEXT_MODULUS;
 
     use std::sync::OnceLock;
 
@@ -1011,6 +1024,28 @@ mod tests {
         let ciphertext = key.encrypt_slots(&[2, 3, 4], "aa06").expect("encrypt");
         let scaled = scalar_mul(&ciphertext, 5).expect("scalar mul");
         assert_eq!(decrypt_prefix(key, &scaled, 3), vec![10, 15, 20]);
+    }
+
+    #[test]
+    fn scalar_multiplication_uses_centered_lift_for_negative_plaintext_scalars() {
+        let key = shared_key();
+        let ciphertext = key
+            .encrypt_slots(&[2, 3, PLAINTEXT_MODULUS - 1], "aa06-negative")
+            .expect("encrypt");
+        let negated = ciphertext_negate(&ciphertext).expect("negate");
+        let negative_scalar = scalar_mul(&ciphertext, -1).expect("negative scalar");
+        let field_residue_scalar = scalar_mul(
+            &ciphertext,
+            i64::try_from(PLAINTEXT_MODULUS - 1).expect("plaintext modulus fits i64"),
+        )
+        .expect("field residue scalar");
+
+        assert_eq!(negative_scalar.components, negated.components);
+        assert_eq!(field_residue_scalar.components, negated.components);
+        assert_eq!(
+            decrypt_prefix(key, &negative_scalar, 3),
+            vec![PLAINTEXT_MODULUS - 2, PLAINTEXT_MODULUS - 3, 1]
+        );
     }
 
     #[test]
