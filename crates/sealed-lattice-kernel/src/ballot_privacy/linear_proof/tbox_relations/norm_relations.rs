@@ -248,7 +248,10 @@ pub(super) fn build_l2_norm_relation(
         )?,
         Some(constant_polynomial(
             proof_ring,
-            proof_ring.modulus() - tbox_profile.exact_norm_bound_squared,
+            negate_mod(
+                tbox_profile.exact_norm_bound_squared % proof_ring.modulus(),
+                proof_ring.modulus(),
+            ),
         )),
     )
 }

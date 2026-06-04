@@ -67,6 +67,13 @@ pub(crate) struct Ciphertext {
     pub(crate) decrypt_scaling: u64,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct EncryptionWitness {
+    pub(crate) randomizer_coefficients: Vec<i64>,
+    pub(crate) error_zero_coefficients: Vec<i64>,
+    pub(crate) error_one_coefficients: Vec<i64>,
+}
+
 impl Ciphertext {
     pub(crate) fn primes(&self) -> &'static [u64] {
         &DATA_PRIMES[..=self.level]
@@ -224,6 +231,10 @@ impl DevelopmentBgvKey {
         &self.secret
     }
 
+    pub(crate) fn public_key_components(&self) -> (&[Vec<u64>], &[Vec<u64>]) {
+        (&self.public_b, &self.public_a)
+    }
+
     // Encrypt plaintext slot values into a fresh full-level ciphertext.
     pub(crate) fn encrypt_slots(
         &self,
@@ -242,6 +253,16 @@ impl DevelopmentBgvKey {
         plaintext_coefficients: &[u64],
         seed_hex: &str,
     ) -> CanonicalResult<Ciphertext> {
+        Ok(self
+            .encrypt_coefficients_with_witness(plaintext_coefficients, seed_hex)?
+            .0)
+    }
+
+    pub(crate) fn encrypt_coefficients_with_witness(
+        &self,
+        plaintext_coefficients: &[u64],
+        seed_hex: &str,
+    ) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
         if plaintext_coefficients.len() != POLYNOMIAL_DEGREE {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -309,11 +330,18 @@ impl DevelopmentBgvKey {
             component_one.push(limb_one);
         }
 
-        Ok(Ciphertext {
-            components: vec![component_zero, component_one],
-            level: EVALUATOR_FULL_LEVEL,
-            decrypt_scaling: 1,
-        })
+        Ok((
+            Ciphertext {
+                components: vec![component_zero, component_one],
+                level: EVALUATOR_FULL_LEVEL,
+                decrypt_scaling: 1,
+            },
+            EncryptionWitness {
+                randomizer_coefficients: randomizer,
+                error_zero_coefficients: error_zero,
+                error_one_coefficients: error_one,
+            },
+        ))
     }
 
     pub(crate) fn decrypt_to_coefficients(

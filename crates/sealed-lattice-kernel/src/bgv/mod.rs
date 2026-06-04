@@ -1,4 +1,5 @@
 pub(crate) mod commands;
+pub(crate) mod direct_ballots;
 pub(crate) mod profile;
 
 mod base_conversion;

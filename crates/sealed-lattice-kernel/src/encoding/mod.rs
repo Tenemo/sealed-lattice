@@ -338,6 +338,7 @@ enum TranscriptCoreCommand {
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
     RejectBgvReferenceOracleArtifact,
+    RunDirectEncryptedBallotPrototype,
     RunDevelopmentTopKEvaluation,
     RunEncryptedAggregateTopKEvaluation,
     RunEncryptedAggregateTopKEvaluationSweep,
@@ -531,6 +532,7 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
         | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
+        | TranscriptCoreCommand::RunDirectEncryptedBallotPrototype
         | TranscriptCoreCommand::RunDevelopmentTopKEvaluation
         | TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluation
         | TranscriptCoreCommand::RunEncryptedAggregateTopKEvaluationSweep => {
@@ -685,6 +687,9 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
             Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
+        }
+        TranscriptCoreCommand::RunDirectEncryptedBallotPrototype => {
+            crate::bgv::direct_ballots::run_direct_encrypted_ballot_prototype(request)
         }
         TranscriptCoreCommand::RunDevelopmentTopKEvaluation => {
             crate::bgv::evaluator::commands::run_development_top_k_evaluation(request)

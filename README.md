@@ -49,6 +49,7 @@ Still unavailable:
 - generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
 - final encrypted aggregate bridge acceptance evidence from committed aggregate shares to encrypted aggregate input data, preserving bridge witness privacy;
 - accepted-input sparse-target oracle success for every supported top count, a claim-bearing masked rank refresh or equivalent target-profile fix for the current projection noise gap, release-grade runtime evidence for the 20-option evaluator, the mandatory post-quantum evaluation proof, target-decryption security, and target acceptance;
+- direct encrypted ballot replacement path: the internal prototype can encrypt and privately preflight one 20-score BGV ballot, but compact proof coverage is blocked because the current generic linear proof backend does not bind all BGV RNS limbs to the same plaintext and encryption randomness witnesses;
 - production target-bound decryption and result release.
 
 ## What is internal
@@ -59,6 +60,7 @@ Several protocol components exist only as workspace-internal implementation, tes
 - deterministic PVSS ballot-algebra helpers used for regression tests;
 - ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
 - sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, and allowed-operation registry for the encrypted aggregate path;
+- an internal direct encrypted ballot prototype command for feasibility discovery. It is stopped at proof assessment and does not make direct aggregation, evaluator replay, Node/WASM verification, or mobile evidence claim-bearing;
 - scoped passive setup HE-security evidence for the data-basis setup/bridge/evaluator path, while target-decryption parameters remain downstream;
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
 - offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
