@@ -20,6 +20,9 @@ import type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvTargetCiphertextPairInput,
+    BgvTargetDecryptionResult,
+    BgvTargetDecryptionShare,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -35,6 +38,9 @@ export type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvTargetCiphertextPairInput,
+    BgvTargetDecryptionResult,
+    BgvTargetDecryptionShare,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -98,6 +104,25 @@ export type TranscriptCoreKernel = {
             readonly level: number;
         }[];
     }): Record<string, unknown>;
+    generateBgvTargetDecryptionShare(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly setupPrivateWitness: {
+            readonly setupSeed: string;
+        };
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly trusteeIdentity: string;
+    }): BgvTargetDecryptionShare;
+    recombineBgvTargetDecryptionShares(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly decryptionShares: readonly BgvTargetDecryptionShare[];
+    }): BgvTargetDecryptionResult;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -213,6 +238,27 @@ type TranscriptCoreKernelCommand =
               readonly rotation: number;
               readonly level: number;
           }[];
+      }
+    | {
+          readonly command: 'GenerateBgvTargetDecryptionShare';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly setupPrivateWitness: {
+              readonly setupSeed: string;
+          };
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly trusteeIdentity: string;
+      }
+    | {
+          readonly command: 'RecombineBgvTargetDecryptionShares';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly decryptionShares: readonly BgvTargetDecryptionShare[];
       }
     | {
           readonly command: 'VerifyBgvPassiveSetup';

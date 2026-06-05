@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "259af0d6562b8562ef20ab5a5b652171cfea09398b230e070e884de4072a1fa29f139a4e6030f1441783c88095030dab49ba3b6fcc18735d4ee416d5ed568ea8";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "fba9a8715fac9538bf5309a560b862b296a53516d1d5ecb5082ce3e271d7c1cba46c58c73c7d0202637226aecccc5a51c06b857e3c3bd8ac5229c4bdc35150aa";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -275,7 +275,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     );
     assert_eq!(
         first["targetDecryptionStatus"]["targetPartDecImplemented"],
-        false
+        true
     );
     assert_eq!(
         first["certificates"]["setupParameterCertificate"]["finalSecurityStatus"],
@@ -287,7 +287,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     );
     assert_eq!(
         first["certificates"]["targetThresholdDecryptabilityCertificate"]["downstreamProtocolStatus"],
-        "TargetDecryptionShareProtocolStillDownstream"
+        "TargetShareProofAndC1C4CertificationStillDownstream"
     );
     assert_eq!(first["setupInputs"]["defaultSetupSeedUsed"], false);
     assert_eq!(
@@ -1190,10 +1190,10 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
             }),
         ),
         (
-            "target decryption PartDec claim",
+            "target decryption PartDec missing",
             Box::new(|mutated_package| {
                 mutated_package["targetDecryptionStatus"]["targetPartDecImplemented"] =
-                    serde_json::json!(true);
+                    serde_json::json!(false);
             }),
         ),
         (
@@ -1304,7 +1304,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             },
             "targetDecryptionStatus": {
                 "targetC1C4StatusAccepted": false,
-                "targetPartDecImplemented": false,
+                "targetPartDecImplemented": true,
                 "setupMaterialMatchesTargetDecryption": true,
             },
             "objectType": "BgvPassiveSetupPackage",
@@ -1333,7 +1333,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
         },
         "targetDecryptionStatus": {
             "targetC1C4StatusAccepted": false,
-            "targetPartDecImplemented": false,
+            "targetPartDecImplemented": true,
             "setupMaterialMatchesTargetDecryption": true,
         },
         "objectType": "BgvPassiveSetupPackage",

@@ -17,6 +17,8 @@ import type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvTargetDecryptionResult,
+    BgvTargetDecryptionShare,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -241,6 +243,31 @@ export const createTranscriptCoreKernelLoader = (
                         setupPrivateWitness: input.setupPrivateWitness,
                         workingLevel: input.workingLevel,
                         rotationKeys: input.rotationKeys,
+                    }),
+                generateBgvTargetDecryptionShare: (
+                    input,
+                ): BgvTargetDecryptionShare =>
+                    executeCommand<BgvTargetDecryptionShare>({
+                        command: 'GenerateBgvTargetDecryptionShare',
+                        setupPackage: input.setupPackage,
+                        setupPrivateWitness: input.setupPrivateWitness,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetShareProfile: input.targetShareProfile,
+                        trusteeIdentity: input.trusteeIdentity,
+                    }),
+                recombineBgvTargetDecryptionShares: (
+                    input,
+                ): BgvTargetDecryptionResult =>
+                    executeCommand<BgvTargetDecryptionResult>({
+                        command: 'RecombineBgvTargetDecryptionShares',
+                        setupPackage: input.setupPackage,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetShareProfile: input.targetShareProfile,
+                        decryptionShares: input.decryptionShares,
                     }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({

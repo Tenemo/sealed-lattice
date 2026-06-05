@@ -178,11 +178,11 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'FinalTargetSecurityPendingTargetModulus',
             ]),
         );
-        expect(setup.nonClaims).toContain('TargetPartDecNotImplemented');
+        expect(setup.nonClaims).toContain('TargetShareProofNotCertified');
         expect(setup.targetDecryptionStatus).toMatchObject({
             targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
             setupMaterialMatchesTargetDecryption: true,
-            targetPartDecImplemented: false,
+            targetPartDecImplemented: true,
             targetC1C4StatusAccepted: false,
         });
         expect(certificates.setupParameterCertificate).toMatchObject({
@@ -533,12 +533,12 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                     ),
             ],
             [
-                'target decryption claim',
+                'target decryption PartDec missing',
                 (setupPackage) =>
                     setPathValue(
                         setupPackage,
                         ['targetDecryptionStatus', 'targetPartDecImplemented'],
-                        true,
+                        false,
                     ),
             ],
             [

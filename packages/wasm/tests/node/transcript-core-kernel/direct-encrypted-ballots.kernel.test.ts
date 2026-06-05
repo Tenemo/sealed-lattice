@@ -99,9 +99,9 @@ describe('direct encrypted ballot kernel command', () => {
         expect(
             result.proofAttempt.proofTransport.firstProofStatementHash,
         ).toHaveLength(128);
-        expect(result.proofAttempt.proofTransport.proofProfileHash).toHaveLength(
-            128,
-        );
+        expect(
+            result.proofAttempt.proofTransport.proofProfileHash,
+        ).toHaveLength(128);
         expect(result.proofAttempt.proofTransport.retention).toContain(
             'verified and then dropped',
         );

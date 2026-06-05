@@ -462,17 +462,18 @@ fn transport_direct_ballot_binary_proof(
         DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
         &chunk_merkle_root,
     )?;
-    let public_transport_hash = direct_ballot_public_proof_transport_hash(
-        setup_package,
-        ballot,
-        statement_hash,
-        expected_proof_bytes_hash,
-        proof_bytes.len(),
-        DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
-        chunk_count,
-        &chunk_hashes,
-        &chunk_merkle_root,
-    )?;
+    let public_transport_hash =
+        direct_ballot_public_proof_transport_hash(DirectBallotPublicProofTransportHashInput {
+            setup_package,
+            ballot,
+            statement_hash,
+            proof_bytes_hash: expected_proof_bytes_hash,
+            proof_byte_length: proof_bytes.len(),
+            chunk_size_bytes: DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+            chunk_count,
+            chunk_hashes: &chunk_hashes,
+            chunk_merkle_root: &chunk_merkle_root,
+        })?;
 
     Ok(DirectBallotBinaryProofTransport {
         proof_size_bytes: transported_proof_bytes.len(),
@@ -499,6 +500,58 @@ fn direct_ballot_proof_chunk_hash(
             chunk,
         ],
     ))
+}
+
+struct DirectBallotPublicProofTransportHashInput<'a> {
+    setup_package: &'a Value,
+    ballot: &'a DirectEncryptedBallot,
+    statement_hash: &'a str,
+    proof_bytes_hash: &'a str,
+    proof_byte_length: usize,
+    chunk_size_bytes: usize,
+    chunk_count: usize,
+    chunk_hashes: &'a [String],
+    chunk_merkle_root: &'a str,
+}
+
+fn direct_ballot_public_proof_transport_hash(
+    input: DirectBallotPublicProofTransportHashInput<'_>,
+) -> CanonicalResult<String> {
+    validate_direct_ballot_hash_hex(input.statement_hash, "statementHash")?;
+    validate_direct_ballot_hash_hex(input.proof_bytes_hash, "proofBytesHash")?;
+    validate_direct_ballot_hash_hex(input.chunk_merkle_root, "proofChunkMerkleRoot")?;
+    let collective_public_key_root = required_string_path(
+        input.setup_package,
+        &["collectivePublicKey", "collectivePublicKeyRoot"],
+    )?;
+    let ballot_layout_hash = required_string_path(
+        input.setup_package,
+        &["profileBindings", "encryptedBallotLayoutHash"],
+    )?;
+    let proof_profile_hash = direct_ballot_relation_proof_profile_hash()?;
+
+    derive_protocol_hash(
+        "ProofBytesHash",
+        &json!({
+            "objectType": "DirectEncryptedBallotProofTransport",
+            "objectVersion": 1,
+            "proofByteLength": input.proof_byte_length,
+            "chunkSizeBytes": input.chunk_size_bytes,
+            "chunkCount": input.chunk_count,
+            "chunkHashes": input.chunk_hashes,
+            "chunkMerkleRoot": input.chunk_merkle_root,
+            "fullProofHash": input.proof_bytes_hash,
+            "statementHash": input.statement_hash,
+            "ciphertextRoot": input.ballot.ciphertext_root,
+            "voterIdentity": input.ballot.input.voter_identity,
+            "actionContextHash": input.ballot.input.action_context_hash,
+            "profileId": PROFILE_ID,
+            "profileHash": profile_hash()?,
+            "collectivePublicKeyRoot": collective_public_key_root,
+            "ballotLayoutHash": ballot_layout_hash,
+            "proofProfileHash": proof_profile_hash,
+        }),
+    )
 }
 
 fn verify_direct_ballot_public_proof_transport(
@@ -571,52 +624,6 @@ fn verify_direct_ballot_public_proof_transport(
     }
 
     Ok(())
-}
-
-fn direct_ballot_public_proof_transport_hash(
-    setup_package: &Value,
-    ballot: &DirectEncryptedBallot,
-    statement_hash: &str,
-    proof_bytes_hash: &str,
-    proof_byte_length: usize,
-    chunk_size_bytes: usize,
-    chunk_count: usize,
-    chunk_hashes: &[String],
-    chunk_merkle_root: &str,
-) -> CanonicalResult<String> {
-    validate_direct_ballot_hash_hex(statement_hash, "statementHash")?;
-    validate_direct_ballot_hash_hex(proof_bytes_hash, "proofBytesHash")?;
-    validate_direct_ballot_hash_hex(chunk_merkle_root, "proofChunkMerkleRoot")?;
-    let collective_public_key_root = required_string_path(
-        setup_package,
-        &["collectivePublicKey", "collectivePublicKeyRoot"],
-    )?;
-    let ballot_layout_hash =
-        required_string_path(setup_package, &["profileBindings", "encryptedBallotLayoutHash"])?;
-    let proof_profile_hash = direct_ballot_relation_proof_profile_hash()?;
-
-    derive_protocol_hash(
-        "ProofBytesHash",
-        &json!({
-            "objectType": "DirectEncryptedBallotProofTransport",
-            "objectVersion": 1,
-            "proofByteLength": proof_byte_length,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "chunkHashes": chunk_hashes,
-            "chunkMerkleRoot": chunk_merkle_root,
-            "fullProofHash": proof_bytes_hash,
-            "statementHash": statement_hash,
-            "ciphertextRoot": ballot.ciphertext_root,
-            "voterIdentity": ballot.input.voter_identity,
-            "actionContextHash": ballot.input.action_context_hash,
-            "profileId": PROFILE_ID,
-            "profileHash": profile_hash()?,
-            "collectivePublicKeyRoot": collective_public_key_root,
-            "ballotLayoutHash": ballot_layout_hash,
-            "proofProfileHash": proof_profile_hash,
-        }),
-    )
 }
 
 pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Value> {
@@ -817,11 +824,11 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "proofGate": first_proof.proof_gate,
             "generation": "Generated and verified one internal binary proof for the all-limb BGV encryption relation, score-linear constraints, and support constraints. This is internal relation evidence only; the proof model is not claim-bearing until weakest-relation soundness and zero-knowledge support checks are fixed.",
             "fullRnsCoverage": "The proof covers all 17 BGV RNS limbs with one shared randomizer, error, encoding-carry, score, and one-hot response vector.",
-            "blocker": "Next missing pieces are accepted weakest-relation soundness accounting, replacement or formal redesign of witness-dependent support commitments, Fiat-Shamir/QROM review, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, public package proof transport for an accepted proof profile, public accepted randomness API boundaries, and target-bound threshold PartDec/recombination math. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
+            "blocker": "Next missing pieces are accepted weakest-relation soundness accounting, replacement or formal redesign of witness-dependent support commitments, Fiat-Shamir/QROM review, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, public package proof transport for an accepted proof profile, public accepted randomness API boundaries, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
         },
         "aggregation": aggregation_result.report,
         "evaluatorReplay": evaluator_replay,
-        "decision": "Direct BGV ballot encryption, all-limb private preflight, one widened shared-response internal proof, direct ciphertext aggregation, binary chunk proof transport with public hashes, and requested-top-count encrypted sparse target projection are the active path. They are not claim-bearing because proof soundness is not accepted, current support commitments are not accepted as zero-knowledge, mobile evidence is missing, public accepted proof transport is missing, public accepted randomness boundaries are not finalized, and target-bound threshold PartDec/recombination math is not closed."
+        "decision": "Direct BGV ballot encryption, all-limb private preflight, one widened shared-response internal proof, direct ciphertext aggregation, binary chunk proof transport with public hashes, and requested-top-count encrypted sparse target projection are the active path. They are not claim-bearing because proof soundness is not accepted, current support commitments are not accepted as zero-knowledge, mobile evidence is missing, public accepted proof transport is missing, public accepted randomness boundaries are not finalized, and target share proof/C1-C4/public target-decryption gates are not closed."
     }))
 }
 
@@ -1239,14 +1246,16 @@ fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             &target_order_root,
         )?;
         let evaluator_replay_context_hash = direct_ballot_evaluator_replay_context_hash(
-            setup_package,
-            &aggregate_ciphertext_root,
-            aggregate_ciphertext_canonical_byte_length,
-            ballot_count,
-            *top_count,
-            score_domain_max,
-            context.working_level(),
-            &target_layout_root,
+            DirectBallotEvaluatorReplayContextHashInput {
+                setup_package,
+                aggregate_ciphertext_root: &aggregate_ciphertext_root,
+                aggregate_ciphertext_canonical_byte_length,
+                ballot_count,
+                top_count: *top_count,
+                score_domain_max,
+                working_level: context.working_level(),
+                target_layout_hash: &target_layout_root,
+            },
         )?;
         let evaluator_replay_record_hash = direct_ballot_evaluator_replay_record_hash(
             setup_package,
@@ -1416,35 +1425,39 @@ fn direct_ballot_target_ciphertext_hash(
     )
 }
 
-fn direct_ballot_evaluator_replay_context_hash(
-    setup_package: &Value,
-    aggregate_ciphertext_root: &str,
+struct DirectBallotEvaluatorReplayContextHashInput<'a> {
+    setup_package: &'a Value,
+    aggregate_ciphertext_root: &'a str,
     aggregate_ciphertext_canonical_byte_length: usize,
     ballot_count: usize,
     top_count: usize,
     score_domain_max: u64,
     working_level: usize,
-    target_layout_hash: &str,
+    target_layout_hash: &'a str,
+}
+
+fn direct_ballot_evaluator_replay_context_hash(
+    input: DirectBallotEvaluatorReplayContextHashInput<'_>,
 ) -> CanonicalResult<String> {
     derive_protocol_hash(
         "EvaluatorReplayContextHash",
         &json!({
             "objectType": "DirectEncryptedBallotEvaluatorReplayContext",
             "objectVersion": 1,
-            "setupPackageHash": setup_package_hash(setup_package)?,
-            "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
-            "manifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
-            "thresholdProfileHash": required_string_path(setup_package, &["setupInputs", "thresholdProfileHash"])?,
-            "aggregateCiphertextRoot": aggregate_ciphertext_root,
-            "aggregateCiphertextCanonicalByteLength": aggregate_ciphertext_canonical_byte_length,
-            "ballotCount": ballot_count,
-            "topCount": top_count,
-            "scoreDomainMax": score_domain_max,
+            "setupPackageHash": setup_package_hash(input.setup_package)?,
+            "ceremonyId": required_string_path(input.setup_package, &["setupInputs", "ceremonyId"])?,
+            "manifestHash": required_string_path(input.setup_package, &["setupInputs", "manifestHash"])?,
+            "thresholdProfileHash": required_string_path(input.setup_package, &["setupInputs", "thresholdProfileHash"])?,
+            "aggregateCiphertextRoot": input.aggregate_ciphertext_root,
+            "aggregateCiphertextCanonicalByteLength": input.aggregate_ciphertext_canonical_byte_length,
+            "ballotCount": input.ballot_count,
+            "topCount": input.top_count,
+            "scoreDomainMax": input.score_domain_max,
             "tiePolicy": TIE_POLICY,
-            "workingLevel": working_level,
+            "workingLevel": input.working_level,
             "profileHash": profile_hash()?,
             "directComparisonProfileHash": direct_comparison_profile_hash()?,
-            "targetLayoutHash": target_layout_hash,
+            "targetLayoutHash": input.target_layout_hash,
             "intermediateOpeningsAllowed": false,
         }),
     )
@@ -2294,7 +2307,7 @@ mod tests {
         assert_eq!(
             result["proofAttempt"]["blocker"].as_str(),
             Some(
-                "Next missing pieces are accepted weakest-relation soundness accounting, replacement or formal redesign of witness-dependent support commitments, Fiat-Shamir/QROM review, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, public package proof transport for an accepted proof profile, public accepted randomness API boundaries, and target-bound threshold PartDec/recombination math. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
+                "Next missing pieces are accepted weakest-relation soundness accounting, replacement or formal redesign of witness-dependent support commitments, Fiat-Shamir/QROM review, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, public package proof transport for an accepted proof profile, public accepted randomness API boundaries, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
             )
         );
         assert_eq!(
@@ -2804,7 +2817,11 @@ mod tests {
         .expect_err("duplicate top counts must reject");
 
         assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-        assert!(error.message.contains("topCounts must not contain duplicates"));
+        assert!(
+            error
+                .message
+                .contains("topCounts must not contain duplicates")
+        );
     }
 
     #[test]
@@ -2934,12 +2951,26 @@ mod tests {
         );
         assert_eq!(
             result["evaluatorReplay"]["privateCorrectnessCheck"].as_str(),
-            Some("The command privately checked the final target ciphertext against the plaintext oracle and does not publish aggregate scores, ranks, comparisons, masks, or decoded target slots in the replay report.")
+            Some(
+                "The command privately checked the final target ciphertext against the plaintext oracle and does not publish aggregate scores, ranks, comparisons, masks, or decoded target slots in the replay report."
+            )
         );
         assert!(result["evaluatorReplay"].get("decodedTargetIds").is_none());
-        assert!(result["evaluatorReplay"].get("decodedTargetOrders").is_none());
-        assert!(result["evaluatorReplay"].get("plaintextOracleTargetIds").is_none());
-        assert!(result["evaluatorReplay"].get("plaintextOracleTargetOrders").is_none());
+        assert!(
+            result["evaluatorReplay"]
+                .get("decodedTargetOrders")
+                .is_none()
+        );
+        assert!(
+            result["evaluatorReplay"]
+                .get("plaintextOracleTargetIds")
+                .is_none()
+        );
+        assert!(
+            result["evaluatorReplay"]
+                .get("plaintextOracleTargetOrders")
+                .is_none()
+        );
         assert_eq!(
             result["evaluatorReplay"]["targetIdRoot"]
                 .as_str()

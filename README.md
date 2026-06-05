@@ -59,7 +59,8 @@ The direct encrypted ballot implementation has useful internal evidence:
 - duplicate voter identities, out-of-order voter identities, invalid scores, and mismatched setup witness seeds reject before encryption and proof generation;
 - the packed batched-pair evaluator produces encrypted sparse target roots for requested top counts without publishing aggregate scores, ranks, comparisons, masks, evaluator intermediates, or decoded target slots;
 - one native one-ballot packed batched-pair replay matches the full 20-option target oracle at working level 8 in about 240 s;
-- target-accepted record and target-bound decryption-share shell verification now refuse shares for any ciphertext other than the accepted target ciphertext.
+- target-accepted record and target-bound decryption-share verification refuse shares for any ciphertext other than the accepted target ciphertext;
+- target-bound threshold `PartDec` and recombination math compute context-bound Shamir partial decryptions for the accepted sparse target ciphertext pair and recover target ID/order slots with Lagrange interpolation.
 
 This evidence is not claim-bearing. The current blockers are:
 
@@ -71,7 +72,10 @@ This evidence is not claim-bearing. The current blockers are:
 - mobile proof verification;
 - mobile evaluator replay;
 - browser/mobile proof-copy and memory evidence;
-- target-bound threshold `PartDec` and recombination math for accepted `C_target` only.
+- target decryption share proof verification and certification;
+- smudging, noise, and C1-C4 target-decryption closure;
+- public target-decryption/recombination integration;
+- mobile target-decryption/recombination evidence.
 
 ## What is internal
 

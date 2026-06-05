@@ -215,3 +215,50 @@ export type BgvPassiveSetupVerification = {
     readonly unresolvedReason: string | null;
     readonly statusLabels: readonly string[];
 };
+
+export type BgvTargetCiphertextPairInput = {
+    readonly targetIdCanonicalBytesHex: string;
+    readonly targetOrderCanonicalBytesHex: string;
+};
+
+export type BgvTargetDecryptionShare = Readonly<
+    Record<string, unknown> & {
+        readonly objectType: 'BgvTargetDecryptionShare';
+        readonly objectVersion: 1;
+        readonly targetDecryptionShareHash: ProtocolHash;
+        readonly trusteeIdentity: string;
+        readonly rosterPosition: number;
+        readonly interpolationPoint: number;
+        readonly targetAcceptedRecordHash: ProtocolHash;
+        readonly targetContextHash: ProtocolHash;
+        readonly targetCiphertextHash: ProtocolHash;
+        readonly targetDecryptionCiphertextHash: ProtocolHash;
+        readonly targetShareProfileHash: ProtocolHash;
+        readonly shareRoot: ProtocolHash;
+        readonly sharePayload: unknown;
+        readonly statusLabels: readonly string[];
+    }
+>;
+
+export type BgvTargetDecryptionResult = {
+    readonly ok: true;
+    readonly operation: 'recombineBgvTargetDecryptionShares';
+    readonly targetDecryptionResultHash: ProtocolHash;
+    readonly setupPackageHash: ProtocolHash;
+    readonly targetAcceptedRecordHash: ProtocolHash;
+    readonly targetContextHash: ProtocolHash;
+    readonly targetCiphertextHash: ProtocolHash;
+    readonly targetShareProfileHash: ProtocolHash;
+    readonly targetDecryptionProfileHash: ProtocolHash;
+    readonly shareEquation: string;
+    readonly recombinationEquation: string;
+    readonly selectedShareRule: string;
+    readonly minimumSharesForInterpolation: number;
+    readonly decryptionThreshold: number;
+    readonly decryptionShareQuorum: number;
+    readonly selectedRosterPositions: readonly number[];
+    readonly decodedTargetIds: readonly number[];
+    readonly decodedTargetOrders: readonly number[];
+    readonly decryptScaling: number;
+    readonly statusLabels: readonly string[];
+};

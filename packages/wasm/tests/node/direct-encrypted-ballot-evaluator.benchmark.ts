@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     createDirectBallotSetupPackage,
+    type DirectEncryptedBallotEvaluatorReplayResult,
     runMeasuredDirectEncryptedBallot,
 } from './transcript-core-kernel/direct-encrypted-ballot';
 
@@ -24,6 +25,14 @@ const directBallotBenchmarkTopCount = (): number => {
 
     return topCount;
 };
+
+const isEvaluatorReplayResultArray = (
+    value:
+        | string
+        | DirectEncryptedBallotEvaluatorReplayResult
+        | readonly DirectEncryptedBallotEvaluatorReplayResult[],
+): value is readonly DirectEncryptedBallotEvaluatorReplayResult[] =>
+    Array.isArray(value);
 
 describe('direct encrypted ballot evaluator benchmark', () => {
     it(
@@ -104,7 +113,10 @@ describe('direct encrypted ballot evaluator benchmark', () => {
             );
             expect(result.evaluatorReplay).not.toBeTypeOf('string');
             const evaluatorReplay = result.evaluatorReplay;
-            if (typeof evaluatorReplay === 'string' || Array.isArray(evaluatorReplay)) {
+            if (
+                typeof evaluatorReplay === 'string' ||
+                isEvaluatorReplayResultArray(evaluatorReplay)
+            ) {
                 throw new Error('Expected one evaluator replay result.');
             }
             expect(evaluatorReplay.topCount).toBe(topCount);

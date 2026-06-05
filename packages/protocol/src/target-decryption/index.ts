@@ -10,6 +10,10 @@ import {
 } from '@sealed-lattice/types';
 
 import {
+    verifyBoardConsistency,
+    verifyInclusionProof,
+} from '../board/index.js';
+import {
     buildBoardHeadMap,
     createRefusal,
     defaultSignedRootContextHash,
@@ -18,10 +22,6 @@ import {
     uniqueStrings,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
-import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
 
 import {
     deriveTargetAcceptedRecordHash,
@@ -149,8 +149,10 @@ const verifyTargetAcceptedRecordUnchecked = (
             input.targetFinalityRecord.targetFinalityRecordHash ||
         record.targetFinalityCheckpointHash !==
             checkpoint.targetFinalityCheckpointHash ||
-        record.targetProposalHash !== input.targetFinalityRecord.targetProposalHash ||
-        record.targetFinalityScope !== input.targetFinalityRecord.targetFinalityScope
+        record.targetProposalHash !==
+            input.targetFinalityRecord.targetProposalHash ||
+        record.targetFinalityScope !==
+            input.targetFinalityRecord.targetFinalityScope
     ) {
         refusedObjects.push(
             createRefusal(
@@ -163,8 +165,10 @@ const verifyTargetAcceptedRecordUnchecked = (
     }
     if (
         record.electionManifestHash !== checkpoint.electionManifestHash ||
-        record.evaluatorReplayRecordHash !== checkpoint.evaluatorReplayRecordHash ||
-        record.evaluatorReplayProfileHash !== checkpoint.evaluatorReplayProfileHash ||
+        record.evaluatorReplayRecordHash !==
+            checkpoint.evaluatorReplayRecordHash ||
+        record.evaluatorReplayProfileHash !==
+            checkpoint.evaluatorReplayProfileHash ||
         record.targetCiphertextHash !== checkpoint.targetCiphertextHash ||
         record.targetLayoutHash !== checkpoint.targetLayoutHash
     ) {
@@ -180,12 +184,14 @@ const verifyTargetAcceptedRecordUnchecked = (
     if (
         input.evaluatorReplayRecord.evaluatorReplayRecordHash !==
             record.evaluatorReplayRecordHash ||
-        input.evaluatorReplayRecord.targetProposalHash !== record.targetProposalHash ||
+        input.evaluatorReplayRecord.targetProposalHash !==
+            record.targetProposalHash ||
         input.evaluatorReplayRecord.targetFinalityRecordHash !==
             record.targetFinalityRecordHash ||
         input.evaluatorReplayRecord.targetCiphertextHash !==
             record.targetCiphertextHash ||
-        input.evaluatorReplayRecord.targetLayoutHash !== record.targetLayoutHash ||
+        input.evaluatorReplayRecord.targetLayoutHash !==
+            record.targetLayoutHash ||
         input.evaluatorReplayRecord.evaluatorReplayProfileHash !==
             record.evaluatorReplayProfileHash
     ) {
@@ -321,7 +327,10 @@ const verifyTopKDecryptionShareShellUnchecked = (
 
     refusedObjects.push(...boardResult.refusedObjects);
     refusedObjects.push(
-        ...verifyInclusionProof(input.decryptionShareInclusionProof, headsByHash),
+        ...verifyInclusionProof(
+            input.decryptionShareInclusionProof,
+            headsByHash,
+        ),
     );
 
     if (share.topKDecryptionShareHash !== expectedShareHash) {
@@ -334,7 +343,10 @@ const verifyTopKDecryptionShareShellUnchecked = (
             ),
         );
     }
-    if (share.objectType !== 'TopKDecryptionShare' || share.objectVersion !== 1) {
+    if (
+        share.objectType !== 'TopKDecryptionShare' ||
+        share.objectVersion !== 1
+    ) {
         refusedObjects.push(
             createRefusal(
                 'DecryptionShareInvalid',
@@ -382,7 +394,8 @@ const verifyTopKDecryptionShareShellUnchecked = (
     }
     if (
         share.ceremonyId !== targetAcceptedRecord.ceremonyId ||
-        share.electionManifestHash !== targetAcceptedRecord.electionManifestHash ||
+        share.electionManifestHash !==
+            targetAcceptedRecord.electionManifestHash ||
         share.targetAcceptedRecordHash !==
             targetAcceptedRecord.targetAcceptedRecordHash ||
         share.targetProposalHash !== targetAcceptedRecord.targetProposalHash ||
@@ -394,7 +407,8 @@ const verifyTopKDecryptionShareShellUnchecked = (
         share.evaluatorReplayRecordHash !==
             targetAcceptedRecord.evaluatorReplayRecordHash ||
         share.targetContextHash !== targetAcceptedRecord.targetContextHash ||
-        share.targetCiphertextHash !== targetAcceptedRecord.targetCiphertextHash ||
+        share.targetCiphertextHash !==
+            targetAcceptedRecord.targetCiphertextHash ||
         share.targetDecryptionProfileHash !==
             targetAcceptedRecord.targetDecryptionProfileHash ||
         share.targetBasisHash !== targetAcceptedRecord.targetBasisHash
@@ -408,7 +422,10 @@ const verifyTopKDecryptionShareShellUnchecked = (
             ),
         );
     }
-    if (share.targetDecryptionCiphertextHash !== targetAcceptedRecord.targetCiphertextHash) {
+    if (
+        share.targetDecryptionCiphertextHash !==
+        targetAcceptedRecord.targetCiphertextHash
+    ) {
         refusedObjects.push(
             createRefusal(
                 'DecryptionShareInvalid',

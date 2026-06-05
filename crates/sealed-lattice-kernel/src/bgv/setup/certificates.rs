@@ -385,8 +385,8 @@ pub(super) fn target_decryption_profile(profile_hash: &str) -> CanonicalResult<V
         "bgvProfileHash": profile_hash,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
         "asyncLagrangeTargetDirection": true,
-        "partDecImplemented": false,
-        "finDecImplemented": false,
+        "partDecImplemented": true,
+        "finDecImplemented": true,
         "c1ThroughC4Certified": false,
         "qTargetKnown": false,
     }))
@@ -482,7 +482,7 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
     Ok(json!({
         "objectType": "TargetThresholdDecryptabilityCertificate",
         "objectVersion": 1,
-        "certificateScope": "setup-key-and-ciphertext-profile-compatibility-only",
+        "certificateScope": "setup-key-ciphertext-profile-and-target-recombination-math",
         "setupBinding": setup_binding,
         "keyBinding": key_binding,
         "ciphertextProfile": ciphertext_profile,
@@ -490,13 +490,14 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "ciphertextCompatibilityStatus": "TargetThresholdDecryptabilityCompatibilityCertified",
         "semanticDecryptionPolicy": "only an accepted target ciphertext after target finality and evaluator replay may request target decryption",
         "aggregateCiphertextPolicy": "direct encrypted ballot aggregate ciphertexts are target-key compatible but never authorized semantic decryption targets",
-        "downstreamProtocolStatus": "TargetDecryptionShareProtocolStillDownstream",
+        "downstreamProtocolStatus": "TargetShareProofAndC1C4CertificationStillDownstream",
         "statusLabels": [
             "TargetThresholdDecryptabilityCompatibilityCertified",
             "CollectivePublicKeyRootBound",
             "ThresholdVerificationMaterialBound",
             "DecryptableBgvCiphertextConvention",
-            "TargetDecryptionShareProtocolStillDownstream"
+            "TargetPartDecAndRecombinationImplemented",
+            "TargetShareProofAndC1C4CertificationStillDownstream"
         ],
     }))
 }

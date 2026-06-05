@@ -38,7 +38,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         &json!({
             "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "profileStatus": "future-target-decryption-profile-binding",
+            "profileStatus": "target-decryption-profile-binding",
         }),
     )?;
     let public_common_random_polynomial_root = public_common_random_polynomial_root(input)?;
@@ -187,7 +187,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "targetDecryptionProfileHash": target_decryption_profile_hash,
             "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
             "setupMaterialMatchesTargetDecryption": true,
-            "targetPartDecImplemented": false,
+            "targetPartDecImplemented": true,
             "targetC1C4StatusAccepted": false,
         },
         "statusLabels": [
@@ -199,6 +199,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "ThresholdVerificationMaterialBound",
             "EvaluationKeyRootBound",
             "TargetDecryptionSetupMaterialMatched",
+            "TargetPartDecAndRecombinationImplemented",
             "PassiveSetupInputReady",
             "DirectEvaluatorReplayHeSecurityAccepted",
             "FinalTargetSecurityPendingTargetModulus"
@@ -207,7 +208,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "ActiveMaliciousSetupProofMissing",
             "BgvAlgebraicPublicKeyProofMissing",
             "MaliciousEvaluationKeyProofMissing",
-            "TargetPartDecNotImplemented",
+            "TargetShareProofNotCertified",
             "TargetC1C4NotCertified",
             "FinalTargetSecurityPendingTargetModulus",
             "DirectEvaluatorReplayNoiseClosurePending",

@@ -127,7 +127,7 @@ pub(super) fn validate_setup_package_internal_bindings(
         &json!({
             "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "profileStatus": "future-target-decryption-profile-binding",
+            "profileStatus": "target-decryption-profile-binding",
         }),
     )?;
     compare_string_at_path(
@@ -200,16 +200,22 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
             "passive BGV setup package must mark target decryption material matching",
         ));
     }
-    if bool_at_path(
+    if !bool_at_path(
         setup_package,
         &["targetDecryptionStatus", "targetPartDecImplemented"],
-    )? || bool_at_path(
+    )? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "passive BGV setup package must mark target decryption PartDec implemented",
+        ));
+    }
+    if bool_at_path(
         setup_package,
         &["targetDecryptionStatus", "targetC1C4StatusAccepted"],
     )? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must not claim target decryption PartDec or C1-C4 certification",
+            "passive BGV setup package must not claim target decryption C1-C4 certification",
         ));
     }
     if bool_at_path(

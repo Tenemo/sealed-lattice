@@ -6,7 +6,10 @@ import type {
 } from '@sealed-lattice/types';
 
 export const deriveTargetAcceptedRecordHash = (
-    record: Omit<TargetAcceptedRecord, 'targetAcceptedRecordHash' | 'signature'>,
+    record: Omit<
+        TargetAcceptedRecord,
+        'targetAcceptedRecordHash' | 'signature'
+    >,
 ): ProtocolHash =>
     deriveProtocolHash('TargetAcceptedRecordHash', {
         acceptanceMode: record.acceptanceMode,
@@ -33,7 +36,10 @@ export const deriveTargetAcceptedRecordHash = (
     });
 
 export const deriveTopKDecryptionShareHash = (
-    share: Omit<TopKDecryptionShareShell, 'topKDecryptionShareHash' | 'signature'>,
+    share: Omit<
+        TopKDecryptionShareShell,
+        'topKDecryptionShareHash' | 'signature'
+    >,
 ): ProtocolHash =>
     deriveProtocolHash('TopKDecryptionShareHash', {
         boardPosition: share.boardPosition,

@@ -321,6 +321,8 @@ enum TranscriptCoreCommand {
     AnalyzeBgvCanonicalObject,
     RejectBgvReferenceOracleArtifact,
     RunDirectEncryptedBallot,
+    GenerateBgvTargetDecryptionShare,
+    RecombineBgvTargetDecryptionShares,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -491,7 +493,11 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
         | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
-        | TranscriptCoreCommand::RunDirectEncryptedBallot => run_bgv_command(command, &request),
+        | TranscriptCoreCommand::RunDirectEncryptedBallot
+        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
+        | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
+            run_bgv_command(command, &request)
+        }
     }
 }
 
@@ -541,6 +547,16 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::RunDirectEncryptedBallot => {
             crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
+        }
+        TranscriptCoreCommand::GenerateBgvTargetDecryptionShare => {
+            crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
+            crate::bgv::target_decryption::recombine_bgv_target_decryption_shares_from_request(
+                request,
+            )
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

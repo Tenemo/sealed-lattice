@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
     targetDecryptionProfileId,
     type EvaluatorReplayRecord,
@@ -8,7 +6,14 @@ import {
     type TargetFinalityRecord,
     type TopKDecryptionShareShell,
 } from '@sealed-lattice/types';
+import { describe, expect, it } from 'vitest';
 
+import {
+    createBoardEvidence,
+    createBoardHead,
+    createBoardHeadWithObjects,
+    createTargetFinalityRecord,
+} from './election-foundation-board-helpers';
 import {
     ceremonyId,
     createKeyFixture,
@@ -21,20 +26,14 @@ import {
     witnessPolicy,
     witnessPublicKeyHashes,
 } from './election-foundation-fixture-constants';
-import {
-    createBoardEvidence,
-    createBoardHead,
-    createBoardHeadWithObjects,
-    createTargetFinalityRecord,
-} from './election-foundation-board-helpers';
 
+import { verifyTargetFinality } from '#packages/protocol/src/finality/index';
 import {
     deriveTargetAcceptedRecordHash,
     deriveTopKDecryptionShareHash,
     verifyTargetAcceptedRecord,
     verifyTopKDecryptionShareShell,
 } from '#packages/protocol/src/target-decryption/index';
-import { verifyTargetFinality } from '#packages/protocol/src/finality/index';
 
 const trusteeIdentity = 'trustee-1';
 const trusteePublicKeyHash = createKeyFixture(
@@ -47,17 +46,13 @@ const createFinalityFixture = (): {
     readonly targetFinalityRecord: TargetFinalityRecord;
 } => {
     const genesisHead = createBoardHead(0, null);
-    const finalizedHead = createBoardHeadWithObjects(
-        1,
-        genesisHead.headHash,
-        [
-            {
-                boardPosition: 0,
-                objectHash: defaultEvaluatorReplayRecordHash,
-                objectType: 'EvaluatorReplayRecord',
-            },
-        ],
-    ).head;
+    const finalizedHead = createBoardHeadWithObjects(1, genesisHead.headHash, [
+        {
+            boardPosition: 0,
+            objectHash: defaultEvaluatorReplayRecordHash,
+            objectType: 'EvaluatorReplayRecord',
+        },
+    ]).head;
     const targetFinalityRecord = createTargetFinalityRecord(finalizedHead);
 
     return { genesisHead, finalizedHead, targetFinalityRecord };
@@ -76,8 +71,7 @@ const createEvaluatorReplayRecord = (
         electionManifestHash: checkpoint.electionManifestHash,
         targetProposalHash: targetFinalityRecord.targetProposalHash,
         encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
-        targetFinalityRecordHash:
-            targetFinalityRecord.targetFinalityRecordHash,
+        targetFinalityRecordHash: targetFinalityRecord.targetFinalityRecordHash,
         evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
         evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
         targetCiphertextHash: checkpoint.targetCiphertextHash,
@@ -126,10 +120,8 @@ const createAcceptedTargetFixture = (): {
         targetContextHash: deriveFixtureHash('fixture-target-context-v1', {
             targetProposalHash: targetFinalityRecord.targetProposalHash,
         }),
-        targetFinalityRecordHash:
-            targetFinalityRecord.targetFinalityRecordHash,
-        targetFinalityCheckpointHash:
-            checkpoint.targetFinalityCheckpointHash,
+        targetFinalityRecordHash: targetFinalityRecord.targetFinalityRecordHash,
+        targetFinalityCheckpointHash: checkpoint.targetFinalityCheckpointHash,
         evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
         targetPreimageHash: deriveFixtureHash('fixture-target-preimage-v1', {
             targetCiphertextHash: checkpoint.targetCiphertextHash,
@@ -200,12 +192,10 @@ const createShare = (
         ceremonyId,
         electionManifestHash: targetAcceptedRecord.electionManifestHash,
         trusteeIdentity,
-        targetAcceptedRecordHash:
-            targetAcceptedRecord.targetAcceptedRecordHash,
+        targetAcceptedRecordHash: targetAcceptedRecord.targetAcceptedRecordHash,
         targetProposalHash: targetAcceptedRecord.targetProposalHash,
         targetPreimageHash: targetAcceptedRecord.targetPreimageHash,
-        targetFinalityRecordHash:
-            targetAcceptedRecord.targetFinalityRecordHash,
+        targetFinalityRecordHash: targetAcceptedRecord.targetFinalityRecordHash,
         targetFinalityCheckpointHash:
             targetAcceptedRecord.targetFinalityCheckpointHash,
         evaluatorReplayRecordHash:
@@ -244,8 +234,7 @@ const createShare = (
         TopKDecryptionShareShell,
         'topKDecryptionShareHash' | 'signature'
     >;
-    const topKDecryptionShareHash =
-        deriveTopKDecryptionShareHash(sharePayload);
+    const topKDecryptionShareHash = deriveTopKDecryptionShareHash(sharePayload);
 
     return {
         ...sharePayload,
@@ -324,7 +313,10 @@ describe('target-bound decryption shell verification', () => {
                 },
             ],
         ).head;
-        const signedShare = createShare(fixture.targetAcceptedRecord, shareHead);
+        const signedShare = createShare(
+            fixture.targetAcceptedRecord,
+            shareHead,
+        );
         const shareInclusionProof = createBoardHeadWithObjects(
             shareHead.boardSequence,
             fixture.acceptedHead.headHash,
@@ -337,7 +329,9 @@ describe('target-bound decryption shell verification', () => {
             ],
         ).inclusionProofs[0];
         if (shareInclusionProof === undefined) {
-            throw new Error('Decryption share inclusion proof was not created.');
+            throw new Error(
+                'Decryption share inclusion proof was not created.',
+            );
         }
 
         expect(finalityVerification.ok).toBe(true);
@@ -444,7 +438,9 @@ describe('target-bound decryption shell verification', () => {
             ],
         ).inclusionProofs[0];
         if (shareInclusionProof === undefined) {
-            throw new Error('Decryption share inclusion proof was not created.');
+            throw new Error(
+                'Decryption share inclusion proof was not created.',
+            );
         }
 
         const shareVerification = verifyTopKDecryptionShareShell({
@@ -462,13 +458,14 @@ describe('target-bound decryption shell verification', () => {
         });
 
         expect(shareVerification.ok).toBe(false);
-        expect(shareVerification.refusedObjects).toContainEqual(
-            expect.objectContaining({
-                code: 'DecryptionShareInvalid',
-                message: expect.stringContaining(
-                    'Only the accepted target ciphertext',
-                ),
-            }),
-        );
+        expect(
+            shareVerification.refusedObjects.some(
+                (refusal) =>
+                    refusal.code === 'DecryptionShareInvalid' &&
+                    refusal.message.includes(
+                        'Only the accepted target ciphertext',
+                    ),
+            ),
+        ).toBe(true);
     });
 });
