@@ -66,10 +66,10 @@ describe('election foundation public package API in browsers', () => {
 
     it('runs the deterministic election foundation without WASM-specific APIs', () => {
         const thresholdProfile = deriveThresholdProfile({
-            rosterSize: 20,
+            rosterSize: 10,
         });
 
-        expect(thresholdProfile.releaseQuorum).toBe(14);
+        expect(thresholdProfile.releaseQuorum).toBe(10);
         expect(
             validatePollSpec({
                 pollId: 'browser-poll',

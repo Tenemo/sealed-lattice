@@ -117,21 +117,21 @@ describe('election foundation public package API in Node', () => {
 
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
         const thresholdProfile = deriveThresholdProfile({
-            rosterSize: 20,
+            rosterSize: 10,
             targetBoundShareSelectionProfile: {
                 profileId: targetBoundShareSelectionProfileId,
                 certificateHash: 'target-bound-certificate-hash',
                 targetDecryptionProfileId,
                 targetBasisHash: 'target-basis-hash',
                 decryptionShareQuorum: 9,
-                minimumSharesForInterpolation: 7,
+                minimumSharesForInterpolation: 4,
                 minimumArrivalsForRobustDecode: 9,
                 invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
                 selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
             },
         });
 
-        expect(thresholdProfile.privacyCorruptionBound).toBe(6);
+        expect(thresholdProfile.privacyCorruptionBound).toBe(3);
         expect(
             validatePollSpec({
                 pollId: 'poll',

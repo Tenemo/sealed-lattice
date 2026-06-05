@@ -177,7 +177,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "KeySwitchKeyRoot",
             "KeySwitchDecompositionHash",
             "EvalKeyRoot",
-            "EvaluationKeySetDigest",
+            "EvaluationKeySetHash",
             "EvaluationKeySizeProfileHash",
             "CollectiveSecretDistributionCertificateHash",
             "ErrorDistributionCertificateHash",
@@ -524,7 +524,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
         "SetupPrivateWitnessNotExported",
         "EvaluationKeyRootBound"
     ]);
-    let public_material_hash = derive_protocol_hash("EvaluationKeySetDigest", &material)?;
+    let public_material_hash = derive_protocol_hash("EvaluationKeySetHash", &material)?;
     material["publicEvaluationKeyMaterialHash"] = Value::String(public_material_hash);
 
     Ok(material)
@@ -727,7 +727,7 @@ pub(crate) fn public_evaluation_keys_from_material(
     compare_hash_at_path(
         material,
         &["publicEvaluationKeyMaterialHash"],
-        &derive_protocol_hash("EvaluationKeySetDigest", &hash_input)?,
+        &derive_protocol_hash("EvaluationKeySetHash", &hash_input)?,
         "public evaluation-key material hash",
     )?;
 

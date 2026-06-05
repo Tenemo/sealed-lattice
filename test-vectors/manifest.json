@@ -15,7 +15,7 @@
     },
     {
       "path": "plaintext-oracle/shamir.json",
-      "sha256": "3d6a7100cc2348ce95d43e9c7c509ae6364ddacc01f7e261842edc1db4c85450"
+      "sha256": "414c874787ed521bc3621efb6b6fd9f7d763db5fcc7b2380548c2ac7c0dd8e69"
     },
     {
       "path": "plaintext-oracle/sparse-target.json",

@@ -23,9 +23,9 @@ const targetBoundShareSelectionProfile = {
 } as const;
 
 const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
-const thresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
+const thresholdProfile = deriveThresholdProfile({ rosterSize: 10 });
 const certifiedThresholdProfile = deriveThresholdProfile({
-    rosterSize: 20,
+    rosterSize: 10,
     targetBoundShareSelectionProfile,
 });
 

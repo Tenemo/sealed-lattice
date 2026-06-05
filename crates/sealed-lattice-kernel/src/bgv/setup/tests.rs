@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "fba9a8715fac9538bf5309a560b862b296a53516d1d5ecb5082ce3e271d7c1cba46c58c73c7d0202637226aecccc5a51c06b857e3c3bd8ac5229c4bdc35150aa";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "cbc79bff6a4307499941d328417c4209a99a45f52f45a27d6c3ba8e17a11975b9282fd8e9f5affa12e8be695e2f7a89748b34ae41c16f19c53d5d88701f5564a";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -215,7 +215,7 @@ fn rebind_public_evaluation_key_material_hash(material: &mut serde_json::Value) 
         .expect("public evaluation-key material must be an object")
         .remove("publicEvaluationKeyMaterialHash");
     material["publicEvaluationKeyMaterialHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetDigest", material)
+        derive_protocol_hash("EvaluationKeySetHash", material)
             .expect("public evaluation-key material hash")
     );
 }

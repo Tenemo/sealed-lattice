@@ -765,7 +765,7 @@ fn evaluation_key_streaming_commitment(
         "streamCommitmentEvidence": true,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
-    let commitment_hash = derive_protocol_hash("EvaluationKeySetDigest", &commitment_record)?;
+    let commitment_hash = derive_protocol_hash("EvaluationKeySetHash", &commitment_record)?;
 
     Ok(json!({
         "commitment": commitment_record,

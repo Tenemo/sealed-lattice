@@ -153,7 +153,7 @@ fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> Canonic
             "evaluation key streaming commitment storage quota decision is inconsistent",
         ));
     }
-    let commitment_hash = derive_protocol_hash("EvaluationKeySetDigest", commitment_record)?;
+    let commitment_hash = derive_protocol_hash("EvaluationKeySetHash", commitment_record)?;
     compare_hash_at_path(
         wrapped_commitment,
         &["commitmentHash"],

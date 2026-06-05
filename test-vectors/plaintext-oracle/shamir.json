@@ -155,7 +155,7 @@
     "threshold": 7,
     "reportHash": "9f7b78ebe82ef81c546e3e1dc5687fca9411979bb55e47a608c5510449a326072bf5856a5f409fa774f07f12a9a397a3fead990597832990251541fe5212c3e2"
   },
-  "mandatoryWorstCaseReport": {
+  "stressWorstCaseReport": {
     "exhaustiveSubsetCount": 77520,
     "maxCenteredAbsCoefficient": 32768,
     "maxCenteredAbsContributorRosterPositions": [

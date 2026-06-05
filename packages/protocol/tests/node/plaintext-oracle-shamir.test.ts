@@ -17,6 +17,8 @@ import {
 } from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext oracle Shamir and interpolation', () => {
+    const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
+
     it('matches deterministic Shamir vectors and reconstructs the secret', () => {
         const shares = evaluateShamirPolynomialForRoster(
             shamirVectors.polynomial,
@@ -43,7 +45,11 @@ describe('plaintext oracle Shamir and interpolation', () => {
         (rosterSize) => {
             const thresholdProfile = deriveThresholdProfile({
                 rosterSize,
-                casualMicroRosterAcknowledged: rosterSize < 20,
+                casualMicroRosterAcknowledged: rosterSize < 10,
+                dynamicRosterProfileCertificateHash:
+                    rosterSize >= 10 && rosterSize !== 10
+                        ? dynamicRosterProfileCertificateHash
+                        : undefined,
             });
             const polynomial = createDeterministicPolynomial(
                 normalizeFieldElement(rosterSize * 19),
@@ -105,7 +111,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         },
     );
 
-    it('matches selected and mandatory interpolation coefficient reports', () => {
+    it('matches selected and stress-profile interpolation coefficient reports', () => {
         const selectedReport = deriveInterpolationCoefficientReport({
             contributorRosterPositions:
                 shamirVectors.selectedContributorRosterPositions,
@@ -130,7 +136,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         });
 
         expect(worstCaseReport).toMatchObject(
-            shamirVectors.mandatoryWorstCaseReport,
+            shamirVectors.stressWorstCaseReport,
         );
     });
 

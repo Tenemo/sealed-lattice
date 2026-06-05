@@ -742,12 +742,12 @@ fn evaluation_key_material_binding(
         "gadget": "crt-idempotent-per-active-data-prime",
         "entries": rotation_stream_entries,
     });
-    let relinearization_stream_digest = evaluation_key_stream_digest(
+    let relinearization_stream_hash = evaluation_key_stream_hash(
         "relinearization-material-stream",
         &relinearization_stream_record,
     )?;
-    let rotation_stream_digest =
-        evaluation_key_stream_digest("rotation-material-stream", &rotation_stream_record)?;
+    let rotation_stream_hash =
+        evaluation_key_stream_hash("rotation-material-stream", &rotation_stream_record)?;
     let sampled_relation_checks = input.sampled_relation_checks;
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
@@ -761,7 +761,7 @@ fn evaluation_key_material_binding(
         "publicBasisId": BgvBasisKind::Data.basis_id(),
         "levelSchedule": relinearization_levels,
         "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?),
-        "keyMaterialStreamDigest": relinearization_stream_digest,
+        "keyMaterialStreamHash": relinearization_stream_hash,
         "maliciousEvaluationKeyProofIncluded": false,
     });
     let relinearization_key_root =
@@ -788,8 +788,8 @@ fn evaluation_key_material_binding(
             ),
             "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
         });
-        let entry_stream_digest =
-            evaluation_key_stream_digest("rotation-material-stream-entry", &entry_stream_record)?;
+        let entry_stream_hash =
+            evaluation_key_stream_hash("rotation-material-stream-entry", &entry_stream_record)?;
         let record = json!({
             "objectType": "BgvRotationKey",
             "objectVersion": 1,
@@ -804,7 +804,7 @@ fn evaluation_key_material_binding(
             "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
             "publicBasisId": BgvBasisKind::Data.basis_id(),
             "publicRlweSampleCount": entry.level + 1,
-            "keyMaterialStreamDigest": entry_stream_digest,
+            "keyMaterialStreamHash": entry_stream_hash,
             "maliciousEvaluationKeyProofIncluded": false,
         });
         let root = derive_protocol_hash("RotationKeyRoot", &record)?;
@@ -821,12 +821,12 @@ fn evaluation_key_material_binding(
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
-        "relinearizationStreamDigest": relinearization_stream_digest,
-        "rotationStreamDigest": rotation_stream_digest,
+        "relinearizationStreamHash": relinearization_stream_hash,
+        "rotationStreamHash": rotation_stream_hash,
         "sampledRelationChecks": sampled_relation_checks,
     });
-    let key_switch_stream_digest =
-        evaluation_key_stream_digest("key-switch-material-stream", &key_switch_stream_record)?;
+    let key_switch_stream_hash =
+        evaluation_key_stream_hash("key-switch-material-stream", &key_switch_stream_record)?;
     let key_switch_key_record = json!({
         "objectType": "BgvKeySwitchKey",
         "objectVersion": 1,
@@ -838,7 +838,7 @@ fn evaluation_key_material_binding(
         "publicBasisId": BgvBasisKind::Data.basis_id(),
         "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?)
             + rotation_schedule.iter().map(|entry| entry.level + 1).sum::<usize>(),
-        "keyMaterialStreamDigest": key_switch_stream_digest,
+        "keyMaterialStreamHash": key_switch_stream_hash,
         "genericKeySwitchApiExported": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
@@ -858,17 +858,17 @@ fn evaluation_key_material_binding(
         "rotSet": input.rot_set,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
         "relinearizationKeyRoot": relinearization_key_root,
-        "relinearizationStreamDigest": relinearization_stream_digest,
+        "relinearizationStreamHash": relinearization_stream_hash,
         "rotationKeyRoots": rotation_key_roots,
-        "rotationStreamDigest": rotation_stream_digest,
+        "rotationStreamHash": rotation_stream_hash,
         "keySwitchKeyRoot": key_switch_key_root,
-        "keySwitchStreamDigest": key_switch_stream_digest,
+        "keySwitchStreamHash": key_switch_stream_hash,
         "sampledRelationChecks": sampled_relation_checks,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
         "rawSecretMaterialExported": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
-    let material_hash = derive_protocol_hash("EvaluationKeySetDigest", &record)?;
+    let material_hash = derive_protocol_hash("EvaluationKeySetHash", &record)?;
 
     Ok(EvaluationKeyMaterialBinding {
         record,
@@ -949,14 +949,14 @@ pub(super) fn evaluation_key_stream_seed(
     )
 }
 
-fn evaluation_key_stream_digest(
+fn evaluation_key_stream_hash(
     stream_label: &str,
     stream_record: &Value,
 ) -> CanonicalResult<String> {
     let canonical_stream_record = canonical_json(stream_record)?;
 
     Ok(hash512_hex(
-        "sealed-lattice-bgv-rns/evaluation-key-stream-digest-v1",
+        "sealed-lattice-bgv-rns/evaluation-key-stream-hash-v1",
         &[stream_label.as_bytes(), canonical_stream_record.as_bytes()],
     ))
 }

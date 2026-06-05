@@ -66,7 +66,7 @@ const createFrozenRosterProfile = (
 
     return deriveFrozenRosterProfile({
         dynamicRosterProfileCertificateHash:
-            rosterSize >= 10 && rosterSize !== 20
+            rosterSize >= 10 && rosterSize !== 10
                 ? deriveProtocolHash('ThresholdProfileHash', {
                       certificate: 'dynamic-roster-profile',
                       rosterSize,

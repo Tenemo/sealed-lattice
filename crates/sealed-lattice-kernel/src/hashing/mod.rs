@@ -115,7 +115,7 @@ reserved_root_namespaces! {
     BALLOT_VALIDITY_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/ballot-validity-proof-profile-hash-v1",
     CHALLENGE_DOMAIN_HASH_NAMESPACE => "sealed-lattice-root/challenge-domain-hash-v1",
     PROOF_BYTES_HASH_NAMESPACE => "sealed-lattice-root/proof-bytes-hash-v1",
-    EVALUATION_KEY_SET_DIGEST_NAMESPACE => "sealed-lattice-root/evaluation-key-set-digest-v1",
+    EVALUATION_KEY_SET_HASH_NAMESPACE => "sealed-lattice-root/evaluation-key-set-hash-v1",
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {

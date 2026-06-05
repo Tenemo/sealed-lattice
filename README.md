@@ -97,7 +97,7 @@ sealed-lattice/
     sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
   docs/                         Public documentation site
   packages/
-    crypto/                     Internal canonical JSON, digests, signatures
+    crypto/                     Internal canonical JSON, hashes, signatures
     protocol/                   Internal protocol logic and reference paths
     sdk/                        Published sealed-lattice package
     testkit/                    Internal fixture loading helpers
