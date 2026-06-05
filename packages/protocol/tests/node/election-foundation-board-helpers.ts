@@ -4,6 +4,7 @@ import type {
     InclusionProof,
     SignedBoardHead,
     TargetFinalityRecord,
+    TargetProposal,
     WitnessCheckpoint,
 } from '@sealed-lattice/types';
 
@@ -12,6 +13,7 @@ import {
     boardPublicKeyHash,
     ceremonyId,
     createKeyFixture,
+    deriveFixtureHash,
     createSignature,
     defaultThresholdProfileHash,
     defaultEvaluatorReplayRecordHash,
@@ -254,6 +256,7 @@ export const createTargetFinalityRecord = (
     finalizedHead: SignedBoardHead,
     evaluatorReplayRecordHash = defaultEvaluatorReplayRecordHash,
     witnessCount = 5,
+    proposalOverrides: Partial<Omit<TargetProposal, 'targetProposalHash'>> = {},
 ): TargetFinalityRecord => {
     const proposalPayload = {
         ceremonyId,
@@ -284,7 +287,12 @@ export const createTargetFinalityRecord = (
         evaluatorReplayProfileHash:
             manifestOpaqueBindings.evaluatorReplayProfileHash,
         targetFinalityPolicyHash,
-    };
+        topOptionCount: 2,
+        tiePolicyHash: deriveFixtureHash('fixture-tie-policy-v1', {
+            tiePolicy: 'HigherScoreThenLowerOptionIndex',
+        }),
+        ...proposalOverrides,
+    } satisfies Omit<TargetProposal, 'targetProposalHash'>;
     const targetProposalHash = deriveTargetProposalHash(proposalPayload);
     const targetFinalityCheckpointPayload = {
         ...proposalPayload,

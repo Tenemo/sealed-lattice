@@ -39,7 +39,10 @@ export const createRosterPollSpec = (): PollSpec => {
         duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
         maxRosterSize: 50,
         minRosterSize: 3,
-        options: ['Option A', 'Option B', 'Option C'],
+        options: Array.from(
+            { length: 20 },
+            (_, optionIndex) => `Option ${String(optionIndex + 1)}`,
+        ),
         pollId: 'poll-main',
         question: 'Choose options',
         rosterPolicy: 'OpenLinkPublicRoster',
@@ -47,7 +50,7 @@ export const createRosterPollSpec = (): PollSpec => {
         smallRosterPolicy: 'AllowMicroRoster',
         thresholdProfileFamily: 'BalancedDefault',
         tiePolicy: 'HigherScoreThenLowerOptionIndex',
-        topOptionCount: 2,
+        topOptionCount: 10,
     });
 
     if (!validation.ok) {

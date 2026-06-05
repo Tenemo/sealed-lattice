@@ -6,6 +6,7 @@ import {
     deriveThresholdProfile as deriveThresholdProfileInternal,
     deriveThresholdProfileHash as deriveThresholdProfileHashInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
+    verifyFoundationTranscript as verifyFoundationTranscriptInternal,
     verifyCastReceiptShell as verifyCastReceiptShellInternal,
     verifyCloseRecordShell as verifyCloseRecordShellInternal,
     isValidLifecycleTransition as isValidLifecycleTransitionInternal,
@@ -32,6 +33,8 @@ import type {
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
     FutureProtocolOperationResult,
+    FoundationTranscriptInput,
+    FoundationTranscriptVerification,
     LifecycleLabelInput,
     LifecycleLabels,
     LifecycleTransition,
@@ -84,6 +87,9 @@ export type {
     DecryptionShareFilteringMode,
     DecryptionShareSelectionRule,
     FailureStatusLabel,
+    FoundationTranscriptComponentResults,
+    FoundationTranscriptInput,
+    FoundationTranscriptVerification,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
     FrozenRosterProfile,
@@ -224,6 +230,12 @@ const unavailableFutureProtocolOperation = (
 /** Reserved transcript verifier entry point for the future complete protocol path. */
 export const verifyTranscript = (): FutureProtocolOperationResult =>
     unavailableFutureProtocolOperation('verifyTranscript');
+
+/** Verifies the integrated foundation transcript without claiming full election verification. */
+export const verifyFoundationTranscript = (
+    input: FoundationTranscriptInput,
+): FoundationTranscriptVerification =>
+    verifyFoundationTranscriptInternal(input);
 
 /** Verifies signed board heads, inclusion proofs, and append-only evidence. */
 export const verifyBoardConsistency = (

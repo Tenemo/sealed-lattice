@@ -33,6 +33,10 @@ const publicPackageAlias = {
 
 const rootPrivateAliases = [
     {
+        find: '#tests',
+        replacement: resolveFromRepoRoot('tests'),
+    },
+    {
         find: '#test-vectors',
         replacement: resolveFromRepoRoot('test-vectors'),
     },

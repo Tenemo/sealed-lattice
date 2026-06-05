@@ -42,6 +42,8 @@ The public package must not expose raw BGV decrypt, arbitrary threshold decrypti
 
 Reserved complete-protocol entry points must fail closed until their direct-path claim gates are actually implemented.
 
+Foundation helpers now include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. Browser and mobile-emulated browser coverage is useful package evidence, but it is not supported-phone evidence.
+
 ## Current implementation status
 
 The direct encrypted ballot implementation has useful internal evidence:
@@ -69,13 +71,13 @@ This evidence is not claim-bearing. The current blockers are:
 - Fiat-Shamir/QROM review;
 - public package proof transport for an accepted proof profile;
 - public accepted randomness API boundaries;
-- mobile proof verification;
-- mobile evaluator replay;
+- supported-phone mobile proof verification;
+- supported-phone mobile evaluator replay;
 - browser/mobile proof-copy and memory evidence;
 - target decryption share proof verification and certification;
 - smudging, noise, and C1-C4 target-decryption closure;
 - public target-decryption/recombination integration;
-- mobile target-decryption/recombination evidence.
+- supported-phone mobile target-decryption/recombination evidence.
 
 ## What is internal
 

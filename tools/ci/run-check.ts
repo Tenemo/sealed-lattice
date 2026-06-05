@@ -56,6 +56,8 @@ export type ParsedCheckArguments = {
 
 const checkUsage =
     'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
+const rustKernelLaneName = 'Rust kernel (fmt, clippy, optimized test)';
+const legacyRustKernelLaneName = 'Rust kernel (fmt, clippy, test)';
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -280,7 +282,7 @@ const buildRustKernelLane = (): ValidationLane => ({
             'cargo-test',
         ),
     ],
-    name: 'Rust kernel (fmt, clippy, optimized test)',
+    name: rustKernelLaneName,
 });
 
 const buildIsolatedLanes = (): readonly ValidationLane[] => [
@@ -294,7 +296,11 @@ const buildProgressLanePlans = (
     const progressSourceForLane = (
         lane: ValidationLane,
     ): CheckProgressLanePlan['progress'] => {
-        const previousProgress = timingHistory.laneProgress.get(lane.name);
+        const previousProgress =
+            lane.name === rustKernelLaneName
+                ? (timingHistory.laneProgress.get(rustKernelLaneName) ??
+                  timingHistory.laneProgress.get(legacyRustKernelLaneName))
+                : timingHistory.laneProgress.get(lane.name);
         if (lane.name === 'Build workspace packages') {
             return {
                 primary:
@@ -329,7 +335,7 @@ const buildProgressLanePlans = (
                 source: 'vitest',
             };
         }
-        if (lane.name === 'Rust kernel (fmt, clippy, test)') {
+        if (lane.name === rustKernelLaneName) {
             return {
                 secondary:
                     previousProgress?.secondary === undefined

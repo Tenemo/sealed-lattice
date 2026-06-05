@@ -33,6 +33,10 @@ export const directComparisonProfileId =
 export const fullyVerifiedResultProfileId =
     'transcript-core-fully-verified-result-profile-v1';
 
+/** Foundation transcript profile emitted by transcript-core fixtures. */
+export const foundationTranscriptProfileId =
+    'transcript-core-foundation-transcript-profile-v1';
+
 /** Passive MHE prototype profile emitted by transcript-core fixtures. */
 export const passiveMhePrototypeProfileId =
     'transcript-core-passive-mhe-prototype-profile-v1';
@@ -41,8 +45,16 @@ export const passiveMhePrototypeProfileId =
 export const activeMaliciousMheProfileId =
     'transcript-core-active-malicious-mhe-profile-v1';
 
+/** Foundation-only profile emitted by transcript-core fixtures. */
+export const foundationOnlyProfileId =
+    'transcript-core-foundation-only-profile-v1';
+
 /** HE setup proof placeholder profile emitted by transcript-core fixtures. */
 export const noHeSetupProofProfileId = 'transcript-core-no-he-setup-proof-v1';
+
+/** Evaluator replay placeholder profile emitted by transcript-core fixtures. */
+export const noEvaluatorReplayProfileId =
+    'transcript-core-no-evaluator-replay-proof-v1';
 
 /** Decryption proof placeholder profile emitted by transcript-core fixtures. */
 export const noDecryptionProofProfileId =

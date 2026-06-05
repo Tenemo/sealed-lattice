@@ -3,6 +3,8 @@ import type {
     BoardConsistencyVerification,
     CapabilityContext,
     CapabilityDecision,
+    FoundationTranscriptInput,
+    FoundationTranscriptVerification,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
     PollSpecInput,
@@ -15,6 +17,8 @@ import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
 
+import { createFoundationTranscriptFixture } from '#tests/support/foundation-transcript-fixture';
+
 type DeriveThresholdProfile = (
     input: ThresholdProfileInput,
 ) => ThresholdProfile;
@@ -26,6 +30,9 @@ type EvaluateActionCapability = (
 type DeriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
 ) => FirstValidOrderingVerification;
+type VerifyFoundationTranscript = (
+    input: FoundationTranscriptInput,
+) => FoundationTranscriptVerification;
 type VerifyBoardConsistency = (
     input: BoardConsistencyInput,
 ) => BoardConsistencyVerification;
@@ -41,12 +48,15 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
+const verifyFoundationTranscript =
+    publicApiRuntimeRecord.verifyFoundationTranscript as VerifyFoundationTranscript;
 const requiredPublicFunctionNames = [
     'deriveThresholdProfile',
     'validatePollSpec',
     'evaluateActionCapability',
     'deriveValidatedFirstValidOrder',
     'verifyBoardConsistency',
+    'verifyFoundationTranscript',
 ] as const;
 
 describe('election foundation public package API in browsers', () => {
@@ -138,6 +148,33 @@ describe('election foundation public package API in browsers', () => {
         ).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'BoardConsistencyFailure' }),
+            ]),
+        );
+    });
+
+    it('verifies the deterministic foundation transcript through the browser public package', () => {
+        const fixture = createFoundationTranscriptFixture();
+        const verification = verifyFoundationTranscript(fixture.input);
+
+        expect(verification.ok).toBe(true);
+        expect(verification.electionManifestHash).toBe(
+            fixture.expectedHashes.electionManifestHash,
+        );
+        expect(verification.targetFinalityRecordHash).toBe(
+            fixture.expectedHashes.targetFinalityRecordHash,
+        );
+
+        const wrongTiePolicyInput = {
+            ...fixture.input,
+            expectedTiePolicyHash: 'f'.repeat(128),
+        };
+        expect(
+            verifyFoundationTranscript(wrongTiePolicyInput).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'TargetFinalityPolicyMismatch',
+                }),
             ]),
         );
     });

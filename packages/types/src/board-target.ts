@@ -160,6 +160,8 @@ export type TargetProposal = {
     readonly targetLayoutHash: ProtocolHash;
     readonly evaluatorReplayProfileHash: ProtocolHash;
     readonly targetFinalityPolicyHash: ProtocolHash;
+    readonly topOptionCount: number;
+    readonly tiePolicyHash: ProtocolHash;
 };
 
 /** Full checkpoint whose hash is signed by target-finality witnesses. */

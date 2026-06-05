@@ -115,6 +115,7 @@ export const vendoredProtocolRuntimeModules = [
     'common/verification-helpers.ts',
     'finality/hashes.ts',
     'finality/index.ts',
+    'foundation/index.ts',
     'lifecycle/capabilities.ts',
     'lifecycle/labels.ts',
     'lifecycle/lifecycle.ts',
@@ -143,6 +144,10 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'finality/index.js',
         exports: ['verifyTargetFinality'],
+    },
+    {
+        source: 'foundation/index.js',
+        exports: ['verifyFoundationTranscript'],
     },
     {
         source: 'lifecycle/capabilities.js',

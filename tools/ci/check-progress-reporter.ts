@@ -496,20 +496,52 @@ export const readPreviousCheckTimingHistory = async (
         .split('\n')
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
+    let mergedTimingHistory:
+        | {
+              commandDurationMilliseconds: Map<string, number>;
+              laneDurationMilliseconds: Map<string, number>;
+              laneProgress: Map<string, CheckProgressHistoryMetric>;
+              totalDurationMilliseconds?: number;
+          }
+        | undefined;
     for (const runIndexLine of [...runIndexLines].reverse()) {
         try {
             const timingHistory = extractCheckTimingHistoryFromSummary(
                 JSON.parse(runIndexLine) as unknown,
             );
             if (timingHistory !== undefined) {
-                return timingHistory;
+                if (mergedTimingHistory === undefined) {
+                    mergedTimingHistory = {
+                        commandDurationMilliseconds: new Map(
+                            timingHistory.commandDurationMilliseconds,
+                        ),
+                        laneDurationMilliseconds: new Map(
+                            timingHistory.laneDurationMilliseconds,
+                        ),
+                        laneProgress: new Map(timingHistory.laneProgress),
+                        totalDurationMilliseconds:
+                            timingHistory.totalDurationMilliseconds,
+                    };
+                } else {
+                    for (const [
+                        laneName,
+                        progress,
+                    ] of timingHistory.laneProgress) {
+                        if (!mergedTimingHistory.laneProgress.has(laneName)) {
+                            mergedTimingHistory.laneProgress.set(
+                                laneName,
+                                progress,
+                            );
+                        }
+                    }
+                }
             }
         } catch {
             // Ignore corrupt local history lines. They are diagnostics only.
         }
     }
 
-    return emptyTimingHistory();
+    return mergedTimingHistory ?? emptyTimingHistory();
 };
 
 const laneStatusLabels: Readonly<Record<CheckProgressStatus, string>> = {

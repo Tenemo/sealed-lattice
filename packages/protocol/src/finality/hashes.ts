@@ -41,6 +41,8 @@ export const deriveTargetProposalHash = (
         targetFinalityPolicyHash: proposal.targetFinalityPolicyHash,
         targetLayoutHash: proposal.targetLayoutHash,
         thresholdProfileHash: proposal.thresholdProfileHash,
+        tiePolicyHash: proposal.tiePolicyHash,
+        topOptionCount: proposal.topOptionCount,
     });
 
 export const deriveTargetFinalityCheckpointHash = (
@@ -62,6 +64,8 @@ export const deriveTargetFinalityCheckpointHash = (
         targetLayoutHash: checkpoint.targetLayoutHash,
         targetProposalHash: checkpoint.targetProposalHash,
         thresholdProfileHash: checkpoint.thresholdProfileHash,
+        tiePolicyHash: checkpoint.tiePolicyHash,
+        topOptionCount: checkpoint.topOptionCount,
         witnessPolicyHash: checkpoint.witnessPolicyHash,
     });
 

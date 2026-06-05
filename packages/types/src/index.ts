@@ -1,4 +1,5 @@
 export * from './board-target.js';
+export * from './foundation.js';
 export * from './lifecycle.js';
 export * from './plaintext-oracle.js';
 export * from './profile-identifiers.js';

@@ -1,4 +1,5 @@
 export { evaluateActionCapability } from './lifecycle/capabilities.js';
+export { verifyFoundationTranscript } from './foundation/index.js';
 export { verifyBoardConsistency } from './board/index.js';
 export {
     verifyCastReceiptShell,
