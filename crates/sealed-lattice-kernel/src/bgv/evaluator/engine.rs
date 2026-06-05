@@ -381,19 +381,7 @@ impl DevelopmentBgvKey {
             }
         }
 
-        let crt = CrtContext::new(primes);
-        let scaling = ciphertext.decrypt_scaling;
-        let mut message_coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
-        for coefficient_index in 0..POLYNOMIAL_DEGREE {
-            let residues = accumulator
-                .iter()
-                .map(|limb| limb[coefficient_index])
-                .collect::<Vec<_>>();
-            let centered_mod_plaintext = crt.center_then_reduce_mod_plaintext(&residues);
-            message_coefficients.push(mul_mod(centered_mod_plaintext, scaling, PLAINTEXT_MODULUS)?);
-        }
-
-        Ok(message_coefficients)
+        decryption_accumulator_to_coefficients(ciphertext, &accumulator)
     }
 
     pub(crate) fn decrypt_to_slots(&self, ciphertext: &Ciphertext) -> CanonicalResult<Vec<u64>> {
@@ -401,6 +389,58 @@ impl DevelopmentBgvKey {
 
         forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)
     }
+}
+
+pub(crate) fn decryption_accumulator_to_coefficients(
+    ciphertext: &Ciphertext,
+    accumulator: &[Vec<u64>],
+) -> CanonicalResult<Vec<u64>> {
+    let primes = ciphertext.primes();
+    if accumulator.len() != primes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "BGV decryption accumulator must have one limb per active data prime",
+        ));
+    }
+    for (limb_index, (limb, modulus)) in accumulator.iter().zip(primes.iter()).enumerate() {
+        if limb.len() != POLYNOMIAL_DEGREE {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                format!(
+                    "BGV decryption accumulator limb {limb_index} has the wrong coefficient count"
+                ),
+            ));
+        }
+        if limb.iter().any(|coefficient| *coefficient >= *modulus) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("BGV decryption accumulator limb {limb_index} has non-canonical residues"),
+            ));
+        }
+    }
+
+    let crt = CrtContext::new(primes);
+    let scaling = ciphertext.decrypt_scaling;
+    let mut message_coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
+    for coefficient_index in 0..POLYNOMIAL_DEGREE {
+        let residues = accumulator
+            .iter()
+            .map(|limb| limb[coefficient_index])
+            .collect::<Vec<_>>();
+        let centered_mod_plaintext = crt.center_then_reduce_mod_plaintext(&residues);
+        message_coefficients.push(mul_mod(centered_mod_plaintext, scaling, PLAINTEXT_MODULUS)?);
+    }
+
+    Ok(message_coefficients)
+}
+
+pub(crate) fn decryption_accumulator_to_slots(
+    ciphertext: &Ciphertext,
+    accumulator: &[Vec<u64>],
+) -> CanonicalResult<Vec<u64>> {
+    let coefficients = decryption_accumulator_to_coefficients(ciphertext, accumulator)?;
+
+    forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)
 }
 
 const PLAINTEXT_MODULUS_I32: i32 = 65_537;

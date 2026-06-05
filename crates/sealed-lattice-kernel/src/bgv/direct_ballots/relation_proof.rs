@@ -1,5 +1,7 @@
 use std::mem::size_of;
 
+use num_bigint::{BigInt, Sign};
+use num_traits::Zero;
 use serde_json::{Value, json};
 
 use super::{
@@ -8,9 +10,7 @@ use super::{
 };
 use crate::{
     bgv::{
-        evaluator::engine::{
-            DevelopmentBgvKey, encode_slots_to_coefficients, negacyclic_mul, signed_residue,
-        },
+        evaluator::engine::{DevelopmentBgvKey, encode_slots_to_coefficients, negacyclic_mul},
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, PROFILE_ID, profile_hash},
     },
@@ -24,10 +24,16 @@ const DIRECT_BALLOT_SCORE_BUCKET_COUNT: usize = 10;
 const DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS: usize = 2;
 const DIRECT_BALLOT_RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS: usize = 3;
 const DIRECT_BALLOT_ERROR_SUPPORT_EXPANSION_COEFFICIENTS: usize = 5;
-const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS: u32 = 40;
-const DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS: u32 = 62;
+const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS: u32 = 192;
+const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES: usize = 24;
+const DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS: u32 = 128;
+const DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS: usize = 360;
+const DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
+const DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS: u32 = 16;
 const DIRECT_BALLOT_RELATION_PROOF_GREEN_BYTES: usize = 5 * 1024 * 1024;
 const DIRECT_BALLOT_RELATION_PROOF_YELLOW_BYTES: usize = 20 * 1024 * 1024;
+const DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1";
 
 pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) proof_bytes: Vec<u8>,
@@ -35,7 +41,7 @@ pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) proof_bytes_hash: String,
     pub(super) statement_hash_hex: String,
     pub(super) relation_commitment_hash_hex: String,
-    pub(super) challenge: u64,
+    pub(super) challenge: String,
     pub(super) relation_commitment_bytes: usize,
     pub(super) response_bytes: usize,
     pub(super) relation_commitment_polynomial_count: usize,
@@ -49,17 +55,17 @@ pub(super) struct DirectBallotRelationProofVerification {
     pub(super) proof_size_bytes: usize,
     pub(super) statement_hash_hex: String,
     pub(super) relation_commitment_hash_hex: String,
-    pub(super) challenge: u64,
+    pub(super) challenge: String,
 }
 
 #[derive(Clone)]
 struct DirectBallotWitnessVector {
-    randomizer_coefficients: Vec<i64>,
-    error_zero_coefficients: Vec<i64>,
-    error_one_coefficients: Vec<i64>,
-    encoding_carry_coefficients: Vec<i64>,
-    score_coefficients: Vec<i64>,
-    one_hot_coefficients: Vec<Vec<i64>>,
+    randomizer_coefficients: Vec<BigInt>,
+    error_zero_coefficients: Vec<BigInt>,
+    error_one_coefficients: Vec<BigInt>,
+    encoding_carry_coefficients: Vec<BigInt>,
+    score_coefficients: Vec<BigInt>,
+    one_hot_coefficients: Vec<Vec<BigInt>>,
 }
 
 struct DirectBallotBgvRelationCommitment {
@@ -80,7 +86,7 @@ struct DirectBallotSupportCommitment {
 }
 
 struct ParsedDirectBallotRelationProof {
-    challenge: u64,
+    challenge: BigInt,
     bgv_relation_commitments: Vec<DirectBallotBgvRelationCommitment>,
     score_linear_commitment: DirectBallotScoreLinearCommitment,
     support_commitment: DirectBallotSupportCommitment,
@@ -117,18 +123,15 @@ pub(super) fn generate_direct_ballot_relation_proof(
         direct_ballot_relation_commitment_hash(&statement_hash, &encoded_commitments);
     let challenge = direct_ballot_relation_challenge(&statement_hash, &relation_commitment_hash)?;
     let response_vector =
-        direct_ballot_relation_response_vector(&mask_vector, &witness_vector, challenge)?;
+        direct_ballot_relation_response_vector(&mask_vector, &witness_vector, &challenge)?;
     let proof_bytes = encode_direct_ballot_relation_proof(
         &statement_hash,
-        challenge,
+        &challenge,
         &encoded_commitments,
         &response_vector,
     )?;
     let proof_size_bytes = proof_bytes.len();
-    let proof_bytes_hash = hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1",
-        &[&proof_bytes],
-    );
+    let proof_bytes_hash = direct_ballot_relation_proof_bytes_hash(&proof_bytes);
 
     Ok(DirectBallotRelationProofGeneration {
         proof_bytes,
@@ -136,7 +139,7 @@ pub(super) fn generate_direct_ballot_relation_proof(
         proof_bytes_hash,
         statement_hash_hex: to_hex(&statement_hash),
         relation_commitment_hash_hex: to_hex(&relation_commitment_hash),
-        challenge,
+        challenge: challenge.to_string(),
         relation_commitment_bytes,
         response_bytes: direct_ballot_relation_response_bytes(),
         relation_commitment_polynomial_count: DATA_PRIMES.len() * 2,
@@ -158,7 +161,7 @@ pub(super) fn verify_direct_ballot_relation_proof(
     verify_direct_ballot_relation_response(
         evaluator_key,
         ballot,
-        parsed_proof.challenge,
+        &parsed_proof.challenge,
         &parsed_proof.bgv_relation_commitments,
         &parsed_proof.score_linear_commitment,
         &parsed_proof.support_commitment,
@@ -169,7 +172,7 @@ pub(super) fn verify_direct_ballot_relation_proof(
         proof_size_bytes: proof_bytes.len(),
         statement_hash_hex: to_hex(&expected_statement_hash),
         relation_commitment_hash_hex: to_hex(&parsed_proof.relation_commitment_hash),
-        challenge: parsed_proof.challenge,
+        challenge: parsed_proof.challenge.to_string(),
     })
 }
 
@@ -187,10 +190,69 @@ pub(super) fn direct_ballot_relation_challenge_bits() -> u32 {
     DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS
 }
 
+pub(super) fn direct_ballot_relation_proof_bytes_hash(proof_bytes: &[u8]) -> String {
+    hash512_hex(
+        DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN,
+        &[proof_bytes],
+    )
+}
+
+pub(super) fn direct_ballot_relation_proof_accounting(
+    proof_size_bytes: usize,
+    total_proof_bytes: usize,
+) -> CanonicalResult<Value> {
+    let independent_repetitions = DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS
+        .div_ceil(DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS);
+    let support_check_count = direct_ballot_support_check_count();
+    let support_union_loss_bits =
+        ceil_log2_usize(support_check_count * direct_ballot_support_maximum_degree());
+    let soundness_after_support_union_bound =
+        DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS - support_union_loss_bits;
+    let response_union_loss_bits = ceil_log2_usize(direct_ballot_relation_response_scalar_count());
+    let zero_knowledge_shift_slack_bits =
+        u32::try_from(DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS)
+            .expect("mask bit count fits u32")
+            - DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS
+            - DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS
+            - response_union_loss_bits;
+    let repeated_proof_size_bytes = checked_repeated_byte_count(
+        proof_size_bytes,
+        independent_repetitions,
+        "direct ballot repeated proof size",
+    )?;
+    let repeated_total_proof_bytes = checked_repeated_byte_count(
+        total_proof_bytes,
+        independent_repetitions,
+        "direct ballot repeated total proof size",
+    )?;
+
+    Ok(json!({
+        "model": "single Fiat-Shamir challenge over the internal binary transcript",
+        "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
+        "challengeCount": 1,
+        "classicalSoundnessBitsBeforeLosses": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
+        "supportCheckCount": support_check_count,
+        "supportMaximumDegree": direct_ballot_support_maximum_degree(),
+        "supportUnionLossBits": support_union_loss_bits,
+        "classicalSoundnessBitsAfterSupportUnionBound": soundness_after_support_union_bound,
+        "targetClassicalSoundnessBits": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
+        "minimumIndependentRepetitionsForTarget": independent_repetitions,
+        "estimatedRepeatedProofSizeBytes": repeated_proof_size_bytes,
+        "estimatedRepeatedTotalProofBytes": repeated_total_proof_bytes,
+        "maskCoefficientBits": DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS,
+        "responseCoefficientBytes": DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES,
+        "witnessBoundBitsForMaskShiftAccounting": DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS,
+        "zeroKnowledgeShiftSlackBitsAfterResponseUnionBound": zero_knowledge_shift_slack_bits,
+        "supportAccounting": "The 192-bit Fiat-Shamir challenge leaves more than 128 classical bits after the support-degree and support-check union bound for this internal transcript.",
+        "zeroKnowledgeAccounting": "The 360-bit masks leave more than 128 bits of shift-hiding slack after response-coordinate union accounting under the bounded direct-ballot witness coefficients. The surrounding command reports whether proof masks came from fresh CSPRNG randomness or deterministic fixture randomness; fixture-mask runs remain development evidence only.",
+        "decision": "Claim-shaped for proof-of-concept sizing: no naive transcript repetition is needed for the direct ballot relation, but this is still not a public claim-bearing proof until the Fiat-Shamir/QROM review and accepted proof transport boundary are closed."
+    }))
+}
+
 pub(super) fn direct_ballot_relation_response_bytes() -> usize {
     (DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS * POLYNOMIAL_DEGREE
         + direct_ballot_relation_response_scalar_count())
-        * size_of::<i64>()
+        * DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES
 }
 
 pub(super) fn direct_ballot_relation_commitment_bytes() -> usize {
@@ -218,6 +280,14 @@ fn direct_ballot_support_commitment_scalar_count() -> usize {
         * DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS
         + POLYNOMIAL_DEGREE * DIRECT_BALLOT_RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS
         + 2 * POLYNOMIAL_DEGREE * DIRECT_BALLOT_ERROR_SUPPORT_EXPANSION_COEFFICIENTS
+}
+
+fn direct_ballot_support_check_count() -> usize {
+    DIRECT_BALLOT_OPTION_COUNT * DIRECT_BALLOT_SCORE_BUCKET_COUNT + 3 * POLYNOMIAL_DEGREE
+}
+
+fn direct_ballot_support_maximum_degree() -> usize {
+    5
 }
 
 fn direct_ballot_relation_statement_hash(
@@ -302,29 +372,38 @@ fn direct_ballot_witness_vector(
     ballot: &DirectEncryptedBallot,
 ) -> CanonicalResult<DirectBallotWitnessVector> {
     Ok(DirectBallotWitnessVector {
-        randomizer_coefficients: ballot.encryption_witness.randomizer_coefficients.clone(),
-        error_zero_coefficients: ballot.encryption_witness.error_zero_coefficients.clone(),
-        error_one_coefficients: ballot.encryption_witness.error_one_coefficients.clone(),
+        randomizer_coefficients: ballot
+            .encryption_witness
+            .randomizer_coefficients
+            .iter()
+            .map(|coefficient| BigInt::from(*coefficient))
+            .collect(),
+        error_zero_coefficients: ballot
+            .encryption_witness
+            .error_zero_coefficients
+            .iter()
+            .map(|coefficient| BigInt::from(*coefficient))
+            .collect(),
+        error_one_coefficients: ballot
+            .encryption_witness
+            .error_one_coefficients
+            .iter()
+            .map(|coefficient| BigInt::from(*coefficient))
+            .collect(),
         encoding_carry_coefficients: direct_ballot_encoding_carry_coefficients(ballot)?,
         score_coefficients: ballot
             .input
             .scores
             .iter()
-            .map(|coefficient| {
-                i64::try_from(*coefficient).map_err(|_| {
-                    invalid_direct_ballot_relation_proof(
-                        "direct ballot score coefficient does not fit in the proof response type",
-                    )
-                })
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?,
+            .map(|coefficient| BigInt::from(*coefficient))
+            .collect(),
         one_hot_coefficients: direct_ballot_one_hot_coefficients(ballot)?,
     })
 }
 
 fn direct_ballot_encoding_carry_coefficients(
     ballot: &DirectEncryptedBallot,
-) -> CanonicalResult<Vec<i64>> {
+) -> CanonicalResult<Vec<BigInt>> {
     let score_encoding_basis = direct_ballot_score_encoding_basis()?;
     let mut carry_coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
     for coefficient_index in 0..POLYNOMIAL_DEGREE {
@@ -341,11 +420,7 @@ fn direct_ballot_encoding_carry_coefficients(
                 "direct ballot encoding carry does not match the batch-encoded score polynomial",
             ));
         }
-        carry_coefficients.push(i64::try_from(difference / plaintext_modulus).map_err(|_| {
-            invalid_direct_ballot_relation_proof(
-                "direct ballot encoding carry coefficient does not fit in the proof response type",
-            )
-        })?);
+        carry_coefficients.push(BigInt::from(difference / plaintext_modulus));
     }
 
     Ok(carry_coefficients)
@@ -353,22 +428,12 @@ fn direct_ballot_encoding_carry_coefficients(
 
 fn direct_ballot_one_hot_coefficients(
     ballot: &DirectEncryptedBallot,
-) -> CanonicalResult<Vec<Vec<i64>>> {
+) -> CanonicalResult<Vec<Vec<BigInt>>> {
     match &ballot.input.one_hot_witnesses {
-        Some(rows) => rows
+        Some(rows) => Ok(rows
             .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|entry| {
-                        i64::try_from(*entry).map_err(|_| {
-                            invalid_direct_ballot_relation_proof(
-                                "direct ballot one-hot entry does not fit in the proof response type",
-                            )
-                        })
-                    })
-                    .collect::<CanonicalResult<Vec<_>>>()
-            })
-            .collect(),
+            .map(|row| row.iter().map(|entry| BigInt::from(*entry)).collect())
+            .collect()),
         None => ballot
             .input
             .scores
@@ -379,13 +444,13 @@ fn direct_ballot_one_hot_coefficients(
                         "direct ballot score does not fit in a one-hot bucket index",
                     )
                 })?;
-                let mut row = vec![0_i64; DIRECT_BALLOT_SCORE_BUCKET_COUNT];
+                let mut row = vec![BigInt::zero(); DIRECT_BALLOT_SCORE_BUCKET_COUNT];
                 if selected_bucket >= row.len() {
                     return Err(invalid_direct_ballot_relation_proof(
                         "direct ballot score is outside the one-hot bucket range",
                     ));
                 }
-                row[selected_bucket] = 1;
+                row[selected_bucket] = BigInt::from(1_u8);
                 Ok(row)
             })
             .collect(),
@@ -449,13 +514,11 @@ fn sample_direct_ballot_relation_mask_scalars(
     proof_randomness_seed_hex: &str,
     witness_vector_index: usize,
     scalar_count: usize,
-) -> CanonicalResult<Vec<i64>> {
+) -> CanonicalResult<Vec<BigInt>> {
     let mut coefficients = Vec::with_capacity(scalar_count);
     let witness_vector_index_bytes = usize_to_u64_bytes(witness_vector_index)?;
-    let coefficient_mask = (1_u64 << DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS) - 1;
-    let mut block_index = 0_u64;
     while coefficients.len() < scalar_count {
-        let block_index_bytes = block_index.to_le_bytes();
+        let coefficient_index_bytes = usize_to_u64_bytes(coefficients.len())?;
         let block = hash512(
             "sealed-lattice/direct-encrypted-ballot/relation-mask-scalar-v1",
             &[
@@ -463,34 +526,10 @@ fn sample_direct_ballot_relation_mask_scalars(
                 ciphertext_root.as_bytes(),
                 proof_randomness_seed_hex.as_bytes(),
                 &witness_vector_index_bytes,
-                &block_index_bytes,
+                &coefficient_index_bytes,
             ],
         );
-        for chunk in block.chunks_exact(8) {
-            let mut value_bytes = [0_u8; 8];
-            value_bytes.copy_from_slice(chunk);
-            let raw_value = u64::from_le_bytes(value_bytes);
-            let magnitude = i64::try_from(raw_value & coefficient_mask).map_err(|_| {
-                invalid_direct_ballot_relation_proof(
-                    "direct ballot relation scalar mask coefficient does not fit in i64",
-                )
-            })?;
-            let coefficient =
-                if (raw_value >> DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS) & 1 == 1 {
-                    -magnitude
-                } else {
-                    magnitude
-                };
-            coefficients.push(coefficient);
-            if coefficients.len() == scalar_count {
-                break;
-            }
-        }
-        block_index = block_index.checked_add(1).ok_or_else(|| {
-            invalid_direct_ballot_relation_proof(
-                "direct ballot relation scalar mask block index overflowed",
-            )
-        })?;
+        coefficients.push(direct_ballot_relation_mask_coefficient(&block)?);
     }
 
     Ok(coefficients)
@@ -511,13 +550,11 @@ fn sample_direct_ballot_relation_mask_polynomial(
     ciphertext_root: &str,
     proof_randomness_seed_hex: &str,
     witness_polynomial_index: usize,
-) -> CanonicalResult<Vec<i64>> {
+) -> CanonicalResult<Vec<BigInt>> {
     let mut coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
     let witness_polynomial_index_bytes = usize_to_u64_bytes(witness_polynomial_index)?;
-    let coefficient_mask = (1_u64 << DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS) - 1;
-    let mut block_index = 0_u64;
     while coefficients.len() < POLYNOMIAL_DEGREE {
-        let block_index_bytes = block_index.to_le_bytes();
+        let coefficient_index_bytes = usize_to_u64_bytes(coefficients.len())?;
         let block = hash512(
             "sealed-lattice/direct-encrypted-ballot/relation-mask-v1",
             &[
@@ -525,37 +562,37 @@ fn sample_direct_ballot_relation_mask_polynomial(
                 ciphertext_root.as_bytes(),
                 proof_randomness_seed_hex.as_bytes(),
                 &witness_polynomial_index_bytes,
-                &block_index_bytes,
+                &coefficient_index_bytes,
             ],
         );
-        for chunk in block.chunks_exact(8) {
-            let mut value_bytes = [0_u8; 8];
-            value_bytes.copy_from_slice(chunk);
-            let raw_value = u64::from_le_bytes(value_bytes);
-            let magnitude = i64::try_from(raw_value & coefficient_mask).map_err(|_| {
-                invalid_direct_ballot_relation_proof(
-                    "direct ballot relation mask coefficient does not fit in i64",
-                )
-            })?;
-            let coefficient =
-                if (raw_value >> DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS) & 1 == 1 {
-                    -magnitude
-                } else {
-                    magnitude
-                };
-            coefficients.push(coefficient);
-            if coefficients.len() == POLYNOMIAL_DEGREE {
-                break;
-            }
-        }
-        block_index = block_index.checked_add(1).ok_or_else(|| {
-            invalid_direct_ballot_relation_proof(
-                "direct ballot relation mask block index overflowed",
-            )
-        })?;
+        coefficients.push(direct_ballot_relation_mask_coefficient(&block)?);
     }
 
     Ok(coefficients)
+}
+
+fn direct_ballot_relation_mask_coefficient(block: &[u8; 64]) -> CanonicalResult<BigInt> {
+    let magnitude_byte_count = DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS.div_ceil(8);
+    if magnitude_byte_count >= block.len() {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation mask coefficient needs more hash material",
+        ));
+    }
+    let mut magnitude_bytes = block[..magnitude_byte_count].to_vec();
+    let excess_bits = magnitude_byte_count * 8 - DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS;
+    if excess_bits > 0 {
+        let kept_bits = 8 - excess_bits;
+        let mask = (1_u16 << kept_bits) - 1;
+        if let Some(last_byte) = magnitude_bytes.last_mut() {
+            *last_byte &= u8::try_from(mask).expect("mask fits u8");
+        }
+    }
+    let magnitude = BigInt::from_bytes_le(Sign::Plus, &magnitude_bytes);
+    if block[magnitude_byte_count] & 1 == 1 {
+        Ok(-magnitude)
+    } else {
+        Ok(magnitude)
+    }
 }
 
 fn evaluate_direct_ballot_bgv_relation_commitments(
@@ -614,7 +651,7 @@ fn evaluate_direct_ballot_bgv_relation_commitment(
     let mut component_one = Vec::with_capacity(POLYNOMIAL_DEGREE);
     for coefficient_index in 0..POLYNOMIAL_DEGREE {
         let scaled_error_zero = scaled_signed_residue(
-            witness_vector.error_zero_coefficients[coefficient_index],
+            &witness_vector.error_zero_coefficients[coefficient_index],
             PLAINTEXT_MODULUS,
             modulus,
         )?;
@@ -635,7 +672,7 @@ fn evaluate_direct_ballot_bgv_relation_commitment(
         )?);
 
         let scaled_error_one = scaled_signed_residue(
-            witness_vector.error_one_coefficients[coefficient_index],
+            &witness_vector.error_one_coefficients[coefficient_index],
             PLAINTEXT_MODULUS,
             modulus,
         )?;
@@ -663,8 +700,8 @@ fn encoded_score_with_carry_residue(
             "direct ballot score encoding basis has the wrong option count",
         ));
     }
-    let mut coefficient = -i128::from(PLAINTEXT_MODULUS)
-        * i128::from(witness_vector.encoding_carry_coefficients[coefficient_index]);
+    let mut coefficient = -BigInt::from(PLAINTEXT_MODULUS)
+        * &witness_vector.encoding_carry_coefficients[coefficient_index];
     for (score, basis_polynomial) in witness_vector
         .score_coefficients
         .iter()
@@ -675,15 +712,15 @@ fn encoded_score_with_carry_residue(
                 "direct ballot score encoding basis has the wrong polynomial degree",
             ));
         }
-        coefficient += i128::from(*score) * i128::from(basis_polynomial[coefficient_index]);
+        coefficient += score * BigInt::from(basis_polynomial[coefficient_index]);
     }
-    signed_i128_residue(coefficient, modulus)
+    signed_bigint_residue(&coefficient, modulus)
 }
 
 fn verify_direct_ballot_relation_response(
     evaluator_key: &DevelopmentBgvKey,
     ballot: &DirectEncryptedBallot,
-    challenge: u64,
+    challenge: &BigInt,
     bgv_relation_commitments: &[DirectBallotBgvRelationCommitment],
     score_linear_commitment: &DirectBallotScoreLinearCommitment,
     support_commitment: &DirectBallotSupportCommitment,
@@ -716,7 +753,7 @@ fn verify_direct_ballot_relation_response(
                 "direct ballot relation proof limb vectors must match the polynomial degree",
             ));
         }
-        let challenge_residue = challenge % modulus;
+        let challenge_residue = challenge_residue(challenge, modulus)?;
         for coefficient_index in 0..POLYNOMIAL_DEGREE {
             let scaled_ciphertext_zero = mul_mod(
                 challenge_residue,
@@ -776,10 +813,10 @@ fn evaluate_direct_ballot_score_linear_commitment(
         let mut bucket_sum = 0_u64;
         let mut weighted_sum = 0_u64;
         for bucket_index in 0..DIRECT_BALLOT_SCORE_BUCKET_COUNT {
-            let bucket_residue = signed_residue(
-                witness_vector.one_hot_coefficients[option_index][bucket_index],
+            let bucket_residue = signed_bigint_residue(
+                &witness_vector.one_hot_coefficients[option_index][bucket_index],
                 PLAINTEXT_MODULUS,
-            );
+            )?;
             bucket_sum = add_mod(bucket_sum, bucket_residue, PLAINTEXT_MODULUS)?;
             let bucket_weight = u64::try_from(bucket_index + 1)
                 .expect("score bucket weight fits u64")
@@ -790,10 +827,10 @@ fn evaluate_direct_ballot_score_linear_commitment(
                 PLAINTEXT_MODULUS,
             )?;
         }
-        let score_residue = signed_residue(
-            witness_vector.score_coefficients[option_index],
+        let score_residue = signed_bigint_residue(
+            &witness_vector.score_coefficients[option_index],
             PLAINTEXT_MODULUS,
-        );
+        )?;
         bucket_sums.push(bucket_sum);
         weighted_differences.push(sub_mod(score_residue, weighted_sum, PLAINTEXT_MODULUS)?);
     }
@@ -805,7 +842,7 @@ fn evaluate_direct_ballot_score_linear_commitment(
 }
 
 fn verify_direct_ballot_score_linear_response(
-    challenge: u64,
+    challenge: &BigInt,
     score_linear_commitment: &DirectBallotScoreLinearCommitment,
     response_vector: &DirectBallotWitnessVector,
 ) -> CanonicalResult<()> {
@@ -817,7 +854,7 @@ fn verify_direct_ballot_score_linear_response(
             "direct ballot score linear commitment has the wrong option count",
         ));
     }
-    let challenge_residue = challenge % PLAINTEXT_MODULUS;
+    let challenge_residue = challenge_residue(challenge, PLAINTEXT_MODULUS)?;
     for option_index in 0..DIRECT_BALLOT_OPTION_COUNT {
         let checked_bucket_sum = sub_mod(
             response_commitment.bucket_sums[option_index],
@@ -861,8 +898,8 @@ fn evaluate_direct_ballot_support_commitment(
         for (mask, witness) in mask_row.iter().zip(witness_row.iter()) {
             one_hot_booleanity.extend(support_expansion_coefficients(
                 DirectBallotSupportKind::OneHot,
-                signed_residue(*mask, modulus),
-                signed_residue(*witness, modulus),
+                signed_bigint_residue(mask, modulus)?,
+                signed_bigint_residue(witness, modulus)?,
                 modulus,
             )?);
         }
@@ -893,8 +930,8 @@ fn evaluate_direct_ballot_support_commitment(
 
 fn support_expansion_commitments_for_polynomial(
     support_kind: DirectBallotSupportKind,
-    mask_polynomial: &[i64],
-    witness_polynomial: &[i64],
+    mask_polynomial: &[BigInt],
+    witness_polynomial: &[BigInt],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
     if mask_polynomial.len() != POLYNOMIAL_DEGREE || witness_polynomial.len() != POLYNOMIAL_DEGREE {
@@ -907,8 +944,8 @@ fn support_expansion_commitments_for_polynomial(
     for (mask, witness) in mask_polynomial.iter().zip(witness_polynomial.iter()) {
         commitments.extend(support_expansion_coefficients(
             support_kind,
-            signed_residue(*mask, modulus),
-            signed_residue(*witness, modulus),
+            signed_bigint_residue(mask, modulus)?,
+            signed_bigint_residue(witness, modulus)?,
             modulus,
         )?);
     }
@@ -917,14 +954,14 @@ fn support_expansion_commitments_for_polynomial(
 }
 
 fn verify_direct_ballot_support_response(
-    challenge: u64,
+    challenge: &BigInt,
     support_commitment: &DirectBallotSupportCommitment,
     response_vector: &DirectBallotWitnessVector,
 ) -> CanonicalResult<()> {
     validate_direct_ballot_witness_vector_shape(response_vector)?;
     validate_direct_ballot_support_commitment_shape(support_commitment)?;
     let modulus = direct_ballot_support_modulus();
-    let challenge_residue = challenge % modulus;
+    let challenge_residue = challenge_residue(challenge, modulus)?;
     for (option_index, row) in response_vector.one_hot_coefficients.iter().enumerate() {
         let commitment_offset = option_index
             .checked_mul(DIRECT_BALLOT_SCORE_BUCKET_COUNT)
@@ -977,7 +1014,7 @@ fn verify_direct_ballot_support_response(
 fn verify_support_response_polynomial(
     label: &str,
     support_kind: DirectBallotSupportKind,
-    response_coefficients: &[i64],
+    response_coefficients: &[BigInt],
     expansion_commitments: &[u64],
     challenge_residue: u64,
     modulus: u64,
@@ -993,7 +1030,7 @@ fn verify_support_response_polynomial(
         .zip(expansion_commitments.chunks_exact(expansion_coefficient_count))
         .enumerate()
     {
-        let response_residue = signed_residue(*response, modulus);
+        let response_residue = signed_bigint_residue(response, modulus)?;
         let support_value =
             support_polynomial_value(support_kind, response_residue, challenge_residue, modulus)?;
         let mut expanded_support_value = 0_u64;
@@ -1165,7 +1202,7 @@ fn direct_ballot_support_modulus() -> u64 {
 fn direct_ballot_relation_response_vector(
     mask_vector: &DirectBallotWitnessVector,
     witness_vector: &DirectBallotWitnessVector,
-    challenge: u64,
+    challenge: &BigInt,
 ) -> CanonicalResult<DirectBallotWitnessVector> {
     validate_direct_ballot_witness_vector_shape(mask_vector)?;
     validate_direct_ballot_witness_vector_shape(witness_vector)?;
@@ -1218,11 +1255,11 @@ fn direct_ballot_relation_response_vector(
 }
 
 fn response_polynomial(
-    mask_polynomial: &[i64],
-    witness_polynomial: &[i64],
-    challenge: u64,
+    mask_polynomial: &[BigInt],
+    witness_polynomial: &[BigInt],
+    challenge: &BigInt,
     label: &str,
-) -> CanonicalResult<Vec<i64>> {
+) -> CanonicalResult<Vec<BigInt>> {
     if mask_polynomial.len() != witness_polynomial.len() {
         return Err(invalid_direct_ballot_relation_proof(format!(
             "{label} mask and witness lengths must match"
@@ -1237,11 +1274,9 @@ fn response_polynomial(
         .iter()
         .zip(witness_polynomial.iter())
         .map(|(mask_coefficient, witness_coefficient)| {
-            let response = i128::from(*mask_coefficient)
-                + i128::from(challenge) * i128::from(*witness_coefficient);
-            i64::try_from(response).map_err(|_| {
-                invalid_direct_ballot_relation_proof(format!("{label} does not fit in i64"))
-            })
+            let response = mask_coefficient + challenge * witness_coefficient;
+            validate_signed_bigint_fixed_width(&response, label)?;
+            Ok(response)
         })
         .collect()
 }
@@ -1249,8 +1284,7 @@ fn response_polynomial(
 fn direct_ballot_relation_challenge(
     statement_hash: &[u8; 64],
     relation_commitment_hash: &[u8; 64],
-) -> CanonicalResult<u64> {
-    let challenge_mask = (1_u64 << DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS) - 1;
+) -> CanonicalResult<BigInt> {
     let mut block_index = 0_u64;
     loop {
         let block_index_bytes = block_index.to_le_bytes();
@@ -1258,13 +1292,10 @@ fn direct_ballot_relation_challenge(
             "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
             &[statement_hash, relation_commitment_hash, &block_index_bytes],
         );
-        for chunk in block.chunks_exact(8) {
-            let mut value_bytes = [0_u8; 8];
-            value_bytes.copy_from_slice(chunk);
-            let challenge = u64::from_le_bytes(value_bytes) & challenge_mask;
-            if challenge != 0 {
-                return Ok(challenge);
-            }
+        let challenge_bytes = &block[..DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES];
+        let challenge = BigInt::from_bytes_le(Sign::Plus, challenge_bytes);
+        if !challenge.is_zero() {
+            return Ok(challenge);
         }
         block_index = block_index.checked_add(1).ok_or_else(|| {
             invalid_direct_ballot_relation_proof(
@@ -1280,7 +1311,7 @@ fn parse_direct_ballot_relation_proof(
 ) -> CanonicalResult<ParsedDirectBallotRelationProof> {
     let expected_size = DIRECT_BALLOT_RELATION_PROOF_MAGIC.len()
         + expected_statement_hash.len()
-        + size_of::<u64>()
+        + DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES
         + direct_ballot_relation_commitment_bytes()
         + direct_ballot_relation_response_bytes();
     if proof_bytes.len() != expected_size {
@@ -1303,8 +1334,8 @@ fn parse_direct_ballot_relation_proof(
             "direct ballot relation proof is not bound to this statement",
         ));
     }
-    let challenge = read_u64(proof_bytes, &mut cursor)?;
-    if challenge == 0 || challenge >= (1_u64 << DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS) {
+    let challenge = read_challenge(proof_bytes, &mut cursor)?;
+    if challenge.is_zero() {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot relation proof challenge is outside the expected range",
         ));
@@ -1344,20 +1375,20 @@ fn parse_direct_ballot_relation_proof(
 
 fn encode_direct_ballot_relation_proof(
     statement_hash: &[u8; 64],
-    challenge: u64,
+    challenge: &BigInt,
     encoded_commitments: &[u8],
     response_vector: &DirectBallotWitnessVector,
 ) -> CanonicalResult<Vec<u8>> {
     let mut proof_bytes = Vec::with_capacity(
         DIRECT_BALLOT_RELATION_PROOF_MAGIC.len()
             + statement_hash.len()
-            + size_of::<u64>()
+            + DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES
             + encoded_commitments.len()
             + direct_ballot_relation_response_bytes(),
     );
     proof_bytes.extend_from_slice(DIRECT_BALLOT_RELATION_PROOF_MAGIC);
     proof_bytes.extend_from_slice(statement_hash);
-    append_u64(&mut proof_bytes, challenge);
+    append_challenge(&mut proof_bytes, challenge)?;
     proof_bytes.extend_from_slice(encoded_commitments);
     encode_direct_ballot_relation_response(&mut proof_bytes, response_vector)?;
 
@@ -1598,15 +1629,15 @@ fn encode_direct_ballot_relation_response(
     validate_direct_ballot_witness_vector_shape(response_vector)?;
     for polynomial in direct_ballot_witness_polynomials(response_vector) {
         for coefficient in polynomial {
-            append_i64(output, *coefficient);
+            append_signed_bigint_fixed(output, coefficient)?;
         }
     }
     for coefficient in &response_vector.score_coefficients {
-        append_i64(output, *coefficient);
+        append_signed_bigint_fixed(output, coefficient)?;
     }
     for row in &response_vector.one_hot_coefficients {
         for coefficient in row {
-            append_i64(output, *coefficient);
+            append_signed_bigint_fixed(output, coefficient)?;
         }
     }
 
@@ -1629,10 +1660,10 @@ fn read_direct_ballot_relation_response(
     })
 }
 
-fn read_signed_polynomial(proof_bytes: &[u8], cursor: &mut usize) -> CanonicalResult<Vec<i64>> {
+fn read_signed_polynomial(proof_bytes: &[u8], cursor: &mut usize) -> CanonicalResult<Vec<BigInt>> {
     let mut polynomial = Vec::with_capacity(POLYNOMIAL_DEGREE);
     for _ in 0..POLYNOMIAL_DEGREE {
-        polynomial.push(read_i64(proof_bytes, cursor)?);
+        polynomial.push(read_signed_bigint_fixed(proof_bytes, cursor)?);
     }
 
     Ok(polynomial)
@@ -1642,10 +1673,10 @@ fn read_signed_scalars(
     proof_bytes: &[u8],
     cursor: &mut usize,
     scalar_count: usize,
-) -> CanonicalResult<Vec<i64>> {
+) -> CanonicalResult<Vec<BigInt>> {
     let mut scalars = Vec::with_capacity(scalar_count);
     for _ in 0..scalar_count {
-        scalars.push(read_i64(proof_bytes, cursor)?);
+        scalars.push(read_signed_bigint_fixed(proof_bytes, cursor)?);
     }
 
     Ok(scalars)
@@ -1747,7 +1778,7 @@ fn validate_direct_ballot_support_commitment_shape(
 
 fn direct_ballot_witness_polynomials(
     witness_vector: &DirectBallotWitnessVector,
-) -> [&[i64]; DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS] {
+) -> [&[BigInt]; DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS] {
     [
         witness_vector.randomizer_coefficients.as_slice(),
         witness_vector.error_zero_coefficients.as_slice(),
@@ -1757,7 +1788,7 @@ fn direct_ballot_witness_polynomials(
 }
 
 fn signed_polynomial_residues(
-    polynomial: &[i64],
+    polynomial: &[BigInt],
     modulus: u64,
     label: &str,
 ) -> CanonicalResult<Vec<u64>> {
@@ -1766,35 +1797,120 @@ fn signed_polynomial_residues(
             "{label} must match the polynomial degree"
         )));
     }
-    Ok(polynomial
+    polynomial
         .iter()
-        .map(|coefficient| signed_residue(*coefficient, modulus))
-        .collect())
+        .map(|coefficient| signed_bigint_residue(coefficient, modulus))
+        .collect()
 }
 
-fn scaled_signed_residue(coefficient: i64, scalar: u64, modulus: u64) -> CanonicalResult<u64> {
+fn scaled_signed_residue(coefficient: &BigInt, scalar: u64, modulus: u64) -> CanonicalResult<u64> {
     mul_mod(
-        signed_residue(coefficient, modulus),
+        signed_bigint_residue(coefficient, modulus)?,
         scalar % modulus,
         modulus,
     )
 }
 
-fn signed_i128_residue(coefficient: i128, modulus: u64) -> CanonicalResult<u64> {
-    let modulus = i128::from(modulus);
-    let residue = coefficient.rem_euclid(modulus);
-    u64::try_from(residue).map_err(|_| {
-        invalid_direct_ballot_relation_proof(
-            "direct ballot signed residue does not fit in the modulus type",
-        )
-    })
+fn signed_bigint_residue(coefficient: &BigInt, modulus: u64) -> CanonicalResult<u64> {
+    let modulus_bigint = BigInt::from(modulus);
+    let residue = ((coefficient % &modulus_bigint) + &modulus_bigint) % &modulus_bigint;
+    let (_, bytes) = residue.to_bytes_le();
+    let mut output = 0_u64;
+    for (byte_index, byte) in bytes.iter().enumerate() {
+        let shift = byte_index.checked_mul(8).ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot signed residue byte shift overflowed",
+            )
+        })?;
+        if shift >= 64 {
+            return Err(invalid_direct_ballot_relation_proof(
+                "direct ballot signed residue does not fit in the modulus type",
+            ));
+        }
+        output |= u64::from(*byte) << shift;
+    }
+    if output >= modulus {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot signed residue is not canonical",
+        ));
+    }
+    Ok(output)
+}
+
+fn challenge_residue(challenge: &BigInt, modulus: u64) -> CanonicalResult<u64> {
+    signed_bigint_residue(challenge, modulus)
+}
+
+fn validate_signed_bigint_fixed_width(value: &BigInt, label: &str) -> CanonicalResult<()> {
+    let bytes = value.to_signed_bytes_le();
+    if bytes.len() > DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES {
+        return Err(invalid_direct_ballot_relation_proof(format!(
+            "{label} does not fit in the fixed response encoding"
+        )));
+    }
+    Ok(())
+}
+
+fn append_signed_bigint_fixed(output: &mut Vec<u8>, value: &BigInt) -> CanonicalResult<()> {
+    validate_signed_bigint_fixed_width(value, "direct ballot relation response coefficient")?;
+    let mut bytes = value.to_signed_bytes_le();
+    let sign_extension = if value.sign() == Sign::Minus {
+        0xff
+    } else {
+        0x00
+    };
+    bytes.resize(
+        DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES,
+        sign_extension,
+    );
+    output.extend_from_slice(&bytes);
+    Ok(())
+}
+
+fn read_signed_bigint_fixed(input: &[u8], cursor: &mut usize) -> CanonicalResult<BigInt> {
+    let end = cursor
+        .checked_add(DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES)
+        .ok_or_else(|| {
+            invalid_direct_ballot_relation_proof("direct ballot relation proof cursor overflowed")
+        })?;
+    let bytes = input.get(*cursor..end).ok_or_else(|| {
+        invalid_direct_ballot_relation_proof("direct ballot relation proof ended early")
+    })?;
+    *cursor = end;
+    Ok(BigInt::from_signed_bytes_le(bytes))
+}
+
+fn append_challenge(output: &mut Vec<u8>, challenge: &BigInt) -> CanonicalResult<()> {
+    if challenge.sign() == Sign::Minus || challenge.is_zero() {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation challenge is outside the expected range",
+        ));
+    }
+    let (_, mut bytes) = challenge.to_bytes_le();
+    if bytes.len() > DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation challenge does not fit its encoding",
+        ));
+    }
+    bytes.resize(DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES, 0);
+    output.extend_from_slice(&bytes);
+    Ok(())
+}
+
+fn read_challenge(input: &[u8], cursor: &mut usize) -> CanonicalResult<BigInt> {
+    let end = cursor
+        .checked_add(DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES)
+        .ok_or_else(|| {
+            invalid_direct_ballot_relation_proof("direct ballot relation proof cursor overflowed")
+        })?;
+    let bytes = input.get(*cursor..end).ok_or_else(|| {
+        invalid_direct_ballot_relation_proof("direct ballot relation proof ended early")
+    })?;
+    *cursor = end;
+    Ok(BigInt::from_bytes_le(Sign::Plus, bytes))
 }
 
 fn append_u64(output: &mut Vec<u8>, value: u64) {
-    output.extend_from_slice(&value.to_le_bytes());
-}
-
-fn append_i64(output: &mut Vec<u8>, value: i64) {
     output.extend_from_slice(&value.to_le_bytes());
 }
 
@@ -1814,11 +1930,6 @@ fn read_hash(input: &[u8], cursor: &mut usize) -> CanonicalResult<[u8; 64]> {
 fn read_u64(input: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
     let bytes = read_fixed_bytes::<8>(input, cursor)?;
     Ok(u64::from_le_bytes(bytes))
-}
-
-fn read_i64(input: &[u8], cursor: &mut usize) -> CanonicalResult<i64> {
-    let bytes = read_fixed_bytes::<8>(input, cursor)?;
-    Ok(i64::from_le_bytes(bytes))
 }
 
 fn read_fixed_bytes<const LENGTH: usize>(
@@ -1847,6 +1958,28 @@ fn usize_to_u64_bytes(value: usize) -> CanonicalResult<[u8; 8]> {
         .to_le_bytes())
 }
 
+fn checked_repeated_byte_count(
+    byte_count: usize,
+    repetitions: u32,
+    label: &str,
+) -> CanonicalResult<usize> {
+    let repetitions = usize::try_from(repetitions).map_err(|_| {
+        invalid_direct_ballot_relation_proof(format!("{label} repetition count does not fit usize"))
+    })?;
+
+    byte_count
+        .checked_mul(repetitions)
+        .ok_or_else(|| invalid_direct_ballot_relation_proof(format!("{label} overflowed")))
+}
+
+fn ceil_log2_usize(value: usize) -> u32 {
+    if value <= 1 {
+        0
+    } else {
+        usize::BITS - (value - 1).leading_zeros()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1871,22 +2004,23 @@ mod tests {
         should_accept: bool,
     ) {
         let modulus = direct_ballot_support_modulus();
-        let mask = 7_i64;
-        let challenge = 29_u64;
+        let mask = BigInt::from(7_i64);
+        let witness = BigInt::from(witness);
+        let challenge = BigInt::from(29_u64);
         let expansion = support_expansion_coefficients(
             support_kind,
-            signed_residue(mask, modulus),
-            signed_residue(witness, modulus),
+            signed_bigint_residue(&mask, modulus).expect("mask residue"),
+            signed_bigint_residue(&witness, modulus).expect("witness residue"),
             modulus,
         )
         .expect("support expansion");
-        let response = vec![mask + i64::try_from(challenge).expect("challenge fits i64") * witness];
+        let response = vec![mask + &challenge * witness];
         let result = verify_support_response_polynomial(
             "test witness",
             support_kind,
             &response,
             &expansion,
-            challenge % modulus,
+            challenge_residue(&challenge, modulus).expect("challenge residue"),
             modulus,
         );
 

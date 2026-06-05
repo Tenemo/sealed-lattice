@@ -153,6 +153,26 @@ pub(crate) fn sum_aligned(ciphertexts: &[Ciphertext]) -> CanonicalResult<Ciphert
     Ok(accumulator)
 }
 
+fn add_to_aligned_sum(
+    accumulator: &mut Option<Ciphertext>,
+    term: Ciphertext,
+) -> CanonicalResult<()> {
+    *accumulator = Some(match accumulator.take() {
+        Some(current) => sum_aligned(&[current, term])?,
+        None => term,
+    });
+
+    Ok(())
+}
+
+fn require_aligned_sum(
+    accumulator: Option<Ciphertext>,
+    empty_message: &'static str,
+) -> CanonicalResult<Ciphertext> {
+    accumulator
+        .ok_or_else(|| CanonicalError::new(CanonicalErrorCode::InvalidFixture, empty_message))
+}
+
 // Derive the encrypted score bits of a broadcast score ciphertext.
 pub(crate) fn derive_score_bits(
     context: &EvaluatorContext,
@@ -919,10 +939,9 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             "batched packed-rank evaluation exceeds the generator subgroup slot window",
         ));
     }
-
     let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_max)?;
     let shift_constant = broadcast_constant(score_domain_max);
-    let mut comparison_input_terms = Vec::with_capacity(option_count - 1);
+    let mut comparison_input_sum = None;
     let mut pair_windows = Vec::with_capacity(option_count - 1);
     let mut next_window_offset = 0_usize;
     for shift in 1..option_count {
@@ -953,14 +972,18 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
                 &format!("{seed_hex}-batched-pair-window-{shift}"),
             )?
         };
-        comparison_input_terms.push(windowed_inputs);
+        add_to_aligned_sum(&mut comparison_input_sum, windowed_inputs)?;
         next_window_offset += pair_window_size;
     }
-    let comparison_inputs = sum_aligned(&comparison_input_terms)?;
+    let comparison_inputs = require_aligned_sum(
+        comparison_input_sum,
+        "batched packed-rank evaluation did not produce comparison inputs",
+    )?;
     let refreshed_comparison_inputs = modulus_switch_to(
         &comparison_inputs,
         comparison_inputs.level.saturating_sub(1),
     )?;
+    drop(comparison_inputs);
     let comparison_baby_step_count = direct_comparison_baby_step_count(score_domain_max)?;
     let comparison_outputs = evaluate_direct_comparison_polynomial_with_baby_step_count(
         context,
@@ -968,8 +991,10 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
         &greater_or_equal_polynomial,
         comparison_baby_step_count,
     )?;
+    drop(refreshed_comparison_inputs);
+    drop(greater_or_equal_polynomial);
 
-    let mut rank_terms = Vec::with_capacity(2 * (option_count - 1));
+    let mut rank_sum = None;
     for (shift, window_offset, pair_window_size) in pair_windows {
         let window_logical_indices =
             (window_offset..(window_offset + pair_window_size)).collect::<Vec<_>>();
@@ -1006,12 +1031,18 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             lower_beats_higher_for_return.level,
             &format!("{seed_hex}-batched-pair-rank-return-{shift}"),
         )?;
-        rank_terms.push(higher_beats_lower_for_lower_slots);
-        rank_terms.push(lower_beats_higher_at_higher_slot);
+        add_to_aligned_sum(&mut rank_sum, higher_beats_lower_for_lower_slots)?;
+        add_to_aligned_sum(&mut rank_sum, lower_beats_higher_at_higher_slot)?;
     }
+    drop(comparison_outputs);
+
+    let packed_ranks = require_aligned_sum(
+        rank_sum,
+        "batched packed-rank evaluation did not produce rank terms",
+    )?;
 
     Ok(PackedRankEvaluation {
-        packed_ranks: sum_aligned(&rank_terms)?,
+        packed_ranks,
         exact_rank_indicators: Vec::new(),
     })
 }

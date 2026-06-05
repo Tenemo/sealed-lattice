@@ -169,8 +169,14 @@ impl EvaluatorContext {
             )
         })?;
 
-        let cache_key = (galois_element, level, seed.to_string());
+        #[cfg(target_arch = "wasm32")]
         {
+            return generate_galois_key(key, galois_element, level, seed);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let cache_key = (galois_element, level, seed.to_string());
             let generated_rotation_keys = self.generated_rotation_keys.read().map_err(|_| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
@@ -180,20 +186,20 @@ impl EvaluatorContext {
             if let Some(rotation_key) = generated_rotation_keys.get(&cache_key) {
                 return Ok(rotation_key.clone());
             }
+
+            let generated_key = generate_galois_key(key, galois_element, level, seed)?;
+            self.generated_rotation_keys
+                .write()
+                .map_err(|_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "generated rotation-key cache is poisoned",
+                    )
+                })?
+                .insert(cache_key, generated_key.clone());
+
+            Ok(generated_key)
         }
-
-        let generated_key = generate_galois_key(key, galois_element, level, seed)?;
-        self.generated_rotation_keys
-            .write()
-            .map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "generated rotation-key cache is poisoned",
-                )
-            })?
-            .insert(cache_key, generated_key.clone());
-
-        Ok(generated_key)
     }
 
     pub(crate) fn rotate_ciphertext(

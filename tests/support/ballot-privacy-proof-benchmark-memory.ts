@@ -64,3 +64,16 @@ export const captureRuntimeMemorySnapshot = (): RuntimeMemorySnapshot => {
               usedHeapBytes: safeMemoryInteger(memoryUsage.heapUsed),
           };
 };
+
+export const requiredRuntimeMemoryBytes = (
+    snapshot: RuntimeMemorySnapshot,
+    field: keyof RuntimeMemorySnapshot,
+    label: string,
+): number => {
+    const value = snapshot[field];
+    if (typeof value !== 'number') {
+        throw new Error(`${label} was not measured.`);
+    }
+
+    return value;
+};

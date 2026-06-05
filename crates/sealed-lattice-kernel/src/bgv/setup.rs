@@ -137,6 +137,22 @@ pub(crate) struct PreparedPassiveSetupPublicEvaluationKeys {
     pub(crate) record: Value,
 }
 
+pub(crate) struct DevelopmentThresholdSecretShare {
+    pub(crate) trustee_identity: String,
+    pub(crate) roster_position: usize,
+    pub(crate) recovery_epoch: u64,
+    pub(crate) device_epoch: u64,
+    pub(crate) participant_setup_record_hash: String,
+    pub(crate) trustee_threshold_verification_key_hash: String,
+    pub(crate) secret_coefficients: Vec<i64>,
+    pub(crate) error_coefficients: Vec<i64>,
+}
+
+pub(crate) struct DevelopmentThresholdSecretShares {
+    pub(crate) threshold_share_verification_key_hash: String,
+    pub(crate) shares: Vec<DevelopmentThresholdSecretShare>,
+}
+
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
         "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
@@ -397,6 +413,79 @@ pub(crate) fn development_evaluator_key_from_passive_setup_package(
         public_b,
         public_a,
     )
+}
+
+pub(crate) fn development_threshold_secret_shares_from_passive_setup_package(
+    setup_package: &Value,
+    private_setup_seed: &str,
+) -> CanonicalResult<DevelopmentThresholdSecretShares> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+    let private_setup_seed_hash = input::private_passive_setup_seed_hash_from_package_witness(
+        setup_package,
+        private_setup_seed,
+    )?;
+    let participant_records = array_at_path(setup_package, &["participants"])?;
+    let participant_identities = participant_records
+        .iter()
+        .map(|participant| {
+            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut shares = Vec::with_capacity(participant_records.len());
+    for participant in participant_records {
+        let trustee_identity = string_at_path(participant, &["trusteeIdentity"])?.to_string();
+        let secret_coefficients = (0..POLYNOMIAL_DEGREE)
+            .map(|coefficient_index| {
+                bounded_collective_secret_share_coefficient(
+                    &private_setup_seed_hash,
+                    &participant_identities,
+                    &trustee_identity,
+                    coefficient_index,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let error_coefficients = (0..POLYNOMIAL_DEGREE)
+            .map(|coefficient_index| {
+                bounded_collective_error_share_coefficient(
+                    &private_setup_seed_hash,
+                    &participant_identities,
+                    &trustee_identity,
+                    coefficient_index,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        shares.push(DevelopmentThresholdSecretShare {
+            trustee_identity,
+            roster_position: usize_at_path(participant, &["rosterPosition"])?,
+            recovery_epoch: unsigned_at_path(participant, &["recoveryEpoch"])?,
+            device_epoch: unsigned_at_path(participant, &["deviceEpoch"])?,
+            participant_setup_record_hash: string_at_path(
+                participant,
+                &["participantSetupRecordHash"],
+            )?
+            .to_string(),
+            trustee_threshold_verification_key_hash: string_at_path(
+                participant,
+                &["trusteeThresholdVerificationKeyHash"],
+            )?
+            .to_string(),
+            secret_coefficients,
+            error_coefficients,
+        });
+    }
+
+    Ok(DevelopmentThresholdSecretShares {
+        threshold_share_verification_key_hash: string_at_path(
+            setup_package,
+            &[
+                "thresholdVerificationMaterial",
+                "thresholdShareVerificationKeyHash",
+            ],
+        )?
+        .to_string(),
+        shares,
+    })
 }
 
 pub(crate) fn evaluation_key_seeds_from_passive_setup_package(
