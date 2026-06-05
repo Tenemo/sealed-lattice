@@ -88,7 +88,6 @@ const requiredPublicFunctions = [
     ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
     ['verifyCastReceiptShell', publicApiRuntimeRecord.verifyCastReceiptShell],
     ['verifyCloseRecordShell', publicApiRuntimeRecord.verifyCloseRecordShell],
-    ['verifyFirstValidPolicy', publicApiRuntimeRecord.verifyFirstValidPolicy],
     [
         'verifyRecoveryEpochUpdate',
         publicApiRuntimeRecord.verifyRecoveryEpochUpdate,

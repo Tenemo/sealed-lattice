@@ -1,28 +1,16 @@
-import {
-    targetBoundShareSelectionProfileId,
-    targetDecryptionProfileId,
-    type CapabilityContext,
-} from '@sealed-lattice/types';
+import type { CapabilityContext } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
+
+import {
+    dynamicRosterProfileCertificateHash,
+    targetBoundShareSelectionProfile,
+} from './election-foundation-fixture-constants.js';
 
 import {
     deriveThresholdProfile,
     evaluateActionCapability,
 } from '#packages/protocol/src/index';
 
-const targetBoundShareSelectionProfile = {
-    profileId: targetBoundShareSelectionProfileId,
-    certificateHash: 'target-bound-certificate-hash',
-    targetDecryptionProfileId,
-    targetBasisHash: 'target-basis-hash',
-    decryptionShareQuorum: 9,
-    minimumSharesForInterpolation: 7,
-    minimumArrivalsForRobustDecode: 9,
-    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
-    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
-} as const;
-
-const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 10 });
 const certifiedThresholdProfile = deriveThresholdProfile({
     rosterSize: 10,

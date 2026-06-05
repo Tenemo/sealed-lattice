@@ -2,10 +2,6 @@
   "schemaVersion": 1,
   "entries": [
     {
-      "path": "election-foundation/poll-specs.json",
-      "sha256": "372a4230bb71916706d725dc302edcdb84d91028e109a94d7caceb0bea1e7eee"
-    },
-    {
       "path": "plaintext-oracle/comparator-polynomials.json",
       "sha256": "da5e86c839149e31489c84c7ea23335b7ab9f3eeda18c2efae40904822925acd"
     },

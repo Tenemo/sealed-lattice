@@ -1,12 +1,16 @@
 import {
     activeMaliciousMheProfileId,
     passiveMhePrototypeProfileId,
-    targetBoundShareSelectionProfileId,
     targetDecryptionProfileId,
     type LifecycleLabelInput,
     type LifecycleState,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
+
+import {
+    dynamicRosterProfileCertificateHash,
+    targetBoundShareSelectionProfile,
+} from './election-foundation-fixture-constants.js';
 
 import {
     deriveLifecycleLabels,
@@ -25,19 +29,6 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
     }
 };
 
-const targetBoundShareSelectionProfile = {
-    profileId: targetBoundShareSelectionProfileId,
-    certificateHash: 'target-bound-certificate-hash',
-    targetDecryptionProfileId,
-    targetBasisHash: 'target-basis-hash',
-    decryptionShareQuorum: 9,
-    minimumSharesForInterpolation: 7,
-    minimumArrivalsForRobustDecode: 9,
-    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
-    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
-} as const;
-
-const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
 const uncertifiedThresholdProfile = deriveThresholdProfile({ rosterSize: 20 });
 const thresholdProfile = deriveThresholdProfile({
     rosterSize: 10,

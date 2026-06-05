@@ -13,7 +13,6 @@ import {
     isActionCurrentForRecoveryEpoch as isActionCurrentForRecoveryEpochInternal,
     validatePollSpec as validatePollSpecInternal,
     verifyBoardConsistency as verifyBoardConsistencyInternal,
-    verifyFirstValidPolicy as verifyFirstValidPolicyInternal,
     verifyRecoveryEpochUpdate as verifyRecoveryEpochUpdateInternal,
     verifyRosterExternalAcceptance as verifyRosterExternalAcceptanceInternal,
     verifyRosterManifestTranscript as verifyRosterManifestTranscriptInternal,
@@ -262,11 +261,6 @@ export const deriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
 ): FirstValidOrderingVerification =>
     deriveValidatedFirstValidOrderInternal(input);
-
-/** Verifies a first-valid policy input and returns its deterministic ordering. */
-export const verifyFirstValidPolicy = (
-    input: FirstValidOrderingInput,
-): FirstValidOrderingVerification => verifyFirstValidPolicyInternal(input);
 
 /** Verifies one participant's local acceptance of the frozen public roster. */
 export const verifyRosterExternalAcceptance = (

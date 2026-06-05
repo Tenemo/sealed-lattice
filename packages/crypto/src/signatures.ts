@@ -120,7 +120,7 @@ const decodeHexField = (
     return bytes;
 };
 
-export const deriveMlDsaContextByteLength = (contextString: string): number =>
+const deriveMlDsaContextByteLength = (contextString: string): number =>
     textEncoder.encode(contextString).byteLength;
 
 export const createMlDsaSignatureProfileFixture = (

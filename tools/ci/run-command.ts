@@ -280,20 +280,6 @@ export const createPackageManagerCommand = (
     };
 };
 
-export const runCommand = (invocation: CommandInvocation): number => {
-    console.log(`\n${invocation.description}`);
-    const result = spawnSync(invocation.command, invocation.args, {
-        env: invocation.env ?? process.env,
-        stdio: 'inherit',
-    });
-
-    if (result.error !== undefined) {
-        throw result.error;
-    }
-
-    return result.status ?? 1;
-};
-
 export const createPackageManagerSpawnCommand = (
     runner: PackageManagerRunner,
     commandArguments: readonly string[],

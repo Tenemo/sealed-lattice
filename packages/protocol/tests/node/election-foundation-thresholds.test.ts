@@ -1,16 +1,16 @@
-import {
-    targetDecryptionProfileId,
-    type PollSpec,
-    targetBoundShareSelectionProfileId,
-} from '@sealed-lattice/types';
+import type { PollSpec } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
+
+import {
+    dynamicRosterProfileCertificateHash,
+    targetBoundShareSelectionProfile,
+} from './election-foundation-fixture-constants.js';
 
 import {
     deriveFrozenRosterProfile,
     deriveThresholdProfile,
 } from '#packages/protocol/src/index';
 
-const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
 const invalidDynamicRosterProfileCertificateHash = 'not-a-protocol-hash';
 const rosterHash = 'b'.repeat(128);
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
@@ -33,17 +33,6 @@ const pollSpec = {
     topOptionCount: 1,
 } as const satisfies PollSpec;
 
-const targetBoundShareSelectionProfile = {
-    profileId: targetBoundShareSelectionProfileId,
-    certificateHash: 'target-bound-certificate-hash',
-    targetDecryptionProfileId,
-    targetBasisHash: 'target-basis-hash',
-    decryptionShareQuorum: 9,
-    minimumSharesForInterpolation: 7,
-    minimumArrivalsForRobustDecode: 9,
-    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
-    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
-} as const;
 const retiredThresholdDecryptionProfileId =
     'unsupported-target-decryption-profile-v0';
 

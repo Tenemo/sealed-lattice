@@ -169,7 +169,7 @@ export const vendoredProtocolRuntimeEntryExports = [
     },
     {
         source: 'ordering/index.js',
-        exports: ['deriveValidatedFirstValidOrder', 'verifyFirstValidPolicy'],
+        exports: ['deriveValidatedFirstValidOrder'],
     },
     {
         source: 'recovery/index.js',

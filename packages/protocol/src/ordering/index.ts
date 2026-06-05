@@ -304,7 +304,3 @@ export const deriveValidatedFirstValidOrder = (
         };
     }
 };
-
-export const verifyFirstValidPolicy = (
-    input: FirstValidOrderingInput,
-): FirstValidOrderingVerification => deriveValidatedFirstValidOrder(input);
