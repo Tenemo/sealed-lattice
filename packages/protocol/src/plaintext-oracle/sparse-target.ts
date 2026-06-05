@@ -111,6 +111,9 @@ export const deriveSparseTopKTarget = (input: {
         seenRanks.add(rankingEntry.rank);
     }
 
+    // Re-derive the canonical ranking from scratch (higher totalScore first,
+    // then lower optionIndex) and assert the supplied ranking matches it. This
+    // enforces the frozen tie-break order; any other ordering is rejected.
     const canonicalRanking = [...input.ranking]
         .sort(
             (left, right) =>
@@ -132,6 +135,12 @@ export const deriveSparseTopKTarget = (input: {
         }
     }
 
+    // Dual-slot top-k encoding, one slot pair per option index:
+    //   targetIdSlots[i]    = optionOrdinal (optionIndex+1) if option i is in
+    //                         the top-k, else 0
+    //   targetOrderSlots[i] = its 1-based rank position (rank+1) if in top-k,
+    //                         else 0
+    // 0 is reserved for "not selected"; ordinals/positions are 1-based.
     const rankByOptionIndex = new Map(
         input.ranking.map((entry) => [entry.optionIndex, entry.rank]),
     );
@@ -339,6 +348,9 @@ const decodeSparseTopKTargetUnchecked = (input: {
             continue;
         }
 
+        // A slot pair is either fully unselected (both zero -> skip) or fully
+        // selected (both nonzero). Exactly one zero is a half-filled, malformed
+        // slot and is refused.
         if (optionOrdinal === 0 && orderPosition === 0) {
             continue;
         }

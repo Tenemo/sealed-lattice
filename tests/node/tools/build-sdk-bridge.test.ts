@@ -82,7 +82,7 @@ describe('SDK bridge build helpers', () => {
             'plaintext-oracle/index.ts',
         );
         expect(sdkProtocolRuntimeSourceRelativePaths).not.toContain(
-            'target-acceptance/index.ts',
+            'plaintext-oracle/top-k.ts',
         );
     });
 });

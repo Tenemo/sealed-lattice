@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 pub(super) fn sample_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<Value> {
     sample_positions()
         .into_iter()
@@ -13,6 +16,7 @@ pub(super) fn sample_public_residues(seed_hash: &str, label: &str, modulus: u64)
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn sample_small_distribution(
     seed_hash: &str,
     identity: &str,
@@ -33,6 +37,48 @@ pub(super) fn sample_small_distribution(
                 "position": position,
                 "value": value,
             })
+        })
+        .collect()
+}
+
+pub(super) fn sample_bounded_collective_secret_share_distribution(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+) -> CanonicalResult<Vec<Value>> {
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            Ok(json!({
+                "position": position,
+                "value": bounded_collective_secret_share_coefficient(
+                    seed_hash,
+                    participant_identities,
+                    participant_identity,
+                    position,
+                )?,
+            }))
+        })
+        .collect()
+}
+
+pub(super) fn sample_bounded_collective_error_share_distribution(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+) -> CanonicalResult<Vec<Value>> {
+    sample_positions()
+        .into_iter()
+        .map(|position| {
+            Ok(json!({
+                "position": position,
+                "value": bounded_collective_error_share_coefficient(
+                    seed_hash,
+                    participant_identities,
+                    participant_identity,
+                    position,
+                )?,
+            }))
         })
         .collect()
 }
@@ -71,6 +117,125 @@ pub(super) fn sample_small_distribution_offset(
     }
 }
 
+pub(super) fn bounded_collective_secret_share_coefficient(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+    position: usize,
+) -> CanonicalResult<i64> {
+    if !is_collective_share_owner(
+        seed_hash,
+        participant_identities,
+        participant_identity,
+        "local-secret-share",
+        position,
+    )? {
+        return Ok(0);
+    }
+
+    match sample_small_distribution_offset(
+        seed_hash,
+        participant_identity,
+        "local-secret-share",
+        position,
+        3,
+    ) {
+        0 => Ok(-1),
+        1 => Ok(0),
+        2 => Ok(1),
+        _ => unreachable!("ternary secret offset is sampled modulo three"),
+    }
+}
+
+pub(super) fn bounded_collective_error_share_coefficient(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+    position: usize,
+) -> CanonicalResult<i64> {
+    if !is_collective_share_owner(
+        seed_hash,
+        participant_identities,
+        participant_identity,
+        "local-error",
+        position,
+    )? {
+        return Ok(0);
+    }
+
+    Ok(centered_binomial_eta2_coefficient(
+        seed_hash,
+        participant_identity,
+        "local-error",
+        position,
+    ))
+}
+
+fn is_collective_share_owner(
+    seed_hash: &str,
+    participant_identities: &[String],
+    participant_identity: &str,
+    label: &str,
+    position: usize,
+) -> CanonicalResult<bool> {
+    let participant_index = participant_identities
+        .iter()
+        .position(|identity| identity == participant_identity)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "collective share owner schedule references an unknown participant identity",
+            )
+        })?;
+    let owner_index =
+        collective_share_owner_index(seed_hash, label, position, participant_identities.len())?;
+
+    Ok(participant_index == owner_index)
+}
+
+fn collective_share_owner_index(
+    seed_hash: &str,
+    label: &str,
+    position: usize,
+    participant_count: usize,
+) -> CanonicalResult<usize> {
+    if participant_count == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective share owner schedule requires at least one participant",
+        ));
+    }
+    let participant_count_u64 =
+        u64::try_from(participant_count).expect("participant count fits u64");
+    let position_text = position.to_string();
+    let mut block_index = 0_u64;
+    loop {
+        let block_index_text = block_index.to_string();
+        let output = hash512(
+            "sealed-lattice-bgv-rns/bounded-collective-share-owner-v1",
+            &[
+                seed_hash.as_bytes(),
+                label.as_bytes(),
+                position_text.as_bytes(),
+                block_index_text.as_bytes(),
+            ],
+        );
+        for chunk in output.chunks_exact(8) {
+            let mut word = [0_u8; 8];
+            word.copy_from_slice(chunk);
+            if let Some(reduced_value) =
+                reduce_unbiased_u64(u64::from_le_bytes(word), participant_count_u64)
+            {
+                return Ok(usize::try_from(reduced_value).expect("owner index fits usize"));
+            }
+        }
+        block_index = block_index
+            .checked_add(1)
+            .expect("collective share owner rejection block index overflowed");
+    }
+}
+
+#[cfg(test)]
 pub(super) fn sample_centered_binomial_eta2(
     seed_hash: &str,
     identity: &str,
@@ -79,17 +244,7 @@ pub(super) fn sample_centered_binomial_eta2(
     sample_positions()
         .into_iter()
         .map(|position| {
-            let position_text = position.to_string();
-            let output = hash512(
-                "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
-                &[
-                    seed_hash.as_bytes(),
-                    identity.as_bytes(),
-                    label.as_bytes(),
-                    position_text.as_bytes(),
-                ],
-            );
-            let value = centered_binomial_eta2_from_bits(output[0]);
+            let value = centered_binomial_eta2_coefficient(seed_hash, identity, label, position);
             json!({
                 "position": position,
                 "value": value,
@@ -99,9 +254,19 @@ pub(super) fn sample_centered_binomial_eta2(
 }
 
 pub(super) fn dense_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<u64> {
-    (0..POLYNOMIAL_DEGREE)
-        .map(|position| sample_residue(seed_hash, label, position, modulus))
-        .collect()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .into_par_iter()
+            .map(|position| sample_residue(seed_hash, label, position, modulus))
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .map(|position| sample_residue(seed_hash, label, position, modulus))
+            .collect()
+    }
 }
 
 pub(super) fn dense_small_coefficients(
@@ -112,15 +277,31 @@ pub(super) fn dense_small_coefficients(
     maximum: i64,
 ) -> Vec<i64> {
     let width = u64::try_from(maximum - minimum + 1).expect("small distribution width fits u64");
-    (0..POLYNOMIAL_DEGREE)
-        .map(|position| {
-            minimum
-                + i64::try_from(sample_small_distribution_offset(
-                    seed_hash, identity, label, position, width,
-                ))
-                .expect("small distribution offset fits i64")
-        })
-        .collect()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .into_par_iter()
+            .map(|position| {
+                minimum
+                    + i64::try_from(sample_small_distribution_offset(
+                        seed_hash, identity, label, position, width,
+                    ))
+                    .expect("small distribution offset fits i64")
+            })
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        (0..POLYNOMIAL_DEGREE)
+            .map(|position| {
+                minimum
+                    + i64::try_from(sample_small_distribution_offset(
+                        seed_hash, identity, label, position, width,
+                    ))
+                    .expect("small distribution offset fits i64")
+            })
+            .collect()
+    }
 }
 
 pub(super) fn dense_centered_binomial_coefficients(
@@ -159,6 +340,28 @@ pub(super) fn dense_centered_binomial_coefficients(
     coefficients
 }
 
+fn centered_binomial_eta2_coefficient(
+    seed_hash: &str,
+    identity: &str,
+    label: &str,
+    position: usize,
+) -> i64 {
+    let position_text = position.to_string();
+    let output = hash512(
+        "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
+        &[
+            seed_hash.as_bytes(),
+            identity.as_bytes(),
+            label.as_bytes(),
+            position_text.as_bytes(),
+        ],
+    );
+
+    centered_binomial_eta2_from_bits(output[0])
+}
+
+// Centered binomial distribution with eta=2, support [-2, 2]: takes 4 random
+// bits per sample and returns (b0 + b1) - (b2 + b3).
 fn centered_binomial_eta2_from_bits(bits: u8) -> i64 {
     let low_weight = i64::from(bits & 1) + i64::from((bits >> 1) & 1);
     let high_weight = i64::from((bits >> 2) & 1) + i64::from((bits >> 3) & 1);
@@ -179,6 +382,16 @@ pub(super) fn signed_to_modulus_residue(value: i64, modulus: u64) -> u64 {
     }
 }
 
+pub(super) fn signed_to_plaintext_scaled_residue(value: i64, modulus: u64) -> CanonicalResult<u64> {
+    mul_mod(
+        PLAINTEXT_MODULUS % modulus,
+        signed_to_modulus_residue(value, modulus),
+        modulus,
+    )
+}
+
+// Polynomial multiplication in Z_q[X]/(X^N + 1): forward NTT both operands,
+// multiply pointwise, then inverse NTT.
 pub(super) fn negacyclic_product_mod(
     left: &[u64],
     right: &[u64],
@@ -223,8 +436,8 @@ pub(super) fn sample_encryption_relation_checks(
     message_residues: &[u64],
     public_key_product: &[u64],
     public_sample_product: &[u64],
-    error_zero_residues: &[u64],
-    error_one_residues: &[u64],
+    scaled_error_zero_residues: &[u64],
+    scaled_error_one_residues: &[u64],
 ) -> CanonicalResult<Vec<Value>> {
     let modulus = DATA_PRIMES[0];
     sample_positions()
@@ -233,7 +446,7 @@ pub(super) fn sample_encryption_relation_checks(
             let component_zero = add_mod(
                 add_mod(
                     public_key_product[position],
-                    error_zero_residues[position],
+                    scaled_error_zero_residues[position],
                     modulus,
                 )?,
                 message_residues[position],
@@ -241,7 +454,7 @@ pub(super) fn sample_encryption_relation_checks(
             )?;
             let component_one = add_mod(
                 public_sample_product[position],
-                error_one_residues[position],
+                scaled_error_one_residues[position],
                 modulus,
             )?;
             Ok(json!({
@@ -311,13 +524,4 @@ pub(super) fn sample_positions() -> Vec<usize> {
     positions.dedup();
 
     positions
-}
-
-pub(super) fn development_fixture_hash(fixture_record: &Value) -> CanonicalResult<String> {
-    let canonical_fixture = canonical_json(fixture_record)?;
-
-    Ok(hash512_hex(
-        "sealed-lattice-bgv-rns/development-fixture-hash-v1",
-        &[canonical_fixture.as_bytes()],
-    ))
 }

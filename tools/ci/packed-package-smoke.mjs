@@ -20,7 +20,7 @@ assert(
     'Threshold profile calculator must be exported as a function',
 );
 assert(
-    deriveThresholdProfile({ rosterSize: 20 }).privacyCorruptionBound === 6,
+    deriveThresholdProfile({ rosterSize: 10 }).privacyCorruptionBound === 3,
     'Threshold profile calculator must be exported and deterministic',
 );
 assert(

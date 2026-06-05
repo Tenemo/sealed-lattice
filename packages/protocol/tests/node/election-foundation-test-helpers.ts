@@ -30,7 +30,6 @@ export {
 } from '#packages/protocol/src/closing/index';
 export {
     deriveElectionManifestHash,
-    deriveReceiverKeyRegistrationHash,
     deriveRegistrationEntryHash,
     deriveRosterHash,
     deriveTrusteeSetupEntryHash,
@@ -46,14 +45,6 @@ export {
     verifyTargetFinality,
 } from '#packages/protocol/src/finality/index';
 export { deriveValidatedFirstValidOrder } from '#packages/protocol/src/ordering/index';
-export {
-    deriveLocalReplayRecordHash,
-    deriveTargetAcceptedRecordHash,
-    deriveTopKDecryptionShareHash,
-    verifyLocalReplayRecordShell,
-    verifyTargetAcceptedRecordShell,
-    verifyTopKDecryptionShareShell,
-} from '#packages/protocol/src/target-acceptance/index';
 export type {
     ActionContext,
     BoardConsistencyInput,
@@ -61,14 +52,11 @@ export type {
     CastReceipt,
     CloseRecord,
     ElectionManifest,
-    EvaluationProofRecord,
     FirstValidOrderingInput,
     InclusionProof,
-    LocalReplayRecord,
     ManifestOpaqueBindings,
     ManifestPolicyHashes,
     ProtocolSignatureEnvelope,
-    ReceiverKeyRegistration,
     RecoveryEpochMapEntry,
     RecoveryEpochUpdate,
     RegistrationEntry,
@@ -76,10 +64,8 @@ export type {
     SignedBoardHead,
     SignedObjectType,
     SignerRole,
-    TargetAcceptedRecord,
     TargetFinalityRecord,
     TargetFinalityVerification,
-    TopKDecryptionShareShell,
     TrusteeSetupEntry,
     ValidatedFirstValidObject,
     WitnessCheckpoint,

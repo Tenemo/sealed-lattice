@@ -1,10 +1,17 @@
 /**
- * Public package facade for the current release boundary.
+ * Documented public package facade for the current release boundary.
  *
- * The published package exists so packaging, documentation, smoke tests, and
- * release workflow can stabilize before the broader protocol-facing API is
- * introduced.
+ * The generated documentation intentionally covers the current direct-path
+ * development boundary. Complete direct encrypted ballot voting entry points
+ * remain unpublished until their proof, replay, finality, decryption, and
+ * mobile evidence gates close.
  *
  * @packageDocumentation
  */
-export * from '#packages/sdk/src/index.js';
+export {
+    deriveThresholdProfile,
+    validatePollSpec,
+    verifyBoardConsistency,
+    verifyTargetFinality,
+    verifyTranscriptCoreFixture,
+} from '#packages/sdk/src/index.js';

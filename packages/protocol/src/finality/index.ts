@@ -61,35 +61,33 @@ const verifyTargetRecordShape = (
         witnessPolicyHash: record.witnessPolicyHash,
     });
     const expectedProposalHash = deriveTargetProposalHash({
-        targetCiphertextHash: checkpoint.targetCiphertextHash,
-        topKCiphertextHash: checkpoint.topKCiphertextHash,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestHash: checkpoint.electionManifestHash,
-        thresholdProfileHash: checkpoint.thresholdProfileHash,
-        evaluationContextHash: checkpoint.evaluationContextHash,
-        evaluationProofProfileHash: checkpoint.evaluationProofProfileHash,
-        publicSlotMaskHash: checkpoint.publicSlotMaskHash,
+        encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
+        evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
+        evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
+        evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
+        targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
-        topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
+        thresholdProfileHash: checkpoint.thresholdProfileHash,
     });
     const expectedCheckpointHash = deriveTargetFinalityCheckpointHash({
         boardPolicyHash: checkpoint.boardPolicyHash,
-        targetCiphertextHash: checkpoint.targetCiphertextHash,
-        topKCiphertextHash: checkpoint.topKCiphertextHash,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestHash: checkpoint.electionManifestHash,
-        thresholdProfileHash: checkpoint.thresholdProfileHash,
-        evaluationContextHash: checkpoint.evaluationContextHash,
-        evaluationProofProfileHash: checkpoint.evaluationProofProfileHash,
+        encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
+        evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
+        evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
+        evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         finalizedBoardHeadHash: checkpoint.finalizedBoardHeadHash,
         objectType: checkpoint.objectType,
         objectVersion: checkpoint.objectVersion,
-        publicSlotMaskHash: checkpoint.publicSlotMaskHash,
+        targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
         targetProposalHash: checkpoint.targetProposalHash,
-        topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
+        thresholdProfileHash: checkpoint.thresholdProfileHash,
         witnessPolicyHash: checkpoint.witnessPolicyHash,
     });
 
@@ -228,6 +226,9 @@ const verifyTargetRecordShape = (
             ),
         );
     }
+    // Target finality fixes a 5-of-7 witness threshold. Both the witness policy
+    // and the target-finality policy must declare exactly 7 total / 5 quorum;
+    // any other witness policy is rejected.
     if (
         witnessPolicy.totalWitnesses !== 7 ||
         witnessPolicy.witnessQuorum !== 5 ||
@@ -278,14 +279,14 @@ const verifyTargetRecordShape = (
     if (
         record.inclusionProof.boardHeadHash !==
             checkpoint.finalizedBoardHeadHash ||
-        record.inclusionProof.includedObjectType !== 'TopKEvaluationRecord' ||
+        record.inclusionProof.includedObjectType !== 'EvaluatorReplayRecord' ||
         record.inclusionProof.includedObjectHash !==
-            checkpoint.topKEvaluationRecordHash
+            checkpoint.evaluatorReplayRecordHash
     ) {
         refusedObjects.push(
             createRefusal(
-                'TopKEvaluationRecordNotIncluded',
-                'Target finality must finalize a board head containing the typed top-k evaluation record hash.',
+                'EvaluatorReplayRecordNotIncluded',
+                'Target finality must finalize a board head containing the evaluator replay record hash.',
                 record.targetFinalityRecordHash,
                 'TargetFinalityRecord',
             ),
@@ -475,6 +476,10 @@ const findFinalityForkEvidence = (
         const equivocatingWitnessIdentities = validWitnessIdentities.filter(
             (witnessIdentity) => conflictingWitnesses.has(witnessIdentity),
         );
+        // Two 5-of-7 quorums must overlap in at least 2*quorum - total =
+        // 2*5 - 7 = 3 witnesses. So >=3 shared valid signers across two
+        // conflicting finalized heads proves witness equivocation; fewer is
+        // not conclusive and is skipped.
         if (
             equivocatingWitnessIdentities.length <
             2 * input.witnessPolicy.witnessQuorum -
@@ -537,6 +542,8 @@ const verifyTargetFinalityUnchecked = (
         }
     }
 
+    // A witness that signed twice is dropped from the valid set entirely (not
+    // merely de-duplicated), so it cannot be counted toward the quorum at all.
     for (const witnessIdentity of duplicateWitnessIdentities) {
         refusedObjects.push(
             createRefusal(

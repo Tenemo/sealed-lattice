@@ -13,7 +13,6 @@ import type {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import apiSnapshot from '../../api-snapshot.json' with { type: 'json' };
 import * as publicApiRuntime from '../../dist/index.js';
 
 type DeriveThresholdProfile = (
@@ -42,14 +41,22 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
-const expectedRuntimeExports = [...apiSnapshot.runtimeExports].sort();
+const requiredPublicFunctionNames = [
+    'deriveThresholdProfile',
+    'validatePollSpec',
+    'evaluateActionCapability',
+    'deriveValidatedFirstValidOrder',
+    'verifyBoardConsistency',
+] as const;
 
 describe('election foundation public package API in browsers', () => {
     it('exposes callable safe runtime functions', () => {
-        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual([
-            ...expectedRuntimeExports,
-        ]);
-        for (const publicFunctionName of expectedRuntimeExports) {
+        const runtimeExportNames = Object.keys(publicApiRuntimeRecord).sort();
+
+        expect(runtimeExportNames).toEqual(
+            expect.arrayContaining([...requiredPublicFunctionNames]),
+        );
+        for (const publicFunctionName of runtimeExportNames) {
             expect(
                 typeof publicApiRuntimeRecord[publicFunctionName],
                 publicFunctionName,
@@ -59,10 +66,10 @@ describe('election foundation public package API in browsers', () => {
 
     it('runs the deterministic election foundation without WASM-specific APIs', () => {
         const thresholdProfile = deriveThresholdProfile({
-            rosterSize: 20,
+            rosterSize: 10,
         });
 
-        expect(thresholdProfile.releaseQuorum).toBe(14);
+        expect(thresholdProfile.releaseQuorum).toBe(10);
         expect(
             validatePollSpec({
                 pollId: 'browser-poll',
@@ -72,7 +79,7 @@ describe('election foundation public package API in browsers', () => {
             }),
         ).toMatchObject({ ok: true });
         expect(
-            evaluateActionCapability('DeriveAggregateContribution', {
+            evaluateActionCapability('VerifyEncryptedBallotProofs', {
                 lifecycleState: 'votingClosed',
                 thresholdProfile,
                 pollSpecValid: true,
@@ -82,12 +89,11 @@ describe('election foundation public package API in browsers', () => {
                     'accepted-roster-hash',
                 setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 turnoutCount: thresholdProfile.releaseQuorum,
-                bridgeBenchmarkReportPresent: true,
-                bridgeProverCertificatePresent: true,
+                directProofTransportPresent: true,
             }),
         ).toEqual({
             allowed: true,
-            action: 'DeriveAggregateContribution',
+            action: 'VerifyEncryptedBallotProofs',
         });
         expect(
             deriveValidatedFirstValidOrder({

@@ -7,7 +7,7 @@ import {
     writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import {
     DiagnosticCategory,
@@ -22,6 +22,7 @@ import {
     vendoredProtocolRuntimeModules,
 } from './verify-public-package-policy.js';
 
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { collectFiles } from '#tools/internal/files.js';
 import { rewriteModuleSpecifiers } from '#tools/internal/module-specifiers.js';
 
@@ -478,11 +479,6 @@ export const buildSdkInternalRuntime = async (): Promise<void> => {
     await inlineTypesIntoSdkDist();
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     await buildSdkInternalRuntime();
 }

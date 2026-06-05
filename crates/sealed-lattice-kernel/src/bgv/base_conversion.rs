@@ -10,7 +10,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
     coefficients: &[u64],
     target_basis_kind: BgvBasisKind,
     target_level: usize,
-    layout_hash: String,
+    encrypted_ballot_aggregate_layout_hash: String,
 ) -> CanonicalResult<RnsPolynomial> {
     if coefficients
         .iter()
@@ -42,11 +42,15 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
     RnsPolynomial::coefficient_domain(
         target_basis_kind,
         target_level,
-        layout_hash,
+        encrypted_ballot_aggregate_layout_hash,
         residues_by_modulus,
     )
 }
 
+// "Plaintext-lifted" means the SAME field value (< 65537) is stored identically
+// across every RNS limb at each coefficient, not a general CRT object. This
+// rejects limbs that disagree, AND residues that are congruent mod 65537 but
+// not the identical lifted value (e.g. 7 vs 7+65537).
 pub(crate) fn convert_plaintext_lifted_basis(
     source: &RnsPolynomial,
     target_basis_kind: BgvBasisKind,
@@ -92,24 +96,31 @@ pub(crate) fn convert_plaintext_lifted_basis(
             .collect::<Vec<_>>(),
         target_basis_kind,
         target_level,
-        source.layout_hash.clone(),
+        source.encrypted_ballot_aggregate_layout_hash.clone(),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{convert_plaintext_lifted_basis, lift_plaintext_coefficients_to_basis};
-    use crate::bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_hash};
+    use crate::bgv::profile::{
+        BgvBasisKind, POLYNOMIAL_DEGREE, encrypted_ballot_aggregate_layout_hash,
+    };
 
     #[test]
     fn base_conversion_lifts_plaintext_coefficients_to_selected_bases() {
         let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
         coefficients[0] = 65_536;
         coefficients[1] = 1;
-        let layout_hash = layout_hash().expect("layout hash");
-        let source =
-            lift_plaintext_coefficients_to_basis(&coefficients, BgvBasisKind::Data, 0, layout_hash)
-                .expect("data basis object");
+        let encrypted_ballot_aggregate_layout_hash =
+            encrypted_ballot_aggregate_layout_hash().expect("layout hash");
+        let source = lift_plaintext_coefficients_to_basis(
+            &coefficients,
+            BgvBasisKind::Data,
+            0,
+            encrypted_ballot_aggregate_layout_hash,
+        )
+        .expect("data basis object");
         let converted = convert_plaintext_lifted_basis(&source, BgvBasisKind::Extended, 1)
             .expect("extended basis conversion");
 
@@ -125,7 +136,7 @@ mod tests {
             &coefficients,
             BgvBasisKind::Data,
             1,
-            layout_hash().expect("layout hash"),
+            encrypted_ballot_aggregate_layout_hash().expect("layout hash"),
         )
         .expect("data basis object");
         source.residues_by_modulus[1][0] = 8;
@@ -140,7 +151,7 @@ mod tests {
             &coefficients,
             BgvBasisKind::Data,
             1,
-            layout_hash().expect("layout hash"),
+            encrypted_ballot_aggregate_layout_hash().expect("layout hash"),
         )
         .expect("data basis object");
         source.residues_by_modulus[1][0] = 7 + 65_537;

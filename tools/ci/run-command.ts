@@ -1,7 +1,13 @@
-import { spawn, spawnSync } from 'node:child_process';
+import {
+    spawn,
+    spawnSync,
+    type ChildProcess,
+    type SpawnOptions,
+} from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 import type { ActiveLocalRunLog, CommandLogFiles } from './local-run-log.js';
 
@@ -13,6 +19,36 @@ export type CommandInvocation = {
     readonly description: string;
     readonly env?: NodeJS.ProcessEnv;
     readonly logFileSlug?: string;
+};
+
+export type CommandOutputMode = 'capture' | 'inherit';
+
+export type CommandOutputStreamName = 'stderr' | 'stdout';
+
+export type CommandStartEvent = {
+    readonly invocation: CommandInvocation;
+    readonly logFiles?: CommandLogFiles;
+    readonly startedAtMilliseconds: number;
+};
+
+export type CommandOutputEvent = {
+    readonly chunk: string;
+    readonly invocation: CommandInvocation;
+    readonly streamName: CommandOutputStreamName;
+};
+
+export type CommandExitEvent = {
+    readonly durationMilliseconds: number;
+    readonly error?: Error;
+    readonly exitCode: number;
+    readonly invocation: CommandInvocation;
+    readonly terminationSignal: NodeJS.Signals | null;
+};
+
+export type CommandRunObserver = {
+    readonly onCommandExit?: (event: CommandExitEvent) => void;
+    readonly onCommandOutput?: (event: CommandOutputEvent) => void;
+    readonly onCommandStart?: (event: CommandStartEvent) => void;
 };
 
 export type PackageManagerRunner = {
@@ -326,35 +362,130 @@ export const runPackageManager = (
     );
 };
 
-const runCommandInParallel = (invocation: CommandInvocation): Promise<number> =>
+type KillableChildProcess = Pick<ChildProcess, 'kill' | 'pid'>;
+
+type ProcessGroupKiller = (
+    processIdentifier: number,
+    signal: NodeJS.Signals,
+) => unknown;
+
+type WindowsTaskKiller = (
+    command: string,
+    commandArguments: readonly string[],
+    options: { readonly stdio: 'ignore' },
+) => unknown;
+
+export const createAbortableCommandSpawnOptions = (
+    env: NodeJS.ProcessEnv,
+    stdio: SpawnOptions['stdio'],
+    platform: NodeJS.Platform = process.platform,
+): SpawnOptions => ({
+    detached: platform !== 'win32',
+    env,
+    stdio,
+});
+
+export const killProcessTree = (
+    childProcess: KillableChildProcess,
+    input: {
+        readonly platform?: NodeJS.Platform;
+        readonly processGroupKiller?: ProcessGroupKiller;
+        readonly windowsTaskKiller?: WindowsTaskKiller;
+    } = {},
+): void => {
+    const processId = childProcess.pid;
+    if (processId === undefined) {
+        return;
+    }
+    if ((input.platform ?? process.platform) === 'win32') {
+        // child.kill() only ends the direct child on Windows; package-manager
+        // and test-runner grandchildren survive. taskkill /t ends the whole
+        // tree. spawnSync keeps the abort path free of dangling listeners.
+        (input.windowsTaskKiller ?? spawnSync)(
+            'taskkill',
+            ['/pid', String(processId), '/t', '/f'],
+            {
+                stdio: 'ignore',
+            },
+        );
+        return;
+    }
+    try {
+        (input.processGroupKiller ?? process.kill)(-processId, 'SIGTERM');
+    } catch {
+        childProcess.kill('SIGTERM');
+    }
+};
+
+const runCommandWithInheritedOutput = (
+    invocation: CommandInvocation,
+    signal?: AbortSignal,
+    observer?: CommandRunObserver,
+): Promise<number> =>
     new Promise((resolve, reject) => {
+        if (signal?.aborted === true) {
+            resolve(1);
+            return;
+        }
         console.log(`\n${invocation.description}`);
-        const childProcess = spawn(invocation.command, invocation.args, {
-            env: invocation.env ?? process.env,
-            stdio: 'inherit',
+        const startedAtMilliseconds = performance.now();
+        observer?.onCommandStart?.({
+            invocation,
+            startedAtMilliseconds,
         });
+        const childProcess = spawn(
+            invocation.command,
+            invocation.args,
+            createAbortableCommandSpawnOptions(
+                invocation.env ?? process.env,
+                'inherit',
+            ),
+        );
+        const onAbort = (): void => {
+            killProcessTree(childProcess);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
         let settled = false;
         childProcess.once('error', (error) => {
             if (settled) {
                 return;
             }
             settled = true;
+            signal?.removeEventListener('abort', onAbort);
+            observer?.onCommandExit?.({
+                durationMilliseconds: Math.round(
+                    performance.now() - startedAtMilliseconds,
+                ),
+                error,
+                exitCode: 1,
+                invocation,
+                terminationSignal: null,
+            });
             reject(error);
         });
-        childProcess.once('close', (exitCode, signal) => {
+        childProcess.once('close', (exitCode, terminationSignal) => {
             if (settled) {
                 return;
             }
             settled = true;
-            if (signal !== null) {
+            signal?.removeEventListener('abort', onAbort);
+            const resolvedExitCode =
+                terminationSignal === null ? (exitCode ?? 1) : 1;
+            if (terminationSignal !== null) {
                 console.error(
-                    `${invocation.description} terminated by signal ${signal}.`,
+                    `${invocation.description} terminated by signal ${terminationSignal}.`,
                 );
-                resolve(1);
-                return;
             }
 
-            resolve(exitCode ?? 1);
+            observer?.onCommandExit?.({
+                durationMilliseconds: Math.round(
+                    performance.now() - startedAtMilliseconds,
+                ),
+                exitCode: resolvedExitCode,
+                invocation,
+                terminationSignal,
+            });
+            resolve(resolvedExitCode);
         });
     });
 
@@ -388,51 +519,124 @@ const closeCommandLogStreams = async (streams: {
     ]);
 };
 
-const runCommandWithOptionalLog = async (
-    invocation: CommandInvocation,
-    runLog?: ActiveLocalRunLog,
-): Promise<number> => {
-    if (runLog === undefined) {
-        return runCommandInParallel(invocation);
+const closeOptionalCommandLogStreams = async (
+    streams:
+        | {
+              readonly combined: WriteStream;
+              readonly stderr: WriteStream;
+              readonly stdout: WriteStream;
+          }
+        | undefined,
+): Promise<void> => {
+    if (streams === undefined) {
+        return;
     }
 
-    const commandLogFiles = runLog.createCommandLogFiles({
+    await closeCommandLogStreams(streams);
+};
+
+const runCommandWithOptionalLog = async (
+    invocation: CommandInvocation,
+    input: {
+        readonly observer?: CommandRunObserver;
+        readonly outputMode?: CommandOutputMode;
+        readonly runLog?: ActiveLocalRunLog;
+        readonly signal?: AbortSignal;
+    } = {},
+): Promise<number> => {
+    const outputMode = input.outputMode ?? 'inherit';
+    if (input.runLog === undefined && outputMode === 'inherit') {
+        return runCommandWithInheritedOutput(
+            invocation,
+            input.signal,
+            input.observer,
+        );
+    }
+    if (input.signal?.aborted === true) {
+        return 1;
+    }
+
+    const commandLogFiles = input.runLog?.createCommandLogFiles({
         description: invocation.description,
         preferredSlug: invocation.logFileSlug,
     });
-    const commandLogStreams = openCommandLogStreams(commandLogFiles);
+    const commandLogStreams =
+        commandLogFiles === undefined
+            ? undefined
+            : openCommandLogStreams(commandLogFiles);
     const heading = `\n${invocation.description}\n`;
-    process.stdout.write(heading);
-    commandLogStreams.combined.write(heading);
-    runLog.writeCombinedOutput(heading);
+    if (outputMode === 'inherit') {
+        process.stdout.write(heading);
+    }
+    commandLogStreams?.combined.write(heading);
+    input.runLog?.writeCombinedOutput(heading);
+    const startedAtMilliseconds = performance.now();
+    input.observer?.onCommandStart?.({
+        invocation,
+        logFiles: commandLogFiles,
+        startedAtMilliseconds,
+    });
 
     return new Promise((resolve, reject) => {
-        const childProcess = spawn(invocation.command, invocation.args, {
-            env: invocation.env ?? process.env,
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        const childProcess = spawn(
+            invocation.command,
+            invocation.args,
+            createAbortableCommandSpawnOptions(invocation.env ?? process.env, [
+                'ignore',
+                'pipe',
+                'pipe',
+            ]),
+        );
+        const childStandardOutput = childProcess.stdout;
+        const childStandardError = childProcess.stderr;
+        if (childStandardOutput === null || childStandardError === null) {
+            killProcessTree(childProcess);
+            void (async () => {
+                try {
+                    await closeOptionalCommandLogStreams(commandLogStreams);
+                } finally {
+                    reject(
+                        new Error(
+                            'Command log capture requires piped stdout and stderr.',
+                        ),
+                    );
+                }
+            })();
+            return;
+        }
+        const onAbort = (): void => {
+            killProcessTree(childProcess);
+        };
+        input.signal?.addEventListener('abort', onAbort, { once: true });
         const writeChunk = (
-            streamName: 'stderr' | 'stdout',
-            chunk: string | Uint8Array,
+            streamName: CommandOutputStreamName,
+            chunk: string,
         ): void => {
             const terminalStream =
                 streamName === 'stdout' ? process.stdout : process.stderr;
             const childStream =
                 streamName === 'stdout'
-                    ? commandLogStreams.stdout
-                    : commandLogStreams.stderr;
-            terminalStream.write(chunk);
-            childStream.write(chunk);
-            commandLogStreams.combined.write(chunk);
-            runLog.writeCombinedOutput(chunk);
+                    ? commandLogStreams?.stdout
+                    : commandLogStreams?.stderr;
+            if (outputMode === 'inherit') {
+                terminalStream.write(chunk);
+            }
+            childStream?.write(chunk);
+            commandLogStreams?.combined.write(chunk);
+            input.runLog?.writeCombinedOutput(chunk);
+            input.observer?.onCommandOutput?.({
+                chunk,
+                invocation,
+                streamName,
+            });
         };
         let settled = false;
-        childProcess.stdout.setEncoding('utf8');
-        childProcess.stderr.setEncoding('utf8');
-        childProcess.stdout.on('data', (chunk: string) => {
+        childStandardOutput.setEncoding('utf8');
+        childStandardError.setEncoding('utf8');
+        childStandardOutput.on('data', (chunk: string) => {
             writeChunk('stdout', chunk);
         });
-        childProcess.stderr.on('data', (chunk: string) => {
+        childStandardError.on('data', (chunk: string) => {
             writeChunk('stderr', chunk);
         });
         childProcess.once('error', (error) => {
@@ -440,31 +644,59 @@ const runCommandWithOptionalLog = async (
                 return;
             }
             settled = true;
+            input.signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
-                    await closeCommandLogStreams(commandLogStreams);
+                    input.observer?.onCommandExit?.({
+                        durationMilliseconds: Math.round(
+                            performance.now() - startedAtMilliseconds,
+                        ),
+                        error,
+                        exitCode: 1,
+                        invocation,
+                        terminationSignal: null,
+                    });
+                    await closeOptionalCommandLogStreams(commandLogStreams);
                 } catch {
                     // Preserve the original process start failure.
                 }
                 reject(error);
             })();
         });
-        childProcess.once('close', (exitCode, signal) => {
+        childProcess.once('close', (exitCode, terminationSignal) => {
             if (settled) {
                 return;
             }
             settled = true;
+            input.signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
-                    if (signal !== null) {
-                        const signalMessage = `${invocation.description} terminated by signal ${signal}.\n`;
-                        process.stderr.write(signalMessage);
-                        commandLogStreams.stderr.write(signalMessage);
-                        commandLogStreams.combined.write(signalMessage);
-                        runLog.writeCombinedOutput(signalMessage);
+                    const resolvedExitCode =
+                        terminationSignal === null ? (exitCode ?? 1) : 1;
+                    if (terminationSignal !== null) {
+                        const signalMessage = `${invocation.description} terminated by signal ${terminationSignal}.\n`;
+                        if (outputMode === 'inherit') {
+                            process.stderr.write(signalMessage);
+                        }
+                        commandLogStreams?.stderr.write(signalMessage);
+                        commandLogStreams?.combined.write(signalMessage);
+                        input.runLog?.writeCombinedOutput(signalMessage);
+                        input.observer?.onCommandOutput?.({
+                            chunk: signalMessage,
+                            invocation,
+                            streamName: 'stderr',
+                        });
                     }
-                    await closeCommandLogStreams(commandLogStreams);
-                    resolve(signal === null ? (exitCode ?? 1) : 1);
+                    input.observer?.onCommandExit?.({
+                        durationMilliseconds: Math.round(
+                            performance.now() - startedAtMilliseconds,
+                        ),
+                        exitCode: resolvedExitCode,
+                        invocation,
+                        terminationSignal,
+                    });
+                    await closeOptionalCommandLogStreams(commandLogStreams);
+                    resolve(resolvedExitCode);
                 } catch (error) {
                     reject(
                         error instanceof Error
@@ -479,11 +711,16 @@ const runCommandWithOptionalLog = async (
 
 export const runCommandsInParallel = async (
     invocations: readonly CommandInvocation[],
-    input: { readonly runLog?: ActiveLocalRunLog } = {},
+    input: {
+        readonly observer?: CommandRunObserver;
+        readonly outputMode?: CommandOutputMode;
+        readonly runLog?: ActiveLocalRunLog;
+        readonly signal?: AbortSignal;
+    } = {},
 ): Promise<number> => {
     const exitCodes = await Promise.all(
         invocations.map((invocation) =>
-            runCommandWithOptionalLog(invocation, input.runLog),
+            runCommandWithOptionalLog(invocation, input),
         ),
     );
 
@@ -492,13 +729,18 @@ export const runCommandsInParallel = async (
 
 export const runCommandsInSeries = async (
     invocations: readonly CommandInvocation[],
-    input: { readonly runLog?: ActiveLocalRunLog } = {},
+    input: {
+        readonly observer?: CommandRunObserver;
+        readonly outputMode?: CommandOutputMode;
+        readonly runLog?: ActiveLocalRunLog;
+        readonly signal?: AbortSignal;
+    } = {},
 ): Promise<number> => {
     for (const invocation of invocations) {
-        const exitCode = await runCommandWithOptionalLog(
-            invocation,
-            input.runLog,
-        );
+        if (input.signal?.aborted === true) {
+            return 1;
+        }
+        const exitCode = await runCommandWithOptionalLog(invocation, input);
         if (exitCode !== 0) {
             return exitCode;
         }

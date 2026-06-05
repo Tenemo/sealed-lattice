@@ -14,7 +14,7 @@ import {
     createKeyFixture,
     createSignature,
     defaultThresholdProfileHash,
-    defaultTopKEvaluationRecordHash,
+    defaultEvaluatorReplayRecordHash,
     manifestOpaqueBindings,
     targetFinalityPolicyHash,
     witnessIdentities,
@@ -184,15 +184,15 @@ export const createTargetProposalHead = (
     boardSequence: number,
     previousHeadHash: string | null,
     branchName = 'main',
-    topKEvaluationRecordHash = defaultTopKEvaluationRecordHash,
+    evaluatorReplayRecordHash = defaultEvaluatorReplayRecordHash,
 ): SignedBoardHead =>
     createBoardHeadWithObjects(
         boardSequence,
         previousHeadHash,
         [
             {
-                objectType: 'TopKEvaluationRecord',
-                objectHash: topKEvaluationRecordHash,
+                objectType: 'EvaluatorReplayRecord',
+                objectHash: evaluatorReplayRecordHash,
                 boardPosition: 0,
             },
         ],
@@ -252,7 +252,7 @@ export const createWitnessCheckpoint = (
 
 export const createTargetFinalityRecord = (
     finalizedHead: SignedBoardHead,
-    topKEvaluationRecordHash = defaultTopKEvaluationRecordHash,
+    evaluatorReplayRecordHash = defaultEvaluatorReplayRecordHash,
     witnessCount = 5,
 ): TargetFinalityRecord => {
     const proposalPayload = {
@@ -262,31 +262,27 @@ export const createTargetFinalityRecord = (
             marker: 'default-manifest',
         }),
         thresholdProfileHash: defaultThresholdProfileHash,
-        evaluationContextHash: deriveProtocolHash('EvaluationContextHash', {
-            ceremonyId,
-            marker: 'top-k-evaluation',
-        }),
-        topKEvaluationRecordHash,
-        topKCiphertextHash: deriveProtocolHash('CiphertextRoot', {
-            ceremonyId,
-            marker: 'c-top-k',
-        }),
-        publicSlotMaskHash: deriveProtocolHash('ChallengeDomainHash', {
-            payload: {
+        evaluatorReplayContextHash: deriveProtocolHash(
+            'EvaluatorReplayContextHash',
+            {
                 ceremonyId,
-                marker: 'top-k-mask',
+                marker: 'direct-evaluator-replay',
             },
-            purpose: 'fixture-public-slot-mask-v1',
+        ),
+        evaluatorReplayRecordHash,
+        encryptedBallotAggregateHash: deriveProtocolHash('CiphertextRoot', {
+            ceremonyId,
+            marker: 'direct-encrypted-ballot-aggregate',
         }),
         targetCiphertextHash: deriveProtocolHash('CiphertextRoot', {
             ceremonyId,
-            marker: 'c-target',
+            marker: 'direct-target-ciphertext',
         }),
         targetLayoutHash: deriveProtocolHash('TargetLayoutHash', {
-            layout: 'WinnerRankTopK-v1',
+            layout: 'direct-sparse-target-layout-v1',
         }),
-        evaluationProofProfileHash:
-            manifestOpaqueBindings.evaluationProofProfileHash,
+        evaluatorReplayProfileHash:
+            manifestOpaqueBindings.evaluatorReplayProfileHash,
         targetFinalityPolicyHash,
     };
     const targetProposalHash = deriveTargetProposalHash(proposalPayload);
@@ -308,8 +304,8 @@ export const createTargetFinalityRecord = (
     };
     const inclusionProof = createInclusionProof(
         finalizedHead,
-        'TopKEvaluationRecord',
-        topKEvaluationRecordHash,
+        'EvaluatorReplayRecord',
+        evaluatorReplayRecordHash,
     );
     const witnessCheckpoints = witnessIdentities
         .slice(0, witnessCount)

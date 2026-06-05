@@ -7,22 +7,6 @@ import type {
     TranscriptCoreFixtureVerification,
 } from '@sealed-lattice/types';
 
-import type { BridgeRandomnessSource } from './kernel-randomness.js';
-import type {
-    AggregateBridgeEncryptionGeneration,
-    AggregateBridgeEncryptionVerification,
-    AggregateBridgeRelationEvaluation,
-} from './kernel-types/aggregate-bridge.js';
-import type {
-    BallotPrivacyEncodedRelationVectorVerification,
-    BallotPrivacyKernelVerification,
-    BallotPrivacyLinearProofVectorVerification,
-    BallotPrivacyProofBackendStatus,
-    BallotPrivacyProofGeneration,
-    BallotPrivacyReceiverKeyProofGeneration,
-    BallotPrivacyReceiverKeyProofGenerationPreparation,
-    BallotPrivacyReceiverKeyVectorVerification,
-} from './kernel-types/ballot-privacy.js';
 import type {
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
@@ -36,24 +20,12 @@ import type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvTargetCiphertextPairInput,
+    BgvTargetDecryptionResult,
+    BgvTargetDecryptionShare,
 } from './kernel-types/bgv.js';
 
 export type {
-    AggregateBridgeEncryptionGeneration,
-    AggregateBridgeEncryptionVerification,
-    AggregateBridgeRelationEvaluation,
-} from './kernel-types/aggregate-bridge.js';
-export type {
-    BallotPrivacyEncodedRelationVectorVerification,
-    BallotPrivacyKernelVerification,
-    BallotPrivacyLinearProofVectorVerification,
-    BallotPrivacyProofBackendStatus,
-    BallotPrivacyProofGeneration,
-    BallotPrivacyReceiverKeyProofGeneration,
-    BallotPrivacyReceiverKeyProofGenerationPreparation,
-    BallotPrivacyReceiverKeyVectorVerification,
-} from './kernel-types/ballot-privacy.js';
-export type {
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,
@@ -66,6 +38,9 @@ export type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvTargetCiphertextPairInput,
+    BgvTargetDecryptionResult,
+    BgvTargetDecryptionShare,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -107,133 +82,6 @@ export type TranscriptCoreKernel = {
     verifyFixture(
         fixture: TranscriptCoreFixture,
     ): TranscriptCoreFixtureVerification;
-    describeBallotPrivacyProofBackend(): BallotPrivacyProofBackendStatus;
-    verifyBallotPrivacyLinearProofVector(input: {
-        readonly vectorCase: unknown;
-    }): BallotPrivacyLinearProofVectorVerification;
-    verifyBallotPrivacyEncodedRelationVector(input: {
-        readonly vectorCase: unknown;
-    }): BallotPrivacyEncodedRelationVectorVerification;
-    verifyBallotPrivacyReceiverKeyVector(input: {
-        readonly vectorCase: unknown;
-    }): BallotPrivacyReceiverKeyVectorVerification;
-    verifyReceiverKeyProof(input: {
-        readonly linearStatement?: unknown;
-        readonly parameterSet?: unknown;
-        readonly proofBytesHex?: string;
-        readonly proofEncoding?: unknown;
-        readonly publicRandomnessHex?: string;
-        readonly receiverKeyProof: unknown;
-    }): BallotPrivacyKernelVerification;
-    prepareReceiverKeyProofGeneration(input: {
-        readonly linearStatement: unknown;
-        readonly parameterSet: unknown;
-        readonly proofEncoding: unknown;
-        readonly publicRandomnessHex: string;
-        readonly secretState: unknown;
-        readonly proverRandomnessHex?: string;
-    }): BallotPrivacyReceiverKeyProofGenerationPreparation;
-    generateReceiverKeyProof(input: {
-        readonly linearStatement: unknown;
-        readonly parameterSet: unknown;
-        readonly proofEncoding: unknown;
-        readonly publicRandomnessHex?: string;
-        readonly secretState: unknown;
-        readonly proverRandomnessHex?: string;
-    }): BallotPrivacyReceiverKeyProofGeneration;
-    generateBallotProof(input: {
-        readonly linearStatement: unknown;
-        readonly parameterSet: unknown;
-        readonly proofEncoding: unknown;
-        readonly publicRandomnessHex?: string;
-        readonly secretState: unknown;
-        readonly proverRandomnessHex?: string;
-    }): BallotPrivacyProofGeneration;
-    generateBallotComponentProof(input: {
-        readonly componentId: string;
-        readonly proofInput: unknown;
-        readonly secretState: unknown;
-        readonly proverRandomnessHex?: string;
-    }): BallotPrivacyProofGeneration;
-    generateBallotProofRecord(input: {
-        readonly statement: unknown;
-        readonly linearStatement: unknown;
-        readonly parameterSet: unknown;
-        readonly proofEncoding: unknown;
-        readonly publicRandomnessHex?: string;
-        readonly componentBundleStatement: unknown;
-        readonly componentProofInputs: readonly unknown[];
-        readonly secretState: unknown;
-        readonly proverRandomnessHex?: string;
-        readonly componentProverRandomnessHexes?: Readonly<
-            Record<string, string>
-        >;
-        readonly componentSecretStates?: Readonly<Record<string, unknown>>;
-        readonly casualMicroRosterAcknowledged?: boolean;
-    }): BallotPrivacyProofGeneration;
-    verifyBallotProof(input: {
-        readonly ballotProof: unknown;
-        readonly componentBundleStatement?: unknown;
-        readonly componentProofBundle?: unknown;
-        readonly componentProofInputs?: readonly unknown[];
-        readonly dynamicRosterProfileEvidence?: unknown;
-        readonly linearStatement?: unknown;
-        readonly parameterSet?: unknown;
-        readonly proofBytesHex?: string;
-        readonly proofEncoding?: unknown;
-        readonly publicRandomnessHex?: string;
-        readonly statement: unknown;
-        readonly casualMicroRosterAcknowledged?: boolean;
-    }): BallotPrivacyKernelVerification;
-    verifyClaimBearingBallotPackage(input: {
-        readonly ballotPackage: unknown;
-        readonly dynamicRosterProfileEvidence?: unknown;
-        readonly casualMicroRosterAcknowledged?: boolean;
-    }): BallotPrivacyKernelVerification;
-    generateAggregateDerivationProof(input: {
-        readonly proofInput: unknown;
-        readonly secretState: unknown;
-        readonly proverRandomnessHex?: string;
-    }): BallotPrivacyProofGeneration;
-    verifyAggregateDerivationProof(input: {
-        readonly closeRecord: unknown;
-        readonly component: unknown;
-        readonly contributorActionContext: unknown;
-        readonly countedBallotPackages?: readonly unknown[];
-        readonly casualMicroRosterAcknowledged?: boolean;
-    }): BallotPrivacyKernelVerification;
-    generateAggregateBridgeEncryption(input: {
-        readonly aggregateSelectionPolicyHash: ProtocolHash;
-        readonly aggregateDerivationComponent: unknown;
-        readonly aggregateWitness: unknown;
-        readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
-        readonly heParamHash: ProtocolHash;
-        readonly setupPackage: unknown;
-        readonly proverRandomnessHex?: string;
-        readonly encryptionRandomnessSeedHex?: string;
-        readonly developmentRandomnessOverrideAcknowledged?: boolean;
-        readonly includeCanonicalBytesHex?: boolean;
-    }): AggregateBridgeEncryptionGeneration | BallotPrivacyKernelVerification;
-    evaluateAggregateBridgeRelation(input: {
-        readonly aggregateSelectionPolicyHash: ProtocolHash;
-        readonly aggregateDerivationComponent: unknown;
-        readonly aggregateWitness: unknown;
-        readonly bridgeEncryption: unknown;
-        readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
-        readonly heParamHash: ProtocolHash;
-        readonly setupPackage: unknown;
-        readonly proverRandomnessHex?: string;
-        readonly encryptionRandomnessSeedHex?: string;
-        readonly developmentRandomnessOverrideAcknowledged?: boolean;
-    }): AggregateBridgeRelationEvaluation | BallotPrivacyKernelVerification;
-    verifyAggregateBridgeEncryption(input: {
-        readonly aggregateSelectionPolicyHash: ProtocolHash;
-        readonly aggregateDerivationComponent: unknown;
-        readonly bridgeEncryption: unknown;
-        readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
-        readonly heParamHash: ProtocolHash;
-        readonly setupPackage: unknown;
-    }): AggregateBridgeEncryptionVerification | BallotPrivacyKernelVerification;
     describeBgvRnsProfile(): BgvRnsProfileDescription;
     describeBgvOperationRegistry(): unknown;
     describeBgvPassiveSetupObjectModel(): unknown;
@@ -245,6 +93,36 @@ export type TranscriptCoreKernel = {
         readonly participants: readonly BgvPassiveSetupParticipantInput[];
         readonly setupSeed?: string;
     }): BgvPassiveSetupPackage;
+    generateBgvEvaluationKeyMaterial(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly setupPrivateWitness: {
+            readonly setupSeed: string;
+        };
+        readonly workingLevel?: number;
+        readonly rotationKeys?: readonly {
+            readonly rotation: number;
+            readonly level: number;
+        }[];
+    }): Record<string, unknown>;
+    generateBgvTargetDecryptionShare(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly setupPrivateWitness: {
+            readonly setupSeed: string;
+        };
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly trusteeIdentity: string;
+    }): BgvTargetDecryptionShare;
+    recombineBgvTargetDecryptionShares(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly decryptionShares: readonly BgvTargetDecryptionShare[];
+    }): BgvTargetDecryptionResult;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -328,155 +206,6 @@ type TranscriptCoreKernelCommand =
           readonly fixture: TranscriptCoreFixture;
       }
     | {
-          readonly command: 'DescribeBallotPrivacyProofBackend';
-      }
-    | {
-          readonly command: 'VerifyBallotPrivacyLinearProofVector';
-          readonly vectorCase: unknown;
-      }
-    | {
-          readonly command: 'VerifyBallotPrivacyEncodedRelationVector';
-          readonly vectorCase: unknown;
-      }
-    | {
-          readonly command: 'VerifyBallotPrivacyReceiverKeyVector';
-          readonly vectorCase: unknown;
-      }
-    | {
-          readonly command: 'VerifyReceiverKeyProof';
-          readonly linearStatement?: unknown;
-          readonly parameterSet?: unknown;
-          readonly proofBytesHex?: string;
-          readonly proofEncoding?: unknown;
-          readonly publicRandomnessHex?: string;
-          readonly receiverKeyProof: unknown;
-      }
-    | {
-          readonly command: 'PrepareReceiverKeyProofGeneration';
-          readonly linearStatement: unknown;
-          readonly parameterSet: unknown;
-          readonly proofEncoding: unknown;
-          readonly publicRandomnessHex: string;
-          readonly secretState: unknown;
-          readonly proverRandomnessHex?: string;
-      }
-    | {
-          readonly command: 'GenerateReceiverKeyProof';
-          readonly linearStatement: unknown;
-          readonly parameterSet: unknown;
-          readonly proofEncoding: unknown;
-          readonly publicRandomnessHex: string;
-          readonly secretState: unknown;
-          readonly proverRandomnessHex: string;
-      }
-    | {
-          readonly command: 'GenerateBallotProof';
-          readonly linearStatement: unknown;
-          readonly parameterSet: unknown;
-          readonly proofEncoding: unknown;
-          readonly publicRandomnessHex: string;
-          readonly secretState: unknown;
-          readonly proverRandomnessHex: string;
-      }
-    | {
-          readonly command: 'GenerateBallotComponentProof';
-          readonly componentId: string;
-          readonly proofInput: unknown;
-          readonly secretState: unknown;
-          readonly proverRandomnessHex: string;
-      }
-    | {
-          readonly command: 'GenerateBallotProofRecord';
-          readonly statement: unknown;
-          readonly linearStatement: unknown;
-          readonly parameterSet: unknown;
-          readonly proofEncoding: unknown;
-          readonly publicRandomnessHex: string;
-          readonly componentBundleStatement: unknown;
-          readonly componentProofInputs: readonly unknown[];
-          readonly secretState: unknown;
-          readonly proverRandomnessHex: string;
-          readonly componentProverRandomnessHexes: Readonly<
-              Record<string, string>
-          >;
-          readonly componentSecretStates?: Readonly<Record<string, unknown>>;
-          readonly casualMicroRosterAcknowledged?: boolean;
-      }
-    | {
-          readonly command: 'VerifyBallotProof';
-          readonly ballotProof: unknown;
-          readonly componentBundleStatement?: unknown;
-          readonly componentProofBundle?: unknown;
-          readonly componentProofInputs?: readonly unknown[];
-          readonly dynamicRosterProfileEvidence?: unknown;
-          readonly linearStatement?: unknown;
-          readonly parameterSet?: unknown;
-          readonly proofBytesHex?: string;
-          readonly proofEncoding?: unknown;
-          readonly publicRandomnessHex?: string;
-          readonly statement: unknown;
-          readonly casualMicroRosterAcknowledged?: boolean;
-      }
-    | {
-          readonly command: 'VerifyClaimBearingBallotPackage';
-          readonly ballotPackage: unknown;
-          readonly dynamicRosterProfileEvidence?: unknown;
-          readonly casualMicroRosterAcknowledged?: boolean;
-      }
-    | {
-          readonly command: 'GenerateAggregateDerivationProof';
-          readonly proofInput: unknown;
-          readonly secretState: unknown;
-          readonly proverRandomnessHex: string;
-      }
-    | {
-          readonly command: 'VerifyAggregateDerivationProof';
-          readonly closeRecord: unknown;
-          readonly component: unknown;
-          readonly contributorActionContext: unknown;
-          readonly countedBallotPackages?: readonly unknown[];
-          readonly casualMicroRosterAcknowledged?: boolean;
-      }
-    | {
-          readonly command: 'GenerateAggregateBridgeEncryption';
-          readonly aggregateSelectionPolicyHash: ProtocolHash;
-          readonly aggregateDerivationComponent: unknown;
-          readonly aggregateWitness: unknown;
-          readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
-          readonly heParamHash: ProtocolHash;
-          readonly setupPackage: unknown;
-          readonly proverRandomnessHex: string;
-          readonly proverRandomnessSource: BridgeRandomnessSource;
-          readonly encryptionRandomnessSeedHex: string;
-          readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
-          readonly developmentRandomnessOverrideAcknowledged?: boolean;
-          readonly includeCanonicalBytesHex?: boolean;
-      }
-    | {
-          readonly command: 'EvaluateAggregateBridgeRelation';
-          readonly aggregateSelectionPolicyHash: ProtocolHash;
-          readonly aggregateDerivationComponent: unknown;
-          readonly aggregateWitness: unknown;
-          readonly bridgeEncryption: unknown;
-          readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
-          readonly heParamHash: ProtocolHash;
-          readonly setupPackage: unknown;
-          readonly proverRandomnessHex: string;
-          readonly proverRandomnessSource: BridgeRandomnessSource;
-          readonly encryptionRandomnessSeedHex: string;
-          readonly encryptionRandomnessSeedSource: BridgeRandomnessSource;
-          readonly developmentRandomnessOverrideAcknowledged?: boolean;
-      }
-    | {
-          readonly command: 'VerifyAggregateBridgeEncryption';
-          readonly aggregateSelectionPolicyHash: ProtocolHash;
-          readonly aggregateDerivationComponent: unknown;
-          readonly bridgeEncryption: unknown;
-          readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
-          readonly heParamHash: ProtocolHash;
-          readonly setupPackage: unknown;
-      }
-    | {
           readonly command: 'DescribeBgvRnsProfile';
       }
     | {
@@ -497,6 +226,39 @@ type TranscriptCoreKernelCommand =
           readonly thresholdProfileHash: ProtocolHash;
           readonly participants: readonly BgvPassiveSetupParticipantInput[];
           readonly setupSeed?: string;
+      }
+    | {
+          readonly command: 'GenerateBgvEvaluationKeyMaterial';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly setupPrivateWitness: {
+              readonly setupSeed: string;
+          };
+          readonly workingLevel?: number;
+          readonly rotationKeys?: readonly {
+              readonly rotation: number;
+              readonly level: number;
+          }[];
+      }
+    | {
+          readonly command: 'GenerateBgvTargetDecryptionShare';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly setupPrivateWitness: {
+              readonly setupSeed: string;
+          };
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly trusteeIdentity: string;
+      }
+    | {
+          readonly command: 'RecombineBgvTargetDecryptionShares';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly decryptionShares: readonly BgvTargetDecryptionShare[];
       }
     | {
           readonly command: 'VerifyBgvPassiveSetup';
@@ -542,6 +304,34 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'RejectBgvReferenceOracleArtifact';
           readonly artifact: unknown;
+      }
+    | {
+          readonly command: 'RunDirectEncryptedBallot';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly setupPrivateWitness: {
+              readonly setupSeed: string;
+          };
+          readonly ballotEncryptionRandomness: {
+              readonly source:
+                  | 'fresh-csprng'
+                  | 'development-deterministic-fixture';
+              readonly encryptionSeedHexes: readonly string[];
+          };
+          readonly proofMaskRandomness: {
+              readonly source:
+                  | 'fresh-csprng'
+                  | 'development-deterministic-fixture';
+              readonly ballotProofRandomnessHexes: readonly string[];
+          };
+          readonly ballots: readonly {
+              readonly voterIdentity: string;
+              readonly actionContextHash: string;
+              readonly scores: readonly number[];
+              readonly oneHotWitnesses?: readonly (readonly number[])[];
+          }[];
+          readonly topCount?: number;
+          readonly topCounts?: readonly number[];
+          readonly targetFinalityPolicyHash?: string;
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

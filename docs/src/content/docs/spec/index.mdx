@@ -9,9 +9,10 @@ This page collects the stable rules of the current `sealed-lattice` release boun
 ## Public package surface
 
 - The only committed public package name is `sealed-lattice`.
-- The current public runtime facade exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs.
+- The current public runtime facade is a development verification surface while the final direct encrypted ballot API is being built.
 - No public subpaths are promised yet.
-- The published package exists to stabilize packaging, docs, smoke checks, transcript-core fixtures, election foundation vectors, ballot privacy verification, and release flow before wider APIs are introduced.
+- The selected protocol direction is direct BGV-encrypted ballots, public ciphertext aggregation, deterministic mobile evaluator replay, target finality, and target-bound threshold decryption.
+- Complete ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release APIs are not published yet.
 
 ## Private workspace surface
 
@@ -26,9 +27,10 @@ This page collects the stable rules of the current `sealed-lattice` release boun
 - No private package may depend on `sealed-lattice`.
 - Package-boundary checks must stay green before wider functionality is published.
 
-## Verification rules
+## Direct-path verification rules
 
-- Node tests, browser tests, public package behavior checks, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must all continue to pass.
+- Node tests, browser tests, public package behavior checks, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must continue to pass.
 - The Rust transcript-core must keep building for native tests and `wasm32-unknown-unknown`.
 - The internal WASM loader must keep loading the transcript-core artifact in both Node and browser tests.
-- Reserved protocol hash derivation, ballot privacy proof verification, and `GF(65537)` field checks exposed through the internal WASM loader must remain covered by Node and browser tests.
+- Direct ballot proof, encrypted aggregation, evaluator replay, target finality, and target-bound decryption checks must stay direct-path-only as those surfaces are implemented.
+- Default, release, docs, package-smoke, browser, and mobile gates should verify only the selected direct path and shared substrate.

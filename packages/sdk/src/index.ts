@@ -51,12 +51,6 @@ import type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
-import type {
-    AggregateBridgeEncryptionVerification,
-    BallotPrivacyKernelVerification,
-    BallotPrivacyProofBackendStatus,
-    TranscriptCoreKernel,
-} from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
 
@@ -65,35 +59,15 @@ export type {
     ActionContext,
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
-    AggregateDerivationComponent,
-    AggregateDerivationPackageReference,
-    AggregateDerivationProofRecord,
-    AggregateDerivationProofVerificationInput,
-    AggregateDerivationStatement,
-    AggregateDerivationVerification,
-    AggregateShareCommitment,
     TargetBoundShareSelectionProfile,
     AppendOnlyConsistencyProof,
     BaseClaimProfile,
     BoardConsistencyInput,
     BoardConsistencyVerification,
     BoardEntryMerklePathStep,
-    BallotPrivacyRosterProfileEvidence,
-    BallotPrivacyVerification,
-    BallotProofComponentId,
-    BallotProofComponentProofBundle,
-    BallotProofComponentProofRecord,
-    BallotProofComponentProofStatementFormat,
-    BallotProofComponentProofVerificationInput,
-    BallotProofRecord,
-    BallotProofReceiverPayloadReference,
-    BallotProofReceiverPublicKeyReference,
-    BallotProofShareCommitmentReference,
-    BallotProofStatement,
     CanonicalError,
     CanonicalErrorCode,
     CanonicalSignedRootObject,
-    ClaimBearingBallotPackage,
     CapabilityContext,
     CapabilityDecision,
     CastReceipt,
@@ -109,7 +83,6 @@ export type {
     ElectionManifest,
     DecryptionShareFilteringMode,
     DecryptionShareSelectionRule,
-    EvaluationProofMode,
     FailureStatusLabel,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
@@ -143,11 +116,6 @@ export type {
     ProtocolRefusalCode,
     ProtocolSignatureEnvelope,
     ProtocolVerificationStatusLabel,
-    ReceiverKeyRegistration,
-    ReceiverKeyProof,
-    ReceiverKeyProofRootEvidence,
-    ReceiverEncryptionPublicKey,
-    ReceiverPayload,
     RecoveryEpochMapEntry,
     RecoveryEpochUpdate,
     RecoveryEpochVerification,
@@ -169,7 +137,6 @@ export type {
     SignedBoardHead,
     SignedObjectType,
     SignerRole,
-    ShareCommitment,
     SmallRosterPolicy,
     StructuredProtocolVerificationResult,
     TargetFinalityPolicy,
@@ -197,10 +164,6 @@ export type {
     WitnessCheckpoint,
     WitnessPolicy,
 } from '@sealed-lattice/types';
-export type {
-    BallotPrivacyKernelVerification,
-    BallotPrivacyProofBackendStatus,
-};
 
 /** Derives threshold, quorum, and warning parameters for a roster profile. */
 export const deriveThresholdProfile = (
@@ -239,6 +202,9 @@ export const evaluateActionCapability = (
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
 
+// Fail-closed result builder for the reserved future complete-protocol entry points
+// below: each returns a structured OperationUnavailable refusal (ok:false) rather than
+// throwing, so callers get a typed, non-crashing refusal until the path is implemented.
 const unavailableFutureProtocolOperation = (
     operation: string,
 ): FutureProtocolOperationResult => ({
@@ -258,14 +224,6 @@ const unavailableFutureProtocolOperation = (
 /** Reserved transcript verifier entry point for the future complete protocol path. */
 export const verifyTranscript = (): FutureProtocolOperationResult =>
     unavailableFutureProtocolOperation('verifyTranscript');
-
-/** Reserved bridge-proof creation entry point for the future aggregate path. */
-export const createBridgeProof = (): FutureProtocolOperationResult =>
-    unavailableFutureProtocolOperation('createBridgeProof');
-
-/** Reserved one-shot decryption-share policy verifier for the future target path. */
-export const verifyOneShotSharePolicy = (): FutureProtocolOperationResult =>
-    unavailableFutureProtocolOperation('verifyOneShotSharePolicy');
 
 /** Verifies signed board heads, inclusion proofs, and append-only evidence. */
 export const verifyBoardConsistency = (
@@ -346,79 +304,4 @@ export const verifyTranscriptCoreFixture = async (
         chunkRoot: verification.chunkRoot,
         statusLabels: verification.statusLabels,
     };
-};
-
-/** Input accepted by the packaged WASM receiver-key proof verifier. */
-export type ReceiverKeyProofVerificationInput = Parameters<
-    TranscriptCoreKernel['verifyReceiverKeyProof']
->[0];
-
-/** Input accepted by the packaged WASM ballot proof verifier. */
-export type BallotProofVerificationInput = Parameters<
-    TranscriptCoreKernel['verifyBallotProof']
->[0];
-
-/** Input accepted by the packaged WASM scoped relation-bearing ballot package verifier. */
-export type ClaimBearingBallotPackageVerificationInput = Parameters<
-    TranscriptCoreKernel['verifyClaimBearingBallotPackage']
->[0];
-
-/** Input accepted by the packaged WASM aggregate derivation proof verifier. */
-export type AggregateDerivationComponentVerificationInput = Parameters<
-    TranscriptCoreKernel['verifyAggregateDerivationProof']
->[0];
-
-/** Input accepted by the packaged WASM bridge proof verifier. */
-export type BridgeProofVerificationInput = Parameters<
-    TranscriptCoreKernel['verifyAggregateBridgeEncryption']
->[0];
-
-/** Result returned by the packaged WASM bridge proof verifier. */
-export type BridgeProofVerification =
-    | AggregateBridgeEncryptionVerification
-    | BallotPrivacyKernelVerification;
-
-/** Verifies a receiver-key proof with the packaged WASM proof backend. */
-export const verifyReceiverKeyProof = async (
-    input: ReceiverKeyProofVerificationInput,
-): Promise<BallotPrivacyKernelVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyReceiverKeyProof(input);
-};
-
-/** Verifies a ballot proof record with the packaged WASM proof backend. */
-export const verifyBallotProof = async (
-    input: BallotProofVerificationInput,
-): Promise<BallotPrivacyKernelVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyBallotProof(input);
-};
-
-/** Verifies a proof-byte-bearing scoped relation-bearing ballot package with the packaged WASM proof backend. */
-export const verifyClaimBearingBallotPackage = async (
-    input: ClaimBearingBallotPackageVerificationInput,
-): Promise<BallotPrivacyKernelVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyClaimBearingBallotPackage(input);
-};
-
-/** Verifies an aggregate derivation component with the packaged WASM proof backend. */
-export const verifyAggregateDerivationComponent = async (
-    input: AggregateDerivationComponentVerificationInput,
-): Promise<BallotPrivacyKernelVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyAggregateDerivationProof(input);
-};
-
-/** Verifies an encrypted aggregate bridge proof with the packaged WASM proof backend. */
-export const verifyBridgeProof = async (
-    input: BridgeProofVerificationInput,
-): Promise<BridgeProofVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyAggregateBridgeEncryption(input);
 };

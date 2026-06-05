@@ -4,7 +4,7 @@ use super::rng::DeterministicFixtureRng;
 use super::types::{
     ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS,
     FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS, FIELD_TITLE, MAGIC,
-    MANDATORY_EVALUATION_PROOF_PROFILE_ID, MheSecurityClosure, NO_DECRYPTION_PROOF_PROFILE_ID,
+    MANDATORY_EVALUATOR_REPLAY_PROFILE_ID, MheSecurityClosure, NO_DECRYPTION_PROOF_PROFILE_ID,
     NO_HE_SETUP_PROOF_PROFILE_ID, PASSIVE_MHE_PROTOTYPE_PROFILE_ID, REQUIRED_FIELDS,
     TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION, TranscriptCoreAnalysis,
     TranscriptCoreObject, TranscriptCoreProfile, TranscriptCoreStatus,
@@ -69,7 +69,7 @@ pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> Trans
         base_claim_profile_id: base_claim_profile.expected_profile_id().to_string(),
         mhe_security_profile_id: mhe_security_closure.expected_profile_id().to_string(),
         he_setup_proof_profile_id: NO_HE_SETUP_PROOF_PROFILE_ID.to_string(),
-        evaluation_proof_profile_id: MANDATORY_EVALUATION_PROOF_PROFILE_ID.to_string(),
+        evaluator_replay_profile_id: MANDATORY_EVALUATOR_REPLAY_PROFILE_ID.to_string(),
         decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
         title: match (base_claim_profile, mhe_security_closure) {
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => {
@@ -91,14 +91,14 @@ pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> Trans
                     "canonical".to_string(),
                     "fully-verified".to_string(),
                     "passive-mhe-prototype".to_string(),
-                    "mandatory-proof-profile".to_string(),
+                    "mandatory-evaluator-replay-profile".to_string(),
                 ]
             }
             (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => vec![
                 "canonical".to_string(),
                 "fully-verified".to_string(),
                 "active-malicious".to_string(),
-                "mandatory-proof-profile".to_string(),
+                "mandatory-evaluator-replay-profile".to_string(),
             ],
         },
         checkpoints: match (base_claim_profile, mhe_security_closure) {
@@ -112,6 +112,8 @@ pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> Trans
     }
 }
 
+// Writes the fixed field-ID schema: each field is emitted as its numeric field
+// ID followed by its value, in strictly increasing ID order (parser enforced).
 pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8> {
     let mut output = Vec::new();
     output.extend(MAGIC);
@@ -123,7 +125,7 @@ pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8
     append_string(&mut output, &object.base_claim_profile_id);
     append_string(&mut output, &object.mhe_security_profile_id);
     append_string(&mut output, &object.he_setup_proof_profile_id);
-    append_string(&mut output, &object.evaluation_proof_profile_id);
+    append_string(&mut output, &object.evaluator_replay_profile_id);
     append_string(&mut output, &object.decryption_proof_profile_id);
     append_varuint(&mut output, REQUIRED_FIELDS.len() as u64);
 
@@ -187,7 +189,7 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
     let base_claim_profile_id = reader.read_string()?;
     let mhe_security_profile_id = reader.read_string()?;
     let he_setup_proof_profile_id = reader.read_string()?;
-    let evaluation_proof_profile_id = reader.read_string()?;
+    let evaluator_replay_profile_id = reader.read_string()?;
     let decryption_proof_profile_id = reader.read_string()?;
     validate_profiles(
         base_claim_profile,
@@ -195,7 +197,7 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
         &base_claim_profile_id,
         &mhe_security_profile_id,
         &he_setup_proof_profile_id,
-        &evaluation_proof_profile_id,
+        &evaluator_replay_profile_id,
         &decryption_proof_profile_id,
     )?;
 
@@ -209,6 +211,8 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
     let mut tags = None;
     let mut checkpoints = None;
 
+    // Canonical ordering: field IDs must be strictly increasing, so duplicate or
+    // reordered fields are rejected and the encoding stays unique.
     for _ in 0..field_count {
         let field_id = reader.read_varuint()?;
         if field_id == previous_field_id {
@@ -254,7 +258,7 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
         base_claim_profile_id,
         mhe_security_profile_id,
         he_setup_proof_profile_id,
-        evaluation_proof_profile_id,
+        evaluator_replay_profile_id,
         decryption_proof_profile_id,
         title: title.ok_or_else(|| missing_field("title"))?,
         sequence: sequence.ok_or_else(|| missing_field("sequence"))?,
@@ -301,7 +305,7 @@ pub fn analyze_canonical_object(
         base_claim_profile_id: object.base_claim_profile_id,
         mhe_security_profile_id: object.mhe_security_profile_id,
         he_setup_proof_profile_id: object.he_setup_proof_profile_id,
-        evaluation_proof_profile_id: object.evaluation_proof_profile_id,
+        evaluator_replay_profile_id: object.evaluator_replay_profile_id,
         decryption_proof_profile_id: object.decryption_proof_profile_id,
         object_hash512: object_root(bytes),
         chunk_root: chunk_root(bytes, chunk_size_usize)?,
@@ -367,7 +371,7 @@ fn validate_profiles(
     base_claim_profile_id: &str,
     mhe_security_profile_id: &str,
     he_setup_proof_profile_id: &str,
-    evaluation_proof_profile_id: &str,
+    evaluator_replay_profile_id: &str,
     decryption_proof_profile_id: &str,
 ) -> CanonicalResult<()> {
     if base_claim_profile_id != base_claim_profile.expected_profile_id() {
@@ -400,10 +404,10 @@ fn validate_profiles(
             "one or more reserved proof profile IDs are not supported",
         ));
     }
-    if evaluation_proof_profile_id != MANDATORY_EVALUATION_PROOF_PROFILE_ID {
+    if evaluator_replay_profile_id != MANDATORY_EVALUATOR_REPLAY_PROFILE_ID {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "fullyVerified requires the mandatory evaluation-proof profile",
+            "fullyVerified requires the mandatory evaluator-replay profile",
         ));
     }
 
@@ -465,7 +469,7 @@ pub(super) fn append_transcript_core_header(output: &mut Vec<u8>, object: &Trans
     append_string(output, &object.base_claim_profile_id);
     append_string(output, &object.mhe_security_profile_id);
     append_string(output, &object.he_setup_proof_profile_id);
-    append_string(output, &object.evaluation_proof_profile_id);
+    append_string(output, &object.evaluator_replay_profile_id);
     append_string(output, &object.decryption_proof_profile_id);
 }
 

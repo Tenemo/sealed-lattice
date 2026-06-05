@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 export type CoverageMetric = {
     readonly covered: number;
@@ -33,7 +34,7 @@ export type CoverageArtifactsOptions = {
 export const defaultRequiredCoverageEntryPaths = [
     'packages/crypto/src/canonical-json.ts',
     'packages/protocol/src/lifecycle/thresholds.ts',
-    'packages/protocol/src/ballot-privacy/objects.ts',
+    'packages/types/src/board-target.ts',
     'packages/sdk/src/index.ts',
     'packages/wasm/src/transcript-core-bridge.ts',
     'tools/ci/check-package-boundaries.ts',
@@ -223,12 +224,7 @@ const main = async (): Promise<void> => {
     );
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(path.resolve(scriptEntryPoint)).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }
 /* v8 ignore stop */

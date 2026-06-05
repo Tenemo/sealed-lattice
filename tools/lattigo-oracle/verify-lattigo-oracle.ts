@@ -5,9 +5,10 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { deriveProtocolHash } from '#packages/crypto/src/index';
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const pinnedReferencePath = path.join(
@@ -450,11 +451,6 @@ const main = async (): Promise<void> => {
     await runDockerOracle();
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }

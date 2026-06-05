@@ -1,7 +1,4 @@
-import { pathToFileURL } from 'node:url';
-
 import {
-    type ActiveLocalRunLog,
     createLocalRunLog,
     currentProcessExitCode,
     removeRunLogArguments,
@@ -10,6 +7,7 @@ import {
 import {
     createPackageManagerCommand,
     resolvePackageManagerRunner,
+    runCommandsInParallel,
     runCommandsInSeries,
     type CommandInvocation,
     type PackageManagerRunner,
@@ -20,6 +18,8 @@ import {
     proofBenchmarkLaneValues,
     type ProofBenchmarkLane,
 } from './test-lanes.js';
+
+import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const isProofBenchmarkLane = (lane: string): lane is ProofBenchmarkLane =>
     proofBenchmarkLaneValues.some((supportedLane) => supportedLane === lane);
@@ -54,46 +54,37 @@ export const buildProofBenchmarkCommands = (
     const packageManagerRunner =
         input.packageManagerRunner ?? resolvePackageManagerRunner();
     const lanes = input.lanes ?? defaultProofBenchmarkLanes;
-    const buildCommand = (
-        description: string,
-        commandArguments: readonly string[],
-        logFileSlug: string,
-    ): CommandInvocation =>
-        createPackageManagerCommand(description, commandArguments, {
-            logFileSlug,
-            packageManagerRunner,
-        });
 
-    return [
-        buildCommand('Build workspace packages', ['run', 'build'], 'build'),
-        ...lanes.map((lane) => {
-            const laneDefinition = proofBenchmarkLaneDefinitions[lane];
+    return lanes.map((lane) => {
+        const laneDefinition = proofBenchmarkLaneDefinitions[lane];
 
-            return buildCommand(
-                laneDefinition.commandDescription,
-                [
-                    'exec',
-                    'vitest',
-                    '--project',
-                    laneDefinition.projectName,
-                    '--run',
-                ],
+        return createPackageManagerCommand(
+            laneDefinition.commandDescription,
+            [
+                'exec',
+                'vitest',
+                '--project',
                 laneDefinition.projectName,
-            );
-        }),
-    ];
+                '--run',
+            ],
+            {
+                logFileSlug: laneDefinition.projectName,
+                packageManagerRunner,
+            },
+        );
+    });
 };
 
-export const runProofBenchmarkCommands = async (
-    invocations: readonly CommandInvocation[],
-    input: { readonly runLog?: ActiveLocalRunLog } = {},
-): Promise<number> => {
-    return runCommandsInSeries(invocations, { runLog: input.runLog });
-};
+const buildWorkspaceBuildCommand = (
+    packageManagerRunner: PackageManagerRunner,
+): CommandInvocation =>
+    createPackageManagerCommand('Build workspace packages', ['run', 'build'], {
+        logFileSlug: 'build',
+        packageManagerRunner,
+    });
 
 const proofBenchmarkScriptNames: Record<ProofBenchmarkLane, string> = {
     desktop: 'test:proof-benchmark:browser:desktop',
-    'mobile-throttled': 'test:proof-benchmark:browser:mobile:throttled',
     node: 'test:proof-benchmark:node',
 };
 
@@ -108,6 +99,7 @@ const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     const commandArguments = removeRunLogArguments(rawArguments);
     const lanes = parseRequestedProofBenchmarkLanes(commandArguments);
+    const packageManagerRunner = resolvePackageManagerRunner();
     const runLog = runLogDisabledByArguments(rawArguments)
         ? undefined
         : await createLocalRunLog({
@@ -117,8 +109,17 @@ const main = async (): Promise<void> => {
           });
 
     try {
-        process.exitCode = await runProofBenchmarkCommands(
-            buildProofBenchmarkCommands({ lanes }),
+        const buildExitCode = await runCommandsInSeries(
+            [buildWorkspaceBuildCommand(packageManagerRunner)],
+            { runLog },
+        );
+        if (buildExitCode !== 0) {
+            process.exitCode = buildExitCode;
+
+            return;
+        }
+        process.exitCode = await runCommandsInParallel(
+            buildProofBenchmarkCommands({ lanes, packageManagerRunner }),
             { runLog },
         );
     } finally {
@@ -126,11 +127,6 @@ const main = async (): Promise<void> => {
     }
 };
 
-const scriptEntryPoint = process.argv[1];
-const isMainModule =
-    scriptEntryPoint !== undefined &&
-    import.meta.url === pathToFileURL(scriptEntryPoint).href;
-
-if (isMainModule) {
+if (isDirectlyInvokedModule(import.meta.url)) {
     void main();
 }

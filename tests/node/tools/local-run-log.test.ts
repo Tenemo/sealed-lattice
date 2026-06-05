@@ -186,6 +186,70 @@ describe('local run logs', () => {
         }
     });
 
+    it('captures command output for caller-owned progress reporting', async () => {
+        const rootDirectoryPath = await createTemporaryLogRoot();
+        try {
+            const log = await createLocalRunLog({
+                commandLineArguments: ['--sample'],
+                lanes: ['sample'],
+                now: new Date('2026-05-29T19:30:00.000Z'),
+                rootDirectoryPath,
+                scriptName: 'sample run',
+            });
+            const command: CommandInvocation = {
+                args: [
+                    '-e',
+                    [
+                        "process.stdout.write('captured stdout\\n');",
+                        "process.stderr.write('captured stderr\\n');",
+                    ].join(''),
+                ],
+                command: process.execPath,
+                description: 'Exercise captured output',
+                logFileSlug: 'captured-output',
+            };
+            const observedOutput: string[] = [];
+            const {
+                result: exitCode,
+                stderr,
+                stdout,
+            } = await captureProcessOutput(() =>
+                runCommandsInSeries([command], {
+                    observer: {
+                        onCommandOutput: (event) => {
+                            observedOutput.push(
+                                `${event.streamName}:${event.chunk}`,
+                            );
+                        },
+                    },
+                    outputMode: 'capture',
+                    runLog: log,
+                }),
+            );
+            await log.finish({ exitCode });
+
+            expect(exitCode).toBe(0);
+            expect(stdout).not.toContain('captured stdout');
+            expect(stderr).not.toContain('captured stderr');
+            expect(observedOutput.join('')).toContain('stdout:captured stdout');
+            expect(observedOutput.join('')).toContain('stderr:captured stderr');
+            await expect(
+                readFile(
+                    path.join(
+                        log.runDirectoryPath,
+                        'captured-output.stdout.log',
+                    ),
+                    'utf8',
+                ),
+            ).resolves.toContain('captured stdout');
+            await expect(
+                readFile(log.combinedLogPath, 'utf8'),
+            ).resolves.toContain('captured stderr');
+        } finally {
+            await rm(rootDirectoryPath, { force: true, recursive: true });
+        }
+    });
+
     it('uses explicit arguments for disabling logs and safe path names', () => {
         expect(runLogDisabledByArguments(['--no-run-log'])).toBe(true);
         expect(

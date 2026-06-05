@@ -1,6 +1,6 @@
 ---
 title: sealed-lattice
-description: Documentation for the sealed-lattice public verification package.
+description: Documentation for the sealed-lattice direct encrypted ballot direction.
 template: splash
 editUrl: false
 head:
@@ -8,18 +8,18 @@ head:
       content: sealed-lattice
 hero:
     title: sealed-lattice
-    tagline: Verification helpers for post-quantum threshold voting artifacts in Node and browsers.
+    tagline: Direct BGV-encrypted ballot direction for mobile verification.
     image:
         html: |
             <div class="landing-hero-panel">
               <div class="landing-hero-panel__card">
-                <p class="landing-hero-panel__eyebrow">Public package</p>
-                <h2 class="landing-hero-panel__title">verify voting artifacts</h2>
+                <p class="landing-hero-panel__eyebrow">Selected direction</p>
+                <h2 class="landing-hero-panel__title">verify direct encrypted ballots</h2>
                 <ol class="landing-hero-panel__list">
                   <li>Install <code>sealed-lattice</code>.</li>
-                  <li>Validate poll definitions and derive threshold profiles.</li>
-                  <li>Verify board, roster, receipt, transcript, and ballot privacy proof evidence.</li>
-                  <li>Keep production election use out of scope until the missing voting workflow is complete and audited.</li>
+                  <li>Use the current verification helpers for development and integration work.</li>
+                  <li>Track the direct encrypted ballot path: proof, aggregation, replay, finality, and target decryption.</li>
+                  <li>Keep production election use out of scope until the complete direct path is implemented, measured, audited, and certified.</li>
                 </ol>
               </div>
               <div class="landing-hero-panel__facts">
@@ -29,9 +29,9 @@ hero:
                   <small>ES modules with bundled WASM verification</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Current use</span>
-                  <strong>public evidence verification</strong>
-                  <small>Polls, boards, rosters, receipts, transcripts, and proof records</small>
+                  <span class="landing-hero-panel__label">Current direction</span>
+                  <strong>direct encrypted ballots</strong>
+                  <small>BGV ballots, public aggregation, mobile replay</small>
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Package</span>
@@ -62,38 +62,40 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
 
 <section class="landing-section not-content">
   <div class="landing-section__header">
-    <h2>What you can use today</h2>
+    <h2>Selected direction</h2>
     <p>
-      The published package focuses on verification of public election artifacts
-      that already have structured evidence.
+      The active construction is direct BGV-encrypted ballots, public ciphertext
+      aggregation, deterministic mobile evaluator replay, target finality, and
+      target-bound threshold decryption.
     </p>
   </div>
 
   <div class="landing-split-grid">
-    <Card title="Election foundation checks">
+    <Card title="Direct encrypted ballot path">
       <div class="landing-card-copy">
         <p>
-          Validate poll specifications, derive threshold and roster profiles,
-          evaluate lifecycle transitions, and check whether protocol actions are
-          currently allowed.
+          Each voter publishes one encrypted ballot. Verification must
+          check the ballot proof, select the first valid ballot per voter, and
+          recompute the encrypted ballot aggregate from public ciphertexts.
         </p>
         <p>
-          Verify board consistency, cast receipts, close records, target
-          finality, roster manifests, recovery epochs, and first-valid ordering.
+          The evaluator is checked by deterministic mobile replay. Only the
+          finalized and replay-matched <code>C_target</code> can be decrypted.
         </p>
       </div>
     </Card>
 
-    <Card title="Proof-backed verification">
+    <Card title="Current limits">
       <div class="landing-card-copy">
         <p>
-          Verify transcript-core fixtures and supported ballot privacy evidence
-          through the bundled Rust/WASM verifier.
+          The direct proof, aggregation, and browser evidence are internal
+          development evidence. They are not supported-phone evidence, production
+          readiness, or a complete public voting API.
         </p>
         <p>
-          Receiver-key proofs, ballot proof records, claim-bearing ballot
-          packages, and aggregate derivation components return structured
-          acceptance and refusal results.
+          Ballot proof soundness, zero-knowledge accounting, public proof
+          transport, sparse target projection, mobile replay, and target-bound
+          decryption remain open.
         </p>
       </div>
     </Card>
@@ -104,8 +106,9 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
   <div class="landing-section__header">
     <h2>Use the package</h2>
     <p>
-      Start with installation and the public root import. Reserved complete
-      protocol entry points fail closed until the matching protocol layer exists.
+      Start with installation and the public root import. Complete voting
+      entry points remain unavailable until the direct path is implemented and
+      verified.
     </p>
   </div>
 
@@ -115,10 +118,10 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
          Use `npm install sealed-lattice` or `pnpm add sealed-lattice`.
       2. **Import from the root.**
          Use `sealed-lattice` for the supported public API.
-      3. **Verify structured evidence.**
-         Pass poll, board, roster, transcript, receipt, or proof records to the matching verification helper.
+      3. **Verify current public evidence.**
+         Use the current helpers for development verification and package integration.
       4. **Keep the current limits explicit.**
-         Ballot generation, casting, aggregation, tally evaluation, and production decryption are not available yet.
+         Ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release are not complete public APIs yet.
     </Steps>
   </div>
 </section>
@@ -136,7 +139,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="Get started"
       href="./guides/getting-started/"
-      description="Install the package, validate a poll, and see the current verification helpers."
+      description="Install the package and understand the current direct-path boundary."
     />
     <LinkCard
       title="API reference"
@@ -151,7 +154,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="Development workflow"
       href="./guides/development-workflow/"
-      description="Run the local checks, docs build, browser matrix, and package smoke tests."
+      description="Run the local checks, docs build, browser tests, and package smoke tests."
     />
   </CardGrid>
 </section>

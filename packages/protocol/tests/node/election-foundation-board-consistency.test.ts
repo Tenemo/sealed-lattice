@@ -25,6 +25,7 @@ import {
     createSignature,
     createTargetFinalityRecord,
     createTargetProposalHead,
+    deriveFixtureHash,
     deriveConflictingHeadEvidenceHash,
     deriveInclusionProofHash,
     deriveProtocolHash,
@@ -47,20 +48,17 @@ describe('board consistency', () => {
     it('accepts an honest board chain with inclusion evidence', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createBoardHead(1, head0.headHash);
-        const topKEvaluationRecordHash = deriveProtocolHash(
-            'ChallengeDomainHash',
-            {
-                payload: { proposal: 'target' },
-                purpose: 'fixture-top-k-evaluation-record-v1',
-            },
+        const evaluatorReplayRecordHash = deriveFixtureHash(
+            'fixture-evaluator-replay-record-v1',
+            { proposal: 'target' },
         );
         const { head: head2, inclusionProofs } = createBoardHeadWithObjects(
             2,
             head1.headHash,
             [
                 {
-                    objectType: 'TopKEvaluationRecord',
-                    objectHash: topKEvaluationRecordHash,
+                    objectType: 'EvaluatorReplayRecord',
+                    objectHash: evaluatorReplayRecordHash,
                     boardPosition: 2,
                 },
             ],
@@ -113,20 +111,17 @@ describe('board consistency', () => {
 
     it('rejects a board-entry Merkle path with a substituted sibling', () => {
         const head0 = createBoardHead(0, null);
-        const topKEvaluationRecordHash = deriveProtocolHash(
-            'ChallengeDomainHash',
-            {
-                payload: { proposal: 'target' },
-                purpose: 'fixture-top-k-evaluation-record-v1',
-            },
+        const evaluatorReplayRecordHash = deriveFixtureHash(
+            'fixture-evaluator-replay-record-v1',
+            { proposal: 'target' },
         );
         const { head, inclusionProofs } = createBoardHeadWithObjects(
             1,
             head0.headHash,
             [
                 {
-                    objectType: 'TopKEvaluationRecord',
-                    objectHash: topKEvaluationRecordHash,
+                    objectType: 'EvaluatorReplayRecord',
+                    objectHash: evaluatorReplayRecordHash,
                     boardPosition: 2,
                 },
             ],
@@ -170,10 +165,9 @@ describe('board consistency', () => {
         const head1 = createBoardHead(1, head0.headHash);
         const fabricatedInclusionProof = createInclusionProof(
             head1,
-            'TopKEvaluationRecord',
-            deriveProtocolHash('ChallengeDomainHash', {
-                payload: { proposal: 'not-in-head' },
-                purpose: 'fixture-top-k-evaluation-record-v1',
+            'EvaluatorReplayRecord',
+            deriveFixtureHash('fixture-evaluator-replay-record-v1', {
+                proposal: 'not-in-head',
             }),
         );
 
@@ -537,7 +531,7 @@ describe('board consistency', () => {
                 manifest: 'cast',
             }),
             voterIdentity: 'participant-1',
-            ballotPackageHash: deriveProtocolHash('BallotPackageHash', {
+            encryptedBallotHash: deriveProtocolHash('CiphertextRoot', {
                 ballot: 'participant-1',
             }),
             contextHash,

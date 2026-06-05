@@ -64,7 +64,7 @@ export type GoldenTranscriptCoreFixture = {
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
-    readonly evaluationProofProfileId: string;
+    readonly evaluatorReplayProfileId: string;
     readonly decryptionProofProfileId: string;
     readonly expectedObjectHash512: string;
     readonly expectedChunkRoot: string;
@@ -104,7 +104,7 @@ export type TranscriptCoreAnalysis = {
     readonly baseClaimProfileId: string;
     readonly mheSecurityProfileId: string;
     readonly heSetupProofProfileId: string;
-    readonly evaluationProofProfileId: string;
+    readonly evaluatorReplayProfileId: string;
     readonly decryptionProofProfileId: string;
     readonly objectHash512: string;
     readonly chunkRoot: string;

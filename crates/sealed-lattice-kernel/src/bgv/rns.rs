@@ -1,5 +1,7 @@
 use crate::{
-    bgv::profile::{BgvBasisKind, POLYNOMIAL_DEGREE, layout_hash, profile_hash},
+    bgv::profile::{
+        BgvBasisKind, POLYNOMIAL_DEGREE, encrypted_ballot_aggregate_layout_hash, profile_hash,
+    },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
@@ -33,7 +35,7 @@ pub(crate) struct RnsPolynomial {
     pub(crate) level: usize,
     pub(crate) coefficient_count: usize,
     pub(crate) domain: PolynomialDomain,
-    pub(crate) layout_hash: String,
+    pub(crate) encrypted_ballot_aggregate_layout_hash: String,
     pub(crate) moduli: Vec<u64>,
     pub(crate) residues_by_modulus: Vec<Vec<u64>>,
 }
@@ -42,7 +44,7 @@ impl RnsPolynomial {
     pub(crate) fn coefficient_domain(
         basis_kind: BgvBasisKind,
         level: usize,
-        layout_hash: String,
+        encrypted_ballot_aggregate_layout_hash: String,
         residues_by_modulus: Vec<Vec<u64>>,
     ) -> CanonicalResult<Self> {
         let moduli = basis_kind.moduli_for_level(level).ok_or_else(|| {
@@ -57,7 +59,7 @@ impl RnsPolynomial {
             level,
             coefficient_count: POLYNOMIAL_DEGREE,
             domain: PolynomialDomain::Coefficient,
-            layout_hash,
+            encrypted_ballot_aggregate_layout_hash,
             moduli,
             residues_by_modulus,
         };
@@ -103,10 +105,11 @@ impl RnsPolynomial {
                 "claim-path BGV-RNS objects must be coefficient-domain canonical objects",
             ));
         }
-        if self.layout_hash != layout_hash()? {
+        if self.encrypted_ballot_aggregate_layout_hash != encrypted_ballot_aggregate_layout_hash()?
+        {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "BGV-RNS object layout hash does not match the selected encrypted aggregate layout",
+                "BGV-RNS object layout hash does not match the selected direct aggregate layout",
             ));
         }
         if self.residues_by_modulus.len() != self.moduli.len() {
@@ -139,7 +142,8 @@ impl RnsPolynomial {
 mod tests {
     use super::{PolynomialDomain, RnsPolynomial};
     use crate::bgv::profile::{
-        BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME, layout_hash,
+        BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
+        encrypted_ballot_aggregate_layout_hash,
     };
 
     #[test]
@@ -148,7 +152,7 @@ mod tests {
         let object = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             0,
-            layout_hash().expect("layout hash"),
+            encrypted_ballot_aggregate_layout_hash().expect("layout hash"),
             residues_by_modulus,
         )
         .expect("object should validate");
@@ -159,11 +163,12 @@ mod tests {
 
     #[test]
     fn rns_validation_binds_each_selected_basis_and_level() {
-        let layout_hash = layout_hash().expect("layout hash");
+        let encrypted_ballot_aggregate_layout_hash =
+            encrypted_ballot_aggregate_layout_hash().expect("layout hash");
         let data = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             DATA_PRIMES.len() - 1,
-            layout_hash.clone(),
+            encrypted_ballot_aggregate_layout_hash.clone(),
             DATA_PRIMES
                 .iter()
                 .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
@@ -175,7 +180,7 @@ mod tests {
         let extended = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Extended,
             DATA_PRIMES.len(),
-            layout_hash.clone(),
+            encrypted_ballot_aggregate_layout_hash.clone(),
             DATA_PRIMES
                 .iter()
                 .chain([SPECIAL_PRIME].iter())
@@ -188,7 +193,7 @@ mod tests {
         let special = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Special,
             0,
-            layout_hash,
+            encrypted_ballot_aggregate_layout_hash,
             vec![vec![SPECIAL_PRIME - 1; POLYNOMIAL_DEGREE]],
         )
         .expect("special basis object");
@@ -200,7 +205,7 @@ mod tests {
         let mut object = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             0,
-            layout_hash().expect("layout hash"),
+            encrypted_ballot_aggregate_layout_hash().expect("layout hash"),
             vec![vec![0_u64; POLYNOMIAL_DEGREE]],
         )
         .expect("object should build");
@@ -228,7 +233,7 @@ mod tests {
 
         let mut wrong_layout = object.clone();
         wrong_layout.residues_by_modulus[0][0] = 0;
-        wrong_layout.layout_hash = "0".repeat(128);
+        wrong_layout.encrypted_ballot_aggregate_layout_hash = "0".repeat(128);
         assert!(wrong_layout.validate().is_err());
 
         let mut wrong_limb_count = object;

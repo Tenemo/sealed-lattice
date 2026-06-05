@@ -6,14 +6,6 @@ import type {
 } from '@sealed-lattice/types';
 
 import type {
-    BallotPrivacyEncodedRelationVectorVerification,
-    BallotPrivacyKernelVerification,
-    BallotPrivacyLinearProofVectorVerification,
-    BallotPrivacyProofBackendStatus,
-    BallotPrivacyProofGeneration,
-    BallotPrivacyReceiverKeyProofGeneration,
-    BallotPrivacyReceiverKeyProofGenerationPreparation,
-    BallotPrivacyReceiverKeyVectorVerification,
     BgvCanonicalObjectAnalysis,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
@@ -25,15 +17,12 @@ import type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvTargetDecryptionResult,
+    BgvTargetDecryptionShare,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
     TranscriptCorePlaintextComparison,
-} from './kernel-contracts.js';
-import {
-    componentProverRandomnessHexes,
-    suppliedOrFreshBridgeRandomness,
-    suppliedOrFreshRandomnessHex,
 } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
 import {
@@ -91,6 +80,9 @@ export const createTranscriptCoreKernelLoader = (
                 .map((entry) => entry.name)
                 .sort();
             let kernelOperationInProgress = false;
+            // One WASM instance has a single shared linear memory and allocator, so
+            // overlapping commands would corrupt each other's buffers; the kernel is
+            // single-threaded by contract, so reject any re-entrant operation.
             const runExclusiveKernelOperation = <Result>(
                 operationName: string,
                 operation: () => Result,
@@ -213,266 +205,6 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'VerifyFixture',
                         fixture,
                     }),
-                describeBallotPrivacyProofBackend:
-                    (): BallotPrivacyProofBackendStatus =>
-                        executeCommand<BallotPrivacyProofBackendStatus>({
-                            command: 'DescribeBallotPrivacyProofBackend',
-                        }),
-                verifyBallotPrivacyLinearProofVector: (
-                    input,
-                ): BallotPrivacyLinearProofVectorVerification =>
-                    executeCommand<BallotPrivacyLinearProofVectorVerification>({
-                        command: 'VerifyBallotPrivacyLinearProofVector',
-                        vectorCase: input.vectorCase,
-                    }),
-                verifyBallotPrivacyEncodedRelationVector: (
-                    input,
-                ): BallotPrivacyEncodedRelationVectorVerification =>
-                    executeCommand<BallotPrivacyEncodedRelationVectorVerification>(
-                        {
-                            command: 'VerifyBallotPrivacyEncodedRelationVector',
-                            vectorCase: input.vectorCase,
-                        },
-                    ),
-                verifyBallotPrivacyReceiverKeyVector: (
-                    input,
-                ): BallotPrivacyReceiverKeyVectorVerification =>
-                    executeCommand<BallotPrivacyReceiverKeyVectorVerification>({
-                        command: 'VerifyBallotPrivacyReceiverKeyVector',
-                        vectorCase: input.vectorCase,
-                    }),
-                verifyReceiverKeyProof: (
-                    input,
-                ): BallotPrivacyKernelVerification =>
-                    executeCommand<BallotPrivacyKernelVerification>({
-                        command: 'VerifyReceiverKeyProof',
-                        linearStatement: input.linearStatement,
-                        parameterSet: input.parameterSet,
-                        proofBytesHex: input.proofBytesHex,
-                        proofEncoding: input.proofEncoding,
-                        publicRandomnessHex: input.publicRandomnessHex,
-                        receiverKeyProof: input.receiverKeyProof,
-                    }),
-                prepareReceiverKeyProofGeneration: (
-                    input,
-                ): BallotPrivacyReceiverKeyProofGenerationPreparation =>
-                    executeCommand<BallotPrivacyReceiverKeyProofGenerationPreparation>(
-                        {
-                            command: 'PrepareReceiverKeyProofGeneration',
-                            linearStatement: input.linearStatement,
-                            parameterSet: input.parameterSet,
-                            proofEncoding: input.proofEncoding,
-                            publicRandomnessHex: input.publicRandomnessHex,
-                            secretState: input.secretState,
-                            proverRandomnessHex: input.proverRandomnessHex,
-                        },
-                    ),
-                generateReceiverKeyProof: (
-                    input,
-                ): BallotPrivacyReceiverKeyProofGeneration =>
-                    executeCommand<BallotPrivacyReceiverKeyProofGeneration>({
-                        command: 'GenerateReceiverKeyProof',
-                        linearStatement: input.linearStatement,
-                        parameterSet: input.parameterSet,
-                        proofEncoding: input.proofEncoding,
-                        publicRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.publicRandomnessHex,
-                        ),
-                        secretState: input.secretState,
-                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.proverRandomnessHex,
-                        ),
-                    }),
-                generateBallotProof: (input): BallotPrivacyProofGeneration =>
-                    executeCommand<BallotPrivacyProofGeneration>({
-                        command: 'GenerateBallotProof',
-                        linearStatement: input.linearStatement,
-                        parameterSet: input.parameterSet,
-                        proofEncoding: input.proofEncoding,
-                        publicRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.publicRandomnessHex,
-                        ),
-                        secretState: input.secretState,
-                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.proverRandomnessHex,
-                        ),
-                    }),
-                generateBallotComponentProof: (
-                    input,
-                ): BallotPrivacyProofGeneration =>
-                    executeCommand<BallotPrivacyProofGeneration>({
-                        command: 'GenerateBallotComponentProof',
-                        componentId: input.componentId,
-                        proofInput: input.proofInput,
-                        secretState: input.secretState,
-                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.proverRandomnessHex,
-                        ),
-                    }),
-                generateBallotProofRecord: (
-                    input,
-                ): BallotPrivacyProofGeneration =>
-                    executeCommand<BallotPrivacyProofGeneration>({
-                        command: 'GenerateBallotProofRecord',
-                        statement: input.statement,
-                        linearStatement: input.linearStatement,
-                        parameterSet: input.parameterSet,
-                        proofEncoding: input.proofEncoding,
-                        publicRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.publicRandomnessHex,
-                        ),
-                        componentBundleStatement:
-                            input.componentBundleStatement,
-                        componentProofInputs: input.componentProofInputs,
-                        secretState: input.secretState,
-                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.proverRandomnessHex,
-                        ),
-                        componentProverRandomnessHexes:
-                            componentProverRandomnessHexes(
-                                input.componentProofInputs,
-                                input.componentProverRandomnessHexes,
-                            ),
-                        componentSecretStates: input.componentSecretStates,
-                        casualMicroRosterAcknowledged:
-                            input.casualMicroRosterAcknowledged,
-                    }),
-                verifyBallotProof: (input): BallotPrivacyKernelVerification =>
-                    executeCommand<BallotPrivacyKernelVerification>({
-                        command: 'VerifyBallotProof',
-                        ballotProof: input.ballotProof,
-                        componentBundleStatement:
-                            input.componentBundleStatement,
-                        componentProofBundle: input.componentProofBundle,
-                        componentProofInputs: input.componentProofInputs,
-                        dynamicRosterProfileEvidence:
-                            input.dynamicRosterProfileEvidence,
-                        linearStatement: input.linearStatement,
-                        parameterSet: input.parameterSet,
-                        proofBytesHex: input.proofBytesHex,
-                        proofEncoding: input.proofEncoding,
-                        publicRandomnessHex: input.publicRandomnessHex,
-                        statement: input.statement,
-                        casualMicroRosterAcknowledged:
-                            input.casualMicroRosterAcknowledged,
-                    }),
-                verifyClaimBearingBallotPackage: (
-                    input,
-                ): BallotPrivacyKernelVerification =>
-                    executeCommand<BallotPrivacyKernelVerification>({
-                        command: 'VerifyClaimBearingBallotPackage',
-                        ballotPackage: input.ballotPackage,
-                        dynamicRosterProfileEvidence:
-                            input.dynamicRosterProfileEvidence,
-                        casualMicroRosterAcknowledged:
-                            input.casualMicroRosterAcknowledged,
-                    }),
-                generateAggregateDerivationProof: (
-                    input,
-                ): BallotPrivacyProofGeneration =>
-                    executeCommand<BallotPrivacyProofGeneration>({
-                        command: 'GenerateAggregateDerivationProof',
-                        proofInput: input.proofInput,
-                        secretState: input.secretState,
-                        proverRandomnessHex: suppliedOrFreshRandomnessHex(
-                            input.proverRandomnessHex,
-                        ),
-                    }),
-                verifyAggregateDerivationProof: (
-                    input,
-                ): BallotPrivacyKernelVerification =>
-                    executeCommand<BallotPrivacyKernelVerification>({
-                        command: 'VerifyAggregateDerivationProof',
-                        closeRecord: input.closeRecord,
-                        component: input.component,
-                        contributorActionContext:
-                            input.contributorActionContext,
-                        countedBallotPackages: input.countedBallotPackages,
-                        casualMicroRosterAcknowledged:
-                            input.casualMicroRosterAcknowledged,
-                    }),
-                generateAggregateBridgeEncryption: (input) => {
-                    const proverRandomness = suppliedOrFreshBridgeRandomness(
-                        input.proverRandomnessHex,
-                        input.developmentRandomnessOverrideAcknowledged,
-                    );
-                    const encryptionRandomness =
-                        suppliedOrFreshBridgeRandomness(
-                            input.encryptionRandomnessSeedHex,
-                            input.developmentRandomnessOverrideAcknowledged,
-                        );
-
-                    return executeCommand({
-                        command: 'GenerateAggregateBridgeEncryption',
-                        aggregateSelectionPolicyHash:
-                            input.aggregateSelectionPolicyHash,
-                        aggregateDerivationComponent:
-                            input.aggregateDerivationComponent,
-                        aggregateWitness: input.aggregateWitness,
-                        bridgeWitnessPrivacyProfileHash:
-                            input.bridgeWitnessPrivacyProfileHash,
-                        heParamHash: input.heParamHash,
-                        setupPackage: input.setupPackage,
-                        proverRandomnessHex: proverRandomness.randomnessHex,
-                        proverRandomnessSource:
-                            proverRandomness.randomnessSource,
-                        encryptionRandomnessSeedHex:
-                            encryptionRandomness.randomnessHex,
-                        encryptionRandomnessSeedSource:
-                            encryptionRandomness.randomnessSource,
-                        developmentRandomnessOverrideAcknowledged:
-                            input.developmentRandomnessOverrideAcknowledged,
-                        includeCanonicalBytesHex:
-                            input.includeCanonicalBytesHex,
-                    });
-                },
-                evaluateAggregateBridgeRelation: (input) => {
-                    const proverRandomness = suppliedOrFreshBridgeRandomness(
-                        input.proverRandomnessHex,
-                        input.developmentRandomnessOverrideAcknowledged,
-                    );
-                    const encryptionRandomness =
-                        suppliedOrFreshBridgeRandomness(
-                            input.encryptionRandomnessSeedHex,
-                            input.developmentRandomnessOverrideAcknowledged,
-                        );
-
-                    return executeCommand({
-                        command: 'EvaluateAggregateBridgeRelation',
-                        aggregateSelectionPolicyHash:
-                            input.aggregateSelectionPolicyHash,
-                        aggregateDerivationComponent:
-                            input.aggregateDerivationComponent,
-                        aggregateWitness: input.aggregateWitness,
-                        bridgeEncryption: input.bridgeEncryption,
-                        bridgeWitnessPrivacyProfileHash:
-                            input.bridgeWitnessPrivacyProfileHash,
-                        heParamHash: input.heParamHash,
-                        setupPackage: input.setupPackage,
-                        proverRandomnessHex: proverRandomness.randomnessHex,
-                        proverRandomnessSource:
-                            proverRandomness.randomnessSource,
-                        encryptionRandomnessSeedHex:
-                            encryptionRandomness.randomnessHex,
-                        encryptionRandomnessSeedSource:
-                            encryptionRandomness.randomnessSource,
-                        developmentRandomnessOverrideAcknowledged:
-                            input.developmentRandomnessOverrideAcknowledged,
-                    });
-                },
-                verifyAggregateBridgeEncryption: (input) =>
-                    executeCommand({
-                        command: 'VerifyAggregateBridgeEncryption',
-                        aggregateSelectionPolicyHash:
-                            input.aggregateSelectionPolicyHash,
-                        aggregateDerivationComponent:
-                            input.aggregateDerivationComponent,
-                        bridgeEncryption: input.bridgeEncryption,
-                        bridgeWitnessPrivacyProfileHash:
-                            input.bridgeWitnessPrivacyProfileHash,
-                        heParamHash: input.heParamHash,
-                        setupPackage: input.setupPackage,
-                    }),
                 describeBgvRnsProfile: (): BgvRnsProfileDescription =>
                     executeCommand<BgvRnsProfileDescription>({
                         command: 'DescribeBgvRnsProfile',
@@ -501,6 +233,41 @@ export const createTranscriptCoreKernelLoader = (
                         thresholdProfileHash: input.thresholdProfileHash,
                         participants: input.participants,
                         setupSeed: input.setupSeed,
+                    }),
+                generateBgvEvaluationKeyMaterial: (
+                    input,
+                ): Record<string, unknown> =>
+                    executeCommand<Record<string, unknown>>({
+                        command: 'GenerateBgvEvaluationKeyMaterial',
+                        setupPackage: input.setupPackage,
+                        setupPrivateWitness: input.setupPrivateWitness,
+                        workingLevel: input.workingLevel,
+                        rotationKeys: input.rotationKeys,
+                    }),
+                generateBgvTargetDecryptionShare: (
+                    input,
+                ): BgvTargetDecryptionShare =>
+                    executeCommand<BgvTargetDecryptionShare>({
+                        command: 'GenerateBgvTargetDecryptionShare',
+                        setupPackage: input.setupPackage,
+                        setupPrivateWitness: input.setupPrivateWitness,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetShareProfile: input.targetShareProfile,
+                        trusteeIdentity: input.trusteeIdentity,
+                    }),
+                recombineBgvTargetDecryptionShares: (
+                    input,
+                ): BgvTargetDecryptionResult =>
+                    executeCommand<BgvTargetDecryptionResult>({
+                        command: 'RecombineBgvTargetDecryptionShares',
+                        setupPackage: input.setupPackage,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetShareProfile: input.targetShareProfile,
+                        decryptionShares: input.decryptionShares,
                     }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({
@@ -584,6 +351,8 @@ export const createTranscriptCoreKernelLoader = (
                     }),
             };
         })().catch((error: unknown) => {
+            // Clear the cached promise on failure so a later call can retry
+            // instantiation instead of permanently re-throwing the cached rejection.
             kernelPromise = undefined;
             throw error;
         });

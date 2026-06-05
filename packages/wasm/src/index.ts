@@ -7,16 +7,6 @@ import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
-    type BallotPrivacyEncodedRelationVectorVerification,
-    type BallotPrivacyKernelVerification,
-    type BallotPrivacyLinearProofVectorVerification,
-    type BallotPrivacyProofBackendStatus,
-    type BallotPrivacyProofGeneration,
-    type BallotPrivacyReceiverKeyProofGeneration,
-    type BallotPrivacyReceiverKeyProofGenerationPreparation,
-    type BallotPrivacyReceiverKeyVectorVerification,
-    type AggregateBridgeEncryptionGeneration,
-    type AggregateBridgeEncryptionVerification,
     type BgvBaseConversionFixture,
     type BgvBatchPlaintextEncoding,
     type BgvCiphertextConventionFixture,
@@ -33,8 +23,6 @@ const transcriptCoreKernelUrl = new URL(
     '../dist/sealed-lattice-kernel.wasm',
     import.meta.url,
 );
-const packagedTranscriptCoreKernelNormalizedSha256Hex =
-    '7dd797112619ce5dc677d693fbc913748b3a619a9e28f25bcc537b42c2c54998';
 
 export {
     canonicalErrorCodes,
@@ -43,16 +31,6 @@ export {
 };
 export type {
     TranscriptCoreKernel,
-    BallotPrivacyEncodedRelationVectorVerification,
-    BallotPrivacyKernelVerification,
-    BallotPrivacyLinearProofVectorVerification,
-    BallotPrivacyProofBackendStatus,
-    BallotPrivacyProofGeneration,
-    BallotPrivacyReceiverKeyProofGeneration,
-    BallotPrivacyReceiverKeyProofGenerationPreparation,
-    BallotPrivacyReceiverKeyVectorVerification,
-    AggregateBridgeEncryptionGeneration,
-    AggregateBridgeEncryptionVerification,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
@@ -64,10 +42,14 @@ export type {
     TranscriptCorePlaintextComparison,
 };
 
+// This private, never-published workspace loader is dev- and test-only scaffolding: it
+// loads the freshly built dist kernel with the explicit unpinned opt-in so committed
+// source never has to track a build-derived hash. The published integrity gate lives in
+// the SDK instead — packages/sdk/src/kernel.ts pins the normalized WASM hash into its
+// built dist/kernel.js, and tools/ci/verify-packed-package.ts enforces it at pack time.
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
-        expectedKernelSha256Hex:
-            packagedTranscriptCoreKernelNormalizedSha256Hex,
+        allowUnpinnedKernel: true,
     });
 
 export const verifyTranscriptCoreFixture = async (

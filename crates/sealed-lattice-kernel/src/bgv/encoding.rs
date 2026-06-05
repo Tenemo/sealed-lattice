@@ -2,7 +2,10 @@ use crate::{
     bgv::{
         base_conversion::lift_plaintext_coefficients_to_basis,
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, layout_hash},
+        profile::{
+            BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
+            encrypted_ballot_aggregate_layout_hash,
+        },
         rns::RnsPolynomial,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -14,6 +17,9 @@ pub(crate) struct EncodedBatchPlaintext {
     pub(crate) polynomial: RnsPolynomial,
 }
 
+// Batch encoding: slots are the NTT/evaluation representation, coefficients are
+// the polynomial. Encoding is the inverse NTT (slots -> coefficients), then the
+// coefficients are lifted into the RNS data basis.
 pub(crate) fn encode_batch_plaintext_slots(
     supplied_slots: &[u64],
     target_level: usize,
@@ -37,7 +43,7 @@ pub(crate) fn encode_batch_plaintext_slots(
         &coefficients_mod_plaintext,
         BgvBasisKind::Data,
         target_level,
-        layout_hash()?,
+        encrypted_ballot_aggregate_layout_hash()?,
     )?;
 
     Ok(EncodedBatchPlaintext {
@@ -47,6 +53,8 @@ pub(crate) fn encode_batch_plaintext_slots(
     })
 }
 
+// Decoding is the inverse of encoding: recover the plaintext coefficients from
+// any limb, then run the forward NTT (coefficients -> slots).
 pub(crate) fn decode_batch_plaintext_polynomial(
     polynomial: &RnsPolynomial,
 ) -> CanonicalResult<Vec<u64>> {

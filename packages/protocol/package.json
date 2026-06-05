@@ -12,6 +12,12 @@
       "import": "./dist/index.js"
     }
   },
+  "imports": {
+    "#packages/protocol/src/*.js": "./src/*.ts",
+    "#packages/protocol/tests/*.js": "./tests/*.ts",
+    "#packages/protocol/src/*": "./src/*.ts",
+    "#packages/protocol/tests/*": "./tests/*.ts"
+  },
   "scripts": {
     "check": "tsc --project tsconfig.json --pretty false --noEmit",
     "build": "del-cli dist && tsc --project tsconfig.json"

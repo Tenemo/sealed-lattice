@@ -1,9 +1,57 @@
-use super::development_fixtures::development_key_arithmetic_fixture;
 use super::*;
+use crate::bgv::evaluator::{
+    key_switch::{KEY_SWITCH_ERROR_DOMAIN, KEY_SWITCH_SAMPLE_DOMAIN},
+    prg::DeterministicSampler,
+    records::MAXIMUM_OPTION_COUNT,
+    top_k::{
+        DIRECT_COMPARISON_OUTPUT_LEVEL, direct_score_packing_basis_galois_elements,
+        packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
+    },
+};
+use crate::bgv::setup::sampling::{
+    bounded_collective_error_share_coefficient, bounded_collective_secret_share_coefficient,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
+const DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL: &str =
+    "componentZero=sum_i(-a*s_i+p*e_i),componentOne=a-over-selected-BGV-RNS-data-basis";
+const EVALUATION_KEY_STREAM_POLICY: &str =
+    "sealed-lattice-deterministic-bgv-key-switch-material-stream-v1";
 
 pub(super) struct CollectivePublicKeyCoefficients {
     pub(super) component_zero_coefficients: Vec<u64>,
     pub(super) component_one_coefficients: Vec<u64>,
+}
+
+struct EvaluationKeyMaterialBinding {
+    record: Value,
+    material_hash: String,
+    relinearization_key_root: String,
+    relinearization_key_record: Value,
+    key_switch_key_root: String,
+    key_switch_key_record: Value,
+    rotation_key_roots: Vec<Value>,
+    rotation_key_records: Vec<Value>,
+}
+
+struct RotationScheduleEntry {
+    rotation: usize,
+    level: usize,
+    purpose: &'static str,
+}
+
+struct EvaluationKeyMaterialInput<'a> {
+    setup_seed_hash: &'a str,
+    sampled_relation_checks: Value,
+    ceremony_id: &'a str,
+    manifest_hash: &'a str,
+    roster_hash: &'a str,
+    collective_public_key: &'a Value,
+    key_switch_decomposition_hash: &'a str,
+    rot_set: &'a Value,
+    rot_set_hash: &'a str,
 }
 
 pub(super) fn collective_public_key(
@@ -32,6 +80,7 @@ pub(super) fn collective_public_key(
         .collect::<Vec<_>>();
     let coefficient_material = collective_public_key_coefficient_material(
         &input.setup_seed_hash,
+        &input.private_setup_seed_hash,
         public_common_random_polynomial_root,
         public_key_share_roots,
         participant_descriptors,
@@ -52,8 +101,8 @@ pub(super) fn collective_public_key(
         "publicKeyShareRoots": public_key_share_roots,
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "aggregationRule": "coefficient-wise-public-key-share-sum-with-shared-crp",
-        "publicKeyComponentModel": "componentZero=sum_i(-a*s_i+e_i),componentOne=a-over-selected-BGV-RNS-data-basis",
-        "publicKeyCoefficientMaterialBinding": "passive-transcript-derived-from-setup-seed-hash-and-public-key-share-roots",
+        "publicKeyComponentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
+        "publicKeyCoefficientMaterialBinding": "public-coefficients-bound-in-setup-package-with-private-share-derivation-unexported",
         "participantCount": public_key_share_roots.len(),
         "centralizedSecretReconstruction": false,
         "rawSecretShareExported": false,
@@ -90,69 +139,75 @@ pub(super) fn collective_public_key(
 pub(super) fn collective_public_key_coefficients_by_modulus_from_setup_package(
     setup_package: &Value,
 ) -> CanonicalResult<Vec<CollectivePublicKeyCoefficients>> {
-    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
-    let participants = array_at_path(setup_package, &["participants"])?;
-    let participant_identities = participants
-        .iter()
-        .map(|participant| {
-            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let (collective_secret_coefficients, collective_error_coefficients) =
-        collective_signed_secret_and_error_coefficients(setup_seed_hash, &participant_identities);
+    let coefficient_tables = array_at_path(
+        setup_package,
+        &[
+            "collectivePublicKey",
+            "coefficientMaterial",
+            "coefficientTables",
+        ],
+    )?;
+    if coefficient_tables.len() != DATA_PRIMES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public key coefficient table count does not match the selected data basis",
+        ));
+    }
 
-    DATA_PRIMES
-        .iter()
-        .copied()
-        .map(|modulus| {
-            collective_public_key_coefficients_from_signed(
-                setup_seed_hash,
-                &collective_secret_coefficients,
-                &collective_error_coefficients,
-                modulus,
-            )
-        })
-        .collect()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        coefficient_tables
+            .par_iter()
+            .enumerate()
+            .map(|(modulus_index, table)| {
+                collective_public_key_coefficients_from_table(modulus_index, table)
+            })
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        coefficient_tables
+            .iter()
+            .enumerate()
+            .map(|(modulus_index, table)| {
+                collective_public_key_coefficients_from_table(modulus_index, table)
+            })
+            .collect()
+    }
 }
 
-pub(super) fn expected_collective_public_key_coefficient_material(
-    setup_package: &Value,
-    participant_bindings: &[VerifiedParticipantSetupBinding],
-) -> CanonicalResult<Value> {
-    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
-    let collective_public_key = value_at_path(setup_package, &["collectivePublicKey"])?;
-    let collective_public_key_record = value_at_path(collective_public_key, &["record"])?;
-    let public_common_random_polynomial_root = string_at_path(
-        collective_public_key_record,
-        &["publicCommonRandomPolynomialRoot"],
+fn collective_public_key_coefficients_from_table(
+    modulus_index: usize,
+    table: &Value,
+) -> CanonicalResult<CollectivePublicKeyCoefficients> {
+    let modulus = unsigned_at_path(table, &["modulus"])?;
+    if modulus != DATA_PRIMES[modulus_index] {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient table modulus does not match the selected data basis",
+        ));
+    }
+    let component_zero_coefficients =
+        read_public_key_coefficient_vector(table, "componentZeroCoefficients")?;
+    let component_one_coefficients =
+        read_public_key_coefficient_vector(table, "componentOneCoefficients")?;
+    compare_hash_at_path(
+        table,
+        &["componentZeroCoefficientHash512"],
+        &coefficient_vector_hash512(&component_zero_coefficients),
+        "collective public key component-zero coefficient hash",
     )?;
-    let public_key_share_roots = participant_bindings
-        .iter()
-        .map(|participant| participant.public_key_share_root.clone())
-        .collect::<Vec<_>>();
-    let participant_descriptors = participant_bindings
-        .iter()
-        .map(|participant| {
-            json!({
-                "trusteeIdentity": participant.trustee_identity,
-                "rosterPosition": participant.roster_position,
-                "recoveryEpoch": participant.recovery_epoch,
-                "deviceEpoch": participant.device_epoch,
-            })
-        })
-        .collect::<Vec<_>>();
-    let participant_identities = participant_bindings
-        .iter()
-        .map(|participant| participant.trustee_identity.clone())
-        .collect::<Vec<_>>();
+    compare_hash_at_path(
+        table,
+        &["componentOneCoefficientHash512"],
+        &coefficient_vector_hash512(&component_one_coefficients),
+        "collective public key component-one coefficient hash",
+    )?;
 
-    collective_public_key_coefficient_material(
-        setup_seed_hash,
-        public_common_random_polynomial_root,
-        &public_key_share_roots,
-        participant_descriptors,
-        &participant_identities,
-    )
+    Ok(CollectivePublicKeyCoefficients {
+        component_zero_coefficients,
+        component_one_coefficients,
+    })
 }
 
 pub(super) fn collective_public_key_coefficient_root(
@@ -163,21 +218,66 @@ pub(super) fn collective_public_key_coefficient_root(
 
 fn collective_public_key_coefficient_material(
     setup_seed_hash: &str,
+    private_setup_seed_hash: &str,
     public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
     participant_descriptors: Vec<Value>,
     participant_identities: &[String],
 ) -> CanonicalResult<Value> {
-    let modulus_summaries = DATA_PRIMES
+    let (collective_secret_coefficients, collective_error_coefficients) =
+        collective_signed_secret_and_error_coefficients(
+            private_setup_seed_hash,
+            participant_identities,
+        );
+    #[cfg(not(target_arch = "wasm32"))]
+    let coefficient_tables = DATA_PRIMES
+        .par_iter()
+        .copied()
+        .map(|modulus| {
+            collective_public_key_coefficient_table(
+                setup_seed_hash,
+                &collective_secret_coefficients,
+                &collective_error_coefficients,
+                modulus,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
+    let coefficient_tables = DATA_PRIMES
         .iter()
         .copied()
         .map(|modulus| {
+            collective_public_key_coefficient_table(
+                setup_seed_hash,
+                &collective_secret_coefficients,
+                &collective_error_coefficients,
+                modulus,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let modulus_summaries = coefficient_tables
+        .par_iter()
+        .map(|table| {
             collective_public_key_coefficient_derivation_summary(
                 setup_seed_hash,
                 public_common_random_polynomial_root,
                 public_key_share_roots,
                 participant_identities,
-                modulus,
+                table,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    #[cfg(target_arch = "wasm32")]
+    let modulus_summaries = coefficient_tables
+        .iter()
+        .map(|table| {
+            collective_public_key_coefficient_derivation_summary(
+                setup_seed_hash,
+                public_common_random_polynomial_root,
+                public_key_share_roots,
+                participant_identities,
+                table,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -189,17 +289,41 @@ fn collective_public_key_coefficient_material(
         "basisId": BgvBasisKind::Data.basis_id(),
         "level": DATA_PRIMES.len() - 1,
         "coefficientCount": POLYNOMIAL_DEGREE,
-        "componentModel": "componentZero=sum_i(-a*s_i+e_i),componentOne=a-over-selected-BGV-RNS-data-basis",
-        "componentDerivation": "passive-transcript-derived-from-setup-seed-hash",
-        "fullCoefficientVectorHashesComputed": false,
-        "fullCoefficientExpansionOwner": "encrypted aggregate bridge relation arithmetic",
+        "componentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
+        "componentDerivation": "public-coefficients-generated-from-private-setup-witness-and-bound-in-setup-package",
+        "fullCoefficientVectorHashesComputed": true,
+        "fullCoefficientExpansionOwner": "passive setup package public key material",
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
         "participantCount": participant_identities.len(),
         "participants": participant_descriptors,
         "modulusSummaries": modulus_summaries,
+        "coefficientTables": coefficient_tables,
         "algebraicPublicKeyProofStatus": "BgvAlgebraicPublicKeyProofMissing",
         "rawSecretShareExported": false,
+    }))
+}
+
+fn collective_public_key_coefficient_table(
+    setup_seed_hash: &str,
+    collective_secret_coefficients: &[i64],
+    collective_error_coefficients: &[i64],
+    modulus: u64,
+) -> CanonicalResult<Value> {
+    let coefficients = collective_public_key_coefficients_from_signed(
+        setup_seed_hash,
+        collective_secret_coefficients,
+        collective_error_coefficients,
+        modulus,
+    )?;
+
+    Ok(json!({
+        "modulus": modulus,
+        "componentZeroCoefficientHash512": coefficient_vector_hash512(&coefficients.component_zero_coefficients),
+        "componentOneCoefficientHash512": coefficient_vector_hash512(&coefficients.component_one_coefficients),
+        "componentZeroCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
+        "componentOneCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_one_coefficients),
+        "coefficientByteLength": POLYNOMIAL_DEGREE * 8,
     }))
 }
 
@@ -208,8 +332,9 @@ fn collective_public_key_coefficient_derivation_summary(
     public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
     participant_identities: &[String],
-    modulus: u64,
+    coefficient_table: &Value,
 ) -> CanonicalResult<Value> {
+    let modulus = unsigned_at_path(coefficient_table, &["modulus"])?;
     let modulus_bytes = modulus.to_le_bytes();
     let participant_count_bytes = (participant_identities.len() as u64).to_le_bytes();
     let public_key_share_root_count_bytes = (public_key_share_roots.len() as u64).to_le_bytes();
@@ -249,44 +374,152 @@ fn collective_public_key_coefficient_derivation_summary(
         "componentOneCoefficientDerivationHash512": component_one_derivation_hash,
         "sampledComponentZeroDerivationResidues": sampled_component_zero_derivation_residues,
         "sampledComponentOneCoefficients": sampled_component_one_coefficients,
-        "fullCoefficientVectorHashStatus": "deferred-to-bridge-arithmetic-expansion",
+        "componentZeroCoefficientHash512": string_at_path(
+            coefficient_table,
+            &["componentZeroCoefficientHash512"],
+        )?,
+        "componentOneCoefficientHash512": string_at_path(
+            coefficient_table,
+            &["componentOneCoefficientHash512"],
+        )?,
+        "fullCoefficientVectorHashStatus": "bound-in-setup-package",
     }))
 }
 
-fn collective_signed_secret_and_error_coefficients(
-    setup_seed_hash: &str,
-    participant_identities: &[String],
-) -> (Vec<i64>, Vec<i64>) {
-    let mut collective_secret_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
-    let mut collective_error_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
-    for participant_identity in participant_identities {
-        let local_secret_coefficients = dense_small_coefficients(
-            setup_seed_hash,
-            participant_identity,
-            "local-secret-share",
-            -1,
-            1,
-        );
-        let local_error_coefficients = dense_centered_binomial_coefficients(
-            setup_seed_hash,
-            participant_identity,
-            "local-error",
-        );
-        for coefficient_index in 0..POLYNOMIAL_DEGREE {
-            collective_secret_coefficients[coefficient_index] +=
-                local_secret_coefficients[coefficient_index];
-            collective_error_coefficients[coefficient_index] +=
-                local_error_coefficients[coefficient_index];
+fn read_public_key_coefficient_vector(
+    table: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<u64>> {
+    let hex_field_name = match field_name {
+        "componentZeroCoefficients" => "componentZeroCoefficientsLeHex",
+        "componentOneCoefficients" => "componentOneCoefficientsLeHex",
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "unknown collective public key coefficient vector field",
+            ));
         }
+    };
+    let bytes = crate::transcript_core::decode_hex(string_at_path(table, &[hex_field_name])?)?;
+    if bytes.len() != POLYNOMIAL_DEGREE * 8 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public key coefficient vector width does not match the selected BGV profile",
+        ));
+    }
+    let coefficients = bytes
+        .chunks_exact(8)
+        .map(|chunk| {
+            let mut coefficient_bytes = [0_u8; 8];
+            coefficient_bytes.copy_from_slice(chunk);
+            u64::from_le_bytes(coefficient_bytes)
+        })
+        .collect::<Vec<_>>();
+
+    Ok(coefficients)
+}
+
+fn coefficient_vector_bytes(coefficients: &[u64]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(coefficients.len() * 8);
+    for coefficient in coefficients {
+        bytes.extend(coefficient.to_le_bytes());
     }
 
-    (
-        collective_secret_coefficients,
-        collective_error_coefficients,
+    bytes
+}
+
+fn coefficient_vector_le_hex(coefficients: &[u64]) -> String {
+    crate::transcript_core::encode_hex(&coefficient_vector_bytes(coefficients))
+}
+
+fn coefficient_vector_hash512(coefficients: &[u64]) -> String {
+    let bytes = coefficient_vector_bytes(coefficients);
+
+    hash512_hex(
+        "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1",
+        &[&bytes],
     )
 }
 
-fn collective_public_key_coefficients_from_signed(
+pub(super) fn collective_signed_secret_and_error_coefficients(
+    private_setup_seed_hash: &str,
+    participant_identities: &[String],
+) -> (Vec<i64>, Vec<i64>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let coefficient_pairs = (0..POLYNOMIAL_DEGREE)
+            .into_par_iter()
+            .map(|coefficient_index| {
+                collective_signed_secret_and_error_coefficient_pair(
+                    private_setup_seed_hash,
+                    participant_identities,
+                    coefficient_index,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        coefficient_pairs.into_iter().unzip()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut collective_secret_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
+        let mut collective_error_coefficients = vec![0_i64; POLYNOMIAL_DEGREE];
+        for participant_identity in participant_identities {
+            for coefficient_index in 0..POLYNOMIAL_DEGREE {
+                collective_secret_coefficients[coefficient_index] +=
+                    bounded_collective_secret_share_coefficient(
+                        private_setup_seed_hash,
+                        participant_identities,
+                        participant_identity,
+                        coefficient_index,
+                    )
+                    .expect("participant identity is drawn from the owner schedule");
+                collective_error_coefficients[coefficient_index] +=
+                    bounded_collective_error_share_coefficient(
+                        private_setup_seed_hash,
+                        participant_identities,
+                        participant_identity,
+                        coefficient_index,
+                    )
+                    .expect("participant identity is drawn from the owner schedule");
+            }
+        }
+
+        (
+            collective_secret_coefficients,
+            collective_error_coefficients,
+        )
+    }
+}
+
+fn collective_signed_secret_and_error_coefficient_pair(
+    private_setup_seed_hash: &str,
+    participant_identities: &[String],
+    coefficient_index: usize,
+) -> (i64, i64) {
+    let mut collective_secret_coefficient = 0_i64;
+    let mut collective_error_coefficient = 0_i64;
+    for participant_identity in participant_identities {
+        collective_secret_coefficient += bounded_collective_secret_share_coefficient(
+            private_setup_seed_hash,
+            participant_identities,
+            participant_identity,
+            coefficient_index,
+        )
+        .expect("participant identity is drawn from the owner schedule");
+        collective_error_coefficient += bounded_collective_error_share_coefficient(
+            private_setup_seed_hash,
+            participant_identities,
+            participant_identity,
+            coefficient_index,
+        )
+        .expect("participant identity is drawn from the owner schedule");
+    }
+
+    (collective_secret_coefficient, collective_error_coefficient)
+}
+
+pub(super) fn collective_public_key_coefficients_from_signed(
     setup_seed_hash: &str,
     collective_secret_coefficients: &[i64],
     collective_error_coefficients: &[i64],
@@ -304,10 +537,10 @@ fn collective_public_key_coefficients_from_signed(
         .iter()
         .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
         .collect::<Vec<_>>();
-    let collective_error_residues = collective_error_coefficients
+    let collective_scaled_error_residues = collective_error_coefficients
         .iter()
-        .map(|coefficient| signed_to_modulus_residue(*coefficient, modulus))
-        .collect::<Vec<_>>();
+        .map(|coefficient| signed_to_plaintext_scaled_residue(*coefficient, modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
     let component_one_coefficients =
         dense_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus);
     let public_sample_secret_product = negacyclic_product_mod(
@@ -315,10 +548,12 @@ fn collective_public_key_coefficients_from_signed(
         &collective_secret_residues,
         modulus,
     )?;
-    let component_zero_coefficients = collective_error_residues
+    let component_zero_coefficients = collective_scaled_error_residues
         .iter()
         .zip(public_sample_secret_product.iter())
-        .map(|(error_residue, product_residue)| sub_mod(*error_residue, *product_residue, modulus))
+        .map(|(scaled_error_residue, product_residue)| {
+            sub_mod(*scaled_error_residue, *product_residue, modulus)
+        })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok(CollectivePublicKeyCoefficients {
@@ -329,8 +564,8 @@ fn collective_public_key_coefficients_from_signed(
 
 pub(super) fn threshold_verification_material(
     input: &PassiveSetupInput,
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
     participant_setup_record_hashes: &[String],
     trustee_threshold_verification_key_hashes: &[String],
 ) -> CanonicalResult<Value> {
@@ -351,9 +586,9 @@ pub(super) fn threshold_verification_material(
         "objectType": "ThresholdShareVerificationKeySet",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "targetDecryptionProfileHash": target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "participantSetupRecordHashes": participant_setup_record_hashes,
@@ -375,8 +610,8 @@ pub(super) fn threshold_verification_material(
         "ThresholdShareVerificationKeyHash",
         &json!({
             "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
+            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         }),
     )?;
 
@@ -388,33 +623,132 @@ pub(super) fn threshold_verification_material(
         "statusLabels": [
             "ThresholdVerificationMaterialBound",
             "PassiveSetupVerificationScopeOnly",
-            "KllpsVerificationRootsBound"
+            "TargetDecryptionVerificationRootsBound"
         ],
     }))
 }
 
-pub(super) fn evaluation_keys(
-    input: &PassiveSetupInput,
-    collective_public_key: &Value,
-    key_switch_decomposition_hash: &str,
+pub(super) fn expected_evaluation_key_material_binding(
+    setup_package: &Value,
 ) -> CanonicalResult<Value> {
-    let rot_set = provisional_rotation_set()?;
-    let rot_set_hash = derive_protocol_hash("RotSetHash", &rot_set)?;
+    let setup_inputs = value_at_path(setup_package, &["setupInputs"])?;
+    let evaluation_keys = value_at_path(setup_package, &["evaluationKeys"])?;
+    let actual_material = value_at_path(evaluation_keys, &["evaluationKeyMaterialCommitment"])?;
+    let collective_public_key = value_at_path(setup_package, &["collectivePublicKey"])?;
+    let key_switch_decomposition_hash =
+        string_at_path(evaluation_keys, &["keySwitchDecompositionHash"])?;
+    let rot_set = value_at_path(evaluation_keys, &["rotSet"])?;
+    let rot_set_hash = string_at_path(evaluation_keys, &["rotSetHash"])?;
+
+    evaluation_key_material_binding(EvaluationKeyMaterialInput {
+        setup_seed_hash: string_at_path(setup_inputs, &["setupSeedHash"])?,
+        sampled_relation_checks: value_at_path(
+            actual_material,
+            &["record", "sampledRelationChecks"],
+        )?
+        .clone(),
+        ceremony_id: string_at_path(setup_inputs, &["ceremonyId"])?,
+        manifest_hash: string_at_path(setup_inputs, &["manifestHash"])?,
+        roster_hash: string_at_path(setup_inputs, &["rosterHash"])?,
+        collective_public_key,
+        key_switch_decomposition_hash,
+        rot_set,
+        rot_set_hash,
+    })
+    .map(|binding| {
+        json!({
+            "record": binding.record,
+            "materialHash": binding.material_hash,
+            "relinearizationKeyRoot": binding.relinearization_key_root,
+            "relinearizationKeyRecord": binding.relinearization_key_record,
+            "keySwitchKeyRoot": binding.key_switch_key_root,
+            "keySwitchKeyRecord": binding.key_switch_key_record,
+            "rotationKeyRoots": binding.rotation_key_roots,
+            "rotationKeyRecords": binding.rotation_key_records,
+        })
+    })
+}
+
+fn evaluation_key_material_binding(
+    input: EvaluationKeyMaterialInput<'_>,
+) -> CanonicalResult<EvaluationKeyMaterialBinding> {
     let collective_public_key_root =
-        string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
-    let bgv_public_key_root = string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?;
-    let relinearization_arithmetic_fixture = development_key_arithmetic_fixture(
-        input,
-        DEVELOPMENT_RELINEARIZATION_ARITHMETIC_FIXTURE_ID,
-        "relinearization-key-fixture",
-        key_switch_decomposition_hash,
+        string_at_path(input.collective_public_key, &["collectivePublicKeyRoot"])?;
+    let bgv_public_key_root = string_at_path(input.collective_public_key, &["bgvPublicKeyRoot"])?;
+    let collective_public_key_coefficient_root = string_at_path(
+        input.collective_public_key,
+        &["collectivePublicKeyCoefficientRoot"],
     )?;
-    let key_switch_arithmetic_fixture = development_key_arithmetic_fixture(
-        input,
-        DEVELOPMENT_KEY_SWITCH_ARITHMETIC_FIXTURE_ID,
-        "key-switch-fixture",
-        key_switch_decomposition_hash,
+    let relinearization_levels = selected_relinearization_levels()?;
+    let rotation_schedule = selected_rotation_schedule_entries()?;
+    let relinearization_stream_entries = relinearization_levels
+        .iter()
+        .map(|level| {
+            let key_stream_seed =
+                evaluation_key_stream_seed(input.setup_seed_hash, "relinearization", *level, None);
+            json!({
+                "level": level,
+                "keyStreamSeed": key_stream_seed,
+                "sourcePolynomial": "secret-square",
+                "digitCount": level + 1,
+            })
+        })
+        .collect::<Vec<_>>();
+    let rotation_stream_entries = rotation_schedule
+        .iter()
+        .map(|entry| {
+            let key_stream_seed = evaluation_key_stream_seed(
+                input.setup_seed_hash,
+                "rotation",
+                entry.level,
+                Some(entry.rotation),
+            );
+            json!({
+                "rotation": entry.rotation,
+                "level": entry.level,
+                "purpose": entry.purpose,
+                "keyStreamSeed": key_stream_seed,
+                "sourcePolynomial": "automorphism(secret)",
+                "digitCount": entry.level + 1,
+            })
+        })
+        .collect::<Vec<_>>();
+    let relinearization_stream_record = json!({
+        "objectType": "BgvRelinearizationKeyMaterialStream",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "bgvPublicKeyRoot": bgv_public_key_root,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
+        "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
+        "publicBasisId": BgvBasisKind::Data.basis_id(),
+        "componentOrder": ["componentZeroB", "componentOneA"],
+        "gadget": "crt-idempotent-per-active-data-prime",
+        "entries": relinearization_stream_entries,
+    });
+    let rotation_stream_record = json!({
+        "objectType": "BgvRotationKeyMaterialStream",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "bgvPublicKeyRoot": bgv_public_key_root,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
+        "rotSetHash": input.rot_set_hash,
+        "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
+        "publicBasisId": BgvBasisKind::Data.basis_id(),
+        "componentOrder": ["componentZeroB", "componentOneA"],
+        "gadget": "crt-idempotent-per-active-data-prime",
+        "entries": rotation_stream_entries,
+    });
+    let relinearization_stream_hash = evaluation_key_stream_hash(
+        "relinearization-material-stream",
+        &relinearization_stream_record,
     )?;
+    let rotation_stream_hash =
+        evaluation_key_stream_hash("rotation-material-stream", &rotation_stream_record)?;
+    let sampled_relation_checks = input.sampled_relation_checks;
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
         "objectVersion": 1,
@@ -423,40 +757,76 @@ pub(super) fn evaluation_keys(
         "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
-        "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Extended.basis_id(),
-        "publicRlweSampleCount": 2,
-        "arithmeticFixtureHash": relinearization_arithmetic_fixture["fixtureHash"],
+        "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
+        "publicBasisId": BgvBasisKind::Data.basis_id(),
+        "levelSchedule": relinearization_levels,
+        "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?),
+        "keyMaterialStreamHash": relinearization_stream_hash,
         "maliciousEvaluationKeyProofIncluded": false,
     });
     let relinearization_key_root =
         derive_protocol_hash("RelinearizationKeyRoot", &relinearization_key_record)?;
-    let rotation_key_records = rot_set["rotations"]
-        .as_array()
-        .expect("rotation set uses array")
-        .iter()
-        .map(|rotation| {
-            let record = json!({
-                "objectType": "BgvRotationKey",
-                "objectVersion": 1,
-                "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-                "ceremonyId": input.ceremony_id,
-                "rosterHash": input.roster_hash,
-                "collectivePublicKeyRoot": collective_public_key_root,
-                "rotSetHash": rot_set_hash,
-                "rotation": rotation,
-                "keySwitchDecompositionHash": key_switch_decomposition_hash,
-                "publicBasisId": BgvBasisKind::Extended.basis_id(),
-                "publicRlweSampleCount": 1,
-                "maliciousEvaluationKeyProofIncluded": false,
-            });
-            let root = derive_protocol_hash("RotationKeyRoot", &record)?;
-            Ok(json!({
-                "rotation": rotation,
-                "rotationKeyRoot": root,
-            }))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut rotation_key_roots = Vec::with_capacity(rotation_schedule.len());
+    let mut rotation_key_records = Vec::with_capacity(rotation_schedule.len());
+    for entry in &rotation_schedule {
+        let entry_stream_record = json!({
+            "objectType": "BgvRotationKeyMaterialStreamEntry",
+            "objectVersion": 1,
+            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+            "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
+            "collectivePublicKeyRoot": collective_public_key_root,
+            "bgvPublicKeyRoot": bgv_public_key_root,
+            "rotSetHash": input.rot_set_hash,
+            "rotation": entry.rotation,
+            "level": entry.level,
+            "purpose": entry.purpose,
+            "keyStreamSeed": evaluation_key_stream_seed(
+                    input.setup_seed_hash,
+                "rotation",
+                entry.level,
+                Some(entry.rotation),
+            ),
+            "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
+        });
+        let entry_stream_hash =
+            evaluation_key_stream_hash("rotation-material-stream-entry", &entry_stream_record)?;
+        let record = json!({
+            "objectType": "BgvRotationKey",
+            "objectVersion": 1,
+            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+            "ceremonyId": input.ceremony_id,
+            "rosterHash": input.roster_hash,
+            "collectivePublicKeyRoot": collective_public_key_root,
+            "rotSetHash": input.rot_set_hash,
+            "rotation": entry.rotation,
+            "level": entry.level,
+            "purpose": entry.purpose,
+            "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
+            "publicBasisId": BgvBasisKind::Data.basis_id(),
+            "publicRlweSampleCount": entry.level + 1,
+            "keyMaterialStreamHash": entry_stream_hash,
+            "maliciousEvaluationKeyProofIncluded": false,
+        });
+        let root = derive_protocol_hash("RotationKeyRoot", &record)?;
+        rotation_key_roots.push(json!({
+            "rotation": entry.rotation,
+            "level": entry.level,
+            "purpose": entry.purpose,
+            "rotationKeyRoot": root,
+        }));
+        rotation_key_records.push(record);
+    }
+    let key_switch_stream_record = json!({
+        "objectType": "BgvEvaluationKeySwitchMaterialStream",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
+        "relinearizationStreamHash": relinearization_stream_hash,
+        "rotationStreamHash": rotation_stream_hash,
+        "sampledRelationChecks": sampled_relation_checks,
+    });
+    let key_switch_stream_hash =
+        evaluation_key_stream_hash("key-switch-material-stream", &key_switch_stream_record)?;
     let key_switch_key_record = json!({
         "objectType": "BgvKeySwitchKey",
         "objectVersion": 1,
@@ -464,14 +834,433 @@ pub(super) fn evaluation_keys(
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
-        "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Extended.basis_id(),
-        "publicRlweSampleCount": 1,
-        "arithmeticFixtureHash": key_switch_arithmetic_fixture["fixtureHash"],
+        "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
+        "publicBasisId": BgvBasisKind::Data.basis_id(),
+        "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?)
+            + rotation_schedule.iter().map(|entry| entry.level + 1).sum::<usize>(),
+        "keyMaterialStreamHash": key_switch_stream_hash,
         "genericKeySwitchApiExported": false,
         "maliciousEvaluationKeyProofIncluded": false,
     });
     let key_switch_key_root = derive_protocol_hash("KeySwitchKeyRoot", &key_switch_key_record)?;
+    let record = json!({
+        "objectType": "BgvEvaluationKeyMaterialCommitment",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "ceremonyId": input.ceremony_id,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "bgvPublicKeyRoot": bgv_public_key_root,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
+        "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
+        "rotSetHash": input.rot_set_hash,
+        "rotSet": input.rot_set,
+        "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
+        "relinearizationKeyRoot": relinearization_key_root,
+        "relinearizationStreamHash": relinearization_stream_hash,
+        "rotationKeyRoots": rotation_key_roots,
+        "rotationStreamHash": rotation_stream_hash,
+        "keySwitchKeyRoot": key_switch_key_root,
+        "keySwitchStreamHash": key_switch_stream_hash,
+        "sampledRelationChecks": sampled_relation_checks,
+        "fullCoefficientStreamMaterializedInSetupPackage": false,
+        "rawSecretMaterialExported": false,
+        "maliciousEvaluationKeyProofIncluded": false,
+    });
+    let material_hash = derive_protocol_hash("EvaluationKeySetHash", &record)?;
+
+    Ok(EvaluationKeyMaterialBinding {
+        record,
+        material_hash,
+        relinearization_key_root,
+        relinearization_key_record,
+        key_switch_key_root,
+        key_switch_key_record,
+        rotation_key_roots,
+        rotation_key_records,
+    })
+}
+
+fn selected_relinearization_levels() -> CanonicalResult<Vec<usize>> {
+    if DIRECT_COMPARISON_OUTPUT_LEVEL >= DATA_PRIMES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "direct comparison output level must fit the selected data basis",
+        ));
+    }
+
+    Ok((1..DATA_PRIMES.len()).collect())
+}
+
+fn selected_rotation_schedule_entries() -> CanonicalResult<Vec<RotationScheduleEntry>> {
+    let mut entries_by_rotation_and_level = BTreeMap::new();
+    for rotation in direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
+        entries_by_rotation_and_level.insert(
+            (rotation, DATA_PRIMES.len() - 1),
+            "direct-score-packing-generator-basis",
+        );
+    }
+    for rotation in packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
+        entries_by_rotation_and_level
+            .entry((rotation, DATA_PRIMES.len() - 1))
+            .or_insert("generator-ordered-packed-rank-forward-basis");
+    }
+    for rotation in packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
+        entries_by_rotation_and_level.insert(
+            (rotation, DIRECT_COMPARISON_OUTPUT_LEVEL),
+            "generator-ordered-packed-rank-return-basis",
+        );
+    }
+
+    Ok(entries_by_rotation_and_level
+        .into_iter()
+        .map(|((rotation, level), purpose)| RotationScheduleEntry {
+            rotation,
+            level,
+            purpose,
+        })
+        .collect())
+}
+
+fn total_digit_count(levels: &[usize]) -> usize {
+    levels.iter().map(|level| level + 1).sum()
+}
+
+pub(super) fn evaluation_key_stream_seed(
+    setup_seed_hash: &str,
+    key_kind: &str,
+    level: usize,
+    rotation: Option<usize>,
+) -> String {
+    let level_text = level.to_string();
+    let rotation_text = rotation
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_string());
+
+    hash512_hex(
+        "sealed-lattice-bgv-rns/evaluation-key-stream-seed-v1",
+        &[
+            setup_seed_hash.as_bytes(),
+            key_kind.as_bytes(),
+            level_text.as_bytes(),
+            rotation_text.as_bytes(),
+        ],
+    )
+}
+
+fn evaluation_key_stream_hash(
+    stream_label: &str,
+    stream_record: &Value,
+) -> CanonicalResult<String> {
+    let canonical_stream_record = canonical_json(stream_record)?;
+
+    Ok(hash512_hex(
+        "sealed-lattice-bgv-rns/evaluation-key-stream-hash-v1",
+        &[stream_label.as_bytes(), canonical_stream_record.as_bytes()],
+    ))
+}
+
+fn sampled_evaluation_key_relation_checks(
+    private_setup_seed_hash: &str,
+    setup_seed_hash: &str,
+    participant_identities: &[String],
+    relinearization_levels: &[usize],
+    rotation_schedule: &[RotationScheduleEntry],
+) -> CanonicalResult<Vec<Value>> {
+    let (collective_secret_coefficients, _) = collective_signed_secret_and_error_coefficients(
+        private_setup_seed_hash,
+        participant_identities,
+    );
+    let mut checks = Vec::new();
+    let mut sampled_relinearization_levels = BTreeSet::new();
+    if let Some(first_level) = relinearization_levels.first() {
+        sampled_relinearization_levels.insert(*first_level);
+    }
+    sampled_relinearization_levels.insert(DIRECT_COMPARISON_OUTPUT_LEVEL);
+    if let Some(last_level) = relinearization_levels.last() {
+        sampled_relinearization_levels.insert(*last_level);
+    }
+    for level in sampled_relinearization_levels {
+        let seed = evaluation_key_stream_seed(setup_seed_hash, "relinearization", level, None);
+        checks.push(sampled_key_switch_relation_check(
+            setup_seed_hash,
+            &collective_secret_coefficients,
+            "relinearization",
+            "secret-square",
+            level,
+            None,
+            &seed,
+        )?);
+    }
+    let mut sampled_rotation_indexes = BTreeSet::new();
+    if !rotation_schedule.is_empty() {
+        sampled_rotation_indexes.insert(0_usize);
+        sampled_rotation_indexes.insert(1_usize);
+        sampled_rotation_indexes.insert(rotation_schedule.len() - 2);
+        sampled_rotation_indexes.insert(rotation_schedule.len() - 1);
+    }
+    for required_purpose in [
+        "direct-score-packing-generator-basis",
+        "generator-ordered-packed-rank-forward-basis",
+        "generator-ordered-packed-rank-return-basis",
+    ] {
+        if let Some((rotation_index, _)) = rotation_schedule
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| entry.purpose == required_purpose)
+        {
+            sampled_rotation_indexes.insert(rotation_index);
+        }
+    }
+    for rotation_index in sampled_rotation_indexes {
+        let entry = &rotation_schedule[rotation_index];
+        let seed = evaluation_key_stream_seed(
+            setup_seed_hash,
+            "rotation",
+            entry.level,
+            Some(entry.rotation),
+        );
+        checks.push(sampled_key_switch_relation_check(
+            setup_seed_hash,
+            &collective_secret_coefficients,
+            "rotation",
+            entry.purpose,
+            entry.level,
+            Some(entry.rotation),
+            &seed,
+        )?);
+    }
+
+    Ok(checks)
+}
+
+fn sampled_key_switch_relation_check(
+    setup_seed_hash: &str,
+    collective_secret_coefficients: &[i64],
+    key_kind: &str,
+    purpose: &str,
+    level: usize,
+    rotation: Option<usize>,
+    seed: &str,
+) -> CanonicalResult<Value> {
+    let source_limbs =
+        key_switch_source_limbs(collective_secret_coefficients, key_kind, rotation, level)?;
+    let secret_residues = DATA_PRIMES[..=level]
+        .iter()
+        .map(|modulus| {
+            collective_secret_coefficients
+                .iter()
+                .map(|coefficient| signed_to_modulus_residue(*coefficient, *modulus))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let domain = match rotation {
+        Some(galois_element) => format!("galois-{galois_element}"),
+        None => "relinearization".to_string(),
+    };
+    let mut digit_indexes = BTreeSet::new();
+    digit_indexes.insert(0_usize);
+    digit_indexes.insert(level);
+    let mut limb_indexes = BTreeSet::new();
+    limb_indexes.insert(0_usize);
+    limb_indexes.insert(level);
+    let mut samples = Vec::new();
+    for digit_index in digit_indexes {
+        let digit_bytes = (digit_index as u64).to_le_bytes();
+        let error = DeterministicSampler::new(
+            KEY_SWITCH_ERROR_DOMAIN,
+            &[domain.as_bytes(), seed.as_bytes(), &digit_bytes],
+        )
+        .centered_binomial_eta2(POLYNOMIAL_DEGREE);
+        for limb_index in limb_indexes.iter().copied() {
+            let modulus = DATA_PRIMES[limb_index];
+            let modulus_bytes = modulus.to_le_bytes();
+            let public_sample = DeterministicSampler::new(
+                KEY_SWITCH_SAMPLE_DOMAIN,
+                &[
+                    domain.as_bytes(),
+                    seed.as_bytes(),
+                    &digit_bytes,
+                    &modulus_bytes,
+                ],
+            )
+            .uniform_residues(modulus, POLYNOMIAL_DEGREE);
+            let public_sample_secret_product =
+                negacyclic_product_mod(&public_sample, &secret_residues[limb_index], modulus)?;
+            for position in sample_positions() {
+                let scaled_error = signed_to_plaintext_scaled_residue(error[position], modulus)?;
+                let expected = if limb_index == digit_index {
+                    add_mod(
+                        scaled_error,
+                        source_limbs[digit_index][position] % modulus,
+                        modulus,
+                    )?
+                } else {
+                    scaled_error
+                };
+                let component_zero = if limb_index == digit_index {
+                    add_mod(
+                        sub_mod(
+                            scaled_error,
+                            public_sample_secret_product[position],
+                            modulus,
+                        )?,
+                        source_limbs[digit_index][position] % modulus,
+                        modulus,
+                    )?
+                } else {
+                    sub_mod(
+                        scaled_error,
+                        public_sample_secret_product[position],
+                        modulus,
+                    )?
+                };
+                let decrypted_key_limb = add_mod(
+                    component_zero,
+                    public_sample_secret_product[position],
+                    modulus,
+                )?;
+                samples.push(json!({
+                    "digitIndex": digit_index,
+                    "limbIndex": limb_index,
+                    "position": position,
+                    "modulus": modulus,
+                    "componentZeroCoefficient": component_zero,
+                    "componentOneCoefficient": public_sample[position],
+                    "decryptedKeyLimbCoefficient": decrypted_key_limb,
+                    "expectedKeyLimbCoefficient": expected,
+                    "relationMatches": decrypted_key_limb == expected,
+                }));
+            }
+        }
+    }
+
+    Ok(json!({
+        "keyKind": key_kind,
+        "purpose": purpose,
+        "level": level,
+        "rotation": rotation,
+        "keyStreamSeed": seed,
+        "setupSeedHash": setup_seed_hash,
+        "samples": samples,
+    }))
+}
+
+fn key_switch_source_limbs(
+    collective_secret_coefficients: &[i64],
+    key_kind: &str,
+    rotation: Option<usize>,
+    level: usize,
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    let secret_residues = DATA_PRIMES[..=level]
+        .iter()
+        .map(|modulus| {
+            collective_secret_coefficients
+                .iter()
+                .map(|coefficient| signed_to_modulus_residue(*coefficient, *modulus))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    match key_kind {
+        "relinearization" => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                secret_residues
+                    .par_iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        negacyclic_product_mod(limb, limb, DATA_PRIMES[limb_index])
+                    })
+                    .collect()
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                secret_residues
+                    .iter()
+                    .enumerate()
+                    .map(|(limb_index, limb)| {
+                        negacyclic_product_mod(limb, limb, DATA_PRIMES[limb_index])
+                    })
+                    .collect()
+            }
+        }
+        "rotation" => {
+            let galois_element = rotation.ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "rotation key material requires a Galois element",
+                )
+            })?;
+            let rotated_secret =
+                automorphism_signed(collective_secret_coefficients, galois_element);
+            Ok(DATA_PRIMES[..=level]
+                .iter()
+                .map(|modulus| {
+                    rotated_secret
+                        .iter()
+                        .map(|coefficient| signed_to_modulus_residue(*coefficient, *modulus))
+                        .collect::<Vec<_>>()
+                })
+                .collect())
+        }
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "unknown evaluation key material source kind",
+        )),
+    }
+}
+
+fn automorphism_signed(input: &[i64], galois_element: usize) -> Vec<i64> {
+    let ring_order = 2 * POLYNOMIAL_DEGREE;
+    let mut output = vec![0_i64; POLYNOMIAL_DEGREE];
+    for (coefficient_index, value) in input.iter().enumerate() {
+        let exponent = (coefficient_index * galois_element) % ring_order;
+        if exponent < POLYNOMIAL_DEGREE {
+            output[exponent] += value;
+        } else {
+            output[exponent - POLYNOMIAL_DEGREE] -= value;
+        }
+    }
+
+    output
+}
+
+pub(super) fn evaluation_keys(
+    input: &PassiveSetupInput,
+    collective_public_key: &Value,
+    key_switch_decomposition_hash: &str,
+) -> CanonicalResult<Value> {
+    let rot_set = selected_rotation_set()?;
+    let rot_set_hash = derive_protocol_hash("RotSetHash", &rot_set)?;
+    let collective_public_key_root =
+        string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
+    let bgv_public_key_root = string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?;
+    let participant_identities = input
+        .participants
+        .iter()
+        .map(|participant| participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
+    let relinearization_levels = selected_relinearization_levels()?;
+    let rotation_schedule = selected_rotation_schedule_entries()?;
+    let sampled_relation_checks = sampled_evaluation_key_relation_checks(
+        &input.private_setup_seed_hash,
+        &input.setup_seed_hash,
+        &participant_identities,
+        &relinearization_levels,
+        &rotation_schedule,
+    )?;
+    let material_binding = evaluation_key_material_binding(EvaluationKeyMaterialInput {
+        setup_seed_hash: &input.setup_seed_hash,
+        sampled_relation_checks: Value::Array(sampled_relation_checks),
+        ceremony_id: &input.ceremony_id,
+        manifest_hash: &input.manifest_hash,
+        roster_hash: &input.roster_hash,
+        collective_public_key,
+        key_switch_decomposition_hash,
+        rot_set: &rot_set,
+        rot_set_hash: &rot_set_hash,
+    })?;
     let evaluation_key_record = json!({
         "objectType": "BgvEvaluationKeySet",
         "objectVersion": 1,
@@ -483,12 +1272,11 @@ pub(super) fn evaluation_keys(
         "bgvPublicKeyRoot": bgv_public_key_root,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "rotSetHash": rot_set_hash,
-        "relinearizationKeyRoot": relinearization_key_root,
-        "relinearizationArithmeticFixtureHash": relinearization_arithmetic_fixture["fixtureHash"],
-        "rotationKeyRoots": rotation_key_records,
-        "keySwitchKeyRoot": key_switch_key_root,
-        "keySwitchArithmeticFixtureHash": key_switch_arithmetic_fixture["fixtureHash"],
-        "generatedFor": "provisionalRotSet",
+        "evaluationKeyMaterialCommitmentHash": material_binding.material_hash,
+        "relinearizationKeyRoot": material_binding.relinearization_key_root,
+        "rotationKeyRoots": material_binding.rotation_key_roots,
+        "keySwitchKeyRoot": material_binding.key_switch_key_root,
+        "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalRotSetClosure": "encrypted-aggregate-evaluator-closure",
         "regenerateIfRotSetChanges": true,
         "maliciousEvaluationKeyProofIncluded": false,
@@ -500,58 +1288,79 @@ pub(super) fn evaluation_keys(
         "rotSet": rot_set,
         "rotSetHash": rot_set_hash,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "relinearizationKeyRoot": relinearization_key_root,
-        "keySwitchKeyRoot": key_switch_key_root,
-        "relinearizationArithmeticFixture": relinearization_arithmetic_fixture,
-        "keySwitchArithmeticFixture": key_switch_arithmetic_fixture,
-        "rotationKeyRoots": rotation_key_records,
+        "evaluationKeyMaterialCommitment": {
+            "record": material_binding.record,
+            "materialHash": material_binding.material_hash,
+            "relinearizationKeyRoot": material_binding.relinearization_key_root,
+            "relinearizationKeyRecord": material_binding.relinearization_key_record,
+            "keySwitchKeyRoot": material_binding.key_switch_key_root,
+            "keySwitchKeyRecord": material_binding.key_switch_key_record,
+            "rotationKeyRoots": material_binding.rotation_key_roots,
+            "rotationKeyRecords": material_binding.rotation_key_records,
+        },
+        "evaluationKeyMaterialCommitmentHash": material_binding.material_hash,
+        "relinearizationKeyRoot": material_binding.relinearization_key_root,
+        "keySwitchKeyRoot": material_binding.key_switch_key_root,
+        "rotationKeyRoots": material_binding.rotation_key_roots,
         "evaluationKeyRoot": evaluation_key_root,
         "statusLabels": [
-            "RelinearizationKeyMaterialBound",
-            "RotationKeyMaterialBound",
-            "KeySwitchMaterialBound",
-            "ProvisionalRotSetBound"
+            "RelinearizationKeyMaterialStreamBound",
+            "RotationKeyMaterialStreamBound",
+            "KeySwitchMaterialStreamBound",
+            "SelectedRotSetBound"
         ],
     }))
 }
 
-fn provisional_rotation_set() -> CanonicalResult<Value> {
+fn selected_rotation_set() -> CanonicalResult<Value> {
+    let direct_score_packing_rotations =
+        direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
+            .into_iter()
+            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+            .collect::<Vec<_>>();
+    let packed_rank_forward_rotations =
+        packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
+            .into_iter()
+            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+            .collect::<Vec<_>>();
+    let packed_rank_return_rotations =
+        packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
+            .into_iter()
+            .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
+            .collect::<Vec<_>>();
+    let rotations = direct_score_packing_rotations
+        .iter()
+        .chain(packed_rank_forward_rotations.iter())
+        .chain(packed_rank_return_rotations.iter())
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     Ok(json!({
-        "rotSetId": PROVISIONAL_ROT_SET_ID,
-        "sourceRdr": "internal-design-note-top-k-circuit-and-sparse-target",
-        "generatedFor": "provisionalRotSet",
+        "rotSetId": SELECTED_ROT_SET_ID,
+        "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalizedBy": "encrypted-aggregate-evaluator-closure",
         "regeneratePassiveSetupKeysIfChanged": true,
-        "rotations": [
-            1, 2, 4, 8, 16, 32, 64, 128,
-            256, 512, 1024, 2048, 4096, 8192,
-            -1, -2, -4, -8, -16, -32, -64, -128,
-            -256, -512, -1024, -2048, -4096, -8192
-        ],
+        "rotations": rotations.clone(),
         "dependencies": [
-            "encrypted-aggregate-reconstruction",
-            "encrypted-aggregate-score-bit-derivation",
-            "bit-sliced-GT-EQ",
-            "rank-accumulation",
-            "encrypted-sparse-target-projection",
-            "target-decryption-interface-checks"
+            "direct-encrypted-ballot-aggregation",
+            "direct-score-packing",
+            "direct-encrypted-score-comparison",
+            "generator-ordered-packed-rank-accumulation",
+            "encrypted-sparse-target-projection"
         ],
         "requiredRotationGroups": [
             {
-                "purpose": "bit-sliced-projection",
-                "rotations": [1, 2, 4, 8, 16, -1, -2, -4, -8, -16]
+                "purpose": "direct-score-packing-generator-basis",
+                "rotations": direct_score_packing_rotations
             },
             {
-                "purpose": "encrypted-aggregate-score-bit-derivation",
-                "rotations": [32, 64, 128, -32, -64, -128]
+                "purpose": "generator-ordered-packed-rank-forward-basis",
+                "rotations": packed_rank_forward_rotations
             },
             {
-                "purpose": "rank-accumulation",
-                "rotations": [256, 512, 1024, 2048, -256, -512, -1024, -2048]
-            },
-            {
-                "purpose": "target-projection",
-                "rotations": [4096, 8192, -4096, -8192]
+                "purpose": "generator-ordered-packed-rank-return-basis",
+                "rotations": packed_rank_return_rotations
             }
         ],
     }))

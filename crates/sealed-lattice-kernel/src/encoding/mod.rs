@@ -138,6 +138,7 @@ pub fn roundtrip_bytes(input: &[u8]) -> Vec<u8> {
     input.to_vec()
 }
 
+// LEB128: 7 payload bits per byte, high bit set marks a continuation byte.
 pub fn encode_varuint(mut value: u64) -> Vec<u8> {
     let mut output = Vec::new();
     loop {
@@ -217,6 +218,8 @@ impl<'a> CanonicalReader<'a> {
             let byte = self.bytes[self.offset];
             self.offset += 1;
             let payload = u64::from(byte & 0x7f);
+            // 10th byte (index 9) carries only 1 usable bit of a u64; payload > 1
+            // would overflow, so reject it.
             if index == 9 && payload > 1 {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::MalformedVarUint,
@@ -226,6 +229,8 @@ impl<'a> CanonicalReader<'a> {
             value |= payload << shift;
 
             if byte & 0x80 == 0 {
+                // Enforce minimal/canonical encoding: re-encode the decoded value
+                // and require the consumed bytes to match exactly.
                 let consumed = &self.bytes[start..self.offset];
                 if consumed != encode_varuint(value).as_slice() {
                     return Err(CanonicalError::new(
@@ -301,29 +306,13 @@ enum TranscriptCoreCommand {
     InterpolateShamirConstantTerm,
     EvaluatePlaintextComparison,
     VerifyFixture,
-    DescribeBallotPrivacyProofBackend,
-    VerifyBallotPrivacyLinearProofVector,
-    VerifyBallotPrivacyEncodedRelationVector,
-    VerifyBallotPrivacyReceiverKeyVector,
-    VerifyReceiverKeyProof,
-    PrepareReceiverKeyProofGeneration,
-    GenerateReceiverKeyProof,
-    GenerateBallotProof,
-    GenerateBallotComponentProof,
-    GenerateBallotProofRecord,
-    VerifyBallotProof,
-    VerifyClaimBearingBallotPackage,
-    GenerateAggregateDerivationProof,
-    VerifyAggregateDerivationProof,
-    GenerateAggregateBridgeEncryption,
-    VerifyAggregateBridgeEncryption,
-    EvaluateAggregateBridgeRelation,
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
     ValidateBgvEvaluatorOperation,
     DescribeBgvPassiveSetupObjectModel,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
+    GenerateBgvEvaluationKeyMaterial,
     EncodeBgvBatchPlaintext,
     ValidateBgvPlaintextObject,
     ValidateBgvCiphertextObject,
@@ -331,6 +320,9 @@ enum TranscriptCoreCommand {
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
     RejectBgvReferenceOracleArtifact,
+    RunDirectEncryptedBallot,
+    GenerateBgvTargetDecryptionShare,
+    RecombineBgvTargetDecryptionShares,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -487,140 +479,25 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
 
             verify_fixture(&fixture)
         }
-        TranscriptCoreCommand::DescribeBallotPrivacyProofBackend
-        | TranscriptCoreCommand::VerifyBallotPrivacyLinearProofVector
-        | TranscriptCoreCommand::VerifyBallotPrivacyEncodedRelationVector
-        | TranscriptCoreCommand::VerifyBallotPrivacyReceiverKeyVector
-        | TranscriptCoreCommand::VerifyReceiverKeyProof
-        | TranscriptCoreCommand::PrepareReceiverKeyProofGeneration
-        | TranscriptCoreCommand::GenerateReceiverKeyProof
-        | TranscriptCoreCommand::GenerateBallotProof
-        | TranscriptCoreCommand::GenerateBallotComponentProof
-        | TranscriptCoreCommand::GenerateBallotProofRecord
-        | TranscriptCoreCommand::VerifyBallotProof
-        | TranscriptCoreCommand::VerifyClaimBearingBallotPackage
-        | TranscriptCoreCommand::GenerateAggregateDerivationProof
-        | TranscriptCoreCommand::VerifyAggregateDerivationProof
-        | TranscriptCoreCommand::GenerateAggregateBridgeEncryption
-        | TranscriptCoreCommand::VerifyAggregateBridgeEncryption
-        | TranscriptCoreCommand::EvaluateAggregateBridgeRelation => {
-            run_ballot_privacy_command(command, &request)
-        }
         TranscriptCoreCommand::DescribeBgvRnsProfile
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
+        | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
         | TranscriptCoreCommand::ValidateBgvPlaintextObject
         | TranscriptCoreCommand::ValidateBgvCiphertextObject
         | TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
-        | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
+        | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
+        | TranscriptCoreCommand::RunDirectEncryptedBallot
+        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
+        | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
             run_bgv_command(command, &request)
         }
-    }
-}
-
-fn run_ballot_privacy_command(
-    command: TranscriptCoreCommand,
-    request: &Value,
-) -> CanonicalResult<Value> {
-    match command {
-        TranscriptCoreCommand::DescribeBallotPrivacyProofBackend => {
-            Ok(crate::ballot_privacy::describe_proof_backend())
-        }
-        TranscriptCoreCommand::VerifyBallotPrivacyLinearProofVector => {
-            let vector_case = request.get("vectorCase").ok_or_else(|| {
-                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
-            })?;
-
-            Ok(crate::ballot_privacy::verify_linear_proof_vector_case(
-                vector_case,
-            ))
-        }
-        TranscriptCoreCommand::VerifyBallotPrivacyEncodedRelationVector => {
-            let vector_case = request.get("vectorCase").ok_or_else(|| {
-                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
-            })?;
-
-            Ok(crate::ballot_privacy::verify_encoded_relation_vector_case(
-                vector_case,
-            ))
-        }
-        TranscriptCoreCommand::VerifyBallotPrivacyReceiverKeyVector => {
-            let vector_case = request.get("vectorCase").ok_or_else(|| {
-                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "vectorCase is required")
-            })?;
-
-            Ok(crate::ballot_privacy::verify_receiver_key_vector_case(
-                vector_case,
-            ))
-        }
-        TranscriptCoreCommand::VerifyReceiverKeyProof => {
-            Ok(crate::ballot_privacy::verify_receiver_key_proof_from_command_request(request))
-        }
-        TranscriptCoreCommand::PrepareReceiverKeyProofGeneration => Ok(
-            crate::ballot_privacy::prepare_receiver_key_proof_generation_from_command_request(
-                request,
-            ),
-        ),
-        TranscriptCoreCommand::GenerateReceiverKeyProof => {
-            Ok(crate::ballot_privacy::generate_receiver_key_proof_from_command_request(request))
-        }
-        TranscriptCoreCommand::GenerateBallotProof => {
-            Ok(crate::ballot_privacy::generate_ballot_proof_from_command_request(request))
-        }
-        TranscriptCoreCommand::GenerateBallotComponentProof => Ok(
-            crate::ballot_privacy::generate_ballot_component_proof_from_command_request(request),
-        ),
-        TranscriptCoreCommand::GenerateBallotProofRecord => {
-            Ok(crate::ballot_privacy::generate_ballot_proof_record_from_command_request(request))
-        }
-        TranscriptCoreCommand::VerifyBallotProof => {
-            Ok(crate::ballot_privacy::verify_ballot_proof_from_command_request(request))
-        }
-        TranscriptCoreCommand::VerifyClaimBearingBallotPackage => {
-            let ballot_package = request.get("ballotPackage").ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "ballotPackage is required",
-                )
-            })?;
-            let casual_micro_roster_acknowledged = request
-                .get("casualMicroRosterAcknowledged")
-                .and_then(Value::as_bool)
-                == Some(true);
-            let dynamic_roster_profile_evidence = request.get("dynamicRosterProfileEvidence");
-
-            Ok(crate::ballot_privacy::verify_claim_bearing_ballot_package(
-                ballot_package,
-                dynamic_roster_profile_evidence,
-                casual_micro_roster_acknowledged,
-            ))
-        }
-        TranscriptCoreCommand::GenerateAggregateDerivationProof => Ok(
-            crate::ballot_privacy::generate_aggregate_derivation_proof_from_command_request(
-                request,
-            ),
-        ),
-        TranscriptCoreCommand::VerifyAggregateDerivationProof => Ok(
-            crate::ballot_privacy::verify_aggregate_derivation_proof_from_command_request(request),
-        ),
-        TranscriptCoreCommand::GenerateAggregateBridgeEncryption => Ok(
-            crate::ballot_privacy::generate_aggregate_bridge_encryption_from_command_request(
-                request,
-            ),
-        ),
-        TranscriptCoreCommand::VerifyAggregateBridgeEncryption => Ok(
-            crate::ballot_privacy::verify_aggregate_bridge_encryption_from_command_request(request),
-        ),
-        TranscriptCoreCommand::EvaluateAggregateBridgeRelation => Ok(
-            crate::ballot_privacy::evaluate_aggregate_bridge_relation_from_command_request(request),
-        ),
-        _ => unreachable!("non-ballot command dispatched to ballot privacy handler"),
     }
 }
 
@@ -644,6 +521,9 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::VerifyBgvPassiveSetup => {
             crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
         }
+        TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial => {
+            crate::bgv::commands::generate_bgv_evaluation_key_material_from_request(request)
+        }
         TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
             crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)
         }
@@ -664,6 +544,19 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
             Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
+        }
+        TranscriptCoreCommand::RunDirectEncryptedBallot => {
+            crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
+        }
+        TranscriptCoreCommand::GenerateBgvTargetDecryptionShare => {
+            crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
+            crate::bgv::target_decryption::recombine_bgv_target_decryption_shares_from_request(
+                request,
+            )
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

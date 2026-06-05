@@ -55,6 +55,9 @@ impl DeterministicFixtureRng {
         }
     }
 
+    // Counter-mode keystream PRG: each 64-byte block is hash512 (the domain-
+    // separated SHAKE256 XOF) keyed by the seed and a varuint block counter,
+    // which is incremented per refill.
     fn refill(&mut self) {
         let mut counter_bytes = Vec::new();
         append_varuint(&mut counter_bytes, self.counter);
@@ -77,6 +80,10 @@ fn decode_u64_be(bytes: &[u8]) -> u64 {
     value
 }
 
+// Rejection sampling to avoid modulo bias (canonical pattern for this repo; the
+// same idea recurs in bgv/setup/sampling.rs). The threshold is the largest
+// multiple of `bound` that fits, i.e. 2^64 - (2^64 mod bound); candidates at or
+// above it are discarded so every residue is equally likely.
 #[cfg(test)]
 fn reduce_u64_below_without_modulo_bias(value: u64, exclusive_upper_bound: u64) -> Option<u64> {
     let bound = u128::from(exclusive_upper_bound);

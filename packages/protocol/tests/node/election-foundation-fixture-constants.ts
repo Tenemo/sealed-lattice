@@ -7,13 +7,13 @@ import {
 } from '@sealed-lattice/crypto';
 import {
     bgvPassiveSetupProfileId,
-    bridgeWitnessPrivacyProfileId,
-    cpadProfileId,
-    encryptedAggregateBridgeProfileId,
-    evaluationNoiseProfileId,
-    evaluationProofProfileId,
+    ballotValidityProofProfileId,
+    directComparisonProfileId,
+    encryptedBallotAggregateProfileId,
+    encryptedBallotLayoutProfileId,
+    evaluatorReplayProfileId,
     mobileProfileId,
-    thresholdDecryptionProfileId,
+    targetDecryptionProfileId,
 } from '@sealed-lattice/types';
 import type {
     CanonicalSignedRootObject,
@@ -30,7 +30,7 @@ import {
     deriveWitnessPolicyHash,
 } from '#packages/protocol/src/finality/index';
 
-const deriveFixtureHash = (
+export const deriveFixtureHash = (
     purpose: string,
     payload: Record<string, unknown>,
 ): string =>
@@ -100,9 +100,9 @@ export const targetFinalityPolicyHash = deriveTargetFinalityPolicyHash({
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
-export const defaultTopKEvaluationRecordHash = deriveFixtureHash(
-    'fixture-top-k-evaluation-record-v1',
-    { proposal: 'top-k' },
+export const defaultEvaluatorReplayRecordHash = deriveFixtureHash(
+    'fixture-evaluator-replay-record-v1',
+    { proposal: 'direct-evaluator-replay' },
 );
 export const defaultThresholdProfileHash = deriveProtocolHash(
     'ThresholdProfileHash',
@@ -148,9 +148,14 @@ export const manifestPolicyHashes: ManifestPolicyHashes = {
     witnessPolicyHash,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
-    encryptedAggregateBridgeProfileId,
     bgvPassiveSetupProfileId,
-    bridgeWitnessPrivacyProfileId,
+    encryptedBallotLayoutProfileId,
+    ballotValidityProofProfileId,
+    encryptedBallotAggregateProfileId,
+    evaluatorReplayProfileId,
+    directComparisonProfileId,
+    targetDecryptionProfileId,
+    mobileProfileId,
     heParamHash: deriveFixtureHash('fixture-he-parameter-profile-v1', {
         profile: 'BGV-RNS-v1',
     }),
@@ -200,89 +205,71 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         'CanonicalCiphertextConventionHash',
         { convention: 'bgv-rns-coefficient-domain-c0-plus-c1-s' },
     ),
-    encryptedAggregateBridgeHash: deriveProtocolHash(
-        'EncryptedAggregateBridgeHash',
-        {
-            profile: encryptedAggregateBridgeProfileId,
-        },
-    ),
-    bridgeWitnessPrivacyProfileHash: deriveFixtureHash(
-        'fixture-bridge-witness-privacy-profile-v1',
-        { profile: bridgeWitnessPrivacyProfileId },
-    ),
     bgvBatchEncoderHash: deriveProtocolHash('BGVBatchEncoderHash', {
-        layout: 'WinnerRankTopK-v1',
+        layout: 'DirectEncryptedScoreSlots-v1',
     }),
-    bridgeLayoutHash: deriveFixtureHash('fixture-bridge-layout-v1', {
-        layout: 'encrypted-aggregate-input-layout-v1',
+    encryptedBallotLayoutHash: deriveProtocolHash('EncryptedBallotLayoutHash', {
+        layout: encryptedBallotLayoutProfileId,
     }),
-    encryptedAggregateInputRoot: deriveFixtureHash(
-        'fixture-encrypted-aggregate-input-root-v1',
-        { layout: 'encrypted-aggregate-input-v1' },
+    ballotValidityProofProfileHash: deriveFixtureHash(
+        'fixture-ballot-validity-proof-profile-v1',
+        { profile: ballotValidityProofProfileId },
     ),
-    encryptedAggregateShareCiphertextRoot: deriveProtocolHash(
-        'EncryptedAggregateShareCiphertextRoot',
-        {
-            layout: 'encrypted-aggregate-share-ciphertexts-v1',
-        },
+    encryptedBallotAggregateProfileHash: deriveProtocolHash(
+        'EncryptedBallotAggregateProfileHash',
+        { profile: encryptedBallotAggregateProfileId },
     ),
-    encryptedAggregateReconstructionHash: deriveProtocolHash(
-        'EncryptedAggregateReconstructionHash',
-        {
-            circuit: 'encrypted-aggregate-reconstruction-v1',
-        },
+    encryptedBallotAggregateLayoutHash: deriveProtocolHash(
+        'EncryptedBallotAggregateLayoutHash',
+        { layout: 'direct-encrypted-ballot-aggregate-layout-v1' },
     ),
-    scoreBitDerivationCircuitHash: deriveProtocolHash(
-        'ScoreBitDerivationCircuitHash',
-        {
-            circuit: 'score-bit-derivation-circuit-v1',
-            selectedEvaluatorPath:
-                'encrypted-aggregate-score-bit-derivation-v1',
-        },
-    ),
-    encryptedScoreBitInputHash: deriveProtocolHash(
-        'EncryptedScoreBitInputHash',
-        {
-            layout: 'encrypted-score-bit-inputs-v1',
-            selectedEvaluatorPath:
-                'encrypted-aggregate-score-bit-derivation-v1',
-        },
+    directAggregateLayoutHash: deriveProtocolHash('DirectAggregateLayoutHash', {
+        layout: 'direct-aggregate-layout-v1',
+    }),
+    directComparisonProfileHash: deriveProtocolHash(
+        'DirectComparisonProfileHash',
+        { profile: directComparisonProfileId },
     ),
     comparisonInputDerivationCircuitHash: deriveProtocolHash(
         'ComparisonInputDerivationCircuitHash',
         {
             circuit: 'comparison-input-derivation-circuit-v1',
-            futureDesignNoteRequired: true,
-            selectedEvaluatorPath:
-                'inactive-future-direct-comparison-input-profile',
+            selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
         },
     ),
     encryptedComparisonInputHash: deriveProtocolHash(
         'EncryptedComparisonInputHash',
         {
-            futureDesignNoteRequired: true,
             layout: 'encrypted-comparison-inputs-v1',
-            selectedEvaluatorPath:
-                'inactive-future-direct-comparison-input-profile',
+            selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
         },
+    ),
+    encryptedSparseTargetProjectionHash: deriveProtocolHash(
+        'EncryptedSparseTargetProjectionHash',
+        { circuit: 'encrypted-sparse-target-projection-v1' },
+    ),
+    targetLayoutHash: deriveProtocolHash('TargetLayoutHash', {
+        layout: 'direct-sparse-target-layout-v1',
+    }),
+    evaluatorReplayProfileHash: deriveFixtureHash(
+        'fixture-evaluator-replay-profile-v1',
+        { profile: evaluatorReplayProfileId },
     ),
     evaluationNoiseProfileHash: deriveFixtureHash(
-        'fixture-evaluation-noise-profile-v1',
-        {
-            profile: evaluationNoiseProfileId,
-        },
+        'fixture-direct-evaluator-noise-profile-v1',
+        { profile: 'direct-evaluator-noise-profile-v1' },
     ),
     heEvaluationNoiseCertHash: deriveFixtureHash('fixture-he-noise-cert-v1', {
-        certificate: 'he-evaluation-noise-v1',
+        certificate: 'direct-evaluator-noise-v1',
     }),
     allowedEvaluatorOpsHash: deriveProtocolHash('AllowedEvaluatorOpsHash', {
-        operations: 'packed-bit-sliced-bgv-top-k-v1',
+        operations: 'direct-encrypted-score-comparison-v1',
     }),
     rotSetHash: deriveProtocolHash('RotSetHash', {
-        rotations: 'provisional-encrypted-aggregate-evaluator-top-k',
+        rotations: 'direct-encrypted-ballot-evaluator-replay',
     }),
     evaluationKeyRoot: deriveProtocolHash('EvalKeyRoot', {
-        keys: 'provisional-encrypted-aggregate-evaluator-top-k',
+        keys: 'direct-encrypted-ballot-evaluator-replay',
     }),
     evaluationKeySizeProfileHash: deriveProtocolHash(
         'EvaluationKeySizeProfileHash',
@@ -302,32 +289,29 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
             setup: 'threshold-share-verification-key-set',
         },
     ),
-    evaluationProofProfileId,
-    evaluationProofProfileHash: deriveFixtureHash(
-        'fixture-evaluation-proof-profile-v1',
-        { profile: evaluationProofProfileId },
+    trusteeThresholdVerificationKeyHash: deriveProtocolHash(
+        'TrusteeThresholdVerificationKeyHash',
+        {
+            setup: 'trustee-threshold-verification-key-set',
+        },
     ),
-    thresholdDecryptionProfileId,
-    thresholdDecryptionProfileHash: deriveProtocolHash(
-        'ThresholdDecryptionProfileHash',
-        { profile: thresholdDecryptionProfileId },
+    targetDecryptionProfileHash: deriveProtocolHash(
+        'TargetDecryptionProfileHash',
+        { profile: targetDecryptionProfileId },
     ),
-    kllpsTargetDecryptionProfileHash: deriveProtocolHash(
-        'KllpsTargetDecryptionProfileHash',
-        { profile: thresholdDecryptionProfileId },
+    targetThresholdDecryptabilityCertificateHash: deriveProtocolHash(
+        'TargetThresholdDecryptabilityCertificateHash',
+        {
+            profile: targetDecryptionProfileId,
+            targetOnly: true,
+        },
     ),
-    cpadProfileId,
-    cpadProfileHash: deriveFixtureHash('fixture-cpad-profile-v1', {
-        profile: cpadProfileId,
+    targetBasisHash: deriveFixtureHash('fixture-target-basis-v1', {
+        profile: 'direct-target-basis-v1',
     }),
-    targetBasisHash: deriveProtocolHash('TargetBasisHash', {
-        profile: 'target-basis-v1',
+    mobileProfileHash: deriveFixtureHash('fixture-mobile-profile-v1', {
+        profile: mobileProfileId,
     }),
-    mobileProfileId,
-    bridgeBenchmarkReportPolicyHash: deriveFixtureHash(
-        'fixture-bridge-benchmark-report-policy-v1',
-        { policy: 'bridge-benchmark-report' },
-    ),
 };
 
 export const createSignature = (

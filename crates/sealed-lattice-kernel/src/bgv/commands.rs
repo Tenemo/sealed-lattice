@@ -1,4 +1,3 @@
-use num_bigint::BigInt;
 use serde_json::{Value, json};
 
 use crate::{
@@ -6,14 +5,14 @@ use crate::{
         base_conversion::convert_plaintext_lifted_basis,
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         profile::{
-            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, aggregate_input_encoding_profile_hash,
-            allowed_operation_registry_hash, allowed_operation_registry_value,
-            backend_profile_hash, ballot_score_encoding_profile_hash,
-            ballot_share_layout_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
+            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_hash,
+            allowed_operation_registry_value, backend_profile_hash,
+            ballot_score_encoding_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
             batch_layout_binding_value, canonical_ciphertext_convention_hash,
-            encoded_aggregate_layout_hash, layout_hash, profile_hash,
-            security_estimator_input_hash, selected_profile_value,
-            top_k_evaluator_input_layout_hash,
+            direct_aggregate_layout_hash, direct_comparison_profile_hash,
+            encrypted_ballot_aggregate_layout_hash, encrypted_ballot_aggregate_profile_hash,
+            encrypted_ballot_layout_hash, profile_hash, security_estimator_input_hash,
+            selected_profile_value,
         },
         serialization::{
             BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
@@ -21,6 +20,7 @@ use crate::{
         },
         setup::{
             describe_passive_setup_object_model, generate_passive_setup_package_from_request,
+            generate_passive_setup_public_evaluation_key_material_from_request,
             verify_passive_setup_package_from_request,
         },
         validation::{
@@ -31,22 +31,20 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-pub(crate) use crate::bgv::setup::EncryptedAggregateBridgeCiphertextRelationTrace;
-
 pub(crate) fn describe_bgv_rns_profile() -> CanonicalResult<Value> {
     Ok(json!({
         "profile": selected_profile_value(),
         "profileHash": profile_hash()?,
         "backendProfileHash": backend_profile_hash()?,
         "batchEncoderHash": batch_encoder_hash()?,
-        "encryptedAggregateInputLayoutHash": layout_hash()?,
+        "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
         "batchLayoutBinding": batch_layout_binding_value()?,
         "batchLayoutBindingHash": batch_layout_binding_hash()?,
         "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
-        "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash()?,
-        "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
-        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
-        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+        "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
+        "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
+        "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
+        "directComparisonProfileHash": direct_comparison_profile_hash()?,
         "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
         "securityEstimatorInputHash": security_estimator_input_hash()?,
@@ -124,6 +122,12 @@ pub(crate) fn verify_bgv_passive_setup_from_request(request: &Value) -> Canonica
     verify_passive_setup_package_from_request(request)
 }
 
+pub(crate) fn generate_bgv_evaluation_key_material_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    generate_passive_setup_public_evaluation_key_material_from_request(request)
+}
+
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
     reject_unexpected_bgv_request_fields(
         request,
@@ -186,7 +190,7 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
         "validation": validation,
         "statusLabels": [
             "BGVBatchEncoded",
-            "EncryptedAggregateInputLayoutBound",
+            "DirectEncryptedBallotAggregateLayoutBound",
             "NativeDecodeRoundTripMatched",
             "PlaintextRootBound"
         ],
@@ -202,14 +206,14 @@ fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
     let supplied_binding = request.get("layoutBinding").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "BGV batch encoder requires explicit EncryptedAggregateInput layout binding",
+            "BGV batch encoder requires explicit direct encrypted ballot aggregate layout binding",
         )
     })?;
     let expected_binding = batch_layout_binding_value()?;
     if supplied_binding != &expected_binding {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "BGV batch encoder layout binding does not match the selected EncryptedAggregateInput layout",
+            "BGV batch encoder layout binding does not match the selected direct encrypted ballot aggregate layout",
         ));
     }
 
@@ -321,81 +325,6 @@ pub(crate) fn reject_bgv_reference_oracle_artifact_from_request(request: &Value)
     reject_reference_oracle_artifact(artifact)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots(
-    setup_package: &Value,
-    contributor_identity: &str,
-    aggregate_derivation_component_hash: &str,
-    aggregate_derivation_statement_hash: &str,
-    post_voting_closed_context_hash: &str,
-    reduced_aggregate_slots: &[u64],
-    encryption_randomness_seed_hex: &str,
-    include_canonical_bytes_hex: bool,
-) -> CanonicalResult<EncryptedAggregateBridgeCiphertextRelationTrace> {
-    crate::bgv::setup::generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots(
-        setup_package,
-        contributor_identity,
-        aggregate_derivation_component_hash,
-        aggregate_derivation_statement_hash,
-        post_voting_closed_context_hash,
-        reduced_aggregate_slots,
-        encryption_randomness_seed_hex,
-        include_canonical_bytes_hex,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
-    setup_package: &Value,
-    aggregate_derivation_component_hash: &str,
-    aggregate_derivation_statement_hash: &str,
-    post_voting_closed_context_hash: &str,
-    bridge_encryption: &Value,
-) -> CanonicalResult<()> {
-    crate::bgv::setup::verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
-        setup_package,
-        aggregate_derivation_component_hash,
-        aggregate_derivation_statement_hash,
-        post_voting_closed_context_hash,
-        bridge_encryption,
-    )
-}
-
-pub(crate) fn encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
-    reduced_slot_response: &[BigInt],
-    plaintext_coefficient_response: &[BigInt],
-) -> CanonicalResult<String> {
-    crate::bgv::setup::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
-        reduced_slot_response,
-        plaintext_coefficient_response,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
-    setup_package: &Value,
-    contributor_identity: &str,
-    aggregate_derivation_statement_hash: &str,
-    bridge_encryption: &Value,
-    challenge_scalar: u64,
-    plaintext_coefficient_response: &[BigInt],
-    randomizer_response: &[BigInt],
-    perturbation_zero_response: &[BigInt],
-    perturbation_one_response: &[BigInt],
-) -> CanonicalResult<String> {
-    crate::bgv::setup::encrypted_aggregate_bridge_ciphertext_commitment_hash_from_responses(
-        setup_package,
-        contributor_identity,
-        aggregate_derivation_statement_hash,
-        bridge_encryption,
-        challenge_scalar,
-        plaintext_coefficient_response,
-        randomizer_response,
-        perturbation_zero_response,
-        perturbation_one_response,
-    )
-}
-
 pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> CanonicalResult<Value> {
     reject_unexpected_bgv_request_fields(
         request,
@@ -412,7 +341,7 @@ pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> Cano
         "basisId": object.components[0].basis_id,
         "level": object.components[0].level,
         "coefficientCount": object.components[0].coefficient_count,
-        "layoutHash": object.components[0].layout_hash,
+        "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
         "statusLabels": [
             "BGVCanonicalObjectParsed",
             "CoefficientDomainCanonical"
@@ -516,7 +445,9 @@ mod tests {
             encoded["statusLabels"]
                 .as_array()
                 .expect("labels")
-                .contains(&serde_json::json!("EncryptedAggregateInputLayoutBound"))
+                .contains(&serde_json::json!(
+                    "DirectEncryptedBallotAggregateLayoutBound"
+                ))
         );
         assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({
@@ -547,11 +478,11 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "58c345519637224053f85635ecd8493f74a42bc6b44fcd889571bf73e44ea0534de25677efec1b2efff76f64d17735debb527c787db0b8057a59458e004bfb3c"
+            "0ed438e393c879787b859758e3c975edf4520b0258d2b42690eeb336c5a72140e265e5e7404b868ade767ee3b29da3c669c9d8db382a8877bb032accd51f8a58"
         );
         assert_eq!(
             encoded["canonicalBytesHash512"],
-            "02dd5e48be07c2bc343db89c7566f907b0bc319b56feb4ea0d6fa9a40a9f65829346a2ea08a576342c8dccce1a098e31f553c60726b1a76c1a77ae4a57cf426e"
+            "a6c247b2a549934dcf071cb48cb983194ea8ecf6d1c4021cae3750f5385e9fa3db08671d84568ca33614b5a1f581069d441b1fa4c426d266b1c04e8f4d39ee76"
         );
         assert_eq!(encoded["canonicalByteLength"], 90_441);
 
@@ -564,11 +495,11 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "ea667f7e46ffa85907186697546c29f810e32559acf366bd7fe646be10638a0e6b6d4946fc7a3cade59e468ac65b12cc5115c8ed89f4d1111bd92a7a2b4dd0b6"
+            "28abe0e1146052111d852fd130c46ca993f9e30bd6f41a82b7bd060f18516cdca0af82cd2d7691b419a1f940d550424170dccded3c3260d6ca57175c86e569f0"
         );
         assert_eq!(
             ciphertext["canonicalBytesHash512"],
-            "63844b4aa643a6e261ddc4d9acf28c2cb6836a50079ce34aa9a18296505b83eda7c14686e212c728d3fd877bbfa2f2c41a33f58817fc328c66ff738f460472ba"
+            "5e16cf5cac15f9767873d0f469cf1a014470908652216124e6ec8048cf04238e73d54e37dd7236996e988ea053cca303910cdd4e2dea50a67ef433fbd7ad9e70"
         );
         assert_eq!(ciphertext["canonicalByteLength"], 180_781);
 
@@ -579,11 +510,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "84e9322792461a7bfaf4026c23edeed8ec836c6cae265ad7dfdb3402fa78a0f2aac858db22395c30b5154d46528fc0b989b44866a6bce536fb4fc8a863a45416"
+            "6d0bed44f39f28a28e8cc58fbf3f81885cbab61a31e9166daaa08d4a90c90a29f3fbea28949e0c2169aa395057b3eb02e79b308893a224a7a069d1849d428500"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "4f5642198725dddac839c179cc88138f8617d84b564e5b974d193c1d6003a599714c6ce4b7992dfec7bd03b1b4966e8e71dbc992930b1991ad5a72bac27a6672"
+            "2b8a266d210fc0aab7756fdf57322f7b4c8e1f166eac07409dd9a66b85fc3d8d58732e880b757ecb740c7dd0629e674c0d3ccc4ed9054e0cfcddf60638193144"
         );
     }
 

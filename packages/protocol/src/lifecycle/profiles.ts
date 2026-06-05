@@ -8,7 +8,7 @@ import type {
     TiePolicy,
 } from '@sealed-lattice/types';
 export {
-    cpadProfileId,
+    targetDecryptionProfileId,
     targetBoundShareSelectionProfileId,
 } from '@sealed-lattice/types';
 
@@ -37,7 +37,12 @@ export const defaultThresholdProfileFamily =
 export const defaultSmallRosterPolicy =
     'ForbidMicroRoster' as const satisfies SmallRosterPolicy;
 
+// Roster-size landmarks:
+//  3  - absolute minimum supported roster.
+//  10 - the mandatory benchmark roster size.
+//  20 - larger stress profile, claim-bearing only with dynamic evidence.
+//  50 - hard maximum supported roster.
 export const minimumSupportedRosterSize = 3;
 export const minimumDynamicRosterSize = 10;
-export const mandatoryBenchmarkRosterSize = 20;
+export const mandatoryBenchmarkRosterSize = 10;
 export const maximumSupportedRosterSize = 50;

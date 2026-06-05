@@ -2,16 +2,7 @@ import type { ProtocolHash } from './protocol-hash.js';
 import type { MheSecurityClosure } from './transcript-core.js';
 
 /** Result claim labels used after decryption and verification complete. */
-export type ResultClaimLabel =
-    | 'fullyVerified'
-    | 'resultLocallyReplayedAuditable';
-
-/** Evaluation proof state represented in lifecycle labels. */
-export type EvaluationProofMode =
-    | 'evaluationProofPending'
-    | 'evaluationProofVerified'
-    | 'evaluationProofRejected'
-    | 'evaluationProofProfileRejected';
+export type ResultClaimLabel = 'fullyVerified';
 
 /** Backend corruption model used when deriving threshold profiles. */
 export type HeBackendCorruptionModel =
@@ -37,7 +28,7 @@ export type DecryptionShareSelectionRule =
 export type TargetBoundShareSelectionProfile = {
     readonly profileId: string;
     readonly certificateHash: string;
-    readonly cpadProfileId: string;
+    readonly targetDecryptionProfileId: string;
     readonly targetBasisHash: ProtocolHash;
     readonly decryptionShareQuorum: number;
     readonly minimumSharesForInterpolation: number;
@@ -88,10 +79,9 @@ export type ThresholdProfile = {
     readonly privacyCorruptionBound: number;
     readonly decryptionCorruptionBound: number;
     readonly activeFaultBound: number;
-    readonly pvssThreshold: number;
+    readonly ballotReleaseFloor: number;
     readonly decryptionThreshold: number;
     readonly releaseQuorum: number;
-    readonly aggregateContributionQuorum: number;
     readonly decryptionShareQuorum: number | null;
     readonly targetBoundShareSelectionProfile: TargetBoundShareSelectionProfile | null;
     readonly maximumRaceShares: number;
@@ -108,9 +98,7 @@ export type ScoreDomain = {
 };
 
 /** Duplicate ballot policy currently supported by the public facade. */
-export type DuplicateBallotPolicy =
-    | 'FirstValidBeforeVotingClosedCounts'
-    | 'LastValidBeforeVotingClosedCounts';
+export type DuplicateBallotPolicy = 'FirstValidBeforeVotingClosedCounts';
 
 /** Tie-breaking policy currently supported by the public facade. */
 export type TiePolicy = 'HigherScoreThenLowerOptionIndex';
@@ -219,18 +207,15 @@ export type LifecycleState =
     | 'rosterFrozen'
     | 'votingOpen'
     | 'votingClosed'
-    | 'aggregatePending'
-    | 'aggregateReady'
-    | 'aggregateBridgeVerified'
-    | 'evaluationPending'
-    | 'topKEvaluated'
+    | 'encryptedBallotsSelected'
+    | 'ballotProofsVerified'
+    | 'encryptedBallotAggregateComputed'
+    | 'evaluatorReplayed'
     | 'targetFinalityReached'
-    | 'evaluationProofPending'
-    | 'evaluationProofVerified'
     | 'targetAccepted'
     | 'decryptionPending'
     | 'decryptionSharesReady'
-    | 'cpadProfileVerified'
+    | 'resultDecoded'
     | 'fullyVerified'
     | 'pending'
     | 'outsideClaim'
@@ -238,51 +223,50 @@ export type LifecycleState =
 
 /** Primary non-failure status label shown for lifecycle progress. */
 export type PrimaryStatusLabel =
-    | 'aggregateBridgeVerified'
-    | 'aggregateReady'
+    | 'ballotProofsVerified'
     | 'ballotSubmitted'
-    | 'cpadProfileVerified'
-    | 'evaluationProofVerified'
+    | 'encryptedBallotAggregateComputed'
+    | 'encryptedBallotsSelected'
+    | 'evaluatorReplayed'
     | 'forkDetected'
+    | 'fullyVerified'
     | 'outsideClaim'
     | 'pending'
+    | 'resultDecoded'
     | 'rosterFrozen'
-    | 'targetAccepted'
-    | 'topKEvaluated'
-    | 'fullyVerified';
+    | 'targetAccepted';
 
 /** Failure status label shown when transcript or profile checks cannot proceed. */
 export type FailureStatusLabel =
-    | 'aggregateThresholdNotReached'
+    | 'ballotProofsMissing'
     | 'boardEvidencePublished'
     | 'boardForkSuspected'
+    | 'evaluatorReplayMissing'
     | 'forkDetected'
-    | 'missingAggregateContributions'
     | 'missingDecryptionShares'
     | 'missingTargetFinality'
     | 'outsideMeasuredRuntimeProfile'
+    | 'rejectedBallotProofProfile'
     | 'rejectedBoardFinalityProfile'
-    | 'rejectedBridgeBenchmarkReport'
-    | 'rejectedBridgeProof'
+    | 'rejectedEvaluatorReplayProfile'
     | 'setupIncomplete'
     | 'turnoutFloorNotReached'
     | 'unsupportedBackendProfile'
     | 'unsupportedBgvProfile'
-    | 'unsupportedKllpsCpadProfile'
+    | 'unsupportedMobileProfile'
+    | 'unsupportedTargetDecryptionProfile'
     | 'witnessEquivocationEvidence';
 
 /** Mode or caveat status label attached to lifecycle outputs. */
 export type ModeStatusLabel =
     | 'activeMaliciousClosure'
     | 'casualMicroRoster'
-    | 'evaluationProofClosure'
-    | 'kllpsCpadClosure'
-    | 'localReplayFailed'
-    | 'localReplayMatched'
-    | 'localReplayUnavailable'
+    | 'directEncryptedBallotPath'
     | 'longRunningCryptographicCheck'
     | 'measuredRuntimeProfile'
-    | 'passiveMhePrototype';
+    | 'mobileReplayProfile'
+    | 'passiveMhePrototype'
+    | 'targetDecryptionClosure';
 
 /** Allowed lifecycle transition edge. */
 export type LifecycleTransition = {
@@ -296,34 +280,28 @@ export type LifecycleLabelInput = {
     readonly thresholdProfile: ThresholdProfile;
     readonly mheSecurityClosure?: MheSecurityClosure;
     readonly securityProfileIds?: readonly string[];
-    readonly evaluationProofMode?: EvaluationProofMode;
     readonly localRosterAccepted?: boolean;
     readonly ownBallotSubmitted?: boolean;
-    readonly evaluationLocallyReplayed?: boolean;
-    readonly localReplayDiagnosticVerified?: boolean;
-    readonly localReplayUnavailable?: boolean;
     readonly witnessEquivocationEvidence?: boolean;
     readonly targetFinalityNotReached?: boolean;
-    readonly bridgeProofRejected?: boolean;
+    readonly ballotProofsMissing?: boolean;
+    readonly evaluatorReplayMissing?: boolean;
     readonly backendProfileRejected?: boolean;
     readonly bgvProfileRejected?: boolean;
-    readonly kllpsCpadProfileRejected?: boolean;
+    readonly ballotProofProfileRejected?: boolean;
+    readonly evaluatorReplayProfileRejected?: boolean;
+    readonly targetDecryptionProfileRejected?: boolean;
     readonly decryptionThresholdNotReached?: boolean;
-    readonly bridgeBenchmarkReportRejected?: boolean;
     readonly boardFinalityProfileRejected?: boolean;
     readonly runtimeProfileRejected?: boolean;
     readonly outsideMeasuredRuntimeProfile?: boolean;
     readonly measuredRuntimeProfile?: boolean;
+    readonly mobileReplayEvidencePresent?: boolean;
     readonly longRunningCryptographicCheck?: boolean;
     readonly runtimeClaimGatePassed?: boolean;
-    readonly bridgeBenchmarkReportPresent?: boolean;
-    readonly bridgeProverCertificatePresent?: boolean;
-    readonly evaluationProofCertificatePresent?: boolean;
-    readonly oneShotDecryptionProofCertificatePresent?: boolean;
-    readonly kllpsCpadCertificatePresent?: boolean;
-    readonly thresholdDecryptionCertificatePresent?: boolean;
-    readonly evaluationProofClosureApplied?: boolean;
-    readonly kllpsCpadClosureApplied?: boolean;
+    readonly directProofTransportPresent?: boolean;
+    readonly targetDecryptionCertificatePresent?: boolean;
+    readonly targetDecryptionClosureApplied?: boolean;
     readonly activeMaliciousClosureApplied?: boolean;
     readonly decodedResultLayoutVerified?: boolean;
 };
@@ -334,7 +312,6 @@ export type LifecycleLabels = {
     readonly failures: readonly FailureStatusLabel[];
     readonly modes: readonly ModeStatusLabel[];
     readonly resultClaimLabels: readonly ResultClaimLabel[];
-    readonly evaluationProofMode: EvaluationProofMode;
 };
 
 /** Public protocol action checked by capability helpers. */
@@ -348,18 +325,14 @@ export type ProtocolAction =
     | 'OpenVoting'
     | 'SubmitVote'
     | 'CloseVoting'
-    | 'DeriveAggregateContribution'
-    | 'CreateBridgeProof'
-    | 'VerifyBridgeProof'
+    | 'VerifyEncryptedBallotProofs'
+    | 'AggregateEncryptedBallots'
+    | 'ReplayEvaluator'
     | 'VerifyTranscript'
-    | 'VerifyEvaluationProof'
     | 'AcceptTarget'
-    | 'ReplayEvaluation'
-    | 'CreateLocalReplayDiagnostic'
     | 'CreateTargetBoundDecryptionShare'
     | 'VerifyDecryptionShare'
-    | 'VerifyOneShotSharePolicy'
-    | 'VerifyKllpsTargetDecryptionProfile'
+    | 'VerifyTargetDecryptionProfile'
     | 'RecombineAcceptedTarget'
     | 'DecodeVerifiedTopK'
     | 'CreateRecoveryEpochUpdate'
@@ -381,34 +354,31 @@ export type CapabilityContext = {
     readonly pollSpecValid: boolean;
     readonly finalRosterHash?: ProtocolHash;
     readonly frozenRosterProfileHash?: ProtocolHash;
-    readonly receiverKeyCoverageComplete?: boolean;
     readonly trusteeSetupComplete?: boolean;
-    readonly ballotProofProfileFrozen?: boolean;
-    readonly shareLayoutFrozen?: boolean;
+    readonly encryptedBallotLayoutFrozen?: boolean;
+    readonly ballotValidityProofProfileFrozen?: boolean;
+    readonly evaluatorReplayProfileFrozen?: boolean;
     readonly targetOutputLayoutFrozen?: boolean;
-    readonly kllpsCpadProfileReferencePresent?: boolean;
+    readonly targetDecryptionProfileReferencePresent?: boolean;
     readonly localRosterAccepted?: boolean;
     readonly rosterExternalAcceptanceHash?: ProtocolHash;
     readonly actionContextRosterExternalAcceptanceHash?: ProtocolHash | null;
     readonly setupCompleteCount?: number;
     readonly turnoutCount?: number;
     readonly decryptionShareCount?: number;
+    readonly ballotProofsVerified?: boolean;
+    readonly encryptedBallotAggregateComputed?: boolean;
+    readonly evaluatorReplaySucceeded?: boolean;
     readonly targetFinalityAccepted?: boolean;
     readonly targetAccepted?: boolean;
-    readonly evaluationProofVerified?: boolean;
-    readonly cpadProfileVerified?: boolean;
-    readonly localReplaySucceeded?: boolean;
+    readonly targetDecryptionProfileVerified?: boolean;
     readonly browserSupported?: boolean;
     readonly runtimeProfileSupported?: boolean;
     readonly storageQuotaSufficient?: boolean;
-    readonly bridgeBenchmarkReportPresent?: boolean;
-    readonly bridgeProverCertificatePresent?: boolean;
-    readonly evaluationProofCertificatePresent?: boolean;
-    readonly oneShotDecryptionProofCertificatePresent?: boolean;
-    readonly kllpsCpadCertificatePresent?: boolean;
-    readonly thresholdDecryptionCertificatePresent?: boolean;
-    readonly evaluationProofClosureApplied?: boolean;
-    readonly cpadClosureApplied?: boolean;
+    readonly directProofTransportPresent?: boolean;
+    readonly mobileReplayEvidencePresent?: boolean;
+    readonly targetDecryptionCertificatePresent?: boolean;
+    readonly targetDecryptionClosureApplied?: boolean;
     readonly activeMaliciousClosureApplied?: boolean;
     readonly recoveryState?: RecoveryState;
 };
@@ -426,28 +396,20 @@ export type RefusalReason =
     | 'SetupIncomplete'
     | 'turnoutFloorNotReached'
     | 'TurnoutBelowReleaseFloor'
-    | 'AggregateThresholdNotReached'
-    | 'EvaluationProofMissing'
-    | 'EvaluationProofRejected'
-    | 'LocalReplayNotVerified'
+    | 'BallotProofsMissing'
+    | 'EncryptedBallotAggregateMissing'
+    | 'EvaluatorReplayMissing'
     | 'TargetFinalityCheckpointMissing'
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'
-    | 'KllpsCpadProfileNotVerified'
-    | 'CPADProfileNotVerified'
+    | 'TargetDecryptionProfileNotCertified'
     | 'UnsupportedBrowserContext'
     | 'OutsideMeasuredRuntimeProfile'
     | 'UnsupportedMobileProfile'
     | 'InsufficientStorageQuota'
-    | 'MissingBridgeMobileCertificate'
-    | 'MissingBridgeProverCertificate'
-    | 'MissingEvaluationProofCertificate'
-    | 'MissingOneShotDecryptionProofCertificate'
-    | 'MissingBridgeBenchmarkReport'
-    | 'MissingKllpsCpadCertificate'
-    | 'MissingCPADCertificate'
-    | 'MissingThresholdDecryptionCertificate'
-    | 'ThresholdDecryptionProfileNotCertified'
+    | 'MissingDirectProofTransport'
+    | 'MissingMobileReplayEvidence'
+    | 'MissingTargetDecryptionCertificate'
     | 'ClaimClosureMissing'
     | 'AmbiguousRecoveryState'
     | 'StaleRecoveryEpoch'

@@ -26,7 +26,10 @@ export type ActiveLocalRunLog = {
     readonly combinedLogPath: string;
     readonly runDirectoryPath: string;
     createCommandLogFiles(request: CommandLogRequest): CommandLogFiles;
-    finish(input: { readonly exitCode: number }): Promise<void>;
+    finish(input: {
+        readonly details?: unknown;
+        readonly exitCode: number;
+    }): Promise<void>;
     writeCombinedOutput(chunk: string | Uint8Array): void;
 };
 
@@ -44,6 +47,7 @@ type LocalRunLogMetadata = {
 };
 
 type LocalRunLogSummary = {
+    readonly details?: unknown;
     readonly durationMilliseconds: number;
     readonly exitCode: number;
     readonly finishedAtIso: string;
@@ -163,7 +167,10 @@ class LocalRunLog implements ActiveLocalRunLog {
         };
     }
 
-    async finish(input: { readonly exitCode: number }): Promise<void> {
+    async finish(input: {
+        readonly details?: unknown;
+        readonly exitCode: number;
+    }): Promise<void> {
         if (this.#finished) {
             return;
         }
@@ -174,6 +181,7 @@ class LocalRunLog implements ActiveLocalRunLog {
             durationMilliseconds: Math.round(
                 performance.now() - this.#startedAtMilliseconds,
             ),
+            details: input.details,
             exitCode: input.exitCode,
             finishedAtIso,
             objectVersion: 'sealed-lattice-local-run-log-summary-v1',

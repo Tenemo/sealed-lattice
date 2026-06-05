@@ -5,12 +5,8 @@ pub(crate) fn add_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u6
     if left >= modulus || right >= modulus {
         return Err(out_of_range_error());
     }
-    if modulus <= u64::MAX / 2 {
-        let sum = left + right;
-        return Ok(if sum >= modulus { sum - modulus } else { sum });
-    }
 
-    Ok(((u128::from(left) + u128::from(right)) % u128::from(modulus)) as u64)
+    Ok(add_mod_fast(left, right, modulus))
 }
 
 pub(crate) fn sub_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u64> {
@@ -18,11 +14,8 @@ pub(crate) fn sub_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u6
     if left >= modulus || right >= modulus {
         return Err(out_of_range_error());
     }
-    if left >= right {
-        Ok(left - right)
-    } else {
-        Ok(modulus - (right - left))
-    }
+
+    Ok(sub_mod_fast(left, right, modulus))
 }
 
 pub(crate) fn mul_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u64> {
@@ -30,16 +23,58 @@ pub(crate) fn mul_mod(left: u64, right: u64, modulus: u64) -> CanonicalResult<u6
     if left >= modulus || right >= modulus {
         return Err(out_of_range_error());
     }
-    if modulus <= u64::from(u32::MAX) {
-        return Ok(left.wrapping_mul(right) % modulus);
-    }
-    if modulus < (1_u64 << 53) {
-        return Ok(reduce_u53_product(left, right, modulus));
-    }
 
-    Ok(((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64)
+    Ok(mul_mod_fast(left, right, modulus))
 }
 
+#[inline]
+pub(crate) fn add_mod_fast(left: u64, right: u64, modulus: u64) -> u64 {
+    debug_assert!(modulus > 1);
+    debug_assert!(left < modulus);
+    debug_assert!(right < modulus);
+    if modulus <= u64::MAX / 2 {
+        let sum = left + right;
+        return if sum >= modulus { sum - modulus } else { sum };
+    }
+
+    ((u128::from(left) + u128::from(right)) % u128::from(modulus)) as u64
+}
+
+#[inline]
+pub(crate) fn sub_mod_fast(left: u64, right: u64, modulus: u64) -> u64 {
+    debug_assert!(modulus > 1);
+    debug_assert!(left < modulus);
+    debug_assert!(right < modulus);
+    if left >= right {
+        left - right
+    } else {
+        modulus - (right - left)
+    }
+}
+
+#[inline]
+pub(crate) fn mul_mod_fast(left: u64, right: u64, modulus: u64) -> u64 {
+    debug_assert!(modulus > 1);
+    debug_assert!(left < modulus);
+    debug_assert!(right < modulus);
+    // Three size paths, fastest first. <= u32::MAX: the product fits u64, so a
+    // plain wrapping multiply then reduce is exact.
+    if modulus <= u64::from(u32::MAX) {
+        return left.wrapping_mul(right) % modulus;
+    }
+    // < 2^53 (f64 exact-integer limit): use the f64-quotient estimate path.
+    if modulus < (1_u64 << 53) {
+        return reduce_u53_product(left, right, modulus);
+    }
+
+    // Otherwise fall back to a full 128-bit multiply and reduce.
+    ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64
+}
+
+// f64 estimates the quotient (accurate to within a few multiples of the
+// modulus), then the bounded +/- loop corrects the remainder into [0, modulus).
+// If it has not converged after the fixed iteration budget, fall back to an
+// exact u128 reduction.
 fn reduce_u53_product(left: u64, right: u64, modulus: u64) -> u64 {
     let product = u128::from(left) * u128::from(right);
     let approximate_quotient = ((left as f64) * (right as f64) / (modulus as f64)) as u64;
@@ -93,6 +128,9 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
         ));
     }
 
+    // Extended Euclidean algorithm: track remainders alongside the Bezout
+    // coefficient for `value`. When the loop ends, `previous_remainder` holds
+    // gcd(value, modulus) and `previous_coefficient` is value's inverse.
     let mut previous_remainder = i128::from(modulus);
     let mut remainder = i128::from(value);
     let mut previous_coefficient = 0_i128;
@@ -107,6 +145,7 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
         previous_coefficient = coefficient;
         coefficient = next_coefficient;
     }
+    // gcd != 1 means `value` is not invertible modulo `modulus`.
     if previous_remainder != 1 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

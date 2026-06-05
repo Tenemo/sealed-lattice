@@ -27,7 +27,6 @@ import {
 } from './inclusion.js';
 import {
     verifyManifest,
-    verifyReceiverKeyRegistration,
     verifyRegistrationEntry,
     verifyTrusteeSetupEntry,
 } from './object-validation.js';
@@ -57,9 +56,6 @@ const verifyRosterManifestTranscriptUnchecked = (
     const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
     const registrationProofsByHash = mapInclusionProofsByObjectHash(
         input.registrationInclusionProofs,
-    );
-    const receiverProofsByHash = mapInclusionProofsByObjectHash(
-        input.receiverKeyRegistrationInclusionProofs,
     );
     const trusteeProofsByHash = mapInclusionProofsByObjectHash(
         input.trusteeSetupInclusionProofs,
@@ -134,42 +130,6 @@ const verifyRosterManifestTranscriptUnchecked = (
         );
     }
 
-    const receiverIdentities = new Set<string>();
-    for (const entry of input.receiverKeyRegistrations) {
-        const normalizedReceiverIdentity = normalizeIdentityForComparison(
-            entry.participantIdentity,
-        );
-        if (receiverIdentities.has(normalizedReceiverIdentity)) {
-            refusedObjects.push(
-                createRefusal(
-                    'DuplicateReceiverKeyRegistration',
-                    'Roster freeze rejects duplicate receiver-key registrations after Unicode NFC normalization.',
-                    entry.receiverKeyRegistrationHash,
-                    'ReceiverKeyRegistration',
-                ),
-            );
-        }
-        receiverIdentities.add(normalizedReceiverIdentity);
-        refusedObjects.push(
-            ...verifyReceiverKeyRegistration(
-                input,
-                entry,
-                participantPublicKeys.get(normalizedReceiverIdentity),
-            ),
-        );
-        refusedObjects.push(
-            ...verifyRequiredIncludedObjectPlacement({
-                proofByHash: receiverProofsByHash,
-                objectHash: entry.receiverKeyRegistrationHash,
-                expectedObjectType: 'ReceiverKeyRegistration',
-                headsByHash,
-                objectBoardSequence: entry.boardSequence,
-                objectBoardPosition: entry.boardPosition,
-                rosterFreezeBoardSequence: input.rosterFreezeBoardSequence,
-            }),
-        );
-    }
-
     const trusteeIdentities = new Set<string>();
     for (const entry of input.trusteeSetupEntries) {
         const normalizedTrusteeIdentity = normalizeIdentityForComparison(
@@ -207,14 +167,6 @@ const verifyRosterManifestTranscriptUnchecked = (
     }
 
     for (const participantIdentity of participantIdentities) {
-        if (!receiverIdentities.has(participantIdentity)) {
-            refusedObjects.push(
-                createRefusal(
-                    'MissingReceiverKeyRegistration',
-                    'Every roster identity must have a receiver-key registration shell.',
-                ),
-            );
-        }
         if (!trusteeIdentities.has(participantIdentity)) {
             refusedObjects.push(
                 createRefusal(
@@ -436,9 +388,6 @@ const verifyRosterManifestTranscriptUnchecked = (
                   ...boardResult.acceptedHashes,
                   ...input.registrationEntries.map(
                       (entry) => entry.registrationEntryHash,
-                  ),
-                  ...input.receiverKeyRegistrations.map(
-                      (entry) => entry.receiverKeyRegistrationHash,
                   ),
                   ...input.trusteeSetupEntries.map(
                       (entry) => entry.trusteeSetupEntryHash,

@@ -22,21 +22,6 @@ export type RegistrationEntry = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
-/** Signed receiver-key registration for encrypted trustee setup material. */
-export type ReceiverKeyRegistration = {
-    readonly objectType: 'ReceiverKeyRegistration';
-    readonly objectVersion: 1;
-    readonly receiverKeyRegistrationHash: ProtocolHash;
-    readonly ceremonyId: string;
-    readonly participantIdentity: string;
-    readonly receiverKeyRoot: ProtocolHash;
-    readonly boardSequence: number;
-    readonly boardPosition: number;
-    readonly recoveryEpoch: number;
-    readonly deviceEpoch: number;
-    readonly signature: ProtocolSignatureEnvelope;
-};
-
 /** Signed trustee setup entry bound to a frozen roster participant. */
 export type TrusteeSetupEntry = {
     readonly objectType: 'TrusteeSetupEntry';
@@ -45,7 +30,7 @@ export type TrusteeSetupEntry = {
     readonly ceremonyId: string;
     readonly trusteeIdentity: string;
     readonly setupProfileId: string;
-    readonly thresholdDecryptionProfileId: string;
+    readonly targetDecryptionProfileId: string;
     readonly trusteeSetupRoot: ProtocolHash;
     readonly bgvProfileHash: ProtocolHash;
     readonly rustBgvBackendProfileHash: ProtocolHash;
@@ -75,9 +60,14 @@ export type ManifestPolicyHashes = {
 
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
-    readonly encryptedAggregateBridgeProfileId: string;
     readonly bgvPassiveSetupProfileId: string;
-    readonly bridgeWitnessPrivacyProfileId: string;
+    readonly encryptedBallotLayoutProfileId: string;
+    readonly ballotValidityProofProfileId: string;
+    readonly encryptedBallotAggregateProfileId: string;
+    readonly evaluatorReplayProfileId: string;
+    readonly directComparisonProfileId: string;
+    readonly targetDecryptionProfileId: string;
+    readonly mobileProfileId: string;
     readonly heParamHash: ProtocolHash;
     readonly bgvPassiveSetupPackageHash: ProtocolHash;
     readonly bgvSetupParameterCertificateHash: ProtocolHash;
@@ -89,17 +79,18 @@ export type ManifestOpaqueBindings = {
     readonly errorDistributionCertificateHash: ProtocolHash;
     readonly keySwitchDecompositionHash: ProtocolHash;
     readonly canonicalCiphertextConventionHash: ProtocolHash;
-    readonly encryptedAggregateBridgeHash: ProtocolHash;
-    readonly bridgeWitnessPrivacyProfileHash: ProtocolHash;
     readonly bgvBatchEncoderHash: ProtocolHash;
-    readonly bridgeLayoutHash: ProtocolHash;
-    readonly encryptedAggregateInputRoot: ProtocolHash;
-    readonly encryptedAggregateShareCiphertextRoot: ProtocolHash;
-    readonly encryptedAggregateReconstructionHash: ProtocolHash;
-    readonly scoreBitDerivationCircuitHash: ProtocolHash;
-    readonly encryptedScoreBitInputHash: ProtocolHash;
+    readonly encryptedBallotLayoutHash: ProtocolHash;
+    readonly ballotValidityProofProfileHash: ProtocolHash;
+    readonly encryptedBallotAggregateProfileHash: ProtocolHash;
+    readonly encryptedBallotAggregateLayoutHash: ProtocolHash;
+    readonly directAggregateLayoutHash: ProtocolHash;
     readonly comparisonInputDerivationCircuitHash: ProtocolHash;
     readonly encryptedComparisonInputHash: ProtocolHash;
+    readonly encryptedSparseTargetProjectionHash: ProtocolHash;
+    readonly targetLayoutHash: ProtocolHash;
+    readonly evaluatorReplayProfileHash: ProtocolHash;
+    readonly directComparisonProfileHash: ProtocolHash;
     readonly evaluationNoiseProfileHash: ProtocolHash;
     readonly heEvaluationNoiseCertHash: ProtocolHash;
     readonly allowedEvaluatorOpsHash: ProtocolHash;
@@ -108,16 +99,11 @@ export type ManifestOpaqueBindings = {
     readonly evaluationKeySizeProfileHash: ProtocolHash;
     readonly thresholdShareVerificationKeyRoot: ProtocolHash;
     readonly thresholdShareVerificationKeyHash: ProtocolHash;
-    readonly evaluationProofProfileId: string;
-    readonly evaluationProofProfileHash: ProtocolHash;
-    readonly thresholdDecryptionProfileId: string;
-    readonly thresholdDecryptionProfileHash: ProtocolHash;
-    readonly kllpsTargetDecryptionProfileHash: ProtocolHash;
-    readonly cpadProfileId: string;
-    readonly cpadProfileHash: ProtocolHash;
+    readonly trusteeThresholdVerificationKeyHash: ProtocolHash;
+    readonly targetDecryptionProfileHash: ProtocolHash;
+    readonly targetThresholdDecryptabilityCertificateHash: ProtocolHash;
     readonly targetBasisHash: ProtocolHash;
-    readonly mobileProfileId: string;
-    readonly bridgeBenchmarkReportPolicyHash: ProtocolHash;
+    readonly mobileProfileHash: ProtocolHash;
 };
 
 /** Signed election manifest accepted after roster and setup checks. */
@@ -156,14 +142,12 @@ export type ConflictingManifestEvidence = {
     readonly manifestInclusionProof: InclusionProof;
 };
 
-/** Input used to verify roster, manifest, receiver keys, and trustee setup. */
+/** Input used to verify roster, manifest, and trustee setup. */
 export type RosterManifestTranscriptInput = {
     readonly ceremonyId: string;
     readonly boardEvidence: BoardConsistencyInput;
     readonly registrationEntries: readonly RegistrationEntry[];
     readonly registrationInclusionProofs: readonly InclusionProof[];
-    readonly receiverKeyRegistrations: readonly ReceiverKeyRegistration[];
-    readonly receiverKeyRegistrationInclusionProofs: readonly InclusionProof[];
     readonly trusteeSetupEntries: readonly TrusteeSetupEntry[];
     readonly trusteeSetupInclusionProofs: readonly InclusionProof[];
     readonly pollSpec: PollSpec;
@@ -275,7 +259,7 @@ export type RecoveryEpochUpdate = {
     readonly oldActionCutoffBoardSequence: number;
     readonly boardHeadHash: ProtocolHash;
     readonly newSigningPublicKeyHash: ProtocolHash;
-    readonly restoredFrozenReceiverStateCommitment: ProtocolHash;
+    readonly restoredEncryptedBallotStateCommitment: ProtocolHash;
     readonly newTrusteeSetupCommitment: ProtocolHash;
     readonly signature: ProtocolSignatureEnvelope;
 };

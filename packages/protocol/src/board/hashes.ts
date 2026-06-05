@@ -25,6 +25,10 @@ export const deriveBoardEntryHash = (
         includedObjectType: entry.includedObjectType,
     });
 
+// Two distinct board-root models share the 'BoardRootHash' namespace: this
+// structured Merkle-tree model (leaf/branch/root nodeKind variants, below) and
+// the flat boardEntryHashes-list model (deriveBoardEntryListRootHash). The
+// presence of `nodeKind` vs the list shape disambiguates them in the preimage.
 export const deriveBoardLeafNodeHash = (
     boardPosition: number,
     boardEntryHash: ProtocolHash,
@@ -76,6 +80,9 @@ const deriveNextBoardMerkleLevel = (
     return nextLevelHashes;
 };
 
+// Flat board-root model: hashes the whole boardEntryHashes list directly (no
+// nodeKind). Shares the 'BoardRootHash' namespace with the structured tree
+// model above; the differing payload shape keeps the two preimages disjoint.
 export const deriveBoardEntryListRootHash = (
     boardEntryHashes: readonly ProtocolHash[],
 ): ProtocolHash => deriveProtocolHash('BoardRootHash', { boardEntryHashes });

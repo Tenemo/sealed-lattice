@@ -13,8 +13,10 @@ use crate::{
 
 const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object-v1";
 const CANONICAL_OBJECT_VERSION: u64 = 1;
+// Max polynomial components in a BGV object: a degree-2 ciphertext has 3.
 const MAXIMUM_COMPONENT_COUNT: usize = 3;
-const MAXIMUM_MODULUS_COUNT: usize = 17;
+// Max RNS limbs: 17 data primes + 1 special prime (the extended basis).
+const MAXIMUM_MODULUS_COUNT: usize = 18;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BgvObjectKind {
@@ -104,6 +106,8 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     for component in &object.components {
         component.validate()?;
     }
+    // Canonicalize-by-round-trip: re-serialize the parsed object and require the
+    // bytes to match exactly, rejecting any non-canonical input encoding.
     if serialize_bgv_object(object.object_kind, &object.components)? != bytes {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -147,7 +151,7 @@ fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
     append_varuint(output, polynomial.level as u64);
     append_varuint(output, polynomial.coefficient_count as u64);
     append_string(output, polynomial.domain.as_str());
-    append_string(output, &polynomial.layout_hash);
+    append_string(output, &polynomial.encrypted_ballot_aggregate_layout_hash);
     append_varuint(output, polynomial.moduli.len() as u64);
     for modulus in &polynomial.moduli {
         append_varuint(output, *modulus);
@@ -188,7 +192,7 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
             "BGV polynomial domain is not supported",
         )
     })?;
-    let layout_hash = reader.read_string()?;
+    let encrypted_ballot_aggregate_layout_hash = reader.read_string()?;
     let modulus_count = read_bounded_count(reader, MAXIMUM_MODULUS_COUNT, "modulus")?;
     let mut moduli = Vec::with_capacity(modulus_count);
     for _ in 0..modulus_count {
@@ -228,7 +232,7 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
         level,
         coefficient_count,
         domain,
-        layout_hash,
+        encrypted_ballot_aggregate_layout_hash,
         moduli,
         residues_by_modulus,
     })
@@ -318,8 +322,8 @@ mod tests {
         assert_eq!(parsed.object_kind, BgvObjectKind::Ciphertext);
         assert_eq!(parsed.components.len(), 2);
         assert_eq!(
-            parsed.components[0].layout_hash,
-            parsed.components[1].layout_hash
+            parsed.components[0].encrypted_ballot_aggregate_layout_hash,
+            parsed.components[1].encrypted_ballot_aggregate_layout_hash
         );
         assert_eq!(ciphertext_root(&canonical_bytes).len(), 128);
         assert!(serialize_bgv_object(BgvObjectKind::Ciphertext, &[left.polynomial]).is_err());

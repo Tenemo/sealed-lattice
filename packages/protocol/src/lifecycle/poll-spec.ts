@@ -1,6 +1,5 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
-    DuplicateBallotPolicy,
     PollSpec,
     PollSpecValidation,
     PollSpecValidationError,
@@ -9,7 +8,6 @@ import type {
     ScoreDomain,
     SmallRosterPolicy,
     ThresholdProfileFamily,
-    TiePolicy,
 } from '@sealed-lattice/types';
 
 import {
@@ -22,13 +20,6 @@ import {
     maximumSupportedRosterSize,
     minimumSupportedRosterSize,
 } from './profiles.js';
-
-const addError = (
-    errors: PollSpecValidationError[],
-    error: PollSpecValidationError,
-): void => {
-    errors.push(error);
-};
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
     typeof value === 'object' && value !== null;
@@ -43,27 +34,6 @@ const isSupportedScoreDomain = (scoreDomain: unknown): boolean =>
 const normalizeScoreDomain = (
     scoreDomain: ScoreDomain | undefined,
 ): ScoreDomain => scoreDomain ?? defaultScoreDomain;
-
-const normalizeDuplicateBallotPolicy = (
-    duplicateBallotPolicy: DuplicateBallotPolicy | undefined,
-): DuplicateBallotPolicy =>
-    duplicateBallotPolicy ?? defaultDuplicateBallotPolicy;
-
-const normalizeTiePolicy = (tiePolicy: TiePolicy | undefined): TiePolicy =>
-    tiePolicy ?? defaultTiePolicy;
-
-const normalizeRosterPolicy = (
-    rosterPolicy: RosterPolicy | undefined,
-): RosterPolicy => rosterPolicy ?? defaultRosterPolicy;
-
-const normalizeThresholdProfileFamily = (
-    thresholdProfileFamily: ThresholdProfileFamily | undefined,
-): ThresholdProfileFamily =>
-    thresholdProfileFamily ?? defaultThresholdProfileFamily;
-
-const normalizeSmallRosterPolicy = (
-    smallRosterPolicy: SmallRosterPolicy | undefined,
-): SmallRosterPolicy => smallRosterPolicy ?? defaultSmallRosterPolicy;
 
 const isSupportedRosterPolicy = (
     rosterPolicy: unknown,
@@ -138,14 +108,14 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const normalizedOptions: string[] = [];
 
     if (pollId === undefined || pollId.length === 0) {
-        addError(errors, {
+        errors.push({
             code: 'EmptyPollId',
             field: 'pollId',
             message: 'pollId must be a nonempty string.',
         });
     }
     if (question === undefined || question.length === 0) {
-        addError(errors, {
+        errors.push({
             code: 'EmptyQuestion',
             field: 'question',
             message: 'question must be a nonempty string.',
@@ -156,7 +126,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         options.length < 1 ||
         options.length > 20
     ) {
-        addError(errors, {
+        errors.push({
             code: 'InvalidOptionCount',
             field: 'options',
             message: 'options must be an array with 1 to 20 labels.',
@@ -165,7 +135,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
 
     options.forEach((optionLabel, optionIndex) => {
         if (typeof optionLabel !== 'string' || optionLabel.length === 0) {
-            addError(errors, {
+            errors.push({
                 code: 'EmptyOptionLabel',
                 field: `options[${optionIndex}]`,
                 message: 'option labels must be nonempty strings.',
@@ -174,7 +144,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         }
         const normalizedOptionLabel = optionLabel.normalize('NFC');
         if (optionLabels.has(normalizedOptionLabel)) {
-            addError(errors, {
+            errors.push({
                 code: 'DuplicateOptionLabel',
                 field: `options[${optionIndex}]`,
                 message:
@@ -192,14 +162,14 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         topOptionCount < 1 ||
         topOptionCount > options.length
     ) {
-        addError(errors, {
+        errors.push({
             code: 'InvalidTopOptionCount',
             field: 'topOptionCount',
             message: 'topOptionCount must be between 1 and options.length.',
         });
     }
     if (!isSupportedScoreDomain(scoreDomain)) {
-        addError(errors, {
+        errors.push({
             code: 'UnsupportedScoreDomain',
             field: 'scoreDomain',
             message: 'scoreDomain must be exactly 1..10 with skipped score 1.',
@@ -209,7 +179,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         duplicateBallotPolicy !== undefined &&
         duplicateBallotPolicy !== defaultDuplicateBallotPolicy
     ) {
-        addError(errors, {
+        errors.push({
             code: 'UnsupportedDuplicateBallotPolicy',
             field: 'duplicateBallotPolicy',
             message:
@@ -217,28 +187,28 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         });
     }
     if (tiePolicy !== undefined && tiePolicy !== defaultTiePolicy) {
-        addError(errors, {
+        errors.push({
             code: 'UnsupportedTiePolicy',
             field: 'tiePolicy',
             message: 'tiePolicy must be HigherScoreThenLowerOptionIndex.',
         });
     }
     if (!isSupportedRosterPolicy(rosterPolicy)) {
-        addError(errors, {
+        errors.push({
             code: 'UnsupportedRosterPolicy',
             field: 'rosterPolicy',
             message: 'rosterPolicy must be OpenLinkPublicRoster.',
         });
     }
     if (!isSupportedThresholdProfileFamily(thresholdProfileFamily)) {
-        addError(errors, {
+        errors.push({
             code: 'UnsupportedThresholdProfileFamily',
             field: 'thresholdProfileFamily',
             message: 'thresholdProfileFamily must be BalancedDefault.',
         });
     }
     if (!isSupportedSmallRosterPolicy(smallRosterPolicy)) {
-        addError(errors, {
+        errors.push({
             code: 'UnsupportedSmallRosterPolicy',
             field: 'smallRosterPolicy',
             message:
@@ -258,7 +228,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         normalizedMaxRosterSize > maximumSupportedRosterSize ||
         normalizedMinRosterSize > normalizedMaxRosterSize
     ) {
-        addError(errors, {
+        errors.push({
             code: 'InvalidRosterBounds',
             field: 'minRosterSize',
             message:
@@ -284,21 +254,16 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             scoreDomain: normalizeScoreDomain(
                 scoreDomain as ScoreDomain | undefined,
             ),
-            duplicateBallotPolicy: normalizeDuplicateBallotPolicy(
-                duplicateBallotPolicy as DuplicateBallotPolicy | undefined,
-            ),
-            tiePolicy: normalizeTiePolicy(tiePolicy as TiePolicy | undefined),
-            rosterPolicy: normalizeRosterPolicy(
-                rosterPolicy as RosterPolicy | undefined,
-            ),
+            duplicateBallotPolicy: defaultDuplicateBallotPolicy,
+            tiePolicy: defaultTiePolicy,
+            rosterPolicy: defaultRosterPolicy,
             minRosterSize: normalizedMinRosterSize,
             maxRosterSize: normalizedMaxRosterSize,
-            thresholdProfileFamily: normalizeThresholdProfileFamily(
-                thresholdProfileFamily as ThresholdProfileFamily | undefined,
-            ),
-            smallRosterPolicy: normalizeSmallRosterPolicy(
-                smallRosterPolicy as SmallRosterPolicy | undefined,
-            ),
+            thresholdProfileFamily: defaultThresholdProfileFamily,
+            smallRosterPolicy:
+                smallRosterPolicy === undefined
+                    ? defaultSmallRosterPolicy
+                    : (smallRosterPolicy as SmallRosterPolicy),
         } satisfies PollSpec,
     };
 };

@@ -1,5 +1,8 @@
 import type { FieldElement } from '@sealed-lattice/types';
 
+// 2^16 + 1, the Fermat prime defining GF(65537). Primality is what makes
+// invertFieldElement valid (every nonzero element is invertible), and every
+// score/tally fits one element / a 3-byte (24-bit) encoding.
 export const fieldModulus = 65_537;
 const maximumCanonicalFieldElement = fieldModulus - 1;
 
@@ -34,6 +37,9 @@ export const normalizeFieldElement = (value: number): FieldElement => {
     return ((integerValue % fieldModulus) + fieldModulus) % fieldModulus;
 };
 
+// Balanced representative: maps [0, p) onto (-p/2, p/2] (values above the
+// midpoint become negative). This is the signed form the lattice proof's
+// coefficient-norm bounds are measured against, not a cosmetic choice.
 export const centeredFieldElement = (value: FieldElement): number => {
     const canonicalValue = assertCanonicalFieldElement(value);
     const midpoint = (fieldModulus - 1) / 2;
@@ -43,6 +49,7 @@ export const centeredFieldElement = (value: FieldElement): number => {
         : canonicalValue;
 };
 
+// Big-endian 24-bit layout: exactly 3 bytes cover the full range 0..65536.
 export const encodeFieldElement = (value: FieldElement): string => {
     const canonicalValue = assertCanonicalFieldElement(value);
     const firstByte = (canonicalValue >> 16) & 0xff;
@@ -122,6 +129,9 @@ export const exponentiateFieldElement = (
     return accumulatedValue;
 };
 
+// Modular inverse via the extended Euclidean algorithm: tracks the Bezout
+// coefficient of `value` as gcd(value, p) is reduced; since p is prime the gcd
+// is 1, so the final coefficient is value^-1 mod p.
 export const invertFieldElement = (value: FieldElement): FieldElement => {
     const canonicalValue = assertCanonicalFieldElement(value);
     if (canonicalValue === 0) {

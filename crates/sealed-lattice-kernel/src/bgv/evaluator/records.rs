@@ -1,0 +1,31 @@
+use serde_json::json;
+
+use crate::{
+    bgv::profile::POLYNOMIAL_DEGREE,
+    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+    hashing::derive_protocol_hash,
+};
+
+pub(crate) const MAXIMUM_OPTION_COUNT: usize = 20;
+pub(crate) const DIRECT_TARGET_PROJECTION_ID: &str = "direct-encrypted-target-projection-v1";
+
+pub(crate) fn target_layout_hash(option_count: usize) -> CanonicalResult<String> {
+    if option_count == 0 || option_count > MAXIMUM_OPTION_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "target layout option count must be between 1 and the supported maximum",
+        ));
+    }
+
+    derive_protocol_hash(
+        "TargetLayoutHash",
+        &json!({
+            "layoutId": DIRECT_TARGET_PROJECTION_ID,
+            "optionCount": option_count,
+            "targetIdSlotRule": "(option + 1) * [rank < topCount]",
+            "targetOrderSlotRule": "(rank + 1) * [rank < topCount]",
+            "intermediateOpeningsAllowed": false,
+            "slotCount": POLYNOMIAL_DEGREE,
+        }),
+    )
+}

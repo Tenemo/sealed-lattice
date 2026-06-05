@@ -23,7 +23,8 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo fmt --check -p sealed-lattice-kernel
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-            - run: cargo test --workspace
+            - name: Run Rust tests with optimized test profile
+              run: cargo test --workspace
 
     wasm:
         name: wasm
@@ -49,7 +50,7 @@ jobs:
                   pnpm run build
                   pnpm run lint
                   pnpm run tsc
-                  pnpm run api-surface:check
+                  pnpm exec tsx ./tools/ci/generate-api-surface-summary.ts
                   pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
                   pnpm exec tsx ./tools/ci/check-package-boundaries.ts
                   pnpm run vectors

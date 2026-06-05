@@ -13,6 +13,9 @@ const textEncoder = new TextEncoder();
 
 const protocolHashNamespaceSet = new Set<string>(protocolHashNamespaceValues);
 
+// PascalCase namespace -> kebab-case, feeding the `sealed-lattice-root/<kebab>-v1`
+// wire domain template below. This derivation is the domain-separation namespace
+// for every deriveProtocolHash and must stay stable: any change rotates all hashes.
 const pascalCaseToKebabCase = (value: string): string =>
     value
         .replace(/([A-Z]+)([A-Z][a-z])/gu, '$1-$2')
@@ -26,6 +29,9 @@ const reservedProtocolHashDomainSet = new Set(
     ),
 );
 
+// Fails closed: only namespaces pre-registered in the transcript-core registry
+// (protocolHashNamespaceValues) resolve to a domain. Unknown PascalCase names,
+// or unreserved `sealed-lattice-root/...` strings, throw — no unscoped domains.
 export const resolveProtocolHashDomain = (namespace: string): string => {
     if (protocolHashNamespaceSet.has(namespace)) {
         return `sealed-lattice-root/${pascalCaseToKebabCase(namespace)}-v1`;

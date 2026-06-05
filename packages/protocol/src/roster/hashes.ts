@@ -2,7 +2,6 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ProtocolHash,
-    ReceiverKeyRegistration,
     RegistrationEntry,
     RosterExternalAcceptance,
     TrusteeSetupEntry,
@@ -25,24 +24,6 @@ export const deriveRegistrationEntryHash = (
         signingPublicKeyHash: entry.signingPublicKeyHash,
     });
 
-export const deriveReceiverKeyRegistrationHash = (
-    entry: Omit<
-        ReceiverKeyRegistration,
-        'receiverKeyRegistrationHash' | 'signature'
-    >,
-): ProtocolHash =>
-    deriveProtocolHash('ReceiverKeyRegistrationHash', {
-        boardPosition: entry.boardPosition,
-        boardSequence: entry.boardSequence,
-        ceremonyId: entry.ceremonyId,
-        deviceEpoch: entry.deviceEpoch,
-        objectType: entry.objectType,
-        objectVersion: entry.objectVersion,
-        participantIdentity: entry.participantIdentity,
-        receiverKeyRoot: entry.receiverKeyRoot,
-        recoveryEpoch: entry.recoveryEpoch,
-    });
-
 export const deriveTrusteeSetupEntryHash = (
     entry: Omit<TrusteeSetupEntry, 'trusteeSetupEntryHash' | 'signature'>,
 ): ProtocolHash =>
@@ -62,7 +43,7 @@ export const deriveTrusteeSetupEntryHash = (
         rotSetHash: entry.rotSetHash,
         rustBgvBackendProfileHash: entry.rustBgvBackendProfileHash,
         setupProfileId: entry.setupProfileId,
-        thresholdDecryptionProfileId: entry.thresholdDecryptionProfileId,
+        targetDecryptionProfileId: entry.targetDecryptionProfileId,
         thresholdShareVerificationKeyRoot:
             entry.thresholdShareVerificationKeyRoot,
         trusteeThresholdVerificationKeyHash:
@@ -71,6 +52,9 @@ export const deriveTrusteeSetupEntryHash = (
         trusteeSetupRoot: entry.trusteeSetupRoot,
     });
 
+// Order-independent by design: entries are NFC-normalized and sorted by
+// identity before hashing, so any party computes the same roster hash
+// regardless of the original registration order.
 export const deriveRosterHash = (
     entries: readonly RegistrationEntry[],
 ): ProtocolHash =>

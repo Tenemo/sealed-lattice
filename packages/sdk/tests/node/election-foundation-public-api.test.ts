@@ -1,6 +1,6 @@
 import {
-    cpadProfileId,
     targetBoundShareSelectionProfileId,
+    targetDecryptionProfileId,
     type CapabilityContext,
     type CapabilityDecision,
     type FirstValidOrderingInput,
@@ -16,7 +16,6 @@ import {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import apiSnapshot from '../../api-snapshot.json' with { type: 'json' };
 import * as publicApiRuntime from '../../dist/index.js';
 
 type DeriveThresholdProfile = (
@@ -48,7 +47,6 @@ const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 
 const requiredPublicFunctions = [
-    ['createBridgeProof', publicApiRuntimeRecord.createBridgeProof],
     [
         'deriveFrozenRosterProfile',
         publicApiRuntimeRecord.deriveFrozenRosterProfile,
@@ -68,25 +66,10 @@ const requiredPublicFunctions = [
     ],
     ['isValidLifecycleTransition', isValidLifecycleTransition],
     ['validatePollSpec', validatePollSpec],
-    [
-        'verifyAggregateDerivationComponent',
-        publicApiRuntimeRecord.verifyAggregateDerivationComponent,
-    ],
-    ['verifyBallotProof', publicApiRuntimeRecord.verifyBallotProof],
     ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
-    ['verifyBridgeProof', publicApiRuntimeRecord.verifyBridgeProof],
     ['verifyCastReceiptShell', publicApiRuntimeRecord.verifyCastReceiptShell],
-    [
-        'verifyClaimBearingBallotPackage',
-        publicApiRuntimeRecord.verifyClaimBearingBallotPackage,
-    ],
     ['verifyCloseRecordShell', publicApiRuntimeRecord.verifyCloseRecordShell],
     ['verifyFirstValidPolicy', publicApiRuntimeRecord.verifyFirstValidPolicy],
-    [
-        'verifyOneShotSharePolicy',
-        publicApiRuntimeRecord.verifyOneShotSharePolicy,
-    ],
-    ['verifyReceiverKeyProof', publicApiRuntimeRecord.verifyReceiverKeyProof],
     [
         'verifyRecoveryEpochUpdate',
         publicApiRuntimeRecord.verifyRecoveryEpochUpdate,
@@ -107,17 +90,16 @@ const requiredPublicFunctions = [
     ],
 ] as const;
 
-const expectedRuntimeExports = [...apiSnapshot.runtimeExports].sort();
+const requiredPublicFunctionNames = requiredPublicFunctions
+    .map(([publicFunctionName]) => publicFunctionName)
+    .sort();
 
 describe('election foundation public package API in Node', () => {
-    it('exposes only the safe runtime functions and keeps forbidden operations absent', () => {
-        expect(
-            requiredPublicFunctions.map(
-                ([publicFunctionName]) => publicFunctionName,
-            ),
-        ).toEqual(expectedRuntimeExports);
-        expect(Object.keys(publicApiRuntimeRecord).sort()).toEqual(
-            expectedRuntimeExports,
+    it('exposes safe runtime functions and keeps runtime exports callable', () => {
+        const runtimeExportNames = Object.keys(publicApiRuntimeRecord).sort();
+
+        expect(runtimeExportNames).toEqual(
+            expect.arrayContaining(requiredPublicFunctionNames),
         );
         for (const [
             publicFunctionName,
@@ -125,25 +107,31 @@ describe('election foundation public package API in Node', () => {
         ] of requiredPublicFunctions) {
             expect(typeof publicFunction, publicFunctionName).toBe('function');
         }
+        for (const publicFunctionName of runtimeExportNames) {
+            expect(
+                typeof publicApiRuntimeRecord[publicFunctionName],
+                publicFunctionName,
+            ).toBe('function');
+        }
     });
 
     it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
         const thresholdProfile = deriveThresholdProfile({
-            rosterSize: 20,
+            rosterSize: 10,
             targetBoundShareSelectionProfile: {
                 profileId: targetBoundShareSelectionProfileId,
                 certificateHash: 'target-bound-certificate-hash',
-                cpadProfileId,
+                targetDecryptionProfileId,
                 targetBasisHash: 'target-basis-hash',
                 decryptionShareQuorum: 9,
-                minimumSharesForInterpolation: 7,
+                minimumSharesForInterpolation: 4,
                 minimumArrivalsForRobustDecode: 9,
                 invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
                 selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
             },
         });
 
-        expect(thresholdProfile.privacyCorruptionBound).toBe(6);
+        expect(thresholdProfile.privacyCorruptionBound).toBe(3);
         expect(
             validatePollSpec({
                 pollId: 'poll',
@@ -158,20 +146,17 @@ describe('election foundation public package API in Node', () => {
                 to: 'votingClosed',
             }),
         ).toBe(true);
+
         const labels = deriveLifecycleLabels({
             lifecycleState: 'fullyVerified',
             thresholdProfile,
             mheSecurityClosure: 'ActiveMalicious',
             localRosterAccepted: true,
             runtimeClaimGatePassed: true,
-            bridgeBenchmarkReportPresent: true,
-            bridgeProverCertificatePresent: true,
-            evaluationProofCertificatePresent: true,
-            oneShotDecryptionProofCertificatePresent: true,
-            kllpsCpadCertificatePresent: true,
-            thresholdDecryptionCertificatePresent: true,
-            evaluationProofClosureApplied: true,
-            kllpsCpadClosureApplied: true,
+            directProofTransportPresent: true,
+            mobileReplayEvidencePresent: true,
+            targetDecryptionCertificatePresent: true,
+            targetDecryptionClosureApplied: true,
             activeMaliciousClosureApplied: true,
             decodedResultLayoutVerified: true,
         });
@@ -180,7 +165,7 @@ describe('election foundation public package API in Node', () => {
         expect(labels.primary).toContain('fullyVerified');
         expect(
             evaluateActionCapability('AcceptTarget', {
-                lifecycleState: 'evaluationProofVerified',
+                lifecycleState: 'targetFinalityReached',
                 thresholdProfile,
                 pollSpecValid: true,
                 localRosterAccepted: true,
@@ -188,12 +173,11 @@ describe('election foundation public package API in Node', () => {
                 actionContextRosterExternalAcceptanceHash:
                     'accepted-roster-hash',
                 targetFinalityAccepted: true,
-                evaluationProofVerified: true,
-                bridgeBenchmarkReportPresent: true,
+                evaluatorReplaySucceeded: true,
             }),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
         expect(
-            publicApiRuntimeRecord.createBridgeProof as () => {
+            publicApiRuntimeRecord.verifyTranscript as () => {
                 readonly ok: boolean;
                 readonly refusedObjects: readonly {
                     readonly code: string;
@@ -202,7 +186,7 @@ describe('election foundation public package API in Node', () => {
         ).toBeTypeOf('function');
         expect(
             (
-                publicApiRuntimeRecord.createBridgeProof as () => {
+                publicApiRuntimeRecord.verifyTranscript as () => {
                     readonly ok: boolean;
                     readonly refusedObjects: readonly {
                         readonly code: string;

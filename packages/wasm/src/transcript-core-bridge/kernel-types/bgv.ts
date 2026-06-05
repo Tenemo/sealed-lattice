@@ -21,14 +21,14 @@ export type BgvRnsProfileDescription = {
     readonly profileHash: ProtocolHash;
     readonly backendProfileHash: ProtocolHash;
     readonly batchEncoderHash: ProtocolHash;
-    readonly encryptedAggregateInputLayoutHash: ProtocolHash;
+    readonly encryptedBallotAggregateLayoutHash: ProtocolHash;
     readonly batchLayoutBinding: unknown;
     readonly batchLayoutBindingHash: ProtocolHash;
     readonly ballotScoreEncodingProfileHash: ProtocolHash;
-    readonly ballotShareLayoutProfileHash: ProtocolHash;
-    readonly aggregateInputEncodingProfileHash: ProtocolHash;
-    readonly encodedAggregateLayoutHash: ProtocolHash;
-    readonly topKEvaluatorInputLayoutHash: ProtocolHash;
+    readonly encryptedBallotLayoutHash: ProtocolHash;
+    readonly encryptedBallotAggregateProfileHash: ProtocolHash;
+    readonly directAggregateLayoutHash: ProtocolHash;
+    readonly directComparisonProfileHash: ProtocolHash;
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly allowedEvaluatorOpsHash: ProtocolHash;
     readonly securityEstimatorInputHash: string;
@@ -195,13 +195,13 @@ export type BgvPassiveSetupPackage = {
     readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
     readonly trustedDealerBoundary: Readonly<Record<string, unknown>>;
-    readonly kllpsStatus: {
-        readonly thresholdDecryptionProfileId: string;
-        readonly thresholdDecryptionProfileHash: ProtocolHash;
-        readonly kllpsTargetDecryptionProfileHash: ProtocolHash;
-        readonly setupMaterialMatchesKLLPS: boolean;
-        readonly KLLPSPartDecStatusImplemented: boolean;
-        readonly KLLPSC1C4StatusAccepted: boolean;
+    readonly targetDecryptionStatus: {
+        readonly targetDecryptionProfileId: string;
+        readonly targetDecryptionProfileHash: ProtocolHash;
+        readonly targetDecryptionProfileBindingHash: ProtocolHash;
+        readonly setupMaterialMatchesTargetDecryption: boolean;
+        readonly targetPartDecImplemented: boolean;
+        readonly targetC1C4StatusAccepted: boolean;
     };
     readonly statusLabels: readonly string[];
     readonly nonClaims: readonly string[];
@@ -213,5 +213,52 @@ export type BgvPassiveSetupVerification = {
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly unknown[];
     readonly unresolvedReason: string | null;
+    readonly statusLabels: readonly string[];
+};
+
+export type BgvTargetCiphertextPairInput = {
+    readonly targetIdCanonicalBytesHex: string;
+    readonly targetOrderCanonicalBytesHex: string;
+};
+
+export type BgvTargetDecryptionShare = Readonly<
+    Record<string, unknown> & {
+        readonly objectType: 'BgvTargetDecryptionShare';
+        readonly objectVersion: 1;
+        readonly targetDecryptionShareHash: ProtocolHash;
+        readonly trusteeIdentity: string;
+        readonly rosterPosition: number;
+        readonly interpolationPoint: number;
+        readonly targetAcceptedRecordHash: ProtocolHash;
+        readonly targetContextHash: ProtocolHash;
+        readonly targetCiphertextHash: ProtocolHash;
+        readonly targetDecryptionCiphertextHash: ProtocolHash;
+        readonly targetShareProfileHash: ProtocolHash;
+        readonly shareRoot: ProtocolHash;
+        readonly sharePayload: unknown;
+        readonly statusLabels: readonly string[];
+    }
+>;
+
+export type BgvTargetDecryptionResult = {
+    readonly ok: true;
+    readonly operation: 'recombineBgvTargetDecryptionShares';
+    readonly targetDecryptionResultHash: ProtocolHash;
+    readonly setupPackageHash: ProtocolHash;
+    readonly targetAcceptedRecordHash: ProtocolHash;
+    readonly targetContextHash: ProtocolHash;
+    readonly targetCiphertextHash: ProtocolHash;
+    readonly targetShareProfileHash: ProtocolHash;
+    readonly targetDecryptionProfileHash: ProtocolHash;
+    readonly shareEquation: string;
+    readonly recombinationEquation: string;
+    readonly selectedShareRule: string;
+    readonly minimumSharesForInterpolation: number;
+    readonly decryptionThreshold: number;
+    readonly decryptionShareQuorum: number;
+    readonly selectedRosterPositions: readonly number[];
+    readonly decodedTargetIds: readonly number[];
+    readonly decodedTargetOrders: readonly number[];
+    readonly decryptScaling: number;
     readonly statusLabels: readonly string[];
 };

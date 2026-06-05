@@ -1,7 +1,8 @@
 use super::*;
-use crate::bgv::setup::key_material::{
-    collective_public_key_coefficient_root, expected_collective_public_key_coefficient_material,
-};
+use crate::bgv::setup::key_material::collective_public_key_coefficient_root;
+
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
 
 pub(super) fn validate_collective_public_key(
     setup_package: &Value,
@@ -49,17 +50,13 @@ pub(super) fn validate_collective_public_key(
             "collective public key share roots do not match participant records",
         ));
     }
-    let expected_coefficient_material =
-        expected_collective_public_key_coefficient_material(setup_package, participant_bindings)?;
     let coefficient_material = value_at_path(collective_public_key, &["coefficientMaterial"])?;
-    if coefficient_material != &expected_coefficient_material {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "collective public key coefficient material does not match the setup transcript",
-        ));
-    }
-    let expected_coefficient_root =
-        collective_public_key_coefficient_root(&expected_coefficient_material)?;
+    validate_collective_public_key_coefficient_material(
+        coefficient_material,
+        collective_public_key_record,
+        participant_bindings,
+    )?;
+    let expected_coefficient_root = collective_public_key_coefficient_root(coefficient_material)?;
     compare_hash_at_path(
         collective_public_key,
         &["collectivePublicKeyCoefficientRoot"],
@@ -99,11 +96,200 @@ pub(super) fn validate_collective_public_key(
     )
 }
 
+fn validate_collective_public_key_coefficient_material(
+    coefficient_material: &Value,
+    collective_public_key_record: &Value,
+    participant_bindings: &[VerifiedParticipantSetupBinding],
+) -> CanonicalResult<()> {
+    compare_string_at_path(
+        coefficient_material,
+        &["objectType"],
+        "BgvCollectivePublicKeyCoefficientMaterial",
+        "collective public key coefficient material object type",
+    )?;
+    if usize_at_path(coefficient_material, &["objectVersion"])? != 1
+        || usize_at_path(coefficient_material, &["level"])? != DATA_PRIMES.len() - 1
+        || usize_at_path(coefficient_material, &["coefficientCount"])? != POLYNOMIAL_DEGREE
+        || usize_at_path(coefficient_material, &["participantCount"])? != participant_bindings.len()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient material shape does not match the selected setup profile",
+        ));
+    }
+    compare_string_at_path(
+        coefficient_material,
+        &["basisId"],
+        BgvBasisKind::Data.basis_id(),
+        "collective public key coefficient basis",
+    )?;
+    compare_string_at_path(
+        coefficient_material,
+        &["fullCoefficientExpansionOwner"],
+        "passive setup package public key material",
+        "collective public key coefficient material owner",
+    )?;
+    if !bool_at_path(
+        coefficient_material,
+        &["fullCoefficientVectorHashesComputed"],
+    )? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient material must bind full coefficient vector hashes",
+        ));
+    }
+    let expected_public_key_share_roots = participant_bindings
+        .iter()
+        .map(|participant| Value::String(participant.public_key_share_root.clone()))
+        .collect::<Vec<_>>();
+    if array_at_path(coefficient_material, &["publicKeyShareRoots"])?
+        != &expected_public_key_share_roots
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient material share roots do not match participant records",
+        ));
+    }
+    compare_hash_at_path(
+        coefficient_material,
+        &["publicCommonRandomPolynomialRoot"],
+        string_at_path(
+            collective_public_key_record,
+            &["publicCommonRandomPolynomialRoot"],
+        )?,
+        "collective public key coefficient material CRP root",
+    )?;
+    let expected_participants = participant_bindings
+        .iter()
+        .map(|participant| {
+            json!({
+                "trusteeIdentity": participant.trustee_identity,
+                "rosterPosition": participant.roster_position,
+                "recoveryEpoch": participant.recovery_epoch,
+                "deviceEpoch": participant.device_epoch,
+            })
+        })
+        .collect::<Vec<_>>();
+    if array_at_path(coefficient_material, &["participants"])? != &expected_participants {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient material participants do not match participant records",
+        ));
+    }
+
+    let coefficient_tables = array_at_path(coefficient_material, &["coefficientTables"])?;
+    let modulus_summaries = array_at_path(coefficient_material, &["modulusSummaries"])?;
+    if coefficient_tables.len() != DATA_PRIMES.len() || modulus_summaries.len() != DATA_PRIMES.len()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public key coefficient material must include one table and summary per data prime",
+        ));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        DATA_PRIMES
+            .par_iter()
+            .enumerate()
+            .try_for_each(|(modulus_index, modulus)| {
+                validate_coefficient_table_and_summary(
+                    &coefficient_tables[modulus_index],
+                    &modulus_summaries[modulus_index],
+                    *modulus,
+                )
+            })?;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        for (modulus_index, modulus) in DATA_PRIMES.iter().enumerate() {
+            validate_coefficient_table_and_summary(
+                &coefficient_tables[modulus_index],
+                &modulus_summaries[modulus_index],
+                *modulus,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_coefficient_table_and_summary(
+    coefficient_table: &Value,
+    summary: &Value,
+    modulus: u64,
+) -> CanonicalResult<()> {
+    validate_coefficient_table(coefficient_table, modulus)?;
+    if unsigned_at_path(summary, &["modulus"])? != modulus {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient summary modulus does not match the selected data basis",
+        ));
+    }
+    for field_name in [
+        "componentZeroCoefficientHash512",
+        "componentOneCoefficientHash512",
+    ] {
+        compare_hash_at_path(
+            summary,
+            &[field_name],
+            string_at_path(coefficient_table, &[field_name])?,
+            "collective public key coefficient summary hash",
+        )?;
+    }
+    compare_string_at_path(
+        summary,
+        &["fullCoefficientVectorHashStatus"],
+        "bound-in-setup-package",
+        "collective public key coefficient vector hash status",
+    )
+}
+
+fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> CanonicalResult<()> {
+    if unsigned_at_path(table, &["modulus"])? != expected_modulus
+        || usize_at_path(table, &["coefficientByteLength"])? != POLYNOMIAL_DEGREE * 8
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key coefficient table shape does not match the selected data basis",
+        ));
+    }
+    for (hex_field_name, hash_field_name) in [
+        (
+            "componentZeroCoefficientsLeHex",
+            "componentZeroCoefficientHash512",
+        ),
+        (
+            "componentOneCoefficientsLeHex",
+            "componentOneCoefficientHash512",
+        ),
+    ] {
+        let bytes = crate::transcript_core::decode_hex(string_at_path(table, &[hex_field_name])?)?;
+        if bytes.len() != POLYNOMIAL_DEGREE * 8 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "collective public key coefficient table byte length is invalid",
+            ));
+        }
+        let expected_hash = hash512_hex(
+            "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1",
+            &[&bytes],
+        );
+        compare_hash_at_path(
+            table,
+            &[hash_field_name],
+            &expected_hash,
+            "collective public key coefficient table hash",
+        )?;
+    }
+
+    Ok(())
+}
+
 pub(super) fn validate_threshold_verification_material(
     setup_package: &Value,
     participant_bindings: &[VerifiedParticipantSetupBinding],
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
 ) -> CanonicalResult<()> {
     let threshold_material = value_at_path(setup_package, &["thresholdVerificationMaterial"])?;
     let verification_key_set = value_at_path(threshold_material, &["verificationKeySet"])?;
@@ -167,8 +353,8 @@ pub(super) fn validate_threshold_verification_material(
         "ThresholdShareVerificationKeyHash",
         &json!({
             "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
+            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         }),
     )?;
     compare_hash_at_path(

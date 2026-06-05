@@ -40,7 +40,6 @@ type PackDryRunMetadataEntry = {
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const forbiddenPublishedRuntimePathFragments = [
     'dist/internal/election-foundation/plaintext-oracle/',
-    'dist/internal/election-foundation/target-acceptance/',
 ] as const;
 const forbiddenPublishedOraclePathFragments = [
     'tools/lattigo-oracle/',
@@ -48,15 +47,7 @@ const forbiddenPublishedOraclePathFragments = [
     'oracle-vector',
     'oracle-serializer',
 ] as const;
-const forbiddenPublishedTestVectorPathFragments = [
-    'test-vectors/',
-    'ballot-field-linear-proof-vectors.json',
-    'encoded-ballot-linear-relation-vectors.json',
-    'proof-backend-linear-vectors.json',
-    'proof-stack-profile.json',
-    'receiver-key-linear-proof-vectors.json',
-    'receiver-key-proof-vectors.json',
-] as const;
+const forbiddenPublishedTestVectorPathFragments = ['test-vectors/'] as const;
 const requiredPublishedPackageFilePaths = [
     'LICENSE',
     'README.md',

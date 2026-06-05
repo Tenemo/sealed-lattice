@@ -3,7 +3,6 @@ import type {
     ElectionManifest,
     FrozenRosterProfile,
     PollSpec,
-    ReceiverKeyRegistration,
     RegistrationEntry,
     RosterManifestTranscriptInput,
     TrusteeSetupEntry,
@@ -30,7 +29,6 @@ import {
 import { deriveFrozenRosterProfile } from '#packages/protocol/src/lifecycle/thresholds';
 import {
     deriveElectionManifestHash,
-    deriveReceiverKeyRegistrationHash,
     deriveRegistrationEntryHash,
     deriveRosterHash,
     deriveTrusteeSetupEntryHash,
@@ -68,7 +66,7 @@ const createFrozenRosterProfile = (
 
     return deriveFrozenRosterProfile({
         dynamicRosterProfileCertificateHash:
-            rosterSize >= 10 && rosterSize !== 20
+            rosterSize >= 10 && rosterSize !== 10
                 ? deriveProtocolHash('ThresholdProfileHash', {
                       certificate: 'dynamic-roster-profile',
                       rosterSize,
@@ -113,48 +111,6 @@ export const createRegistrationEntry = (
     };
 };
 
-export const createReceiverKeyRegistration = (
-    participantIdentity: string,
-    boardSequence: number,
-    boardPosition: number,
-): ReceiverKeyRegistration => {
-    const signingPublicKeyHash =
-        getParticipantSigningPublicKeyHash(participantIdentity);
-    const payload = {
-        objectType: 'ReceiverKeyRegistration',
-        objectVersion: 1,
-        ceremonyId,
-        participantIdentity,
-        receiverKeyRoot: deriveProtocolHash('ChallengeDomainHash', {
-            payload: {
-                participantIdentity,
-            },
-            purpose: 'fixture-receiver-key-root-v1',
-        }),
-        boardSequence,
-        boardPosition,
-        recoveryEpoch: 0,
-        deviceEpoch: 0,
-    } satisfies Omit<
-        ReceiverKeyRegistration,
-        'receiverKeyRegistrationHash' | 'signature'
-    >;
-    const receiverKeyRegistrationHash =
-        deriveReceiverKeyRegistrationHash(payload);
-
-    return {
-        ...payload,
-        receiverKeyRegistrationHash,
-        signature: createSignature(
-            'ReceiverKeyRegistration',
-            'Participant',
-            participantIdentity,
-            signingPublicKeyHash,
-            receiverKeyRegistrationHash,
-        ),
-    };
-};
-
 export const createTrusteeSetupEntry = (
     trusteeIdentity: string,
     boardSequence: number,
@@ -167,8 +123,8 @@ export const createTrusteeSetupEntry = (
         objectVersion: 1,
         ceremonyId,
         setupProfileId: manifestOpaqueBindings.bgvPassiveSetupProfileId,
-        thresholdDecryptionProfileId:
-            manifestOpaqueBindings.thresholdDecryptionProfileId,
+        targetDecryptionProfileId:
+            manifestOpaqueBindings.targetDecryptionProfileId,
         trusteeIdentity,
         trusteeSetupRoot: deriveProtocolHash('ParticipantBgvSetupRecordHash', {
             trusteeIdentity,
@@ -271,29 +227,17 @@ export const createRosterManifestTranscriptInput = (
                   ...registrations,
                   createRegistrationEntry('organizer', 1, registrations.length),
               ];
-    const receiverKeyRegistrations = rosterRegistrations.map((entry, index) =>
-        createReceiverKeyRegistration(
-            entry.participantIdentity,
-            1,
-            rosterRegistrations.length + index,
-        ),
-    );
     const trusteeSetupEntries = rosterRegistrations.map((entry, index) =>
         createTrusteeSetupEntry(
             entry.participantIdentity,
             1,
-            rosterRegistrations.length * 2 + index,
+            rosterRegistrations.length + index,
         ),
     );
     const setupObjects = [
         ...rosterRegistrations.map((entry) => ({
             objectType: 'RegistrationEntry' as const,
             objectHash: entry.registrationEntryHash,
-            boardPosition: entry.boardPosition,
-        })),
-        ...receiverKeyRegistrations.map((entry) => ({
-            objectType: 'ReceiverKeyRegistration' as const,
-            objectHash: entry.receiverKeyRegistrationHash,
             boardPosition: entry.boardPosition,
         })),
         ...trusteeSetupEntries.map((entry) => ({
@@ -330,14 +274,6 @@ export const createRosterManifestTranscriptInput = (
                     proof.includedObjectHash === entry.registrationEntryHash,
             ) ?? setupInclusionProofs[0],
     );
-    const receiverKeyRegistrationInclusionProofs = receiverKeyRegistrations.map(
-        (entry) =>
-            setupInclusionProofs.find(
-                (proof) =>
-                    proof.includedObjectHash ===
-                    entry.receiverKeyRegistrationHash,
-            ) ?? setupInclusionProofs[0],
-    );
     const trusteeSetupInclusionProofs = trusteeSetupEntries.map(
         (entry) =>
             setupInclusionProofs.find(
@@ -356,8 +292,6 @@ export const createRosterManifestTranscriptInput = (
         ]),
         registrationEntries: rosterRegistrations,
         registrationInclusionProofs,
-        receiverKeyRegistrations,
-        receiverKeyRegistrationInclusionProofs,
         trusteeSetupEntries,
         trusteeSetupInclusionProofs,
         pollSpec,

@@ -1,10 +1,15 @@
 use crate::{
     bgv::{
-        modular_arithmetic::{add_mod, inverse_mod, mul_mod, pow_mod, sub_mod},
-        profile::{POLYNOMIAL_DEGREE, root_parameters_for_modulus},
+        modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod_fast, pow_mod, sub_mod_fast},
+        profile::{
+            POLYNOMIAL_DEGREE, ROOT_PARAMETERS, RootParameters, root_parameters_for_modulus,
+        },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
+use std::sync::OnceLock;
+
+static FULL_DEGREE_NTT_PLANS: OnceLock<Vec<NttPlan>> = OnceLock::new();
 
 pub(crate) fn forward_negacyclic_ntt(
     coefficients: &[u64],
@@ -17,6 +22,10 @@ pub(crate) fn inverse_negacyclic_ntt(values: &[u64], modulus: u64) -> CanonicalR
     transform_negacyclic(values, modulus, TransformDirection::Inverse)
 }
 
+// Negacyclic (X^N+1) transform reduced to a cyclic NTT: weight the input by
+// powers of psi (the 2N-th root), run a cyclic NTT, then weight the output. The
+// inverse undoes both. `root_exponent = POLYNOMIAL_DEGREE/len` rescales the
+// stored full-degree root down to the requested transform length.
 fn transform_negacyclic(
     values: &[u64],
     modulus: u64,
@@ -24,46 +33,136 @@ fn transform_negacyclic(
 ) -> CanonicalResult<Vec<u64>> {
     validate_transform_length(values.len())?;
     validate_residues(values, modulus)?;
+    if values.len() == POLYNOMIAL_DEGREE {
+        let plan = full_degree_ntt_plan(modulus)?;
+
+        return transform_with_plan(values, plan, direction);
+    }
+
     let root_parameters = root_parameters_for_modulus(modulus).ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "modulus is not part of the selected BGV-RNS profile",
         )
     })?;
-    let root_exponent = (POLYNOMIAL_DEGREE / values.len()) as u64;
+    let plan = build_ntt_plan(root_parameters, values.len())?;
+
+    transform_with_plan(values, &plan, direction)
+}
+
+fn transform_with_plan(
+    values: &[u64],
+    plan: &NttPlan,
+    direction: TransformDirection,
+) -> CanonicalResult<Vec<u64>> {
     let mut transformed = values.to_vec();
 
     match direction {
         TransformDirection::Forward => {
-            let negacyclic_root = pow_mod(root_parameters.negacyclic_root, root_exponent, modulus)?;
-            multiply_by_powers(&mut transformed, negacyclic_root, modulus)?;
-            let cyclic_root = pow_mod(root_parameters.cyclic_root, root_exponent, modulus)?;
-            cyclic_ntt(&mut transformed, cyclic_root, modulus, false)?;
+            multiply_by_cached_powers(
+                &mut transformed,
+                &plan.forward_negacyclic_powers,
+                plan.modulus,
+            );
+            cyclic_ntt_with_twiddles(
+                &mut transformed,
+                &plan.bit_reverse_swaps,
+                &plan.forward_stage_twiddles,
+                plan.modulus,
+                None,
+            );
         }
         TransformDirection::Inverse => {
-            let inverse_cyclic_root =
-                pow_mod(root_parameters.inverse_cyclic_root, root_exponent, modulus)?;
-            cyclic_ntt(&mut transformed, inverse_cyclic_root, modulus, true)?;
-            let inverse_negacyclic_root = pow_mod(
-                root_parameters.inverse_negacyclic_root,
-                root_exponent,
-                modulus,
-            )?;
-            multiply_by_powers(&mut transformed, inverse_negacyclic_root, modulus)?;
+            cyclic_ntt_with_twiddles(
+                &mut transformed,
+                &plan.bit_reverse_swaps,
+                &plan.inverse_stage_twiddles,
+                plan.modulus,
+                Some(plan.inverse_length),
+            );
+            multiply_by_cached_powers(
+                &mut transformed,
+                &plan.inverse_negacyclic_powers,
+                plan.modulus,
+            );
         }
     }
 
     Ok(transformed)
 }
 
-fn cyclic_ntt(
-    values: &mut [u64],
-    root: u64,
+fn full_degree_ntt_plans() -> &'static [NttPlan] {
+    FULL_DEGREE_NTT_PLANS
+        .get_or_init(|| {
+            ROOT_PARAMETERS
+                .iter()
+                .map(|parameters| {
+                    build_ntt_plan(*parameters, POLYNOMIAL_DEGREE)
+                        .expect("selected root parameters build a full-degree NTT plan")
+                })
+                .collect()
+        })
+        .as_slice()
+}
+
+fn full_degree_ntt_plan(modulus: u64) -> CanonicalResult<&'static NttPlan> {
+    full_degree_ntt_plans()
+        .iter()
+        .find(|plan| plan.modulus == modulus)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "modulus is not part of the selected BGV-RNS profile",
+            )
+        })
+}
+
+struct NttPlan {
     modulus: u64,
-    normalize_inverse: bool,
-) -> CanonicalResult<()> {
-    bit_reverse_permute(values);
-    let length = values.len();
+    forward_negacyclic_powers: Vec<u64>,
+    inverse_negacyclic_powers: Vec<u64>,
+    bit_reverse_swaps: Vec<(usize, usize)>,
+    forward_stage_twiddles: Vec<Vec<u64>>,
+    inverse_stage_twiddles: Vec<Vec<u64>>,
+    inverse_length: u64,
+}
+
+fn build_ntt_plan(root_parameters: RootParameters, length: usize) -> CanonicalResult<NttPlan> {
+    let root_exponent = (POLYNOMIAL_DEGREE / length) as u64;
+    let modulus = root_parameters.modulus;
+    let negacyclic_root = pow_mod(root_parameters.negacyclic_root, root_exponent, modulus)?;
+    let inverse_negacyclic_root = pow_mod(
+        root_parameters.inverse_negacyclic_root,
+        root_exponent,
+        modulus,
+    )?;
+    let cyclic_root = pow_mod(root_parameters.cyclic_root, root_exponent, modulus)?;
+    let inverse_cyclic_root = pow_mod(root_parameters.inverse_cyclic_root, root_exponent, modulus)?;
+
+    Ok(NttPlan {
+        modulus,
+        forward_negacyclic_powers: build_powers(negacyclic_root, length, modulus),
+        inverse_negacyclic_powers: build_powers(inverse_negacyclic_root, length, modulus),
+        bit_reverse_swaps: build_bit_reverse_swaps(length),
+        forward_stage_twiddles: build_stage_twiddles(cyclic_root, length, modulus)?,
+        inverse_stage_twiddles: build_stage_twiddles(inverse_cyclic_root, length, modulus)?,
+        inverse_length: inverse_mod(length as u64, modulus)?,
+    })
+}
+
+fn build_powers(root: u64, length: usize, modulus: u64) -> Vec<u64> {
+    let mut powers = Vec::with_capacity(length);
+    let mut power = 1_u64;
+    for _ in 0..length {
+        powers.push(power);
+        power = mul_mod_fast(power, root, modulus);
+    }
+
+    powers
+}
+
+fn build_stage_twiddles(root: u64, length: usize, modulus: u64) -> CanonicalResult<Vec<Vec<u64>>> {
+    let mut stages = Vec::with_capacity(length.trailing_zeros() as usize);
     let mut butterfly_width = 2_usize;
     while butterfly_width <= length {
         let half_width = butterfly_width / 2;
@@ -72,45 +171,65 @@ fn cyclic_ntt(
         let mut twiddle = 1_u64;
         for _ in 0..half_width {
             stage_twiddles.push(twiddle);
-            twiddle = mul_mod(twiddle, step_root, modulus)?;
+            twiddle = mul_mod_fast(twiddle, step_root, modulus);
         }
+        stages.push(stage_twiddles);
+        butterfly_width *= 2;
+    }
+
+    Ok(stages)
+}
+
+// Decimation-in-time Cooley-Tukey NTT: bit-reversed input -> natural-order
+// output, with cached per-stage twiddle factors.
+fn cyclic_ntt_with_twiddles(
+    values: &mut [u64],
+    bit_reverse_swaps: &[(usize, usize)],
+    stage_twiddles: &[Vec<u64>],
+    modulus: u64,
+    inverse_length: Option<u64>,
+) {
+    apply_bit_reverse_swaps(values, bit_reverse_swaps);
+    let length = values.len();
+    let mut butterfly_width = 2_usize;
+    for twiddles in stage_twiddles {
+        let half_width = butterfly_width / 2;
+        debug_assert_eq!(twiddles.len(), half_width);
         let mut block_start = 0_usize;
         while block_start < length {
-            for (offset, stage_twiddle) in stage_twiddles.iter().enumerate().take(half_width) {
+            for (offset, stage_twiddle) in twiddles.iter().enumerate().take(half_width) {
                 let left_index = block_start + offset;
                 let right_index = left_index + half_width;
-                let right_value = mul_mod(values[right_index], *stage_twiddle, modulus)?;
+                let right_value = mul_mod_fast(values[right_index], *stage_twiddle, modulus);
                 let left_value = values[left_index];
-                values[left_index] = add_mod(left_value, right_value, modulus)?;
-                values[right_index] = sub_mod(left_value, right_value, modulus)?;
+                values[left_index] = add_mod_fast(left_value, right_value, modulus);
+                values[right_index] = sub_mod_fast(left_value, right_value, modulus);
             }
             block_start += butterfly_width;
         }
         butterfly_width *= 2;
     }
 
-    if normalize_inverse {
-        let inverse_length = inverse_mod(length as u64, modulus)?;
+    if let Some(inverse_length) = inverse_length {
         for value in values {
-            *value = mul_mod(*value, inverse_length, modulus)?;
+            *value = mul_mod_fast(*value, inverse_length, modulus);
         }
     }
-
-    Ok(())
 }
 
-fn multiply_by_powers(values: &mut [u64], root: u64, modulus: u64) -> CanonicalResult<()> {
-    let mut power = 1_u64;
-    for value in values {
-        *value = mul_mod(*value, power, modulus)?;
-        power = mul_mod(power, root, modulus)?;
+fn multiply_by_cached_powers(values: &mut [u64], powers: &[u64], modulus: u64) {
+    debug_assert_eq!(values.len(), powers.len());
+    for (value, power) in values.iter_mut().zip(powers.iter()) {
+        *value = mul_mod_fast(*value, *power, modulus);
     }
-
-    Ok(())
 }
 
-fn bit_reverse_permute(values: &mut [u64]) {
-    let length = values.len();
+// Computes the bit-reversal permutation swaps once per transform length.
+// `reversed_index` is advanced as a bit-reversed counter: the inner loop
+// performs the carry of incrementing the most-significant bit downward, so each
+// step yields the next reversed index.
+fn build_bit_reverse_swaps(length: usize) -> Vec<(usize, usize)> {
+    let mut swaps = Vec::with_capacity(length / 2);
     let mut reversed_index = 0_usize;
     for index in 1..length {
         let mut bit = length >> 1;
@@ -120,8 +239,19 @@ fn bit_reverse_permute(values: &mut [u64]) {
         }
         reversed_index ^= bit;
         if index < reversed_index {
-            values.swap(index, reversed_index);
+            swaps.push((index, reversed_index));
         }
+    }
+
+    swaps
+}
+
+fn apply_bit_reverse_swaps(values: &mut [u64], swaps: &[(usize, usize)]) {
+    let length = values.len();
+    for (left_index, right_index) in swaps {
+        debug_assert!(*left_index < length);
+        debug_assert!(*right_index < length);
+        values.swap(*left_index, *right_index);
     }
 }
 
@@ -169,7 +299,7 @@ pub(crate) fn negacyclic_convolution_for_tests(
     let right_transformed = forward_negacyclic_ntt(right, modulus)?;
     let mut product = Vec::with_capacity(left.len());
     for (left_value, right_value) in left_transformed.iter().zip(right_transformed.iter()) {
-        product.push(mul_mod(*left_value, *right_value, modulus)?);
+        product.push(mul_mod_fast(*left_value, *right_value, modulus));
     }
 
     inverse_negacyclic_ntt(&product, modulus)

@@ -12,30 +12,13 @@ import { allowAction, refuseAction } from './refusal.js';
 
 const claimBearingActions = new Set<ProtocolAction>([
     'SubmitVote',
-    'DeriveAggregateContribution',
-    'VerifyBridgeProof',
-    'VerifyEvaluationProof',
+    'VerifyEncryptedBallotProofs',
+    'AggregateEncryptedBallots',
+    'ReplayEvaluator',
     'AcceptTarget',
     'CreateTargetBoundDecryptionShare',
     'VerifyDecryptionShare',
-    'VerifyOneShotSharePolicy',
-    'VerifyKllpsTargetDecryptionProfile',
-    'RecombineAcceptedTarget',
-    'DecodeVerifiedTopK',
-]);
-
-const bridgeBenchmarkReportActions = new Set<ProtocolAction>([
-    'VerifyBridgeProof',
-    'DeriveAggregateContribution',
-    'VerifyEvaluationProof',
-    'AcceptTarget',
-]);
-
-const decryptionCertificateActions = new Set<ProtocolAction>([
-    'CreateTargetBoundDecryptionShare',
-    'VerifyDecryptionShare',
-    'VerifyOneShotSharePolicy',
-    'VerifyKllpsTargetDecryptionProfile',
+    'VerifyTargetDecryptionProfile',
     'RecombineAcceptedTarget',
     'DecodeVerifiedTopK',
 ]);
@@ -90,13 +73,53 @@ const evaluateLifecycleAction = (
         ? allowAction(action)
         : refuseAction(action, 'InvalidLifecycleState');
 
-const evaluateAggregateContribution = (
+const nonEmptyHash = (hash: string | undefined): boolean =>
+    hash !== undefined && hash.length > 0;
+
+const evaluateOpenVoting = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+): CapabilityDecision => {
+    if (!lifecycleAllows(context, 'votingOpen')) {
+        return refuseAction(action, 'InvalidLifecycleState');
+    }
+    if (!context.thresholdProfile.claimBearing) {
+        return refuseAction(action, 'ProfileNotClaimBearing');
+    }
+    if (
+        !nonEmptyHash(context.finalRosterHash) ||
+        !nonEmptyHash(context.frozenRosterProfileHash) ||
+        context.encryptedBallotLayoutFrozen !== true ||
+        context.ballotValidityProofProfileFrozen !== true ||
+        context.evaluatorReplayProfileFrozen !== true ||
+        context.targetOutputLayoutFrozen !== true ||
+        context.targetDecryptionProfileReferencePresent !== true
+    ) {
+        return refuseAction(action, 'ClaimClosureMissing');
+    }
+    if (
+        context.trusteeSetupComplete !== true ||
+        !countAtLeast(
+            context.setupCompleteCount,
+            context.thresholdProfile.setupCompletionQuorum,
+        )
+    ) {
+        return refuseAction(action, 'setupIncomplete');
+    }
+    if (context.localRosterAccepted !== true) {
+        return refuseAction(action, 'LocalRosterNotAccepted');
+    }
+
+    return allowAction(action);
+};
+
+const evaluateEncryptedBallotProofs = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (
         context.lifecycleState !== 'votingClosed' &&
-        context.lifecycleState !== 'aggregatePending'
+        context.lifecycleState !== 'encryptedBallotsSelected'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
@@ -116,34 +139,39 @@ const evaluateAggregateContribution = (
     ) {
         return refuseAction(action, 'turnoutFloorNotReached');
     }
-    if (context.bridgeBenchmarkReportPresent !== true) {
-        return refuseAction(action, 'MissingBridgeBenchmarkReport');
-    }
-    if (context.bridgeProverCertificatePresent !== true) {
-        return refuseAction(action, 'MissingBridgeProverCertificate');
+    if (context.directProofTransportPresent !== true) {
+        return refuseAction(action, 'MissingDirectProofTransport');
     }
 
     return allowAction(action);
 };
 
-const evaluateEvaluationProof = (
+const evaluateEncryptedBallotAggregation = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (
-        context.lifecycleState !== 'targetFinalityReached' &&
-        context.lifecycleState !== 'evaluationProofPending'
-    ) {
+    if (context.lifecycleState !== 'ballotProofsVerified') {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.targetFinalityAccepted !== true) {
-        return refuseAction(action, 'TargetFinalityCheckpointMissing');
+    if (context.ballotProofsVerified !== true) {
+        return refuseAction(action, 'BallotProofsMissing');
     }
-    if (context.evaluationProofCertificatePresent !== true) {
-        return refuseAction(action, 'MissingEvaluationProofCertificate');
+
+    return allowAction(action);
+};
+
+const evaluateEvaluatorReplay = (
+    action: ProtocolAction,
+    context: CapabilityContext,
+): CapabilityDecision => {
+    if (context.lifecycleState !== 'encryptedBallotAggregateComputed') {
+        return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.bridgeBenchmarkReportPresent !== true) {
-        return refuseAction(action, 'MissingBridgeBenchmarkReport');
+    if (context.encryptedBallotAggregateComputed !== true) {
+        return refuseAction(action, 'EncryptedBallotAggregateMissing');
+    }
+    if (context.mobileReplayEvidencePresent !== true) {
+        return refuseAction(action, 'MissingMobileReplayEvidence');
     }
 
     return allowAction(action);
@@ -153,40 +181,17 @@ const evaluateTargetAcceptance = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
-    if (context.lifecycleState !== 'evaluationProofVerified') {
-        return refuseAction(action, 'InvalidLifecycleState');
-    }
-    if (context.targetFinalityAccepted !== true) {
-        return refuseAction(action, 'TargetFinalityCheckpointMissing');
-    }
-    if (context.evaluationProofVerified !== true) {
-        return refuseAction(action, 'EvaluationProofMissing');
-    }
-    if (context.bridgeBenchmarkReportPresent !== true) {
-        return refuseAction(action, 'MissingBridgeBenchmarkReport');
-    }
-
-    return allowAction(action);
-};
-
-const evaluateLocalReplay = (
-    action: ProtocolAction,
-    context: CapabilityContext,
-): CapabilityDecision => {
     if (
-        context.lifecycleState !== 'targetAccepted' &&
-        context.lifecycleState !== 'decryptionPending' &&
-        context.lifecycleState !== 'decryptionSharesReady' &&
-        context.lifecycleState !== 'cpadProfileVerified' &&
-        context.lifecycleState !== 'fullyVerified'
+        context.lifecycleState !== 'evaluatorReplayed' &&
+        context.lifecycleState !== 'targetFinalityReached'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.targetAccepted !== true) {
-        return refuseAction(action, 'TargetNotAccepted');
+    if (context.evaluatorReplaySucceeded !== true) {
+        return refuseAction(action, 'EvaluatorReplayMissing');
     }
-    if (context.evaluationProofVerified !== true) {
-        return refuseAction(action, 'EvaluationProofMissing');
+    if (context.targetFinalityAccepted !== true) {
+        return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
 
     return allowAction(action);
@@ -208,41 +213,32 @@ const evaluateDecryptionShare = (
     if (context.targetAccepted !== true) {
         return refuseAction(action, 'TargetNotAccepted');
     }
-    if (context.evaluationProofVerified !== true) {
-        return refuseAction(action, 'EvaluationProofMissing');
-    }
     if (getCertifiedDecryptionShareQuorum(context) === undefined) {
-        return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
+        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
     }
 
     const recoveryRefusal = isRecoveryRefused(context.recoveryState);
     if (recoveryRefusal !== undefined) {
         return refuseAction(action, recoveryRefusal);
     }
-    if (context.oneShotDecryptionProofCertificatePresent !== true) {
-        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
-    }
-    if (context.thresholdDecryptionCertificatePresent !== true) {
-        return refuseAction(action, 'MissingThresholdDecryptionCertificate');
+    if (context.targetDecryptionCertificatePresent !== true) {
+        return refuseAction(action, 'MissingTargetDecryptionCertificate');
     }
 
     return allowAction(action);
 };
 
-const evaluateKllpsCpadProfile = (
+const evaluateTargetDecryptionProfile = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
     if (context.lifecycleState !== 'decryptionSharesReady') {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.kllpsCpadCertificatePresent !== true) {
-        return refuseAction(action, 'MissingKllpsCpadCertificate');
-    }
     const certifiedDecryptionShareQuorum =
         getCertifiedDecryptionShareQuorum(context);
     if (certifiedDecryptionShareQuorum === undefined) {
-        return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
+        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
     }
     if (
         !countAtLeast(
@@ -252,8 +248,8 @@ const evaluateKllpsCpadProfile = (
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
-    if (context.thresholdDecryptionCertificatePresent !== true) {
-        return refuseAction(action, 'MissingThresholdDecryptionCertificate');
+    if (context.targetDecryptionCertificatePresent !== true) {
+        return refuseAction(action, 'MissingTargetDecryptionCertificate');
     }
 
     return allowAction(action);
@@ -265,7 +261,7 @@ const evaluateRecombination = (
 ): CapabilityDecision => {
     if (
         context.lifecycleState !== 'decryptionSharesReady' &&
-        context.lifecycleState !== 'cpadProfileVerified' &&
+        context.lifecycleState !== 'resultDecoded' &&
         context.lifecycleState !== 'fullyVerified'
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
@@ -276,16 +272,13 @@ const evaluateRecombination = (
     if (context.targetFinalityAccepted !== true) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (context.evaluationProofVerified !== true) {
-        return refuseAction(action, 'EvaluationProofMissing');
-    }
-    if (context.cpadProfileVerified !== true) {
-        return refuseAction(action, 'KllpsCpadProfileNotVerified');
+    if (context.targetDecryptionProfileVerified !== true) {
+        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
     }
     const certifiedDecryptionShareQuorum =
         getCertifiedDecryptionShareQuorum(context);
     if (certifiedDecryptionShareQuorum === undefined) {
-        return refuseAction(action, 'ThresholdDecryptionProfileNotCertified');
+        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
     }
     if (
         !countAtLeast(
@@ -295,8 +288,8 @@ const evaluateRecombination = (
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
-    if (context.oneShotDecryptionProofCertificatePresent !== true) {
-        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
+    if (context.targetDecryptionClosureApplied !== true) {
+        return refuseAction(action, 'ClaimClosureMissing');
     }
 
     return allowAction(action);
@@ -334,66 +327,6 @@ const evaluateClaimBearingEnvironment = (
         return refuseAction(action, 'OutsideMeasuredRuntimeProfile');
     }
     return undefined;
-};
-
-const nonEmptyHash = (hash: string | undefined): boolean =>
-    hash !== undefined && hash.length > 0;
-
-const evaluateOpenVoting = (
-    action: ProtocolAction,
-    context: CapabilityContext,
-): CapabilityDecision => {
-    if (!lifecycleAllows(context, 'votingOpen')) {
-        return refuseAction(action, 'InvalidLifecycleState');
-    }
-    if (!context.thresholdProfile.claimBearing) {
-        return refuseAction(action, 'ProfileNotClaimBearing');
-    }
-    if (
-        !nonEmptyHash(context.finalRosterHash) ||
-        !nonEmptyHash(context.frozenRosterProfileHash) ||
-        context.ballotProofProfileFrozen !== true ||
-        context.shareLayoutFrozen !== true ||
-        context.targetOutputLayoutFrozen !== true ||
-        context.kllpsCpadProfileReferencePresent !== true
-    ) {
-        return refuseAction(action, 'ClaimClosureMissing');
-    }
-    if (
-        context.receiverKeyCoverageComplete !== true ||
-        context.trusteeSetupComplete !== true ||
-        !countAtLeast(
-            context.setupCompleteCount,
-            context.thresholdProfile.setupCompletionQuorum,
-        )
-    ) {
-        return refuseAction(action, 'setupIncomplete');
-    }
-    if (context.localRosterAccepted !== true) {
-        return refuseAction(action, 'LocalRosterNotAccepted');
-    }
-
-    return allowAction(action);
-};
-
-const evaluateUnavailableFutureAction = (
-    action: ProtocolAction,
-    context: CapabilityContext,
-): CapabilityDecision => {
-    if (
-        bridgeBenchmarkReportActions.has(action) &&
-        context.bridgeBenchmarkReportPresent === false
-    ) {
-        return refuseAction(action, 'MissingBridgeBenchmarkReport');
-    }
-    if (
-        decryptionCertificateActions.has(action) &&
-        context.oneShotDecryptionProofCertificatePresent === false
-    ) {
-        return refuseAction(action, 'MissingOneShotDecryptionProofCertificate');
-    }
-
-    return refuseAction(action, 'OperationUnavailable');
 };
 
 export const evaluateActionCapability = (
@@ -440,32 +373,25 @@ export const evaluateActionCapability = (
                 : refuseAction(action, 'InvalidLifecycleState');
         case 'CloseVoting':
             return evaluateLifecycleAction(action, context, 'votingClosed');
-        case 'VerifyTranscript':
-            return evaluateUnavailableFutureAction(action, context);
-        case 'DeriveAggregateContribution':
-            return evaluateAggregateContribution(action, context);
-        case 'VerifyBridgeProof':
-            return evaluateUnavailableFutureAction(action, context);
-        case 'VerifyEvaluationProof':
-            return evaluateEvaluationProof(action, context);
+        case 'VerifyEncryptedBallotProofs':
+            return evaluateEncryptedBallotProofs(action, context);
+        case 'AggregateEncryptedBallots':
+            return evaluateEncryptedBallotAggregation(action, context);
+        case 'ReplayEvaluator':
+            return evaluateEvaluatorReplay(action, context);
         case 'AcceptTarget':
             return evaluateTargetAcceptance(action, context);
-        case 'ReplayEvaluation':
-        case 'CreateLocalReplayDiagnostic':
-            return evaluateLocalReplay(action, context);
         case 'CreateTargetBoundDecryptionShare':
+        case 'VerifyDecryptionShare':
             return evaluateDecryptionShare(action, context);
-        case 'VerifyKllpsTargetDecryptionProfile':
-            return evaluateKllpsCpadProfile(action, context);
+        case 'VerifyTargetDecryptionProfile':
+            return evaluateTargetDecryptionProfile(action, context);
         case 'RecombineAcceptedTarget':
             return evaluateRecombination(action, context);
         case 'DecodeVerifiedTopK':
-            return evaluateUnavailableFutureAction(action, context);
+            return evaluateRecombination(action, context);
+        case 'VerifyTranscript':
         case 'CreateRecoveryEpochUpdate':
-            return refuseAction(action, 'OperationUnavailable');
-        case 'VerifyDecryptionShare':
-        case 'VerifyOneShotSharePolicy':
-            return evaluateUnavailableFutureAction(action, context);
         case 'VerifyEncryptedEnvelope':
             return refuseAction(action, 'OperationUnavailable');
         default:

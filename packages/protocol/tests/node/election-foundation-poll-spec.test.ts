@@ -123,7 +123,7 @@ describe('election foundation poll-spec validation', () => {
                     skippedOptionScore: 1,
                 } as unknown as PollSpecInput['scoreDomain'],
                 duplicateBallotPolicy:
-                    'FirstBallotCounts' as PollSpecInput['duplicateBallotPolicy'],
+                    'FirstBallotCounts' as unknown as PollSpecInput['duplicateBallotPolicy'],
                 tiePolicy: 'RandomTieBreak' as PollSpecInput['tiePolicy'],
             }),
             [

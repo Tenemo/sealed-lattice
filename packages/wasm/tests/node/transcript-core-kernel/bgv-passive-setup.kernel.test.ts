@@ -154,8 +154,10 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             readonly publicRlweSamplesByBasis: {
                 readonly QData: {
                     readonly publicKeyShares: number;
+                    readonly rotationKeys: number;
                 };
                 readonly QPPublic: {
+                    readonly exposedOnAcceptedDirectEvaluatorReplayPath: boolean;
                     readonly rotationKeys: number;
                 };
                 readonly QTarget: {
@@ -172,33 +174,47 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'CollectivePublicKeyRootBound',
                 'EvaluationKeyRootBound',
                 'PassiveSetupInputReady',
-                'FinalSetupSecurityPendingTargetModulus',
+                'DirectEvaluatorReplayHeSecurityAccepted',
+                'FinalTargetSecurityPendingTargetModulus',
             ]),
         );
-        expect(setup.nonClaims).toContain('KLLPSPartDecNotImplemented');
-        expect(setup.kllpsStatus).toMatchObject({
-            thresholdDecryptionProfileId:
-                'BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1',
-            setupMaterialMatchesKLLPS: true,
-            KLLPSPartDecStatusImplemented: false,
-            KLLPSC1C4StatusAccepted: false,
+        expect(setup.nonClaims).toContain('TargetShareProofNotCertified');
+        expect(setup.targetDecryptionStatus).toMatchObject({
+            targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
+            setupMaterialMatchesTargetDecryption: true,
+            targetPartDecImplemented: true,
+            targetC1C4StatusAccepted: false,
         });
         expect(certificates.setupParameterCertificate).toMatchObject({
-            finalSecurityStatus: 'pendingQTarget',
+            finalSecurityStatus:
+                'acceptedForDirectEvaluatorReplayTargetPending',
             largestExposedModulusBitsWithoutQTarget: 799,
         });
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,
         });
         expect(
-            certificates.publicRlweSamplesByBasis.QPPublic.rotationKeys,
+            certificates.publicRlweSamplesByBasis.QData.rotationKeys,
         ).toBeGreaterThan(0);
+        expect(certificates.publicRlweSamplesByBasis.QPPublic).toMatchObject({
+            exposedOnAcceptedDirectEvaluatorReplayPath: false,
+            rotationKeys: 0,
+        });
         expect(
             certificates.publicRlweSamplesByBasis.QTarget.sampleCountStatus,
         ).toBe('pendingUntilFinalNoiseAnalysis');
         expect(
             setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
         ).toHaveLength(128);
+        expect(
+            Object.prototype.hasOwnProperty.call(
+                setup.setupInputs,
+                'privateSetupSeedHash',
+            ),
+        ).toBe(false);
+        expect(
+            Object.prototype.hasOwnProperty.call(setup, 'privateSetupSeedHash'),
+        ).toBe(false);
         expect(setup.collectivePublicKey.coefficientMaterial).toMatchObject({
             objectType: 'BgvCollectivePublicKeyCoefficientMaterial',
             objectVersion: 1,
@@ -227,21 +243,29 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
 
-        expect(() =>
-            kernel.generateBgvPassiveSetup({
-                ...setupRequest,
-                participants: [
-                    {
-                        ...setupRequest.participants[0],
-                        globalSecretPolynomial: 'forbidden',
-                    },
-                    setupRequest.participants[1],
-                    setupRequest.participants[2],
-                ],
-            } as unknown as Parameters<
-                typeof kernel.generateBgvPassiveSetup
-            >[0]),
-        ).toThrow(TranscriptCoreKernelCommandError);
+        for (const fieldName of [
+            'globalSecretPolynomial',
+            'trustedDealerSecret',
+            'trustedDealerKeyMaterial',
+            'fullSecretKey',
+            'collectiveSecretKey',
+            'fullSecretReconstruction',
+            'thresholdSecretShares',
+        ]) {
+            expect(() =>
+                kernel.generateBgvPassiveSetup({
+                    ...setupRequest,
+                    participants: [
+                        {
+                            ...setupRequest.participants[0],
+                            [fieldName]: 'forbidden',
+                        },
+                        setupRequest.participants[1],
+                        setupRequest.participants[2],
+                    ],
+                }),
+            ).toThrow(TranscriptCoreKernelCommandError);
+        }
         expect(() =>
             kernel.verifyBgvPassiveSetup({
                 setupPackage: setup,
@@ -274,6 +298,79 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         expect(() =>
             kernel.verifyBgvPassiveSetup({
                 setupPackage: mutatedCoefficientSetup,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('generates public evaluation-key material without exporting the private setup witness', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const setup = kernel.generateBgvPassiveSetup(setupRequest);
+        const material = kernel.generateBgvEvaluationKeyMaterial({
+            setupPackage: setup,
+            setupPrivateWitness: {
+                setupSeed: setupRequest.setupSeed,
+            },
+            workingLevel: 1,
+        });
+
+        expect(material).toMatchObject({
+            objectType: 'BgvPublicEvaluationKeyMaterial',
+            setupPackageHash: setup.setupPackageHash,
+            evaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
+            rawSecretMaterialExported: false,
+        });
+        expect((material.rotationKeys as readonly unknown[]).length).toBe(0);
+        expect(material.statusLabels).toEqual(
+            expect.arrayContaining([
+                'PublicEvaluationKeyMaterialGenerated',
+                'SetupPrivateWitnessNotExported',
+            ]),
+        );
+        expect(
+            Object.prototype.hasOwnProperty.call(
+                material,
+                'setupPrivateWitness',
+            ),
+        ).toBe(false);
+        expect(
+            Object.prototype.hasOwnProperty.call(
+                material,
+                'privateSetupSeedHash',
+            ),
+        ).toBe(false);
+        expect(() =>
+            kernel.generateBgvEvaluationKeyMaterial({
+                setupPackage: setup,
+                setupPrivateWitness: {
+                    setupSeed: 'wrong-private-setup-seed',
+                },
+                workingLevel: 1,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('rejects duplicate public evaluation-key rotation requests', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const setup = kernel.generateBgvPassiveSetup(setupRequest);
+        const selectedRotationKeyRoot = arrayAtPath(setup, [
+            'evaluationKeys',
+            'rotationKeyRoots',
+        ])[0] as
+            | { readonly rotation: number; readonly level: number }
+            | undefined;
+
+        expect(selectedRotationKeyRoot).toBeDefined();
+        expect(() =>
+            kernel.generateBgvEvaluationKeyMaterial({
+                setupPackage: setup,
+                setupPrivateWitness: {
+                    setupSeed: setupRequest.setupSeed,
+                },
+                workingLevel: 1,
+                rotationKeys: [
+                    selectedRotationKeyRoot!,
+                    selectedRotationKeyRoot!,
+                ],
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
     });
@@ -436,12 +533,12 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                     ),
             ],
             [
-                'KLLPS claim',
+                'target decryption PartDec missing',
                 (setupPackage) =>
                     setPathValue(
                         setupPackage,
-                        ['kllpsStatus', 'KLLPSPartDecStatusImplemented'],
-                        true,
+                        ['targetDecryptionStatus', 'targetPartDecImplemented'],
+                        false,
                     ),
             ],
             [
@@ -454,7 +551,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                             'setupParameterCertificate',
                             'finalSecurityStatus',
                         ],
-                        'accepted',
+                        'pendingQTarget',
                     ),
             ],
             [
@@ -465,23 +562,25 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                         [
                             'developmentEncryptionFixture',
                             'fixture',
-                            'bridgeEncryptionClaim',
+                            'directProofClaim',
                         ],
                         true,
                     ),
             ],
             [
-                'arithmetic fixture',
+                'evaluation key material commitment',
                 (setupPackage) =>
                     setPathValue(
                         setupPackage,
                         [
                             'evaluationKeys',
-                            'relinearizationArithmeticFixture',
-                            'fixture',
-                            'sampledCoefficientChecks',
+                            'evaluationKeyMaterialCommitment',
+                            'record',
+                            'sampledRelationChecks',
                             0,
-                            'recompositionMatches',
+                            'samples',
+                            0,
+                            'relationMatches',
                         ],
                         false,
                     ),
@@ -493,8 +592,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                         setupPackage,
                         [
                             'certificates',
-                            'evaluationKeyStreamingFixture',
-                            'fixture',
+                            'evaluationKeyStreamingCommitment',
+                            'commitment',
                             'chunkRoot',
                         ],
                         validHash('7'),
@@ -514,15 +613,10 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
 
         for (const fieldName of [
-            'encryptedAggregateBridgeHash',
-            'encryptedAggregateTargetBasisRoot',
-            'encryptedAggregateReconstructionHash',
-            'scoreBitDerivationCircuitHash',
             'comparisonInputDerivationCircuitHash',
-            'encryptedScoreBitInputHash',
             'encryptedComparisonInputHash',
-            'bitSlicedComparatorHash',
             'encryptedSparseTargetProjectionHash',
+            'targetLayoutHash',
             'passiveSetupEvaluatorContextBindingHash',
         ]) {
             const mutatedSetup = structuredClone(setup);
@@ -623,11 +717,20 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         }
     });
 
-    it('refuses missing rotation keys for each provisional purpose', async () => {
+    it('refuses missing rotation keys for each selected purpose', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
+        const selectedRotations = arrayAtPath(setup, [
+            'evaluationKeys',
+            'rotationKeyRoots',
+        ])
+            .slice(0, 4)
+            .map(
+                (rotationRoot) =>
+                    (rotationRoot as { readonly rotation: number }).rotation,
+            );
 
-        for (const rotation of [1, 32, 256, 4096]) {
+        for (const rotation of selectedRotations) {
             const mutatedSetup = structuredClone(setup);
             const rotationRoots = arrayAtPath(mutatedSetup, [
                 'evaluationKeys',
@@ -654,7 +757,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'rotations',
                 0,
             ],
-            3,
+            1,
         );
         expectReboundSetupPackageToBeRejected(kernel, wrongRotationGroup);
     });

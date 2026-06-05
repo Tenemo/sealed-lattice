@@ -70,7 +70,7 @@ pub fn mutate_non_canonical_varuint_fixture() -> String {
     append_string(&mut bytes, &object.base_claim_profile_id);
     append_string(&mut bytes, &object.mhe_security_profile_id);
     append_string(&mut bytes, &object.he_setup_proof_profile_id);
-    append_string(&mut bytes, &object.evaluation_proof_profile_id);
+    append_string(&mut bytes, &object.evaluator_replay_profile_id);
     append_string(&mut bytes, &object.decryption_proof_profile_id);
     append_varuint(&mut bytes, 0);
 
@@ -107,10 +107,10 @@ pub fn mutate_invalid_profile_fixture() -> String {
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
-pub fn mutate_unknown_evaluation_profile_fixture() -> String {
+pub fn mutate_unknown_evaluator_replay_profile_fixture() -> String {
     let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
-    object.evaluation_proof_profile_id =
-        "transcript-core-unknown-evaluation-proof-profile".to_string();
+    object.evaluator_replay_profile_id =
+        "transcript-core-unknown-evaluator-replay-profile".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
@@ -183,17 +183,17 @@ pub fn mutate_mhe_security_profile_mismatch_fixture() -> String {
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
-pub fn mutate_wrong_evaluation_profile_fixture() -> String {
+pub fn mutate_wrong_evaluator_replay_profile_fixture() -> String {
     let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
-    object.evaluation_proof_profile_id =
-        "transcript-core-wrong-evaluation-proof-profile".to_string();
+    object.evaluator_replay_profile_id =
+        "transcript-core-wrong-evaluator-replay-profile".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
 
-pub fn mutate_fully_verified_missing_evaluation_profile_fixture() -> String {
+pub fn mutate_fully_verified_missing_evaluator_replay_profile_fixture() -> String {
     let mut object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
-    object.evaluation_proof_profile_id = String::new();
+    object.evaluator_replay_profile_id = String::new();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }

@@ -35,7 +35,7 @@ type FieldVectors = {
 };
 
 type ShamirVectors = {
-    readonly mandatoryWorstCaseReport: {
+    readonly stressWorstCaseReport: {
         readonly exhaustiveSubsetCount: number;
         readonly maxCenteredAbsCoefficient: number;
         readonly maxCenteredAbsContributorRosterPositions: readonly number[];

@@ -6,13 +6,18 @@ pub(super) fn participant_setup_material(
     profile_hash: &str,
     backend_profile_hash: &str,
     public_common_random_polynomial_root: &str,
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
 ) -> CanonicalResult<ParticipantSetupMaterial> {
+    let participant_identities = input
+        .participants
+        .iter()
+        .map(|setup_participant| setup_participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
     let local_secret_share_commitment_hash = hash512_hex(
         "sealed-lattice-bgv-rns/local-secret-share-commitment-v1",
         &[
-            input.setup_seed_hash.as_bytes(),
+            input.private_setup_seed_hash.as_bytes(),
             participant.trustee_identity.as_bytes(),
             participant.roster_position.to_string().as_bytes(),
             profile_hash.as_bytes(),
@@ -21,7 +26,7 @@ pub(super) fn participant_setup_material(
     let local_error_commitment_hash = hash512_hex(
         "sealed-lattice-bgv-rns/local-error-commitment-v1",
         &[
-            input.setup_seed_hash.as_bytes(),
+            input.private_setup_seed_hash.as_bytes(),
             participant.trustee_identity.as_bytes(),
             participant.roster_position.to_string().as_bytes(),
             public_common_random_polynomial_root.as_bytes(),
@@ -43,21 +48,19 @@ pub(super) fn participant_setup_material(
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "localSecretShareCommitmentHash": local_secret_share_commitment_hash,
         "localErrorCommitmentHash": local_error_commitment_hash,
-        "publicShareConstruction": "b_i=-a*s_i+e_i-over-selected-BGV-RNS-profile",
+        "publicShareConstruction": "owner-routed-standard-ternary-share-b_i=p*e_i-a*s_i-over-selected-BGV-RNS-profile",
         "rawSecretShareExported": false,
         "centralizedSecretReconstruction": false,
-        "sampledLocalSecretCoefficients": sample_small_distribution(
-            &input.setup_seed_hash,
+        "sampledLocalSecretCoefficients": sample_bounded_collective_secret_share_distribution(
+            &input.private_setup_seed_hash,
+            &participant_identities,
             &participant.trustee_identity,
-            "local-secret-share",
-            -1,
-            1,
-        ),
-        "sampledLocalErrorCoefficients": sample_centered_binomial_eta2(
-            &input.setup_seed_hash,
+        )?,
+        "sampledLocalErrorCoefficients": sample_bounded_collective_error_share_distribution(
+            &input.private_setup_seed_hash,
+            &participant_identities,
             &participant.trustee_identity,
-            "local-error",
-        ),
+        )?,
     });
     let public_key_share_root =
         derive_protocol_hash("PublicKeyShareRoot", &public_key_share_record)?;
@@ -65,9 +68,9 @@ pub(super) fn participant_setup_material(
         "objectType": "TrusteeThresholdVerificationKey",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "targetDecryptionProfileHash": target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "trusteeIdentity": participant.trustee_identity,
