@@ -37,6 +37,7 @@ use crate::{
         setup::{
             development_evaluator_key_from_passive_setup_package,
             validate_passive_setup_package_for_encrypted_evaluation,
+            validate_private_setup_seed_from_passive_setup_package,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -628,11 +629,8 @@ fn verify_direct_ballot_public_proof_transport(
 
 pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Value> {
     let setup_package = required_object_field(request, "setupPackage")?;
-    validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
     let private_setup_seed =
         required_string_path(request, &["setupPrivateWitness", "setupSeed"])?.to_string();
-    let evaluator_key =
-        development_evaluator_key_from_passive_setup_package(setup_package, &private_setup_seed)?;
 
     let (ballots, ballot_encryption_randomness) = read_ballots(request)?;
     if ballots.len() > DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS {
@@ -642,6 +640,19 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         ));
     }
     validate_direct_ballot_batch_order(&ballots)?;
+    for ballot in &ballots {
+        validate_direct_ballot_input(ballot)?;
+    }
+    validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
+    validate_private_setup_seed_from_passive_setup_package(setup_package, &private_setup_seed)?;
+    let proof_mask_randomness = read_direct_ballot_proof_mask_randomness(request, ballots.len())?;
+    validate_disjoint_direct_ballot_randomness(
+        &ballot_encryption_randomness.encryption_seed_hexes,
+        &proof_mask_randomness.ballot_proof_randomness_hexes,
+    )?;
+
+    let evaluator_key =
+        development_evaluator_key_from_passive_setup_package(setup_package, &private_setup_seed)?;
     let mut encrypted_ballots = Vec::with_capacity(ballots.len());
     for ballot in ballots {
         let encrypted_ballot = encrypt_direct_ballot(
@@ -653,12 +664,6 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         validate_direct_ballot_preflight(&evaluator_key, &encrypted_ballot)?;
         encrypted_ballots.push(encrypted_ballot);
     }
-    let proof_mask_randomness =
-        read_direct_ballot_proof_mask_randomness(request, encrypted_ballots.len())?;
-    validate_disjoint_direct_ballot_randomness(
-        &ballot_encryption_randomness.encryption_seed_hexes,
-        &proof_mask_randomness.ballot_proof_randomness_hexes,
-    )?;
 
     let mut proof_summaries = Vec::with_capacity(encrypted_ballots.len());
     let mut total_proving_time_milliseconds = DirectBallotTimingTotal::new();
@@ -2392,7 +2397,7 @@ mod tests {
 
     #[test]
     fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
-        let setup_package = setup_package();
+        let setup_package = setup_package_not_reached();
         let ballots = (0..=DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS)
             .map(|ballot_index| {
                 json!({
@@ -2430,7 +2435,7 @@ mod tests {
 
     #[test]
     fn direct_encrypted_ballot_command_rejects_missing_ballot_encryption_randomness() {
-        let setup_package = setup_package();
+        let setup_package = setup_package_not_reached();
         let error = run_direct_encrypted_ballot(&json!({
             "setupPackage": setup_package,
             "setupPrivateWitness": {
@@ -2461,7 +2466,7 @@ mod tests {
 
     #[test]
     fn direct_encrypted_ballot_command_rejects_ballot_embedded_encryption_seed() {
-        let setup_package = setup_package();
+        let setup_package = setup_package_not_reached();
         let error = run_direct_encrypted_ballot(&json!({
             "setupPackage": setup_package,
             "setupPrivateWitness": {
@@ -2498,7 +2503,7 @@ mod tests {
 
     #[test]
     fn direct_encrypted_ballot_command_rejects_reused_encryption_randomness() {
-        let setup_package = setup_package();
+        let setup_package = setup_package_not_reached();
         let reused_randomness = direct_ballot_test_randomness_hex("reused-encryption", 0);
         let error = run_direct_encrypted_ballot(&json!({
             "setupPackage": setup_package,
@@ -2585,7 +2590,7 @@ mod tests {
 
     #[test]
     fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
-        let setup_package = setup_package();
+        let setup_package = setup_package_not_reached();
         let error = run_direct_encrypted_ballot(&json!({
             "setupPackage": setup_package,
             "setupPrivateWitness": {
@@ -2629,7 +2634,7 @@ mod tests {
 
     #[test]
     fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
-        let setup_package = setup_package();
+        let setup_package = setup_package_not_reached();
         let error = run_direct_encrypted_ballot(&json!({
             "setupPackage": setup_package,
             "setupPrivateWitness": {
@@ -2673,7 +2678,7 @@ mod tests {
 
     #[test]
     fn direct_encrypted_ballot_command_rejects_invalid_score_before_proof_generation() {
-        let setup_package = setup_package();
+        let setup_package = setup_package_not_reached();
         let error = run_direct_encrypted_ballot(&json!({
             "setupPackage": setup_package,
             "setupPrivateWitness": {
@@ -3331,7 +3336,14 @@ mod tests {
     }
 
     fn setup_package() -> Value {
-        setup_package_with_seed(DIRECT_BALLOT_TEST_SETUP_SEED)
+        static SETUP_PACKAGE: OnceLock<Value> = OnceLock::new();
+        SETUP_PACKAGE
+            .get_or_init(|| setup_package_with_seed(DIRECT_BALLOT_TEST_SETUP_SEED))
+            .clone()
+    }
+
+    fn setup_package_not_reached() -> Value {
+        json!({})
     }
 
     fn setup_package_with_seed(setup_seed: &str) -> Value {

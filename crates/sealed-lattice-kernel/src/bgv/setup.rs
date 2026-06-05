@@ -348,6 +348,14 @@ pub(crate) fn validate_passive_setup_package_for_encrypted_evaluation(
     validation::validate_setup_package_internal_bindings(setup_package)
 }
 
+pub(crate) fn validate_private_setup_seed_from_passive_setup_package(
+    setup_package: &Value,
+    private_setup_seed: &str,
+) -> CanonicalResult<()> {
+    input::private_passive_setup_seed_hash_from_package_witness(setup_package, private_setup_seed)?;
+    Ok(())
+}
+
 pub(crate) fn development_evaluator_key_from_passive_setup_package(
     setup_package: &Value,
     private_setup_seed: &str,
