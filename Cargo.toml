@@ -2,6 +2,10 @@
 members = ["crates/sealed-lattice-kernel"]
 resolver = "3"
 
+[profile.test]
+opt-level = 3
+overflow-checks = true
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

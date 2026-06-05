@@ -275,12 +275,12 @@ const buildRustKernelLane = (): ValidationLane => ({
             'cargo-clippy',
         ),
         createCargoCommand(
-            'cargo test',
+            'cargo test (optimized test profile)',
             ['test', '-p', 'sealed-lattice-kernel', '--quiet'],
             'cargo-test',
         ),
     ],
-    name: 'Rust kernel (fmt, clippy, test)',
+    name: 'Rust kernel (fmt, clippy, optimized test)',
 });
 
 const buildIsolatedLanes = (): readonly ValidationLane[] => [

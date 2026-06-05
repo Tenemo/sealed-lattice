@@ -23,7 +23,8 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo fmt --check -p sealed-lattice-kernel
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-            - run: cargo test --workspace
+            - name: Run Rust tests with optimized test profile
+              run: cargo test --workspace
 
     wasm:
         name: wasm
