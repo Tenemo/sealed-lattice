@@ -13,7 +13,10 @@ import type {
     ThresholdWarning,
 } from '@sealed-lattice/types';
 
-import { isNonNegativeInteger } from '../common/verification-helpers.js';
+import {
+    isNonNegativeInteger,
+    isProtocolHashString,
+} from '../common/verification-helpers.js';
 
 import { derivePollSpecHash } from './poll-spec.js';
 import {
@@ -26,12 +29,9 @@ import {
     targetDecryptionProfileId,
 } from './profiles.js';
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
 const normalizeDynamicRosterProfileCertificateHash = (
     hash: ProtocolHash | undefined,
-): ProtocolHash | null =>
-    hash !== undefined && protocolHashPattern.test(hash) ? hash : null;
+): ProtocolHash | null => (isProtocolHashString(hash) ? hash : null);
 
 const normalizeBackendCorruptionModel = (
     rosterSize: number,

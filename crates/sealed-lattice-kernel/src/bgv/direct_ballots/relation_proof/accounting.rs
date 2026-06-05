@@ -51,11 +51,10 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
         ceil_log2_usize(support_check_count * direct_ballot_support_maximum_degree());
     let response_union_loss_bits = ceil_log2_usize(direct_ballot_relation_response_scalar_count());
     let zero_knowledge_shift_slack_bits =
-        u32::try_from(DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS)
-            .expect("mask bit count fits u32")
-            - DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS
-            - DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS
-            - response_union_loss_bits;
+        zero_knowledge_shift_slack_bits_after_response_union_bound(
+            DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS,
+            response_union_loss_bits,
+        )?;
     let weakest_relation_bits_per_check = 16_u32;
     let support_modulus_bits = 64 - direct_ballot_support_modulus().leading_zeros();
     let repeated_proof_size_bytes = checked_repeated_byte_count(
@@ -140,4 +139,45 @@ pub(super) fn direct_ballot_support_check_count() -> usize {
 
 pub(super) fn direct_ballot_support_maximum_degree() -> usize {
     5
+}
+
+fn zero_knowledge_shift_slack_bits_after_response_union_bound(
+    mask_coefficient_bits: usize,
+    response_union_loss_bits: u32,
+) -> CanonicalResult<u32> {
+    u32::try_from(mask_coefficient_bits)
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "direct ballot proof mask bit count does not fit proof accounting",
+            )
+        })?
+        .checked_sub(DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS)
+        .and_then(|slack| slack.checked_sub(DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS))
+        .and_then(|slack| slack.checked_sub(response_union_loss_bits))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "direct ballot proof mask bit count is too small for zero-knowledge shift accounting",
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::zero_knowledge_shift_slack_bits_after_response_union_bound;
+    use crate::encoding::CanonicalErrorCode;
+
+    #[test]
+    fn zero_knowledge_shift_slack_rejects_underflowing_profile_constants() {
+        let error = zero_knowledge_shift_slack_bits_after_response_union_bound(1, 1)
+            .expect_err("undersized mask bit count should reject");
+
+        assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+        assert!(
+            error
+                .message
+                .contains("too small for zero-knowledge shift accounting")
+        );
+    }
 }

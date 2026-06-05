@@ -45,6 +45,7 @@ pub(super) fn generate_target_decryption_share(
         "electionManifestHash": setup_binding.election_manifest_hash,
         "trusteeIdentity": participant.trustee_identity,
         "rosterPosition": participant.roster_position,
+        "boardPosition": participant.board_position,
         "interpolationPoint": participant.interpolation_point,
         "recoveryEpoch": participant.recovery_epoch,
         "deviceEpoch": participant.device_epoch,

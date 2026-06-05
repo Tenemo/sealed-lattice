@@ -9,6 +9,7 @@ import type {
 import {
     compareCanonicalStrings,
     createRefusal,
+    isNonEmptyString,
     isNonNegativeInteger,
     uniqueStrings,
     verificationExceptionMessage,
@@ -34,9 +35,6 @@ const candidateConflictKey = (candidate: ValidatedFirstValidObject): string =>
         candidate.objectType,
         candidate.contextHash,
     ].join('\u0000');
-
-const isNonEmptyString = (value: unknown): value is string =>
-    typeof value === 'string' && value.length > 0;
 
 const validateFirstValidObjectShape = (
     candidate: ValidatedFirstValidObject,

@@ -25,8 +25,8 @@ fn setup_request() -> Value {
         ).expect("threshold hash"),
         "participants": [
             { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 3 },
-            { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 4 },
-            { "trusteeIdentity": "trustee-3", "rosterPosition": 2, "boardPosition": 5 }
+            { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 1 },
+            { "trusteeIdentity": "trustee-3", "rosterPosition": 2, "boardPosition": 2 }
         ],
         "setupSeed": "target-decryption-setup-seed",
     })

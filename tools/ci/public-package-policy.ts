@@ -94,15 +94,15 @@ export const forbiddenRuntimeExports = [
     'verifyDirectEncryptedBallotProofWitness',
     'verifyDirectEncryptedBallotWitness',
     'verifyLattigoOracle',
-    'verifyLocalReplayRecordShell',
-    'verifyTargetAcceptedRecordShell',
-    'verifyDirectAggregateOpening',
+    'verifyTargetAcceptedRecord',
     'verifyTestShareCommitmentOpening',
     'verifyTopKDecryptionShareShell',
 ] as const;
 
 export const vendoredProtocolRuntimeModules = [
     'board/hashes.ts',
+    'board/head-chain.ts',
+    'board/inclusion-proof.ts',
     'board/index.ts',
     'board/shell-evidence.ts',
     'closing/index.ts',

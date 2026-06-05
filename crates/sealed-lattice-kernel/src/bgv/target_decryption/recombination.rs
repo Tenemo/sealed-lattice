@@ -15,23 +15,31 @@ pub(super) fn recombine_target_decryption_shares(
     }
     let mut identities = BTreeSet::new();
     let mut roster_positions = BTreeSet::new();
+    let mut board_positions = BTreeSet::new();
     for share in &shares {
         let trustee_identity = string_at_path(&share.record, &["trusteeIdentity"])?.to_string();
-        if !identities.insert(trustee_identity) || !roster_positions.insert(share.roster_position) {
+        if !identities.insert(trustee_identity)
+            || !roster_positions.insert(share.roster_position)
+            || !board_positions.insert(share.board_position)
+        {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "target recombination rejects duplicate trustee shares",
+                "target recombination rejects duplicate trustee, roster-position, or board-position shares",
             ));
         }
     }
-    shares.sort_by_key(|share| share.roster_position);
+    shares.sort_by_key(|share| share.board_position);
     let selected = shares
         .into_iter()
         .take(target_share_profile.minimum_shares_for_interpolation)
         .collect::<Vec<_>>();
-    let selected_positions = selected
+    let selected_roster_positions = selected
         .iter()
         .map(|share| share.roster_position)
+        .collect::<Vec<_>>();
+    let selected_board_positions = selected
+        .iter()
+        .map(|share| share.board_position)
         .collect::<Vec<_>>();
     let target_id_slots =
         recombine_ciphertext_slots(&target_ciphertexts.target_id, &selected, |share| {
@@ -53,7 +61,8 @@ pub(super) fn recombine_target_decryption_shares(
             "targetContextHash": target_accepted.target_context_hash,
             "targetCiphertextHash": target_accepted.target_ciphertext_hash,
             "targetShareProfileHash": target_share_profile.hash,
-            "selectedRosterPositions": selected_positions,
+            "selectedBoardPositions": selected_board_positions,
+            "selectedRosterPositions": selected_roster_positions,
             "decodedTargetIds": decoded_target_ids,
             "decodedTargetOrders": decoded_target_orders,
         }),
@@ -75,7 +84,8 @@ pub(super) fn recombine_target_decryption_shares(
         "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
         "decryptionThreshold": target_share_profile.decryption_threshold,
         "decryptionShareQuorum": target_share_profile.decryption_share_quorum,
-        "selectedRosterPositions": selected_positions,
+        "selectedBoardPositions": selected_board_positions,
+        "selectedRosterPositions": selected_roster_positions,
         "decodedTargetIds": decoded_target_ids,
         "decodedTargetOrders": decoded_target_orders,
         "decryptScaling": 1,

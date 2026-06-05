@@ -52,7 +52,54 @@ fn target_partdec_recombines_selected_sparse_target() {
     assert_eq!(decoded_orders[1], 0);
     assert_eq!(decoded_orders[2], 2);
     assert_eq!(recombined["decryptScaling"], json!(1));
+    assert_eq!(recombined["selectedBoardPositions"], json!([2, 3]));
+    assert_eq!(recombined["selectedRosterPositions"], json!([2, 0]));
     assert_eq!(profile_hash().expect("profile hash").len(), 128);
+}
+
+#[test]
+fn target_recombination_selects_first_valid_shares_in_board_order() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile = target_share_profile(&setup_package);
+    let first_share = generate_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-1",
+    );
+    let second_share = generate_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-2",
+    );
+    let third_share = generate_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-3",
+    );
+
+    let recombined = recombine_bgv_target_decryption_shares_from_request(&json!({
+        "setupPackage": setup_package,
+        "targetAcceptedRecord": accepted_record,
+        "targetCiphertextBinding": target_ciphertext_binding,
+        "targetCiphertexts": target_ciphertexts,
+        "targetShareProfile": target_share_profile,
+        "decryptionShares": [first_share, third_share, second_share],
+    }))
+    .expect("recombine target");
+
+    assert_eq!(recombined["selectedShareRule"], json!(SELECTED_SHARE_RULE));
+    assert_eq!(recombined["selectedBoardPositions"], json!([1, 2]));
+    assert_eq!(recombined["selectedRosterPositions"], json!([1, 2]));
 }
 
 #[test]

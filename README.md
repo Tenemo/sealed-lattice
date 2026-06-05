@@ -29,7 +29,8 @@ The published package currently supports development verification surfaces while
 
 The final direct-path package surface must be defined around:
 
-- setup verification;
+- local setup contribution creation;
+- setup package verification;
 - encrypted ballot verification;
 - encrypted ballot aggregation;
 - mobile evaluator replay verification;
@@ -45,6 +46,28 @@ Reserved complete-protocol entry points must fail closed until their direct-path
 Foundation helpers now include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. Browser and mobile-emulated browser coverage is useful package evidence, but it is not supported-phone evidence.
 
 ## Current implementation status
+
+The BGV setup implementation has useful internal evidence:
+
+- the selected BGV-RNS profile uses `N = 32768`, `p = 65537`, 17 data primes, and one special prime;
+- RNS arithmetic, NTT/INTT, batch encoding, canonical plaintext roots, canonical ciphertext roots, and profile hashes have regression coverage;
+- the internal passive setup command can generate and verify a deterministic full-roster setup package;
+- the package binds manifest, roster, threshold profile, collective public key root, BGV public key root, threshold verification roots, evaluation-key roots, evaluator binding roots, and certificate hashes;
+- the package rejects trusted-dealer fields, raw secret material, malformed roster positions, wrong roots, rebound internal inconsistencies, evaluator-context binding drift, missing selected rotation roots, and unsupported target-decryption claims;
+- the current HE security certificate accepts the largest exposed direct evaluator replay `Q_data` modulus and keeps the special prime and `Q_target` out of accepted exposure;
+- public evaluation-key material can drive development relinearization and rotation checks without exporting the private setup witness;
+- the pinned Lattigo oracle remains development-only parity for comparable RNS, NTT, and coefficient arithmetic behavior.
+
+This evidence is not an accepted mobile setup profile. The current setup blockers are:
+
+- accepted per-trustee mobile setup contributions;
+- commit-reveal public common randomness for the shared public `a` polynomial;
+- separation of accepted setup from deterministic fixture seed setup;
+- collective public-key share correctness evidence;
+- accepted evaluation-key correctness evidence;
+- evaluation-key footprint reduction, binary chunking, and enforced mobile transport certification;
+- public package setup contribution creation and setup package verification surfaces;
+- target-decryption handoff clarity for `Q_target`, smudging, C1-C4, share proofs, and target-decryption readiness.
 
 The direct encrypted ballot implementation has useful internal evidence:
 
@@ -66,6 +89,9 @@ The direct encrypted ballot implementation has useful internal evidence:
 
 This evidence is not claim-bearing. The current blockers are:
 
+- accepted mobile setup contributions and setup package verification;
+- collective public-key correctness evidence;
+- accepted evaluation-key correctness evidence and mobile key transport;
 - weakest-relation proof soundness accounting, including score and one-hot checks that currently reduce over 65537;
 - zero-knowledge accounting, including replacement or formal redesign of witness-dependent support commitments;
 - Fiat-Shamir/QROM review;
@@ -85,6 +111,7 @@ Several components exist only as workspace-internal implementation, test, or vec
 
 - `GF(65537)` arithmetic and plaintext top-k oracle helpers for tests;
 - sealed-lattice Rust/WASM BGV-RNS arithmetic, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext basis conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, and object validation;
+- internal passive BGV setup generation, verification, certificates, and development evaluation-key material;
 - an internal direct encrypted ballot command for current implementation work;
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
 - development-only reference-oracle tooling and generated public test vectors.

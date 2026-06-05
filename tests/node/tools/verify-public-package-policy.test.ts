@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { publicPackagePolicy } from '#tools/ci/public-package-policy';
 import {
     collectEntryPointTypeExportNames,
     validatePublicPackagePolicy,
@@ -69,6 +70,27 @@ describe('public package policy', () => {
 
         expect(failures).toEqual([
             'Forbidden runtime export is public: decryptIntermediateWire',
+        ]);
+    });
+
+    it('rejects target-decryption implementation exports if they reach the SDK facade', async () => {
+        const requiredRuntimeExports =
+            publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
+                (entry) => entry.exports,
+            );
+        const failures = await validatePublicPackagePolicy(
+            publicPackagePolicy,
+            [
+                ...requiredRuntimeExports,
+                'verifyTargetAcceptedRecord',
+                'verifyTopKDecryptionShareShell',
+            ],
+            [],
+        );
+
+        expect(failures).toEqual([
+            'Forbidden runtime export is public: verifyTargetAcceptedRecord',
+            'Forbidden runtime export is public: verifyTopKDecryptionShareShell',
         ]);
     });
 });

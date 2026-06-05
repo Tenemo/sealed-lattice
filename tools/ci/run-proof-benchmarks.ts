@@ -1,17 +1,16 @@
 import {
-    createLocalRunLog,
-    currentProcessExitCode,
     removeRunLogArguments,
     runLogDisabledByArguments,
 } from './local-run-log.js';
 import {
-    createPackageManagerCommand,
     resolvePackageManagerRunner,
-    runCommandsInParallel,
-    runCommandsInSeries,
     type CommandInvocation,
     type PackageManagerRunner,
 } from './run-command.js';
+import {
+    buildVitestProjectCommand,
+    runWorkspaceBuildThenParallelCommands,
+} from './run-vitest-lanes.js';
 import {
     defaultProofBenchmarkLanes,
     proofBenchmarkLaneDefinitions,
@@ -58,30 +57,13 @@ export const buildProofBenchmarkCommands = (
     return lanes.map((lane) => {
         const laneDefinition = proofBenchmarkLaneDefinitions[lane];
 
-        return createPackageManagerCommand(
-            laneDefinition.commandDescription,
-            [
-                'exec',
-                'vitest',
-                '--project',
-                laneDefinition.projectName,
-                '--run',
-            ],
-            {
-                logFileSlug: laneDefinition.projectName,
-                packageManagerRunner,
-            },
-        );
+        return buildVitestProjectCommand({
+            commandDescription: laneDefinition.commandDescription,
+            packageManagerRunner,
+            projectName: laneDefinition.projectName,
+        });
     });
 };
-
-const buildWorkspaceBuildCommand = (
-    packageManagerRunner: PackageManagerRunner,
-): CommandInvocation =>
-    createPackageManagerCommand('Build workspace packages', ['run', 'build'], {
-        logFileSlug: 'build',
-        packageManagerRunner,
-    });
 
 const proofBenchmarkScriptNames: Record<ProofBenchmarkLane, string> = {
     desktop: 'test:proof-benchmark:browser:desktop',
@@ -99,32 +81,14 @@ const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     const commandArguments = removeRunLogArguments(rawArguments);
     const lanes = parseRequestedProofBenchmarkLanes(commandArguments);
-    const packageManagerRunner = resolvePackageManagerRunner();
-    const runLog = runLogDisabledByArguments(rawArguments)
-        ? undefined
-        : await createLocalRunLog({
-              commandLineArguments: rawArguments,
-              lanes,
-              scriptName: proofBenchmarkScriptName(lanes),
-          });
-
-    try {
-        const buildExitCode = await runCommandsInSeries(
-            [buildWorkspaceBuildCommand(packageManagerRunner)],
-            { runLog },
-        );
-        if (buildExitCode !== 0) {
-            process.exitCode = buildExitCode;
-
-            return;
-        }
-        process.exitCode = await runCommandsInParallel(
+    await runWorkspaceBuildThenParallelCommands({
+        buildCommands: (packageManagerRunner) =>
             buildProofBenchmarkCommands({ lanes, packageManagerRunner }),
-            { runLog },
-        );
-    } finally {
-        await runLog?.finish({ exitCode: currentProcessExitCode() });
-    }
+        commandLineArguments: rawArguments,
+        lanes,
+        scriptName: proofBenchmarkScriptName(lanes),
+        shouldCreateRunLog: !runLogDisabledByArguments(rawArguments),
+    });
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {

@@ -132,33 +132,3 @@ pub(super) fn direct_target_ciphertext_hash(
         }),
     )
 }
-
-pub(super) fn coefficient_vector_bytes(coefficients: &[u64]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(coefficients.len() * 8);
-    for coefficient in coefficients {
-        bytes.extend(coefficient.to_le_bytes());
-    }
-    bytes
-}
-
-pub(super) fn coefficient_vector_le_hex(coefficients: &[u64]) -> String {
-    encode_hex(&coefficient_vector_bytes(coefficients))
-}
-
-pub(super) fn coefficient_vector_from_le_hex(value: &str) -> CanonicalResult<Vec<u64>> {
-    let bytes = decode_hex(value)?;
-    if bytes.len() != POLYNOMIAL_DEGREE * 8 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "target partial-decryption coefficient vector byte length does not match the selected BGV profile",
-        ));
-    }
-    Ok(bytes
-        .chunks_exact(8)
-        .map(|chunk| {
-            let mut coefficient_bytes = [0_u8; 8];
-            coefficient_bytes.copy_from_slice(chunk);
-            u64::from_le_bytes(coefficient_bytes)
-        })
-        .collect())
-}

@@ -4,6 +4,7 @@ pub(crate) mod profile;
 pub(crate) mod target_decryption;
 
 mod base_conversion;
+mod coefficient_codec;
 mod encoding;
 pub(crate) mod evaluator;
 mod modular_arithmetic;

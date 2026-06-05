@@ -59,9 +59,11 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         .iter()
         .map(|participant| {
             let roster_position = usize_at_path(participant, &["rosterPosition"])?;
+            let board_position = usize_at_path(participant, &["boardPosition"])?;
             Ok(ParticipantBinding {
                 trustee_identity: string_at_path(participant, &["trusteeIdentity"])?.to_string(),
                 roster_position,
+                board_position,
                 interpolation_point: u64::try_from(roster_position + 1).map_err(|_| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,

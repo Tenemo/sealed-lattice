@@ -25,6 +25,7 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
+    isProtocolHashString,
     signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
@@ -34,11 +35,6 @@ import {
     deriveRosterExternalAcceptanceHash,
     deriveTrusteeSetupEntryHash,
 } from './hashes.js';
-
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
-const isProtocolHashString = (value: ProtocolHash): boolean =>
-    protocolHashPattern.test(value);
 
 // Exact-schema lock: the manifest's opaque bindings must carry precisely this
 // set of field names or it fails closed.

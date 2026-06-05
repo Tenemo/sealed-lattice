@@ -68,6 +68,7 @@ pub(super) fn read_partial_decryption_share(
             target_ciphertexts.target_order.level,
         )?,
         roster_position: participant.roster_position,
+        board_position: participant.board_position,
         interpolation_point: participant.interpolation_point,
     })
 }
@@ -109,6 +110,12 @@ pub(super) fn compare_share_record_fields(
         "rosterPosition",
         participant.roster_position as u64,
         "target share roster position",
+    )?;
+    compare_unsigned_field(
+        share,
+        "boardPosition",
+        participant.board_position as u64,
+        "target share board position",
     )?;
     compare_unsigned_field(
         share,
@@ -249,9 +256,9 @@ pub(super) fn partial_limb_records(partials: &[Vec<u64>]) -> CanonicalResult<Vec
                 "limbIndex": limb_index,
                 "modulus": DATA_PRIMES[limb_index],
                 "partialDecryptionLeHex": encoded,
-                "partialDecryptionHash512": hash512_hex(
-                    "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1",
-                    &[&coefficient_vector_bytes(coefficients)]
+                "partialDecryptionHash512": coefficient_vector_hash512(
+                    coefficients,
+                    TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN,
                 ),
             }))
         })
@@ -292,11 +299,14 @@ pub(super) fn read_partial_limb_set(
                     "target share payload limb order or modulus does not match the selected BGV basis",
                 ));
             }
-            let coefficients =
-                coefficient_vector_from_le_hex(string_at_path(record, &["partialDecryptionLeHex"])?)?;
-            let expected_hash = hash512_hex(
-                "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1",
-                &[&coefficient_vector_bytes(&coefficients)],
+            let coefficients = coefficient_vector_from_le_hex(
+                string_at_path(record, &["partialDecryptionLeHex"])?,
+                POLYNOMIAL_DEGREE,
+                "target partial-decryption coefficient vector byte length does not match the selected BGV profile",
+            )?;
+            let expected_hash = coefficient_vector_hash512(
+                &coefficients,
+                TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN,
             );
             compare_hash_field(
                 record,
