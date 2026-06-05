@@ -3,26 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
     createDirectBallotInputs,
     createDirectBallotSetupPackage,
-    runMeasuredDirectEncryptedBallotPrototype,
-} from './transcript-core-kernel/direct-encrypted-ballot-prototype';
+    runMeasuredDirectEncryptedBallot,
+} from './transcript-core-kernel/direct-encrypted-ballot';
 
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
-import { requiredRuntimeMemoryBytes } from '#tests/support/ballot-privacy-proof-benchmark-memory';
+import { requiredRuntimeMemoryBytes } from '#tests/support/proof-benchmark-memory';
 
 const directBallotProofBatchBenchmarkTimeoutMs = 60 * 60_000;
-
-const aggregateScores = (
-    ballots: ReturnType<typeof createDirectBallotInputs>,
-): readonly number[] => {
-    const aggregate = Array.from({ length: 20 }, () => 0);
-    for (const ballot of ballots) {
-        ballot.scores.forEach((score, optionIndex) => {
-            aggregate[optionIndex] += score;
-        });
-    }
-
-    return aggregate;
-};
 
 describe('direct encrypted ballot proof batch benchmark', () => {
     it(
@@ -32,11 +19,10 @@ describe('direct encrypted ballot proof batch benchmark', () => {
             const setupPackage = createDirectBallotSetupPackage(kernel);
             const ballots = createDirectBallotInputs(20);
             const startedAtMs = performance.now();
-            const { result, memory } =
-                await runMeasuredDirectEncryptedBallotPrototype({
-                    ballots,
-                    setupPackage,
-                });
+            const { result, memory } = await runMeasuredDirectEncryptedBallot({
+                ballots,
+                setupPackage,
+            });
             const wallTimeMs = performance.now() - startedAtMs;
             const externalMemoryDeltaBytes =
                 requiredRuntimeMemoryBytes(
@@ -64,7 +50,7 @@ describe('direct encrypted ballot proof batch benchmark', () => {
                 memory.wasmLinearMemoryBytesAfter -
                 memory.wasmLinearMemoryBytesBefore;
 
-            expect(result.operation).toBe('runDirectEncryptedBallotPrototype');
+            expect(result.operation).toBe('runDirectEncryptedBallot');
             expect(result.input.ballotCount).toBe(20);
             expect(result.proofAttempt.proofCount).toBe(20);
             expect(result.proofAttempt.proofSizeBytes).toBeGreaterThan(
@@ -76,7 +62,7 @@ describe('direct encrypted ballot proof batch benchmark', () => {
             expect(
                 result.proofAttempt.proofAccounting
                     .estimatedRepeatedTotalProofBytes,
-            ).toBe(result.proofAttempt.totalProofBytes);
+            ).toBe(result.proofAttempt.totalProofBytes * 8);
             expect(result.proofAttempt.proofTransport).toMatchObject({
                 encoding: 'binary proof chunks',
                 chunkSizeBytes: 1_048_576,
@@ -91,11 +77,10 @@ describe('direct encrypted ballot proof batch benchmark', () => {
             expect(result.proofAttempt.proofMaskRandomness).toMatchObject({
                 source: 'fresh-csprng',
                 ballotProofRandomnessCount: 20,
-                refreshShareProofRandomnessCount: 0,
                 randomnessBytesPerProof: 32,
             });
             expect(
-                result.ballotPackages.ballotEncryptionRandomness,
+                result.encryptedBallots.ballotEncryptionRandomness,
             ).toMatchObject({
                 source: 'fresh-csprng',
                 ballotEncryptionRandomnessCount: 20,
@@ -105,11 +90,18 @@ describe('direct encrypted ballot proof batch benchmark', () => {
                 result.proofAttempt.totalProofBytes * 2,
             );
             expect(result.aggregation.ballotCount).toBe(20);
-            expect(result.aggregation.aggregateScores).toEqual(
-                result.aggregation.plaintextOracleScores,
+            expect(result.aggregation.aggregateCiphertextRoot).toHaveLength(
+                128,
             );
-            expect(result.aggregation.aggregateScores).toEqual(
-                aggregateScores(ballots),
+            expect(
+                result.aggregation.aggregateCiphertextCanonicalByteLength,
+            ).toBeGreaterThan(0);
+            expect(result.aggregation.privateCorrectnessCheck).toBe(
+                'aggregate score slots matched the plaintext oracle',
+            );
+            expect(result.aggregation).not.toHaveProperty('aggregateScores');
+            expect(result.aggregation).not.toHaveProperty(
+                'plaintextOracleScores',
             );
             expect(result.evaluatorReplay).toBe(
                 'Not run in this command. Supply topCount to attempt the packed batched-pair evaluator route over the direct aggregate.',

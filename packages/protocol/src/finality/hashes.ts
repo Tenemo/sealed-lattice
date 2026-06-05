@@ -31,17 +31,16 @@ export const deriveTargetProposalHash = (
     proposal: Omit<TargetProposal, 'targetProposalHash'>,
 ): ProtocolHash =>
     deriveProtocolHash('TargetProposalHash', {
-        targetCiphertextHash: proposal.targetCiphertextHash,
-        topKCiphertextHash: proposal.topKCiphertextHash,
         ceremonyId: proposal.ceremonyId,
         electionManifestHash: proposal.electionManifestHash,
-        thresholdProfileHash: proposal.thresholdProfileHash,
-        evaluationContextHash: proposal.evaluationContextHash,
-        evaluationProofProfileHash: proposal.evaluationProofProfileHash,
-        publicSlotMaskHash: proposal.publicSlotMaskHash,
+        encryptedBallotAggregateHash: proposal.encryptedBallotAggregateHash,
+        evaluatorReplayContextHash: proposal.evaluatorReplayContextHash,
+        evaluatorReplayProfileHash: proposal.evaluatorReplayProfileHash,
+        evaluatorReplayRecordHash: proposal.evaluatorReplayRecordHash,
+        targetCiphertextHash: proposal.targetCiphertextHash,
         targetFinalityPolicyHash: proposal.targetFinalityPolicyHash,
         targetLayoutHash: proposal.targetLayoutHash,
-        topKEvaluationRecordHash: proposal.topKEvaluationRecordHash,
+        thresholdProfileHash: proposal.thresholdProfileHash,
     });
 
 export const deriveTargetFinalityCheckpointHash = (
@@ -49,21 +48,20 @@ export const deriveTargetFinalityCheckpointHash = (
 ): ProtocolHash =>
     deriveProtocolHash('TargetFinalityCheckpointHash', {
         boardPolicyHash: checkpoint.boardPolicyHash,
-        targetCiphertextHash: checkpoint.targetCiphertextHash,
-        topKCiphertextHash: checkpoint.topKCiphertextHash,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestHash: checkpoint.electionManifestHash,
-        thresholdProfileHash: checkpoint.thresholdProfileHash,
-        evaluationContextHash: checkpoint.evaluationContextHash,
-        evaluationProofProfileHash: checkpoint.evaluationProofProfileHash,
+        encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
+        evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
+        evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
+        evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         finalizedBoardHeadHash: checkpoint.finalizedBoardHeadHash,
         objectType: checkpoint.objectType,
         objectVersion: checkpoint.objectVersion,
-        publicSlotMaskHash: checkpoint.publicSlotMaskHash,
+        targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
         targetProposalHash: checkpoint.targetProposalHash,
-        topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
+        thresholdProfileHash: checkpoint.thresholdProfileHash,
         witnessPolicyHash: checkpoint.witnessPolicyHash,
     });
 

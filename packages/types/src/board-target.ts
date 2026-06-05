@@ -65,7 +65,7 @@ export type BoardConsistencyVerification =
         readonly verifiedHeadHashes: readonly ProtocolHash[];
     };
 
-/** Signed receipt proving that one voter ballot package was accepted. */
+/** Signed receipt proving that one voter encrypted ballot was accepted. */
 export type CastReceipt = {
     readonly objectType: 'CastReceipt';
     readonly objectVersion: 1;
@@ -73,7 +73,7 @@ export type CastReceipt = {
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;
     readonly voterIdentity: string;
-    readonly ballotPackageHash: ProtocolHash;
+    readonly encryptedBallotHash: ProtocolHash;
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly recoveryEpoch: number;
@@ -153,13 +153,12 @@ export type TargetProposal = {
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;
     readonly thresholdProfileHash: ProtocolHash;
-    readonly evaluationContextHash: ProtocolHash;
-    readonly topKEvaluationRecordHash: ProtocolHash;
-    readonly topKCiphertextHash: ProtocolHash;
-    readonly publicSlotMaskHash: ProtocolHash;
+    readonly evaluatorReplayContextHash: ProtocolHash;
+    readonly evaluatorReplayRecordHash: ProtocolHash;
+    readonly encryptedBallotAggregateHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly evaluationProofProfileHash: ProtocolHash;
+    readonly evaluatorReplayProfileHash: ProtocolHash;
     readonly targetFinalityPolicyHash: ProtocolHash;
 };
 
@@ -229,51 +228,33 @@ export type AcceptedTargetFinalityCheckpoint = {
     readonly targetProposalHash: ProtocolHash;
     readonly targetFinalityCheckpointHash: ProtocolHash;
     readonly finalizedBoardHeadHash: ProtocolHash;
-    readonly topKEvaluationRecordHash: ProtocolHash;
+    readonly evaluatorReplayRecordHash: ProtocolHash;
     readonly thresholdProfileHash: ProtocolHash;
-    readonly evaluationContextHash: ProtocolHash;
-    readonly topKCiphertextHash: ProtocolHash;
-    readonly publicSlotMaskHash: ProtocolHash;
+    readonly evaluatorReplayContextHash: ProtocolHash;
+    readonly encryptedBallotAggregateHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly evaluationProofProfileHash: ProtocolHash;
+    readonly evaluatorReplayProfileHash: ProtocolHash;
     readonly targetFinalityScope: string;
     readonly witnessPolicyHash: ProtocolHash;
     readonly targetFinalityPolicyHash: ProtocolHash;
 };
 
-export type EvaluationProofRecord = {
-    readonly objectType: 'EvaluationProofRecord';
+export type EvaluatorReplayRecord = {
+    readonly objectType: 'EvaluatorReplayRecord';
     readonly objectVersion: 1;
-    readonly evaluationProofRecordHash: ProtocolHash;
+    readonly evaluatorReplayRecordHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;
     readonly targetProposalHash: ProtocolHash;
-    readonly topKEvaluationRecordHash: ProtocolHash;
+    readonly encryptedBallotAggregateHash: ProtocolHash;
     readonly targetFinalityRecordHash: ProtocolHash;
-    readonly evaluationProofProfileHash: ProtocolHash;
-    readonly evaluationContextHash: ProtocolHash;
-    readonly topKCiphertextHash: ProtocolHash;
-    readonly publicSlotMaskHash: ProtocolHash;
+    readonly evaluatorReplayProfileHash: ProtocolHash;
+    readonly evaluatorReplayContextHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly proofRoot: ProtocolHash;
-    readonly boardSequence: number;
-    readonly boardPosition: number;
-};
-
-export type LocalReplayRecord = {
-    readonly objectType: 'LocalReplayRecord';
-    readonly objectVersion: 1;
-    readonly localReplayRecordHash: ProtocolHash;
-    readonly ceremonyId: string;
-    readonly electionManifestHash: ProtocolHash;
-    readonly participantIdentity: string;
-    readonly targetProposalHash: ProtocolHash;
-    readonly targetFinalityRecordHash: ProtocolHash;
-    readonly evaluationProofRecordHash: ProtocolHash;
-    readonly replayContextHash: ProtocolHash;
-    readonly localReplayDiagnosticHash: ProtocolHash;
+    readonly replayEvidenceRoot: ProtocolHash;
+    readonly mobileProfileHash: ProtocolHash;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
     readonly signature: ProtocolSignatureEnvelope;
@@ -287,22 +268,18 @@ export type TargetAcceptedRecord = {
     readonly electionManifestHash: ProtocolHash;
     readonly targetFinalityScope: string;
     readonly targetProposalHash: ProtocolHash;
-    readonly topKEvaluationRecordHash: ProtocolHash;
+    readonly evaluatorReplayRecordHash: ProtocolHash;
     readonly targetContextHash: ProtocolHash;
     readonly targetFinalityRecordHash: ProtocolHash;
     readonly targetFinalityCheckpointHash: ProtocolHash;
-    readonly evaluationProofRecordHash: ProtocolHash;
-    readonly evaluationProofProfileHash: ProtocolHash;
+    readonly evaluatorReplayProfileHash: ProtocolHash;
     readonly targetPreimageHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly cpadProfileHash: ProtocolHash;
-    readonly cpadProfileId: string;
-    readonly thresholdDecryptionProfileHash: ProtocolHash;
-    readonly thresholdDecryptionProfileId: string;
-    readonly kllpsTargetDecryptionProfileHash: ProtocolHash;
+    readonly targetDecryptionProfileHash: ProtocolHash;
+    readonly targetDecryptionProfileId: string;
     readonly targetBasisHash: ProtocolHash;
-    readonly acceptanceMode: 'evaluation-proof';
+    readonly acceptanceMode: 'evaluator-replay';
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly organizerIdentity: string;
@@ -321,13 +298,10 @@ export type TopKDecryptionShareShell = {
     readonly targetPreimageHash: ProtocolHash;
     readonly targetFinalityRecordHash: ProtocolHash;
     readonly targetFinalityCheckpointHash: ProtocolHash;
-    readonly evaluationProofRecordHash: ProtocolHash;
-    readonly topKEvaluationRecordHash: ProtocolHash;
+    readonly evaluatorReplayRecordHash: ProtocolHash;
     readonly targetContextHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
-    readonly cpadProfileHash: ProtocolHash;
-    readonly kllpsTargetDecryptionProfileHash: ProtocolHash;
-    readonly thresholdDecryptionProfileHash: ProtocolHash;
+    readonly targetDecryptionProfileHash: ProtocolHash;
     readonly targetDecryptionPreparationRecordHash: ProtocolHash;
     readonly targetDecryptionCiphertextHash: ProtocolHash;
     readonly targetBasisHash: ProtocolHash;
@@ -342,29 +316,13 @@ export type TopKDecryptionShareShell = {
     readonly signature: ProtocolSignatureEnvelope;
 };
 
-export type LocalReplayRecordVerificationInput = {
-    readonly boardEvidence: BoardConsistencyInput;
-    readonly record: LocalReplayRecord;
-    readonly recordInclusionProof: InclusionProof;
-    readonly targetFinalityRecord: TargetFinalityRecord;
-    readonly targetFinalityVerification: TargetFinalityVerification;
-    readonly evaluationProofRecord: EvaluationProofRecord;
-    readonly expectedSignerPublicKeyHash: ProtocolHash;
-};
-
-export type LocalReplayRecordVerification =
-    StructuredProtocolVerificationResult & {
-        readonly localReplayRecordHash?: ProtocolHash;
-        readonly targetFinalityRecordHash?: ProtocolHash;
-    };
-
 export type TargetAcceptedRecordVerificationInput = {
     readonly boardEvidence: BoardConsistencyInput;
     readonly targetAcceptedRecord: TargetAcceptedRecord;
     readonly targetAcceptedRecordInclusionProof: InclusionProof;
     readonly targetFinalityRecord: TargetFinalityRecord;
     readonly targetFinalityVerification: TargetFinalityVerification;
-    readonly evaluationProofRecord: EvaluationProofRecord;
+    readonly evaluatorReplayRecord: EvaluatorReplayRecord;
     readonly expectedOrganizerPublicKeyHash: ProtocolHash;
 };
 

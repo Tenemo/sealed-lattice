@@ -1,7 +1,7 @@
 use super::sampling::{
     reduce_unbiased_u64, sample_centered_binomial_eta2, sample_residue, sample_small_distribution,
 };
-use super::validation::validate_setup_package_shape;
+use super::validation::{validate_setup_package_internal_bindings, validate_setup_package_shape};
 use super::{
     DATA_PRIMES, PASSIVE_SETUP_PROFILE_ID, POLYNOMIAL_DEGREE, data_basis_modulus_bits,
     dense_centered_binomial_coefficients, extended_basis_modulus_bits,
@@ -10,7 +10,7 @@ use super::{
     verify_passive_setup_package_from_request,
 };
 use crate::bgv::evaluator::{
-    circuit::{EvaluatorContext, modulus_switch_to, multiply, validate_evaluation_keys},
+    circuit::{EvaluatorContext, modulus_switch_to, multiply},
     engine::{DevelopmentBgvKey, ciphertext_tensor, encode_slots_to_coefficients},
     key_switch::{generate_galois_key, generate_relinearization_key, relinearize, rotate},
     top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "a959a2f9a1dd7ba83e690f43ca5b5f664967e65eed09d6f162fa31f5b37309bc66dc67ce31fbeea33bdeec6b0dd7b16f25e97b0c3b04fbad5ebe4ac930e4e747";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "259af0d6562b8562ef20ab5a5b652171cfea09398b230e070e884de4072a1fa29f139a4e6030f1441783c88095030dab49ba3b6fcc18735d4ee416d5ed568ea8";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -249,13 +249,14 @@ fn automorphism_residues(input: &[u64], galois_element: usize, modulus: u64) -> 
     output
 }
 
-fn assert_rebound_package_is_rejected(mut package: serde_json::Value, mutation_description: &str) {
-    rebind_setup_package_hash(&mut package);
+fn assert_setup_package_payload_is_rejected(
+    package: serde_json::Value,
+    mutation_description: &str,
+) {
     assert!(
-        verify_passive_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .is_err(),
+        validate_setup_package_shape(&package)
+            .and_then(|_| validate_setup_package_internal_bindings(&package))
+            .is_err(),
         "{mutation_description} should be rejected"
     );
 }
@@ -268,11 +269,17 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
         first["setupPackageHash"], EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH,
         "passive setup generation must remain deterministic for the fixed test seed"
     );
-    assert_eq!(first["kllpsStatus"]["setupMaterialMatchesKLLPS"], true);
-    assert_eq!(first["kllpsStatus"]["KLLPSPartDecStatusImplemented"], false);
+    assert_eq!(
+        first["targetDecryptionStatus"]["setupMaterialMatchesTargetDecryption"],
+        true
+    );
+    assert_eq!(
+        first["targetDecryptionStatus"]["targetPartDecImplemented"],
+        false
+    );
     assert_eq!(
         first["certificates"]["setupParameterCertificate"]["finalSecurityStatus"],
-        "acceptedForSetupBridgeEvaluatorTargetPending"
+        "acceptedForDirectEvaluatorReplayTargetPending"
     );
     assert_eq!(
         first["certificates"]["targetThresholdDecryptabilityCertificate"]["ciphertextCompatibilityStatus"],
@@ -366,7 +373,7 @@ fn passive_setup_security_certificate_keeps_special_prime_out_of_public_exposure
     );
     assert_eq!(
         setup_parameter_certificate["specialPrimeExposureStatus"],
-        serde_json::json!("not-exposed-by-current-setup-bridge-evaluator-public-material")
+        serde_json::json!("not-exposed-by-current-direct-evaluator-replay-public-material")
     );
     assert_eq!(
         he_security_certificate["assessedRing"]["largestExposedBasisClass"],
@@ -378,14 +385,14 @@ fn passive_setup_security_certificate_keeps_special_prime_out_of_public_exposure
     );
     assert_eq!(
         he_security_certificate["assessedRing"]["extendedUtilityExposureStatus"],
-        serde_json::json!("not-exposed-by-current-setup-bridge-evaluator-public-material")
+        serde_json::json!("not-exposed-by-current-direct-evaluator-replay-public-material")
     );
     assert_eq!(
         he_security_certificate["standardRows"]["postQuantumTernary128"]["status"],
         serde_json::json!("accepted")
     );
     assert_eq!(
-        public_samples["QPPublic"]["exposedOnAcceptedSetupBridgeEvaluatorPath"],
+        public_samples["QPPublic"]["exposedOnAcceptedDirectEvaluatorReplayPath"],
         serde_json::json!(false)
     );
     assert_eq!(
@@ -787,19 +794,6 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
 }
 
 #[test]
-fn passive_setup_collective_key_drives_evaluator_key_switch_primitives() {
-    let evaluator_key = setup_derived_evaluator_key().clone();
-    let context =
-        EvaluatorContext::from_key(evaluator_key, "setup-derived-evaluation-key-switch", 3)
-            .expect("setup-derived evaluator context");
-
-    assert!(
-        validate_evaluation_keys(&context, 3, "setup-derived-evaluation-key-validation")
-            .expect("validate evaluation keys")
-    );
-}
-
-#[test]
 fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
     let package = setup_package();
     let evaluator_key = setup_derived_evaluator_key();
@@ -909,7 +903,7 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
         true
     );
     assert_eq!(
-        package["certificates"]["heSecurityCertificate"]["acceptedForSetupBridgeEvaluator"],
+        package["certificates"]["heSecurityCertificate"]["acceptedForDirectEvaluatorReplay"],
         true
     );
     assert_eq!(
@@ -1051,13 +1045,13 @@ fn passive_setup_verification_rejects_rebound_internal_inconsistency() {
 }
 
 #[test]
-fn passive_setup_verification_rejects_rebound_coefficient_material_mutations() {
+fn passive_setup_payload_validation_rejects_coefficient_material_mutations() {
     let package = setup_package();
 
     let mut changed_coefficient_root = package.clone();
     changed_coefficient_root["collectivePublicKey"]["collectivePublicKeyCoefficientRoot"] =
         serde_json::json!(valid_hash('4'));
-    assert_rebound_package_is_rejected(
+    assert_setup_package_payload_is_rejected(
         changed_coefficient_root,
         "collective public key coefficient root mutation",
     );
@@ -1065,7 +1059,7 @@ fn passive_setup_verification_rejects_rebound_coefficient_material_mutations() {
     let mut changed_coefficient_material = package;
     changed_coefficient_material["collectivePublicKey"]["coefficientMaterial"]["modulusSummaries"]
         [0]["componentZeroCoefficientDerivationHash512"] = serde_json::json!("1".repeat(128));
-    assert_rebound_package_is_rejected(
+    assert_setup_package_payload_is_rejected(
         changed_coefficient_material,
         "collective public key coefficient material mutation",
     );
@@ -1087,7 +1081,7 @@ fn passive_setup_verification_rejects_rebound_coefficient_material_mutations() {
         &coefficient_hex[..coefficient_hex.len() - 1],
         replacement_nibble
     ));
-    assert_rebound_package_is_rejected(
+    assert_setup_package_payload_is_rejected(
         changed_public_key_coefficients,
         "collective public key coefficient byte mutation",
     );
@@ -1108,7 +1102,7 @@ fn passive_setup_verification_rejects_nested_secret_material() {
 }
 
 #[test]
-fn passive_setup_verification_rejects_rebound_binding_mutations() {
+fn passive_setup_payload_validation_rejects_binding_mutations() {
     let package = setup_package();
     let mutations: Vec<SetupPackageMutation> = vec![
         (
@@ -1196,16 +1190,17 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
             }),
         ),
         (
-            "KLLPS PartDec claim",
+            "target decryption PartDec claim",
             Box::new(|mutated_package| {
-                mutated_package["kllpsStatus"]["KLLPSPartDecStatusImplemented"] =
+                mutated_package["targetDecryptionStatus"]["targetPartDecImplemented"] =
                     serde_json::json!(true);
             }),
         ),
         (
-            "KLLPS C1-C4 claim",
+            "target decryption C1-C4 claim",
             Box::new(|mutated_package| {
-                mutated_package["kllpsStatus"]["KLLPSC1C4StatusAccepted"] = serde_json::json!(true);
+                mutated_package["targetDecryptionStatus"]["targetC1C4StatusAccepted"] =
+                    serde_json::json!(true);
             }),
         ),
         (
@@ -1216,9 +1211,9 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
             }),
         ),
         (
-            "development encryption bridge claim",
+            "development encryption direct proof claim",
             Box::new(|mutated_package| {
-                mutated_package["developmentEncryptionFixture"]["fixture"]["bridgeEncryptionClaim"] =
+                mutated_package["developmentEncryptionFixture"]["fixture"]["directProofClaim"] =
                     serde_json::json!(true);
             }),
         ),
@@ -1241,30 +1236,26 @@ fn passive_setup_verification_rejects_rebound_binding_mutations() {
     for (mutation_description, mutate_package) in mutations {
         let mut mutated_package = package.clone();
         mutate_package(&mut mutated_package);
-        assert_rebound_package_is_rejected(mutated_package, mutation_description);
+        assert_setup_package_payload_is_rejected(mutated_package, mutation_description);
     }
 }
 
 #[test]
-fn passive_setup_verification_rejects_evaluator_binding_mutations() {
+fn passive_setup_payload_validation_rejects_evaluator_binding_mutations() {
     let package = setup_package();
     for field_name in [
         "evaluatorBindingContextHash",
-        "encryptedAggregateBridgeHash",
-        "encryptedAggregateTargetBasisRoot",
-        "encryptedAggregateReconstructionHash",
-        "scoreBitDerivationCircuitHash",
+        "encryptedBallotAggregateLayoutHash",
+        "directAggregateLayoutHash",
         "comparisonInputDerivationCircuitHash",
-        "encryptedScoreBitInputHash",
         "encryptedComparisonInputHash",
-        "bitSlicedComparatorHash",
         "encryptedSparseTargetProjectionHash",
         "targetLayoutHash",
         "passiveSetupEvaluatorContextBindingHash",
     ] {
         let mut mutated_package = package.clone();
         mutated_package["profileBindings"][field_name] = serde_json::json!(valid_hash('b'));
-        assert_rebound_package_is_rejected(mutated_package, field_name);
+        assert_setup_package_payload_is_rejected(mutated_package, field_name);
     }
 }
 
@@ -1308,13 +1299,13 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
         let minimally_shaped_package = serde_json::json!({
             "certificates": {
                 "setupParameterCertificate": {
-                    "finalSecurityStatus": "acceptedForSetupBridgeEvaluatorTargetPending",
+                    "finalSecurityStatus": "acceptedForDirectEvaluatorReplayTargetPending",
                 },
             },
-            "kllpsStatus": {
-                "KLLPSC1C4StatusAccepted": false,
-                "KLLPSPartDecStatusImplemented": false,
-                "setupMaterialMatchesKLLPS": true,
+            "targetDecryptionStatus": {
+                "targetC1C4StatusAccepted": false,
+                "targetPartDecImplemented": false,
+                "setupMaterialMatchesTargetDecryption": true,
             },
             "objectType": "BgvPassiveSetupPackage",
             "objectVersion": 1,
@@ -1340,10 +1331,10 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
                 "finalSecurityStatus": "pendingQTarget",
             },
         },
-        "kllpsStatus": {
-            "KLLPSC1C4StatusAccepted": false,
-            "KLLPSPartDecStatusImplemented": false,
-            "setupMaterialMatchesKLLPS": true,
+        "targetDecryptionStatus": {
+            "targetC1C4StatusAccepted": false,
+            "targetPartDecImplemented": false,
+            "setupMaterialMatchesTargetDecryption": true,
         },
         "objectType": "BgvPassiveSetupPackage",
         "objectVersion": 1,
@@ -1362,7 +1353,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
     assert!(
         stale_status_error
             .message
-            .contains("accept setup-bridge-evaluator HE security"),
+            .contains("accept direct evaluator replay HE security"),
         "{}",
         stale_status_error.message
     );
@@ -1416,7 +1407,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
     ] {
         let mut mutated_package = package.clone();
         mutate_package(&mut mutated_package);
-        assert_rebound_package_is_rejected(mutated_package, mutation_description);
+        assert_setup_package_payload_is_rejected(mutated_package, mutation_description);
     }
 }
 
@@ -1430,7 +1421,7 @@ fn passive_setup_verification_rejects_rotation_set_gaps() {
     assert_eq!(rotations[0], serde_json::json!(3));
     assert_eq!(
         package["evaluationKeys"]["rotSet"]["requiredRotationGroups"][0]["purpose"],
-        "aggregate-score-packing-generator-basis"
+        "direct-score-packing-generator-basis"
     );
     assert_eq!(
         package["evaluationKeys"]["rotSet"]["requiredRotationGroups"][1]["purpose"],
@@ -1446,7 +1437,7 @@ fn passive_setup_verification_rejects_rotation_set_gaps() {
         .as_array_mut()
         .expect("rotation roots")
         .remove(0);
-    assert_rebound_package_is_rejected(
+    assert_setup_package_payload_is_rejected(
         missing_packed_rank_key,
         "missing generator-ordered packed-rank rotation key",
     );
@@ -1454,9 +1445,9 @@ fn passive_setup_verification_rejects_rotation_set_gaps() {
     let mut wrong_required_rotation_group = package.clone();
     wrong_required_rotation_group["evaluationKeys"]["rotSet"]["requiredRotationGroups"][0]["rotations"]
         [0] = serde_json::json!(1);
-    assert_rebound_package_is_rejected(
+    assert_setup_package_payload_is_rejected(
         wrong_required_rotation_group,
-        "wrong aggregate score packing rotation group",
+        "wrong direct score packing rotation group",
     );
 }
 

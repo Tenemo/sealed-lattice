@@ -36,20 +36,20 @@ describe('public package policy', () => {
                 ...emptyPackagePolicy,
                 forbiddenTypeExports: [
                     'BgvPassiveSetupPackage',
-                    'TopKEvaluatorEncryptedAggregateInput',
+                    'TopKEvaluatorDirectAggregateInput',
                 ],
             },
             [],
             [
                 'BgvPassiveSetupPackage',
                 'SafeVerificationInput',
-                'TopKEvaluatorEncryptedAggregateInput',
+                'TopKEvaluatorDirectAggregateInput',
             ],
         );
 
         expect(failures).toEqual([
             'Forbidden type export is public: BgvPassiveSetupPackage',
-            'Forbidden type export is public: TopKEvaluatorEncryptedAggregateInput',
+            'Forbidden type export is public: TopKEvaluatorDirectAggregateInput',
         ]);
     });
 
@@ -58,12 +58,12 @@ describe('public package policy', () => {
             {
                 ...emptyPackagePolicy,
                 forbiddenRuntimeExports: ['decryptIntermediateWire'],
-                forbiddenTypeExports: ['BridgeProofRecord'],
+                forbiddenTypeExports: ['DirectEncryptedBallotWitness'],
             },
-            ['decryptIntermediateWire', 'verifyBridgeProof'],
+            ['decryptIntermediateWire', 'verifyDirectEncryptedBallotProof'],
             [
-                'BridgeProofVerificationInput',
-                'ReceiverKeyProofVerificationInput',
+                'DirectEncryptedBallotVerificationInput',
+                'EvaluatorReplayVerificationInput',
             ],
         );
 

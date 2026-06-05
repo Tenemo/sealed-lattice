@@ -69,7 +69,7 @@ const assertPollSpecShape = (pollSpec: PollSpec): void => {
     }
 };
 
-export const normalizePlaintextScoreBallot = (
+const normalizePlaintextScoreBallot = (
     pollSpec: PollSpec,
     ballot: PlaintextScoreBallotInput,
 ): NormalizedPlaintextScoreBallot => {

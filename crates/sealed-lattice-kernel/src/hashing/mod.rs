@@ -27,7 +27,6 @@ reserved_root_namespaces! {
     POLL_SPEC_HASH_NAMESPACE => "sealed-lattice-root/poll-spec-hash-v1",
     PUBLIC_KEY_HASH_NAMESPACE => "sealed-lattice-root/public-key-hash-v1",
     REGISTRATION_ENTRY_HASH_NAMESPACE => "sealed-lattice-root/registration-entry-hash-v1",
-    RECEIVER_KEY_REGISTRATION_HASH_NAMESPACE => "sealed-lattice-root/receiver-key-registration-hash-v1",
     TRUSTEE_SETUP_ENTRY_HASH_NAMESPACE => "sealed-lattice-root/trustee-setup-entry-hash-v1",
     ELECTION_MANIFEST_HASH_NAMESPACE => "sealed-lattice-root/election-manifest-hash-v1",
     ROSTER_HASH_NAMESPACE => "sealed-lattice-root/roster-hash-v1",
@@ -35,8 +34,6 @@ reserved_root_namespaces! {
     BOARD_HEAD_HASH_NAMESPACE => "sealed-lattice-root/board-head-hash-v1",
     RECOVERY_EPOCH_UPDATE_HASH_NAMESPACE => "sealed-lattice-root/recovery-epoch-update-hash-v1",
     ACTION_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/action-context-hash-v1",
-    BALLOT_PACKAGE_HASH_NAMESPACE => "sealed-lattice-root/ballot-package-hash-v1",
-    BALLOT_SET_HASH_NAMESPACE => "sealed-lattice-root/ballot-set-hash-v1",
     CAST_RECEIPT_HASH_NAMESPACE => "sealed-lattice-root/cast-receipt-hash-v1",
     CLOSE_RECORD_HASH_NAMESPACE => "sealed-lattice-root/close-record-hash-v1",
     WITNESS_CHECKPOINT_HASH_NAMESPACE => "sealed-lattice-root/witness-checkpoint-hash-v1",
@@ -52,15 +49,15 @@ reserved_root_namespaces! {
     THRESHOLD_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/threshold-profile-hash-v1",
     BGV_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/bgv-profile-hash-v1",
     RUST_BGV_BACKEND_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/rust-bgv-backend-profile-hash-v1",
-    ENCRYPTED_AGGREGATE_BRIDGE_HASH_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-bridge-hash-v1",
-    ENCRYPTED_AGGREGATE_SHARE_CIPHERTEXT_ROOT_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-share-ciphertext-root-v1",
-    ENCRYPTED_AGGREGATE_TARGET_BASIS_ROOT_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-target-basis-root-v1",
-    ENCRYPTED_AGGREGATE_RECONSTRUCTION_HASH_NAMESPACE => "sealed-lattice-root/encrypted-aggregate-reconstruction-hash-v1",
-    SCORE_BIT_DERIVATION_CIRCUIT_HASH_NAMESPACE => "sealed-lattice-root/score-bit-derivation-circuit-hash-v1",
+    ENCRYPTED_BALLOT_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/encrypted-ballot-layout-hash-v1",
+    ENCRYPTED_BALLOT_AGGREGATE_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/encrypted-ballot-aggregate-profile-hash-v1",
+    ENCRYPTED_BALLOT_AGGREGATE_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/encrypted-ballot-aggregate-layout-hash-v1",
+    DIRECT_AGGREGATE_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/direct-aggregate-layout-hash-v1",
+    DIRECT_COMPARISON_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/direct-comparison-profile-hash-v1",
+    EVALUATOR_REPLAY_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/evaluator-replay-context-hash-v1",
+    EVALUATOR_REPLAY_RECORD_HASH_NAMESPACE => "sealed-lattice-root/evaluator-replay-record-hash-v1",
     COMPARISON_INPUT_DERIVATION_CIRCUIT_HASH_NAMESPACE => "sealed-lattice-root/comparison-input-derivation-circuit-hash-v1",
-    ENCRYPTED_SCORE_BIT_INPUT_HASH_NAMESPACE => "sealed-lattice-root/encrypted-score-bit-input-hash-v1",
     ENCRYPTED_COMPARISON_INPUT_HASH_NAMESPACE => "sealed-lattice-root/encrypted-comparison-input-hash-v1",
-    BIT_SLICED_COMPARATOR_HASH_NAMESPACE => "sealed-lattice-root/bit-sliced-comparator-hash-v1",
     ENCRYPTED_SPARSE_TARGET_PROJECTION_HASH_NAMESPACE => "sealed-lattice-root/encrypted-sparse-target-projection-hash-v1",
     CIPHERTEXT_ROOT_NAMESPACE => "sealed-lattice-root/ciphertext-root-v1",
     PLAINTEXT_ROOT_NAMESPACE => "sealed-lattice-root/plaintext-root-v1",
@@ -87,70 +84,29 @@ reserved_root_namespaces! {
     BGV_SETUP_PARAMETER_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/bgv-setup-parameter-certificate-hash-v1",
     BGV_DEVELOPMENT_ENCRYPTION_FIXTURE_HASH_NAMESPACE => "sealed-lattice-root/bgv-development-encryption-fixture-hash-v1",
     TOP_K_CIRCUIT_HASH_NAMESPACE => "sealed-lattice-root/top-k-circuit-hash-v1",
-    RANK_PACKING_HASH_NAMESPACE => "sealed-lattice-root/rank-packing-hash-v1",
     ROT_SET_HASH_NAMESPACE => "sealed-lattice-root/rot-set-hash-v1",
     TARGET_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/target-layout-hash-v1",
-    AGGREGATE_DERIVATION_COMPONENT_HASH_NAMESPACE => "sealed-lattice-root/aggregate-derivation-component-hash-v1",
-    AGGREGATE_CONTRIBUTION_HASH_NAMESPACE => "sealed-lattice-root/aggregate-contribution-hash-v1",
-    AGGREGATE_READY_RECORD_HASH_NAMESPACE => "sealed-lattice-root/aggregate-ready-record-hash-v1",
     POST_VOTING_CLOSED_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/post-voting-closed-context-hash-v1",
     PASSIVE_SETUP_EVALUATOR_BINDING_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/passive-setup-evaluator-binding-context-hash-v1",
-    EVALUATION_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/evaluation-context-hash-v1",
     TARGET_PROPOSAL_HASH_NAMESPACE => "sealed-lattice-root/target-proposal-hash-v1",
     TARGET_FINALITY_CHECKPOINT_HASH_NAMESPACE => "sealed-lattice-root/target-finality-checkpoint-hash-v1",
     TARGET_FINALITY_RECORD_HASH_NAMESPACE => "sealed-lattice-root/target-finality-record-hash-v1",
     TARGET_ACCEPTED_RECORD_HASH_NAMESPACE => "sealed-lattice-root/target-accepted-record-hash-v1",
-    LOCAL_REPLAY_RECORD_HASH_NAMESPACE => "sealed-lattice-root/local-replay-record-hash-v1",
+    TARGET_DECRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-profile-hash-v1",
+    TARGET_DECRYPTION_PROFILE_BINDING_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-profile-binding-hash-v1",
     TOP_K_DECRYPTION_SHARE_HASH_NAMESPACE => "sealed-lattice-root/top-k-decryption-share-hash-v1",
-    THRESHOLD_DECRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/threshold-decryption-profile-hash-v1",
-    KLLPS_TARGET_DECRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/kllps-target-decryption-profile-hash-v1",
     TARGET_THRESHOLD_DECRYPTABILITY_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/target-threshold-decryptability-certificate-hash-v1",
-    BRIDGE_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/bridge-proof-profile-hash-v1",
-    BRIDGE_PROOF_RECORD_HASH_NAMESPACE => "sealed-lattice-root/bridge-proof-record-hash-v1",
     CANONICAL_CIPHERTEXT_CONVENTION_HASH_NAMESPACE => "sealed-lattice-root/canonical-ciphertext-convention-hash-v1",
     BGV_BATCH_ENCODER_HASH_NAMESPACE => "sealed-lattice-root/bgv-batch-encoder-hash-v1",
     BGV_BATCH_ENCODER_LAYOUT_BINDING_HASH_NAMESPACE => "sealed-lattice-root/bgv-batch-encoder-layout-binding-hash-v1",
     ALLOWED_EVALUATOR_OPS_HASH_NAMESPACE => "sealed-lattice-root/allowed-evaluator-ops-hash-v1",
-    AGGREGATE_SHARE_COMMITMENT_HASH_NAMESPACE => "sealed-lattice-root/aggregate-share-commitment-hash-v1",
-    SHARE_COMMITMENT_HASH_NAMESPACE => "sealed-lattice-root/share-commitment-hash-v1",
-    BALLOT_POLYNOMIAL_SET_HASH_NAMESPACE => "sealed-lattice-root/ballot-polynomial-set-hash-v1",
     THRESHOLD_SHARE_VERIFICATION_KEY_ROOT_NAMESPACE => "sealed-lattice-root/threshold-share-verification-key-root-v1",
     THRESHOLD_SHARE_VERIFICATION_KEY_HASH_NAMESPACE => "sealed-lattice-root/threshold-share-verification-key-hash-v1",
     TRUSTEE_THRESHOLD_VERIFICATION_KEY_HASH_NAMESPACE => "sealed-lattice-root/trustee-threshold-verification-key-hash-v1",
-    TARGET_BASIS_HASH_NAMESPACE => "sealed-lattice-root/target-basis-hash-v1",
-    RECEIVER_ENCRYPTION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/receiver-encryption-profile-hash-v1",
-    SHARE_COMMITMENT_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/share-commitment-profile-hash-v1",
-    BALLOT_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/ballot-proof-profile-hash-v1",
-    BALLOT_PRIVACY_ROSTER_PROFILE_EVIDENCE_HASH_NAMESPACE => "sealed-lattice-root/ballot-privacy-roster-profile-evidence-hash-v1",
-    SCORE_MEMBERSHIP_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/score-membership-profile-hash-v1",
     BALLOT_SCORE_ENCODING_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/ballot-score-encoding-profile-hash-v1",
-    BALLOT_SHARE_LAYOUT_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/ballot-share-layout-profile-hash-v1",
-    AGGREGATE_INPUT_ENCODING_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/aggregate-input-encoding-profile-hash-v1",
-    ENCODED_SHARE_VECTOR_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/encoded-share-vector-layout-hash-v1",
-    ENCODED_AGGREGATE_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/encoded-aggregate-layout-hash-v1",
-    TOP_K_EVALUATOR_INPUT_LAYOUT_HASH_NAMESPACE => "sealed-lattice-root/top-k-evaluator-input-layout-hash-v1",
-    SHARE_COMMITMENT_MESSAGE_BOUND_CERT_HASH_NAMESPACE => "sealed-lattice-root/share-commitment-message-bound-cert-hash-v1",
-    RECEIVER_PAYLOAD_HASH_NAMESPACE => "sealed-lattice-root/receiver-payload-hash-v1",
-    RECEIVER_PAYLOAD_CIPHERTEXT_ROOT_NAMESPACE => "sealed-lattice-root/receiver-payload-ciphertext-root-v1",
-    RECEIVER_KEY_PROOF_ROOT_NAMESPACE => "sealed-lattice-root/receiver-key-proof-root-v1",
-    BALLOT_PROOF_STATEMENT_HASH_NAMESPACE => "sealed-lattice-root/ballot-proof-statement-hash-v1",
-    BALLOT_PROOF_RECORD_HASH_NAMESPACE => "sealed-lattice-root/ballot-proof-record-hash-v1",
-    PROOF_BYTES_HASH_NAMESPACE => "sealed-lattice-root/proof-bytes-hash-v1",
+    BALLOT_VALIDITY_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/ballot-validity-proof-profile-hash-v1",
     CHALLENGE_DOMAIN_HASH_NAMESPACE => "sealed-lattice-root/challenge-domain-hash-v1",
-    EVALUATOR_PROGRAM_HASH_NAMESPACE => "sealed-lattice-root/evaluator-program-hash-v1",
-    ENCRYPTED_RANK_ACCUMULATION_HASH_NAMESPACE => "sealed-lattice-root/encrypted-rank-accumulation-hash-v1",
-    TOP_K_CIPHERTEXT_HASH_NAMESPACE => "sealed-lattice-root/top-k-ciphertext-hash-v1",
-    TARGET_CIPHERTEXT_HASH_NAMESPACE => "sealed-lattice-root/target-ciphertext-hash-v1",
-    TOP_K_EVALUATION_RECORD_HASH_NAMESPACE => "sealed-lattice-root/top-k-evaluation-record-hash-v1",
-    EVALUATION_NOISE_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/evaluation-noise-profile-hash-v1",
-    EVALUATION_NOISE_CERT_HASH_NAMESPACE => "sealed-lattice-root/evaluation-noise-cert-hash-v1",
-    EVALUATION_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/evaluation-proof-profile-hash-v1",
-    PUBLIC_SLOT_MASK_HASH_NAMESPACE => "sealed-lattice-root/public-slot-mask-hash-v1",
-    OUTPUT_ENCODING_HASH_NAMESPACE => "sealed-lattice-root/output-encoding-hash-v1",
-    TIE_POLICY_HASH_NAMESPACE => "sealed-lattice-root/tie-policy-hash-v1",
-    EVALUATION_PARAMETER_HASH_NAMESPACE => "sealed-lattice-root/evaluation-parameter-hash-v1",
-    EVALUATOR_INPUT_STATEMENT_HASH_NAMESPACE => "sealed-lattice-root/evaluator-input-statement-hash-v1",
-    ENCRYPTED_SCORE_BIT_OUTPUT_HASH_NAMESPACE => "sealed-lattice-root/encrypted-score-bit-output-hash-v1",
+    PROOF_BYTES_HASH_NAMESPACE => "sealed-lattice-root/proof-bytes-hash-v1",
     EVALUATION_KEY_SET_DIGEST_NAMESPACE => "sealed-lattice-root/evaluation-key-set-digest-v1",
 }
 
@@ -361,12 +317,14 @@ impl CanonicalJsonSink for HashingCanonicalJsonSink<'_> {
     }
 }
 
+#[cfg(test)]
 struct ByteComparisonCanonicalJsonSink<'expected> {
     expected_bytes: &'expected [u8],
     offset: usize,
     matches: bool,
 }
 
+#[cfg(test)]
 impl<'expected> ByteComparisonCanonicalJsonSink<'expected> {
     fn new(expected_bytes: &'expected [u8]) -> Self {
         Self {
@@ -381,6 +339,7 @@ impl<'expected> ByteComparisonCanonicalJsonSink<'expected> {
     }
 }
 
+#[cfg(test)]
 impl CanonicalJsonSink for ByteComparisonCanonicalJsonSink<'_> {
     fn write_str(&mut self, value: &str) -> CanonicalResult<()> {
         if !self.matches {
@@ -513,6 +472,7 @@ pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
     Ok(output)
 }
 
+#[cfg(test)]
 pub fn canonical_json_matches_bytes(value: &Value, expected_bytes: &[u8]) -> CanonicalResult<bool> {
     if canonical_json_len(value)? != expected_bytes.len() {
         return Ok(false);
@@ -614,6 +574,7 @@ pub fn derive_protocol_hash(namespace: &str, value: &Value) -> CanonicalResult<S
     Ok(finalize_hash512_hex(hasher))
 }
 
+#[cfg(test)]
 fn write_ascii_json_string(value: &str, sink: &mut impl CanonicalJsonSink) -> CanonicalResult<()> {
     if !value.is_ascii()
         || value
@@ -629,6 +590,7 @@ fn write_ascii_json_string(value: &str, sink: &mut impl CanonicalJsonSink) -> Ca
     sink.write_char('"')
 }
 
+#[cfg(test)]
 fn ascii_json_string_len(value: &str) -> CanonicalResult<usize> {
     if !value.is_ascii()
         || value
@@ -641,6 +603,7 @@ fn ascii_json_string_len(value: &str) -> CanonicalResult<usize> {
     checked_len_add(value.len(), 2)
 }
 
+#[cfg(test)]
 pub fn derive_protocol_hash_for_ascii_string_payload(
     namespace: &str,
     purpose: &str,
@@ -686,6 +649,7 @@ pub fn derive_protocol_hash_for_ascii_string_payload(
     Ok(finalize_hash512_hex(hasher))
 }
 
+#[cfg(test)]
 pub fn derive_protocol_hash_for_proof_bytes_payload(
     proof_bytes_hex: &str,
     proof_size_bytes: u64,

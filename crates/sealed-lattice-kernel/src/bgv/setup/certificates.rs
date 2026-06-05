@@ -15,8 +15,8 @@ pub(super) fn setup_certificates(
     error_distribution_certificate_hash: &str,
     key_switch_decomposition: &Value,
     key_switch_decomposition_hash: &str,
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
     evaluation_keys: &Value,
     development_encryption_fixture: &Value,
 ) -> CanonicalResult<Value> {
@@ -39,8 +39,8 @@ pub(super) fn setup_certificates(
             setup_inputs,
             collective_public_key,
             threshold_verification_material,
-            threshold_decryption_profile_hash,
-            kllps_target_decryption_profile_hash,
+            target_decryption_profile_hash,
+            target_decryption_profile_binding_hash,
         )?;
     let target_threshold_decryptability_certificate_hash = derive_protocol_hash(
         "TargetThresholdDecryptabilityCertificateHash",
@@ -76,15 +76,15 @@ pub(super) fn setup_certificates(
         "largestExposedModulusBitsWithoutQTarget": q_data_bits,
         "largestExposedBasisClassWithoutQTarget": "Q_data",
         "largestExposedModulusBits": q_data_bits,
-        "finalSecurityStatus": "acceptedForSetupBridgeEvaluatorTargetPending",
-        "specialPrimeExposureStatus": "not-exposed-by-current-setup-bridge-evaluator-public-material",
+        "finalSecurityStatus": "acceptedForDirectEvaluatorReplayTargetPending",
+        "specialPrimeExposureStatus": "not-exposed-by-current-direct-evaluator-replay-public-material",
         "collectiveSecretDistributionCertificateHash": collective_secret_distribution_certificate_hash,
         "errorDistributionCertificateHash": error_distribution_certificate_hash,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "evaluationKeySizeProfileHash": evaluation_key_size_profile_hash,
         "evaluationKeyStreamingCommitmentHash": evaluation_key_streaming_commitment["commitmentHash"],
-        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "targetDecryptionProfileHash": target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
         "heSecurityCertificateHash": he_security_certificate_hash,
         "securityEstimatorInputHash": security_estimator_input_hash()?,
@@ -119,8 +119,8 @@ pub(super) fn setup_certificates(
             "ActualSecretDistributionRecorded",
             "ActualErrorDistributionRecorded",
             "PublicRlweSampleCountsRecorded",
-            "LargestExposedModulusAcceptedForSetupBridgeEvaluator",
-            "SetupBridgeEvaluatorHeSecurityAccepted",
+            "LargestExposedModulusAcceptedForDirectEvaluatorReplay",
+            "DirectEvaluatorReplayHeSecurityAccepted",
             "TargetThresholdDecryptabilityCompatibilityRecorded",
             "EvaluationKeySizeCertificateRecorded",
             "FinalTargetSecurityPendingQTarget"
@@ -189,7 +189,7 @@ fn he_security_certificate_for_setup_profile(
             "dataPrimeCeilLog2Product": data_basis_modulus_bits(),
             "specialPrime": SPECIAL_PRIME,
             "extendedUtilityCeilLog2Product": extended_basis_modulus_bits(),
-            "extendedUtilityExposureStatus": "not-exposed-by-current-setup-bridge-evaluator-public-material",
+            "extendedUtilityExposureStatus": "not-exposed-by-current-direct-evaluator-replay-public-material",
             "largestExposedBasisClass": "Q_data",
             "largestExposedModulusBits": largest_exposed_modulus_bits
         },
@@ -254,8 +254,8 @@ fn he_security_certificate_for_setup_profile(
             "largestExposedModulusBits": largest_exposed_modulus_bits,
             "publicSamplesBound": true,
         },
-        "targetModulusStatus": "target-decryption-Q-target-not-part-of-setup-bridge-evaluator-closure",
-        "acceptedForSetupBridgeEvaluator": post_quantum_accepted && classical_accepted,
+        "targetModulusStatus": "target-decryption-Q-target-not-part-of-direct-evaluator-replay-closure",
+        "acceptedForDirectEvaluatorReplay": post_quantum_accepted && classical_accepted,
         "statusLabels": if post_quantum_accepted && classical_accepted {
             vec![
                 "HEStandardPostQuantum128Accepted",
@@ -374,14 +374,14 @@ pub(super) fn key_switch_decomposition_profile() -> CanonicalResult<Value> {
         "basisId": BgvBasisKind::Data.basis_id(),
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
-        "decompositionStatus": "setup-bridge-evaluator-data-basis-key-switch-material",
+        "decompositionStatus": "direct-evaluator-replay-data-basis-key-switch-material",
         "genericKeySwitchApiExported": false,
     }))
 }
 
-pub(super) fn threshold_decryption_profile(profile_hash: &str) -> CanonicalResult<Value> {
+pub(super) fn target_decryption_profile(profile_hash: &str) -> CanonicalResult<Value> {
     Ok(json!({
-        "profileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+        "profileId": TARGET_DECRYPTION_PROFILE_ID,
         "bgvProfileHash": profile_hash,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
         "asyncLagrangeTargetDirection": true,
@@ -401,11 +401,14 @@ pub(super) fn target_threshold_decryptability_certificate_from_setup_package(
         value_at_path(setup_package, &["thresholdVerificationMaterial"])?,
         string_at_path(
             setup_package,
-            &["kllpsStatus", "thresholdDecryptionProfileHash"],
+            &["targetDecryptionStatus", "targetDecryptionProfileHash"],
         )?,
         string_at_path(
             setup_package,
-            &["kllpsStatus", "kllpsTargetDecryptionProfileHash"],
+            &[
+                "targetDecryptionStatus",
+                "targetDecryptionProfileBindingHash",
+            ],
         )?,
     )
 }
@@ -414,8 +417,8 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
     setup_inputs: &Value,
     collective_public_key: &Value,
     threshold_verification_material: &Value,
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
 ) -> CanonicalResult<Value> {
     let setup_binding = json!({
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
@@ -451,13 +454,13 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "ciphertextComponentCount": 2,
         "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "batchEncoderHash": batch_encoder_hash()?,
-        "encryptedAggregateInputLayoutHash": layout_hash()?,
-        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+        "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
+        "directComparisonProfileHash": direct_comparison_profile_hash()?,
     });
     let threshold_binding = json!({
-        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "targetDecryptionProfileHash": target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "thresholdShareVerificationKeyRoot": string_at_path(
             threshold_verification_material,
             &["thresholdShareVerificationKeyRoot"],
@@ -485,8 +488,8 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "ciphertextProfile": ciphertext_profile,
         "thresholdBinding": threshold_binding,
         "ciphertextCompatibilityStatus": "TargetThresholdDecryptabilityCompatibilityCertified",
-        "semanticDecryptionPolicy": "only-an-accepted-target-ciphertext-after-target-finality-and-evaluation-proof-may-request-threshold-decryption",
-        "bridgeCiphertextPolicy": "encrypted-aggregate-input-ciphertexts-are-threshold-key-compatible-but-never-authorized-semantic-decryption-targets",
+        "semanticDecryptionPolicy": "only an accepted target ciphertext after target finality and evaluator replay may request target decryption",
+        "aggregateCiphertextPolicy": "direct encrypted ballot aggregate ciphertexts are target-key compatible but never authorized semantic decryption targets",
         "downstreamProtocolStatus": "TargetDecryptionShareProtocolStillDownstream",
         "statusLabels": [
             "TargetThresholdDecryptabilityCompatibilityCertified",
@@ -516,80 +519,17 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "PassiveSetupEvaluatorBindingContextHash",
         &evaluator_binding_context,
     )?;
-    let bridge_record = json!({
-        "profileId": "EncryptedAggregateBridge-v1",
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "bgvProfileId": PROFILE_ID,
-        "backendProfileId": BACKEND_PROFILE_ID,
-        "inputLayoutHash": layout_hash()?,
-        "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
-        "bridgeEvidenceRequiredBeforeClaimUse": true,
-        "passiveSetupProvidesBindingOnly": true,
-    });
-    let target_basis_record = json!({
-        "objectType": "EncryptedAggregateTargetBasis",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "sourceBridgeProfileId": "EncryptedAggregateBridge-v1",
-        "basisId": BgvBasisKind::Data.basis_id(),
-        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
-        "layoutHash": layout_hash()?,
-        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "finalizedBy": "bridge-and-evaluator-closure",
-    });
-    let reconstruction_record = json!({
-        "objectType": "EncryptedAggregateReconstructionBinding",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "bridgeHash": derive_protocol_hash("EncryptedAggregateBridgeHash", &bridge_record)?,
-        "TargetBasisRoot": derive_protocol_hash(
-            "EncryptedAggregateTargetBasisRoot",
-            &target_basis_record,
-        )?,
-        "layoutHash": layout_hash()?,
-        "reconstructionClaimPendingEncryptedAggregateBridge": true,
-    });
-    let score_bit_derivation_record = json!({
-        "objectType": "ScoreBitDerivationCircuitBinding",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "encrypted-score-bit-sliced-comparison-v1",
-        "inputLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
-        "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "circuitClosurePendingEncryptedAggregateEvaluator": false,
-        "developmentEvidenceOnly": true,
-    });
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
-        "inputLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
+        "inputLayoutHash": direct_comparison_profile_hash()?,
+        "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "circuitClosurePendingEncryptedAggregateEvaluator": true,
+        "directComparisonClosurePending": true,
         "noiseCertificateAcceptancePending": true,
-    });
-    let encrypted_score_bit_input_record = json!({
-        "objectType": "EncryptedScoreBitInputBinding",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "encrypted-score-bit-sliced-comparison-v1",
-        "scoreBitDerivationCircuitHash": derive_protocol_hash(
-            "ScoreBitDerivationCircuitHash",
-            &score_bit_derivation_record,
-        )?,
-        "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
-        "packingLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingEncryptedAggregateEvaluator": false,
-        "developmentEvidenceOnly": true,
     });
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
@@ -602,21 +542,9 @@ pub(super) fn passive_setup_evaluator_context_bindings(
             &comparison_input_derivation_record,
         )?,
         "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
-        "packingLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingEncryptedAggregateEvaluator": true,
+        "packingLayoutHash": direct_comparison_profile_hash()?,
+        "claimUsePendingDirectEvaluatorReplay": true,
         "noiseCertificateAcceptancePending": true,
-    });
-    let comparator_record = json!({
-        "objectType": "BitSlicedComparatorBinding",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "forbiddenScalarComparatorOperations": [
-            "scalar-polynomial-degree-360-comparator",
-            "uncertified-polynomial-comparator"
-        ],
-        "evaluatorProfilePending": true,
     });
     let sparse_target_projection_record = json!({
         "objectType": "EncryptedSparseTargetProjectionBinding",
@@ -624,36 +552,18 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "targetLayoutHash": target_layout_hash(MAXIMUM_OPTION_COUNT)?,
-        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
-        "claimUsePendingEncryptedAggregateEvaluator": true,
+        "directComparisonProfileHash": direct_comparison_profile_hash()?,
+        "claimUsePendingDirectEvaluatorReplay": true,
     });
 
-    let encrypted_aggregate_bridge_hash =
-        derive_protocol_hash("EncryptedAggregateBridgeHash", &bridge_record)?;
-    let encrypted_aggregate_target_basis_root =
-        derive_protocol_hash("EncryptedAggregateTargetBasisRoot", &target_basis_record)?;
-    let encrypted_aggregate_reconstruction_hash = derive_protocol_hash(
-        "EncryptedAggregateReconstructionHash",
-        &reconstruction_record,
-    )?;
-    let score_bit_derivation_circuit_hash = derive_protocol_hash(
-        "ScoreBitDerivationCircuitHash",
-        &score_bit_derivation_record,
-    )?;
     let comparison_input_derivation_circuit_hash = derive_protocol_hash(
         "ComparisonInputDerivationCircuitHash",
         &comparison_input_derivation_record,
-    )?;
-    let encrypted_score_bit_input_hash = derive_protocol_hash(
-        "EncryptedScoreBitInputHash",
-        &encrypted_score_bit_input_record,
     )?;
     let encrypted_comparison_input_hash = derive_protocol_hash(
         "EncryptedComparisonInputHash",
         &encrypted_comparison_input_record,
     )?;
-    let bit_sliced_comparator_hash =
-        derive_protocol_hash("BitSlicedComparatorHash", &comparator_record)?;
     let encrypted_sparse_target_projection_hash = derive_protocol_hash(
         "EncryptedSparseTargetProjectionHash",
         &sparse_target_projection_record,
@@ -661,36 +571,27 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     let binding_record = json!({
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "encryptedAggregateBridgeHash": encrypted_aggregate_bridge_hash,
-        "encryptedAggregateTargetBasisRoot": encrypted_aggregate_target_basis_root,
-        "encryptedAggregateReconstructionHash": encrypted_aggregate_reconstruction_hash,
-        "scoreBitDerivationCircuitHash": score_bit_derivation_circuit_hash,
+        "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
+        "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
         "comparisonInputDerivationCircuitHash": comparison_input_derivation_circuit_hash,
-        "encryptedScoreBitInputHash": encrypted_score_bit_input_hash,
         "encryptedComparisonInputHash": encrypted_comparison_input_hash,
-        "bitSlicedComparatorHash": bit_sliced_comparator_hash,
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
         "targetLayoutHash": sparse_target_projection_record["targetLayoutHash"],
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
         "directComparisonInputDerivationStatus": "active-profile-candidate",
-        "scoreBitSlicedStatus": "development-evidence-rejected-at-full-depth",
-        "claimUse": "binding-only-until-bridge-and-evaluator-closure",
+        "claimUse": "binding-only-until-direct-evaluator-replay-closure",
     });
 
     Ok(json!({
         "evaluatorBindingContextHash": binding_record["evaluatorBindingContextHash"],
-        "encryptedAggregateBridgeHash": binding_record["encryptedAggregateBridgeHash"],
-        "encryptedAggregateTargetBasisRoot": binding_record["encryptedAggregateTargetBasisRoot"],
-        "encryptedAggregateReconstructionHash": binding_record["encryptedAggregateReconstructionHash"],
-        "scoreBitDerivationCircuitHash": binding_record["scoreBitDerivationCircuitHash"],
+        "encryptedBallotAggregateLayoutHash": binding_record["encryptedBallotAggregateLayoutHash"],
+        "directAggregateLayoutHash": binding_record["directAggregateLayoutHash"],
         "comparisonInputDerivationCircuitHash": binding_record["comparisonInputDerivationCircuitHash"],
-        "encryptedScoreBitInputHash": binding_record["encryptedScoreBitInputHash"],
         "encryptedComparisonInputHash": binding_record["encryptedComparisonInputHash"],
-        "bitSlicedComparatorHash": binding_record["bitSlicedComparatorHash"],
         "encryptedSparseTargetProjectionHash": binding_record["encryptedSparseTargetProjectionHash"],
         "targetLayoutHash": binding_record["targetLayoutHash"],
         "passiveSetupEvaluatorContextBindingHash": derive_protocol_hash(
-            "EvaluationContextHash",
+            "EvaluatorReplayContextHash",
             &binding_record,
         )?,
     }))
@@ -738,11 +639,11 @@ fn public_rlwe_samples_by_basis(participant_count: usize, rotation_key_count: us
         "QPPublic": {
             "basisId": BgvBasisKind::Extended.basis_id(),
             "modulusBits": q_extended_utility_bits,
-            "exposedOnAcceptedSetupBridgeEvaluatorPath": false,
+            "exposedOnAcceptedDirectEvaluatorReplayPath": false,
             "relinearizationKeys": 0,
             "rotationKeys": 0,
             "keySwitchKeys": 0,
-            "exposurePolicy": "special-prime utility basis is not public key-switch material in the current accepted setup-bridge-evaluator path",
+            "exposurePolicy": "special-prime utility basis is not public key-switch material in the current accepted direct evaluator replay path",
         },
         "QTarget": {
             "modulusBits": null,

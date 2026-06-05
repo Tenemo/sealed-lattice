@@ -8,7 +8,7 @@ import type {
     TiePolicy,
 } from '@sealed-lattice/types';
 export {
-    cpadProfileId,
+    targetDecryptionProfileId,
     targetBoundShareSelectionProfileId,
 } from '@sealed-lattice/types';
 

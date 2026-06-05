@@ -5,7 +5,6 @@ use unicode_normalization::UnicodeNormalization;
 
 mod certificates;
 mod development_fixtures;
-mod encrypted_aggregate_bridge_trace;
 mod input;
 mod key_material;
 mod package_builder;
@@ -17,7 +16,6 @@ mod validation;
 mod tests;
 
 use sampling::{
-    bounded_collective_error_share_coefficient, bounded_collective_secret_share_coefficient,
     dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,
     negacyclic_product_mod, sample_bounded_collective_error_share_distribution,
     sample_bounded_collective_secret_share_distribution, sample_encryption_relation_checks,
@@ -25,15 +23,14 @@ use sampling::{
     signed_to_modulus_residue, signed_to_plaintext_scaled_residue,
 };
 
+#[cfg(test)]
+use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
 use crate::{
     bgv::{
         encoding::encode_batch_plaintext_slots,
         evaluator::{
             engine::DevelopmentBgvKey,
-            key_switch::{
-                KeySwitchKey, generate_galois_key, generate_relinearization_key,
-                key_switch_key_from_public_component_b,
-            },
+            key_switch::{KeySwitchKey, generate_galois_key, generate_relinearization_key},
             records::MAXIMUM_OPTION_COUNT,
             top_k::selected_evaluator_rotation_key_schedule,
         },
@@ -41,18 +38,18 @@ use crate::{
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
         profile::{
             BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS,
-            POLYNOMIAL_DEGREE, PROFILE_ID, aggregate_input_encoding_profile_hash,
-            allowed_operation_registry_hash, backend_profile_hash,
-            ballot_score_encoding_profile_hash, ballot_share_layout_profile_hash,
-            batch_encoder_hash, batch_layout_binding_hash, canonical_ciphertext_convention_hash,
-            data_basis_modulus_bits, encoded_aggregate_layout_hash, extended_basis_modulus_bits,
-            layout_hash, profile_hash, security_estimator_input_hash,
-            top_k_evaluator_input_layout_hash,
+            POLYNOMIAL_DEGREE, PROFILE_ID, allowed_operation_registry_hash, backend_profile_hash,
+            ballot_score_encoding_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
+            canonical_ciphertext_convention_hash, data_basis_modulus_bits,
+            direct_aggregate_layout_hash, direct_comparison_profile_hash,
+            encrypted_ballot_aggregate_layout_hash, encrypted_ballot_aggregate_profile_hash,
+            encrypted_ballot_layout_hash, extended_basis_modulus_bits, profile_hash,
+            security_estimator_input_hash,
         },
         rns::RnsPolynomial,
         serialization::{
-            BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
-            parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
+            BgvObjectKind, canonical_bytes_hash, ciphertext_root, plaintext_root,
+            serialize_bgv_object,
         },
         setup_helpers::{
             array_at_path, bool_at_path, compare_derived_hash, compare_expected_string,
@@ -70,7 +67,7 @@ use crate::{
 
 pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
     "sealed-lattice-bgv-rns-passive-full-roster-setup-v1";
-pub(crate) const THRESHOLD_DECRYPTION_PROFILE_ID: &str = "BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1";
+pub(crate) const TARGET_DECRYPTION_PROFILE_ID: &str = "BGV-RNS-AsyncTargetDecryption-v1";
 pub(crate) const KEY_SWITCH_DECOMPOSITION_PROFILE_ID: &str =
     "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
 pub(crate) const SELECTED_ROT_SET_ID: &str = "compact-generator-basis-packed-rank-rot-set-v1";
@@ -137,27 +134,11 @@ pub(crate) struct PreparedPassiveSetupPublicEvaluationKeys {
     pub(crate) record: Value,
 }
 
-pub(crate) struct DevelopmentThresholdSecretShare {
-    pub(crate) trustee_identity: String,
-    pub(crate) roster_position: usize,
-    pub(crate) recovery_epoch: u64,
-    pub(crate) device_epoch: u64,
-    pub(crate) participant_setup_record_hash: String,
-    pub(crate) trustee_threshold_verification_key_hash: String,
-    pub(crate) secret_coefficients: Vec<i64>,
-    pub(crate) error_coefficients: Vec<i64>,
-}
-
-pub(crate) struct DevelopmentThresholdSecretShares {
-    pub(crate) threshold_share_verification_key_hash: String,
-    pub(crate) shares: Vec<DevelopmentThresholdSecretShare>,
-}
-
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
         "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
         "keySwitchDecompositionProfileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
         "selectedRotSetId": SELECTED_ROT_SET_ID,
         "canonicalObjects": [
@@ -204,14 +185,8 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "BGVSetupParameterCertificateHash",
             "BGVDevelopmentEncryptionFixtureHash",
             "RotSetHash",
-            "EncryptedAggregateBridgeHash",
-            "EncryptedAggregateTargetBasisRoot",
-            "EncryptedAggregateReconstructionHash",
-            "ScoreBitDerivationCircuitHash",
             "ComparisonInputDerivationCircuitHash",
-            "EncryptedScoreBitInputHash",
             "EncryptedComparisonInputHash",
-            "BitSlicedComparatorHash",
             "EncryptedSparseTargetProjectionHash"
         ],
         "trustedDealerBoundary": {
@@ -222,7 +197,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
         "statusLabels": [
             "PassiveBgvSetupCanonicalObjectModelFrozen",
             "PassiveSetupOnly",
-            "KllpsSetupMaterialMatchedOnly"
+            "TargetDecryptionSetupMaterialMatchedOnly"
         ],
     }))
 }
@@ -360,7 +335,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
             "EvaluationKeyRootBound",
             "PassiveSetupInputReady",
             "BgvAlgebraicPublicKeyProofMissing",
-            "SetupBridgeEvaluatorHeSecurityAccepted",
+            "DirectEvaluatorReplayHeSecurityAccepted",
             "FinalTargetSecurityPendingTargetModulus"
         ],
     }))
@@ -413,79 +388,6 @@ pub(crate) fn development_evaluator_key_from_passive_setup_package(
         public_b,
         public_a,
     )
-}
-
-pub(crate) fn development_threshold_secret_shares_from_passive_setup_package(
-    setup_package: &Value,
-    private_setup_seed: &str,
-) -> CanonicalResult<DevelopmentThresholdSecretShares> {
-    validation::validate_setup_package_shape(setup_package)?;
-    validation::validate_setup_package_internal_bindings(setup_package)?;
-    let private_setup_seed_hash = input::private_passive_setup_seed_hash_from_package_witness(
-        setup_package,
-        private_setup_seed,
-    )?;
-    let participant_records = array_at_path(setup_package, &["participants"])?;
-    let participant_identities = participant_records
-        .iter()
-        .map(|participant| {
-            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let mut shares = Vec::with_capacity(participant_records.len());
-    for participant in participant_records {
-        let trustee_identity = string_at_path(participant, &["trusteeIdentity"])?.to_string();
-        let secret_coefficients = (0..POLYNOMIAL_DEGREE)
-            .map(|coefficient_index| {
-                bounded_collective_secret_share_coefficient(
-                    &private_setup_seed_hash,
-                    &participant_identities,
-                    &trustee_identity,
-                    coefficient_index,
-                )
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-        let error_coefficients = (0..POLYNOMIAL_DEGREE)
-            .map(|coefficient_index| {
-                bounded_collective_error_share_coefficient(
-                    &private_setup_seed_hash,
-                    &participant_identities,
-                    &trustee_identity,
-                    coefficient_index,
-                )
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-        shares.push(DevelopmentThresholdSecretShare {
-            trustee_identity,
-            roster_position: usize_at_path(participant, &["rosterPosition"])?,
-            recovery_epoch: unsigned_at_path(participant, &["recoveryEpoch"])?,
-            device_epoch: unsigned_at_path(participant, &["deviceEpoch"])?,
-            participant_setup_record_hash: string_at_path(
-                participant,
-                &["participantSetupRecordHash"],
-            )?
-            .to_string(),
-            trustee_threshold_verification_key_hash: string_at_path(
-                participant,
-                &["trusteeThresholdVerificationKeyHash"],
-            )?
-            .to_string(),
-            secret_coefficients,
-            error_coefficients,
-        });
-    }
-
-    Ok(DevelopmentThresholdSecretShares {
-        threshold_share_verification_key_hash: string_at_path(
-            setup_package,
-            &[
-                "thresholdVerificationMaterial",
-                "thresholdShareVerificationKeyHash",
-            ],
-        )?
-        .to_string(),
-        shares,
-    })
 }
 
 pub(crate) fn evaluation_key_seeds_from_passive_setup_package(
@@ -725,6 +627,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn public_evaluation_keys_from_material(
     setup_package: &Value,
     material: &Value,
@@ -903,6 +806,7 @@ pub(crate) fn public_evaluation_keys_from_material(
     })
 }
 
+#[cfg(test)]
 fn reject_forbidden_public_evaluation_key_material_secret_fields(
     value: &Value,
 ) -> CanonicalResult<()> {
@@ -1023,6 +927,7 @@ fn public_key_switch_material_entry(
     }))
 }
 
+#[cfg(test)]
 fn public_key_switch_material_entry_to_key(
     entry: &Value,
     expected_key_kind: &str,
@@ -1097,6 +1002,7 @@ fn public_key_switch_material_entry_to_key(
     key_switch_key_from_public_component_b(level, &domain, seed, component_b_by_digit)
 }
 
+#[cfg(test)]
 fn coefficient_vector_from_le_hex(value: &str) -> CanonicalResult<Vec<u64>> {
     let bytes = crate::transcript_core::decode_hex(value)?;
     if bytes.len() != POLYNOMIAL_DEGREE * 8 {
@@ -1134,16 +1040,5 @@ fn coefficient_vector_hash512(coefficients: &[u64]) -> String {
     )
 }
 
-pub(crate) use encrypted_aggregate_bridge_trace::{
-    EncryptedAggregateBridgeCiphertextRelationTrace,
-    encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses,
-    encrypted_aggregate_bridge_batch_lift_bound_certificate_hash,
-    encrypted_aggregate_bridge_batch_lift_bound_certificate_value,
-    encrypted_aggregate_bridge_ciphertext_commitment_context,
-    encrypted_aggregate_bridge_ciphertext_commitment_hash_from_context,
-    encrypted_aggregate_share_ciphertext_root_with_plaintext_binding,
-    generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots,
-    verify_encrypted_aggregate_bridge_ciphertext_public_bindings,
-};
 use input::read_passive_setup_input;
 use package_builder::build_passive_setup_package;

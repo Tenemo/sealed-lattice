@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import type * as publicTypes from '#packages/sdk/src/index.js';
 
-type BlockedTargetAcceptanceTypes = [
-    // @ts-expect-error target-acceptance shell types are intentionally not public.
+type BlockedTargetOpeningTypes = [
+    // @ts-expect-error evaluator replay records are intentionally not public.
+    publicTypes.EvaluatorReplayRecord,
+    // @ts-expect-error accepted target records are intentionally not public.
     publicTypes.LocalReplayRecord,
-    // @ts-expect-error target-acceptance shell types are intentionally not public.
+    // @ts-expect-error accepted target records are intentionally not public.
     publicTypes.TargetAcceptedRecord,
-    // @ts-expect-error target-acceptance shell types are intentionally not public.
+    // @ts-expect-error target decryption share shells are intentionally not public.
     publicTypes.TopKDecryptionShareShell,
 ];
 
@@ -22,59 +24,36 @@ type BlockedPlaintextOracleTypes = [
     publicTypes.SparseTopKTarget,
 ];
 
-type BlockedPvssBallotTypes = [
-    // @ts-expect-error ballot package shells are intentionally not public.
-    publicTypes.BallotPackageShell,
-    // @ts-expect-error ballot privacy proof profiles are intentionally not public.
-    publicTypes.BallotProofProfile,
-    // @ts-expect-error internal ballot-set types are intentionally not public.
-    publicTypes.CanonicalBallotSet,
-    // @ts-expect-error receiver encryption profiles are intentionally not public.
-    publicTypes.ReceiverEncryptionProfile,
-    // @ts-expect-error share commitment bound certificates are intentionally not public.
-    publicTypes.ShareCommitmentMessageBoundCert,
-    // @ts-expect-error share commitment profiles are intentionally not public.
-    publicTypes.ShareCommitmentProfile,
-    // @ts-expect-error test commitments are intentionally not public.
-    publicTypes.TestShareCommitment,
-    // @ts-expect-error aggregate share witnesses are intentionally not public.
-    publicTypes.TestAggregateShare,
-];
-
-type BlockedEncryptedAggregateBridgeTypes = [
-    // @ts-expect-error encrypted aggregate bridge proof records remain internal until claim-bearing verification exists.
-    publicTypes.BridgeProofRecord,
-    // @ts-expect-error encrypted aggregate bridge aggregate contributions remain internal until claim-bearing verification exists.
-    publicTypes.AggregateContribution,
-    // @ts-expect-error encrypted aggregate bridge aggregate-ready handoff records remain internal until claim-bearing verification exists.
-    publicTypes.AggregateReadyRecord,
-    // @ts-expect-error encrypted aggregate bridge aggregate selection inputs remain internal until claim-bearing verification exists.
-    publicTypes.AggregateContributionSelectionInput,
-    // @ts-expect-error encrypted aggregate bridge aggregate selection outputs remain internal until claim-bearing verification exists.
-    publicTypes.AggregateContributionSelection,
-    // @ts-expect-error encrypted aggregate bridge aggregate-ready build inputs remain internal until claim-bearing verification exists.
-    publicTypes.AggregateReadyRecordBuildInput,
+type BlockedDirectInternalTypes = [
+    // @ts-expect-error BGV setup packages are intentionally not public.
+    publicTypes.BgvPassiveSetupPackage,
+    // @ts-expect-error direct ballot witness material is intentionally not public.
+    publicTypes.DirectEncryptedBallotWitness,
+    // @ts-expect-error direct aggregate evaluator inputs are intentionally not public.
+    publicTypes.TopKEvaluatorDirectAggregateInput,
 ];
 
 type PublicFoundationTypes = [
-    publicTypes.BallotProofRecord,
-    publicTypes.BallotProofStatement,
+    publicTypes.AcceptedTargetFinalityCheckpoint,
     publicTypes.BoardConsistencyInput,
-    publicTypes.BridgeProofVerification,
-    publicTypes.BridgeProofVerificationInput,
-    publicTypes.ClaimBearingBallotPackage,
+    publicTypes.CastReceipt,
+    publicTypes.ElectionManifest,
     publicTypes.PollSpecInput,
-    publicTypes.ReceiverKeyProof,
-    publicTypes.ReceiverKeyProofRootEvidence,
+    publicTypes.RegistrationEntry,
     publicTypes.RosterManifestTranscriptInput,
+    publicTypes.TargetBoundShareSelectionProfile,
+    publicTypes.TargetFinalityCheckpoint,
+    publicTypes.TargetFinalityRecord,
     publicTypes.TargetFinalityVerificationInput,
+    publicTypes.TargetProposal,
+    publicTypes.ThresholdProfile,
+    publicTypes.TrusteeSetupEntry,
 ];
 
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
-    readonly blockedPvssBallotTypes: BlockedPvssBallotTypes;
-    readonly blockedEncryptedAggregateBridgeTypes: BlockedEncryptedAggregateBridgeTypes;
-    readonly blockedTargetAcceptanceTypes: BlockedTargetAcceptanceTypes;
+    readonly blockedDirectInternalTypes: BlockedDirectInternalTypes;
+    readonly blockedTargetOpeningTypes: BlockedTargetOpeningTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
 };
 
@@ -83,21 +62,24 @@ type PublicFoundationTypeNames = readonly string[] & {
 };
 
 const publicFoundationTypeNames = [
-    'BallotProofRecord',
-    'BallotProofStatement',
+    'AcceptedTargetFinalityCheckpoint',
     'BoardConsistencyInput',
-    'BridgeProofVerification',
-    'BridgeProofVerificationInput',
-    'ClaimBearingBallotPackage',
+    'CastReceipt',
+    'ElectionManifest',
     'PollSpecInput',
-    'ReceiverKeyProof',
-    'ReceiverKeyProofRootEvidence',
+    'RegistrationEntry',
     'RosterManifestTranscriptInput',
+    'TargetBoundShareSelectionProfile',
+    'TargetFinalityCheckpoint',
+    'TargetFinalityRecord',
     'TargetFinalityVerificationInput',
+    'TargetProposal',
+    'ThresholdProfile',
+    'TrusteeSetupEntry',
 ] as const satisfies PublicFoundationTypeNames;
 
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
-        expect(publicFoundationTypeNames).toHaveLength(11);
+        expect(publicFoundationTypeNames).toHaveLength(14);
     });
 });

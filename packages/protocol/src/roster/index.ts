@@ -1,6 +1,5 @@
 export {
     deriveElectionManifestHash,
-    deriveReceiverKeyRegistrationHash,
     deriveRegistrationEntryHash,
     deriveRosterHash,
     deriveTrusteeSetupEntryHash,

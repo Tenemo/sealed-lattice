@@ -26,13 +26,13 @@ export const deriveCastReceiptHash = (
     receipt: Omit<CastReceipt, 'castReceiptHash' | 'signature'>,
 ): ProtocolHash =>
     deriveProtocolHash('CastReceiptHash', {
-        ballotPackageHash: receipt.ballotPackageHash,
         boardPosition: receipt.boardPosition,
         boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
         contextHash: receipt.contextHash,
         deviceEpoch: receipt.deviceEpoch,
         electionManifestHash: receipt.electionManifestHash,
+        encryptedBallotHash: receipt.encryptedBallotHash,
         objectType: receipt.objectType,
         objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,
@@ -76,13 +76,13 @@ const verifyCastReceiptShape = (
     const { receipt } = input;
     const refusedObjects: RefusalRecord[] = [];
     const expectedHash = deriveCastReceiptHash({
-        ballotPackageHash: receipt.ballotPackageHash,
         boardPosition: receipt.boardPosition,
         boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
         contextHash: receipt.contextHash,
         deviceEpoch: receipt.deviceEpoch,
         electionManifestHash: receipt.electionManifestHash,
+        encryptedBallotHash: receipt.encryptedBallotHash,
         objectType: receipt.objectType,
         objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,

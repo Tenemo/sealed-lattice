@@ -4,9 +4,12 @@ use crate::bgv::evaluator::{
     prg::DeterministicSampler,
     records::MAXIMUM_OPTION_COUNT,
     top_k::{
-        DIRECT_COMPARISON_OUTPUT_LEVEL, aggregate_score_packing_basis_galois_elements,
+        DIRECT_COMPARISON_OUTPUT_LEVEL, direct_score_packing_basis_galois_elements,
         packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
     },
+};
+use crate::bgv::setup::sampling::{
+    bounded_collective_error_share_coefficient, bounded_collective_secret_share_coefficient,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -561,8 +564,8 @@ pub(super) fn collective_public_key_coefficients_from_signed(
 
 pub(super) fn threshold_verification_material(
     input: &PassiveSetupInput,
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
     participant_setup_record_hashes: &[String],
     trustee_threshold_verification_key_hashes: &[String],
 ) -> CanonicalResult<Value> {
@@ -583,9 +586,9 @@ pub(super) fn threshold_verification_material(
         "objectType": "ThresholdShareVerificationKeySet",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "targetDecryptionProfileHash": target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "participantSetupRecordHashes": participant_setup_record_hashes,
@@ -607,8 +610,8 @@ pub(super) fn threshold_verification_material(
         "ThresholdShareVerificationKeyHash",
         &json!({
             "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
+            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         }),
     )?;
 
@@ -620,7 +623,7 @@ pub(super) fn threshold_verification_material(
         "statusLabels": [
             "ThresholdVerificationMaterialBound",
             "PassiveSetupVerificationScopeOnly",
-            "KllpsVerificationRootsBound"
+            "TargetDecryptionVerificationRootsBound"
         ],
     }))
 }
@@ -892,10 +895,10 @@ fn selected_relinearization_levels() -> CanonicalResult<Vec<usize>> {
 
 fn selected_rotation_schedule_entries() -> CanonicalResult<Vec<RotationScheduleEntry>> {
     let mut entries_by_rotation_and_level = BTreeMap::new();
-    for rotation in aggregate_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
+    for rotation in direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level.insert(
             (rotation, DATA_PRIMES.len() - 1),
-            "aggregate-score-packing-generator-basis",
+            "direct-score-packing-generator-basis",
         );
     }
     for rotation in packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
@@ -998,7 +1001,7 @@ fn sampled_evaluation_key_relation_checks(
         sampled_rotation_indexes.insert(rotation_schedule.len() - 1);
     }
     for required_purpose in [
-        "aggregate-score-packing-generator-basis",
+        "direct-score-packing-generator-basis",
         "generator-ordered-packed-rank-forward-basis",
         "generator-ordered-packed-rank-return-basis",
     ] {
@@ -1273,7 +1276,7 @@ pub(super) fn evaluation_keys(
         "relinearizationKeyRoot": material_binding.relinearization_key_root,
         "rotationKeyRoots": material_binding.rotation_key_roots,
         "keySwitchKeyRoot": material_binding.key_switch_key_root,
-        "generatedFor": "aggregate-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
+        "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalRotSetClosure": "encrypted-aggregate-evaluator-closure",
         "regenerateIfRotSetChanges": true,
         "maliciousEvaluationKeyProofIncluded": false,
@@ -1310,8 +1313,8 @@ pub(super) fn evaluation_keys(
 }
 
 fn selected_rotation_set() -> CanonicalResult<Value> {
-    let aggregate_score_packing_rotations =
-        aggregate_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
+    let direct_score_packing_rotations =
+        direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)?
             .into_iter()
             .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
             .collect::<Vec<_>>();
@@ -1325,7 +1328,7 @@ fn selected_rotation_set() -> CanonicalResult<Value> {
             .into_iter()
             .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))
             .collect::<Vec<_>>();
-    let rotations = aggregate_score_packing_rotations
+    let rotations = direct_score_packing_rotations
         .iter()
         .chain(packed_rank_forward_rotations.iter())
         .chain(packed_rank_return_rotations.iter())
@@ -1335,22 +1338,21 @@ fn selected_rotation_set() -> CanonicalResult<Value> {
         .collect::<Vec<_>>();
     Ok(json!({
         "rotSetId": SELECTED_ROT_SET_ID,
-        "sourceRdr": "internal-design-note-top-k-circuit-and-sparse-target",
-        "generatedFor": "aggregate-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
+        "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalizedBy": "encrypted-aggregate-evaluator-closure",
         "regeneratePassiveSetupKeysIfChanged": true,
         "rotations": rotations.clone(),
         "dependencies": [
-            "encrypted-aggregate-reconstruction",
-            "aggregate-score-packing",
+            "direct-encrypted-ballot-aggregation",
+            "direct-score-packing",
             "direct-encrypted-score-comparison",
             "generator-ordered-packed-rank-accumulation",
             "encrypted-sparse-target-projection"
         ],
         "requiredRotationGroups": [
             {
-                "purpose": "aggregate-score-packing-generator-basis",
-                "rotations": aggregate_score_packing_rotations
+                "purpose": "direct-score-packing-generator-basis",
+                "rotations": direct_score_packing_rotations
             },
             {
                 "purpose": "generator-ordered-packed-rank-forward-basis",

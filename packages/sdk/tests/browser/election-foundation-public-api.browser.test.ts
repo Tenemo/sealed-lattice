@@ -79,7 +79,7 @@ describe('election foundation public package API in browsers', () => {
             }),
         ).toMatchObject({ ok: true });
         expect(
-            evaluateActionCapability('DeriveAggregateContribution', {
+            evaluateActionCapability('VerifyEncryptedBallotProofs', {
                 lifecycleState: 'votingClosed',
                 thresholdProfile,
                 pollSpecValid: true,
@@ -89,12 +89,11 @@ describe('election foundation public package API in browsers', () => {
                     'accepted-roster-hash',
                 setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 turnoutCount: thresholdProfile.releaseQuorum,
-                bridgeBenchmarkReportPresent: true,
-                bridgeProverCertificatePresent: true,
+                directProofTransportPresent: true,
             }),
         ).toEqual({
             allowed: true,
-            action: 'DeriveAggregateContribution',
+            action: 'VerifyEncryptedBallotProofs',
         });
         expect(
             deriveValidatedFirstValidOrder({

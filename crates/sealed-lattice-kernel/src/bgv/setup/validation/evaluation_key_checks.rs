@@ -2,7 +2,7 @@ use super::*;
 use crate::bgv::evaluator::{
     records::MAXIMUM_OPTION_COUNT,
     top_k::{
-        aggregate_score_packing_basis_galois_elements, packed_rank_forward_basis_galois_elements,
+        direct_score_packing_basis_galois_elements, packed_rank_forward_basis_galois_elements,
         packed_rank_return_basis_galois_elements,
     },
 };
@@ -223,7 +223,7 @@ fn validate_required_rotation_groups(
         }
     }
     for purpose in [
-        "aggregate-score-packing-generator-basis",
+        "direct-score-packing-generator-basis",
         "generator-ordered-packed-rank-forward-basis",
         "generator-ordered-packed-rank-return-basis",
     ] {
@@ -240,8 +240,8 @@ fn validate_required_rotation_groups(
 
 fn expected_required_rotation_group(purpose: &str) -> Option<BTreeSet<i64>> {
     let rotations = match purpose {
-        "aggregate-score-packing-generator-basis" => {
-            aggregate_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)
+        "direct-score-packing-generator-basis" => {
+            direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)
                 .ok()?
                 .into_iter()
                 .map(|rotation| i64::try_from(rotation).expect("Galois element fits i64"))

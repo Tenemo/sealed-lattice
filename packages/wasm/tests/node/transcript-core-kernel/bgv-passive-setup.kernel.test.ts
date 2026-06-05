@@ -6,12 +6,7 @@ import {
     TranscriptCoreKernelCommandError,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
-import type {
-    BgvPassiveSetupPackage,
-    TopKEvaluatorEncryptedAggregateEvaluationInput,
-    TopKEvaluatorEncryptedAggregateEvaluationSweepInput,
-    TopKEvaluatorEncryptedAggregateInput,
-} from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
+import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
 const setupRequest = {
     ceremonyId: 'ceremony-main',
@@ -44,20 +39,6 @@ const setupRequest = {
     setupSeed: 'passive-bgv-setup-test-seed',
 } as const;
 
-const expectKernelCommandError = (
-    action: () => unknown,
-): TranscriptCoreKernelCommandError => {
-    try {
-        action();
-    } catch (error) {
-        expect(error).toBeInstanceOf(TranscriptCoreKernelCommandError);
-
-        return error as TranscriptCoreKernelCommandError;
-    }
-
-    throw new Error('Expected transcript-core kernel command to reject.');
-};
-
 const rebindSetupPackageHash = (
     kernel: TranscriptCoreKernel,
     setupPackage: BgvPassiveSetupPackage,
@@ -78,12 +59,6 @@ type MutableJsonRecord = Record<string, unknown>;
 type JsonPathSegment = string | number;
 
 const validHash = (fill: string): string => fill.repeat(128);
-
-const acceptedEvaluatorBindingFields = {
-    canonicalBallotSetHash: validHash('1'),
-    preTargetBoardHead: validHash('2'),
-    evaluatorSignature: validHash('3'),
-} as const;
 
 const setPathValue = (
     target: unknown,
@@ -182,7 +157,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                     readonly rotationKeys: number;
                 };
                 readonly QPPublic: {
-                    readonly exposedOnAcceptedSetupBridgeEvaluatorPath: boolean;
+                    readonly exposedOnAcceptedDirectEvaluatorReplayPath: boolean;
                     readonly rotationKeys: number;
                 };
                 readonly QTarget: {
@@ -199,20 +174,20 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'CollectivePublicKeyRootBound',
                 'EvaluationKeyRootBound',
                 'PassiveSetupInputReady',
-                'SetupBridgeEvaluatorHeSecurityAccepted',
+                'DirectEvaluatorReplayHeSecurityAccepted',
                 'FinalTargetSecurityPendingTargetModulus',
             ]),
         );
-        expect(setup.nonClaims).toContain('KLLPSPartDecNotImplemented');
-        expect(setup.kllpsStatus).toMatchObject({
-            thresholdDecryptionProfileId:
-                'BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1',
-            setupMaterialMatchesKLLPS: true,
-            KLLPSPartDecStatusImplemented: false,
-            KLLPSC1C4StatusAccepted: false,
+        expect(setup.nonClaims).toContain('TargetPartDecNotImplemented');
+        expect(setup.targetDecryptionStatus).toMatchObject({
+            targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
+            setupMaterialMatchesTargetDecryption: true,
+            targetPartDecImplemented: false,
+            targetC1C4StatusAccepted: false,
         });
         expect(certificates.setupParameterCertificate).toMatchObject({
-            finalSecurityStatus: 'acceptedForSetupBridgeEvaluatorTargetPending',
+            finalSecurityStatus:
+                'acceptedForDirectEvaluatorReplayTargetPending',
             largestExposedModulusBitsWithoutQTarget: 799,
         });
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
@@ -222,7 +197,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             certificates.publicRlweSamplesByBasis.QData.rotationKeys,
         ).toBeGreaterThan(0);
         expect(certificates.publicRlweSamplesByBasis.QPPublic).toMatchObject({
-            exposedOnAcceptedSetupBridgeEvaluatorPath: false,
+            exposedOnAcceptedDirectEvaluatorReplayPath: false,
             rotationKeys: 0,
         });
         expect(
@@ -351,33 +326,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'SetupPrivateWitnessNotExported',
             ]),
         );
-        const preparedMaterial = kernel.prepareBgvEvaluationKeyMaterial({
-            setupPackage: setup,
-            setupPrivateWitness: {
-                setupSeed: setupRequest.setupSeed,
-            },
-            workingLevel: 1,
-            rotationKeys: [],
-        });
-        expect(preparedMaterial).toMatchObject({
-            objectType: 'PreparedBgvPublicEvaluationKeyMaterial',
-            setupPackageHash: setup.setupPackageHash,
-            evaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
-            rawSecretMaterialExported: false,
-            relinearizationKeyCount: 1,
-            rotationKeyCount: 0,
-            workingLevel: 1,
-        });
-        expect(
-            typeof preparedMaterial.preparedEvaluationKeyMaterialHandle,
-        ).toBe('string');
-        expect(preparedMaterial.statusLabels).toEqual(
-            expect.arrayContaining([
-                'PreparedPublicEvaluationKeyMaterialGenerated',
-                'PreparedEvaluationKeyMaterialHandleRegistered',
-                'SetupPrivateWitnessNotExported',
-            ]),
-        );
         expect(
             Object.prototype.hasOwnProperty.call(
                 material,
@@ -386,19 +334,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         ).toBe(false);
         expect(
             Object.prototype.hasOwnProperty.call(
-                preparedMaterial,
-                'setupPrivateWitness',
-            ),
-        ).toBe(false);
-        expect(
-            Object.prototype.hasOwnProperty.call(
                 material,
-                'privateSetupSeedHash',
-            ),
-        ).toBe(false);
-        expect(
-            Object.prototype.hasOwnProperty.call(
-                preparedMaterial,
                 'privateSetupSeedHash',
             ),
         ).toBe(false);
@@ -597,11 +533,11 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                     ),
             ],
             [
-                'KLLPS claim',
+                'target decryption claim',
                 (setupPackage) =>
                     setPathValue(
                         setupPackage,
-                        ['kllpsStatus', 'KLLPSPartDecStatusImplemented'],
+                        ['targetDecryptionStatus', 'targetPartDecImplemented'],
                         true,
                     ),
             ],
@@ -626,7 +562,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                         [
                             'developmentEncryptionFixture',
                             'fixture',
-                            'bridgeEncryptionClaim',
+                            'directProofClaim',
                         ],
                         true,
                     ),
@@ -677,14 +613,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
 
         for (const fieldName of [
-            'encryptedAggregateBridgeHash',
-            'encryptedAggregateTargetBasisRoot',
-            'encryptedAggregateReconstructionHash',
-            'scoreBitDerivationCircuitHash',
             'comparisonInputDerivationCircuitHash',
-            'encryptedScoreBitInputHash',
             'encryptedComparisonInputHash',
-            'bitSlicedComparatorHash',
             'encryptedSparseTargetProjectionHash',
             'targetLayoutHash',
             'passiveSetupEvaluatorContextBindingHash',
@@ -697,388 +627,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             );
             expectReboundSetupPackageToBeRejected(kernel, mutatedSetup);
         }
-    });
-
-    it('refuses encrypted aggregate evaluation when bridge ciphertexts use the wrong setup key', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const profileBindings = setup.profileBindings as Record<string, string>;
-        const wrongKeyBridgeInput: TopKEvaluatorEncryptedAggregateInput = {
-            aggregateDerivationComponentHash: validHash('1'),
-            aggregateDerivationStatementHash: validHash('2'),
-            postVotingClosedContextHash: validHash('3'),
-            bridgeEncryption: {
-                profileHash: profileBindings.profileHash,
-                rustBgvBackendProfileHash: profileBindings.backendProfileHash,
-                canonicalCiphertextConventionHash:
-                    profileBindings.canonicalCiphertextConventionHash,
-                plaintextRoot: validHash('4'),
-                ciphertextRoot: validHash('5'),
-                collectivePublicKeyRoot: validHash('6'),
-            },
-        };
-
-        expect(() =>
-            kernel.runEncryptedAggregateTopKEvaluation({
-                setupPackage: setup,
-                evaluationKeyMaterial: {},
-                aggregateReadyRecord: {},
-                encryptedAggregateInputs: [
-                    wrongKeyBridgeInput,
-                    wrongKeyBridgeInput,
-                ],
-                topCount: 1,
-                scoreDomainMax: 200,
-                ...acceptedEvaluatorBindingFields,
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
-    it('refuses encrypted aggregate evaluation outside the selected score domain', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-
-        expect(() =>
-            kernel.runEncryptedAggregateTopKEvaluation({
-                setupPackage: setup,
-                evaluationKeyMaterial: {},
-                aggregateReadyRecord: {},
-                encryptedAggregateInputs: [],
-                topCount: 1,
-                scoreDomainMax: 10,
-                ...acceptedEvaluatorBindingFields,
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
-    it('requires finality-bound hashes on accepted evaluator requests', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const baseRequest = {
-            setupPackage: setup,
-            evaluationKeyMaterial: {},
-            aggregateReadyRecord: {},
-            encryptedAggregateInputs: [],
-            topCount: 1,
-            scoreDomainMax: 200,
-            ...acceptedEvaluatorBindingFields,
-        } satisfies TopKEvaluatorEncryptedAggregateEvaluationInput;
-
-        for (const fieldName of [
-            'canonicalBallotSetHash',
-            'preTargetBoardHead',
-            'evaluatorSignature',
-        ] as const) {
-            const missingRequest = {
-                ...baseRequest,
-            } as Partial<TopKEvaluatorEncryptedAggregateEvaluationInput>;
-            delete missingRequest[fieldName];
-            const missingError = expectKernelCommandError(() =>
-                kernel.runEncryptedAggregateTopKEvaluation(
-                    missingRequest as TopKEvaluatorEncryptedAggregateEvaluationInput,
-                ),
-            );
-            expect(missingError.message).toContain(fieldName);
-
-            const malformedError = expectKernelCommandError(() =>
-                kernel.runEncryptedAggregateTopKEvaluation({
-                    ...baseRequest,
-                    [fieldName]: 'ABC',
-                }),
-            );
-            expect(malformedError.message).toContain(fieldName);
-        }
-    });
-
-    it('refuses accepted evaluator requests that carry plaintext or private witnesses', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-
-        for (const [fieldName, fieldValue] of [
-            ['decodedTargetIdSlots', [1, 0]],
-            ['plaintextRanks', [0, 1]],
-            ['developmentKeySet', { keySeed: 'not-on-this-path' }],
-            ['rawSecretShares', ['share-1', 'share-2']],
-            [
-                'trustedDealerSecret',
-                { secret: 'not-on-accepted-evaluation-path' },
-            ],
-            ['fullSecretReconstruction', { shares: ['not', 'accepted'] }],
-            ['setupPrivateWitness', { setupSeed: 'not-on-this-path' }],
-            ['targetDecryptionShare', { share: 'not-yet-owned' }],
-            ['evaluationProofVerified', true],
-        ] as const) {
-            const request = {
-                setupPackage: setup,
-                evaluationKeyMaterial: {},
-                aggregateReadyRecord: {},
-                encryptedAggregateInputs: [],
-                topCount: 1,
-                scoreDomainMax: 200,
-                ...acceptedEvaluatorBindingFields,
-                [fieldName]: fieldValue,
-            } as unknown as TopKEvaluatorEncryptedAggregateEvaluationInput;
-
-            const error = expectKernelCommandError(() =>
-                kernel.runEncryptedAggregateTopKEvaluation(request),
-            );
-            expect(error.code).toBe('InvalidFixture');
-            expect(error.message).toContain(fieldName);
-
-            const sweepError = expectKernelCommandError(() =>
-                kernel.runEncryptedAggregateTopKEvaluationSweep({
-                    topCounts: [1],
-                    [fieldName]: fieldValue,
-                } as unknown as TopKEvaluatorEncryptedAggregateEvaluationSweepInput),
-            );
-            expect(sweepError.code).toBe('InvalidFixture');
-            expect(sweepError.message).toContain(fieldName);
-        }
-
-        const nestedError = expectKernelCommandError(() =>
-            kernel.runEncryptedAggregateTopKEvaluation({
-                setupPackage: setup,
-                evaluationKeyMaterial: {},
-                aggregateReadyRecord: {},
-                encryptedAggregateInputs: [
-                    {
-                        aggregateDerivationComponentHash: validHash('1'),
-                        aggregateDerivationStatementHash: validHash('2'),
-                        postVotingClosedContextHash: validHash('3'),
-                        bridgeEncryption: {},
-                        aggregateContribution: {
-                            proofWitness: {
-                                aggregateScore: [3, 2, 1],
-                            },
-                        },
-                    },
-                ],
-                topCount: 1,
-                scoreDomainMax: 200,
-                ...acceptedEvaluatorBindingFields,
-            }),
-        );
-        expect(nestedError.code).toBe('InvalidFixture');
-        expect(nestedError.message).toContain(
-            'encryptedAggregateInputs.0.aggregateContribution.proofWitness',
-        );
-    });
-
-    it('refuses accepted evaluator requests with unbound top-level fields', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-
-        const error = expectKernelCommandError(() =>
-            kernel.runEncryptedAggregateTopKEvaluation({
-                setupPackage: setup,
-                evaluationKeyMaterial: {},
-                aggregateReadyRecord: {},
-                encryptedAggregateInputs: [],
-                topCount: 1,
-                scoreDomainMax: 200,
-                ...acceptedEvaluatorBindingFields,
-                unboundDebugArtifact: 'not-on-accepted-path',
-            } as unknown as TopKEvaluatorEncryptedAggregateEvaluationInput),
-        );
-        expect(error.code).toBe('InvalidFixture');
-        expect(error.message).toContain('unboundDebugArtifact');
-    });
-
-    it('exposes the encrypted aggregate evaluation sweep and rejects malformed top-count sets before evaluation work', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(typeof kernel.runEncryptedAggregateTopKEvaluationSweep).toBe(
-            'function',
-        );
-
-        const error = expectKernelCommandError(() =>
-            kernel.runEncryptedAggregateTopKEvaluationSweep({
-                topCounts: [1, 1],
-            } as unknown as TopKEvaluatorEncryptedAggregateEvaluationSweepInput),
-        );
-        expect(error.code).toBe('InvalidFixture');
-        expect(error.message).toBe(
-            'InvalidFixture: topCounts must not contain duplicate values',
-        );
-    });
-
-    it('refuses accepted bridge inputs with development randomness evidence', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const compactBridgeStatus = {
-            bgvEncryptionKeyMaterialKind:
-                'passive-transcript-derived-collective-public-key',
-            developmentKeyOnly: false,
-            aggregateDerivationVerificationScope:
-                'AggregateDerivationFullVerificationChecked',
-            bridgeClaimClosureVerified: false,
-            bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing',
-            thresholdDecryptable: true,
-            claimBearingBridgeEncryption: false,
-        };
-        const developmentRandomnessEvidence = {
-            proverRandomnessSource: 'development-deterministic-fixture',
-            encryptionRandomnessSeedSource: 'fresh-csprng',
-            randomnessSourceEvidence: {
-                objectType: 'AggregateBridgeRandomnessSourceEvidence',
-                objectVersion: 1,
-                proverRandomnessSource: 'development-deterministic-fixture',
-                encryptionRandomnessSeedSource: 'fresh-csprng',
-                callerSuppliedDevelopmentRandomness: true,
-                claimBearingEntropyEvidence: false,
-            },
-        };
-        const rejectedBridgeInput: TopKEvaluatorEncryptedAggregateInput = {
-            aggregateDerivationComponentHash: validHash('1'),
-            aggregateDerivationStatementHash: validHash('2'),
-            postVotingClosedContextHash: validHash('3'),
-            bridgeEncryption: {
-                ...compactBridgeStatus,
-                ...developmentRandomnessEvidence,
-            },
-            bridgeEvidenceVerification: {
-                ...compactBridgeStatus,
-                ...developmentRandomnessEvidence,
-                bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
-                bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked',
-            },
-            aggregateContribution: {
-                contributorRosterPosition: 1,
-                aggregateContributionHash: validHash('4'),
-                bridgeProofRecord: {
-                    ...compactBridgeStatus,
-                    ...developmentRandomnessEvidence,
-                    bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
-                },
-            },
-        };
-
-        expect(() =>
-            kernel.runEncryptedAggregateTopKEvaluation({
-                setupPackage: setup,
-                evaluationKeyMaterial: {},
-                aggregateReadyRecord: {},
-                encryptedAggregateInputs: [
-                    rejectedBridgeInput,
-                    rejectedBridgeInput,
-                ],
-                topCount: 1,
-                scoreDomainMax: 200,
-                ...acceptedEvaluatorBindingFields,
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
-    it('refuses accepted bridge inputs with drifted bridge proof context', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const compactBridgeStatus = {
-            bgvEncryptionKeyMaterialKind:
-                'passive-transcript-derived-collective-public-key',
-            developmentKeyOnly: false,
-            aggregateDerivationVerificationScope:
-                'AggregateDerivationFullVerificationChecked',
-            bridgeClaimClosureVerified: false,
-            bridgeClaimVerificationStatus: 'BridgeProofClaimClosureMissing',
-            thresholdDecryptable: true,
-            claimBearingBridgeEncryption: false,
-        };
-        const freshRandomnessEvidence = {
-            proverRandomnessSource: 'fresh-csprng',
-            encryptionRandomnessSeedSource: 'fresh-csprng',
-            randomnessSourceEvidence: {
-                objectType: 'AggregateBridgeRandomnessSourceEvidence',
-                objectVersion: 1,
-                proverRandomnessSource: 'fresh-csprng',
-                encryptionRandomnessSeedSource: 'fresh-csprng',
-                callerSuppliedDevelopmentRandomness: false,
-                claimBearingEntropyEvidence: false,
-            },
-        };
-        const bridgeProofFields = {
-            bridgeProofProfileHash: validHash('1'),
-            bridgeProofStatementHash: validHash('2'),
-            bridgeProofChallengeContextHash: validHash('3'),
-            bridgeProofTargetContractHash: validHash('4'),
-            bridgeProofBytesHash: validHash('5'),
-            bridgeProofRoot: validHash('6'),
-            encryptedAggregateInputRoot: validHash('7'),
-            encryptedAggregateShareCiphertextRoot: validHash('8'),
-            plaintextCoefficientBindingCommitmentHash: validHash('9'),
-            proofFriendlyPlaintextLiftBindingHash: validHash('a'),
-            aggregateBridgeRelationHandoffRoot: validHash('b'),
-            collectivePublicKeyCoefficientRoot:
-                setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
-        };
-        const rejectedBridgeInput: TopKEvaluatorEncryptedAggregateInput = {
-            aggregateDerivationComponentHash: validHash('b'),
-            aggregateDerivationStatementHash: validHash('c'),
-            postVotingClosedContextHash: validHash('d'),
-            bridgeEncryption: {
-                ...compactBridgeStatus,
-                ...freshRandomnessEvidence,
-                ...bridgeProofFields,
-                collectivePublicKeyRoot:
-                    setup.collectivePublicKey.collectivePublicKeyRoot,
-                bgvPublicKeyRoot: setup.collectivePublicKey.bgvPublicKeyRoot,
-            },
-            bridgeEvidenceVerification: {
-                ...compactBridgeStatus,
-                ...freshRandomnessEvidence,
-                ...bridgeProofFields,
-                bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
-                bridgeEvidenceVerificationStatus: 'BridgeProofEvidenceChecked',
-            },
-            aggregateContribution: {
-                contributorRosterPosition: 1,
-                aggregateContributionHash: validHash('e'),
-                bridgeProofRecord: {
-                    ...compactBridgeStatus,
-                    ...freshRandomnessEvidence,
-                    setupPackageHash: setup.setupPackageHash,
-                    bridgeProofProfileHash:
-                        bridgeProofFields.bridgeProofProfileHash,
-                    proofStatementHash:
-                        bridgeProofFields.bridgeProofStatementHash,
-                    bridgeProofChallengeContextHash: validHash('f'),
-                    bridgeProofTargetContractHash:
-                        bridgeProofFields.bridgeProofTargetContractHash,
-                    proofBytesHash: bridgeProofFields.bridgeProofBytesHash,
-                    proofRoot: bridgeProofFields.bridgeProofRoot,
-                    encryptedAggregateInputRoot:
-                        bridgeProofFields.encryptedAggregateInputRoot,
-                    encryptedAggregateShareCiphertextRoot:
-                        bridgeProofFields.encryptedAggregateShareCiphertextRoot,
-                    plaintextCoefficientBindingCommitmentHash:
-                        bridgeProofFields.plaintextCoefficientBindingCommitmentHash,
-                    proofFriendlyPlaintextLiftBindingHash:
-                        bridgeProofFields.proofFriendlyPlaintextLiftBindingHash,
-                    collectivePublicKeyRoot:
-                        setup.collectivePublicKey.collectivePublicKeyRoot,
-                    collectivePublicKeyCoefficientRoot:
-                        setup.collectivePublicKey
-                            .collectivePublicKeyCoefficientRoot,
-                    bgvPublicKeyRoot:
-                        setup.collectivePublicKey.bgvPublicKeyRoot,
-                    bridgeProofVerificationStatus: 'BridgeProofRelationChecked',
-                },
-            },
-        };
-
-        expect(() =>
-            kernel.runEncryptedAggregateTopKEvaluation({
-                setupPackage: setup,
-                evaluationKeyMaterial: {},
-                aggregateReadyRecord: {},
-                encryptedAggregateInputs: [
-                    rejectedBridgeInput,
-                    rejectedBridgeInput,
-                ],
-                topCount: 1,
-                scoreDomainMax: 200,
-                ...acceptedEvaluatorBindingFields,
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
     });
 
     it('refuses wrong request shapes and recovery-state drift', async () => {

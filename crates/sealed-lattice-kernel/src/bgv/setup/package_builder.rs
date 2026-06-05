@@ -3,7 +3,7 @@ use super::{
     certificates::{
         collective_secret_distribution_certificate, error_distribution_certificate,
         key_switch_decomposition_profile, passive_setup_evaluator_context_bindings,
-        public_common_random_polynomial_root, setup_certificates, threshold_decryption_profile,
+        public_common_random_polynomial_root, setup_certificates, target_decryption_profile,
     },
     development_fixtures::development_encryption_fixture,
     key_material::{collective_public_key, evaluation_keys, threshold_verification_material},
@@ -30,16 +30,14 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
     let key_switch_decomposition = key_switch_decomposition_profile()?;
     let key_switch_decomposition_hash =
         derive_protocol_hash("KeySwitchDecompositionHash", &key_switch_decomposition)?;
-    let threshold_decryption_profile = threshold_decryption_profile(&profile_hash)?;
-    let threshold_decryption_profile_hash = derive_protocol_hash(
-        "ThresholdDecryptionProfileHash",
-        &threshold_decryption_profile,
-    )?;
-    let kllps_target_decryption_profile_hash = derive_protocol_hash(
-        "KllpsTargetDecryptionProfileHash",
+    let target_decryption_profile = target_decryption_profile(&profile_hash)?;
+    let target_decryption_profile_hash =
+        derive_protocol_hash("TargetDecryptionProfileHash", &target_decryption_profile)?;
+    let target_decryption_profile_binding_hash = derive_protocol_hash(
+        "TargetDecryptionProfileBindingHash",
         &json!({
-            "profileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "profileId": TARGET_DECRYPTION_PROFILE_ID,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
             "profileStatus": "future-target-decryption-profile-binding",
         }),
     )?;
@@ -55,8 +53,8 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
                 &profile_hash,
                 &backend_profile_hash,
                 &public_common_random_polynomial_root,
-                &threshold_decryption_profile_hash,
-                &kllps_target_decryption_profile_hash,
+                &target_decryption_profile_hash,
+                &target_decryption_profile_binding_hash,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -71,8 +69,8 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
                 &profile_hash,
                 &backend_profile_hash,
                 &public_common_random_polynomial_root,
-                &threshold_decryption_profile_hash,
-                &kllps_target_decryption_profile_hash,
+                &target_decryption_profile_hash,
+                &target_decryption_profile_binding_hash,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -101,8 +99,8 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
     )?;
     let threshold_verification_material = threshold_verification_material(
         input,
-        &threshold_decryption_profile_hash,
-        &kllps_target_decryption_profile_hash,
+        &target_decryption_profile_hash,
+        &target_decryption_profile_binding_hash,
         &participant_setup_record_hashes,
         &trustee_threshold_verification_key_hashes,
     )?;
@@ -134,8 +132,8 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         &error_distribution_certificate_hash,
         &key_switch_decomposition,
         &key_switch_decomposition_hash,
-        &threshold_decryption_profile_hash,
-        &kllps_target_decryption_profile_hash,
+        &target_decryption_profile_hash,
+        &target_decryption_profile_binding_hash,
         &evaluation_keys,
         &development_encryption_fixture,
     )?;
@@ -157,21 +155,17 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "batchEncoderHash": batch_encoder_hash()?,
             "batchLayoutBindingHash": batch_layout_binding_hash()?,
             "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-            "encryptedAggregateInputLayoutHash": layout_hash()?,
+            "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
             "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
-            "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash()?,
-            "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
-            "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
-            "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+            "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
+            "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
+            "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
+            "directComparisonProfileHash": direct_comparison_profile_hash()?,
             "evaluatorBindingContextHash": evaluator_context_bindings["evaluatorBindingContextHash"],
-            "encryptedAggregateBridgeHash": evaluator_context_bindings["encryptedAggregateBridgeHash"],
-            "encryptedAggregateTargetBasisRoot": evaluator_context_bindings["encryptedAggregateTargetBasisRoot"],
-            "encryptedAggregateReconstructionHash": evaluator_context_bindings["encryptedAggregateReconstructionHash"],
-            "scoreBitDerivationCircuitHash": evaluator_context_bindings["scoreBitDerivationCircuitHash"],
+            "encryptedBallotAggregateLayoutHash": evaluator_context_bindings["encryptedBallotAggregateLayoutHash"],
+            "directAggregateLayoutHash": evaluator_context_bindings["directAggregateLayoutHash"],
             "comparisonInputDerivationCircuitHash": evaluator_context_bindings["comparisonInputDerivationCircuitHash"],
-            "encryptedScoreBitInputHash": evaluator_context_bindings["encryptedScoreBitInputHash"],
             "encryptedComparisonInputHash": evaluator_context_bindings["encryptedComparisonInputHash"],
-            "bitSlicedComparatorHash": evaluator_context_bindings["bitSlicedComparatorHash"],
             "encryptedSparseTargetProjectionHash": evaluator_context_bindings["encryptedSparseTargetProjectionHash"],
             "targetLayoutHash": evaluator_context_bindings["targetLayoutHash"],
             "passiveSetupEvaluatorContextBindingHash": evaluator_context_bindings["passiveSetupEvaluatorContextBindingHash"],
@@ -188,13 +182,13 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "rawSecretSharesExported": false,
             "forbiddenRequestFields": forbidden_setup_field_names(),
         },
-        "kllpsStatus": {
-            "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
-            "setupMaterialMatchesKLLPS": true,
-            "KLLPSPartDecStatusImplemented": false,
-            "KLLPSC1C4StatusAccepted": false,
+        "targetDecryptionStatus": {
+            "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
+            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
+            "setupMaterialMatchesTargetDecryption": true,
+            "targetPartDecImplemented": false,
+            "targetC1C4StatusAccepted": false,
         },
         "statusLabels": [
             "PassiveBgvSetupGenerated",
@@ -204,20 +198,20 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "BgvPublicKeyCoefficientMaterialBound",
             "ThresholdVerificationMaterialBound",
             "EvaluationKeyRootBound",
-            "KllpsSetupMaterialMatched",
+            "TargetDecryptionSetupMaterialMatched",
             "PassiveSetupInputReady",
-            "SetupBridgeEvaluatorHeSecurityAccepted",
+            "DirectEvaluatorReplayHeSecurityAccepted",
             "FinalTargetSecurityPendingTargetModulus"
         ],
         "nonClaims": [
             "ActiveMaliciousSetupProofMissing",
             "BgvAlgebraicPublicKeyProofMissing",
             "MaliciousEvaluationKeyProofMissing",
-            "KLLPSPartDecNotImplemented",
-            "KLLPSC1C4NotCertified",
+            "TargetPartDecNotImplemented",
+            "TargetC1C4NotCertified",
             "FinalTargetSecurityPendingTargetModulus",
-            "FinalEvaluatorNoisePendingEncryptedAggregateEvaluatorClosure",
-            "EvaluationProofNotClosed",
+            "DirectEvaluatorReplayNoiseClosurePending",
+            "EvaluatorReplayNotClosed",
             "TargetDecryptionNotClosed",
             "ActiveMaliciousSetupNotClosed"
         ],

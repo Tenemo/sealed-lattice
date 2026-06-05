@@ -47,7 +47,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
             });
             const polynomial = createDeterministicPolynomial(
                 normalizeFieldElement(rosterSize * 19),
-                thresholdProfile.pvssThreshold,
+                thresholdProfile.decryptionThreshold,
             );
             const shares = evaluateShamirPolynomialForRoster(
                 polynomial,
@@ -55,7 +55,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
             );
             const contributorRosterPositions = selectSpreadContributorPositions(
                 rosterSize,
-                thresholdProfile.pvssThreshold,
+                thresholdProfile.decryptionThreshold,
             );
             const selectedShares = contributorRosterPositions.map(
                 (rosterPosition) =>
@@ -80,7 +80,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
             const secret = normalizeFieldElement(rosterSize * 23);
             const polynomial = createDeterministicPolynomial(
                 secret,
-                thresholdProfile.pvssThreshold,
+                thresholdProfile.decryptionThreshold,
             );
             const shares = evaluateShamirPolynomialForRoster(
                 polynomial,
@@ -89,7 +89,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
 
             for (const contributorRosterPositions of collectContributorPositionSets(
                 rosterSize,
-                thresholdProfile.pvssThreshold,
+                thresholdProfile.decryptionThreshold,
             )) {
                 const selectedShares = contributorRosterPositions.map(
                     (rosterPosition) =>

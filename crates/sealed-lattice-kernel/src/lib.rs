@@ -6,7 +6,6 @@
 
 #![recursion_limit = "256"]
 
-pub(crate) mod ballot_privacy;
 pub(crate) mod bgv;
 mod encoding;
 pub mod fixtures;
@@ -108,8 +107,8 @@ pub unsafe extern "C" fn sealed_lattice_transcript_core_command_with_length(
 #[cfg(test)]
 mod tests {
     use super::{
-        TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, ballot_privacy, bgv, encoding, fixtures, hashing,
-        ring, sealed_lattice_allocate, sealed_lattice_deallocate, sealed_lattice_roundtrip,
+        TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, bgv, encoding, fixtures, hashing, ring,
+        sealed_lattice_allocate, sealed_lattice_deallocate, sealed_lattice_roundtrip,
         sealed_lattice_transcript_core_command_with_length, transcript_core,
     };
     use core::{ptr, slice};
@@ -121,7 +120,6 @@ mod tests {
             "sealed-lattice-transcript-core-command-v1"
         );
         assert_eq!(encoding::MODULE_MARKER, "encoding");
-        assert_eq!(ballot_privacy::MODULE_MARKER, "ballot-privacy");
         assert_eq!(bgv::MODULE_MARKER, "bgv");
         assert_eq!(hashing::MODULE_MARKER, "hashing");
         assert_eq!(transcript_core::MODULE_MARKER, "transcript-core");

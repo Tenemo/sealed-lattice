@@ -1,6 +1,6 @@
 use super::certificates::{
-    passive_setup_evaluator_context_bindings,
-    target_threshold_decryptability_certificate_from_setup_package, threshold_decryption_profile,
+    passive_setup_evaluator_context_bindings, target_decryption_profile,
+    target_threshold_decryptability_certificate_from_setup_package,
 };
 use super::input::ensure_nfc_identity;
 use super::*;
@@ -73,9 +73,9 @@ pub(super) fn validate_setup_package_internal_bindings(
     )?;
     compare_hash_at_path(
         setup_package,
-        &["profileBindings", "encryptedAggregateInputLayoutHash"],
-        &layout_hash()?,
-        "encrypted aggregate input layout hash",
+        &["profileBindings", "encryptedBallotAggregateLayoutHash"],
+        &encrypted_ballot_aggregate_layout_hash()?,
+        "encrypted ballot aggregate layout hash",
     )?;
     let expected_evaluator_bindings =
         passive_setup_evaluator_context_bindings(value_at_path(setup_package, &["setupInputs"])?)?;
@@ -85,34 +85,21 @@ pub(super) fn validate_setup_package_internal_bindings(
             "evaluator binding context hash",
         ),
         (
-            "encryptedAggregateBridgeHash",
-            "encrypted aggregate bridge hash",
+            "encryptedBallotAggregateLayoutHash",
+            "encrypted ballot aggregate layout binding hash",
         ),
         (
-            "encryptedAggregateTargetBasisRoot",
-            "encrypted aggregate target-basis data root",
-        ),
-        (
-            "encryptedAggregateReconstructionHash",
-            "encrypted aggregate reconstruction hash",
-        ),
-        (
-            "scoreBitDerivationCircuitHash",
-            "score-bit derivation circuit hash",
+            "directAggregateLayoutHash",
+            "direct aggregate layout binding hash",
         ),
         (
             "comparisonInputDerivationCircuitHash",
             "comparison-input derivation circuit hash",
         ),
         (
-            "encryptedScoreBitInputHash",
-            "encrypted score-bit input hash",
-        ),
-        (
             "encryptedComparisonInputHash",
             "encrypted comparison input hash",
         ),
-        ("bitSlicedComparatorHash", "bit-sliced comparator hash"),
         (
             "encryptedSparseTargetProjectionHash",
             "encrypted sparse target projection hash",
@@ -131,58 +118,61 @@ pub(super) fn validate_setup_package_internal_bindings(
         )?;
     }
 
-    let threshold_decryption_profile_hash = derive_protocol_hash(
-        "ThresholdDecryptionProfileHash",
-        &threshold_decryption_profile(&profile_hash)?,
+    let target_decryption_profile_hash = derive_protocol_hash(
+        "TargetDecryptionProfileHash",
+        &target_decryption_profile(&profile_hash)?,
     )?;
-    let kllps_target_decryption_profile_hash = derive_protocol_hash(
-        "KllpsTargetDecryptionProfileHash",
+    let target_decryption_profile_binding_hash = derive_protocol_hash(
+        "TargetDecryptionProfileBindingHash",
         &json!({
-            "profileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "profileId": TARGET_DECRYPTION_PROFILE_ID,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
             "profileStatus": "future-target-decryption-profile-binding",
         }),
     )?;
     compare_string_at_path(
         setup_package,
-        &["kllpsStatus", "thresholdDecryptionProfileId"],
-        THRESHOLD_DECRYPTION_PROFILE_ID,
-        "threshold decryption profile id",
+        &["targetDecryptionStatus", "targetDecryptionProfileId"],
+        TARGET_DECRYPTION_PROFILE_ID,
+        "target decryption profile id",
     )?;
     compare_hash_at_path(
         setup_package,
-        &["kllpsStatus", "thresholdDecryptionProfileHash"],
-        &threshold_decryption_profile_hash,
-        "threshold decryption profile hash",
+        &["targetDecryptionStatus", "targetDecryptionProfileHash"],
+        &target_decryption_profile_hash,
+        "target decryption profile hash",
     )?;
     compare_hash_at_path(
         setup_package,
-        &["kllpsStatus", "kllpsTargetDecryptionProfileHash"],
-        &kllps_target_decryption_profile_hash,
-        "KLLPS target decryption profile hash",
+        &[
+            "targetDecryptionStatus",
+            "targetDecryptionProfileBindingHash",
+        ],
+        &target_decryption_profile_binding_hash,
+        "target decryption profile binding hash",
     )?;
 
     let participant_bindings = validate_participant_setup_records(
         setup_package,
         &profile_hash,
         &backend_profile_hash,
-        &threshold_decryption_profile_hash,
-        &kllps_target_decryption_profile_hash,
+        &target_decryption_profile_hash,
+        &target_decryption_profile_binding_hash,
     )?;
     validate_threshold_verification_material(
         setup_package,
         &participant_bindings,
-        &threshold_decryption_profile_hash,
-        &kllps_target_decryption_profile_hash,
+        &target_decryption_profile_hash,
+        &target_decryption_profile_binding_hash,
     )?;
-    validate_evaluation_keys(setup_package)?;
-    validate_setup_certificates(setup_package)?;
     validate_collective_public_key(
         setup_package,
         &participant_bindings,
         &profile_hash,
         &backend_profile_hash,
     )?;
+    validate_setup_certificates(setup_package)?;
+    validate_evaluation_keys(setup_package)?;
 
     Ok(())
 }
@@ -198,20 +188,28 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
             "setupPackage is not a passive BGV setup package",
         ));
     }
-    if !bool_at_path(setup_package, &["kllpsStatus", "setupMaterialMatchesKLLPS"])? {
+    if !bool_at_path(
+        setup_package,
+        &[
+            "targetDecryptionStatus",
+            "setupMaterialMatchesTargetDecryption",
+        ],
+    )? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must mark KLLPS material matching",
+            "passive BGV setup package must mark target decryption material matching",
         ));
     }
     if bool_at_path(
         setup_package,
-        &["kllpsStatus", "KLLPSPartDecStatusImplemented"],
-    )? || bool_at_path(setup_package, &["kllpsStatus", "KLLPSC1C4StatusAccepted"])?
-    {
+        &["targetDecryptionStatus", "targetPartDecImplemented"],
+    )? || bool_at_path(
+        setup_package,
+        &["targetDecryptionStatus", "targetC1C4StatusAccepted"],
+    )? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must not claim KLLPS PartDec or C1-C4 certification",
+            "passive BGV setup package must not claim target decryption PartDec or C1-C4 certification",
         ));
     }
     if bool_at_path(
@@ -236,11 +234,11 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
             "setupParameterCertificate",
             "finalSecurityStatus",
         ],
-    )? != "acceptedForSetupBridgeEvaluatorTargetPending"
+    )? != "acceptedForDirectEvaluatorReplayTargetPending"
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must accept setup-bridge-evaluator HE security while keeping target modulus downstream",
+            "passive BGV setup package must accept direct evaluator replay HE security while keeping target modulus downstream",
         ));
     }
     let participants = setup_package

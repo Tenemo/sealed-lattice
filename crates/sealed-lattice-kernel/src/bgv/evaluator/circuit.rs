@@ -31,6 +31,7 @@ pub(crate) struct EvaluatorContext {
 }
 
 impl EvaluatorContext {
+    #[cfg(test)]
     pub(crate) fn new(seed_hex: &str, working_level: usize) -> CanonicalResult<Self> {
         let key = DevelopmentBgvKey::generate(seed_hex)?;
         Self::from_key(key, seed_hex, working_level)
@@ -84,6 +85,7 @@ impl EvaluatorContext {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn from_passive_setup_public_material(
         setup_package: &serde_json::Value,
         evaluation_key_material: &serde_json::Value,
@@ -104,18 +106,7 @@ impl EvaluatorContext {
         })
     }
 
-    pub(crate) fn from_passive_setup_public_keys(
-        key_material: super::super::setup::PassiveSetupPublicEvaluationKeys,
-    ) -> Self {
-        Self {
-            key: None,
-            relinearization_keys: key_material.relinearization_keys,
-            rotation_key_seeds: BTreeMap::new(),
-            rotation_keys: key_material.rotation_keys,
-            generated_rotation_keys: RwLock::new(BTreeMap::new()),
-        }
-    }
-
+    #[cfg(test)]
     pub(crate) fn key(&self) -> &DevelopmentBgvKey {
         self.key.as_ref().expect(
             "development evaluator key is unavailable in a public evaluation-key material context",
@@ -126,6 +117,7 @@ impl EvaluatorContext {
         self.relinearization_keys.len() - 1
     }
 
+    #[cfg(test)]
     pub(crate) fn has_public_rotation_key(&self, galois_element: usize, level: usize) -> bool {
         self.rotation_keys.contains_key(&(galois_element, level))
     }
@@ -218,25 +210,6 @@ impl EvaluatorContext {
 
         rotate(ciphertext, galois_element, &generated_rotation_key)
     }
-
-    pub(crate) fn validation_rotation_parameters(&self, requested_level: usize) -> (usize, usize) {
-        self.rotation_key_seeds
-            .keys()
-            .find_map(|(galois_element, level)| {
-                if *level == requested_level {
-                    Some((*galois_element, *level))
-                } else {
-                    None
-                }
-            })
-            .or_else(|| {
-                self.rotation_key_seeds
-                    .keys()
-                    .next()
-                    .map(|(galois_element, level)| (*galois_element, *level))
-            })
-            .unwrap_or((3, requested_level))
-    }
 }
 
 // Modulus switch a ciphertext down to a target level (no-op if already at or
@@ -305,43 +278,6 @@ pub(crate) fn multiply(
     modulus_switch(&relinearized)
 }
 
-// Validate that the evaluation keys are functional at a working level: a
-// relinearized multiplication recovers the slot-wise product, and a Galois
-// rotation runs end to end. This exercises the relinearization and rotation
-// evaluation keys before a full evaluation depends on them.
-pub(crate) fn validate_evaluation_keys(
-    context: &EvaluatorContext,
-    level: usize,
-    seed_hex: &str,
-) -> CanonicalResult<bool> {
-    let factors = modulus_switch_to(
-        &context
-            .key()
-            .encrypt_slots(&[2, 3], &format!("{seed_hex}-vk-relin"))?,
-        level,
-    )?;
-    let product = multiply(context, &factors, &factors)?;
-    let product_slots = context.key().decrypt_to_slots(&product)?;
-    let relinearization_correct = product_slots[0] == 4 && product_slots[1] == 9;
-
-    let (galois_element, rotation_level) = context.validation_rotation_parameters(level);
-    let source = modulus_switch_to(
-        &context
-            .key()
-            .encrypt_slots(&[7, 8, 9, 10], &format!("{seed_hex}-vk-rotation"))?,
-        rotation_level,
-    )?;
-    let rotated = context.rotate_ciphertext(
-        &source,
-        galois_element,
-        rotation_level,
-        &format!("{seed_hex}-vk-galois"),
-    )?;
-    let rotation_runs = context.key().decrypt_to_slots(&rotated).is_ok();
-
-    Ok(relinearization_correct && rotation_runs)
-}
-
 // A plaintext polynomial whose every slot holds the same constant value.
 fn broadcast_constant_coefficients(value: u64) -> Vec<u64> {
     let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
@@ -355,6 +291,7 @@ fn broadcast_constant_coefficients(value: u64) -> Vec<u64> {
 // computed with a balanced multiplication tree so the multiplicative depth is
 // logarithmic in the degree; the terms are then brought to a common level and
 // scaling before the linear combination.
+#[cfg(test)]
 pub(crate) fn evaluate_polynomial(
     context: &EvaluatorContext,
     input: &Ciphertext,
@@ -438,6 +375,7 @@ fn evaluate_polynomial_by_power_table(
     Ok(result)
 }
 
+#[cfg(test)]
 fn evaluate_polynomial_paterson_stockmeyer(
     context: &EvaluatorContext,
     input: &Ciphertext,
@@ -620,6 +558,7 @@ fn sum_ciphertexts_at_common_level(ciphertexts: &[Ciphertext]) -> CanonicalResul
     Ok(accumulator)
 }
 
+#[cfg(test)]
 fn integer_square_root_ceil(value: usize) -> usize {
     let mut root = 1_usize;
     while root.saturating_mul(root) < value {

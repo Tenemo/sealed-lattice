@@ -1,10 +1,8 @@
 import {
     activeMaliciousMheProfileId,
-    cpadProfileId,
-    evaluationProofProfileId,
     passiveMhePrototypeProfileId,
     targetBoundShareSelectionProfileId,
-    thresholdDecryptionProfileId,
+    targetDecryptionProfileId,
     type LifecycleLabelInput,
     type LifecycleState,
 } from '@sealed-lattice/types';
@@ -30,7 +28,7 @@ const expectValidPath = (states: readonly LifecycleState[]): void => {
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
     certificateHash: 'target-bound-certificate-hash',
-    cpadProfileId,
+    targetDecryptionProfileId,
     targetBasisHash: 'target-basis-hash',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
@@ -54,21 +52,17 @@ const fullyVerifiedLabelInput = (
     mheSecurityClosure: 'ActiveMalicious',
     localRosterAccepted: true,
     runtimeClaimGatePassed: true,
-    bridgeBenchmarkReportPresent: true,
-    bridgeProverCertificatePresent: true,
-    evaluationProofCertificatePresent: true,
-    oneShotDecryptionProofCertificatePresent: true,
-    kllpsCpadCertificatePresent: true,
-    thresholdDecryptionCertificatePresent: true,
-    evaluationProofClosureApplied: true,
-    kllpsCpadClosureApplied: true,
+    directProofTransportPresent: true,
+    mobileReplayEvidencePresent: true,
+    targetDecryptionCertificatePresent: true,
+    targetDecryptionClosureApplied: true,
     activeMaliciousClosureApplied: true,
     decodedResultLayoutVerified: true,
     ...overrides,
 });
 
 describe('election foundation lifecycle', () => {
-    it('accepts the primary packed BGV lifecycle path', () => {
+    it('accepts the direct encrypted ballot lifecycle path', () => {
         expectValidPath([
             'draft',
             'registrationOpen',
@@ -77,29 +71,24 @@ describe('election foundation lifecycle', () => {
             'rosterFrozen',
             'votingOpen',
             'votingClosed',
-            'aggregatePending',
-            'aggregateReady',
-            'aggregateBridgeVerified',
-            'evaluationPending',
-            'topKEvaluated',
+            'encryptedBallotsSelected',
+            'ballotProofsVerified',
+            'encryptedBallotAggregateComputed',
+            'evaluatorReplayed',
             'targetFinalityReached',
-            'evaluationProofPending',
-            'evaluationProofVerified',
             'targetAccepted',
             'decryptionPending',
             'decryptionSharesReady',
-            'cpadProfileVerified',
+            'resultDecoded',
             'fullyVerified',
         ]);
     });
 
     it.each([
         ['votingOpen', 'targetAccepted'],
-        ['aggregateReady', 'fullyVerified'],
-        ['aggregateReady', 'evaluationPending'],
-        ['topKEvaluated', 'decryptionPending'],
-        ['targetFinalityReached', 'targetAccepted'],
-        ['evaluationProofPending', 'targetAccepted'],
+        ['encryptedBallotsSelected', 'encryptedBallotAggregateComputed'],
+        ['ballotProofsVerified', 'evaluatorReplayed'],
+        ['targetFinalityReached', 'decryptionPending'],
         ['decryptionSharesReady', 'fullyVerified'],
         ['draft', 'votingOpen'],
     ] satisfies readonly (readonly [LifecycleState, LifecycleState])[])(
@@ -118,14 +107,7 @@ describe('election foundation lifecycle', () => {
         ).toBe(false);
     });
 
-    it('keeps local roster acceptance as a diagnostic label', () => {
-        expect(
-            isValidLifecycleTransition({
-                from: 'rosterFrozen',
-                to: 'votingOpen',
-            }),
-        ).toBe(true);
-
+    it('keeps local roster acceptance and ballot submission as local status labels', () => {
         expect(
             deriveLifecycleLabels({
                 lifecycleState: 'draft',
@@ -138,26 +120,32 @@ describe('election foundation lifecycle', () => {
                 lifecycleState: 'draft',
                 thresholdProfile,
                 localRosterAccepted: true,
+                ownBallotSubmitted: true,
             }).primary,
-        ).toContain('rosterFrozen');
+        ).toEqual(expect.arrayContaining(['rosterFrozen', 'ballotSubmitted']));
     });
 
-    it('emits fullyVerified only after all packed BGV claim gates close', () => {
+    it('emits fullyVerified only after every direct-path claim gate closes', () => {
         const labels = deriveLifecycleLabels(fullyVerifiedLabelInput());
 
         expect(labels.primary).toContain('fullyVerified');
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
-        expect(labels.evaluationProofMode).toBe('evaluationProofVerified');
+        expect(labels.modes).toEqual(
+            expect.arrayContaining([
+                'directEncryptedBallotPath',
+                'mobileReplayProfile',
+            ]),
+        );
     });
 
     it.each([
         { localRosterAccepted: false },
-        { evaluationProofCertificatePresent: false },
         { thresholdProfile: uncertifiedThresholdProfile },
-        { kllpsCpadCertificatePresent: false },
-        { thresholdDecryptionCertificatePresent: false },
-        { evaluationProofClosureApplied: false },
-        { kllpsCpadClosureApplied: false },
+        { runtimeClaimGatePassed: false },
+        { directProofTransportPresent: false },
+        { mobileReplayEvidencePresent: false },
+        { targetDecryptionCertificatePresent: false },
+        { targetDecryptionClosureApplied: false },
         { activeMaliciousClosureApplied: false },
         { decodedResultLayoutVerified: false },
     ] satisfies readonly Partial<LifecycleLabelInput>[])(
@@ -172,35 +160,6 @@ describe('election foundation lifecycle', () => {
         },
     );
 
-    it('keeps opt-in local replay additive to the fully verified result', () => {
-        const labels = deriveLifecycleLabels(
-            fullyVerifiedLabelInput({
-                evaluationLocallyReplayed: true,
-                localReplayDiagnosticVerified: true,
-            }),
-        );
-
-        expect(labels.primary).toContain('fullyVerified');
-        expect(labels.modes).toContain('localReplayMatched');
-        expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
-    });
-
-    it('reports unavailable local replay as a diagnostic mode only', () => {
-        const labels = deriveLifecycleLabels(
-            fullyVerifiedLabelInput({
-                evaluationLocallyReplayed: true,
-                localReplayDiagnosticVerified: false,
-                localReplayUnavailable: true,
-            }),
-        );
-
-        expect(labels.modes).toContain('localReplayUnavailable');
-        expect(labels.modes).not.toContain('localReplayMatched');
-        expect(labels.modes).not.toContain('localReplayFailed');
-        expect(labels.failures).not.toContain('localReplayUnavailable');
-        expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
-    });
-
     it.each([3, 4, 5, 6, 7, 8, 9])(
         'marks roster size %d as casual while preserving dynamic result claim gates',
         (rosterSize) => {
@@ -213,60 +172,34 @@ describe('election foundation lifecycle', () => {
                 rosterSize: 16,
                 targetBoundShareSelectionProfile,
             });
+
             const casualLabels = deriveLifecycleLabels(
-                fullyVerifiedLabelInput({
-                    thresholdProfile: casualProfile,
-                }),
+                fullyVerifiedLabelInput({ thresholdProfile: casualProfile }),
             );
             const dynamicLabels = deriveLifecycleLabels(
-                fullyVerifiedLabelInput({
-                    thresholdProfile: dynamicProfile,
-                }),
-            );
-            const passiveLabels = deriveLifecycleLabels(
-                fullyVerifiedLabelInput({
-                    mheSecurityClosure: 'PassiveMHEPrototype',
-                    activeMaliciousClosureApplied: false,
-                }),
+                fullyVerifiedLabelInput({ thresholdProfile: dynamicProfile }),
             );
 
             expect(casualLabels.modes).toContain('casualMicroRoster');
             expect(casualLabels.resultClaimLabels).toEqual([]);
             expect(dynamicLabels.resultClaimLabels).toEqual(['fullyVerified']);
-            expect(passiveLabels.primary).toEqual(['pending']);
-            expect(passiveLabels.modes).toContain('passiveMhePrototype');
         },
     );
 
-    it('derives closure profile labels from transcript-visible profile IDs', () => {
-        const labels = deriveLifecycleLabels({
-            lifecycleState: 'fullyVerified',
-            thresholdProfile,
-            mheSecurityClosure: 'ActiveMalicious',
-            securityProfileIds: [
-                passiveMhePrototypeProfileId,
-                evaluationProofProfileId,
-                thresholdDecryptionProfileId,
-                activeMaliciousMheProfileId,
-            ],
-            localRosterAccepted: true,
-            runtimeClaimGatePassed: true,
-            bridgeBenchmarkReportPresent: true,
-            bridgeProverCertificatePresent: true,
-            evaluationProofCertificatePresent: true,
-            oneShotDecryptionProofCertificatePresent: true,
-            kllpsCpadCertificatePresent: true,
-            thresholdDecryptionCertificatePresent: true,
-            evaluationProofClosureApplied: true,
-            kllpsCpadClosureApplied: true,
-            activeMaliciousClosureApplied: true,
-            decodedResultLayoutVerified: true,
-        });
+    it('derives closure mode labels from transcript-visible profile IDs', () => {
+        const labels = deriveLifecycleLabels(
+            fullyVerifiedLabelInput({
+                securityProfileIds: [
+                    passiveMhePrototypeProfileId,
+                    targetDecryptionProfileId,
+                    activeMaliciousMheProfileId,
+                ],
+            }),
+        );
 
         expect(labels.modes).toEqual(
             expect.arrayContaining([
-                'evaluationProofClosure',
-                'kllpsCpadClosure',
+                'targetDecryptionClosure',
                 'activeMaliciousClosure',
                 'passiveMhePrototype',
             ]),
@@ -274,45 +207,52 @@ describe('election foundation lifecycle', () => {
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
     });
 
-    it('derives BGV, CPAD, bridge, and mobile execution labels from local context', () => {
+    it('derives direct-path failure labels from local context', () => {
         const labels = deriveLifecycleLabels({
-            lifecycleState: 'evaluationProofPending',
+            lifecycleState: 'encryptedBallotAggregateComputed',
             thresholdProfile,
             localRosterAccepted: true,
-            bridgeProofRejected: true,
+            ballotProofsMissing: true,
+            evaluatorReplayMissing: true,
             witnessEquivocationEvidence: true,
             targetFinalityNotReached: true,
             backendProfileRejected: true,
             bgvProfileRejected: true,
-            kllpsCpadProfileRejected: true,
+            ballotProofProfileRejected: true,
+            evaluatorReplayProfileRejected: true,
+            targetDecryptionProfileRejected: true,
             decryptionThresholdNotReached: true,
-            bridgeBenchmarkReportRejected: true,
             boardFinalityProfileRejected: true,
-            runtimeProfileRejected: true,
             outsideMeasuredRuntimeProfile: true,
             measuredRuntimeProfile: true,
             longRunningCryptographicCheck: true,
         });
 
         expect(labels.primary).toEqual(
-            expect.arrayContaining(['rosterFrozen', 'pending']),
+            expect.arrayContaining([
+                'rosterFrozen',
+                'encryptedBallotAggregateComputed',
+            ]),
         );
         expect(labels.failures).toEqual(
             expect.arrayContaining([
-                'rejectedBridgeProof',
+                'ballotProofsMissing',
+                'evaluatorReplayMissing',
                 'witnessEquivocationEvidence',
                 'missingTargetFinality',
                 'unsupportedBackendProfile',
                 'unsupportedBgvProfile',
-                'unsupportedKllpsCpadProfile',
+                'rejectedBallotProofProfile',
+                'rejectedEvaluatorReplayProfile',
+                'unsupportedTargetDecryptionProfile',
                 'missingDecryptionShares',
-                'rejectedBridgeBenchmarkReport',
                 'rejectedBoardFinalityProfile',
                 'outsideMeasuredRuntimeProfile',
             ]),
         );
         expect(labels.modes).toEqual(
             expect.arrayContaining([
+                'directEncryptedBallotPath',
                 'measuredRuntimeProfile',
                 'longRunningCryptographicCheck',
             ]),

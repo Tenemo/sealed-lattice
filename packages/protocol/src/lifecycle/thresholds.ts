@@ -17,13 +17,13 @@ import { isNonNegativeInteger } from '../common/verification-helpers.js';
 
 import { derivePollSpecHash } from './poll-spec.js';
 import {
-    targetBoundShareSelectionProfileId,
-    cpadProfileId,
     mandatoryBenchmarkRosterSize,
     maximumSupportedRosterSize,
     minimumDynamicRosterSize,
     minimumSupportedRosterSize,
     strictLessThanOneThirdModel,
+    targetBoundShareSelectionProfileId,
+    targetDecryptionProfileId,
 } from './profiles.js';
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -96,9 +96,9 @@ const normalizeTargetBoundShareSelectionProfile = (
             'Target-bound share-selection profile requires a certificate hash.',
         );
     }
-    if (profile.cpadProfileId !== cpadProfileId) {
+    if (profile.targetDecryptionProfileId !== targetDecryptionProfileId) {
         throw new Error(
-            'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
+            'Target-bound share-selection profile uses an unsupported target decryption profile ID.',
         );
     }
     if (profile.targetBasisHash.trim().length === 0) {
@@ -173,7 +173,7 @@ const normalizeTargetBoundShareSelectionProfile = (
     return {
         profileId: profile.profileId,
         certificateHash: profile.certificateHash,
-        cpadProfileId: profile.cpadProfileId,
+        targetDecryptionProfileId: profile.targetDecryptionProfileId,
         targetBasisHash: profile.targetBasisHash,
         decryptionShareQuorum: profile.decryptionShareQuorum,
         minimumSharesForInterpolation: profile.minimumSharesForInterpolation,
@@ -275,9 +275,9 @@ export const deriveThresholdProfile = (
     const decryptionCorruptionBound = privacyCorruptionBound;
     // floor(n/5): active (Byzantine-fault) tolerance, the 1/5 active-fault bound.
     const activeFaultBound = Math.floor(rosterSize / 5);
-    // +1 over the privacy corruption bound = reconstruction threshold: one more
-    // share than an adversary can hold is needed to reconstruct a secret.
-    const pvssThreshold = privacyCorruptionBound + 1;
+    // +1 over the privacy corruption bound = one more share than an adversary
+    // can hold is needed before ballot release or target decryption proceeds.
+    const ballotReleaseFloor = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
     const targetBoundShareSelectionProfile =
         normalizeTargetBoundShareSelectionProfile(
@@ -291,7 +291,6 @@ export const deriveThresholdProfile = (
         rosterSize,
         Math.max(10, Math.ceil((2 * rosterSize) / 3)),
     );
-    const aggregateContributionQuorum = pvssThreshold;
     const decryptionShareQuorum =
         targetBoundShareSelectionProfile?.decryptionShareQuorum ?? null;
     const maximumRaceShares = rosterSize;
@@ -321,10 +320,9 @@ export const deriveThresholdProfile = (
         privacyCorruptionBound,
         decryptionCorruptionBound,
         activeFaultBound,
-        pvssThreshold,
+        ballotReleaseFloor,
         decryptionThreshold,
         releaseQuorum,
-        aggregateContributionQuorum,
         decryptionShareQuorum,
         targetBoundShareSelectionProfile,
         maximumRaceShares,
@@ -346,8 +344,7 @@ export const deriveThresholdProfileHash = (input: {
 }): ProtocolHash =>
     deriveProtocolHash('ThresholdProfileHash', {
         activeFaultBound: input.thresholdProfile.activeFaultBound,
-        aggregateContributionQuorum:
-            input.thresholdProfile.aggregateContributionQuorum,
+        ballotReleaseFloor: input.thresholdProfile.ballotReleaseFloor,
         backendCorruptionBound: input.thresholdProfile.backendCorruptionBound,
         backendCorruptionModel: input.thresholdProfile.backendCorruptionModel,
         claimBoundary: input.thresholdProfile.claimBoundary,
@@ -363,7 +360,6 @@ export const deriveThresholdProfileHash = (input: {
         minRosterSize: input.minRosterSize,
         pollSpecHash: input.pollSpecHash,
         privacyCorruptionBound: input.thresholdProfile.privacyCorruptionBound,
-        pvssThreshold: input.thresholdProfile.pvssThreshold,
         releaseQuorum: input.thresholdProfile.releaseQuorum,
         rosterHash: input.rosterHash,
         rosterPolicy: input.rosterPolicy,

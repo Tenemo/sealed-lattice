@@ -14,9 +14,9 @@ import {
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
 
-const retiredKllpsThresholdDecryptionProfileId =
-    'BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1';
-const retiredKllpsCpadProfileId = 'KLLPS26-AsyncLagrangeTarget-CPAD-v1';
+const retiredThresholdDecryptionProfileId =
+    'unsupported-target-decryption-profile-v0';
+const retiredBallotValidityProofProfileId = 'PQEvalProof-STARK-BGVReplay-v1';
 
 describe('roster and manifest shells', () => {
     it('accepts an honest registration to manifest transcript', () => {
@@ -89,7 +89,7 @@ describe('roster and manifest shells', () => {
         );
     });
 
-    it('rejects retired KLLPS CPAD profile identifiers in claim-bearing manifests', () => {
+    it('rejects retired direct-path profile identifiers in claim-bearing manifests', () => {
         const registrations = [
             createRegistrationEntry('participant-1', 1, 0),
             createRegistrationEntry('participant-2', 1, 1),
@@ -100,22 +100,26 @@ describe('roster and manifest shells', () => {
             {
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    thresholdDecryptionProfileId:
-                        retiredKllpsThresholdDecryptionProfileId,
+                    targetDecryptionProfileId:
+                        retiredThresholdDecryptionProfileId,
                 },
             },
         );
-        const oldCpadProfileInput = createRosterManifestTranscriptInput(
+        const oldBallotProofProfileInput = createRosterManifestTranscriptInput(
             registrations,
             {
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    cpadProfileId: retiredKllpsCpadProfileId,
+                    ballotValidityProofProfileId:
+                        retiredBallotValidityProofProfileId,
                 },
             },
         );
 
-        for (const input of [oldThresholdProfileInput, oldCpadProfileInput]) {
+        for (const input of [
+            oldThresholdProfileInput,
+            oldBallotProofProfileInput,
+        ]) {
             const result = verifyRosterManifestTranscript(input);
 
             expect(result.ok).toBe(false);
@@ -247,8 +251,8 @@ describe('roster and manifest shells', () => {
                 boardSequence: 4,
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    evaluationProofProfileId:
-                        'unsupported-evaluation-proof-profile',
+                    evaluatorReplayProfileId:
+                        'unsupported-evaluator-replay-profile',
                 },
             },
         );
@@ -258,11 +262,11 @@ describe('roster and manifest shells', () => {
                 boardSequence: 4,
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    unexpectedBridgeBindingHash: deriveProtocolHash(
+                    unexpectedDirectBindingHash: deriveProtocolHash(
                         'ChallengeDomainHash',
                         {
                             payload: { profile: 'unexpected-profile-binding' },
-                            purpose: 'fixture-unexpected-bridge-binding-v1',
+                            purpose: 'fixture-unexpected-direct-binding-v1',
                         },
                     ),
                 } as typeof manifestOpaqueBindings,
@@ -271,7 +275,7 @@ describe('roster and manifest shells', () => {
         const incompleteOpaqueBindings = {
             ...manifestOpaqueBindings,
         } as Record<string, unknown>;
-        delete incompleteOpaqueBindings.encryptedAggregateBridgeHash;
+        delete incompleteOpaqueBindings.encryptedBallotLayoutHash;
         const manifestWithIncompleteOpaqueBindings = createElectionManifest(
             registrations,
             {
@@ -378,7 +382,7 @@ describe('roster and manifest shells', () => {
                     expect.objectContaining({
                         code: 'ManifestHashMismatch',
                         message:
-                            'Election manifest opaque bindings must use the current encrypted-aggregate profile schema.',
+                            'Election manifest opaque bindings must use the current direct encrypted ballot schema.',
                     }),
                 ]),
             );

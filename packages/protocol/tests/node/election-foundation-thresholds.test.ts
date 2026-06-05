@@ -1,5 +1,5 @@
 import {
-    cpadProfileId,
+    targetDecryptionProfileId,
     type PollSpec,
     targetBoundShareSelectionProfileId,
 } from '@sealed-lattice/types';
@@ -36,7 +36,7 @@ const pollSpec = {
 const targetBoundShareSelectionProfile = {
     profileId: targetBoundShareSelectionProfileId,
     certificateHash: 'target-bound-certificate-hash',
-    cpadProfileId,
+    targetDecryptionProfileId,
     targetBasisHash: 'target-basis-hash',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
@@ -44,7 +44,8 @@ const targetBoundShareSelectionProfile = {
     invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
     selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
-const retiredKllpsCpadProfileId = 'KLLPS26-AsyncLagrangeTarget-CPAD-v1';
+const retiredThresholdDecryptionProfileId =
+    'unsupported-target-decryption-profile-v0';
 
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
@@ -64,12 +65,8 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
     });
 
     expect(rosterSize - profile.activeFaultBound).toBeGreaterThanOrEqual(
-        profile.pvssThreshold,
-    );
-    expect(rosterSize - profile.activeFaultBound).toBeGreaterThanOrEqual(
         profile.decryptionThreshold,
     );
-    expect(profile.aggregateContributionQuorum).toBe(profile.pvssThreshold);
     expect(profile.decryptionShareQuorum).toBeGreaterThanOrEqual(
         profile.decryptionThreshold,
     );
@@ -149,7 +146,6 @@ describe('election foundation threshold profiles', () => {
                 rosterSize,
                 privacyCorruptionBound,
                 decryptionCorruptionBound: privacyCorruptionBound,
-                pvssThreshold: threshold,
                 decryptionThreshold: threshold,
                 decryptionShareQuorum: null,
                 targetBoundShareSelectionProfile: null,
@@ -209,7 +205,6 @@ describe('election foundation threshold profiles', () => {
             expect(profile.claimBearing).toBe(false);
             expect(profile.releaseQuorum).toBe(rosterSize);
             expect(profile.setupCompletionQuorum).toBe(rosterSize);
-            expect(profile.pvssThreshold).toBe(threshold);
             expect(profile.decryptionThreshold).toBe(threshold);
             expect(profile.warnings).toContain('CasualMicroRoster');
         },
@@ -379,22 +374,23 @@ describe('election foundation threshold profiles', () => {
                 rosterSize: 20,
                 targetBoundShareSelectionProfile: {
                     ...targetBoundShareSelectionProfile,
-                    cpadProfileId: 'arbitrary-cpad-profile',
+                    targetDecryptionProfileId: 'arbitrary-target-profile',
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
+            'Target-bound share-selection profile uses an unsupported target decryption profile ID.',
         );
         expect(() =>
             deriveThresholdProfile({
                 rosterSize: 20,
                 targetBoundShareSelectionProfile: {
                     ...targetBoundShareSelectionProfile,
-                    cpadProfileId: retiredKllpsCpadProfileId,
+                    targetDecryptionProfileId:
+                        retiredThresholdDecryptionProfileId,
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile uses an unsupported CPAD profile ID.',
+            'Target-bound share-selection profile uses an unsupported target decryption profile ID.',
         );
 
         expect(() =>

@@ -2,56 +2,8 @@
   "schemaVersion": 1,
   "entries": [
     {
-      "path": "ballot-privacy/ballot-field-linear-proof-vectors.json",
-      "sha256": "b3b647d985a3ffa80831a8df245e0b1927e25998284ec3791879c6185ca4e008"
-    },
-    {
-      "path": "ballot-privacy/encoded-ballot-linear-relation-vectors.json",
-      "sha256": "647c18f9d98ae712e112b1cf0c3462554cf2fcb866a32e850284f04493587a28"
-    },
-    {
-      "path": "ballot-privacy/proof-backend-linear-vectors.json",
-      "sha256": "9b73587d99a7e1590a25a95d31b84f516f520d4b1c159cadd5bafbf1bbc55592"
-    },
-    {
-      "path": "ballot-privacy/proof-stack-profile.json",
-      "sha256": "5b4da2830511572b6df1d08e180e0bbef67c9aaadabcaca451779e3778f0ccbd"
-    },
-    {
-      "path": "ballot-privacy/README.md",
-      "sha256": "ed04842cbc86f36aaa6f2eacc7c65ebd734640ef02f96125e7028306d08c6357"
-    },
-    {
-      "path": "ballot-privacy/receiver-key-linear-proof-vectors.json",
-      "sha256": "75c4db5307819481ae63210b4c1446418333099d8d9661ff8b455a69436f7197"
-    },
-    {
-      "path": "ballot-privacy/receiver-key-proof-vectors.json",
-      "sha256": "3f982d53449303b55a4e518e072bf627a04705a244376a8c6bd653989ec0d55b"
-    },
-    {
-      "path": "election-foundation/board-finality.json",
-      "sha256": "6563860a07a6a2ccc19017905e9048795dafe3994829d97742d8054a035f1550"
-    },
-    {
-      "path": "election-foundation/capability-refusals.json",
-      "sha256": "8c4ece26bff03b4676276cf613a6ffbc25565af8aabbfd9d5c428d1bfe3fae2e"
-    },
-    {
-      "path": "election-foundation/deterministic-fixtures.json",
-      "sha256": "80455a09c62a17e1a637a5cf2c6f29165cf810650fd0638c74aa60d27e68f4b1"
-    },
-    {
-      "path": "election-foundation/lifecycle-transitions.json",
-      "sha256": "5b674b10c79bac46555405b631cc96eca2f422054eeb8d4db3edc9096c47c96d"
-    },
-    {
       "path": "election-foundation/poll-specs.json",
       "sha256": "372a4230bb71916706d725dc302edcdb84d91028e109a94d7caceb0bea1e7eee"
-    },
-    {
-      "path": "election-foundation/threshold-profiles.json",
-      "sha256": "35002e59cb272cb859f314655b7a491e1e6bc7a5ad95569d9281d6b8f4bf4b75"
     },
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
@@ -74,28 +26,16 @@
       "sha256": "b8582beb7a1767cb9e9b87ce0ea86dc60b2f69b876ea45855ca15be01adda442"
     },
     {
-      "path": "pvss-ballot/aggregate-shares.json",
-      "sha256": "b4ff5261ad028bba242ca7481aec6348d9d4d6c69eed095278dcd8acda3a8f01"
-    },
-    {
-      "path": "pvss-ballot/ballot-algebra.json",
-      "sha256": "35a187e9dd688001828aefdcde3f3da16f5f082e0181a87154578c1496ef7662"
-    },
-    {
-      "path": "pvss-ballot/canonical-ballot-set.json",
-      "sha256": "0042bf6301df0b30dbf83b4f1d91f1a81dad212e00c30fd722d926a234defd7b"
-    },
-    {
       "path": "transcript-core/golden-transcript-core.json",
-      "sha256": "dee00dcf9fa181809240fdf45bd093d7d1db45e2de06522b851b2161cc5e278c"
+      "sha256": "639653f67ec61b3655fa392dc9a196b4bea750e66c2f1342e098f2251942d959"
     },
     {
       "path": "transcript-core/malformed-objects.json",
-      "sha256": "73f143a944830c4374b01103667706911feb014fa6100c6565d94ba96bf09512"
+      "sha256": "6035e51b74677e7e880f1fbfa60edd4a034d5d8a4271118ddb9107555eb86270"
     },
     {
       "path": "transcript-core/transcript-core-replay.json",
-      "sha256": "3f23d1aecc9766fe64a49fc174f53431fdd77a12a086b35f84e5e176929176ce"
+      "sha256": "95d917d620fe3f05e6fa7540fc30e902c4d4f8a0a02f0cd80b4cf98c38c738ac"
     }
   ]
 }

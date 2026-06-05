@@ -6,11 +6,13 @@ use crate::{
         evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, layout_hash},
+        profile::{
+            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
+            encrypted_ballot_aggregate_layout_hash,
+        },
         rns::RnsPolynomial,
         serialization::{
-            BgvObjectKind, canonical_bytes_hex, ciphertext_root, parse_bgv_object_hex,
-            serialize_bgv_object,
+            BgvObjectKind, canonical_bytes_hex, ciphertext_root, serialize_bgv_object,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -129,6 +131,7 @@ impl DevelopmentBgvKey {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn generate(seed_hex: &str) -> CanonicalResult<Self> {
         let secret = DeterministicSampler::new(
             "sealed-lattice-bgv-evaluator/development-secret-v1",
@@ -236,6 +239,7 @@ impl DevelopmentBgvKey {
     }
 
     // Encrypt plaintext slot values into a fresh full-level ciphertext.
+    #[cfg(test)]
     pub(crate) fn encrypt_slots(
         &self,
         slots: &[u64],
@@ -248,6 +252,7 @@ impl DevelopmentBgvKey {
 
     // Encrypt a plaintext polynomial given as coefficients in [0, plaintext
     // modulus): c0 = b*u + p*e0 + m, c1 = a*u + p*e1, at the full data level.
+    #[cfg(test)]
     pub(crate) fn encrypt_coefficients(
         &self,
         plaintext_coefficients: &[u64],
@@ -434,15 +439,6 @@ pub(crate) fn decryption_accumulator_to_coefficients(
     Ok(message_coefficients)
 }
 
-pub(crate) fn decryption_accumulator_to_slots(
-    ciphertext: &Ciphertext,
-    accumulator: &[Vec<u64>],
-) -> CanonicalResult<Vec<u64>> {
-    let coefficients = decryption_accumulator_to_coefficients(ciphertext, accumulator)?;
-
-    forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)
-}
-
 const PLAINTEXT_MODULUS_I32: i32 = 65_537;
 
 fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> CanonicalResult<()> {
@@ -469,56 +465,6 @@ fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> C
     }
 
     Ok(())
-}
-
-pub(crate) fn ciphertext_from_canonical_hex(
-    canonical_bytes_hex: &str,
-    expected_ciphertext_root: Option<&str>,
-) -> CanonicalResult<Ciphertext> {
-    let parsed = parse_bgv_object_hex(canonical_bytes_hex)?;
-    if parsed.object_kind != BgvObjectKind::Ciphertext {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "encrypted aggregate evaluator input must be a canonical BGV ciphertext",
-        ));
-    }
-    if parsed.components.len() != 2 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "encrypted aggregate evaluator input must be a two-component BGV ciphertext",
-        ));
-    }
-    let level = parsed.components[0].level;
-    let data_basis_id = BgvBasisKind::Data.basis_id();
-    for component in &parsed.components {
-        if component.basis_id != data_basis_id || component.level != level {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "encrypted aggregate evaluator input must use the selected data basis at one level",
-            ));
-        }
-    }
-    let components = parsed
-        .components
-        .into_iter()
-        .map(|component| component.residues_by_modulus)
-        .collect::<Vec<_>>();
-    let ciphertext = Ciphertext {
-        components,
-        level,
-        decrypt_scaling: 1,
-    };
-    if let Some(expected_root) = expected_ciphertext_root {
-        let actual_root = ciphertext_object_root(&ciphertext)?;
-        if actual_root != expected_root {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "encrypted aggregate evaluator input ciphertext root does not match its canonical bytes",
-            ));
-        }
-    }
-
-    Ok(ciphertext)
 }
 
 // Encode plaintext slot values (in GF(plaintext modulus)) into the polynomial
@@ -559,7 +505,7 @@ pub(crate) fn ciphertext_canonical_bytes_hex(ciphertext: &Ciphertext) -> Canonic
 }
 
 fn ciphertext_canonical_bytes(ciphertext: &Ciphertext) -> CanonicalResult<Vec<u8>> {
-    let canonical_layout = layout_hash()?;
+    let canonical_layout = encrypted_ballot_aggregate_layout_hash()?;
     let components = ciphertext
         .components
         .iter()

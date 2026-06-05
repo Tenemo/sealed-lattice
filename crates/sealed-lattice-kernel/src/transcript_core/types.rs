@@ -29,7 +29,8 @@ pub const PASSIVE_MHE_PROTOTYPE_PROFILE_ID: &str =
     "transcript-core-passive-mhe-prototype-profile-v1";
 pub const ACTIVE_MALICIOUS_MHE_PROFILE_ID: &str = "transcript-core-active-malicious-mhe-profile-v1";
 pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
-pub const MANDATORY_EVALUATION_PROOF_PROFILE_ID: &str = "PQEvalProof-STARK-BGVReplay-v1";
+pub const MANDATORY_EVALUATOR_REPLAY_PROFILE_ID: &str =
+    "direct-encrypted-ballot-evaluator-replay-v1";
 pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-proof-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -148,7 +149,7 @@ pub struct TranscriptCoreObject {
     pub base_claim_profile_id: String,
     pub mhe_security_profile_id: String,
     pub he_setup_proof_profile_id: String,
-    pub evaluation_proof_profile_id: String,
+    pub evaluator_replay_profile_id: String,
     pub decryption_proof_profile_id: String,
     pub title: String,
     pub sequence: u64,
@@ -176,8 +177,8 @@ pub struct TranscriptCoreAnalysis {
     pub mhe_security_profile_id: String,
     #[serde(rename = "heSetupProofProfileId")]
     pub he_setup_proof_profile_id: String,
-    #[serde(rename = "evaluationProofProfileId")]
-    pub evaluation_proof_profile_id: String,
+    #[serde(rename = "evaluatorReplayProfileId")]
+    pub evaluator_replay_profile_id: String,
     #[serde(rename = "decryptionProofProfileId")]
     pub decryption_proof_profile_id: String,
     #[serde(rename = "objectHash512")]

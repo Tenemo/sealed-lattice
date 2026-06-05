@@ -70,9 +70,9 @@ describe('BGV-RNS backend kernel commands', () => {
             readonly allowedEvaluatorOpsHash: string;
         };
         const batchLayoutBinding = profile.batchLayoutBinding as {
-            readonly encodedAggregateLayoutHash: string;
-            readonly encryptedAggregateInputLayoutHash: string;
-            readonly topKEvaluatorInputLayoutHash: string;
+            readonly directAggregateLayoutHash: string;
+            readonly encryptedBallotAggregateLayoutHash: string;
+            readonly directComparisonProfileHash: string;
         };
 
         expect(profile.profile).toMatchObject({
@@ -88,10 +88,10 @@ describe('BGV-RNS backend kernel commands', () => {
             ['profileHash', profile.profileHash],
             ['batchEncoderHash', profile.batchEncoderHash],
             ['batchLayoutBindingHash', profile.batchLayoutBindingHash],
-            ['encodedAggregateLayoutHash', profile.encodedAggregateLayoutHash],
+            ['directAggregateLayoutHash', profile.directAggregateLayoutHash],
             [
-                'topKEvaluatorInputLayoutHash',
-                profile.topKEvaluatorInputLayoutHash,
+                'directComparisonProfileHash',
+                profile.directComparisonProfileHash,
             ],
             [
                 'canonicalCiphertextConventionHash',
@@ -103,9 +103,9 @@ describe('BGV-RNS backend kernel commands', () => {
             expectProtocolHash(value, label);
         }
         expect(profile.batchLayoutBinding).toMatchObject({
-            layoutKind: 'EncryptedAggregateInputEncodedScoreLayout-v1',
+            layoutKind: 'DirectEncryptedBallotAggregateLayout-v1',
             coordinateOrder:
-                'score-share-then-one-hot-score-buckets-per-option',
+                'encrypted-score-then-one-hot-score-buckets-per-option',
             oneHotBucketOrder: 'ascending-score-1-through-10',
             scoreBucketCount: 10,
             scalarOnlyAggregateLayout: false,
@@ -113,17 +113,17 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(operationRegistry.allowedEvaluatorOpsHash).toBe(
             profile.allowedEvaluatorOpsHash,
         );
-        expect(batchLayoutBinding.encodedAggregateLayoutHash).toBe(
-            profile.encodedAggregateLayoutHash,
+        expect(batchLayoutBinding.directAggregateLayoutHash).toBe(
+            profile.directAggregateLayoutHash,
         );
-        expect(batchLayoutBinding.topKEvaluatorInputLayoutHash).toBe(
-            profile.topKEvaluatorInputLayoutHash,
+        expect(batchLayoutBinding.directComparisonProfileHash).toBe(
+            profile.directComparisonProfileHash,
         );
-        expect(batchLayoutBinding.encryptedAggregateInputLayoutHash).toBe(
-            profile.encryptedAggregateInputLayoutHash,
+        expect(batchLayoutBinding.encryptedBallotAggregateLayoutHash).toBe(
+            profile.encryptedBallotAggregateLayoutHash,
         );
         expect(operationRegistry.registry.allowedOperations).toContain(
-            'homomorphicAggregateShareAddition',
+            'homomorphicEncryptedBallotAggregation',
         );
         expect(operationRegistry.registry.forbiddenOperations).toContain(
             'scalarDegree360Comparator',
@@ -133,7 +133,7 @@ describe('BGV-RNS backend kernel commands', () => {
         );
     });
 
-    it('encodes aggregate-share EncryptedAggregateInput slots and validates roots byte-identically', async () => {
+    it('encodes direct encrypted ballot aggregate slots and validates roots byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeBgvRnsProfile();
         const encodedResult = kernel.encodeBgvBatchPlaintext({
@@ -160,7 +160,7 @@ describe('BGV-RNS backend kernel commands', () => {
             profile.batchLayoutBindingHash,
         );
         expect(encoded.statusLabels).toContain(
-            'EncryptedAggregateInputLayoutBound',
+            'DirectEncryptedBallotAggregateLayoutBound',
         );
         expect(encoded.sampledSlots).toEqual(
             expect.arrayContaining([
@@ -201,7 +201,7 @@ describe('BGV-RNS backend kernel commands', () => {
             /plaintext root/u,
         );
         const layoutHashHex = Buffer.from(
-            profile.encryptedAggregateInputLayoutHash,
+            profile.encryptedBallotAggregateLayoutHash,
             'utf8',
         ).toString('hex');
         const wrongLayoutCanonicalBytesHex = (
@@ -238,7 +238,7 @@ describe('BGV-RNS backend kernel commands', () => {
             },
             {
                 ...(profile.batchLayoutBinding as Record<string, unknown>),
-                encodedAggregateLayoutHash: '0'.repeat(128),
+                directAggregateLayoutHash: '0'.repeat(128),
             },
             {
                 ...(profile.batchLayoutBinding as Record<string, unknown>),
@@ -264,11 +264,11 @@ describe('BGV-RNS backend kernel commands', () => {
 
         expect(
             kernel.validateBgvEvaluatorOperation({
-                operation: 'homomorphicAggregateShareAddition',
+                operation: 'homomorphicEncryptedBallotAggregation',
             }),
         ).toMatchObject({
             ok: true,
-            acceptedOperation: 'homomorphicAggregateShareAddition',
+            acceptedOperation: 'homomorphicEncryptedBallotAggregation',
         });
         expectBgvProfileRejected(
             kernel.validateBgvEvaluatorOperation({
@@ -280,7 +280,7 @@ describe('BGV-RNS backend kernel commands', () => {
             kernel.validateBgvEvaluatorOperation({
                 operation: 'uncertifiedScoreBitDerivationOperation',
             }),
-            'ForbiddenEvaluatorOperation',
+            'UncertifiedEvaluatorOperation',
         );
         expectBgvProfileRejected(
             kernel.validateBgvEvaluatorOperation({

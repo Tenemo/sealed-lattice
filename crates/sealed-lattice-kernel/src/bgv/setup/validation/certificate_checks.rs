@@ -173,12 +173,12 @@ fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalRe
         "development-collective-public-key-encryption-fixture",
         "development encryption fixture scope",
     )?;
-    if bool_at_path(fixture_record, &["bridgeEncryptionClaim"])?
-        || bool_at_path(fixture_record, &["encryptedAggregateEvaluatorClaim"])?
+    if bool_at_path(fixture_record, &["directProofClaim"])?
+        || bool_at_path(fixture_record, &["directEvaluatorReplayClaim"])?
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "development encryption fixture must not claim encrypted aggregate bridge or encrypted aggregate evaluator closure",
+            "development encryption fixture must not claim direct proof or evaluator replay closure",
         ));
     }
     compare_hash_at_path(

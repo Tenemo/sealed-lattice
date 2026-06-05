@@ -4,68 +4,86 @@
 
 [![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Node source coverage](https://img.shields.io/endpoint?url=https://tenemo.github.io/sealed-lattice/coverage-badge.json)](https://tenemo.github.io/sealed-lattice/coverage-summary.json) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
-`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Its public package is intentionally narrow while the protocol implementation is still being built and verified.
+`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. The selected construction uses direct BGV-encrypted ballots, public ciphertext aggregation, mandatory mobile evaluator replay, target finality, and target-bound threshold decryption.
 
-## What the package exposes
+The public npm package is intentionally narrow while the protocol implementation is still being built and verified. It is not a complete voting library and must not be used for real ballot secrecy.
 
-`sealed-lattice` package currently exposes safe-by-default helpers for:
+## Selected construction
 
-- transcript-core fixture verification through the packaged Rust/WASM kernel;
-- poll-spec validation, canonical poll/profile hash derivation, threshold profile derivation, and frozen roster-profile derivation;
-- lifecycle labels, lifecycle transitions, and action capability checks;
-- signed board consistency, cast receipt shells, close record shells, and target finality checks;
-- roster manifest verification, participant roster acceptance, deterministic first-valid ordering, and recovery-epoch checks;
-- verification-oriented ballot privacy APIs for receiver-key proofs, ballot proof records, and proof-byte-bearing scoped relation packages through the packaged Rust/WASM verifier;
-- aggregate derivation component verification for the scoped post-close aggregate derivation relation, without exposing aggregate shares, aggregate histograms, exact aggregate scores, aggregate score bits, openings, quotients, plaintext comparison inputs, receiver plaintexts, or proof witnesses;
-- verification-oriented `verifyBridgeProof` support for encrypted aggregate bridge evidence through the packaged Rust/WASM verifier. Internal bridge evidence includes checked integer-lifted plaintext encoding, proof-friendly plaintext coefficient binding, target-threshold decryptability compatibility under the passive setup key, full aggregate-derivation verification binding when close/counting context is supplied, five-check shared-witness challenge-context binding with a 149-bit effective classical random-oracle handoff floor after the BGV support-relation loss, explicit QROM-not-provided status for this handoff proof, coefficientwise BGV randomness/error support accounting, relation proof closure-field refusal, and randomness-source consistency checks. Bridge outputs are checked relation handoff evidence only: final bridge claim closure, conventional `PlaintextRoot` preimage proof, claim-bearing entropy evidence, app-plausible repeated verification, and production result release remain unavailable.
+The active project route is:
 
-Reserved complete-protocol entry points such as transcript verification, bridge-proof creation, bridge-proof acceptance, and one-shot share-policy verification currently fail closed with `OperationUnavailable`.
-
-```ts
-import {
-    validatePollSpec,
-    verifyAggregateDerivationComponent,
-    verifyBridgeProof,
-    verifyClaimBearingBallotPackage,
-    verifyTranscriptCoreFixture,
-} from "sealed-lattice";
+```text
+direct BGV-encrypted ballots
+-> post-quantum ballot validity proofs
+-> public ciphertext aggregation
+-> mandatory mobile evaluator replay
+-> target finality
+-> target-bound threshold decryption
 ```
+
+The first claim-bearing mobile profile targets `n = 10`, `m = 20`, and every `1 <= K_top <= 20`. Larger profiles require separate mobile evidence before they can be treated as claim-bearing.
+
+## Current package boundary
+
+The published package currently supports development verification surfaces while the final direct voting API is being built. Use it for packaging, transcript, foundation, and verifier integration work, not for a complete voting ceremony.
+
+The final direct-path package surface must be defined around:
+
+- setup verification;
+- encrypted ballot verification;
+- encrypted ballot aggregation;
+- mobile evaluator replay verification;
+- target finality verification;
+- target-bound decryption-share verification;
+- target recombination;
+- decoded result verification.
+
+The public package must not expose raw BGV decrypt, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
+
+Reserved complete-protocol entry points must fail closed until their direct-path claim gates are actually implemented.
 
 ## Current implementation status
 
-The public package is a verification surface, not a complete voting API. It can verify transcript-core fixtures, election-foundation objects, receiver-key proof records, ballot proof records, proof-byte-bearing scoped relation packages, and scoped aggregate-derivation components when the caller supplies the required public verifier inputs.
+The direct encrypted ballot implementation has useful internal evidence:
 
-Current accepted ballot package dimensions are:
+- one 20-score direct BGV ballot can be encoded;
+- private preflight checks all 17 data-prime encryption equations against one shared encoded-message, randomizer, and error witness;
+- one internal binary proof checks all data-prime encryption equations, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, one-hot Booleanity, randomizer support, and error support with one shared response vector;
+- the current internal proof is 18,626,400 bytes;
+- binary proof transport is chunked and publicly hash-bound inside the internal command, including proof length, chunk size/count, chunk hashes, chunk Merkle root, full proof hash, statement hash, ciphertext root, voter identity, action context, profile, collective key, ballot layout, and proof profile;
+- Node/WASM one-proof verification and aggregation pass through the internal command path;
+- Node/WASM 20-ballot proof verification and aggregation pass with internal binary chunk transport in about 76.4 s outer wall time, 372,528,000 total proof bytes, about 396 MB WASM linear memory after the run, and about 603 MB Node resident set after the run;
+- desktop Chromium proof smoke verifies one widened proof and aggregates one ballot with internal binary chunk transport in about 4.7 s and about 179 MB WASM linear memory after the run;
+- the internal command uses fresh CSPRNG proof-mask and ballot-encryption randomness by default in Node/WASM and browser helpers;
+- the internal command rejects reused encryption randomness, reused proof-mask randomness, and proof/encryption randomness overlap;
+- duplicate voter identities, out-of-order voter identities, invalid scores, and mismatched setup witness seeds reject before encryption and proof generation;
+- the packed batched-pair evaluator produces encrypted sparse target roots for requested top counts without publishing aggregate scores, ranks, comparisons, masks, evaluator intermediates, or decoded target slots;
+- one native one-ballot packed batched-pair replay matches the full 20-option target oracle at working level 8 in about 240 s;
+- target-accepted record and target-bound decryption-share shell verification now refuse shares for any ciphertext other than the accepted target ciphertext.
 
-- 2 to 20 options;
-- `shareVectorWidth = 11 * optionCount`;
-- `n = 20` as the mandatory benchmark receiver count;
-- dynamic frozen receiver counts from 10 to 50 only when the statement carries bound roster-profile evidence;
-- explicitly acknowledged 3 to 9 receiver casual micro-roster verification only outside claim-bearing package acceptance.
+This evidence is not claim-bearing. The current blockers are:
 
-Still unavailable:
-
-- public ballot generation or casting APIs;
-- generated certificate/workbook rows and benchmark evidence for every dynamic frozen roster size and every casual micro-roster benchmark profile that later evaluation chooses to measure;
-- final encrypted aggregate bridge acceptance evidence from committed aggregate shares to encrypted aggregate input data, preserving bridge witness privacy;
-- accepted-input sparse-target oracle success for every supported top count, a claim-bearing masked rank refresh or equivalent target-profile fix for the current projection noise gap, release-grade runtime evidence for the 20-option evaluator, the mandatory post-quantum evaluation proof, target-decryption security, and target acceptance;
-- direct encrypted ballot replacement path: the internal prototype can encrypt 20-score BGV ballots, privately check all data-limb BGV encryption equations against one shared score, encoding-carry, randomizer, and error witness, generate/verify an 18,626,400-byte internal binary proof per ballot for that all-limb encryption relation, score-linear constraints, one-hot Booleanity, and witness support, and aggregate supplied direct ballot ciphertexts with test-only aggregate score decryption. Its proof-accounting report records one 192-bit challenge, support-degree union accounting above the 128-bit classical target, and mask-shift slack above the 128-bit target without naive transcript repetition. Node/WASM and desktop browser runs use fresh CSPRNG proof-mask and ballot-encryption randomness by default, while deterministic fixture randomness is explicitly reported when used. The internal command requires ballot encryption randomness through a top-level local randomness object and rejects legacy per-ballot encryption seed material. Node/WASM one-proof verification and aggregation pass, and a Node/WASM 20-ballot proof batch passes with internal binary chunk transport in about 76.4 s outer wall time with 372,528,000 total proof bytes, about 396 MB WASM linear memory after the run, and about 603 MB Node resident set after the run; external memory delta was about 1.02x total proof bytes. The internal proof transport path frames generated ballot proofs and submitted refresh-share proofs into 1,048,576-byte binary chunks, hash-checks and reassembles the transported bytes, verifies from transported bytes, and reports chunk Merkle roots, 18 chunks per ballot proof, and 356 chunks for a 20-proof batch. A desktop Chromium proof smoke verifies one widened proof and aggregates with internal binary chunk transport in about 4.7 s with about 179 MB WASM linear memory after the run, and desktop Chromium K = 1 evaluator smoke passes with internal binary chunk transport in about 273.2 s with about 638 MB WASM linear memory after the run. Duplicate voter identities, out-of-order voter identities, invalid scores, and mismatched setup witness seeds reject before encryption and proof generation. One native one-ballot packed batched-pair replay matches the full 20-option target oracle at working level 8 in about 240 s. Prefix refresh opens masked packed ranks by verifying submitted trustee refresh-share records, checking each linear share proof, checking secret-share and error-share support, checking the submitted public-key shares against the collective public key, recombining submitted decryption shares, unmasking internally, and re-encrypting clean ranks. Focused refresh tests pass, including corrupted proof, corrupted share, and unsupported secret-witness rejection. Native K = 1, K = 10, and K = 20 representative replays pass, and the native all-top-count sweep over K = 1 through K = 20 passes in about 592 s. Node/WASM K = 1 replay with submitted-share refresh passes in about 273.7 s outer wall time, about 638 MB WASM linear memory after the run, and about 858 MB Node resident set after the run; evaluator memory growth is dominated by replay state, not proof bytes. It is still not replacement-ready because Fiat-Shamir/QROM review, mobile proof/evaluator evidence, browser/mobile proof-copy evidence, mobile memory evidence, public accepted proof transport evidence, and public accepted ballot encryption randomness rules remain unavailable;
-- production target-bound decryption and result release.
+- weakest-relation proof soundness accounting, including score and one-hot checks that currently reduce over 65537;
+- zero-knowledge accounting, including replacement or formal redesign of witness-dependent support commitments;
+- Fiat-Shamir/QROM review;
+- public package proof transport for an accepted proof profile;
+- public accepted randomness API boundaries;
+- mobile proof verification;
+- mobile evaluator replay;
+- browser/mobile proof-copy and memory evidence;
+- target-bound threshold `PartDec` and recombination math for accepted `C_target` only.
 
 ## What is internal
 
-Several protocol components exist only as workspace-internal implementation, test, or vector infrastructure:
+Several components exist only as workspace-internal implementation, test, or vector infrastructure:
 
-- plaintext `GF(65537)` arithmetic, Shamir interpolation, top-k tallying, and sparse target fixtures;
-- deterministic PVSS ballot-algebra helpers used for regression tests;
-- ballot privacy profile, relation, proof-record, receiver-key proof, and scoped relation package shell infrastructure;
-- sealed-lattice Rust/WASM BGV-RNS profile, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext-lifted base conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, object validation, and allowed-operation registry for the encrypted aggregate path;
-- an internal direct encrypted ballot prototype command for feasibility discovery. It performs all-data-limb private encryption preflight, one widened shared-response validity proof assessment, explicit local ballot-encryption randomness handling, internal binary chunk transport for generated ballot proofs and submitted refresh-share proofs, direct ciphertext aggregation with test-only aggregate score decryption, native full-order packed batched-pair evaluator replay for the one-ballot 20-option target, submitted-share masked refresh for prefix replay, and Node/WASM plus desktop browser proof/evaluator smoke through the internal command path. Prefix sparse targets remain claim-blocked until Fiat-Shamir/QROM review, public accepted proof transport, public accepted ballot encryption randomness rules, and mobile evidence are in place. The command does not make Node/WASM, desktop browser, or mobile evidence claim-bearing;
-- scoped passive setup HE-security evidence for the data-basis setup/bridge/evaluator path, while target-decryption parameters remain downstream;
+- `GF(65537)` arithmetic and plaintext top-k oracle helpers for tests;
+- sealed-lattice Rust/WASM BGV-RNS arithmetic, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext basis conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, and object validation;
+- an internal direct encrypted ballot command for current implementation work;
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
-- offline proof-oracle comparison tooling, development-only Lattigo oracle tooling, and generated public test vectors.
+- development-only reference-oracle tooling and generated public test vectors.
 
-These pieces are not exported as a public voting API and must not be used for real ballot secrecy.
+These pieces are not exported as a public voting API.
 
 ## Repository layout
 
@@ -80,7 +98,7 @@ sealed-lattice/
     sdk/                        Published sealed-lattice package
     testkit/                    Internal fixture loading helpers
     types/                      Shared TypeScript type declarations
-    wasm/                       Internal WASM bridge package
+    wasm/                       Internal WASM loader package
   test-vectors/                 Canonical public regression vectors
   tools/                        CI, vector, packaging, and documentation tools
   typedoc/                      API documentation generation support
@@ -99,7 +117,7 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-The package is not a complete voting library yet. Treat it as a safe public verification surface for the implemented transcript-core fixture checks, election-foundation checks, and scoped ballot privacy verification APIs.
+Treat the package as a development verification package until the direct encrypted ballot API is explicitly published and audited.
 
 ## Development
 
@@ -109,30 +127,15 @@ Install dependencies:
 pnpm install
 ```
 
-Run the full local validation gate (the pre-commit hook runs this):
+Run the main local validation gate:
 
 ```bash
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, then runs the type-check before launching the independent docs, package-smoke, lint, package-policy, vector, knip, API summary, boundary, and fast Node lanes in parallel against that built output. The package-policy lane rejects forbidden runtime exports and direct SDK type exports for setup, evaluator, witness, raw BGV, and decryption construction surfaces. The Rust formatting, clippy, and test lane runs afterward in isolation, so memory-heavy Rust tests do not compete with docs rendering, linting, package smoke verification, and Node tests. The build and type-check run first because they emit `dist/`; the docs and package-smoke lanes reuse those artifacts instead of running their standalone rebuild scripts. The first independent lane to fail aborts the remaining work. It runs:
+`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public API surface summary generation, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, Rust tests, and fast Node tests through the repository check runner.
 
-- workspace package build;
-- workspace type-check;
-- lint;
-- generated docs, docs link verification, and rendered docs smoke verification;
-- npm package smoke verification;
-- public API surface summary generation;
-- public package policy verification;
-- package-boundary verification;
-- test vector verification;
-- dead-code scan;
-- Rust formatting, clippy, and tests;
-- fast Node tests.
-
-The heavier protocol and kernel Node projects and the Playwright browser projects are not in this gate; run `pnpm run test:node` and `pnpm run test:browser` before a push. Locally, it shows a live progress view with elapsed time, latest captured output, previous successful check duration when local history is available, command counts for real command-series lanes, Turbo task visibility for the build lane, Vitest test progress for the fast Node lane, and libtest test progress for the Rust test command. Pass `--progress=always` to use the live view when stdout is a terminal, or `--progress=never` for plain logs. The pre-commit hook redirects the check command to `/dev/tty` when Git gives the hook a non-terminal stdout. It ends with a per-lane pass/fail summary and writes per-lane logs under `logs/` unless you pass `--no-run-log`; failures also print the failed command, exit code, log path, and recent captured output.
-
-Run targeted verification:
+Run focused verification:
 
 ```bash
 pnpm run vectors
@@ -145,32 +148,11 @@ pnpm run test:lattigo-oracle
 pnpm run test:proof-benchmark
 pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
-pnpm run test:aggregate-derivation-kernel
-pnpm run test:encrypted-aggregate-evaluator:representative
-pnpm run test:encrypted-aggregate-bridge:accepted-handoff
-pnpm run test:encrypted-aggregate-bridge:representative
-pnpm run test:encrypted-aggregate-bridge
 pnpm run verify:docs
+pnpm run smoke:pack:npm
 ```
 
-The default Node test command runs the fast Node project plus the heavy protocol and kernel projects. The Node coverage command covers the fast Node project only; heavy protocol, kernel, and proof-benchmark flows still run through their explicit non-coverage lanes. `pnpm run coverage:badge` runs the Node coverage lane, writes Shields-compatible coverage JSON into `docs/public`, and the Pages workflow publishes that JSON with the docs site for the README badge.
-
-Use `pnpm run test:aggregate-derivation-kernel` for aggregate-derivation, aggregate-bridge, and aggregate-ready iteration. It has one fast mode only: representative selected contributors through verified aggregate-ready record construction, with 8 workers by default. Bridge contributor generation and verification now pass the full aggregate-derivation close/counting context, so recomputed bridge checkpoints bind `AggregateDerivationFullVerificationChecked`; cached checkpoints remain development accelerators and are labeled as cached CSPRNG artifacts when reused. The runner always tries checkpoints under `temp/test-checkpoints/` first, ignores stale or corrupt checkpoints, and recomputes only the affected stage. It writes the latest setup package, selected encrypted aggregate inputs, aggregate-ready record, and evaluator request base under the checkpoint directory so a separate manual evaluator slice can consume real bridge outputs. Supported flags are `--workers <count>`, `--checkpoint-dir <path>`, and `--force-recompute ballot-package|bridge-contributors|bgv-passive-setup`; full-matrix, encrypted evaluator, all-`K`, no-resume, and require-checkpoint modes are intentionally not available through this runner.
-
-Use `pnpm run test:encrypted-aggregate-evaluator:representative` only after the fast aggregate runner has written a current request-base file. It prepares root-bound public evaluation-key material in process instead of serializing key-switch coefficients as JSON, runs the accepted-input encrypted aggregate evaluator through the shared-rank sweep command, and writes the public encrypted evaluator result under `temp/test-checkpoints/`. The summary includes public artifact byte sizes, shared packed-rank and sparse-target ciphertext byte lengths, setup key-size certificate extracts, operation-count extracts, and the measured Node/WASM runtime for that run. The single-run and sweep command boundaries reject malformed top-count sets plus witness/private evaluator fields before setup loading in native, Node WASM, and browser WASM coverage. It still defaults to the representative `topCount = 1` slice; pass `-- --top-counts all` only for heavyweight all-top-count release evidence after the cheaper gates are complete. These are proposal/runtime evidence only: test-only oracle decryption confirms the accepted bridge input and shared packed ranks, but accepted-input sparse target projection remains blocked until a claim-bearing masked rank refresh, a different target relation, or a re-certified parameter profile makes every supported top count oracle-correct. Full bridge matrix, full browser parity, and benchmark lanes remain separate closure evidence.
-
-Heavy checks should run selectively, only when the change touches the matching area or when closure/benchmark evidence is being refreshed:
-
-- `pnpm run test:proof-benchmark`, `pnpm run test:proof-benchmark:node`, and `pnpm run test:proof-benchmark:browser:desktop` for proof benchmark evidence;
-- `pnpm run test:encrypted-aggregate-evaluator:representative` for a selected accepted-input evaluator slice after aggregate-ready inputs exist, or `pnpm run test:encrypted-aggregate-evaluator:representative -- --top-counts all` for heavyweight all-top-count release evidence;
-- `pnpm run test:encrypted-aggregate-bridge:accepted-handoff` for the mandatory accepted-package aggregate-ready handoff row;
-- `pnpm run test:encrypted-aggregate-bridge:representative` for selected encrypted aggregate bridge relation rows;
-- `pnpm run test:encrypted-aggregate-bridge` for the full encrypted aggregate bridge matrix;
-- `pnpm run test:node:kernel`, `pnpm run test:node`, and `pnpm run test:browser` for heavy Rust/WASM and browser integration coverage.
-
-Heavy local runners write timestamped logs under `logs/`, which is gitignored. Logged runners include `pnpm run check`, `pnpm run test:node:protocol`, `pnpm run test:node:kernel`, `pnpm run test:node`, `pnpm run test:browser`, all proof-benchmark scripts, and the encrypted aggregate bridge matrix scripts. Each run gets `logs/YYYY-MM-DD/YYYY-MM-DDTHH-mm-ss-SSSZ-script-name/` with `metadata.json`, `summary.json`, `combined.log`, and per-command logs; matrix runs also write per-row worker logs under `workers/`. The check runner stores detailed command timing data in the local summary so later local check runs can show expected durations. CI disables local log emission by passing `--no-run-log`; use the same trailing argument locally when a one-off run should skip logs, for example `pnpm run test:node:kernel -- --no-run-log`.
-
-Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`. Checkpoint filenames are named after their test suite and step. Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when intentionally debugging from the latest local checkpoint.
+Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should remain explicit and direct-path-only.
 
 Build and package-smoke the published SDK:
 

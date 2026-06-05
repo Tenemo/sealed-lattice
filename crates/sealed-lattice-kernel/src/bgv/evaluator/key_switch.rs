@@ -44,12 +44,6 @@ pub(crate) struct KeySwitchComponent {
 }
 
 impl KeySwitchKey {
-    pub(crate) fn drop_component_b(&mut self) {
-        for component in &mut self.components {
-            component.component_b = None;
-        }
-    }
-
     pub(crate) fn drop_component_a_ntt(&mut self) {
         for component in &mut self.components {
             component.component_a_ntt = None;
@@ -307,6 +301,7 @@ fn generate_key_switch_component_for_digit(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn key_switch_key_from_public_component_b(
     level: usize,
     domain: &str,
@@ -357,6 +352,7 @@ pub(crate) fn key_switch_key_from_public_component_b(
     Ok(KeySwitchKey { level, components })
 }
 
+#[cfg(test)]
 fn public_key_switch_component_for_digit(
     domain: &str,
     seed_hex: &str,

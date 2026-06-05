@@ -21,14 +21,14 @@ export type BgvRnsProfileDescription = {
     readonly profileHash: ProtocolHash;
     readonly backendProfileHash: ProtocolHash;
     readonly batchEncoderHash: ProtocolHash;
-    readonly encryptedAggregateInputLayoutHash: ProtocolHash;
+    readonly encryptedBallotAggregateLayoutHash: ProtocolHash;
     readonly batchLayoutBinding: unknown;
     readonly batchLayoutBindingHash: ProtocolHash;
     readonly ballotScoreEncodingProfileHash: ProtocolHash;
-    readonly ballotShareLayoutProfileHash: ProtocolHash;
-    readonly aggregateInputEncodingProfileHash: ProtocolHash;
-    readonly encodedAggregateLayoutHash: ProtocolHash;
-    readonly topKEvaluatorInputLayoutHash: ProtocolHash;
+    readonly encryptedBallotLayoutHash: ProtocolHash;
+    readonly encryptedBallotAggregateProfileHash: ProtocolHash;
+    readonly directAggregateLayoutHash: ProtocolHash;
+    readonly directComparisonProfileHash: ProtocolHash;
     readonly canonicalCiphertextConventionHash: ProtocolHash;
     readonly allowedEvaluatorOpsHash: ProtocolHash;
     readonly securityEstimatorInputHash: string;
@@ -195,13 +195,13 @@ export type BgvPassiveSetupPackage = {
     readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
     readonly trustedDealerBoundary: Readonly<Record<string, unknown>>;
-    readonly kllpsStatus: {
-        readonly thresholdDecryptionProfileId: string;
-        readonly thresholdDecryptionProfileHash: ProtocolHash;
-        readonly kllpsTargetDecryptionProfileHash: ProtocolHash;
-        readonly setupMaterialMatchesKLLPS: boolean;
-        readonly KLLPSPartDecStatusImplemented: boolean;
-        readonly KLLPSC1C4StatusAccepted: boolean;
+    readonly targetDecryptionStatus: {
+        readonly targetDecryptionProfileId: string;
+        readonly targetDecryptionProfileHash: ProtocolHash;
+        readonly targetDecryptionProfileBindingHash: ProtocolHash;
+        readonly setupMaterialMatchesTargetDecryption: boolean;
+        readonly targetPartDecImplemented: boolean;
+        readonly targetC1C4StatusAccepted: boolean;
     };
     readonly statusLabels: readonly string[];
     readonly nonClaims: readonly string[];

@@ -5,9 +5,9 @@ sidebar:
     order: 1
 ---
 
-`sealed-lattice` provides verification helpers for post-quantum threshold voting artifacts in Node and browsers.
+`sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting prototype.
 
-Use it to validate poll definitions, derive threshold profiles, check lifecycle and action rules, verify public board and roster evidence, and verify supported ballot privacy proof records with the bundled Rust/WASM verifier.
+The selected direction is direct BGV-encrypted ballots, public ciphertext aggregation, mandatory mobile evaluator replay, target finality, and target-bound threshold decryption.
 
 The package is under active implementation and has not been independently audited. Use it for development, integration experiments, and verification tooling, not production elections.
 
@@ -40,7 +40,7 @@ if (!pollValidation.ok) {
 }
 
 const thresholdProfile = deriveThresholdProfile({
-    rosterSize: 20,
+    rosterSize: 10,
 });
 ```
 
@@ -50,15 +50,15 @@ const thresholdProfile = deriveThresholdProfile({
 
 ```typescript
 import {
-    verifyBallotProof,
+    deriveThresholdProfile,
+    validatePollSpec,
     verifyBoardConsistency,
-    verifyClaimBearingBallotPackage,
-    verifyReceiverKeyProof,
+    verifyTargetFinality,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
 ```
 
-These helpers verify structured public evidence and return accepted Hashes, status labels, and refusal records where applicable.
+These helpers are useful for current development verification and package integration. Complete direct encrypted ballot voting entry points are not public yet.
 
 ## What you can use today
 
@@ -67,18 +67,18 @@ These helpers verify structured public evidence and return accepted Hashes, stat
 - lifecycle label, lifecycle transition, and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
 - transcript-core fixture verification through the bundled Rust/WASM kernel
-- receiver-key proof, ballot proof record, and claim-bearing ballot package verification
-- aggregate derivation component verification for post-close contribution evidence
+- package-boundary and public API smoke coverage
 
 ## What is not available yet
 
-- ballot generation or casting APIs
-- proof construction APIs
-- aggregation or tally evaluation APIs
+- production ballot generation or casting APIs
+- public direct ballot proof construction APIs
+- public encrypted ballot aggregation APIs
+- public mobile evaluator replay APIs
 - production target-bound decryption or result release
-- production-readiness, audit, or certification claims
+- production-readiness, audit, certification, or supported-phone claims
 
-Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching protocol layer exists.
+Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching direct-path layer exists.
 
 ## Next reads
 

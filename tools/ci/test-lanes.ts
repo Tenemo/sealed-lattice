@@ -17,7 +17,7 @@ type NodeTestProjectDefinition = {
 };
 
 const protocolNodeTestGlobs = [
-    'packages/protocol/tests/node/**/*.protocol.test.ts',
+    'packages/protocol/tests/node/**/*.test.ts',
 ] as const;
 
 const kernelNodeTestGlobs = [

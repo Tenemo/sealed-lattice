@@ -13,7 +13,7 @@ import {
     deriveThresholdProfile,
     validatePollSpec,
     verifyBoardConsistency,
-    verifyClaimBearingBallotPackage,
+    verifyTargetFinality,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
 ```
@@ -25,16 +25,15 @@ import {
 - lifecycle label, lifecycle transition, and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
 - transcript-core fixture verification through the bundled Rust/WASM kernel
-- receiver-key proof, ballot proof record, and claim-bearing ballot package verification
-- aggregate derivation component verification for post-close contribution evidence
 - generated reference pages for the exported runtime functions and public types
 
 ## Current limits
 
 - no public subpaths are supported
-- no ballot generation or casting API is available yet
-- no proof construction API is available yet
-- no aggregation or tally evaluation API is available yet
+- no complete direct encrypted ballot voting API is available yet
+- no production ballot generation or casting API is available yet
+- no public proof construction API is available yet
+- no public aggregation or evaluator replay API is available yet
 - no production target-bound decryption or result release API is available yet
 - reserved complete-protocol entry points fail closed with `OperationUnavailable`
 

@@ -288,8 +288,8 @@ fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> Canonical
 pub(super) fn validate_threshold_verification_material(
     setup_package: &Value,
     participant_bindings: &[VerifiedParticipantSetupBinding],
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
 ) -> CanonicalResult<()> {
     let threshold_material = value_at_path(setup_package, &["thresholdVerificationMaterial"])?;
     let verification_key_set = value_at_path(threshold_material, &["verificationKeySet"])?;
@@ -353,8 +353,8 @@ pub(super) fn validate_threshold_verification_material(
         "ThresholdShareVerificationKeyHash",
         &json!({
             "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
+            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         }),
     )?;
     compare_hash_at_path(

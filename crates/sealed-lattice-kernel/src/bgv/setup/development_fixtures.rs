@@ -77,17 +77,17 @@ pub(super) fn development_encryption_fixture(
         .zip(scaled_error_one_residues.iter())
         .map(|(product, scaled_error)| add_mod(*product, *scaled_error, modulus))
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let layout_hash = layout_hash()?;
+    let encrypted_ballot_aggregate_layout_hash = encrypted_ballot_aggregate_layout_hash()?;
     let component_zero = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         0,
-        layout_hash.clone(),
+        encrypted_ballot_aggregate_layout_hash.clone(),
         vec![ciphertext_component_zero],
     )?;
     let component_one = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         0,
-        layout_hash,
+        encrypted_ballot_aggregate_layout_hash,
         vec![ciphertext_component_one],
     )?;
     let canonical_bytes =
@@ -143,8 +143,8 @@ pub(super) fn development_encryption_fixture(
             &scaled_error_one_residues,
         )?,
         "fixtureScope": "development-collective-public-key-encryption-fixture",
-        "bridgeEncryptionClaim": false,
-        "encryptedAggregateEvaluatorClaim": false,
+        "directProofClaim": false,
+        "directEvaluatorReplayClaim": false,
     });
     let fixture_hash =
         derive_protocol_hash("BGVDevelopmentEncryptionFixtureHash", &fixture_record)?;
@@ -155,8 +155,8 @@ pub(super) fn development_encryption_fixture(
         "statusLabels": [
             "DevelopmentEncryptionFixtureBound",
             "CollectivePublicKeyRootBound",
-            "NotBridgeProofEvidence",
-            "NotEvaluatorClosureEvidence"
+            "NotDirectProofEvidence",
+            "NotEvaluatorReplayClosureEvidence"
         ],
     }))
 }

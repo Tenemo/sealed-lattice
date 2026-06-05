@@ -87,11 +87,11 @@ describe('recovery epoch shells', () => {
             oldActionCutoffBoardSequence: 5,
             boardHeadHash: recoveryContextHead.headHash,
             newSigningPublicKeyHash: newSigningKeyFixture.publicKeyHash,
-            restoredFrozenReceiverStateCommitment: deriveProtocolHash(
+            restoredEncryptedBallotStateCommitment: deriveProtocolHash(
                 'ChallengeDomainHash',
                 {
-                    payload: { receiverState: 'restored' },
-                    purpose: 'fixture-restored-receiver-state-root-v1',
+                    payload: { encryptedBallotState: 'restored' },
+                    purpose: 'fixture-restored-encrypted-ballot-state-root-v1',
                 },
             ),
             newTrusteeSetupCommitment: deriveProtocolHash(

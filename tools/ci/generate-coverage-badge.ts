@@ -34,7 +34,7 @@ export type CoverageArtifactsOptions = {
 export const defaultRequiredCoverageEntryPaths = [
     'packages/crypto/src/canonical-json.ts',
     'packages/protocol/src/lifecycle/thresholds.ts',
-    'packages/protocol/src/ballot-privacy/objects.ts',
+    'packages/types/src/board-target.ts',
     'packages/sdk/src/index.ts',
     'packages/wasm/src/transcript-core-bridge.ts',
     'tools/ci/check-package-boundaries.ts',

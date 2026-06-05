@@ -1,11 +1,9 @@
 import {
     activeMaliciousMheProfileId,
-    evaluationProofProfileId,
     passiveMhePrototypeProfileId,
-    thresholdDecryptionProfileId,
+    targetDecryptionProfileId,
 } from '@sealed-lattice/types';
 import type {
-    EvaluationProofMode,
     FailureStatusLabel,
     LifecycleLabelInput,
     LifecycleLabels,
@@ -23,26 +21,19 @@ const primaryLabelsByState = {
     rosterFrozen: ['rosterFrozen'],
     votingOpen: ['rosterFrozen'],
     votingClosed: ['rosterFrozen'],
-    aggregatePending: ['pending'],
-    aggregateReady: ['pending'],
-    aggregateBridgeVerified: ['pending'],
-    evaluationPending: ['pending'],
-    topKEvaluated: ['pending'],
-    targetFinalityReached: ['pending'],
-    evaluationProofPending: ['pending'],
-    evaluationProofVerified: ['evaluationProofVerified'],
-    targetAccepted: ['evaluationProofVerified', 'targetAccepted'],
-    decryptionPending: ['evaluationProofVerified', 'targetAccepted'],
-    decryptionSharesReady: ['evaluationProofVerified', 'targetAccepted'],
-    cpadProfileVerified: [
-        'evaluationProofVerified',
-        'targetAccepted',
-        'cpadProfileVerified',
-    ],
+    encryptedBallotsSelected: ['encryptedBallotsSelected'],
+    ballotProofsVerified: ['ballotProofsVerified'],
+    encryptedBallotAggregateComputed: ['encryptedBallotAggregateComputed'],
+    evaluatorReplayed: ['evaluatorReplayed'],
+    targetFinalityReached: ['evaluatorReplayed'],
+    targetAccepted: ['evaluatorReplayed', 'targetAccepted'],
+    decryptionPending: ['evaluatorReplayed', 'targetAccepted'],
+    decryptionSharesReady: ['evaluatorReplayed', 'targetAccepted'],
+    resultDecoded: ['evaluatorReplayed', 'targetAccepted', 'resultDecoded'],
     fullyVerified: [
-        'evaluationProofVerified',
+        'evaluatorReplayed',
         'targetAccepted',
-        'cpadProfileVerified',
+        'resultDecoded',
         'fullyVerified',
     ],
     pending: ['pending'],
@@ -58,47 +49,24 @@ const failureLabelsByState = {
     rosterFrozen: [],
     votingOpen: [],
     votingClosed: [],
-    aggregatePending: ['missingAggregateContributions'],
-    aggregateReady: [],
-    aggregateBridgeVerified: [],
-    evaluationPending: [],
-    topKEvaluated: [],
+    encryptedBallotsSelected: ['ballotProofsMissing'],
+    ballotProofsVerified: [],
+    encryptedBallotAggregateComputed: ['evaluatorReplayMissing'],
+    evaluatorReplayed: [],
     targetFinalityReached: [],
-    evaluationProofPending: [],
-    evaluationProofVerified: [],
     targetAccepted: [],
     decryptionPending: ['missingDecryptionShares'],
     decryptionSharesReady: [],
-    cpadProfileVerified: [],
+    resultDecoded: [],
     fullyVerified: [],
     pending: [],
-    outsideClaim: ['unsupportedKllpsCpadProfile'],
+    outsideClaim: ['unsupportedTargetDecryptionProfile'],
     forkDetected: [
         'boardForkSuspected',
         'boardEvidencePublished',
         'forkDetected',
     ],
 } as const satisfies Record<LifecycleState, readonly FailureStatusLabel[]>;
-
-const deriveEvaluationProofMode = (
-    input: LifecycleLabelInput,
-): EvaluationProofMode => {
-    if (input.evaluationProofMode !== undefined) {
-        return input.evaluationProofMode;
-    }
-    if (
-        input.lifecycleState === 'evaluationProofVerified' ||
-        input.lifecycleState === 'targetAccepted' ||
-        input.lifecycleState === 'decryptionPending' ||
-        input.lifecycleState === 'decryptionSharesReady' ||
-        input.lifecycleState === 'cpadProfileVerified' ||
-        input.lifecycleState === 'fullyVerified'
-    ) {
-        return 'evaluationProofVerified';
-    }
-
-    return 'evaluationProofPending';
-};
 
 const deriveLocalPrimaryLabels = (
     input: LifecycleLabelInput,
@@ -131,14 +99,10 @@ const resultPathIsFullyGated = (input: LifecycleLabelInput): boolean =>
     input.thresholdProfile.targetBoundShareSelectionProfile !== null &&
     input.thresholdProfile.decryptionShareQuorum !== null &&
     input.runtimeClaimGatePassed === true &&
-    input.bridgeBenchmarkReportPresent === true &&
-    input.bridgeProverCertificatePresent === true &&
-    input.evaluationProofCertificatePresent === true &&
-    input.oneShotDecryptionProofCertificatePresent === true &&
-    input.kllpsCpadCertificatePresent === true &&
-    input.thresholdDecryptionCertificatePresent === true &&
-    input.evaluationProofClosureApplied === true &&
-    input.kllpsCpadClosureApplied === true &&
+    input.directProofTransportPresent === true &&
+    input.mobileReplayEvidencePresent === true &&
+    input.targetDecryptionCertificatePresent === true &&
+    input.targetDecryptionClosureApplied === true &&
     input.activeMaliciousClosureApplied === true &&
     input.decodedResultLayoutVerified === true;
 
@@ -157,8 +121,7 @@ const deriveResultClaimLabels = (
 
 const securityProfileModeLabelsById = new Map<string, ModeStatusLabel>([
     [passiveMhePrototypeProfileId, 'passiveMhePrototype'],
-    [evaluationProofProfileId, 'evaluationProofClosure'],
-    [thresholdDecryptionProfileId, 'kllpsCpadClosure'],
+    [targetDecryptionProfileId, 'targetDecryptionClosure'],
     [activeMaliciousMheProfileId, 'activeMaliciousClosure'],
 ]);
 
@@ -191,8 +154,7 @@ export const deriveLifecycleLabels = (
     const failures: FailureStatusLabel[] = [
         ...failureLabelsByState[input.lifecycleState],
     ];
-    const modes: ModeStatusLabel[] = [];
-    const evaluationProofMode = deriveEvaluationProofMode(input);
+    const modes: ModeStatusLabel[] = ['directEncryptedBallotPath'];
     const resultClaimLabels = deriveResultClaimLabels(input);
     let primary: PrimaryStatusLabel[] = Array.from(
         new Set([
@@ -208,22 +170,19 @@ export const deriveLifecycleLabels = (
     if (input.measuredRuntimeProfile === true) {
         modes.push('measuredRuntimeProfile');
     }
+    if (input.mobileReplayEvidencePresent === true) {
+        modes.push('mobileReplayProfile');
+    }
     if (input.longRunningCryptographicCheck === true) {
         modes.push('longRunningCryptographicCheck');
     }
-    if (input.localReplayUnavailable === true) {
-        modes.push('localReplayUnavailable');
-    } else if (input.evaluationLocallyReplayed === true) {
-        modes.push('localReplayMatched');
-    }
-    if (
-        input.localReplayUnavailable !== true &&
-        input.localReplayDiagnosticVerified === false
-    ) {
-        modes.push('localReplayFailed');
-    }
 
-    pushFailure(failures, input.bridgeProofRejected, 'rejectedBridgeProof');
+    pushFailure(failures, input.ballotProofsMissing, 'ballotProofsMissing');
+    pushFailure(
+        failures,
+        input.evaluatorReplayMissing,
+        'evaluatorReplayMissing',
+    );
     pushFailure(
         failures,
         input.witnessEquivocationEvidence,
@@ -242,18 +201,23 @@ export const deriveLifecycleLabels = (
     pushFailure(failures, input.bgvProfileRejected, 'unsupportedBgvProfile');
     pushFailure(
         failures,
-        input.kllpsCpadProfileRejected,
-        'unsupportedKllpsCpadProfile',
+        input.ballotProofProfileRejected,
+        'rejectedBallotProofProfile',
+    );
+    pushFailure(
+        failures,
+        input.evaluatorReplayProfileRejected,
+        'rejectedEvaluatorReplayProfile',
+    );
+    pushFailure(
+        failures,
+        input.targetDecryptionProfileRejected,
+        'unsupportedTargetDecryptionProfile',
     );
     pushFailure(
         failures,
         input.decryptionThresholdNotReached,
         'missingDecryptionShares',
-    );
-    pushFailure(
-        failures,
-        input.bridgeBenchmarkReportRejected,
-        'rejectedBridgeBenchmarkReport',
     );
     pushFailure(
         failures,
@@ -283,6 +247,5 @@ export const deriveLifecycleLabels = (
         failures: Array.from(new Set(failures)),
         modes: Array.from(new Set(modes)),
         resultClaimLabels,
-        evaluationProofMode,
     };
 };

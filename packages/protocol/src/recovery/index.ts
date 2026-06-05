@@ -65,8 +65,8 @@ export const deriveRecoveryEpochUpdateHash = (
         previousRecoveryEpoch: update.previousRecoveryEpoch,
         recoveryPolicyHash: update.recoveryPolicyHash,
         recoveryRootPublicKeyHash: update.recoveryRootPublicKeyHash,
-        restoredFrozenReceiverStateCommitment:
-            update.restoredFrozenReceiverStateCommitment,
+        restoredEncryptedBallotStateCommitment:
+            update.restoredEncryptedBallotStateCommitment,
         signerIdentity: update.signerIdentity,
     });
 
@@ -239,8 +239,8 @@ const verifyRecoveryEpochUpdateUnchecked = (
         previousRecoveryEpoch: update.previousRecoveryEpoch,
         recoveryPolicyHash: update.recoveryPolicyHash,
         recoveryRootPublicKeyHash: update.recoveryRootPublicKeyHash,
-        restoredFrozenReceiverStateCommitment:
-            update.restoredFrozenReceiverStateCommitment,
+        restoredEncryptedBallotStateCommitment:
+            update.restoredEncryptedBallotStateCommitment,
         signerIdentity: update.signerIdentity,
     });
 
@@ -337,14 +337,14 @@ const verifyRecoveryEpochUpdateUnchecked = (
     }
     if (
         update.newSigningPublicKeyHash.length === 0 ||
-        update.restoredFrozenReceiverStateCommitment.length === 0 ||
+        update.restoredEncryptedBallotStateCommitment.length === 0 ||
         update.newTrusteeSetupCommitment.length === 0 ||
         update.recoveryPolicyHash.length === 0
     ) {
         refusedObjects.push(
             createRefusal(
                 'RecoveryUpdateInvalid',
-                'Recovery epoch update must bind new signing, receiver-state, trustee-setup, and recovery-policy commitments.',
+                'Recovery epoch update must bind new signing, encrypted-ballot state, trustee setup, and recovery-policy commitments.',
                 update.recoveryEpochUpdateHash,
                 'RecoveryEpochUpdate',
             ),

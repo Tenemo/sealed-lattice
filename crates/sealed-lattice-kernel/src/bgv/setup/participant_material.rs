@@ -6,8 +6,8 @@ pub(super) fn participant_setup_material(
     profile_hash: &str,
     backend_profile_hash: &str,
     public_common_random_polynomial_root: &str,
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
 ) -> CanonicalResult<ParticipantSetupMaterial> {
     let participant_identities = input
         .participants
@@ -68,9 +68,9 @@ pub(super) fn participant_setup_material(
         "objectType": "TrusteeThresholdVerificationKey",
         "objectVersion": 1,
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "targetDecryptionProfileHash": target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "trusteeIdentity": participant.trustee_identity,

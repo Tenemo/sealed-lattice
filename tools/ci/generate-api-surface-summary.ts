@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import * as ts from 'typescript';
@@ -211,12 +212,34 @@ const createCurrentApiSurfaceSummary = async (): Promise<ApiSurfaceSummary> => {
 const formatSummary = (summary: ApiSurfaceSummary): string =>
     `${JSON.stringify(summary, null, 4)}\n`;
 
+const writeTextWithWindowsRetry = async (
+    filePath: string,
+    text: string,
+): Promise<void> => {
+    const temporaryPath = `${filePath}.${String(process.pid)}.tmp`;
+    let lastError: unknown;
+
+    for (let attemptIndex = 0; attemptIndex < 5; attemptIndex += 1) {
+        try {
+            await fs.writeFile(temporaryPath, text, 'utf8');
+            await fs.rename(temporaryPath, filePath);
+
+            return;
+        } catch (error) {
+            lastError = error;
+            await fs.rm(temporaryPath, { force: true });
+            await delay(50 * (attemptIndex + 1));
+        }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+};
+
 const main = async (): Promise<void> => {
     const currentSummary = await createCurrentApiSurfaceSummary();
-    await fs.writeFile(
+    await writeTextWithWindowsRetry(
         apiSurfaceSummaryPath,
         formatSummary(currentSummary),
-        'utf8',
     );
     console.log(
         `Public API surface summary generated: ${normalizePath(apiSurfaceSummaryPath)}`,

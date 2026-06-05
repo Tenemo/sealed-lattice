@@ -65,7 +65,7 @@ pub(crate) fn validate_plaintext_hex(
         "basisId": object.components[0].basis_id,
         "level": object.components[0].level,
         "coefficientCount": object.components[0].coefficient_count,
-        "layoutHash": object.components[0].layout_hash,
+        "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
         "plaintextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
         "statusLabels": [
@@ -103,7 +103,8 @@ pub(crate) fn validate_ciphertext_hex(
             || component.basis_id != first.basis_id
             || component.level != first.level
             || component.coefficient_count != first.coefficient_count
-            || component.layout_hash != first.layout_hash
+            || component.encrypted_ballot_aggregate_layout_hash
+                != first.encrypted_ballot_aggregate_layout_hash
             || component.moduli != first.moduli
     }) {
         return Err(CanonicalError::new(
@@ -120,7 +121,7 @@ pub(crate) fn validate_ciphertext_hex(
         "basisId": first.basis_id,
         "level": first.level,
         "coefficientCount": first.coefficient_count,
-        "layoutHash": first.layout_hash,
+        "layoutHash": first.encrypted_ballot_aggregate_layout_hash,
         "ciphertextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
         "statusLabels": [

@@ -61,35 +61,33 @@ const verifyTargetRecordShape = (
         witnessPolicyHash: record.witnessPolicyHash,
     });
     const expectedProposalHash = deriveTargetProposalHash({
-        targetCiphertextHash: checkpoint.targetCiphertextHash,
-        topKCiphertextHash: checkpoint.topKCiphertextHash,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestHash: checkpoint.electionManifestHash,
-        thresholdProfileHash: checkpoint.thresholdProfileHash,
-        evaluationContextHash: checkpoint.evaluationContextHash,
-        evaluationProofProfileHash: checkpoint.evaluationProofProfileHash,
-        publicSlotMaskHash: checkpoint.publicSlotMaskHash,
+        encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
+        evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
+        evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
+        evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
+        targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
-        topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
+        thresholdProfileHash: checkpoint.thresholdProfileHash,
     });
     const expectedCheckpointHash = deriveTargetFinalityCheckpointHash({
         boardPolicyHash: checkpoint.boardPolicyHash,
-        targetCiphertextHash: checkpoint.targetCiphertextHash,
-        topKCiphertextHash: checkpoint.topKCiphertextHash,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestHash: checkpoint.electionManifestHash,
-        thresholdProfileHash: checkpoint.thresholdProfileHash,
-        evaluationContextHash: checkpoint.evaluationContextHash,
-        evaluationProofProfileHash: checkpoint.evaluationProofProfileHash,
+        encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
+        evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
+        evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
+        evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         finalizedBoardHeadHash: checkpoint.finalizedBoardHeadHash,
         objectType: checkpoint.objectType,
         objectVersion: checkpoint.objectVersion,
-        publicSlotMaskHash: checkpoint.publicSlotMaskHash,
+        targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
         targetProposalHash: checkpoint.targetProposalHash,
-        topKEvaluationRecordHash: checkpoint.topKEvaluationRecordHash,
+        thresholdProfileHash: checkpoint.thresholdProfileHash,
         witnessPolicyHash: checkpoint.witnessPolicyHash,
     });
 
@@ -281,14 +279,14 @@ const verifyTargetRecordShape = (
     if (
         record.inclusionProof.boardHeadHash !==
             checkpoint.finalizedBoardHeadHash ||
-        record.inclusionProof.includedObjectType !== 'TopKEvaluationRecord' ||
+        record.inclusionProof.includedObjectType !== 'EvaluatorReplayRecord' ||
         record.inclusionProof.includedObjectHash !==
-            checkpoint.topKEvaluationRecordHash
+            checkpoint.evaluatorReplayRecordHash
     ) {
         refusedObjects.push(
             createRefusal(
-                'TopKEvaluationRecordNotIncluded',
-                'Target finality must finalize a board head containing the typed top-k evaluation record hash.',
+                'EvaluatorReplayRecordNotIncluded',
+                'Target finality must finalize a board head containing the evaluator replay record hash.',
                 record.targetFinalityRecordHash,
                 'TargetFinalityRecord',
             ),

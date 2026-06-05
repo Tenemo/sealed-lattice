@@ -9,20 +9,20 @@ pub use codec::{
 };
 pub use mutations::{
     mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
-    mutate_field_order_fixture, mutate_fully_verified_missing_evaluation_profile_fixture,
+    mutate_field_order_fixture, mutate_fully_verified_missing_evaluator_replay_profile_fixture,
     mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
     mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
     mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
     mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
-    mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
+    mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluator_replay_profile_fixture,
     mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
     mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-    mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
+    mutate_unsupported_object_version_fixture, mutate_wrong_evaluator_replay_profile_fixture,
 };
 #[cfg(test)]
 pub use rng::DeterministicFixtureRng;
 #[cfg(test)]
-pub use types::MANDATORY_EVALUATION_PROOF_PROFILE_ID;
+pub use types::MANDATORY_EVALUATOR_REPLAY_PROFILE_ID;
 pub use types::{
     FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
     TranscriptCoreProfile,
@@ -35,18 +35,18 @@ pub const MODULE_MARKER: &str = "transcript-core";
 mod tests {
     use super::{
         DeterministicFixtureRng, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
-        FULLY_VERIFIED_PASSIVE_MHE_PROFILE, MANDATORY_EVALUATION_PROOF_PROFILE_ID,
+        FULLY_VERIFIED_PASSIVE_MHE_PROFILE, MANDATORY_EVALUATOR_REPLAY_PROFILE_ID,
         analyze_canonical_object, canonical_transcript_core_object, decode_hex,
         mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
-        mutate_field_order_fixture, mutate_fully_verified_missing_evaluation_profile_fixture,
+        mutate_field_order_fixture, mutate_fully_verified_missing_evaluator_replay_profile_fixture,
         mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
         mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
         mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
         mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
-        mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluation_profile_fixture,
+        mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluator_replay_profile_fixture,
         mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
         mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-        mutate_unsupported_object_version_fixture, mutate_wrong_evaluation_profile_fixture,
+        mutate_unsupported_object_version_fixture, mutate_wrong_evaluator_replay_profile_fixture,
         parse_transcript_core_object, serialize_transcript_core_object,
     };
     use crate::encoding::{CanonicalErrorCode, append_varuint};
@@ -108,8 +108,8 @@ mod tests {
             fully_verified_active.object_hash512
         );
         assert_eq!(
-            fully_verified_active.evaluation_proof_profile_id,
-            MANDATORY_EVALUATION_PROOF_PROFILE_ID,
+            fully_verified_active.evaluator_replay_profile_id,
+            MANDATORY_EVALUATOR_REPLAY_PROFILE_ID,
         );
     }
 
@@ -174,7 +174,7 @@ mod tests {
                 CanonicalErrorCode::UnknownProofProfile,
             ),
             (
-                mutate_unknown_evaluation_profile_fixture(),
+                mutate_unknown_evaluator_replay_profile_fixture(),
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
@@ -210,11 +210,11 @@ mod tests {
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
-                mutate_wrong_evaluation_profile_fixture(),
+                mutate_wrong_evaluator_replay_profile_fixture(),
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
-                mutate_fully_verified_missing_evaluation_profile_fixture(),
+                mutate_fully_verified_missing_evaluator_replay_profile_fixture(),
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (

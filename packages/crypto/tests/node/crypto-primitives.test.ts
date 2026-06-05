@@ -72,16 +72,16 @@ describe('crypto primitive boundary', () => {
 
     it('rejects unreserved protocol hash namespaces', () => {
         expect(() =>
-            resolveProtocolHashDomain('AuxiliaryBridgeModulusHash'),
+            resolveProtocolHashDomain('UnreservedInternalModulusHash'),
         ).toThrow('reserved');
         expect(() =>
             resolveProtocolHashDomain(
-                'sealed-lattice-root/auxiliary-bridge-modulus-hash-v1',
+                'sealed-lattice-root/unreserved-internal-modulus-hash-v1',
             ),
         ).toThrow('reserved');
         expect(() =>
-            deriveProtocolHash('ReceiverKeyRoot', {
-                receiver: 'fixture',
+            deriveProtocolHash('UnreservedInternalRoot', {
+                fixture: 'rejected',
             }),
         ).toThrow('reserved');
     });

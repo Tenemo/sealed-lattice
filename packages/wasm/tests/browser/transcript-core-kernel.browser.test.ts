@@ -41,13 +41,13 @@ const fullyVerifiedPassiveMhePrototypeFixture = findFixture(
 const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 const browserBgvRnsVectors = {
     profileHash:
-        '7071099482aac9e76a6728bd47a3906d55a3d39dc86ba5376323c3cb099326a9bdf072e1189983d04e74b648567bf069b6844fd3c167f0b31df3c5eff4ebb58d',
+        '79a826f54f3863ec664b5b8cef4a2108c089e059560657fd102c4423d1329152bc0a0ecf09f7903cf7509f35da4bd8b6af7aa88c6532f3372be5d9c0c4e9025c',
     batchLayoutBindingHash:
-        '0ff4161d3e74b6f02134e2c86240d8e61139889bad65ab2b5615d7919e7562c97c45fe4ed031076beea6f76e1c485257fb521f4eab65056c77f1cd06aa39b1c6',
+        '0c615062a05d9b7182b6f069d5a6aca23b86c8eb1e986a9e7b12adf34061c4e96eb9e89a9030e517f331b8089c0ba50e0ba1eadd7490e3e608ea80288ad25853',
     encodedPlaintextRoot:
-        'ea3c780b8c7834f070b3d4bc70ef6715dc39abd5c10ce2cf4e503a16fafa98a4c0c3a25246d3227c448fb1005ef2bd26924c396e83ac9c74008c0387288b1208',
+        '0ed438e393c879787b859758e3c975edf4520b0258d2b42690eeb336c5a72140e265e5e7404b868ade767ee3b29da3c669c9d8db382a8877bb032accd51f8a58',
     encodedPlaintextHash:
-        'be87cf264df69ed4379194ee0112dd903a58b4c2bf9e097fde0a1281175b6463d73fae17d35b5cfe2c6842ec2da9dac397452eb19b86944f3ff42673c288e99a',
+        'a6c247b2a549934dcf071cb48cb983194ea8ecf6d1c4021cae3750f5385e9fa3db08671d84568ca33614b5a1f581069d441b1fa4c426d266b1c04e8f4d39ee76',
 } as const;
 
 describe('transcript-core kernel in browsers', () => {
@@ -111,63 +111,6 @@ describe('transcript-core kernel in browsers', () => {
                 chunkSize: 8,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
-    it('rejects malformed encrypted aggregate evaluation sweep requests before setup loading', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(() =>
-            kernel.runEncryptedAggregateTopKEvaluationSweep({
-                topCounts: [1, 1],
-            } as unknown as Parameters<
-                typeof kernel.runEncryptedAggregateTopKEvaluationSweep
-            >[0]),
-        ).toThrow(
-            new TranscriptCoreKernelCommandError({
-                code: 'InvalidFixture',
-                message: 'topCounts must not contain duplicate values',
-            }),
-        );
-    });
-
-    it('rejects accepted evaluator witness fields before setup loading', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const forbiddenFieldCases = [
-            ['developmentKeySet', { keySeed: 'not-on-this-path' }],
-            ['trustedDealerSecret', { secret: 'not-on-this-path' }],
-            ['plaintextRanks', [0, 1]],
-            ['decodedTargetIdSlots', [1, 0]],
-            ['targetDecryptionShare', { share: 'not-yet-owned' }],
-        ] as const;
-
-        for (const [fieldName, fieldValue] of forbiddenFieldCases) {
-            expect(() =>
-                kernel.runEncryptedAggregateTopKEvaluation({
-                    [fieldName]: fieldValue,
-                } as unknown as Parameters<
-                    typeof kernel.runEncryptedAggregateTopKEvaluation
-                >[0]),
-            ).toThrow(
-                new TranscriptCoreKernelCommandError({
-                    code: 'InvalidFixture',
-                    message: `accepted encrypted aggregate evaluation rejects forbidden witness field ${fieldName}`,
-                }),
-            );
-
-            expect(() =>
-                kernel.runEncryptedAggregateTopKEvaluationSweep({
-                    topCounts: [1],
-                    [fieldName]: fieldValue,
-                } as unknown as Parameters<
-                    typeof kernel.runEncryptedAggregateTopKEvaluationSweep
-                >[0]),
-            ).toThrow(
-                new TranscriptCoreKernelCommandError({
-                    code: 'InvalidFixture',
-                    message: `accepted encrypted aggregate evaluation rejects forbidden witness field ${fieldName}`,
-                }),
-            );
-        }
     });
 
     it('produces byte-identical BGV canonical roots through browser WASM', async () => {

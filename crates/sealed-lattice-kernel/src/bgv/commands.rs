@@ -1,4 +1,3 @@
-use num_bigint::BigInt;
 use serde_json::{Value, json};
 
 use crate::{
@@ -6,16 +5,15 @@ use crate::{
         base_conversion::convert_plaintext_lifted_basis,
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         profile::{
-            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, aggregate_input_encoding_profile_hash,
-            allowed_operation_registry_hash, allowed_operation_registry_value,
-            backend_profile_hash, ballot_score_encoding_profile_hash,
-            ballot_share_layout_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
+            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_hash,
+            allowed_operation_registry_value, backend_profile_hash,
+            ballot_score_encoding_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
             batch_layout_binding_value, canonical_ciphertext_convention_hash,
-            encoded_aggregate_layout_hash, layout_hash, profile_hash,
-            security_estimator_input_hash, selected_profile_value,
-            top_k_evaluator_input_layout_hash,
+            direct_aggregate_layout_hash, direct_comparison_profile_hash,
+            encrypted_ballot_aggregate_layout_hash, encrypted_ballot_aggregate_profile_hash,
+            encrypted_ballot_layout_hash, profile_hash, security_estimator_input_hash,
+            selected_profile_value,
         },
-        rns::RnsPolynomial,
         serialization::{
             BgvObjectKind, canonical_bytes_hash, canonical_bytes_hex, ciphertext_root,
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
@@ -33,22 +31,20 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-pub(crate) use crate::bgv::setup::EncryptedAggregateBridgeCiphertextRelationTrace;
-
 pub(crate) fn describe_bgv_rns_profile() -> CanonicalResult<Value> {
     Ok(json!({
         "profile": selected_profile_value(),
         "profileHash": profile_hash()?,
         "backendProfileHash": backend_profile_hash()?,
         "batchEncoderHash": batch_encoder_hash()?,
-        "encryptedAggregateInputLayoutHash": layout_hash()?,
+        "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
         "batchLayoutBinding": batch_layout_binding_value()?,
         "batchLayoutBindingHash": batch_layout_binding_hash()?,
         "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
-        "ballotShareLayoutProfileHash": ballot_share_layout_profile_hash()?,
-        "aggregateInputEncodingProfileHash": aggregate_input_encoding_profile_hash()?,
-        "encodedAggregateLayoutHash": encoded_aggregate_layout_hash()?,
-        "topKEvaluatorInputLayoutHash": top_k_evaluator_input_layout_hash()?,
+        "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
+        "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
+        "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
+        "directComparisonProfileHash": direct_comparison_profile_hash()?,
         "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
         "securityEstimatorInputHash": security_estimator_input_hash()?,
@@ -194,7 +190,7 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
         "validation": validation,
         "statusLabels": [
             "BGVBatchEncoded",
-            "EncryptedAggregateInputLayoutBound",
+            "DirectEncryptedBallotAggregateLayoutBound",
             "NativeDecodeRoundTripMatched",
             "PlaintextRootBound"
         ],
@@ -210,14 +206,14 @@ fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
     let supplied_binding = request.get("layoutBinding").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "BGV batch encoder requires explicit EncryptedAggregateInput layout binding",
+            "BGV batch encoder requires explicit direct encrypted ballot aggregate layout binding",
         )
     })?;
     let expected_binding = batch_layout_binding_value()?;
     if supplied_binding != &expected_binding {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "BGV batch encoder layout binding does not match the selected EncryptedAggregateInput layout",
+            "BGV batch encoder layout binding does not match the selected direct encrypted ballot aggregate layout",
         ));
     }
 
@@ -234,39 +230,6 @@ pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalR
     let expected_plaintext_root = request.get("expectedPlaintextRoot").and_then(Value::as_str);
 
     validate_plaintext_hex(canonical_bytes_hex, expected_plaintext_root)
-}
-
-pub(crate) fn canonical_plaintext_root_from_coefficients(
-    coefficients_mod_plaintext: &[u64],
-) -> CanonicalResult<(String, usize)> {
-    if coefficients_mod_plaintext.len() != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "canonical plaintext root coefficient count does not match the selected BGV profile",
-        ));
-    }
-    if coefficients_mod_plaintext
-        .iter()
-        .any(|coefficient| *coefficient >= crate::bgv::profile::PLAINTEXT_MODULUS)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "canonical plaintext root coefficients must be reduced modulo the plaintext modulus",
-        ));
-    }
-    let residues_by_modulus = DATA_PRIMES
-        .iter()
-        .map(|_| coefficients_mod_plaintext.to_vec())
-        .collect::<Vec<_>>();
-    let polynomial = RnsPolynomial::coefficient_domain(
-        BgvBasisKind::Data,
-        DATA_PRIMES.len() - 1,
-        layout_hash()?,
-        residues_by_modulus,
-    )?;
-    let canonical_bytes = serialize_bgv_object(BgvObjectKind::Plaintext, &[polynomial])?;
-
-    Ok((plaintext_root(&canonical_bytes), canonical_bytes.len()))
 }
 
 pub(crate) fn validate_bgv_ciphertext_from_request(request: &Value) -> CanonicalResult<Value> {
@@ -362,74 +325,6 @@ pub(crate) fn reject_bgv_reference_oracle_artifact_from_request(request: &Value)
     reject_reference_oracle_artifact(artifact)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots(
-    setup_package: &Value,
-    contributor_identity: &str,
-    aggregate_derivation_component_hash: &str,
-    aggregate_derivation_statement_hash: &str,
-    post_voting_closed_context_hash: &str,
-    reduced_aggregate_slots: &[u64],
-    encryption_randomness_seed_hex: &str,
-    include_canonical_bytes_hex: bool,
-) -> CanonicalResult<EncryptedAggregateBridgeCiphertextRelationTrace> {
-    crate::bgv::setup::generate_encrypted_aggregate_bridge_ciphertext_relation_trace_from_slots(
-        setup_package,
-        contributor_identity,
-        aggregate_derivation_component_hash,
-        aggregate_derivation_statement_hash,
-        post_voting_closed_context_hash,
-        reduced_aggregate_slots,
-        encryption_randomness_seed_hex,
-        include_canonical_bytes_hex,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
-    setup_package: &Value,
-    aggregate_derivation_component_hash: &str,
-    aggregate_derivation_statement_hash: &str,
-    post_voting_closed_context_hash: &str,
-    bridge_encryption: &Value,
-) -> CanonicalResult<()> {
-    crate::bgv::setup::verify_encrypted_aggregate_bridge_ciphertext_public_bindings(
-        setup_package,
-        aggregate_derivation_component_hash,
-        aggregate_derivation_statement_hash,
-        post_voting_closed_context_hash,
-        bridge_encryption,
-    )
-}
-
-pub(crate) fn encrypted_aggregate_share_ciphertext_root_with_plaintext_binding(
-    setup_package: &Value,
-    aggregate_derivation_component_hash: &str,
-    aggregate_derivation_statement_hash: &str,
-    post_voting_closed_context_hash: &str,
-    bridge_encryption: &Value,
-) -> CanonicalResult<String> {
-    crate::bgv::setup::encrypted_aggregate_share_ciphertext_root_with_plaintext_binding(
-        setup_package,
-        aggregate_derivation_component_hash,
-        aggregate_derivation_statement_hash,
-        post_voting_closed_context_hash,
-        bridge_encryption,
-    )
-}
-
-pub(crate) fn encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
-    reduced_slot_response: &[BigInt],
-    plaintext_coefficient_response: &[BigInt],
-    plaintext_encoding_quotient_response: &[BigInt],
-) -> CanonicalResult<String> {
-    crate::bgv::setup::encrypted_aggregate_bridge_batch_encoding_commitment_hash_from_responses(
-        reduced_slot_response,
-        plaintext_coefficient_response,
-        plaintext_encoding_quotient_response,
-    )
-}
-
 pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> CanonicalResult<Value> {
     reject_unexpected_bgv_request_fields(
         request,
@@ -446,7 +341,7 @@ pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> Cano
         "basisId": object.components[0].basis_id,
         "level": object.components[0].level,
         "coefficientCount": object.components[0].coefficient_count,
-        "layoutHash": object.components[0].layout_hash,
+        "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
         "statusLabels": [
             "BGVCanonicalObjectParsed",
             "CoefficientDomainCanonical"
@@ -550,7 +445,9 @@ mod tests {
             encoded["statusLabels"]
                 .as_array()
                 .expect("labels")
-                .contains(&serde_json::json!("EncryptedAggregateInputLayoutBound"))
+                .contains(&serde_json::json!(
+                    "DirectEncryptedBallotAggregateLayoutBound"
+                ))
         );
         assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({
@@ -581,11 +478,11 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "ea3c780b8c7834f070b3d4bc70ef6715dc39abd5c10ce2cf4e503a16fafa98a4c0c3a25246d3227c448fb1005ef2bd26924c396e83ac9c74008c0387288b1208"
+            "0ed438e393c879787b859758e3c975edf4520b0258d2b42690eeb336c5a72140e265e5e7404b868ade767ee3b29da3c669c9d8db382a8877bb032accd51f8a58"
         );
         assert_eq!(
             encoded["canonicalBytesHash512"],
-            "be87cf264df69ed4379194ee0112dd903a58b4c2bf9e097fde0a1281175b6463d73fae17d35b5cfe2c6842ec2da9dac397452eb19b86944f3ff42673c288e99a"
+            "a6c247b2a549934dcf071cb48cb983194ea8ecf6d1c4021cae3750f5385e9fa3db08671d84568ca33614b5a1f581069d441b1fa4c426d266b1c04e8f4d39ee76"
         );
         assert_eq!(encoded["canonicalByteLength"], 90_441);
 
@@ -598,11 +495,11 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "08fa9c93f0a9a1a126da1ef56af57dd321d0f0897dbb22e65a183b977354a71da965969381960ab7d9f76b2eba937db2a24b3f2f36af5d96add949a76c72a986"
+            "28abe0e1146052111d852fd130c46ca993f9e30bd6f41a82b7bd060f18516cdca0af82cd2d7691b419a1f940d550424170dccded3c3260d6ca57175c86e569f0"
         );
         assert_eq!(
             ciphertext["canonicalBytesHash512"],
-            "46bc8c2049fd989cc76e1ca29728fe39ae619884399db1c48ccc8bc6e9e4a748c35df6ab3683fc18e7f2eed39ed782439b08838fdc574ca4f0108738cc93cc92"
+            "5e16cf5cac15f9767873d0f469cf1a014470908652216124e6ec8048cf04238e73d54e37dd7236996e988ea053cca303910cdd4e2dea50a67ef433fbd7ad9e70"
         );
         assert_eq!(ciphertext["canonicalByteLength"], 180_781);
 
@@ -613,11 +510,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "3c59be181276ea38e603fa44861bb4d7be4204b6593f2159c6c943ff7ae69e68455670c41febe7f734c37fc8b8f242e10f2b78873fd6f5f960f2de43087c1198"
+            "6d0bed44f39f28a28e8cc58fbf3f81885cbab61a31e9166daaa08d4a90c90a29f3fbea28949e0c2169aa395057b3eb02e79b308893a224a7a069d1849d428500"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "6eb1dfef84ec0b5cc4e272170edb8a82763f10fa0ec438b7cd6e57433414653666e594839c807a03cd87c9c21cee9b11ef7561f8b30c4b749114c534b1abf0c2"
+            "2b8a266d210fc0aab7756fdf57322f7b4c8e1f166eac07409dd9a66b85fc3d8d58732e880b757ecb740c7dd0629e674c0d3ccc4ed9054e0cfcddf60638193144"
         );
     }
 

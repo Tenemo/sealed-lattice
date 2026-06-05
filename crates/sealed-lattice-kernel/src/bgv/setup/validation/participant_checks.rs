@@ -4,8 +4,8 @@ pub(super) fn validate_participant_setup_records(
     setup_package: &Value,
     profile_hash: &str,
     backend_profile_hash: &str,
-    threshold_decryption_profile_hash: &str,
-    kllps_target_decryption_profile_hash: &str,
+    target_decryption_profile_hash: &str,
+    target_decryption_profile_binding_hash: &str,
 ) -> CanonicalResult<Vec<VerifiedParticipantSetupBinding>> {
     let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?;
     let manifest_hash = hash_at_path(setup_package, &["setupInputs", "manifestHash"])?;
@@ -141,9 +141,9 @@ pub(super) fn validate_participant_setup_records(
             "objectType": "TrusteeThresholdVerificationKey",
             "objectVersion": 1,
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-            "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
-            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
-            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+            "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+            "targetDecryptionProfileHash": target_decryption_profile_hash,
+            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
             "ceremonyId": ceremony_id,
             "rosterHash": roster_hash,
             "trusteeIdentity": trustee_identity,

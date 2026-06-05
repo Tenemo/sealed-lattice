@@ -5,14 +5,14 @@ sidebar:
     order: 3
 ---
 
-The workspace is only in a good state when the checks, docs, smoke tests, and Rust/WASM transcript plus ballot privacy verification paths all pass together.
+The workspace is only in a good state when the checks, docs, smoke tests, Rust/WASM transcript paths, and selected direct-path verification lanes pass together.
 
 ## Prerequisites
 
 - Node `24.14.1` or newer
 - `pnpm` `10.33.0`
 - Rust with the `wasm32-unknown-unknown` target installed
-- Playwright browser runtimes for the browser matrix
+- Playwright browser runtimes for browser tests
 
 ## Main commands
 
@@ -30,63 +30,58 @@ pnpm run test
 pnpm run test:proof-benchmark
 pnpm run test:proof-benchmark:node
 pnpm run test:proof-benchmark:browser:desktop
-pnpm run test:aggregate-derivation-kernel
-pnpm run test:encrypted-aggregate-evaluator:representative
-pnpm run test:encrypted-aggregate-bridge
-pnpm run test:encrypted-aggregate-bridge:representative
 pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
 
 ## What each command proves
 
-- `pnpm run build`: every package builds, the private crypto/runtime bridge is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
-- `pnpm run api-surface:generate`: runs the full build and regenerates the public API surface summary for PR review
-- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API surface summary generation, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane; the first failing lane aborts the remaining work
+- `pnpm run build`: every package builds, the private crypto/runtime facade is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
+- `pnpm run api-surface:generate`: runs the full build and regenerates the public API surface summary for review
+- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API surface summary generation, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
-- `pnpm run test:node:fast`: pre-commit-friendly Node tests, excluding slow protocol, kernel-heavy WASM, and proof-benchmark suites
-- `pnpm run test:node:protocol`: slow protocol relation and proof-record generation input tests that remain part of the default Node gate without running under coverage instrumentation
-- `pnpm run test:node:kernel`: transcript-core WASM loader, parity, fixture, proof-generation, proof-record integration, and aggregate-derivation transcript-core WASM integration tests
-- `pnpm run test`: runs the fast, protocol, and kernel Node lanes, then the desktop and mobile browser lanes through the package scripts
-- `pnpm run test:proof-benchmark`: Node and desktop Chromium proof benchmark lanes, built once and then run concurrently; the desktop Chromium lane mirrors the Node lane one-to-one
-- `pnpm run test:proof-benchmark:node`: Node proof benchmark lane, suitable for a separate CI worker
-- `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane, suitable for a separate CI worker
+- `pnpm run test:node:fast`: pre-commit-friendly Node tests
+- `pnpm run test:node:protocol`: slower protocol and relation tests that remain useful for the selected direct path and shared substrate
+- `pnpm run test:node:kernel`: transcript-core WASM loader, parity, fixture, proof, and kernel integration tests
+- `pnpm run test`: runs the Node lanes and browser lanes through the package scripts
+- `pnpm run test:proof-benchmark`: direct proof benchmark evidence where applicable
+- `pnpm run test:proof-benchmark:node`: Node proof benchmark lane
+- `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane
 - `pnpm run coverage:badge`: runs the fast Node coverage lane and writes the Shields-compatible badge and summary JSON that GitHub Pages publishes for the README badge
-- `pnpm run test:aggregate-derivation-kernel`: fast aggregate-derivation, aggregate bridge, and aggregate-ready iteration with representative selected contributors, 8 workers by default, opportunistic checkpoint reuse, and latest setup/input/request-base files under the checkpoint directory; it intentionally does not provide full-matrix, encrypted-evaluator, all-`K`, no-resume, or require-checkpoint modes
-- `pnpm run test:encrypted-aggregate-evaluator:representative`: reads the latest aggregate request-base artifact, prepares root-bound public evaluation-key material in process, and runs one representative accepted-input encrypted evaluator slice; it is manual and does not replace the all-supported-top-count closure sweep
-- `pnpm run test:encrypted-aggregate-bridge`: builds once, runs the cheap all-row bridge shape/config guardrail, then runs the full encrypted aggregate bridge matrix with 8 workers
-- `pnpm run test:encrypted-aggregate-bridge:representative`: builds once, then runs the selected representative bridge rows with 4 workers
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
 - `pnpm run docs:build`: builds the docs site without the surrounding verification checks when that narrower target is needed
-- `pnpm run smoke:pack:npm`: the published package tarball installs cleanly through npm and exposes safe-by-default helpers for transcript-core fixture verification, election foundation checks, and verification-oriented ballot privacy APIs
+- `pnpm run smoke:pack:npm`: the published package tarball installs cleanly through npm and exposes the current safe public boundary
 
 ## Local hooks
 
 The pre-commit hook runs `pnpm run check`.
-This builds the workspace once, then runs static verification, docs verification, npm package smoke verification, and the fast Node Vitest project in parallel against the built output before running Rust verification in isolation; the first failing lane aborts the remaining work.
-Protocol, kernel, browser, and proof benchmark lanes remain explicit commands so they can use checkpoints and targeted reruns instead of slowing every local commit. The Node kernel command runs its merged heavy WASM project sequentially, the proof benchmark command runs its Node and desktop lanes concurrently on one machine, and the encrypted aggregate bridge matrix defaults to parallel local execution. The coverage lane covers the fast Node project only; heavy protocol, kernel, and proof-benchmark coverage comes from their explicit test lanes rather than V8 coverage instrumentation. The coverage badge is generated locally in the Pages workflow, not by Codecov.
+
+Protocol, kernel, browser, and proof benchmark lanes remain explicit commands so they can use targeted reruns instead of slowing every local commit. The coverage badge is generated locally in the Pages workflow, not by Codecov.
 
 ## Local run logs
 
 Heavy local runners write timestamped logs under gitignored `logs/` directories.
-Logged runners include `pnpm run test:node:protocol`, `pnpm run test:node:kernel`, `pnpm run test:node`, `pnpm run test:browser`, all proof-benchmark scripts, and the encrypted aggregate bridge matrix scripts.
+
 Each run gets `logs/YYYY-MM-DD/YYYY-MM-DDTHH-mm-ss-SSSZ-script-name/` with `metadata.json`, `summary.json`, `combined.log`, and per-command logs.
-Encrypted aggregate bridge matrix runs also write per-row worker logs under `workers/`.
+
 CI disables local log emission with `--no-run-log`; use the same trailing argument locally when a one-off run should skip logs, for example `pnpm run test:node:kernel -- --no-run-log`.
-
-## Heavy proof checkpoints
-
-Heavy ballot privacy proof flows write resumable development checkpoints to `temp/test-checkpoints/`.
-The checkpoints are scratch artifacts and remain outside the published package and source tree.
-Checkpoint filenames are named after their test suite and step.
-Set `SEALED_LATTICE_RESUME_TEST_CHECKPOINTS=1` only when debugging a failed long run and intentionally reusing the latest local checkpoint.
-
-The checkpoint set currently covers relation requests, lowered statements, generated proof records, scoped relation-bearing ballot packages, and verification reports.
 
 ## Heavy gate policy
 
-The default Node runner can execute selected Vitest projects side by side, and the proof benchmark command runs its Node and desktop lanes concurrently; the merged kernel project keeps its heavy work sequential on one machine.
-Use `pnpm run test:aggregate-derivation-kernel` as the default aggregate and bridge readiness loop. It reuses valid checkpoints, ignores stale or corrupt checkpoints, recomputes only the affected stage, and writes the latest setup package, selected encrypted aggregate inputs, aggregate-ready record, and evaluator request base under the checkpoint directory for later manual evaluator slices. Use `pnpm run test:encrypted-aggregate-evaluator:representative` only when an accepted-input evaluator slice is needed. The full encrypted aggregate bridge matrix first runs the cheap all-row shape/config guardrail, then uses 8 workers; the representative bridge matrix uses 4 workers. Full matrix and all-supported-`K` evaluator runs are closure or release evidence, not normal iteration checks.
+Default and release gates should stay lean and direct-path-only.
+
+Use explicit heavy lanes only when the change touches the selected direct path area:
+
+```text
+direct proof benchmark;
+direct Node/WASM proof-copy measurement;
+direct browser proof-copy measurement;
+fully encrypted evaluator replay benchmark;
+target-bound decryption benchmark;
+manual mobile proof and replay lane.
+```
+
+Default, release, docs, package-smoke, browser, and mobile gates should cover only the selected direct path and shared substrate.
 
 ## Release-facing rule
 

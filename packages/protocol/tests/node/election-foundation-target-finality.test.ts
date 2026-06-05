@@ -8,7 +8,7 @@ import {
     createTargetFinalityRecord,
     createTargetProposalHead,
     createWitnessCheckpoint,
-    deriveProtocolHash,
+    deriveFixtureHash,
     deriveTargetFinalityRecordHash,
     deriveWitnessPolicyHash,
     targetFinalityPolicy,
@@ -94,21 +94,18 @@ describe('target finality', () => {
         );
     });
 
-    it('rejects wrong top-k inclusion, unknown witnesses, and conflicting finalized targets', () => {
+    it('rejects wrong evaluator replay inclusion, unknown witnesses, and conflicting finalized targets', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createTargetProposalHead(1, head0.headHash, 'left');
-        const forkTopKEvaluationRecordHash = deriveProtocolHash(
-            'ChallengeDomainHash',
-            {
-                payload: { proposal: 'fork' },
-                purpose: 'fixture-top-k-evaluation-record-v1',
-            },
+        const forkEvaluatorReplayRecordHash = deriveFixtureHash(
+            'fixture-evaluator-replay-record-v1',
+            { proposal: 'fork' },
         );
         const head1Fork = createTargetProposalHead(
             1,
             head0.headHash,
             'right',
-            forkTopKEvaluationRecordHash,
+            forkEvaluatorReplayRecordHash,
         );
         const boardEvidence = createBoardEvidence([head0, head1, head1Fork]);
         const record = createTargetFinalityRecord(head1);
@@ -117,7 +114,7 @@ describe('target finality', () => {
             inclusionProof: createInclusionProof(
                 head1,
                 'ElectionManifest',
-                record.targetFinalityCheckpoint.topKEvaluationRecordHash,
+                record.targetFinalityCheckpoint.evaluatorReplayRecordHash,
             ),
         };
         const unknownWitnessRecord = {
@@ -129,7 +126,7 @@ describe('target finality', () => {
         };
         const forkRecord = createTargetFinalityRecord(
             head1Fork,
-            forkTopKEvaluationRecordHash,
+            forkEvaluatorReplayRecordHash,
         );
 
         expect(
@@ -143,7 +140,7 @@ describe('target finality', () => {
         ).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    code: 'TopKEvaluationRecordNotIncluded',
+                    code: 'EvaluatorReplayRecordNotIncluded',
                 }),
             ]),
         );
@@ -268,23 +265,20 @@ describe('target finality', () => {
             head0.headHash,
             'first-target',
         );
-        const secondTopKEvaluationRecordHash = deriveProtocolHash(
-            'ChallengeDomainHash',
-            {
-                payload: { proposal: 'second-linear-target' },
-                purpose: 'fixture-top-k-evaluation-record-v1',
-            },
+        const secondEvaluatorReplayRecordHash = deriveFixtureHash(
+            'fixture-evaluator-replay-record-v1',
+            { proposal: 'second-linear-target' },
         );
         const secondTargetHead = createTargetProposalHead(
             2,
             firstTargetHead.headHash,
             'second-target',
-            secondTopKEvaluationRecordHash,
+            secondEvaluatorReplayRecordHash,
         );
         const firstRecord = createTargetFinalityRecord(firstTargetHead);
         const secondRecord = createTargetFinalityRecord(
             secondTargetHead,
-            secondTopKEvaluationRecordHash,
+            secondEvaluatorReplayRecordHash,
         );
         const verification = verifyTargetFinality({
             boardEvidence: createBoardEvidence([

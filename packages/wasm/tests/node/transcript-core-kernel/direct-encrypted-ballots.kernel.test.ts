@@ -3,23 +3,21 @@ import { describe, expect, it } from 'vitest';
 import {
     createDirectBallotInputs,
     createDirectBallotSetupPackage,
-    directBallotScores,
-    runMeasuredDirectEncryptedBallotPrototype,
-} from './direct-encrypted-ballot-prototype';
+    runMeasuredDirectEncryptedBallot,
+} from './direct-encrypted-ballot';
 
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
-describe('direct encrypted ballot prototype kernel command', () => {
+describe('direct encrypted ballot kernel command', () => {
     it('generates and verifies one full direct ballot proof through Node/WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setupPackage = createDirectBallotSetupPackage(kernel);
-        const { result, memory } =
-            await runMeasuredDirectEncryptedBallotPrototype({
-                setupPackage,
-            });
+        const { result, memory } = await runMeasuredDirectEncryptedBallot({
+            setupPackage,
+        });
 
-        expect(result.operation).toBe('runDirectEncryptedBallotPrototype');
+        expect(result.operation).toBe('runDirectEncryptedBallot');
         expect(result.input.ballotCount).toBe(1);
         expect(result.ballotLayout.optionCount).toBe(20);
         expect(result.profile.dataPrimeCount).toBe(17);
@@ -35,38 +33,45 @@ describe('direct encrypted ballot prototype kernel command', () => {
             'all RNS limb encryption equations',
         );
         expect(result.proofAttempt.challengeSoundness).toContain(
-            'support-degree union accounting and mask-shift accounting are reported',
+            'claim soundness is not accepted',
         );
         expect(result.proofAttempt.proofAccounting).toMatchObject({
             challengeBits: 192,
+            nominalChallengeBits: 192,
+            proofModelAccepted: false,
+            weakestRelationEffectiveBitsPerCheck: 16,
+            supportRelationModulusBits: 47,
             targetClassicalSoundnessBits: 128,
-            minimumIndependentRepetitionsForTarget: 1,
+            minimumIndependentRepetitionsForTarget: null,
+            estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses: 8,
         });
         expect(
             result.proofAttempt.proofAccounting.estimatedRepeatedProofSizeBytes,
-        ).toBe(result.proofAttempt.proofSizeBytes);
+        ).toBe(result.proofAttempt.proofSizeBytes * 8);
         expect(
             result.proofAttempt.proofAccounting
                 .estimatedRepeatedTotalProofBytes,
-        ).toBe(result.proofAttempt.totalProofBytes);
+        ).toBe(result.proofAttempt.totalProofBytes * 8);
         expect(
             result.proofAttempt.proofAccounting
                 .classicalSoundnessBitsAfterSupportUnionBound,
-        ).toBeGreaterThanOrEqual(128);
+        ).toBeNull();
         expect(
             result.proofAttempt.proofAccounting
                 .zeroKnowledgeShiftSlackBitsAfterResponseUnionBound,
         ).toBeGreaterThanOrEqual(128);
         expect(result.proofAttempt.proofAccounting.decision).toContain(
-            'no naive transcript repetition is needed',
+            'claim soundness is not accepted',
         );
-        expect(result.ballotPackages.ballotEncryptionRandomness).toMatchObject({
+        expect(
+            result.encryptedBallots.ballotEncryptionRandomness,
+        ).toMatchObject({
             source: 'fresh-csprng',
             ballotEncryptionRandomnessCount: 1,
             randomnessBytesPerBallot: 32,
         });
         expect(
-            result.ballotPackages.ballotEncryptionRandomness.retention,
+            result.encryptedBallots.ballotEncryptionRandomness.retention,
         ).toContain('not returned');
         expect(result.proofAttempt.proofTransport).toMatchObject({
             encoding: 'binary proof chunks',
@@ -77,18 +82,32 @@ describe('direct encrypted ballot prototype kernel command', () => {
             transportedProofBytesHash: result.proofAttempt.proofBytesHash,
         });
         expect(result.proofAttempt.proofTransport.status).toContain(
-            'reassembled, and verified from the transported bytes',
+            'chunk-hash checked',
         );
         expect(
             result.proofAttempt.proofTransport.firstProofChunkMerkleRoot,
         ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkHashes,
+        ).toHaveLength(18);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkHashes[0],
+        ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.firstProofPublicTransportHash,
+        ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.firstProofStatementHash,
+        ).toHaveLength(128);
+        expect(result.proofAttempt.proofTransport.proofProfileHash).toHaveLength(
+            128,
+        );
         expect(result.proofAttempt.proofTransport.retention).toContain(
             'verified and then dropped',
         );
         expect(result.proofAttempt.proofMaskRandomness).toMatchObject({
             source: 'fresh-csprng',
             ballotProofRandomnessCount: 1,
-            refreshShareProofRandomnessCount: 0,
             randomnessBytesPerProof: 32,
         });
         expect(result.proofAttempt.proofMaskRandomness.retention).toContain(
@@ -108,10 +127,18 @@ describe('direct encrypted ballot prototype kernel command', () => {
             result.proofAttempt.sharedShortResponseVectorLength,
         ).toBeLessThan(result.proofAttempt.duplicatedShortResponseVectorLength);
         expect(result.aggregation.ballotCount).toBe(1);
-        expect(result.aggregation.aggregateScores).toEqual(
-            result.aggregation.plaintextOracleScores,
+        expect(result.aggregation.aggregateCiphertextRoot).toHaveLength(128);
+        expect(
+            result.aggregation.aggregateCiphertextCanonicalByteLength,
+        ).toBeGreaterThan(0);
+        expect(result.aggregation.result).toContain(
+            'without publishing aggregate scores',
         );
-        expect(result.aggregation.aggregateScores).toEqual(directBallotScores);
+        expect(result.aggregation.privateCorrectnessCheck).toBe(
+            'aggregate score slots matched the plaintext oracle',
+        );
+        expect(result.aggregation).not.toHaveProperty('aggregateScores');
+        expect(result.aggregation).not.toHaveProperty('plaintextOracleScores');
         expect(memory.wasmLinearMemoryBytesAfter).toBeGreaterThanOrEqual(
             memory.wasmLinearMemoryBytesBefore,
         );
@@ -136,7 +163,7 @@ describe('direct encrypted ballot prototype kernel command', () => {
         }));
 
         await expect(
-            runMeasuredDirectEncryptedBallotPrototype({
+            runMeasuredDirectEncryptedBallot({
                 ballots,
                 setupPackage,
             }),
@@ -149,7 +176,7 @@ describe('direct encrypted ballot prototype kernel command', () => {
         const ballots = [...createDirectBallotInputs(2)].reverse();
 
         await expect(
-            runMeasuredDirectEncryptedBallotPrototype({
+            runMeasuredDirectEncryptedBallot({
                 ballots,
                 setupPackage,
             }),
@@ -165,7 +192,7 @@ describe('direct encrypted ballot prototype kernel command', () => {
         }
 
         await expect(
-            runMeasuredDirectEncryptedBallotPrototype({
+            runMeasuredDirectEncryptedBallot({
                 ballots: [
                     {
                         ...ballot,
@@ -184,7 +211,7 @@ describe('direct encrypted ballot prototype kernel command', () => {
         const setupPackage = createDirectBallotSetupPackage(kernel);
 
         await expect(
-            runMeasuredDirectEncryptedBallotPrototype({
+            runMeasuredDirectEncryptedBallot({
                 setupPackage,
                 setupSeed: 'direct-encrypted-ballot-wrong-setup-seed',
             }),

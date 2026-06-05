@@ -15,7 +15,7 @@ use crate::{
         profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, PROFILE_ID, profile_hash},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, hash512, hash512_hex, to_hex},
+    hashing::{canonical_json, derive_protocol_hash, hash512, hash512_hex, to_hex},
 };
 
 const DIRECT_BALLOT_RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP001";
@@ -35,6 +35,7 @@ const DIRECT_BALLOT_RELATION_PROOF_YELLOW_BYTES: usize = 20 * 1024 * 1024;
 const DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1";
 
+#[derive(Clone)]
 pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) proof_bytes: Vec<u8>,
     pub(super) proof_size_bytes: usize,
@@ -197,17 +198,31 @@ pub(super) fn direct_ballot_relation_proof_bytes_hash(proof_bytes: &[u8]) -> Str
     )
 }
 
+pub(super) fn direct_ballot_relation_proof_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "BallotValidityProofProfileHash",
+        &json!({
+            "profileId": "direct-encrypted-ballot-validity-relation-v1",
+            "statementVersion": 3,
+            "proofEncoding": "binary relation transcript",
+            "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
+            "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
+            "proofBytesDomain": DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN,
+            "proofModelStatus": "internal relation proof; claim soundness and support zero-knowledge are not accepted",
+            "relation": "BGV all-limb encryption equations, score encoding, one-hot constraints, randomizer support, and error support",
+            "sourceRingDegree": POLYNOMIAL_DEGREE,
+            "dataPrimeCount": DATA_PRIMES.len(),
+        }),
+    )
+}
+
 pub(super) fn direct_ballot_relation_proof_accounting(
     proof_size_bytes: usize,
     total_proof_bytes: usize,
 ) -> CanonicalResult<Value> {
-    let independent_repetitions = DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS
-        .div_ceil(DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS);
     let support_check_count = direct_ballot_support_check_count();
     let support_union_loss_bits =
         ceil_log2_usize(support_check_count * direct_ballot_support_maximum_degree());
-    let soundness_after_support_union_bound =
-        DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS - support_union_loss_bits;
     let response_union_loss_bits = ceil_log2_usize(direct_ballot_relation_response_scalar_count());
     let zero_knowledge_shift_slack_bits =
         u32::try_from(DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS)
@@ -215,37 +230,48 @@ pub(super) fn direct_ballot_relation_proof_accounting(
             - DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS
             - DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS
             - response_union_loss_bits;
+    let weakest_relation_bits_per_check = 16_u32;
+    let support_modulus_bits = 64 - direct_ballot_support_modulus().leading_zeros();
     let repeated_proof_size_bytes = checked_repeated_byte_count(
         proof_size_bytes,
-        independent_repetitions,
+        DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS
+            .div_ceil(weakest_relation_bits_per_check),
         "direct ballot repeated proof size",
     )?;
     let repeated_total_proof_bytes = checked_repeated_byte_count(
         total_proof_bytes,
-        independent_repetitions,
+        DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS
+            .div_ceil(weakest_relation_bits_per_check),
         "direct ballot repeated total proof size",
     )?;
 
     Ok(json!({
-        "model": "single Fiat-Shamir challenge over the internal binary transcript",
+        "model": "internal binary transcript with unaccepted claim soundness accounting",
+        "proofModelAccepted": false,
         "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
+        "nominalChallengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
         "challengeCount": 1,
-        "classicalSoundnessBitsBeforeLosses": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
+        "weakestCheckedRelation": "score and one-hot linear relation over the plaintext modulus 65537",
+        "weakestRelationEffectiveBitsPerCheck": weakest_relation_bits_per_check,
+        "supportRelationModulusBits": support_modulus_bits,
+        "classicalSoundnessBitsBeforeLosses": Value::Null,
         "supportCheckCount": support_check_count,
         "supportMaximumDegree": direct_ballot_support_maximum_degree(),
         "supportUnionLossBits": support_union_loss_bits,
-        "classicalSoundnessBitsAfterSupportUnionBound": soundness_after_support_union_bound,
+        "classicalSoundnessBitsAfterSupportUnionBound": Value::Null,
         "targetClassicalSoundnessBits": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
-        "minimumIndependentRepetitionsForTarget": independent_repetitions,
+        "minimumIndependentRepetitionsForTarget": Value::Null,
+        "minimumIndependentRepetitionsStatus": "not accepted from nominal challenge bits; the current weakest checked relation is about 16 bits per check before union losses",
+        "estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS.div_ceil(weakest_relation_bits_per_check),
         "estimatedRepeatedProofSizeBytes": repeated_proof_size_bytes,
         "estimatedRepeatedTotalProofBytes": repeated_total_proof_bytes,
         "maskCoefficientBits": DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS,
         "responseCoefficientBytes": DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES,
         "witnessBoundBitsForMaskShiftAccounting": DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS,
         "zeroKnowledgeShiftSlackBitsAfterResponseUnionBound": zero_knowledge_shift_slack_bits,
-        "supportAccounting": "The 192-bit Fiat-Shamir challenge leaves more than 128 classical bits after the support-degree and support-check union bound for this internal transcript.",
-        "zeroKnowledgeAccounting": "The 360-bit masks leave more than 128 bits of shift-hiding slack after response-coordinate union accounting under the bounded direct-ballot witness coefficients. The surrounding command reports whether proof masks came from fresh CSPRNG randomness or deterministic fixture randomness; fixture-mask runs remain development evidence only.",
-        "decision": "Claim-shaped for proof-of-concept sizing: no naive transcript repetition is needed for the direct ballot relation, but this is still not a public claim-bearing proof until the Fiat-Shamir/QROM review and accepted proof transport boundary are closed."
+        "supportAccounting": "The current support checks use one support modulus and witness-dependent support commitments. The support soundness and union-bound model is not accepted.",
+        "zeroKnowledgeAccounting": "The current support commitments include witness-dependent expansion coefficients, so zero-knowledge is not accepted even though mask-shift slack is reported for the linear response encoding.",
+        "decision": "The internal proof verifies the implemented relation, but claim soundness is not accepted. Nominal challenge bits do not establish 128-bit soundness because subrelations reduce the challenge modulo smaller rings and the support proof must be replaced or formally redesigned."
     }))
 }
 
@@ -1980,6 +2006,10 @@ fn ceil_log2_usize(value: usize) -> u32 {
     }
 }
 
+fn invalid_direct_ballot_relation_proof(message: impl Into<String>) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2032,8 +2062,4 @@ mod tests {
             assert!(error.message.contains("test witness support check failed"));
         }
     }
-}
-
-fn invalid_direct_ballot_relation_proof(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }

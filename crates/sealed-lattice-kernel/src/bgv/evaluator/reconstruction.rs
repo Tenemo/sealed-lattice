@@ -3,18 +3,18 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-// One selected aggregate contributor: the centered Lagrange interpolation
-// coefficient and the contributor's encrypted aggregate-share ciphertext.
+// One selected direct aggregate contributor: the centered Lagrange
+// interpolation coefficient and the contributor's encrypted share ciphertext.
 pub(crate) struct AggregateContributor {
     pub(crate) interpolation_coefficient: i64,
     pub(crate) encrypted_share: Ciphertext,
 }
 
-// Homomorphic Lagrange-weighted reconstruction of the encrypted aggregate from
-// the selected contributors: C_aggregate = sum_r lambda_r * C_r. The centered
-// coefficients are bounded by the aggregate-interpolation coefficient
-// certificate; scalar multiplication keeps the scaling factor, so the weighted
-// shares add directly.
+// Homomorphic Lagrange-weighted reconstruction of the direct encrypted
+// aggregate from the selected contributors: C_aggregate = sum_r lambda_r * C_r.
+// The centered coefficients are bounded by the aggregate-interpolation
+// coefficient certificate; scalar multiplication keeps the scaling factor, so
+// the weighted shares add directly.
 pub(crate) fn reconstruct_aggregate(
     contributors: &[AggregateContributor],
 ) -> CanonicalResult<Ciphertext> {
@@ -36,7 +36,7 @@ pub(crate) fn reconstruct_aggregate(
     Ok(accumulator)
 }
 
-// Reconstruct the encrypted aggregate score from the encrypted histogram
+// Reconstruct the direct encrypted score from the encrypted histogram
 // buckets: Enc(Score[a]) = sum_{s=1}^{bucket_count} s * Enc(H[a, s]). The bucket
 // at index s-1 holds the count of voters who assigned score s.
 pub(crate) fn score_from_histogram(buckets: &[Ciphertext]) -> CanonicalResult<Ciphertext> {

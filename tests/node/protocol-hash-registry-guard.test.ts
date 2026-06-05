@@ -17,20 +17,11 @@ const scannedSourceFileExtensions = new Set(['.rs', '.ts', '.tsx']);
 const ignoredPathSegmentPattern =
     /(?:^|[\\/])(?:coverage|dist|node_modules|target|temp)(?:[\\/]|$)/u;
 const reusedNamespaceValues = [
-    'AggregateShareCommitmentHash',
-    'BallotSetHash',
-    'BridgeProofRecordHash',
     'ChallengeDomainHash',
     'ConflictingHeadEvidenceHash',
     'FirstValidOrderHash',
     'WitnessEquivocationEvidenceHash',
 ] as const;
-const reusedNamespacePurposeBindingExceptions = new Set([
-    [
-        'crates/sealed-lattice-kernel/src/ballot_privacy/aggregate_bridge_proof/statement.rs',
-        'BridgeProofRecordHash',
-    ].join('\u0000'),
-]);
 type SourceFile = {
     readonly relativePath: string;
     readonly text: string;
@@ -145,37 +136,10 @@ describe('protocol hash registry guard', () => {
         expect(missingSourceNamespaces).toEqual([]);
     });
 
-    it('keeps board-finality required namespaces backed by source code', () => {
-        const boardFinalityVector = JSON.parse(
-            readWorkspaceText(
-                'test-vectors/election-foundation/board-finality.json',
-            ),
-        ) as { readonly requiredHashNamespaces: readonly string[] };
-        const sourceMissingNamespaces =
-            boardFinalityVector.requiredHashNamespaces.filter(
-                (namespace) =>
-                    !productionSourceFiles.some((sourceFile) =>
-                        hasQuotedNamespace(sourceFile, namespace),
-                    ),
-            );
-
-        expect(sourceMissingNamespaces).toEqual([]);
-    });
-
     it('keeps reused source namespaces explicitly purpose-bound', () => {
         const unboundLocations = productionSourceFiles.flatMap((sourceFile) =>
             reusedNamespaceValues.flatMap((namespace) =>
                 collectQuotedNamespaceLocations(sourceFile, namespace)
-                    .filter(() => {
-                        const exceptionKey = [
-                            sourceFile.relativePath,
-                            namespace,
-                        ].join('\u0000');
-
-                        return !reusedNamespacePurposeBindingExceptions.has(
-                            exceptionKey,
-                        );
-                    })
                     .filter((characterIndex) => {
                         const searchStart = Math.max(0, characterIndex - 2500);
                         const searchEnd = Math.min(
