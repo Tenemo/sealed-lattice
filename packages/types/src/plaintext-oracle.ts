@@ -1,14 +1,6 @@
+import type { FieldElement } from './field.js';
 import type { ProtocolHash } from './protocol-hash.js';
-
-/** Canonical element of `GF(65537)`, represented as an integer in `0..65536`. */
-export type FieldElement = number;
-
-/** Fixed-width canonical encoding for a `GF(65537)` element. */
-export type FieldElementEncoding = {
-    readonly bytesHex: string;
-    readonly centeredValue: number;
-    readonly value: FieldElement;
-};
+import type { SparseTopKTarget } from './target-result.js';
 
 /** Polynomial over `GF(65537)` with the constant term at index zero. */
 export type ShamirPolynomial = {
@@ -94,28 +86,6 @@ export type ComparatorPolynomialSet = {
     readonly equalCoefficients: readonly FieldElement[];
     readonly greaterThanCoefficients: readonly FieldElement[];
     readonly rosterSize: number;
-};
-
-/** Sparse target layout used by the mandatory homomorphic top-k path. */
-export type SparseTopKTargetLayoutId = 'WinnerRankTopK-v1';
-
-/** Plain sparse target expected from the later homomorphic top-k evaluator. */
-export type SparseTopKTarget = {
-    readonly forbiddenSemanticSlots: readonly FieldElement[];
-    readonly layoutHash: ProtocolHash;
-    readonly layoutId: SparseTopKTargetLayoutId;
-    readonly optionCount: number;
-    readonly targetHash: ProtocolHash;
-    readonly targetIdSlots: readonly FieldElement[];
-    readonly targetOrderSlots: readonly FieldElement[];
-    readonly topOptionCount: number;
-};
-
-/** One decoded sparse target selection ordered by final result position. */
-export type DecodedSparseTopKSelection = {
-    readonly optionIndex: number;
-    readonly optionOrdinal: number;
-    readonly orderPosition: number;
 };
 
 /** Plaintext top-k oracle output consumed by future encrypted tally paths. */

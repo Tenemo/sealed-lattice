@@ -1,8 +1,9 @@
 /** Claim profile label attached to transcript-core fixtures and results. */
-export type BaseClaimProfile = 'FullyVerifiedResult';
+export type BaseClaimProfile = 'FoundationTranscript' | 'FullyVerifiedResult';
 
 /** High-level malicious security closure claimed by transcript-core fixtures. */
 export type TranscriptCoreMheSecurityClosure =
+    | 'FoundationOnly'
     | 'PassiveMHEPrototype'
     | 'ActiveMalicious';
 

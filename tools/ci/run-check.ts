@@ -56,6 +56,8 @@ export type ParsedCheckArguments = {
 
 const checkUsage =
     'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
+const rustKernelLaneName = 'Rust kernel (fmt, clippy, optimized test)';
+const legacyRustKernelLaneName = 'Rust kernel (fmt, clippy, test)';
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -163,13 +165,12 @@ const buildGatingLanes = (
 // uses the same build script as standalone verification so TypeDoc generation
 // and postprocessing stay in one package-script sequence on Windows. The pack
 // smoke lane still calls its underlying tool directly because its package script
-// rebuilds for standalone use. The API surface lane regenerates the review
-// summary and does not compare it against a pinned baseline. The Rust lane runs
-// after this phase: the tests are memory-heavy on Windows and should not compete
-// with docs rendering, linting, package smoke verification, and Node tests. The
-// commit gate runs only the fast Node test project; the heavier protocol and
-// kernel Node projects and the Playwright browser projects stay in
-// `pnpm run test:node` and `pnpm run test:browser` for pre-push verification.
+// rebuilds for standalone use. The Rust lane runs after this phase: the tests
+// are memory-heavy on Windows and should not compete with docs rendering,
+// linting, package smoke verification, and Node tests. The commit gate runs
+// only the fast Node test project; the heavier protocol and kernel Node
+// projects and the Playwright browser projects stay in `pnpm run test:node`
+// and `pnpm run test:browser` for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -223,11 +224,6 @@ const buildParallelLanes = (
             '--package-manager',
             'npm',
         ]),
-        lane('Generate public API surface summary', 'api-surface', [
-            'exec',
-            'tsx',
-            './tools/ci/generate-api-surface-summary.ts',
-        ]),
         lane('Verify public package policy', 'package-policy', [
             'exec',
             'tsx',
@@ -280,7 +276,7 @@ const buildRustKernelLane = (): ValidationLane => ({
             'cargo-test',
         ),
     ],
-    name: 'Rust kernel (fmt, clippy, optimized test)',
+    name: rustKernelLaneName,
 });
 
 const buildIsolatedLanes = (): readonly ValidationLane[] => [
@@ -294,7 +290,11 @@ const buildProgressLanePlans = (
     const progressSourceForLane = (
         lane: ValidationLane,
     ): CheckProgressLanePlan['progress'] => {
-        const previousProgress = timingHistory.laneProgress.get(lane.name);
+        const previousProgress =
+            lane.name === rustKernelLaneName
+                ? (timingHistory.laneProgress.get(rustKernelLaneName) ??
+                  timingHistory.laneProgress.get(legacyRustKernelLaneName))
+                : timingHistory.laneProgress.get(lane.name);
         if (lane.name === 'Build workspace packages') {
             return {
                 primary:
@@ -329,7 +329,7 @@ const buildProgressLanePlans = (
                 source: 'vitest',
             };
         }
-        if (lane.name === 'Rust kernel (fmt, clippy, test)') {
+        if (lane.name === rustKernelLaneName) {
             return {
                 secondary:
                     previousProgress?.secondary === undefined

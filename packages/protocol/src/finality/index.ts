@@ -71,6 +71,8 @@ const verifyTargetRecordShape = (
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
         thresholdProfileHash: checkpoint.thresholdProfileHash,
+        tiePolicyHash: checkpoint.tiePolicyHash,
+        topOptionCount: checkpoint.topOptionCount,
     });
     const expectedCheckpointHash = deriveTargetFinalityCheckpointHash({
         boardPolicyHash: checkpoint.boardPolicyHash,
@@ -88,6 +90,8 @@ const verifyTargetRecordShape = (
         targetLayoutHash: checkpoint.targetLayoutHash,
         targetProposalHash: checkpoint.targetProposalHash,
         thresholdProfileHash: checkpoint.thresholdProfileHash,
+        tiePolicyHash: checkpoint.tiePolicyHash,
+        topOptionCount: checkpoint.topOptionCount,
         witnessPolicyHash: checkpoint.witnessPolicyHash,
     });
 

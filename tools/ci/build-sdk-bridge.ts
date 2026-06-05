@@ -20,7 +20,7 @@ import {
 import {
     vendoredProtocolRuntimeEntryExports,
     vendoredProtocolRuntimeModules,
-} from './verify-public-package-policy.js';
+} from './public-package-policy.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { collectFiles } from '#tools/internal/files.js';
@@ -102,6 +102,12 @@ const typesRuntimeOutputPath = path.resolve(
     'internal',
     'types.js',
 );
+const sdkExcludedTypesPackageSupportFiles = new Set([
+    'plaintext-oracle.d.ts',
+    'plaintext-oracle.js',
+]);
+const sdkExcludedTypesPackageExportPattern =
+    /^export \* from ['"]\.\/plaintext-oracle\.js['"];\r?\n?/gmu;
 const runtimeImportTargets = new Map([
     ['@sealed-lattice/crypto', cryptoOutputDirectoryPath],
     ['@sealed-lattice/types', typesRuntimeOutputPath],
@@ -364,6 +370,10 @@ const ensureTypesPackageBuilt = async (): Promise<void> => {
 const stripJavaScriptSourceMapComment = (sourceText: string): string =>
     sourceText.replace(/\r?\n\/\/# sourceMappingURL=.*(?:\r?\n)?$/u, '\n');
 
+export const stripSdkExcludedTypesPackageExports = (
+    sourceText: string,
+): string => sourceText.replace(sdkExcludedTypesPackageExportPattern, '');
+
 const copyTypesPackageSupportFiles = async (): Promise<void> => {
     const supportFilePaths = await collectFiles(typesBuildOutputDirectoryPath, {
         fileNamePattern: /\.(?:d\.ts|js)$/u,
@@ -378,7 +388,8 @@ const copyTypesPackageSupportFiles = async (): Promise<void> => {
             if (
                 relativeSourcePath === 'index.d.ts' ||
                 relativeSourcePath === 'index.js' ||
-                relativeSourcePath === 'index.js.map'
+                relativeSourcePath === 'index.js.map' ||
+                sdkExcludedTypesPackageSupportFiles.has(relativeSourcePath)
             ) {
                 return;
             }
@@ -433,12 +444,18 @@ export const inlineTypesIntoSdkDist = async (): Promise<void> => {
     await mkdir(path.dirname(typesDeclarationOutputPath), {
         recursive: true,
     });
-    await writeFile(typesDeclarationOutputPath, typesDeclarationText, 'utf8');
+    await writeFile(
+        typesDeclarationOutputPath,
+        stripSdkExcludedTypesPackageExports(typesDeclarationText),
+        'utf8',
+    );
     await writeFile(
         typesRuntimeOutputPath,
-        transpileSdkInternalSource(
-            await readFile(typesRuntimeSourcePath, 'utf8'),
-            typesRuntimeSourcePath,
+        stripSdkExcludedTypesPackageExports(
+            transpileSdkInternalSource(
+                await readFile(typesRuntimeSourcePath, 'utf8'),
+                typesRuntimeSourcePath,
+            ),
         ),
         'utf8',
     );

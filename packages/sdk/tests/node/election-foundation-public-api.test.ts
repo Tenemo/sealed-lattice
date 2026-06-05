@@ -3,6 +3,8 @@ import {
     targetDecryptionProfileId,
     type CapabilityContext,
     type CapabilityDecision,
+    type FoundationTranscriptInput,
+    type FoundationTranscriptVerification,
     type FirstValidOrderingInput,
     type FirstValidOrderingVerification,
     type LifecycleLabelInput,
@@ -13,10 +15,17 @@ import {
     type ProtocolAction,
     type ThresholdProfile,
     type ThresholdProfileInput,
+    type TranscriptCoreFixture,
+    type TranscriptCoreVerificationResult,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
+
+import {
+    createFoundationTranscriptCoreFixture,
+    createFoundationTranscriptFixture,
+} from '#tests/support/foundation-transcript-fixture';
 
 type DeriveThresholdProfile = (
     input: ThresholdProfileInput,
@@ -31,6 +40,12 @@ type EvaluateActionCapability = (
 type DeriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
 ) => FirstValidOrderingVerification;
+type VerifyFoundationTranscript = (
+    input: FoundationTranscriptInput,
+) => FoundationTranscriptVerification;
+type VerifyTranscriptCoreFixture = (
+    fixture: TranscriptCoreFixture,
+) => Promise<TranscriptCoreVerificationResult>;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const deriveThresholdProfile =
@@ -45,6 +60,10 @@ const evaluateActionCapability =
     publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
 const deriveValidatedFirstValidOrder =
     publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
+const verifyFoundationTranscript =
+    publicApiRuntimeRecord.verifyFoundationTranscript as VerifyFoundationTranscript;
+const verifyTranscriptCoreFixture =
+    publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
 
 const requiredPublicFunctions = [
     [
@@ -82,6 +101,7 @@ const requiredPublicFunctions = [
         'verifyRosterManifestTranscript',
         publicApiRuntimeRecord.verifyRosterManifestTranscript,
     ],
+    ['verifyFoundationTranscript', verifyFoundationTranscript],
     ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
     ['verifyTranscript', publicApiRuntimeRecord.verifyTranscript],
     [
@@ -231,6 +251,83 @@ describe('election foundation public package API in Node', () => {
             orderedObjects: [
                 expect.objectContaining({ objectHash: 'candidate' }),
             ],
+        });
+    });
+
+    it('verifies the deterministic foundation transcript through the public package', () => {
+        const fixture = createFoundationTranscriptFixture();
+        const verification = verifyFoundationTranscript(fixture.input);
+
+        expect(verification.ok).toBe(true);
+        expect(verification.electionManifestHash).toBe(
+            fixture.expectedHashes.electionManifestHash,
+        );
+        expect(verification.rosterExternalAcceptanceHash).toBe(
+            fixture.expectedHashes.rosterExternalAcceptanceHash,
+        );
+        expect(verification.firstValidOrderHash).toBe(
+            fixture.expectedHashes.firstValidOrderHash,
+        );
+        expect(verification.targetFinalityRecordHash).toBe(
+            fixture.expectedHashes.targetFinalityRecordHash,
+        );
+        expect(verification.nextRequiredEvidence).toEqual(
+            expect.arrayContaining([
+                'direct ballot proof verification',
+                'decoded result verification',
+                'supported-phone mobile runtime evidence',
+            ]),
+        );
+
+        const wrongTopCountInput = {
+            ...fixture.input,
+            expectedTopOptionCount: fixture.input.expectedTopOptionCount - 1,
+        };
+        expect(
+            verifyFoundationTranscript(wrongTopCountInput).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'TargetFinalityPolicyMismatch',
+                }),
+            ]),
+        );
+        expect(
+            (
+                publicApiRuntimeRecord.verifyTranscript as () => {
+                    readonly ok: boolean;
+                    readonly refusedObjects: readonly {
+                        readonly code: string;
+                    }[];
+                }
+            )(),
+        ).toMatchObject({
+            ok: false,
+            refusedObjects: [
+                expect.objectContaining({ code: 'OperationUnavailable' }),
+            ],
+        });
+    });
+
+    it('matches foundation roots through the packaged transcript-core WASM verifier', async () => {
+        const fixture = createFoundationTranscriptFixture();
+        const transcriptCoreFixture = createFoundationTranscriptCoreFixture(
+            fixture.expectedHashes,
+        );
+        const transcriptCoreVerification = await verifyTranscriptCoreFixture(
+            transcriptCoreFixture,
+        );
+
+        expect(transcriptCoreFixture.baseClaimProfile).toBe(
+            'FoundationTranscript',
+        );
+        expect(transcriptCoreFixture.mheSecurityClosure).toBe('FoundationOnly');
+        expect(transcriptCoreVerification).toMatchObject({
+            caseName: 'foundation-transcript-roots',
+            label: 'TranscriptCoreVerified',
+            objectHash512: transcriptCoreFixture.expectedObjectHash512,
+            chunkRoot: transcriptCoreFixture.expectedChunkRoot,
+            statusLabels: ['TranscriptCoreVerified'],
         });
     });
 });

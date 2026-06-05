@@ -6,10 +6,11 @@ import {
     computeRelativeTypesSpecifier,
     rewriteTypesImports,
     sdkProtocolRuntimeSourceRelativePaths,
+    stripSdkExcludedTypesPackageExports,
     transpileBridgeSource,
     transpileSdkInternalSource,
 } from '#tools/ci/build-sdk-bridge';
-import { vendoredProtocolRuntimeModules } from '#tools/ci/verify-public-package-policy';
+import { vendoredProtocolRuntimeModules } from '#tools/ci/public-package-policy';
 
 const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
 const typesRuntime = path.resolve(distRoot, 'internal/types.js');
@@ -53,6 +54,25 @@ describe('SDK bridge build helpers', () => {
 
         expect(rewritten).toContain("from './internal/types.js'");
         expect(rewritten).not.toContain('@sealed-lattice/types');
+    });
+
+    it('strips test-only plaintext oracle type exports from the SDK copy', () => {
+        expect(
+            stripSdkExcludedTypesPackageExports(
+                [
+                    "export * from './board-target.js';",
+                    "export * from './plaintext-oracle.js';",
+                    "export * from './target-result.js';",
+                    '',
+                ].join('\n'),
+            ),
+        ).toBe(
+            [
+                "export * from './board-target.js';",
+                "export * from './target-result.js';",
+                '',
+            ].join('\n'),
+        );
     });
 
     it('computes a relative specifier from nested dist files', () => {

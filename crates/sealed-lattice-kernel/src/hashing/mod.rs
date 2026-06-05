@@ -43,7 +43,6 @@ reserved_root_namespaces! {
     FIRST_VALID_ORDER_HASH_NAMESPACE => "sealed-lattice-root/first-valid-order-hash-v1",
     TARGET_FINALITY_POLICY_HASH_NAMESPACE => "sealed-lattice-root/target-finality-policy-hash-v1",
     WITNESS_POLICY_HASH_NAMESPACE => "sealed-lattice-root/witness-policy-hash-v1",
-    SIGNED_ROOT_HASH_NAMESPACE => "sealed-lattice-root/signed-root-hash-v1",
     PROTOCOL_SIGNATURE_ENVELOPE_HASH_NAMESPACE => "sealed-lattice-root/protocol-signature-envelope-hash-v1",
     PROVIDER_BUILD_HASH_NAMESPACE => "sealed-lattice-root/provider-build-hash-v1",
     THRESHOLD_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/threshold-profile-hash-v1",

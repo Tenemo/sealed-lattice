@@ -9,7 +9,6 @@ export {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    deriveCanonicalSignedRootHash,
     deriveMlDsaContextByteLength,
     deriveMlDsaPublicKeyHash,
     deriveProtocolSignatureHash,

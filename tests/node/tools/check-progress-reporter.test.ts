@@ -135,6 +135,84 @@ describe('check progress reporter timing history', () => {
             await rm(logRootDirectoryPath, { force: true, recursive: true });
         }
     });
+
+    it('backfills missing lane progress from older successful summaries', async () => {
+        const logRootDirectoryPath = await createTemporaryDirectory();
+        try {
+            await writeFile(
+                path.join(logRootDirectoryPath, 'runs.jsonl'),
+                [
+                    JSON.stringify({
+                        details: {
+                            completedCommandCount: 3,
+                            lanes: [
+                                {
+                                    commands: [],
+                                    durationMilliseconds: 120_000,
+                                    name: 'Rust kernel (fmt, clippy, test)',
+                                    progress: {
+                                        secondary: {
+                                            completed: 166,
+                                            total: 166,
+                                            unit: 'test',
+                                        },
+                                    },
+                                    status: 'passed',
+                                },
+                            ],
+                            objectVersion:
+                                'sealed-lattice-check-run-details-v1',
+                            totalCommandCount: 3,
+                        },
+                        durationMilliseconds: 130_000,
+                        exitCode: 0,
+                        scriptName: 'check',
+                    }),
+                    JSON.stringify({
+                        details: {
+                            completedCommandCount: 3,
+                            lanes: [
+                                {
+                                    commands: [],
+                                    durationMilliseconds: 10_000,
+                                    name: 'Rust kernel (fmt, clippy, optimized test)',
+                                    status: 'passed',
+                                },
+                            ],
+                            objectVersion:
+                                'sealed-lattice-check-run-details-v1',
+                            totalCommandCount: 3,
+                        },
+                        durationMilliseconds: 11_000,
+                        exitCode: 0,
+                        scriptName: 'check',
+                    }),
+                ].join('\n'),
+                'utf8',
+            );
+
+            const timingHistory =
+                await readPreviousCheckTimingHistory(logRootDirectoryPath);
+
+            expect(timingHistory.totalDurationMilliseconds).toBe(11_000);
+            expect(
+                timingHistory.laneDurationMilliseconds.get(
+                    'Rust kernel (fmt, clippy, optimized test)',
+                ),
+            ).toBe(10_000);
+            expect(
+                timingHistory.laneProgress.get(
+                    'Rust kernel (fmt, clippy, test)',
+                )?.secondary,
+            ).toEqual({
+                completed: 166,
+                total: 166,
+                unit: 'test',
+            });
+        } finally {
+            await rm(logRootDirectoryPath, { force: true, recursive: true });
+        }
+    });
 });
 
 describe('check progress output buffers', () => {

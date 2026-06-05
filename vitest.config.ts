@@ -33,6 +33,10 @@ const publicPackageAlias = {
 
 const rootPrivateAliases = [
     {
+        find: '#tests',
+        replacement: resolveFromRepoRoot('tests'),
+    },
+    {
         find: '#test-vectors',
         replacement: resolveFromRepoRoot('test-vectors'),
     },
@@ -237,7 +241,6 @@ export default defineConfig({
             include: [
                 'packages/*/src/**/*.ts',
                 'tools/**/*.ts',
-                'tools/**/*.mts',
                 'tools/**/*.mjs',
             ],
             exclude: ['packages/*/src/**/*.d.ts'],

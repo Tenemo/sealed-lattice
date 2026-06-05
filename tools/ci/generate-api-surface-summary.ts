@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -9,15 +10,10 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 type ApiSurfaceSummary = {
     readonly declarationFiles: readonly string[];
-    readonly declarations: readonly DeclarationSurfaceFile[];
+    readonly reachableDeclarationHash: string;
     readonly runtimeExports: readonly string[];
-    readonly schemaVersion: 1;
+    readonly schemaVersion: 2;
     readonly typeExports: readonly string[];
-};
-
-type DeclarationSurfaceFile = {
-    readonly file: string;
-    readonly lines: readonly string[];
 };
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -182,17 +178,23 @@ const loadRuntimeExportNames = async (): Promise<string[]> => {
     return sortedUnique(Object.keys(runtimeModule));
 };
 
-const loadDeclarationSurfaceFiles = async (
+const hashReachableDeclarationFiles = async (
     declarationFilePaths: readonly string[],
-): Promise<DeclarationSurfaceFile[]> =>
-    Promise.all(
-        declarationFilePaths.map(async (declarationFilePath) => ({
-            file: normalizePath(declarationFilePath),
-            lines: normalizeText(
-                await fs.readFile(declarationFilePath, 'utf8'),
-            ).split('\n'),
-        })),
-    );
+): Promise<string> => {
+    const hash = createHash('sha256');
+
+    for (const declarationFilePath of declarationFilePaths) {
+        const relativePath = normalizePath(declarationFilePath);
+        const declarationText = normalizeText(
+            await fs.readFile(declarationFilePath, 'utf8'),
+        );
+
+        hash.update(`${relativePath.length}:${relativePath}\n`, 'utf8');
+        hash.update(`${declarationText.length}:${declarationText}\n`, 'utf8');
+    }
+
+    return hash.digest('hex');
+};
 
 const createCurrentApiSurfaceSummary = async (): Promise<ApiSurfaceSummary> => {
     const declarationFilePaths = await collectReachableDeclarationFilePaths();
@@ -201,9 +203,10 @@ const createCurrentApiSurfaceSummary = async (): Promise<ApiSurfaceSummary> => {
     );
 
     return {
-        schemaVersion: 1,
+        schemaVersion: 2,
         declarationFiles: declarationFilePaths.map(normalizePath),
-        declarations: await loadDeclarationSurfaceFiles(declarationFilePaths),
+        reachableDeclarationHash:
+            await hashReachableDeclarationFiles(declarationFilePaths),
         runtimeExports: await loadRuntimeExportNames(),
         typeExports: collectNamedTypeExports(entrySourceFile),
     };

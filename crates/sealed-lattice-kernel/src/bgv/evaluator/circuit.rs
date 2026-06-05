@@ -1,4 +1,6 @@
-use std::{collections::BTreeMap, sync::RwLock};
+use std::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::RwLock;
 
 use crate::{
     bgv::{
@@ -18,6 +20,9 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
+#[cfg(test)]
+use crate::bgv::modular_arithmetic::integer_square_root_ceil;
+
 // The evaluator context owns the development key set and the per-level
 // relinearization keys needed by homomorphic multiplication. Relinearization
 // keys are generated for every level from one up to the working level so a
@@ -27,6 +32,7 @@ pub(crate) struct EvaluatorContext {
     relinearization_keys: Vec<Option<KeySwitchKey>>,
     rotation_key_seeds: BTreeMap<(usize, usize), String>,
     rotation_keys: BTreeMap<(usize, usize), KeySwitchKey>,
+    #[cfg(not(target_arch = "wasm32"))]
     generated_rotation_keys: RwLock<BTreeMap<(usize, usize, String), KeySwitchKey>>,
 }
 
@@ -81,6 +87,7 @@ impl EvaluatorContext {
             relinearization_keys,
             rotation_key_seeds,
             rotation_keys: BTreeMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
         })
     }
@@ -102,6 +109,7 @@ impl EvaluatorContext {
             relinearization_keys: key_material.relinearization_keys,
             rotation_key_seeds: BTreeMap::new(),
             rotation_keys: key_material.rotation_keys,
+            #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
         })
     }
@@ -279,7 +287,7 @@ pub(crate) fn multiply(
 }
 
 // A plaintext polynomial whose every slot holds the same constant value.
-fn broadcast_constant_coefficients(value: u64) -> Vec<u64> {
+pub(crate) fn broadcast_constant_coefficients(value: u64) -> Vec<u64> {
     let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
     coefficients[0] = value % PLAINTEXT_MODULUS;
 
@@ -556,16 +564,6 @@ fn sum_ciphertexts_at_common_level(ciphertexts: &[Ciphertext]) -> CanonicalResul
     }
 
     Ok(accumulator)
-}
-
-#[cfg(test)]
-fn integer_square_root_ceil(value: usize) -> usize {
-    let mut root = 1_usize;
-    while root.saturating_mul(root) < value {
-        root += 1;
-    }
-
-    root
 }
 
 fn higher_power_needed(coefficients: &[u64], power: usize) -> bool {

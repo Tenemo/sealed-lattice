@@ -42,6 +42,8 @@ The public package must not expose raw BGV decrypt, arbitrary threshold decrypti
 
 Reserved complete-protocol entry points must fail closed until their direct-path claim gates are actually implemented.
 
+Foundation helpers now include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. Browser and mobile-emulated browser coverage is useful package evidence, but it is not supported-phone evidence.
+
 ## Current implementation status
 
 The direct encrypted ballot implementation has useful internal evidence:
@@ -69,13 +71,13 @@ This evidence is not claim-bearing. The current blockers are:
 - Fiat-Shamir/QROM review;
 - public package proof transport for an accepted proof profile;
 - public accepted randomness API boundaries;
-- mobile proof verification;
-- mobile evaluator replay;
+- supported-phone mobile proof verification;
+- supported-phone mobile evaluator replay;
 - browser/mobile proof-copy and memory evidence;
 - target decryption share proof verification and certification;
 - smudging, noise, and C1-C4 target-decryption closure;
 - public target-decryption/recombination integration;
-- mobile target-decryption/recombination evidence.
+- supported-phone mobile target-decryption/recombination evidence.
 
 ## What is internal
 
@@ -95,17 +97,15 @@ These pieces are not exported as a public voting API.
 sealed-lattice/
   crates/
     sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
-  docs/                         Public documentation site
+  docs/                         Public documentation site and API documentation tools
   packages/
     crypto/                     Internal canonical JSON, hashes, signatures
     protocol/                   Internal protocol logic and reference paths
     sdk/                        Published sealed-lattice package
-    testkit/                    Internal fixture loading helpers
     types/                      Shared TypeScript type declarations
     wasm/                       Internal WASM loader package
   test-vectors/                 Canonical public regression vectors
   tools/                        CI, vector, packaging, and documentation tools
-  typedoc/                      API documentation generation support
 ```
 
 ## Documentation
@@ -137,7 +137,9 @@ Run the main local validation gate:
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public API surface summary generation, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, Rust tests, and fast Node tests through the repository check runner.
+`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, Rust tests, and fast Node tests through the repository check runner.
+
+For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
 Run focused verification:
 

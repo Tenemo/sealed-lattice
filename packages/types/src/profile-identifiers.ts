@@ -33,6 +33,10 @@ export const directComparisonProfileId =
 export const fullyVerifiedResultProfileId =
     'transcript-core-fully-verified-result-profile-v1';
 
+/** Foundation transcript profile emitted by transcript-core fixtures. */
+export const foundationTranscriptProfileId =
+    'transcript-core-foundation-transcript-profile-v1';
+
 /** Passive MHE prototype profile emitted by transcript-core fixtures. */
 export const passiveMhePrototypeProfileId =
     'transcript-core-passive-mhe-prototype-profile-v1';
@@ -41,8 +45,16 @@ export const passiveMhePrototypeProfileId =
 export const activeMaliciousMheProfileId =
     'transcript-core-active-malicious-mhe-profile-v1';
 
+/** Foundation-only profile emitted by transcript-core fixtures. */
+export const foundationOnlyProfileId =
+    'transcript-core-foundation-only-profile-v1';
+
 /** HE setup proof placeholder profile emitted by transcript-core fixtures. */
 export const noHeSetupProofProfileId = 'transcript-core-no-he-setup-proof-v1';
+
+/** Evaluator replay placeholder profile emitted by transcript-core fixtures. */
+export const noEvaluatorReplayProfileId =
+    'transcript-core-no-evaluator-replay-proof-v1';
 
 /** Decryption proof placeholder profile emitted by transcript-core fixtures. */
 export const noDecryptionProofProfileId =
@@ -51,12 +63,5 @@ export const noDecryptionProofProfileId =
 /** Mobile replay profile required by accepted manifests. */
 export const mobileProfileId = 'mobile-flagship-profile-v1';
 
-/** Score membership profile for score values in the supported score domain. */
-export const scoreMembershipProfileId = 'one-hot-score-membership-v1';
-
 /** Ballot score encoding profile for direct encrypted score coordinates. */
 export const ballotScoreEncodingProfileId = 'DirectEncryptedScoreSlots-v1';
-
-/** Field encoding profile for canonical GF(65537) representatives. */
-export const fieldEncodingProfileId =
-    'gf65537-canonical-representative-quotient-v1';

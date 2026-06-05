@@ -15,7 +15,5 @@ pub(crate) mod prg;
 pub(crate) mod circuit;
 pub(crate) mod engine;
 pub(crate) mod key_switch;
-#[cfg(test)]
-pub(crate) mod reconstruction;
 pub(crate) mod records;
 pub(crate) mod top_k;

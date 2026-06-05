@@ -12,7 +12,7 @@ sidebar:
 - the workspace layout is explicit and package-boundary checked
 - the published package identity is stable
 - the public runtime facade remains intentionally narrow while the final direct API is built
-- the election foundation verifies signed-root envelopes for the current board, finality, roster-manifest, cast receipt, close record, and recovery helpers
+- the election foundation component helpers verify signed-root envelopes for the current board, finality, roster-manifest, cast receipt, close record, and recovery helpers
 - the Rust transcript-core builds, the published SDK loader verifies the packaged kernel hash before instantiation, and unpinned local WASM loader use requires an explicit test-only opt-in
 - docs, smoke checks, browser coverage, vector manifest verification, and release workflow continue to verify the current boundary
 
@@ -21,7 +21,7 @@ sidebar:
 - no complete threshold voting workflow is published yet
 - no production ballot generation, casting, aggregation, evaluator replay, target-bound decryption, or result release API is public yet
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
-- the internal direct encrypted ballot proof is not claim-bearing until soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and mobile evidence close
+- the internal direct encrypted ballot proof is not claim-bearing until soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and supported-phone mobile evidence close
 - direct encrypted sparse target projection is not complete for every supported top count
 - target-bound decryption is not implemented as an accepted direct-path rule
 - no caller should rely on private package names or future public subpaths becoming stable

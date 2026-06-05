@@ -91,14 +91,15 @@ export type DirectEncryptedBallotResult = {
         readonly coverage: string;
         readonly proofCount: number;
         readonly rnsLimbCount: number;
+        readonly responseEncoding: string;
+        readonly responsePolynomialDegree: number;
+        readonly sharedResponsePolynomialCount: number;
         readonly proofSizeBytes: number;
         readonly verifiedProofSizeBytes: number;
         readonly totalProofBytes: number;
         readonly proofBytesHash: string;
         readonly proofGate: string;
         readonly timingStatus: string;
-        readonly sharedShortResponseVectorLength: number;
-        readonly duplicatedShortResponseVectorLength: number;
         readonly challengeSoundness: string;
         readonly proofAccounting: {
             readonly challengeBits: number;

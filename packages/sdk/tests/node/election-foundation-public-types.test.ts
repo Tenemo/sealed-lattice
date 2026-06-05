@@ -38,6 +38,8 @@ type PublicFoundationTypes = [
     publicTypes.BoardConsistencyInput,
     publicTypes.CastReceipt,
     publicTypes.ElectionManifest,
+    publicTypes.FoundationTranscriptInput,
+    publicTypes.FoundationTranscriptVerification,
     publicTypes.PollSpecInput,
     publicTypes.RegistrationEntry,
     publicTypes.RosterManifestTranscriptInput,
@@ -66,6 +68,8 @@ const publicFoundationTypeNames = [
     'BoardConsistencyInput',
     'CastReceipt',
     'ElectionManifest',
+    'FoundationTranscriptInput',
+    'FoundationTranscriptVerification',
     'PollSpecInput',
     'RegistrationEntry',
     'RosterManifestTranscriptInput',
@@ -80,6 +84,6 @@ const publicFoundationTypeNames = [
 
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
-        expect(publicFoundationTypeNames).toHaveLength(14);
+        expect(publicFoundationTypeNames).toHaveLength(16);
     });
 });

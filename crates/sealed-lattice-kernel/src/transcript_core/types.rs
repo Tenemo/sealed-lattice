@@ -25,34 +25,42 @@ pub(super) const REQUIRED_FIELDS: [u64; 6] = [
 
 pub const FULLY_VERIFIED_RESULT_PROFILE_ID: &str =
     "transcript-core-fully-verified-result-profile-v1";
+pub const FOUNDATION_TRANSCRIPT_PROFILE_ID: &str =
+    "transcript-core-foundation-transcript-profile-v1";
 pub const PASSIVE_MHE_PROTOTYPE_PROFILE_ID: &str =
     "transcript-core-passive-mhe-prototype-profile-v1";
 pub const ACTIVE_MALICIOUS_MHE_PROFILE_ID: &str = "transcript-core-active-malicious-mhe-profile-v1";
+pub const FOUNDATION_ONLY_PROFILE_ID: &str = "transcript-core-foundation-only-profile-v1";
 pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
 pub const MANDATORY_EVALUATOR_REPLAY_PROFILE_ID: &str =
     "direct-encrypted-ballot-evaluator-replay-v1";
+pub const NO_EVALUATOR_REPLAY_PROFILE_ID: &str = "transcript-core-no-evaluator-replay-proof-v1";
 pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-proof-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BaseClaimProfile {
+    FoundationTranscript,
     FullyVerifiedResult,
 }
 
 impl BaseClaimProfile {
     pub fn code(self) -> u64 {
         match self {
+            Self::FoundationTranscript => 1,
             Self::FullyVerifiedResult => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::FoundationTranscript => "FoundationTranscript",
             Self::FullyVerifiedResult => "FullyVerifiedResult",
         }
     }
 
     pub fn expected_profile_id(self) -> &'static str {
         match self {
+            Self::FoundationTranscript => FOUNDATION_TRANSCRIPT_PROFILE_ID,
             Self::FullyVerifiedResult => FULLY_VERIFIED_RESULT_PROFILE_ID,
         }
     }
@@ -60,6 +68,7 @@ impl BaseClaimProfile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MheSecurityClosure {
+    FoundationOnly,
     PassiveMhePrototype,
     ActiveMalicious,
 }
@@ -67,6 +76,7 @@ pub enum MheSecurityClosure {
 impl MheSecurityClosure {
     pub fn code(self) -> u64 {
         match self {
+            Self::FoundationOnly => 3,
             Self::PassiveMhePrototype => 1,
             Self::ActiveMalicious => 2,
         }
@@ -74,6 +84,7 @@ impl MheSecurityClosure {
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::FoundationOnly => "FoundationOnly",
             Self::PassiveMhePrototype => "PassiveMHEPrototype",
             Self::ActiveMalicious => "ActiveMalicious",
         }
@@ -81,6 +92,7 @@ impl MheSecurityClosure {
 
     pub fn expected_profile_id(self) -> &'static str {
         match self {
+            Self::FoundationOnly => FOUNDATION_ONLY_PROFILE_ID,
             Self::PassiveMhePrototype => PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
             Self::ActiveMalicious => ACTIVE_MALICIOUS_MHE_PROFILE_ID,
         }
