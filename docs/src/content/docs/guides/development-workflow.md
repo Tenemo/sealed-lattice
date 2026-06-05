@@ -37,8 +37,8 @@ pnpm run smoke:pack:npm
 ## What each command proves
 
 - `pnpm run build`: every package builds, the private crypto/runtime facade is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
-- `pnpm run api-surface:generate`: runs the full build and regenerates the public API surface summary for review
-- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public API surface summary generation, public package policy, dependency-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane
+- `pnpm run api-surface:generate`: runs the full build and regenerates the compact public API surface summary for manual PR review
+- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public package policy, package-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests
 - `pnpm run test:node:protocol`: slower protocol and relation tests that remain useful for the selected direct path and shared substrate

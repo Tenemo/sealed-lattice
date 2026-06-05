@@ -7,7 +7,7 @@ import {
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
 describe('hash namespace registries', () => {
-    it('lists valid TypeScript and Rust root namespaces without duplicates', async () => {
+    it('keeps TypeScript and Rust root namespaces identical', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const typeScriptDomains = protocolHashNamespaceValues
             .map(resolveProtocolHashDomain)
@@ -21,5 +21,6 @@ describe('hash namespace registries', () => {
         for (const domain of [...typeScriptDomains, ...rustDomains]) {
             expect(domain).toMatch(/^sealed-lattice-root\/[a-z0-9-]+-v1$/u);
         }
+        expect(typeScriptDomains).toEqual(rustDomains);
     });
 });

@@ -123,9 +123,22 @@ describe('direct encrypted ballot kernel command', () => {
         expect(result.proofAttempt.totalProofBytes).toBe(
             result.proofAttempt.proofSizeBytes,
         );
+        expect(result.proofAttempt.responseEncoding).toBe(
+            'full BGV-degree signed response polynomials plus direct ballot score scalars',
+        );
+        expect(result.proofAttempt.responsePolynomialDegree).toBeGreaterThan(
+            64,
+        );
         expect(
-            result.proofAttempt.sharedShortResponseVectorLength,
-        ).toBeLessThan(result.proofAttempt.duplicatedShortResponseVectorLength);
+            result.proofAttempt.sharedResponsePolynomialCount,
+        ).toBeGreaterThan(0);
+        expect(result.proofAttempt).not.toHaveProperty('proofRingDegree');
+        expect(result.proofAttempt).not.toHaveProperty(
+            'sharedShortResponseVectorLength',
+        );
+        expect(result.proofAttempt).not.toHaveProperty(
+            'duplicatedShortResponseVectorLength',
+        );
         expect(result.aggregation.ballotCount).toBe(1);
         expect(result.aggregation.aggregateCiphertextRoot).toHaveLength(128);
         expect(

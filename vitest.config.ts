@@ -241,7 +241,6 @@ export default defineConfig({
             include: [
                 'packages/*/src/**/*.ts',
                 'tools/**/*.ts',
-                'tools/**/*.mts',
                 'tools/**/*.mjs',
             ],
             exclude: ['packages/*/src/**/*.d.ts'],

@@ -5,8 +5,6 @@
             "entry": [
                 "tests/**/*.ts",
                 "tools/**/*.ts",
-                "tools/**/*.mts",
-                "tools/**/*.cjs",
                 "docs/typedoc/**/*.ts",
                 "docs/astro.config.ts",
                 "docs/src/content.config.ts"
@@ -14,8 +12,6 @@
             "project": [
                 "tests/**/*.ts",
                 "tools/**/*.ts",
-                "tools/**/*.mts",
-                "tools/**/*.cjs",
                 "docs/typedoc/**/*.ts",
                 "docs/src/**/*.ts"
             ],

@@ -1,4 +1,5 @@
 export * from './board-target.js';
+export * from './field.js';
 export * from './foundation.js';
 export * from './lifecycle.js';
 export * from './plaintext-oracle.js';
@@ -6,4 +7,5 @@ export * from './profile-identifiers.js';
 export * from './protocol-hash.js';
 export * from './protocol-objects.js';
 export * from './roster-recovery.js';
+export * from './target-result.js';
 export * from './transcript-core.js';

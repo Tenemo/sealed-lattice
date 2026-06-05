@@ -181,10 +181,6 @@ export const createMlDsaKeyPairFixture = (
     };
 };
 
-export const deriveCanonicalSignedRootHash = (
-    signedRoot: CanonicalSignedRootObject,
-): ProtocolHash => deriveProtocolHash('SignedRootHash', signedRoot);
-
 export const deriveProtocolSignatureHash = (
     signature: Omit<ProtocolSignatureEnvelope, 'signatureHash'>,
 ): ProtocolHash =>

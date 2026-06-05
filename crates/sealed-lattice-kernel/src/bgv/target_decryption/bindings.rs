@@ -1,0 +1,270 @@
+use super::*;
+
+pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<SetupBinding> {
+    validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
+    if !bool_at_path(
+        setup_package,
+        &["targetDecryptionStatus", "targetPartDecImplemented"],
+    )? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "target decryption requires setup material that marks target PartDec implemented",
+        ));
+    }
+    if bool_at_path(
+        setup_package,
+        &["targetDecryptionStatus", "targetC1C4StatusAccepted"],
+    )? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "target decryption setup must not claim C1-C4 certification until that gate is closed",
+        ));
+    }
+    let setup_package_hash = hash_at_path(setup_package, &["setupPackageHash"])?.to_string();
+    let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?.to_string();
+    let election_manifest_hash =
+        hash_at_path(setup_package, &["setupInputs", "manifestHash"])?.to_string();
+    let threshold_profile_hash =
+        hash_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?.to_string();
+    let target_decryption_profile_hash = hash_at_path(
+        setup_package,
+        &["targetDecryptionStatus", "targetDecryptionProfileHash"],
+    )?
+    .to_string();
+    let target_decryption_profile_binding_hash = hash_at_path(
+        setup_package,
+        &[
+            "targetDecryptionStatus",
+            "targetDecryptionProfileBindingHash",
+        ],
+    )?
+    .to_string();
+    let threshold_share_verification_key_root = hash_at_path(
+        setup_package,
+        &[
+            "thresholdVerificationMaterial",
+            "thresholdShareVerificationKeyRoot",
+        ],
+    )?
+    .to_string();
+    let threshold_share_verification_key_hash = hash_at_path(
+        setup_package,
+        &[
+            "thresholdVerificationMaterial",
+            "thresholdShareVerificationKeyHash",
+        ],
+    )?
+    .to_string();
+    let participants = array_at_path(setup_package, &["participants"])?
+        .iter()
+        .map(|participant| {
+            let roster_position = usize_at_path(participant, &["rosterPosition"])?;
+            Ok(ParticipantBinding {
+                trustee_identity: string_at_path(participant, &["trusteeIdentity"])?.to_string(),
+                roster_position,
+                interpolation_point: u64::try_from(roster_position + 1).map_err(|_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "target decryption interpolation point does not fit u64",
+                    )
+                })?,
+                recovery_epoch: unsigned_at_path(participant, &["recoveryEpoch"])?,
+                device_epoch: unsigned_at_path(participant, &["deviceEpoch"])?,
+                trustee_threshold_verification_key_hash: hash_at_path(
+                    participant,
+                    &["trusteeThresholdVerificationKeyHash"],
+                )?
+                .to_string(),
+            })
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(SetupBinding {
+        setup_package_hash,
+        ceremony_id,
+        election_manifest_hash,
+        threshold_profile_hash,
+        target_decryption_profile_hash,
+        target_decryption_profile_binding_hash,
+        participants,
+        threshold_verification: ThresholdVerificationBinding {
+            threshold_share_verification_key_root,
+            threshold_share_verification_key_hash,
+        },
+    })
+}
+
+pub(super) fn read_target_accepted_binding(
+    record: &Value,
+    setup_binding: &SetupBinding,
+) -> CanonicalResult<TargetAcceptedBinding> {
+    if string_at_path(record, &["objectType"])? != "TargetAcceptedRecord"
+        || unsigned_at_path(record, &["objectVersion"])? != 1
+        || string_at_path(record, &["acceptanceMode"])? != "evaluator-replay"
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "targetAcceptedRecord must be a canonical evaluator-replay TargetAcceptedRecord",
+        ));
+    }
+    if string_at_path(record, &["targetDecryptionProfileId"])? != TARGET_DECRYPTION_PROFILE_ID {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "target accepted record uses an unsupported target decryption profile",
+        ));
+    }
+    compare_string_field(
+        record,
+        "ceremonyId",
+        &setup_binding.ceremony_id,
+        "target accepted ceremony",
+    )?;
+    compare_hash_field(
+        record,
+        "electionManifestHash",
+        &setup_binding.election_manifest_hash,
+        "target accepted manifest hash",
+    )?;
+    compare_hash_field(
+        record,
+        "targetDecryptionProfileHash",
+        &setup_binding.target_decryption_profile_hash,
+        "target decryption profile hash",
+    )?;
+    let expected_record_hash = derive_protocol_hash(
+        "TargetAcceptedRecordHash",
+        &json!({
+            "acceptanceMode": string_at_path(record, &["acceptanceMode"])?,
+            "boardPosition": unsigned_at_path(record, &["boardPosition"])?,
+            "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
+            "ceremonyId": string_at_path(record, &["ceremonyId"])?,
+            "electionManifestHash": hash_at_path(record, &["electionManifestHash"])?,
+            "evaluatorReplayProfileHash": hash_at_path(record, &["evaluatorReplayProfileHash"])?,
+            "evaluatorReplayRecordHash": hash_at_path(record, &["evaluatorReplayRecordHash"])?,
+            "objectType": string_at_path(record, &["objectType"])?,
+            "objectVersion": unsigned_at_path(record, &["objectVersion"])?,
+            "organizerIdentity": string_at_path(record, &["organizerIdentity"])?,
+            "targetBasisHash": hash_at_path(record, &["targetBasisHash"])?,
+            "targetCiphertextHash": hash_at_path(record, &["targetCiphertextHash"])?,
+            "targetContextHash": hash_at_path(record, &["targetContextHash"])?,
+            "targetDecryptionProfileHash": hash_at_path(record, &["targetDecryptionProfileHash"])?,
+            "targetDecryptionProfileId": string_at_path(record, &["targetDecryptionProfileId"])?,
+            "targetFinalityCheckpointHash": hash_at_path(record, &["targetFinalityCheckpointHash"])?,
+            "targetFinalityRecordHash": hash_at_path(record, &["targetFinalityRecordHash"])?,
+            "targetFinalityScope": string_at_path(record, &["targetFinalityScope"])?,
+            "targetLayoutHash": hash_at_path(record, &["targetLayoutHash"])?,
+            "targetPreimageHash": hash_at_path(record, &["targetPreimageHash"])?,
+            "targetProposalHash": hash_at_path(record, &["targetProposalHash"])?,
+        }),
+    )?;
+    compare_hash_field(
+        record,
+        "targetAcceptedRecordHash",
+        &expected_record_hash,
+        "target accepted record hash",
+    )?;
+
+    Ok(TargetAcceptedBinding {
+        target_accepted_record_hash: expected_record_hash,
+        target_proposal_hash: hash_at_path(record, &["targetProposalHash"])?.to_string(),
+        target_preimage_hash: hash_at_path(record, &["targetPreimageHash"])?.to_string(),
+        target_finality_record_hash: hash_at_path(record, &["targetFinalityRecordHash"])?
+            .to_string(),
+        target_finality_checkpoint_hash: hash_at_path(record, &["targetFinalityCheckpointHash"])?
+            .to_string(),
+        evaluator_replay_record_hash: hash_at_path(record, &["evaluatorReplayRecordHash"])?
+            .to_string(),
+        target_context_hash: hash_at_path(record, &["targetContextHash"])?.to_string(),
+        target_ciphertext_hash: hash_at_path(record, &["targetCiphertextHash"])?.to_string(),
+        target_layout_hash: hash_at_path(record, &["targetLayoutHash"])?.to_string(),
+        target_decryption_profile_hash: hash_at_path(record, &["targetDecryptionProfileHash"])?
+            .to_string(),
+        target_basis_hash: hash_at_path(record, &["targetBasisHash"])?.to_string(),
+    })
+}
+
+pub(super) fn read_target_share_profile(
+    value: &Value,
+    setup_binding: &SetupBinding,
+) -> CanonicalResult<TargetShareProfile> {
+    if string_at_path(value, &["objectType"])? != "TargetDecryptionShareProfile"
+        || unsigned_at_path(value, &["objectVersion"])? != 1
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "targetShareProfile must be a TargetDecryptionShareProfile version 1 object",
+        ));
+    }
+    compare_hash_field(
+        value,
+        "thresholdProfileHash",
+        &setup_binding.threshold_profile_hash,
+        "target share threshold profile hash",
+    )?;
+    compare_string_field(
+        value,
+        "targetDecryptionProfileId",
+        TARGET_DECRYPTION_PROFILE_ID,
+        "target decryption profile id",
+    )?;
+    compare_hash_field(
+        value,
+        "targetDecryptionProfileHash",
+        &setup_binding.target_decryption_profile_hash,
+        "target decryption profile hash",
+    )?;
+    compare_hash_field(
+        value,
+        "targetDecryptionProfileBindingHash",
+        &setup_binding.target_decryption_profile_binding_hash,
+        "target decryption profile binding hash",
+    )?;
+    compare_string_field(
+        value,
+        "selectedShareRule",
+        SELECTED_SHARE_RULE,
+        "target decryption share-selection rule",
+    )?;
+    let decryption_threshold = usize_field(value, "decryptionThreshold")?;
+    let minimum_shares_for_interpolation = usize_field(value, "minimumSharesForInterpolation")?;
+    let decryption_share_quorum = usize_field(value, "decryptionShareQuorum")?;
+    let participant_count = setup_binding.participants.len();
+    if decryption_threshold == 0
+        || decryption_threshold > participant_count
+        || minimum_shares_for_interpolation < decryption_threshold
+        || minimum_shares_for_interpolation > decryption_share_quorum
+        || decryption_share_quorum > participant_count
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "targetShareProfile quorum values are inconsistent with the setup roster",
+        ));
+    }
+
+    let hash_input = json!({
+        "objectType": "TargetDecryptionShareProfile",
+        "objectVersion": 1,
+        "thresholdProfileHash": setup_binding.threshold_profile_hash,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "targetDecryptionProfileHash": setup_binding.target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
+        "decryptionThreshold": decryption_threshold,
+        "minimumSharesForInterpolation": minimum_shares_for_interpolation,
+        "decryptionShareQuorum": decryption_share_quorum,
+        "selectedShareRule": SELECTED_SHARE_RULE,
+    });
+    let hash = derive_protocol_hash("TargetDecryptionShareProfileHash", &hash_input)?;
+    compare_hash_field(
+        value,
+        "targetShareProfileHash",
+        &hash,
+        "target share profile hash",
+    )?;
+
+    Ok(TargetShareProfile {
+        decryption_threshold,
+        minimum_shares_for_interpolation,
+        decryption_share_quorum,
+        hash,
+    })
+}

@@ -63,12 +63,5 @@ export const noDecryptionProofProfileId =
 /** Mobile replay profile required by accepted manifests. */
 export const mobileProfileId = 'mobile-flagship-profile-v1';
 
-/** Score membership profile for score values in the supported score domain. */
-export const scoreMembershipProfileId = 'one-hot-score-membership-v1';
-
 /** Ballot score encoding profile for direct encrypted score coordinates. */
 export const ballotScoreEncodingProfileId = 'DirectEncryptedScoreSlots-v1';
-
-/** Field encoding profile for canonical GF(65537) representatives. */
-export const fieldEncodingProfileId =
-    'gf65537-canonical-representative-quotient-v1';

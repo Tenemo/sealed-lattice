@@ -41,6 +41,9 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const forbiddenPublishedRuntimePathFragments = [
     'dist/internal/election-foundation/plaintext-oracle/',
 ] as const;
+const forbiddenPublishedTypeSupportPathFragments = [
+    'dist/internal/plaintext-oracle.',
+] as const;
 const forbiddenPublishedOraclePathFragments = [
     'tools/lattigo-oracle/',
     'lattigo-oracle',
@@ -54,11 +57,12 @@ const requiredPublishedPackageFilePaths = [
     'dist/kernel.js',
     'dist/sealed-lattice-kernel.wasm',
     'dist/internal/board-target.d.ts',
+    'dist/internal/field.d.ts',
     'dist/internal/lifecycle.d.ts',
-    'dist/internal/plaintext-oracle.d.ts',
     'dist/internal/protocol-hash.d.ts',
     'dist/internal/protocol-objects.d.ts',
     'dist/internal/roster-recovery.d.ts',
+    'dist/internal/target-result.d.ts',
     'dist/internal/transcript-core.d.ts',
 ] as const;
 const forbiddenPublishedOracleFileNames = new Set([
@@ -163,6 +167,15 @@ export const validatePublishedPackageFilePaths = (
         ) {
             failures.push(
                 `Published package must not include internal protocol runtime: ${publishedPackageFilePath}`,
+            );
+        }
+        if (
+            forbiddenPublishedTypeSupportPathFragments.some((fragment) =>
+                publishedPackageFilePath.includes(fragment),
+            )
+        ) {
+            failures.push(
+                `Published package must not include test-only type support: ${publishedPackageFilePath}`,
             );
         }
         if (

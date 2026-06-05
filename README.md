@@ -97,17 +97,15 @@ These pieces are not exported as a public voting API.
 sealed-lattice/
   crates/
     sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
-  docs/                         Public documentation site
+  docs/                         Public documentation site and API documentation tools
   packages/
     crypto/                     Internal canonical JSON, hashes, signatures
     protocol/                   Internal protocol logic and reference paths
     sdk/                        Published sealed-lattice package
-    testkit/                    Internal fixture loading helpers
     types/                      Shared TypeScript type declarations
     wasm/                       Internal WASM loader package
   test-vectors/                 Canonical public regression vectors
   tools/                        CI, vector, packaging, and documentation tools
-  typedoc/                      API documentation generation support
 ```
 
 ## Documentation
@@ -139,7 +137,9 @@ Run the main local validation gate:
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public API surface summary generation, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, Rust tests, and fast Node tests through the repository check runner.
+`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, Rust tests, and fast Node tests through the repository check runner.
+
+For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
 Run focused verification:
 

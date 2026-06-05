@@ -1,2 +1,1 @@
 * text=auto eol=lf
-test-vectors/ballot-privacy/*.json linguist-generated=true -diff

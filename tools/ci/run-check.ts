@@ -165,13 +165,12 @@ const buildGatingLanes = (
 // uses the same build script as standalone verification so TypeDoc generation
 // and postprocessing stay in one package-script sequence on Windows. The pack
 // smoke lane still calls its underlying tool directly because its package script
-// rebuilds for standalone use. The API surface lane regenerates the review
-// summary and does not compare it against a pinned baseline. The Rust lane runs
-// after this phase: the tests are memory-heavy on Windows and should not compete
-// with docs rendering, linting, package smoke verification, and Node tests. The
-// commit gate runs only the fast Node test project; the heavier protocol and
-// kernel Node projects and the Playwright browser projects stay in
-// `pnpm run test:node` and `pnpm run test:browser` for pre-push verification.
+// rebuilds for standalone use. The Rust lane runs after this phase: the tests
+// are memory-heavy on Windows and should not compete with docs rendering,
+// linting, package smoke verification, and Node tests. The commit gate runs
+// only the fast Node test project; the heavier protocol and kernel Node
+// projects and the Playwright browser projects stay in `pnpm run test:node`
+// and `pnpm run test:browser` for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -224,11 +223,6 @@ const buildParallelLanes = (
             './tools/ci/verify-packed-package.ts',
             '--package-manager',
             'npm',
-        ]),
-        lane('Generate public API surface summary', 'api-surface', [
-            'exec',
-            'tsx',
-            './tools/ci/generate-api-surface-summary.ts',
         ]),
         lane('Verify public package policy', 'package-policy', [
             'exec',

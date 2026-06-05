@@ -33,4 +33,4 @@ The goal of the current release is to keep package boundaries safe while the dir
 
 - package `exports` maps keep each package root explicit
 - ESLint resolves the workspace packages and rejects invalid imports
-- dependency-cruiser rejects forbidden internal dependencies, cycles, deep imports, and cross-package relative imports
+- the package-boundary checker rejects forbidden internal dependencies, deep imports, and cross-package relative imports

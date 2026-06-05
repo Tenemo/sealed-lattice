@@ -3,8 +3,8 @@ import type {
     ModeStatusLabel,
     PrimaryStatusLabel,
 } from './lifecycle.js';
-import type { DecodedSparseTopKSelection } from './plaintext-oracle.js';
 import type { ProtocolHash } from './protocol-hash.js';
+import type { DecodedSparseTopKSelection } from './target-result.js';
 
 /** Canonical object type covered by protocol hash and verification helpers. */
 export type ProtocolObjectType =
