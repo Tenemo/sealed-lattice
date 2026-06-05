@@ -3,17 +3,18 @@ import { describe, expect, it } from 'vitest';
 
 import {
     canonicalJson,
-    createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
-    createProtocolSignatureFixture,
     deriveMlDsaPublicKeyHash,
     deriveProtocolHash,
     deriveProtocolSignatureHash,
-    hash512,
     hash512Hex,
     resolveProtocolHashDomain,
     verifySignedObjectSignature,
 } from '#packages/crypto/src/index';
+import {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+} from '#packages/crypto/tests/support/protocol-signature-fixtures';
 
 const contextHash = deriveProtocolHash('ActionContextHash', {
     context: 'crypto-test',
@@ -64,10 +65,10 @@ describe('crypto primitive boundary', () => {
         largeCanonicalPart.fill(7);
 
         expect(
-            hash512('sealed-lattice-root/plaintext-root-v1', [
+            hash512Hex('sealed-lattice-root/plaintext-root-v1', [
                 largeCanonicalPart,
             ]),
-        ).toHaveLength(64);
+        ).toHaveLength(128);
     });
 
     it('rejects unreserved protocol hash namespaces', () => {

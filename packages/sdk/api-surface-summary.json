@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "46f0ff653e41adb625a57d3e8ecf0137bbb786b8bc897263f2b1d0ffcf8b493a",
+    "reachableDeclarationHash": "9ed1b090dc8c66a38e7dd73b3267bebc51faeaacc81d6fc588fc33ff7387a65c",
     "runtimeExports": [
         "deriveFrozenRosterProfile",
         "deriveLifecycleLabels",
@@ -29,7 +29,6 @@
         "verifyBoardConsistency",
         "verifyCastReceiptShell",
         "verifyCloseRecordShell",
-        "verifyFirstValidPolicy",
         "verifyFoundationTranscript",
         "verifyRecoveryEpochUpdate",
         "verifyRosterExternalAcceptance",

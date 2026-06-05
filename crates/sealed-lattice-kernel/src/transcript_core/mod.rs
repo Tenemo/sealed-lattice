@@ -1,12 +1,17 @@
 mod codec;
+#[cfg(test)]
 mod mutations;
+#[cfg(test)]
 mod rng;
 mod types;
 
 pub use codec::{
-    analyze_canonical_object, analyze_canonical_object_hex, canonical_transcript_core_object,
-    decode_hex, encode_hex, parse_transcript_core_object, serialize_transcript_core_object,
+    analyze_canonical_object, analyze_canonical_object_hex, decode_hex, encode_hex,
+    parse_transcript_core_object,
 };
+#[cfg(test)]
+pub use codec::{canonical_transcript_core_object, serialize_transcript_core_object};
+#[cfg(test)]
 pub use mutations::{
     mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
     mutate_field_order_fixture, mutate_fully_verified_missing_evaluator_replay_profile_fixture,
@@ -22,10 +27,9 @@ pub use mutations::{
 #[cfg(test)]
 pub use rng::DeterministicFixtureRng;
 #[cfg(test)]
-pub use types::MANDATORY_EVALUATOR_REPLAY_PROFILE_ID;
 pub use types::{
     FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
-    TranscriptCoreProfile,
+    MANDATORY_EVALUATOR_REPLAY_PROFILE_ID, TranscriptCoreProfile,
 };
 
 #[cfg(test)]

@@ -99,12 +99,14 @@ impl MheSecurityClosure {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TranscriptCoreProfile {
     pub base_claim_profile: BaseClaimProfile,
     pub mhe_security_closure: MheSecurityClosure,
 }
 
+#[cfg(test)]
 impl TranscriptCoreProfile {
     pub const fn new(
         base_claim_profile: BaseClaimProfile,
@@ -125,10 +127,12 @@ impl TranscriptCoreProfile {
     }
 }
 
+#[cfg(test)]
 pub const FULLY_VERIFIED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
     BaseClaimProfile::FullyVerifiedResult,
     MheSecurityClosure::PassiveMhePrototype,
 );
+#[cfg(test)]
 pub const FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
     TranscriptCoreProfile::new(
         BaseClaimProfile::FullyVerifiedResult,

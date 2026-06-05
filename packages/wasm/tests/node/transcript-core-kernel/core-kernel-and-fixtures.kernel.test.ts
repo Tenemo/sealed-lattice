@@ -11,11 +11,7 @@ import {
 } from './shared.js';
 
 import { canonicalJson, deriveProtocolHash } from '#packages/crypto/src/index';
-import {
-    loadTranscriptCoreKernel,
-    roundTripBytesThroughKernel,
-    verifyTranscriptCoreFixture,
-} from '#packages/wasm/src/index';
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     normalizeTranscriptCoreKernelBytesForHash,
     TranscriptCoreKernelCommandError,
@@ -326,26 +322,11 @@ describe('transcript-core kernel in Node', () => {
     });
 
     it('keeps byte round-trip as an allocation smoke path', async () => {
-        await expect(
-            roundTripBytesThroughKernel(Uint8Array.from([9, 8, 7, 6, 5])),
-        ).resolves.toEqual(Uint8Array.from([9, 8, 7, 6, 5]));
-    });
+        const kernel = await loadTranscriptCoreKernel();
 
-    it('verifies fixtures through the public WASM wrapper', async () => {
-        await expect(
-            verifyTranscriptCoreFixture(
-                fullyVerifiedPassiveMhePrototypeFixture,
-            ),
-        ).resolves.toEqual({
-            verified: true,
-            caseName: 'fully-verified-passive-mhe-prototype-transcript-core',
-            objectHash512:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedObjectHash512,
-            chunkRoot:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedChunkRoot,
-            statusLabels:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedStatusLabels,
-        });
+        expect(kernel.roundTripBytes(Uint8Array.from([9, 8, 7, 6, 5]))).toEqual(
+            Uint8Array.from([9, 8, 7, 6, 5]),
+        );
     });
 
     it('computes internal hash smoke outputs through the command bridge', async () => {

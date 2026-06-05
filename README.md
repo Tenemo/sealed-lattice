@@ -4,7 +4,7 @@
 
 [![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Node source coverage](https://img.shields.io/endpoint?url=https://tenemo.github.io/sealed-lattice/coverage-badge.json)](https://tenemo.github.io/sealed-lattice/coverage-summary.json) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
-`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. The selected construction uses direct BGV-encrypted ballots, public ciphertext aggregation, mandatory mobile evaluator replay, target finality, and target-bound threshold decryption.
+`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. The selected construction uses active-static secure-with-abort collective BGV setup, direct BGV-encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous first-profile target finality, and one-shot target-bound threshold decryption of `C_target` only.
 
 The public npm package is intentionally narrow while the protocol implementation is still being built and verified. It is not a complete voting library and must not be used for real ballot secrecy.
 
@@ -13,15 +13,16 @@ The public npm package is intentionally narrow while the protocol implementation
 The active project route is:
 
 ```text
-direct BGV-encrypted ballots
--> post-quantum ballot validity proofs
+active-static secure-with-abort collective BGV setup
+-> direct BGV-encrypted ballots
+-> LaZer/LNP-derived no-wrap ballot validity proofs
 -> public ciphertext aggregation
--> mandatory mobile evaluator replay
--> target finality
--> target-bound threshold decryption
+-> bounded-domain encrypted evaluator replay on mobile
+-> unanimous target finality for the first profile
+-> one-shot target-bound threshold decryption of C_target only
 ```
 
-The first claim-bearing mobile profile targets `n = 10`, `m = 20`, and every `1 <= K_top <= 20`. Larger profiles require separate mobile evidence before they can be treated as claim-bearing.
+The first claim-bearing mobile profile targets `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. Larger profiles require separate setup, proof, decryption, evaluator, and supported-phone mobile evidence before they can be treated as claim-bearing.
 
 ## Current package boundary
 
@@ -29,17 +30,23 @@ The published package currently supports development verification surfaces while
 
 The final direct-path package surface must be defined around:
 
+- setup-intent registration;
+- public common-randomness commit and reveal verification;
+- recipient-verified VSS acceptance verification;
 - local setup contribution creation;
 - setup package verification;
+- proof-bearing public-key share verification;
+- proof-bearing evaluation-key share verification;
+- threshold-share commitment derivation;
 - encrypted ballot verification;
 - encrypted ballot aggregation;
-- mobile evaluator replay verification;
+- bounded-domain mobile evaluator replay verification;
 - target finality verification;
 - target-bound decryption-share verification;
 - target recombination;
 - decoded result verification.
 
-The public package must not expose raw BGV decrypt, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
+The public package must not expose raw BGV decrypt, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, raw VSS share export, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
 
 Reserved complete-protocol entry points must fail closed until their direct-path claim gates are actually implemented.
 
@@ -47,9 +54,9 @@ Foundation helpers now include an integrated public foundation verifier. One det
 
 ## Current implementation status
 
-The BGV setup implementation has useful internal evidence:
+The BGV setup implementation has useful passive/development evidence:
 
-- the selected BGV-RNS profile uses `N = 32768`, `p = 65537`, 17 data primes, and one special prime;
+- the selected BGV-RNS prototype profile uses `N = 32768`, `p = 65537`, 17 data primes, and one special prime;
 - RNS arithmetic, NTT/INTT, batch encoding, canonical plaintext roots, canonical ciphertext roots, and profile hashes have regression coverage;
 - the internal passive setup command can generate and verify a deterministic full-roster setup package;
 - the package binds manifest, roster, threshold profile, collective public key root, BGV public key root, threshold verification roots, evaluation-key roots, evaluator binding roots, and certificate hashes;
@@ -58,15 +65,23 @@ The BGV setup implementation has useful internal evidence:
 - public evaluation-key material can drive development relinearization and rotation checks without exporting the private setup witness;
 - the pinned Lattigo oracle remains development-only parity for comparable RNS, NTT, and coefficient arithmetic behavior.
 
-This evidence is not an accepted mobile setup profile. The current setup blockers are:
+This evidence is not active-static setup evidence and is not an accepted mobile setup profile. The current setup blockers are:
 
-- accepted per-trustee mobile setup contributions;
-- commit-reveal public common randomness for the shared public `a` polynomial;
-- separation of accepted setup from deterministic fixture seed setup;
-- collective public-key share correctness evidence;
+- per-RNS-prime Shamir/VSS setup algebra;
+- BDLOP/LNP-style commitment profile for trustee secrets and VSS coefficients;
+- recipient-verified VSS private mailbox envelopes;
+- recipient VSS acceptance records;
+- verifier-derived `ThresholdShareCommitment_j,l` values;
+- same-secret consistency across public key, VSS, relinearization, Galois, key-switch, and decryption shares;
+- LNP/no-wrap public-key share proofs;
+- LNP/no-wrap relinearization round-one and round-two proofs;
+- LNP/no-wrap Galois-key batch proofs;
+- generic key-switch proofs if generic key-switch material is used;
+- target-decryption share proofs bound to verifier-derived threshold-share commitments;
 - accepted evaluation-key correctness evidence;
 - evaluation-key footprint reduction, binary chunking, and enforced mobile transport certification;
 - public package setup contribution creation and setup package verification surfaces;
+- active-static secure-with-abort setup theorem closure;
 - target-decryption handoff clarity for `Q_target`, smudging, C1-C4, share proofs, and target-decryption readiness.
 
 The direct encrypted ballot implementation has useful internal evidence:
@@ -82,17 +97,22 @@ The direct encrypted ballot implementation has useful internal evidence:
 - the internal command uses fresh CSPRNG proof-mask and ballot-encryption randomness by default in Node/WASM and browser helpers;
 - the internal command rejects reused encryption randomness, reused proof-mask randomness, and proof/encryption randomness overlap;
 - duplicate voter identities, out-of-order voter identities, invalid scores, and mismatched setup witness seeds reject before encryption and proof generation;
-- the packed batched-pair evaluator produces encrypted sparse target roots for requested top counts without publishing aggregate scores, ranks, comparisons, masks, evaluator intermediates, or decoded target slots;
+- current evaluator evidence produces encrypted sparse target roots for requested top counts without publishing aggregate scores, ranks, comparisons, masks, evaluator intermediates, or decoded target slots;
 - one native one-ballot packed batched-pair replay matches the full 20-option target oracle at working level 8 in about 240 s;
 - target-accepted record and target-bound decryption-share verification refuse shares for any ciphertext other than the accepted target ciphertext;
 - target-bound threshold `PartDec` and recombination math compute context-bound Shamir partial decryptions for the accepted sparse target ciphertext pair and recover target ID/order slots with Lagrange interpolation.
 
-This evidence is not claim-bearing. The current blockers are:
+This evidence is not claim-bearing. The accepted ballot proof path is a LaZer/LNP-derived linear-relation proof with per-RNS-limb no-wrap lifting. Upstream LaZer native code, Sage codegen, and LaBRADOR are development reference or code-generation material only; the mobile claim path needs a Rust/WASM selective port or reimplementation of the LNP linear-relation subset.
 
-- accepted mobile setup contributions and setup package verification;
+The accepted evaluator profile is bounded-domain interpolation over certified score-difference and rank domains. Full-field `p = 65537` comparison is not the first claim path.
+
+The current blockers are:
+
+- accepted active-static setup contributions and setup package verification;
+- per-RNS-prime VSS and commitment profile acceptance;
 - collective public-key correctness evidence;
 - accepted evaluation-key correctness evidence and mobile key transport;
-- weakest-relation proof soundness accounting, including score and one-hot checks that currently reduce over 65537;
+- proof soundness accounting until encryption, encoder, score, one-hot, support, and carry/slack relations use accepted no-wrap lifting or equivalent accepted accounting;
 - zero-knowledge accounting, including replacement or formal redesign of witness-dependent support commitments;
 - Fiat-Shamir/QROM review;
 - public package proof transport for an accepted proof profile;
@@ -100,10 +120,13 @@ This evidence is not claim-bearing. The current blockers are:
 - supported-phone mobile proof verification;
 - supported-phone mobile evaluator replay;
 - browser/mobile proof-copy and memory evidence;
+- bounded-domain comparator coefficients, depth, noise, and all-`K_top` replay certificate;
 - target decryption share proof verification and certification;
 - smudging, noise, and C1-C4 target-decryption closure;
 - public target-decryption/recombination integration;
 - supported-phone mobile target-decryption/recombination evidence.
+
+The highest-risk mobile feasibility items are proof sizes for active setup, evaluation-key, ballot, and decryption-share proofs; evaluation-key size and mobile key transport; bounded-domain evaluator depth and noise certificates; and supported-phone WASM memory/copy behavior.
 
 ## What is internal
 
@@ -116,7 +139,7 @@ Several components exist only as workspace-internal implementation, test, or vec
 - Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
 - development-only reference-oracle tooling and generated public test vectors.
 
-These pieces are not exported as a public voting API.
+These pieces are not exported as a public voting API. The legacy passive setup profile `sealed-lattice-bgv-rns-passive-full-roster-setup-v1` is development-only and cannot close `CollectiveBgvSetup-v1`.
 
 ## Repository layout
 
@@ -148,7 +171,7 @@ sealed-lattice/
 pnpm add sealed-lattice
 ```
 
-Treat the package as a development verification package until the direct encrypted ballot API is explicitly published and audited.
+Treat the package as a development verification package until the active-static direct encrypted ballot API is explicitly published and audited.
 
 ## Development
 

@@ -317,35 +317,3 @@ export type TopKDecryptionShareShell = {
     readonly shareRoot: ProtocolHash;
     readonly signature: ProtocolSignatureEnvelope;
 };
-
-export type TargetAcceptedRecordVerificationInput = {
-    readonly boardEvidence: BoardConsistencyInput;
-    readonly targetAcceptedRecord: TargetAcceptedRecord;
-    readonly targetAcceptedRecordInclusionProof: InclusionProof;
-    readonly targetFinalityRecord: TargetFinalityRecord;
-    readonly targetFinalityVerification: TargetFinalityVerification;
-    readonly evaluatorReplayRecord: EvaluatorReplayRecord;
-    readonly expectedOrganizerPublicKeyHash: ProtocolHash;
-};
-
-export type TargetAcceptedRecordVerification =
-    StructuredProtocolVerificationResult & {
-        readonly targetAcceptedRecordHash?: ProtocolHash;
-        readonly targetFinalityRecordHash?: ProtocolHash;
-    };
-
-export type TopKDecryptionShareShellVerificationInput = {
-    readonly boardEvidence: BoardConsistencyInput;
-    readonly decryptionShare: TopKDecryptionShareShell;
-    readonly decryptionShareInclusionProof: InclusionProof;
-    readonly targetAcceptedRecord: TargetAcceptedRecord;
-    readonly targetAcceptedRecordVerification: TargetAcceptedRecordVerification;
-    readonly expectedTrusteePublicKeyHash: ProtocolHash;
-};
-
-export type TopKDecryptionShareShellVerification =
-    StructuredProtocolVerificationResult & {
-        readonly topKDecryptionShareHash?: ProtocolHash;
-        readonly targetAcceptedRecordHash?: ProtocolHash;
-        readonly targetFinalityRecordHash?: ProtocolHash;
-    };

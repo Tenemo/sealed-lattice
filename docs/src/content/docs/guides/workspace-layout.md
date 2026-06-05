@@ -14,7 +14,7 @@ The repo is a private workspace with one published package, four private TypeScr
 - `packages/protocol`: deterministic election model and transcript verification helpers
 - `packages/crypto`: internal Hash512, hash, ML-DSA-65 profile, fixture signing, and signed-root verification wrappers
 - `packages/wasm`: typed Rust/WASM loader for transcript-core analysis, protocol hash derivation, direct ballot proof work, and kernel checks
-- `crates/sealed-lattice-kernel`: Rust transcript-core, proof, and BGV kernel crate that exports the WASM command path for transcript fixtures, reserved hash derivation, direct ballot proof experiments, and field checks
+- `crates/sealed-lattice-kernel`: Rust transcript-core, proof, and BGV kernel crate that exports the WASM command path for transcript fixtures, reserved hash derivation, setup/proof experiments, direct ballot proof experiments, and field checks
 
 ## Dependency direction
 
@@ -27,7 +27,7 @@ The repo is a private workspace with one published package, four private TypeScr
 
 ## Why the public facade stays narrow
 
-The goal of the current release is to keep package boundaries safe while the direct encrypted ballot API is still being built. The final public surface will expose direct-path voting and verification operations only after their proof, replay, target finality, decryption, and supported-phone mobile evidence gates close.
+The goal of the current release is to keep package boundaries safe while the active-static direct encrypted ballot API is still being built. The final public surface will expose direct-path voting and verification operations only after setup/VSS, proof, aggregation, bounded-domain replay, target finality, decryption, and supported-phone mobile evidence gates close.
 
 ## Enforcement
 

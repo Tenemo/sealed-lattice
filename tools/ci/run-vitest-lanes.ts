@@ -5,8 +5,7 @@ import {
 } from './package-manager-runner.js';
 import {
     createPackageManagerCommand,
-    runCommandsInParallel,
-    runCommandsInSeries,
+    runCommandsAfterSeriesGate,
     type CommandInvocation,
 } from './run-command.js';
 
@@ -53,17 +52,13 @@ export const runWorkspaceBuildThenParallelCommands = async <
         : undefined;
 
     try {
-        const buildExitCode = await runCommandsInSeries(
-            [buildWorkspaceBuildCommand(packageManagerRunner)],
-            { runLog },
-        );
-        if (buildExitCode !== 0) {
-            process.exitCode = buildExitCode;
-
-            return;
-        }
-        process.exitCode = await runCommandsInParallel(
-            input.buildCommands(packageManagerRunner),
+        process.exitCode = await runCommandsAfterSeriesGate(
+            {
+                gateCommands: [
+                    buildWorkspaceBuildCommand(packageManagerRunner),
+                ],
+                parallelCommands: input.buildCommands(packageManagerRunner),
+            },
             { runLog },
         );
     } finally {

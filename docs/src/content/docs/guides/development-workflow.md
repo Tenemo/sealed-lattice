@@ -76,7 +76,7 @@ Use explicit heavy lanes only when the change touches the selected direct path a
 direct proof benchmark;
 direct Node/WASM proof-copy measurement;
 direct browser proof-copy measurement;
-fully encrypted evaluator replay benchmark;
+bounded-domain evaluator replay benchmark;
 target-bound decryption benchmark;
 manual mobile proof and replay lane.
 ```

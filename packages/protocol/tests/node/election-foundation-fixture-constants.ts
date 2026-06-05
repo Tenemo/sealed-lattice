@@ -1,7 +1,4 @@
 import {
-    createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
-    createProtocolSignatureFixture,
     deriveProtocolHash,
     deriveProtocolSignatureHash,
 } from '@sealed-lattice/crypto';
@@ -30,6 +27,11 @@ import {
     deriveTargetFinalityPolicyHash,
     deriveWitnessPolicyHash,
 } from '#packages/protocol/src/finality/index';
+import {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+} from '#tests/support/protocol-signature-fixtures';
 
 export const deriveFixtureHash = (
     purpose: string,

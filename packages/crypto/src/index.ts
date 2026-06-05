@@ -1,4 +1,4 @@
-export { canonicalJson, hash512, hash512Hex } from './canonical-json.js';
+export { canonicalJson, hash512Hex } from './canonical-json.js';
 export {
     deriveProtocolHash,
     protocolHashNamespaceValues,
@@ -6,14 +6,8 @@ export {
 } from './hashes.js';
 export type { ProtocolHashNamespace } from './hashes.js';
 export {
-    createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
-    createProtocolSignatureFixture,
     deriveMlDsaPublicKeyHash,
     deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from './signatures.js';
-export type {
-    MlDsaKeyPairFixture,
-    SignatureExpectation,
-} from './signatures.js';
+export type { SignatureExpectation } from './signatures.js';

@@ -1,8 +1,7 @@
-import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import { hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import type {
     CanonicalSignedRootObject,
-    MlDsaSignatureProfile,
     ProtocolHash,
     ProtocolRefusalCode,
     ProtocolSignatureEnvelope,
@@ -18,7 +17,6 @@ const textEncoder = new TextEncoder();
 const mlDsaContextByteLimit = 255;
 const supportedMlDsaContextString = 'sealed-lattice:v1';
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
-const mlDsa65SecretKeyByteLength = ml_dsa65.lengths.secretKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
 export type SignatureExpectation = {
@@ -37,12 +35,6 @@ export type SignatureExpectation = {
     readonly byteLength?: number;
     readonly recoveryEpoch?: number;
     readonly deviceEpoch?: number;
-};
-
-export type MlDsaKeyPairFixture = {
-    readonly publicKeyBytesHex: string;
-    readonly publicKeyHash: ProtocolHash;
-    readonly secretKeyBytesHex: string;
 };
 
 const emptySignatureVerificationResult = (
@@ -123,32 +115,6 @@ const decodeHexField = (
 const deriveMlDsaContextByteLength = (contextString: string): number =>
     textEncoder.encode(contextString).byteLength;
 
-export const createMlDsaSignatureProfileFixture = (
-    overrides: Partial<MlDsaSignatureProfile> = {},
-): MlDsaSignatureProfile => {
-    const contextString = overrides.contextString ?? 'sealed-lattice:v1';
-    const contextStringByteLength =
-        overrides.contextStringByteLength ??
-        deriveMlDsaContextByteLength(contextString);
-
-    return {
-        algorithm: 'ML-DSA-65',
-        mode: overrides.mode ?? 'PureMLDSA',
-        providerName: overrides.providerName ?? 'deterministic-fixture',
-        providerVersion: overrides.providerVersion ?? '1',
-        providerBuildHash:
-            overrides.providerBuildHash ??
-            deriveProtocolHash('ProviderBuildHash', {
-                providerName: 'deterministic-fixture',
-                providerVersion: '1',
-            }),
-        fips204Version: overrides.fips204Version ?? 'FIPS 204',
-        errataStatus: overrides.errataStatus ?? 'none',
-        contextString,
-        contextStringByteLength,
-    };
-};
-
 export const deriveMlDsaPublicKeyHash = (
     publicKeyBytesHex: string,
 ): ProtocolHash => {
@@ -164,23 +130,6 @@ export const deriveMlDsaPublicKeyHash = (
     });
 };
 
-export const createMlDsaKeyPairFixture = (
-    seedLabel: string,
-): MlDsaKeyPairFixture => {
-    const seed = deriveProtocolHash('ChallengeDomainHash', {
-        purpose: 'ml-dsa-fixture-seed',
-        seedLabel,
-    }).slice(0, 64);
-    const keyPair = ml_dsa65.keygen(hexToBytes(seed));
-    const publicKeyBytesHex = bytesToHex(keyPair.publicKey);
-
-    return {
-        publicKeyBytesHex,
-        publicKeyHash: deriveMlDsaPublicKeyHash(publicKeyBytesHex),
-        secretKeyBytesHex: bytesToHex(keyPair.secretKey),
-    };
-};
-
 export const deriveProtocolSignatureHash = (
     signature: Omit<ProtocolSignatureEnvelope, 'signatureHash'>,
 ): ProtocolHash =>
@@ -191,42 +140,6 @@ export const deriveProtocolSignatureHash = (
         signatureBytesHex: signature.signatureBytesHex,
         signedRoot: signature.signedRoot,
     });
-
-export const createProtocolSignatureFixture = (
-    input: Omit<
-        ProtocolSignatureEnvelope,
-        'signatureBytesHex' | 'signatureHash'
-    > & {
-        readonly secretKeyBytesHex: string;
-    },
-): ProtocolSignatureEnvelope => {
-    const secretKey = decodeHexField(
-        input.secretKeyBytesHex,
-        mlDsa65SecretKeyByteLength,
-        'secretKeyBytesHex',
-    );
-    const message = canonicalProtocolSignatureMessage({
-        profile: input.profile,
-        publicKeyHash: input.publicKeyHash,
-        signedRoot: input.signedRoot,
-    });
-    const signatureBytes = ml_dsa65.sign(message, secretKey, {
-        context: textEncoder.encode(input.profile.contextString),
-        extraEntropy: false,
-    });
-    const signature = {
-        profile: input.profile,
-        publicKeyBytesHex: input.publicKeyBytesHex,
-        publicKeyHash: input.publicKeyHash,
-        signatureBytesHex: bytesToHex(signatureBytes),
-        signedRoot: input.signedRoot,
-    };
-
-    return {
-        ...signature,
-        signatureHash: deriveProtocolSignatureHash(signature),
-    };
-};
 
 const validateProfile = (
     signature: ProtocolSignatureEnvelope,

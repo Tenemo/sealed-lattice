@@ -135,18 +135,6 @@ export const runPackageManagerAndCaptureOutput = (
     return result.stdout ?? '';
 };
 
-export const runPackageManager = (
-    runner: PackageManagerRunner,
-    commandArguments: readonly string[],
-    workingDirectoryPath: string,
-): void => {
-    runPackageManagerAndCaptureOutput(
-        runner,
-        commandArguments,
-        workingDirectoryPath,
-    );
-};
-
 type KillableChildProcess = Pick<ChildProcess, 'kill' | 'pid'>;
 
 type ProcessGroupKiller = (
@@ -532,4 +520,24 @@ export const runCommandsInSeries = async (
     }
 
     return 0;
+};
+
+export const runCommandsAfterSeriesGate = async (
+    input: {
+        readonly gateCommands: readonly CommandInvocation[];
+        readonly parallelCommands: readonly CommandInvocation[];
+    },
+    options: {
+        readonly observer?: CommandRunObserver;
+        readonly outputMode?: CommandOutputMode;
+        readonly runLog?: ActiveLocalRunLog;
+        readonly signal?: AbortSignal;
+    } = {},
+): Promise<number> => {
+    const gateExitCode = await runCommandsInSeries(input.gateCommands, options);
+    if (gateExitCode !== 0) {
+        return gateExitCode;
+    }
+
+    return runCommandsInParallel(input.parallelCommands, options);
 };

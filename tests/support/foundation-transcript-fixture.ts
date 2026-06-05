@@ -1,7 +1,6 @@
 import {
     canonicalJson,
     deriveProtocolHash,
-    hash512,
     hash512Hex,
 } from '#packages/crypto/src/index';
 import {
@@ -67,6 +66,23 @@ export type FoundationTranscriptExpectedHashes = {
 };
 
 const textEncoder = new TextEncoder();
+
+const hexToBytes = (hex: string): Uint8Array => {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
+        bytes[byteIndex] = Number.parseInt(
+            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
+            16,
+        );
+    }
+
+    return bytes;
+};
+
+const hash512Bytes = (
+    domain: string,
+    parts: readonly Uint8Array[],
+): Uint8Array => hexToBytes(hash512Hex(domain, parts));
 const transcriptCoreChunkSize = 8;
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -120,7 +136,7 @@ const transcriptCoreChunkRoot = (
         chunkStart += chunkSize, chunkIndex += 1
     ) {
         leaves.push(
-            hash512('transcript-core/chunk-leaf', [
+            hash512Bytes('transcript-core/chunk-leaf', [
                 varUintBytes(chunkIndex),
                 canonicalBytes.slice(chunkStart, chunkStart + chunkSize),
             ]),
@@ -128,7 +144,7 @@ const transcriptCoreChunkRoot = (
     }
 
     if (leaves.length === 0) {
-        leaves.push(hash512('transcript-core/chunk-empty', []));
+        leaves.push(hash512Bytes('transcript-core/chunk-empty', []));
     }
 
     let currentLevel = leaves;
@@ -142,7 +158,7 @@ const transcriptCoreChunkRoot = (
             const left = currentLevel[leafIndex];
             const right = currentLevel[leafIndex + 1] ?? left;
             nextLevel.push(
-                hash512('transcript-core/chunk-node', [left, right]),
+                hash512Bytes('transcript-core/chunk-node', [left, right]),
             );
         }
         currentLevel = nextLevel;

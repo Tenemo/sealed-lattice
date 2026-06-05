@@ -5,7 +5,7 @@ sidebar:
     order: 4
 ---
 
-`sealed-lattice` currently ships a development verification package, not a published voting workflow. The selected direction is direct BGV-encrypted ballots with public ciphertext aggregation, mandatory mobile evaluator replay, target finality, and target-bound threshold decryption.
+`sealed-lattice` currently ships a development verification package, not a published voting workflow. The selected direction is active-static secure-with-abort collective BGV setup, direct BGV-encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
 
 ## What the current release guarantees
 
@@ -19,10 +19,11 @@ sidebar:
 ## What it does not guarantee yet
 
 - no complete threshold voting workflow is published yet
-- no production ballot generation, casting, aggregation, evaluator replay, target-bound decryption, or result release API is public yet
+- no production setup contribution, VSS, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, or result release API is public yet
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
+- active-static setup is not claim-bearing until per-RNS-prime VSS, same-secret consistency, public-key proofs, evaluation-key proofs, key transport, and supported-phone evidence close
 - the internal direct encrypted ballot proof is not claim-bearing until soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and supported-phone mobile evidence close
-- direct encrypted sparse target projection is not complete for every supported top count
+- bounded-domain encrypted sparse target projection is not complete for every supported top count
 - target-bound decryption is not implemented as an accepted direct-path rule
 - no caller should rely on private package names or future public subpaths becoming stable
 
@@ -32,11 +33,14 @@ The final direct path must preserve these rules:
 
 ```text
 Every ballot is encrypted before publication.
-Ballot validity proofs are zero-knowledge and sound under the accepted profile.
+Setup is active-static secure with abort, not robust-liveness secure.
+Ballot validity proofs are zero-knowledge and sound under the accepted LNP/no-wrap profile.
 Accepted ballot ciphertexts aggregate by public ciphertext addition.
-Evaluator correctness is verified by deterministic mobile replay.
+Evaluator correctness is verified by deterministic bounded-domain mobile replay.
+C_topK is encrypted under the collective key, but it is not an authorized decryption target.
 Only finalized and replay-matched C_target may be threshold-decrypted.
 Individual ballots, aggregate scores, C_topK, ranks, comparisons, masks, and evaluator intermediates must not be opened.
+Smudging/noise and proof-bearing target-decryption shares remain mandatory.
 ```
 
 ## Caller responsibilities
@@ -44,4 +48,4 @@ Individual ballots, aggregate scores, C_topK, ranks, comparisons, masks, and eva
 - treat the current public package as a development verification package, not as a usable voting library
 - keep application logic off unpublished internal package names
 - do not assume the current internal package split implies frozen future public APIs
-- do not build protocol, proof-generation, transport, or decryption assumptions around unpublished APIs
+- do not build setup, VSS, protocol, proof-generation, transport, or decryption assumptions around unpublished APIs

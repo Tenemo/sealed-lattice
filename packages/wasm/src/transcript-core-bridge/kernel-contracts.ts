@@ -1,5 +1,4 @@
 export { canonicalErrorCodes } from './kernel-errors.js';
-export { suppliedOrFreshRandomnessHex } from './kernel-randomness.js';
 export {
     bytesToHex,
     concatenateByteChunks,

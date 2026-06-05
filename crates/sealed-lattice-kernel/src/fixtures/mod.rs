@@ -3,22 +3,24 @@ use serde_json::{Value, json};
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    transcript_core::{
-        FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
-        TranscriptCoreProfile, analyze_canonical_object, canonical_transcript_core_object,
-        decode_hex, encode_hex, mutate_base_claim_profile_mismatch_fixture,
-        mutate_duplicate_field_fixture, mutate_field_order_fixture,
-        mutate_fully_verified_missing_evaluator_replay_profile_fixture,
-        mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
-        mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
-        mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
-        mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
-        mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluator_replay_profile_fixture,
-        mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
-        mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-        mutate_unsupported_object_version_fixture, mutate_wrong_evaluator_replay_profile_fixture,
-        parse_transcript_core_object, serialize_transcript_core_object,
-    },
+    transcript_core::{analyze_canonical_object, decode_hex, parse_transcript_core_object},
+};
+
+#[cfg(test)]
+use crate::transcript_core::{
+    FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
+    TranscriptCoreProfile, canonical_transcript_core_object, encode_hex,
+    mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
+    mutate_field_order_fixture, mutate_fully_verified_missing_evaluator_replay_profile_fixture,
+    mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
+    mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
+    mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
+    mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
+    mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluator_replay_profile_fixture,
+    mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
+    mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
+    mutate_unsupported_object_version_fixture, mutate_wrong_evaluator_replay_profile_fixture,
+    serialize_transcript_core_object,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -89,6 +91,7 @@ pub fn verify_fixture(fixture: &TranscriptCoreFixture) -> CanonicalResult<Value>
     }
 }
 
+#[cfg(test)]
 pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
     Ok(vec![
         TranscriptCoreFixture::GoldenTranscriptCore(Box::new(build_golden_fixture(
@@ -327,6 +330,7 @@ fn verify_malformed_fixture(fixture: &MalformedObjectFixture) -> CanonicalResult
     }))
 }
 
+#[cfg(test)]
 fn build_golden_fixture(
     case_name: &str,
     profile: TranscriptCoreProfile,
@@ -359,6 +363,7 @@ fn build_golden_fixture(
     })
 }
 
+#[cfg(test)]
 fn build_malformed_fixture(
     case_name: &str,
     canonical_bytes_hex: String,

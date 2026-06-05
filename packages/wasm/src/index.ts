@@ -1,8 +1,3 @@
-import type {
-    TranscriptCoreFixture,
-    TranscriptCoreFixtureVerification,
-} from '@sealed-lattice/types';
-
 import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
@@ -51,19 +46,3 @@ export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
         allowUnpinnedKernel: true,
     });
-
-export const verifyTranscriptCoreFixture = async (
-    fixture: TranscriptCoreFixture,
-): Promise<TranscriptCoreFixtureVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyFixture(fixture);
-};
-
-export const roundTripBytesThroughKernel = async (
-    input: Uint8Array,
-): Promise<Uint8Array> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.roundTripBytes(input);
-};

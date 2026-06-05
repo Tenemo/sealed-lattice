@@ -162,10 +162,7 @@ const appendBytesToHash = (
     hash.update(value);
 };
 
-export const hash512 = (
-    domain: string,
-    parts: readonly Uint8Array[],
-): Uint8Array => {
+const hash512 = (domain: string, parts: readonly Uint8Array[]): Uint8Array => {
     const hash = shake256.create({ dkLen: 64 });
 
     try {

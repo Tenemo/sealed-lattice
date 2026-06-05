@@ -1,6 +1,9 @@
 use serde_json::Value;
 
+#[cfg(test)]
 use super::rng::DeterministicFixtureRng;
+#[cfg(test)]
+use super::types::TranscriptCoreProfile;
 use super::types::{
     ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS,
     FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS, FIELD_TITLE,
@@ -8,7 +11,7 @@ use super::types::{
     NO_DECRYPTION_PROOF_PROFILE_ID, NO_EVALUATOR_REPLAY_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
     PASSIVE_MHE_PROTOTYPE_PROFILE_ID, REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE,
     TRANSCRIPT_CORE_OBJECT_VERSION, TranscriptCoreAnalysis, TranscriptCoreObject,
-    TranscriptCoreProfile, TranscriptCoreStatus,
+    TranscriptCoreStatus,
 };
 use crate::encoding::{
     CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_bytes,
@@ -59,6 +62,7 @@ pub fn decode_hex(hex: &str) -> CanonicalResult<Vec<u8>> {
     Ok(bytes)
 }
 
+#[cfg(test)]
 pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> TranscriptCoreObject {
     let mut fixture_rng = DeterministicFixtureRng::new(&profile.seed_label());
     let base_claim_profile = profile.base_claim_profile;
@@ -501,6 +505,7 @@ fn missing_field(field_name: &str) -> CanonicalError {
     )
 }
 
+#[cfg(test)]
 pub(super) fn append_transcript_core_header(output: &mut Vec<u8>, object: &TranscriptCoreObject) {
     output.extend(MAGIC);
     append_varuint(output, ENVELOPE_VERSION);
@@ -515,6 +520,7 @@ pub(super) fn append_transcript_core_header(output: &mut Vec<u8>, object: &Trans
     append_string(output, &object.decryption_proof_profile_id);
 }
 
+#[cfg(test)]
 pub(super) fn header_length_before_field_count(object: &TranscriptCoreObject) -> usize {
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, object);

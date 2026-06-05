@@ -1,22 +1,8 @@
-import {
-    targetBoundShareSelectionProfileId,
-    targetDecryptionProfileId,
-    type CapabilityContext,
-    type CapabilityDecision,
-    type FoundationTranscriptInput,
-    type FoundationTranscriptVerification,
-    type FirstValidOrderingInput,
-    type FirstValidOrderingVerification,
-    type LifecycleLabelInput,
-    type LifecycleLabels,
-    type LifecycleTransition,
-    type PollSpecInput,
-    type PollSpecValidation,
-    type ProtocolAction,
-    type ThresholdProfile,
-    type ThresholdProfileInput,
-    type TranscriptCoreFixture,
-    type TranscriptCoreVerificationResult,
+import type {
+    FoundationTranscriptInput,
+    FoundationTranscriptVerification,
+    TranscriptCoreFixture,
+    TranscriptCoreVerificationResult,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
@@ -27,64 +13,56 @@ import {
     createFoundationTranscriptFixture,
 } from '#tests/support/foundation-transcript-fixture';
 
-type DeriveThresholdProfile = (
-    input: ThresholdProfileInput,
-) => ThresholdProfile;
-type ValidatePollSpec = (input: PollSpecInput) => PollSpecValidation;
-type IsValidLifecycleTransition = (transition: LifecycleTransition) => boolean;
-type DeriveLifecycleLabels = (input: LifecycleLabelInput) => LifecycleLabels;
-type EvaluateActionCapability = (
-    action: ProtocolAction,
-    context: CapabilityContext,
-) => CapabilityDecision;
-type DeriveValidatedFirstValidOrder = (
-    input: FirstValidOrderingInput,
-) => FirstValidOrderingVerification;
 type VerifyFoundationTranscript = (
     input: FoundationTranscriptInput,
 ) => FoundationTranscriptVerification;
 type VerifyTranscriptCoreFixture = (
     fixture: TranscriptCoreFixture,
 ) => Promise<TranscriptCoreVerificationResult>;
+type VerifyTranscript = () => {
+    readonly ok: boolean;
+    readonly refusedObjects: readonly {
+        readonly code: string;
+    }[];
+};
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
-const deriveThresholdProfile =
-    publicApiRuntimeRecord.deriveThresholdProfile as DeriveThresholdProfile;
-const validatePollSpec =
-    publicApiRuntimeRecord.validatePollSpec as ValidatePollSpec;
-const isValidLifecycleTransition =
-    publicApiRuntimeRecord.isValidLifecycleTransition as IsValidLifecycleTransition;
-const deriveLifecycleLabels =
-    publicApiRuntimeRecord.deriveLifecycleLabels as DeriveLifecycleLabels;
-const evaluateActionCapability =
-    publicApiRuntimeRecord.evaluateActionCapability as EvaluateActionCapability;
-const deriveValidatedFirstValidOrder =
-    publicApiRuntimeRecord.deriveValidatedFirstValidOrder as DeriveValidatedFirstValidOrder;
 const verifyFoundationTranscript =
     publicApiRuntimeRecord.verifyFoundationTranscript as VerifyFoundationTranscript;
 const verifyTranscriptCoreFixture =
     publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
+const verifyTranscript =
+    publicApiRuntimeRecord.verifyTranscript as VerifyTranscript;
 
 const requiredPublicFunctions = [
     [
         'deriveFrozenRosterProfile',
         publicApiRuntimeRecord.deriveFrozenRosterProfile,
     ],
-    ['deriveLifecycleLabels', deriveLifecycleLabels],
+    ['deriveLifecycleLabels', publicApiRuntimeRecord.deriveLifecycleLabels],
     ['derivePollSpecHash', publicApiRuntimeRecord.derivePollSpecHash],
-    ['deriveThresholdProfile', deriveThresholdProfile],
+    ['deriveThresholdProfile', publicApiRuntimeRecord.deriveThresholdProfile],
     [
         'deriveThresholdProfileHash',
         publicApiRuntimeRecord.deriveThresholdProfileHash,
     ],
-    ['deriveValidatedFirstValidOrder', deriveValidatedFirstValidOrder],
-    ['evaluateActionCapability', evaluateActionCapability],
+    [
+        'deriveValidatedFirstValidOrder',
+        publicApiRuntimeRecord.deriveValidatedFirstValidOrder,
+    ],
+    [
+        'evaluateActionCapability',
+        publicApiRuntimeRecord.evaluateActionCapability,
+    ],
     [
         'isActionCurrentForRecoveryEpoch',
         publicApiRuntimeRecord.isActionCurrentForRecoveryEpoch,
     ],
-    ['isValidLifecycleTransition', isValidLifecycleTransition],
-    ['validatePollSpec', validatePollSpec],
+    [
+        'isValidLifecycleTransition',
+        publicApiRuntimeRecord.isValidLifecycleTransition,
+    ],
+    ['validatePollSpec', publicApiRuntimeRecord.validatePollSpec],
     ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
     ['verifyCastReceiptShell', publicApiRuntimeRecord.verifyCastReceiptShell],
     ['verifyCloseRecordShell', publicApiRuntimeRecord.verifyCloseRecordShell],
@@ -102,7 +80,7 @@ const requiredPublicFunctions = [
     ],
     ['verifyFoundationTranscript', verifyFoundationTranscript],
     ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
-    ['verifyTranscript', publicApiRuntimeRecord.verifyTranscript],
+    ['verifyTranscript', verifyTranscript],
     [
         'verifyTranscriptCoreFixture',
         publicApiRuntimeRecord.verifyTranscriptCoreFixture,
@@ -134,121 +112,11 @@ describe('election foundation public package API in Node', () => {
         }
     });
 
-    it('derives threshold, poll, lifecycle, label, and capability decisions', () => {
-        const thresholdProfile = deriveThresholdProfile({
-            rosterSize: 10,
-            targetBoundShareSelectionProfile: {
-                profileId: targetBoundShareSelectionProfileId,
-                certificateHash: 'target-bound-certificate-hash',
-                targetDecryptionProfileId,
-                targetBasisHash: 'target-basis-hash',
-                decryptionShareQuorum: 9,
-                minimumSharesForInterpolation: 4,
-                minimumArrivalsForRobustDecode: 9,
-                invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
-                selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
-            },
-        });
-
-        expect(thresholdProfile.privacyCorruptionBound).toBe(3);
-        expect(
-            validatePollSpec({
-                pollId: 'poll',
-                question: 'Question',
-                options: ['A', 'B'],
-                topOptionCount: 1,
-            }),
-        ).toMatchObject({ ok: true });
-        expect(
-            isValidLifecycleTransition({
-                from: 'votingOpen',
-                to: 'votingClosed',
-            }),
-        ).toBe(true);
-
-        const labels = deriveLifecycleLabels({
-            lifecycleState: 'fullyVerified',
-            thresholdProfile,
-            mheSecurityClosure: 'ActiveMalicious',
-            localRosterAccepted: true,
-            runtimeClaimGatePassed: true,
-            directProofTransportPresent: true,
-            mobileReplayEvidencePresent: true,
-            targetDecryptionCertificatePresent: true,
-            targetDecryptionClosureApplied: true,
-            activeMaliciousClosureApplied: true,
-            decodedResultLayoutVerified: true,
-        });
-
-        expect(labels.resultClaimLabels).toEqual(['fullyVerified']);
-        expect(labels.primary).toContain('fullyVerified');
-        expect(
-            evaluateActionCapability('AcceptTarget', {
-                lifecycleState: 'targetFinalityReached',
-                thresholdProfile,
-                pollSpecValid: true,
-                localRosterAccepted: true,
-                rosterExternalAcceptanceHash: 'accepted-roster-hash',
-                actionContextRosterExternalAcceptanceHash:
-                    'accepted-roster-hash',
-                targetFinalityAccepted: true,
-                evaluatorReplaySucceeded: true,
-            }),
-        ).toEqual({ allowed: true, action: 'AcceptTarget' });
-        expect(
-            publicApiRuntimeRecord.verifyTranscript as () => {
-                readonly ok: boolean;
-                readonly refusedObjects: readonly {
-                    readonly code: string;
-                }[];
-            },
-        ).toBeTypeOf('function');
-        expect(
-            (
-                publicApiRuntimeRecord.verifyTranscript as () => {
-                    readonly ok: boolean;
-                    readonly refusedObjects: readonly {
-                        readonly code: string;
-                    }[];
-                }
-            )(),
-        ).toMatchObject({
+    it('keeps reserved transcript verification fail closed', () => {
+        expect(verifyTranscript()).toMatchObject({
             ok: false,
             refusedObjects: [
                 expect.objectContaining({ code: 'OperationUnavailable' }),
-            ],
-        });
-        expect(
-            deriveValidatedFirstValidOrder({
-                requiredContextHash: 'context',
-                selectionPolicyHash: 'policy',
-                expectedSelectionPolicyHash: 'policy',
-                currentRecoveryEpochMap: {
-                    participant: {
-                        signerIdentity: 'participant',
-                        currentRecoveryEpoch: 0,
-                        currentDeviceEpoch: 0,
-                    },
-                },
-                objects: [
-                    {
-                        objectHash: 'candidate',
-                        objectType: 'TargetFinalityRecord',
-                        boardSequence: 1,
-                        boardPosition: 0,
-                        signerIdentity: 'participant',
-                        recoveryEpoch: 0,
-                        deviceEpoch: 0,
-                        actionSequence: 0,
-                        contextHash: 'context',
-                        isByteIdenticalRetransmission: false,
-                    },
-                ],
-            }),
-        ).toMatchObject({
-            ok: true,
-            orderedObjects: [
-                expect.objectContaining({ objectHash: 'candidate' }),
             ],
         });
     });
@@ -291,21 +159,6 @@ describe('election foundation public package API in Node', () => {
                 }),
             ]),
         );
-        expect(
-            (
-                publicApiRuntimeRecord.verifyTranscript as () => {
-                    readonly ok: boolean;
-                    readonly refusedObjects: readonly {
-                        readonly code: string;
-                    }[];
-                }
-            )(),
-        ).toMatchObject({
-            ok: false,
-            refusedObjects: [
-                expect.objectContaining({ code: 'OperationUnavailable' }),
-            ],
-        });
     });
 
     it('matches foundation roots through the packaged transcript-core WASM verifier', async () => {

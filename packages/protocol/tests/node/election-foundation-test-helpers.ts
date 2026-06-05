@@ -1,11 +1,13 @@
 export {
-    createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
-    createProtocolSignatureFixture,
     deriveProtocolHash,
     deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
+export {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+} from '#tests/support/protocol-signature-fixtures';
 export {
     deriveActionContextHash,
     deriveRecoveryEpochUpdateHash,

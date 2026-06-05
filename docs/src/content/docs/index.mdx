@@ -1,6 +1,6 @@
 ---
 title: sealed-lattice
-description: Documentation for the sealed-lattice direct encrypted ballot direction.
+description: Documentation for the sealed-lattice active-static direct encrypted ballot direction.
 template: splash
 editUrl: false
 head:
@@ -8,7 +8,7 @@ head:
       content: sealed-lattice
 hero:
     title: sealed-lattice
-    tagline: Direct BGV-encrypted ballot direction for mobile verification.
+    tagline: Active-static direct BGV ballot direction for mobile verification.
     image:
         html: |
             <div class="landing-hero-panel">
@@ -18,7 +18,7 @@ hero:
                 <ol class="landing-hero-panel__list">
                   <li>Install <code>sealed-lattice</code>.</li>
                   <li>Use the current verification helpers for development and integration work.</li>
-                  <li>Track the direct encrypted ballot path: proof, aggregation, replay, finality, and target decryption.</li>
+                  <li>Track the active-static path: setup, proof, aggregation, replay, finality, and target decryption.</li>
                   <li>Keep production election use out of scope until the complete direct path is implemented, measured, audited, and certified.</li>
                 </ol>
               </div>
@@ -30,8 +30,8 @@ hero:
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Current direction</span>
-                  <strong>direct encrypted ballots</strong>
-                  <small>BGV ballots, public aggregation, mobile replay</small>
+                  <strong>active-static setup</strong>
+                  <small>Direct BGV ballots and bounded-domain replay</small>
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Package</span>
@@ -64,9 +64,11 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
   <div class="landing-section__header">
     <h2>Selected direction</h2>
     <p>
-      The active construction is direct BGV-encrypted ballots, public ciphertext
-      aggregation, deterministic mobile evaluator replay, target finality, and
-      target-bound threshold decryption.
+      The active construction is active-static secure-with-abort collective BGV
+      setup, direct BGV-encrypted ballots, LaZer/LNP-derived no-wrap ballot
+      validity proofs, public ciphertext aggregation, bounded-domain mobile
+      evaluator replay, unanimous target finality, and one-shot target-bound
+      decryption of <code>C_target</code> only.
     </p>
   </div>
 
@@ -74,13 +76,15 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Card title="Direct encrypted ballot path">
       <div class="landing-card-copy">
         <p>
-          Each voter publishes one encrypted ballot. Verification must
-          check the ballot proof, select the first valid ballot per voter, and
-          recompute the encrypted ballot aggregate from public ciphertexts.
+          Each voter publishes one encrypted ballot. Verification must check
+          active-static setup evidence, the ballot proof, the first valid ballot
+          per voter, and the encrypted ballot aggregate from public ciphertexts.
         </p>
         <p>
-          The evaluator is checked by deterministic mobile replay. Only the
-          finalized and replay-matched <code>C_target</code> can be decrypted.
+          The evaluator is checked by deterministic bounded-domain mobile replay.
+          <code>C_topK</code> is encrypted, but it is not an authorized
+          decryption target. Only the finalized and replay-matched
+          <code>C_target</code> can be decrypted.
         </p>
       </div>
     </Card>
@@ -88,14 +92,14 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Card title="Current limits">
       <div class="landing-card-copy">
         <p>
-          The direct proof, aggregation, and browser evidence are internal
+          The setup, direct proof, aggregation, and browser evidence are internal
           development evidence. They are not supported-phone evidence, production
           readiness, or a complete public voting API.
         </p>
         <p>
-          Ballot proof soundness, zero-knowledge accounting, public proof
-          transport, sparse target projection, mobile replay, and target-bound
-          decryption remain open.
+          Active-static setup, VSS, proof soundness, zero-knowledge accounting,
+          public proof transport, bounded-domain evaluator replay, mobile
+          evidence, and target-bound decryption remain open.
         </p>
       </div>
     </Card>
@@ -121,7 +125,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
       3. **Verify current public evidence.**
          Use the current helpers for development verification and package integration.
       4. **Keep the current limits explicit.**
-         Ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release are not complete public APIs yet.
+         Setup, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release are not complete public APIs yet.
     </Steps>
   </div>
 </section>
