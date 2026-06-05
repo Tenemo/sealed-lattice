@@ -1,6 +1,6 @@
 {
     "name": "sealed-lattice-workspace",
-    "version": "0.0.16",
+    "version": "0.0.17",
     "private": true,
     "description": "Post-quantum threshold homomorphic voting library.",
     "author": "Piotr Piech <piotr@piech.dev>",
