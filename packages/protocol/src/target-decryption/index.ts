@@ -9,12 +9,8 @@ import {
     type TopKDecryptionShareShellVerificationInput,
 } from '@sealed-lattice/types';
 
+import { collectBoardInclusionEvidence } from '../board/shell-evidence.js';
 import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
-import {
-    buildBoardHeadMap,
     createRefusal,
     defaultSignedRootContextHash,
     isProtocolHashString,
@@ -38,9 +34,12 @@ const verifyTargetAcceptedRecordUnchecked = (
     input: TargetAcceptedRecordVerificationInput,
 ): TargetAcceptedRecordVerification => {
     const { targetAcceptedRecord: record } = input;
-    const refusedObjects: RefusalRecord[] = [];
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
+    const boardEvidence = collectBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.targetAcceptedRecordInclusionProof,
+    });
+    const { boardResult } = boardEvidence;
+    const refusedObjects: RefusalRecord[] = [...boardEvidence.refusedObjects];
     const checkpoint = input.targetFinalityRecord.targetFinalityCheckpoint;
     const expectedRecordHash = deriveTargetAcceptedRecordHash({
         acceptanceMode: record.acceptanceMode,
@@ -65,14 +64,6 @@ const verifyTargetAcceptedRecordUnchecked = (
         targetPreimageHash: record.targetPreimageHash,
         targetProposalHash: record.targetProposalHash,
     });
-
-    refusedObjects.push(...boardResult.refusedObjects);
-    refusedObjects.push(
-        ...verifyInclusionProof(
-            input.targetAcceptedRecordInclusionProof,
-            headsByHash,
-        ),
-    );
 
     if (record.targetAcceptedRecordHash !== expectedRecordHash) {
         refusedObjects.push(
@@ -290,9 +281,12 @@ const verifyTopKDecryptionShareShellUnchecked = (
     input: TopKDecryptionShareShellVerificationInput,
 ): TopKDecryptionShareShellVerification => {
     const { decryptionShare: share, targetAcceptedRecord } = input;
-    const refusedObjects: RefusalRecord[] = [];
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
+    const boardEvidence = collectBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.decryptionShareInclusionProof,
+    });
+    const { boardResult } = boardEvidence;
+    const refusedObjects: RefusalRecord[] = [...boardEvidence.refusedObjects];
     const expectedShareHash = deriveTopKDecryptionShareHash({
         boardPosition: share.boardPosition,
         boardSequence: share.boardSequence,
@@ -324,14 +318,6 @@ const verifyTopKDecryptionShareShellUnchecked = (
         trusteeThresholdVerificationKeyHash:
             share.trusteeThresholdVerificationKeyHash,
     });
-
-    refusedObjects.push(...boardResult.refusedObjects);
-    refusedObjects.push(
-        ...verifyInclusionProof(
-            input.decryptionShareInclusionProof,
-            headsByHash,
-        ),
-    );
 
     if (share.topKDecryptionShareHash !== expectedShareHash) {
         refusedObjects.push(

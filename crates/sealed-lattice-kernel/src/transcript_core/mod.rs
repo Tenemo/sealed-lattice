@@ -29,9 +29,6 @@ pub use types::{
 };
 
 #[cfg(test)]
-pub const MODULE_MARKER: &str = "transcript-core";
-
-#[cfg(test)]
 mod tests {
     use super::{
         DeterministicFixtureRng, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,

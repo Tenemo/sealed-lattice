@@ -13,11 +13,10 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
+    collectBoardEvidence,
+    verifyBoardInclusionProof,
+} from '../board/shell-evidence.js';
 import {
-    buildBoardHeadMap,
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
@@ -219,8 +218,8 @@ const verifyRecoveryEpochUpdateUnchecked = (
     input: RecoveryEpochVerificationInput,
 ): RecoveryEpochVerification => {
     const { update, currentEntry } = input;
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
+    const boardEvidence = collectBoardEvidence(input.boardEvidence);
+    const { boardResult, headsByHash } = boardEvidence;
     const updateInclusionHead = headsByHash.get(
         input.updateInclusionProof.boardHeadHash,
     );
@@ -394,7 +393,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
         );
     }
     refusedObjects.push(
-        ...verifyInclusionProof(input.updateInclusionProof, headsByHash),
+        ...verifyBoardInclusionProof(boardEvidence, input.updateInclusionProof),
     );
     for (const conflictingUpdate of input.conflictingUpdates ?? []) {
         if (

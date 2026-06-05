@@ -4,10 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     buildPackageManagerEntryPointCandidates,
-    createAbortableCommandSpawnOptions,
-    killProcessTree,
     resolvePackageManagerRunnerForPackageManager,
     resolvePackageManagerRunnerFromArguments,
+} from '#tools/ci/package-manager-runner';
+import {
+    createAbortableCommandSpawnOptions,
+    killProcessTree,
 } from '#tools/ci/run-command';
 
 describe('package manager runner resolution', () => {

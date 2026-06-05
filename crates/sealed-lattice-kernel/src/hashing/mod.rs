@@ -16,8 +16,6 @@ mod namespaces;
 pub use chunk_tree::chunk_root;
 pub use namespaces::*;
 
-#[cfg(test)]
-pub const MODULE_MARKER: &str = "hashing";
 pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash512";
 
 pub fn to_hex(bytes: &[u8]) -> String {

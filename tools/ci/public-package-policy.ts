@@ -100,6 +100,7 @@ export const forbiddenRuntimeExports = [
 ] as const;
 
 export const vendoredProtocolRuntimeModules = [
+    'board/consistency.ts',
     'board/hashes.ts',
     'board/head-chain.ts',
     'board/inclusion-proof.ts',

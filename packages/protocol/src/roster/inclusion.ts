@@ -5,7 +5,7 @@ import type {
     SignedBoardHead,
 } from '@sealed-lattice/types';
 
-import { verifyInclusionProof } from '../board/index.js';
+import { verifyInclusionProof } from '../board/inclusion-proof.js';
 import { createRefusal } from '../common/verification-helpers.js';
 
 export const mapInclusionProofsByObjectHash = (

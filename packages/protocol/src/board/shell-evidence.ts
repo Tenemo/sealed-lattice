@@ -17,11 +17,15 @@ import {
     uniqueStrings,
 } from '../common/verification-helpers.js';
 
-import { verifyBoardConsistency, verifyInclusionProof } from './index.js';
+import { verifyBoardConsistency } from './consistency.js';
+import { verifyInclusionProof } from './inclusion-proof.js';
 
-type BoardInclusionEvidence = {
+export type BoardEvidence = {
     readonly boardResult: BoardConsistencyVerification;
     readonly headsByHash: ReadonlyMap<ProtocolHash, SignedBoardHead>;
+};
+
+type BoardInclusionEvidence = BoardEvidence & {
     readonly refusedObjects: RefusalRecord[];
 };
 
@@ -33,21 +37,32 @@ type SignedBoardShellVerificationBase = {
     readonly forkEvidence: BoardConsistencyVerification['forkEvidence'];
 };
 
-const collectBoardInclusionEvidence = (input: {
+export const collectBoardEvidence = (
+    boardEvidence: BoardConsistencyInput,
+): BoardEvidence => ({
+    boardResult: verifyBoardConsistency(boardEvidence),
+    headsByHash: buildBoardHeadMap(boardEvidence.signedBoardHeads),
+});
+
+export const verifyBoardInclusionProof = (
+    evidence: BoardEvidence,
+    inclusionProof: InclusionProof,
+): readonly RefusalRecord[] =>
+    verifyInclusionProof(inclusionProof, evidence.headsByHash);
+
+export const collectBoardInclusionEvidence = (input: {
     readonly boardEvidence: BoardConsistencyInput;
     readonly inclusionProof: InclusionProof;
-    readonly objectRefusals: readonly RefusalRecord[];
+    readonly objectRefusals?: readonly RefusalRecord[];
 }): BoardInclusionEvidence => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
+    const evidence = collectBoardEvidence(input.boardEvidence);
 
     return {
-        boardResult,
-        headsByHash,
+        ...evidence,
         refusedObjects: [
-            ...boardResult.refusedObjects,
-            ...input.objectRefusals,
-            ...verifyInclusionProof(input.inclusionProof, headsByHash),
+            ...evidence.boardResult.refusedObjects,
+            ...(input.objectRefusals ?? []),
+            ...verifyBoardInclusionProof(evidence, input.inclusionProof),
         ],
     };
 };

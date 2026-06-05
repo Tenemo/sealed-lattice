@@ -10,11 +10,11 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
+    collectBoardInclusionEvidence,
+    type BoardEvidence,
+    verifyBoardInclusionProof,
+} from '../board/shell-evidence.js';
 import {
-    buildBoardHeadMap,
     createRefusal,
     defaultSignedRootContextHash,
     isProtocolHashString,
@@ -408,11 +408,11 @@ const verifyWitnessCheckpoint = (
 const collectValidWitnessIdentitiesForRecord = (
     input: TargetFinalityVerificationInput,
     record: TargetFinalityRecord,
+    boardEvidence: BoardEvidence,
 ): readonly string[] | undefined => {
-    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
     const refusedObjects: RefusalRecord[] = [
         ...verifyTargetRecordShape(input, record),
-        ...verifyInclusionProof(record.inclusionProof, headsByHash),
+        ...verifyBoardInclusionProof(boardEvidence, record.inclusionProof),
     ];
     const validWitnessIdentities: string[] = [];
     const seenWitnessIdentities = new Set<string>();
@@ -459,6 +459,7 @@ const collectValidWitnessIdentitiesForRecord = (
 const findFinalityForkEvidence = (
     input: TargetFinalityVerificationInput,
     validWitnessIdentities: readonly string[],
+    boardEvidence: BoardEvidence,
 ): ConflictingHeadEvidence | undefined => {
     for (const conflictingRecord of input.conflictingRecords ?? []) {
         if (
@@ -472,7 +473,11 @@ const findFinalityForkEvidence = (
         }
 
         const validConflictingWitnessIdentities =
-            collectValidWitnessIdentitiesForRecord(input, conflictingRecord);
+            collectValidWitnessIdentitiesForRecord(
+                input,
+                conflictingRecord,
+                boardEvidence,
+            );
         if (validConflictingWitnessIdentities === undefined) {
             continue;
         }
@@ -515,13 +520,13 @@ const findFinalityForkEvidence = (
 const verifyTargetFinalityUnchecked = (
     input: TargetFinalityVerificationInput,
 ): TargetFinalityVerification => {
-    const boardResult = verifyBoardConsistency(input.boardEvidence);
-    const headsByHash = buildBoardHeadMap(input.boardEvidence.signedBoardHeads);
-    const refusedObjects: RefusalRecord[] = [
-        ...boardResult.refusedObjects,
-        ...verifyTargetRecordShape(input, input.record),
-        ...verifyInclusionProof(input.record.inclusionProof, headsByHash),
-    ];
+    const boardEvidence = collectBoardInclusionEvidence({
+        boardEvidence: input.boardEvidence,
+        inclusionProof: input.record.inclusionProof,
+        objectRefusals: verifyTargetRecordShape(input, input.record),
+    });
+    const { boardResult } = boardEvidence;
+    const refusedObjects: RefusalRecord[] = [...boardEvidence.refusedObjects];
     const validWitnessIdentities: string[] = [];
     const duplicateWitnessIdentities = new Set<string>();
     const seenWitnessIdentities = new Set<string>();
@@ -577,6 +582,7 @@ const verifyTargetFinalityUnchecked = (
     const finalityForkEvidence = findFinalityForkEvidence(
         input,
         validWitnessIdentities,
+        boardEvidence,
     );
     const forkEvidence = finalityForkEvidence ?? boardResult.forkEvidence;
     const equivocatingWitnessIdentities =

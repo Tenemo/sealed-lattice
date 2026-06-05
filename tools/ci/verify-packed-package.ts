@@ -17,9 +17,11 @@ import {
     resolvePackageManagerRunner,
     resolvePackageManagerRunnerFromArguments,
     resolvePackageManagerRunnerForPackageManager,
+    type PackageManager,
+} from './package-manager-runner.js';
+import {
     runPackageManager,
     runPackageManagerAndCaptureOutput,
-    type PackageManager,
 } from './run-command.js';
 import {
     getRootPackageJsonPath,

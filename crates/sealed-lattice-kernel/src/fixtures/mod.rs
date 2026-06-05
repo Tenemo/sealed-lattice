@@ -21,8 +21,6 @@ use crate::{
     },
 };
 
-pub const MODULE_MARKER: &str = "fixtures";
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind")]
 pub enum TranscriptCoreFixture {

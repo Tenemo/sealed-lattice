@@ -107,25 +107,10 @@ pub unsafe extern "C" fn sealed_lattice_transcript_core_command_with_length(
 #[cfg(test)]
 mod tests {
     use super::{
-        TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, bgv, encoding, fixtures, hashing, ring,
         sealed_lattice_allocate, sealed_lattice_deallocate, sealed_lattice_roundtrip,
-        sealed_lattice_transcript_core_command_with_length, transcript_core,
+        sealed_lattice_transcript_core_command_with_length,
     };
     use core::{ptr, slice};
-
-    #[test]
-    fn exposes_stable_transcript_core_markers() {
-        assert_eq!(
-            TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION,
-            "sealed-lattice-transcript-core-command-v1"
-        );
-        assert_eq!(encoding::MODULE_MARKER, "encoding");
-        assert_eq!(bgv::MODULE_MARKER, "bgv");
-        assert_eq!(hashing::MODULE_MARKER, "hashing");
-        assert_eq!(transcript_core::MODULE_MARKER, "transcript-core");
-        assert_eq!(fixtures::MODULE_MARKER, "fixtures");
-        assert_eq!(ring::MODULE_MARKER, "ring");
-    }
 
     #[test]
     fn exported_allocations_deallocate_with_matching_layout() {

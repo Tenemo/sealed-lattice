@@ -14,6 +14,3 @@ mod serialization;
 mod setup;
 mod setup_helpers;
 mod validation;
-
-#[cfg(test)]
-pub const MODULE_MARKER: &str = "bgv";

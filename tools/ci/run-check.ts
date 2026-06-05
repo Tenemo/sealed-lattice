@@ -18,11 +18,13 @@ import {
     type ActiveLocalRunLog,
 } from './local-run-log.js';
 import {
-    createPackageManagerCommand,
     resolvePackageManagerRunner,
+    type PackageManagerRunner,
+} from './package-manager-runner.js';
+import {
+    createPackageManagerCommand,
     runCommandsInSeries,
     type CommandInvocation,
-    type PackageManagerRunner,
 } from './run-command.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';

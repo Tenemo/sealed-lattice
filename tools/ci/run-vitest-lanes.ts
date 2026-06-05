@@ -1,11 +1,13 @@
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
 import {
-    createPackageManagerCommand,
     resolvePackageManagerRunner,
+    type PackageManagerRunner,
+} from './package-manager-runner.js';
+import {
+    createPackageManagerCommand,
     runCommandsInParallel,
     runCommandsInSeries,
     type CommandInvocation,
-    type PackageManagerRunner,
 } from './run-command.js';
 
 export const buildWorkspaceBuildCommand = (

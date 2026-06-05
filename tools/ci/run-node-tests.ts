@@ -4,9 +4,9 @@ import {
 } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
-    type CommandInvocation,
     type PackageManagerRunner,
-} from './run-command.js';
+} from './package-manager-runner.js';
+import { type CommandInvocation } from './run-command.js';
 import {
     buildVitestProjectCommand,
     runWorkspaceBuildThenParallelCommands,

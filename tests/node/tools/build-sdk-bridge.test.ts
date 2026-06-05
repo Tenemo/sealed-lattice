@@ -93,6 +93,9 @@ describe('SDK bridge build helpers', () => {
             vendoredProtocolRuntimeModules,
         );
         expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
+            'board/consistency.ts',
+        );
+        expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
             'board/index.ts',
         );
         expect(sdkProtocolRuntimeSourceRelativePaths).toContain(

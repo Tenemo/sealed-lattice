@@ -2,10 +2,8 @@ import {
     removeRunLogArguments,
     runLogDisabledByArguments,
 } from './local-run-log.js';
-import {
-    type CommandInvocation,
-    type PackageManagerRunner,
-} from './run-command.js';
+import { type PackageManagerRunner } from './package-manager-runner.js';
+import { type CommandInvocation } from './run-command.js';
 import {
     buildVitestProjectCommand,
     runWorkspaceBuildThenParallelCommands,

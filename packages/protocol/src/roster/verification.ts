@@ -8,10 +8,8 @@ import type {
     RosterManifestTranscriptVerification,
 } from '@sealed-lattice/types';
 
-import {
-    verifyBoardConsistency,
-    verifyInclusionProof,
-} from '../board/index.js';
+import { verifyBoardConsistency } from '../board/consistency.js';
+import { verifyInclusionProof } from '../board/inclusion-proof.js';
 import {
     buildBoardHeadMap,
     createRefusal,

@@ -16,8 +16,6 @@ mod command;
 #[cfg(test)]
 use command::run_transcript_core_command_inner;
 
-#[cfg(test)]
-pub const MODULE_MARKER: &str = "encoding";
 pub const TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION: &str =
     "sealed-lattice-transcript-core-command-v1";
 
