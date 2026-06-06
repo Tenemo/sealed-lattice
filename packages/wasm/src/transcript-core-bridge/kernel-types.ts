@@ -316,6 +316,10 @@ export type TranscriptCoreKernel = {
     validateBgvEvaluatorOperation(input: {
         readonly operation: string;
     }): BgvEvaluatorOperationValidation;
+    describeMaskedRankRefreshProfile(): Record<string, unknown>;
+    verifyMaskedRankRefreshTranscript(
+        input: MaskedRankRefreshTranscriptVerificationInput,
+    ): Record<string, unknown>;
     rejectBgvReferenceOracleArtifact(input: {
         readonly artifact: unknown;
     }): BgvReferenceOracleRejection;
@@ -387,6 +391,24 @@ export type TopKEvaluatorEncryptedAggregateInput = {
     readonly bridgeEncryption: unknown;
 };
 
+export type MaskedRankRefreshTranscriptVerificationInput = {
+    readonly rankRefreshTranscript: unknown;
+    readonly setupPackage: unknown;
+    readonly expectedAlgebraicShareVerificationKeyHash?: ProtocolHash;
+    readonly expectedAlgebraicShareVerificationKeyRoot?: ProtocolHash;
+    readonly expectedBgvPublicKeyRoot?: ProtocolHash;
+    readonly expectedCollectivePublicKeyRoot?: ProtocolHash;
+    readonly expectedEvaluationContextHash?: ProtocolHash;
+    readonly expectedEvaluationKeyRoot?: ProtocolHash;
+    readonly expectedInputRankCiphertextRoot?: ProtocolHash;
+    readonly expectedRefreshedRankCiphertextRoot?: ProtocolHash;
+    readonly expectedSetupPackageHash?: ProtocolHash;
+    readonly expectedTargetLayoutHash?: ProtocolHash;
+    readonly expectedThresholdShareVerificationKeyHash?: ProtocolHash;
+    readonly expectedThresholdShareVerificationKeyRoot?: ProtocolHash;
+    readonly expectedTopCount?: number;
+};
+
 export type TopKEvaluatorEncryptedAggregateEvaluationInput = {
     readonly setupPackage: BgvPassiveSetupPackage;
     readonly evaluationKeyMaterial?: unknown;
@@ -399,6 +421,8 @@ export type TopKEvaluatorEncryptedAggregateEvaluationInput = {
     readonly canonicalBallotSetHash: string;
     readonly preTargetBoardHead: string;
     readonly evaluatorSignature: string;
+    readonly rankRefreshTranscript?: unknown;
+    readonly rankRefreshTranscripts?: readonly unknown[];
 };
 
 export type TopKEvaluatorEncryptedAggregateEvaluationSweepInput = Omit<
@@ -650,6 +674,12 @@ type TranscriptCoreKernelCommand =
           readonly command: 'ValidateBgvEvaluatorOperation';
           readonly operation: string;
       }
+    | {
+          readonly command: 'DescribeMaskedRankRefreshProfile';
+      }
+    | ({
+          readonly command: 'VerifyMaskedRankRefreshTranscript';
+      } & MaskedRankRefreshTranscriptVerificationInput)
     | {
           readonly command: 'DescribeBgvPassiveSetupObjectModel';
       }

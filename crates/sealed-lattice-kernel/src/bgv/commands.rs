@@ -62,6 +62,16 @@ pub(crate) fn describe_bgv_operation_registry() -> CanonicalResult<Value> {
     }))
 }
 
+pub(crate) fn describe_masked_rank_refresh_profile() -> CanonicalResult<Value> {
+    crate::bgv::evaluator::rank_refresh::describe_masked_rank_refresh_profile()
+}
+
+pub(crate) fn verify_masked_rank_refresh_transcript_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    crate::bgv::evaluator::rank_refresh::verify_masked_rank_refresh_transcript_from_request(request)
+}
+
 pub(crate) fn validate_bgv_evaluator_operation_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {

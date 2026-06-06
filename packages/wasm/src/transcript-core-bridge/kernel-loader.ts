@@ -512,6 +512,17 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'ValidateBgvEvaluatorOperation',
                         operation: input.operation,
                     }),
+                describeMaskedRankRefreshProfile: (): Record<string, unknown> =>
+                    executeCommand<Record<string, unknown>>({
+                        command: 'DescribeMaskedRankRefreshProfile',
+                    }),
+                verifyMaskedRankRefreshTranscript: (
+                    input,
+                ): Record<string, unknown> =>
+                    executeCommand<Record<string, unknown>>({
+                        command: 'VerifyMaskedRankRefreshTranscript',
+                        ...input,
+                    }),
                 describeBgvPassiveSetupObjectModel: (): unknown =>
                     executeCommand<unknown>({
                         command: 'DescribeBgvPassiveSetupObjectModel',

@@ -235,7 +235,6 @@ fn collective_public_key_coefficient_material(
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-
     Ok(json!({
         "objectType": "BgvCollectivePublicKeyCoefficientMaterial",
         "objectVersion": 1,
@@ -452,6 +451,7 @@ pub(super) fn threshold_verification_material(
     input: &PassiveSetupInput,
     threshold_decryption_profile_hash: &str,
     kllps_target_decryption_profile_hash: &str,
+    participant_records: &[Value],
     participant_setup_record_hashes: &[String],
     trustee_threshold_verification_key_hashes: &[String],
 ) -> CanonicalResult<Value> {
@@ -468,6 +468,24 @@ pub(super) fn threshold_verification_material(
             })
         })
         .collect::<Vec<_>>();
+    let algebraic_share_verification_key_set = algebraic_share_verification_key_set(
+        input,
+        threshold_decryption_profile_hash,
+        kllps_target_decryption_profile_hash,
+        participant_records,
+    )?;
+    let algebraic_share_verification_key_root = derive_protocol_hash(
+        "AlgebraicThresholdShareVerificationKeyRoot",
+        &algebraic_share_verification_key_set,
+    )?;
+    let algebraic_share_verification_key_hash = derive_protocol_hash(
+        "AlgebraicThresholdShareVerificationKeyHash",
+        &json!({
+            "algebraicShareVerificationKeyRoot": algebraic_share_verification_key_root,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        }),
+    )?;
     let verification_key_set = json!({
         "objectType": "ThresholdShareVerificationKeySet",
         "objectVersion": 1,
@@ -481,12 +499,17 @@ pub(super) fn threshold_verification_material(
         "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
         "participantInterpolationUniverse": participant_points,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
+        "algebraicShareVerificationProfileId": THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID,
+        "algebraicShareVerificationKeyRoot": algebraic_share_verification_key_root,
+        "algebraicShareVerificationKeyHash": algebraic_share_verification_key_hash,
+        "algebraicShareVerificationKeySet": algebraic_share_verification_key_set,
         "passiveSetupVerificationScope": [
             "transcript-binding",
             "identity-binding",
             "roster-binding",
             "profile-binding",
-            "recovery-device-epoch-binding"
+            "recovery-device-epoch-binding",
+            "algebraic-share-proof-statement-binding"
         ],
         "maliciousDkgProofIncluded": false,
     });
@@ -505,13 +528,622 @@ pub(super) fn threshold_verification_material(
         "verificationKeySet": verification_key_set,
         "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": threshold_share_verification_key_hash,
+        "algebraicShareVerificationKeyRoot": verification_key_set["algebraicShareVerificationKeyRoot"],
+        "algebraicShareVerificationKeyHash": verification_key_set["algebraicShareVerificationKeyHash"],
         "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
         "statusLabels": [
             "ThresholdVerificationMaterialBound",
             "PassiveSetupVerificationScopeOnly",
+            "AlgebraicThresholdShareVerificationStatementBound",
+            "ThresholdLsssProofStillPending",
             "KllpsVerificationRootsBound"
         ],
     }))
+}
+
+fn algebraic_share_verification_key_set(
+    input: &PassiveSetupInput,
+    threshold_decryption_profile_hash: &str,
+    kllps_target_decryption_profile_hash: &str,
+    participant_records: &[Value],
+) -> CanonicalResult<Value> {
+    let participant_count = participant_records.len();
+    let decryption_threshold = strict_less_than_one_third_decryption_threshold(participant_count)?;
+    let participant_identities = input
+        .participants
+        .iter()
+        .map(|participant| participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
+    let trustee_keys = participant_records
+        .iter()
+        .map(|participant_record| {
+            let trustee_identity = string_at_path(participant_record, &["trusteeIdentity"])?;
+            let roster_position = usize_at_path(participant_record, &["rosterPosition"])?;
+            let interpolation_point = roster_position + 1;
+            let public_key_share_coefficient_material =
+                trustee_public_key_share_coefficient_material(
+                    input,
+                    &participant_identities,
+                    participant_record,
+                    trustee_identity,
+                    roster_position,
+                    interpolation_point,
+                )?;
+            let public_key_share_coefficient_material_root = derive_protocol_hash(
+                "TrusteePublicKeyShareCoefficientMaterialRoot",
+                &public_key_share_coefficient_material,
+            )?;
+            let public_key_share_coefficient_material_hash = derive_protocol_hash(
+                "TrusteePublicKeyShareCoefficientMaterialHash",
+                &json!({
+                    "publicKeyShareCoefficientMaterialRoot": public_key_share_coefficient_material_root,
+                    "publicKeyShareRoot": hash_at_path(participant_record, &["publicKeyShareRoot"])?,
+                    "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+                    "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+                }),
+            )?;
+            let lsss_witness_commitment_hash = hash512_hex(
+                "sealed-lattice-bgv-rns/threshold-lsss-share-witness-commitment-v1",
+                &[
+                    input.private_setup_seed_hash.as_bytes(),
+                    trustee_identity.as_bytes(),
+                    interpolation_point.to_string().as_bytes(),
+                    decryption_threshold.to_string().as_bytes(),
+                    threshold_decryption_profile_hash.as_bytes(),
+                    kllps_target_decryption_profile_hash.as_bytes(),
+                ],
+            );
+
+            Ok(json!({
+                "objectType": "BgvTrusteeAlgebraicThresholdShareVerificationKey",
+                "objectVersion": 1,
+                "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+                "profileId": THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID,
+                "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+                "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+                "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+                "ceremonyId": input.ceremony_id,
+                "rosterHash": input.roster_hash,
+                "thresholdProfileHash": input.threshold_profile_hash,
+                "trusteeIdentity": trustee_identity,
+                "rosterPosition": roster_position,
+                "interpolationPoint": interpolation_point,
+                "participantSetupRecordHash": hash_at_path(
+                    participant_record,
+                    &["participantSetupRecordHash"],
+                )?,
+                "publicKeyShareRoot": hash_at_path(participant_record, &["publicKeyShareRoot"])?,
+                "publicKeyShareCoefficientMaterialRoot": public_key_share_coefficient_material_root,
+                "publicKeyShareCoefficientMaterialHash": public_key_share_coefficient_material_hash,
+                "publicKeyShareCoefficientMaterialIncluded": false,
+                "publicKeyShareCoefficientMaterialTransport": "root-bound-public-sidecar-required-for-claim-bearing-PartDec-verification",
+                "trusteeThresholdVerificationKeyHash": hash_at_path(
+                    participant_record,
+                    &["trusteeThresholdVerificationKeyHash"],
+                )?,
+                "localSecretShareCommitmentHash": hash_at_path(
+                    participant_record,
+                    &["localSecretShareCommitmentHash"],
+                )?,
+                "localErrorCommitmentHash": hash_at_path(
+                    participant_record,
+                    &["localErrorCommitmentHash"],
+                )?,
+                "thresholdLsssWitnessCommitmentHash": lsss_witness_commitment_hash,
+                "publicKeyShareConsistencyEquation": "publicKeyShareComponentZero + publicCommonRandomPolynomial * trusteeSecretShare = plaintextModulus * trusteeErrorShare mod q",
+                "partDecShareEquation": "partialDecryptionShare = ciphertextComponentOne * trusteeSecretShare + smudgingNoise mod q",
+                "shareEquationProofRequired": true,
+                "proofSystemStatus": "ZeroKnowledgeShareEquationProofPending",
+                "rawSecretShareExported": false,
+                "thresholdSecretShareExported": false,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let public_key_share_coefficient_material_roots = trustee_keys
+        .iter()
+        .map(|trustee_key| {
+            hash_at_path(trustee_key, &["publicKeyShareCoefficientMaterialRoot"])
+                .map(|hash| Value::String(hash.to_string()))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let public_key_share_coefficient_material_hashes = trustee_keys
+        .iter()
+        .map(|trustee_key| {
+            hash_at_path(trustee_key, &["publicKeyShareCoefficientMaterialHash"])
+                .map(|hash| Value::String(hash.to_string()))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(json!({
+        "objectType": "BgvThresholdLsssShareVerificationKeySet",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "profileId": THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID,
+        "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+        "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+        "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        "ceremonyId": input.ceremony_id,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
+        "thresholdProfileHash": input.threshold_profile_hash,
+        "participantCount": participant_count,
+        "decryptionThreshold": decryption_threshold,
+        "thresholdDerivation": "strict-less-than-one-third-backend-bound-plus-one",
+        "basisId": BgvBasisKind::Data.basis_id(),
+        "dataPrimeCount": DATA_PRIMES.len(),
+        "polynomialDegree": POLYNOMIAL_DEGREE,
+        "secretSharingScheme": "coefficientwise-Shamir-LSSS-over-selected-Q-data",
+        "interpolationPointKind": "roster-position-plus-one",
+        "lsssWitnessCommitmentStatus": "private-setup-witness-commitment-bound",
+        "publicKeyShareCoefficientMaterialRoots": public_key_share_coefficient_material_roots,
+        "publicKeyShareCoefficientMaterialHashes": public_key_share_coefficient_material_hashes,
+        "publicKeyShareCoefficientMaterialStatus": "root-bound-public-sidecar-required",
+        "lsssSecretSharesExported": false,
+        "algebraicPartDecProofStatus": "ZeroKnowledgeShareEquationProofPending",
+        "finDecShareCombinationStatus": "FinDecCorrectnessAndSmudgingBoundsPending",
+        "maskReEncryptionProofStatus": "MaskReEncryptionProofPending",
+        "trusteeVerificationKeys": trustee_keys,
+    }))
+}
+
+fn trustee_public_key_share_coefficient_material(
+    input: &PassiveSetupInput,
+    participant_identities: &[String],
+    participant_record: &Value,
+    trustee_identity: &str,
+    roster_position: usize,
+    interpolation_point: usize,
+) -> CanonicalResult<Value> {
+    let trustee_secret_coefficients = (0..POLYNOMIAL_DEGREE)
+        .map(|coefficient_index| {
+            bounded_collective_secret_share_coefficient(
+                &input.private_setup_seed_hash,
+                participant_identities,
+                trustee_identity,
+                coefficient_index,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let trustee_error_coefficients = (0..POLYNOMIAL_DEGREE)
+        .map(|coefficient_index| {
+            bounded_collective_error_share_coefficient(
+                &input.private_setup_seed_hash,
+                participant_identities,
+                trustee_identity,
+                coefficient_index,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let coefficient_tables = DATA_PRIMES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(limb_index, modulus)| {
+            let coefficients = collective_public_key_coefficients_from_signed(
+                &input.setup_seed_hash,
+                &trustee_secret_coefficients,
+                &trustee_error_coefficients,
+                modulus,
+            )?;
+            Ok(json!({
+                "limbIndex": limb_index,
+                "modulus": modulus,
+                "componentZeroBLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
+                "componentZeroBHash512": coefficient_vector_hash512(&coefficients.component_zero_coefficients),
+                "componentOneAHash512": coefficient_vector_hash512(&coefficients.component_one_coefficients),
+                "coefficientByteLength": POLYNOMIAL_DEGREE * 8,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(json!({
+        "objectType": "BgvTrusteePublicKeyShareCoefficientMaterial",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "basisId": BgvBasisKind::Data.basis_id(),
+        "publicShareConstruction": "componentZeroB=plaintextModulus*trusteeErrorShare-publicCommonRandomPolynomial*trusteeSecretShare",
+        "ceremonyId": input.ceremony_id,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
+        "trusteeIdentity": trustee_identity,
+        "rosterPosition": roster_position,
+        "interpolationPoint": interpolation_point,
+        "participantSetupRecordHash": hash_at_path(participant_record, &["participantSetupRecordHash"])?,
+        "publicKeyShareRoot": hash_at_path(participant_record, &["publicKeyShareRoot"])?,
+        "localSecretShareCommitmentHash": hash_at_path(participant_record, &["localSecretShareCommitmentHash"])?,
+        "localErrorCommitmentHash": hash_at_path(participant_record, &["localErrorCommitmentHash"])?,
+        "dataPrimeCount": DATA_PRIMES.len(),
+        "polynomialDegree": POLYNOMIAL_DEGREE,
+        "rawSecretShareExported": false,
+        "rawErrorShareExported": false,
+        "sampledLocalSecretCoefficientsIncluded": false,
+        "sampledLocalErrorCoefficientsIncluded": false,
+        "coefficientTables": coefficient_tables,
+    }))
+}
+
+#[cfg(test)]
+pub(super) fn trustee_public_key_share_coefficient_material_from_setup_witness(
+    setup_package: &Value,
+    private_setup_seed: &str,
+    trustee_identity: &str,
+) -> CanonicalResult<Value> {
+    let private_setup_seed_hash = input::private_passive_setup_seed_hash_from_package_witness(
+        setup_package,
+        private_setup_seed,
+    )?;
+    let setup_inputs = value_at_path(setup_package, &["setupInputs"])?;
+    let participants = array_at_path(setup_package, &["participants"])?;
+    let setup_input = PassiveSetupInput {
+        ceremony_id: string_at_path(setup_inputs, &["ceremonyId"])?.to_string(),
+        manifest_hash: hash_at_path(setup_inputs, &["manifestHash"])?.to_string(),
+        roster_hash: hash_at_path(setup_inputs, &["rosterHash"])?.to_string(),
+        threshold_profile_hash: hash_at_path(setup_inputs, &["thresholdProfileHash"])?.to_string(),
+        setup_seed_provided: !bool_at_path(setup_inputs, &["defaultSetupSeedUsed"])?,
+        setup_seed_hash: hash_at_path(setup_inputs, &["setupSeedHash"])?.to_string(),
+        private_setup_seed_hash,
+        participants: participants
+            .iter()
+            .map(|participant| {
+                Ok(SetupParticipant {
+                    trustee_identity: string_at_path(participant, &["trusteeIdentity"])?
+                        .to_string(),
+                    roster_position: usize_at_path(participant, &["rosterPosition"])?,
+                    board_position: usize_at_path(participant, &["boardPosition"])?,
+                    recovery_epoch: unsigned_at_path(participant, &["recoveryEpoch"])?,
+                    device_epoch: unsigned_at_path(participant, &["deviceEpoch"])?,
+                })
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?,
+    };
+    let participant_identities = setup_input
+        .participants
+        .iter()
+        .map(|participant| participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
+    let participant_record = participants
+        .iter()
+        .find(|participant| {
+            string_at_path(participant, &["trusteeIdentity"])
+                .map(|identity| identity == trustee_identity)
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "public key-share coefficient material trustee is not part of setup",
+            )
+        })?;
+    let roster_position = usize_at_path(participant_record, &["rosterPosition"])?;
+    trustee_public_key_share_coefficient_material(
+        &setup_input,
+        &participant_identities,
+        participant_record,
+        trustee_identity,
+        roster_position,
+        roster_position + 1,
+    )
+}
+
+#[cfg(test)]
+pub(super) fn trustee_public_key_share_witness_coefficients_from_setup_witness(
+    setup_package: &Value,
+    private_setup_seed: &str,
+    trustee_identity: &str,
+) -> CanonicalResult<TrusteePublicKeyShareWitnessCoefficients> {
+    let private_setup_seed_hash = input::private_passive_setup_seed_hash_from_package_witness(
+        setup_package,
+        private_setup_seed,
+    )?;
+    let participants = array_at_path(setup_package, &["participants"])?;
+    let participant_identities = participants
+        .iter()
+        .map(|participant| {
+            string_at_path(participant, &["trusteeIdentity"]).map(ToString::to_string)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    if !participant_identities
+        .iter()
+        .any(|identity| identity == trustee_identity)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "public key-share witness trustee is not part of setup",
+        ));
+    }
+    let secret_share_coefficients = (0..POLYNOMIAL_DEGREE)
+        .map(|coefficient_index| {
+            bounded_collective_secret_share_coefficient(
+                &private_setup_seed_hash,
+                &participant_identities,
+                trustee_identity,
+                coefficient_index,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let error_share_coefficients = (0..POLYNOMIAL_DEGREE)
+        .map(|coefficient_index| {
+            bounded_collective_error_share_coefficient(
+                &private_setup_seed_hash,
+                &participant_identities,
+                trustee_identity,
+                coefficient_index,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(TrusteePublicKeyShareWitnessCoefficients {
+        secret_share_coefficients,
+        error_share_coefficients,
+    })
+}
+
+pub(super) fn validate_trustee_public_key_share_coefficient_material_sidecar(
+    setup_package: &Value,
+    trustee_identity: &str,
+    sidecar: &Value,
+) -> CanonicalResult<Value> {
+    let trustee_key =
+        find_trustee_algebraic_share_verification_key(setup_package, trustee_identity)?;
+    let participant_record = array_at_path(setup_package, &["participants"])?
+        .iter()
+        .find(|participant| {
+            string_at_path(participant, &["trusteeIdentity"])
+                .map(|identity| identity == trustee_identity)
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "public key-share coefficient sidecar trustee is not part of setup",
+            )
+        })?;
+
+    compare_string_at_path(
+        sidecar,
+        &["objectType"],
+        "BgvTrusteePublicKeyShareCoefficientMaterial",
+        "public key-share coefficient sidecar object type",
+    )?;
+    if usize_at_path(sidecar, &["objectVersion"])? != 1
+        || usize_at_path(sidecar, &["dataPrimeCount"])? != DATA_PRIMES.len()
+        || usize_at_path(sidecar, &["polynomialDegree"])? != POLYNOMIAL_DEGREE
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "public key-share coefficient sidecar shape does not match the selected setup profile",
+        ));
+    }
+    compare_string_at_path(
+        sidecar,
+        &["setupProfileId"],
+        PASSIVE_SETUP_PROFILE_ID,
+        "public key-share coefficient sidecar setup profile id",
+    )?;
+    compare_string_at_path(
+        sidecar,
+        &["basisId"],
+        BgvBasisKind::Data.basis_id(),
+        "public key-share coefficient sidecar basis",
+    )?;
+    compare_string_at_path(
+        sidecar,
+        &["publicShareConstruction"],
+        "componentZeroB=plaintextModulus*trusteeErrorShare-publicCommonRandomPolynomial*trusteeSecretShare",
+        "public key-share coefficient sidecar construction",
+    )?;
+    compare_string_at_path(
+        sidecar,
+        &["trusteeIdentity"],
+        trustee_identity,
+        "public key-share coefficient sidecar trustee identity",
+    )?;
+    if usize_at_path(sidecar, &["rosterPosition"])?
+        != usize_at_path(participant_record, &["rosterPosition"])?
+        || usize_at_path(sidecar, &["interpolationPoint"])?
+            != usize_at_path(participant_record, &["rosterPosition"])? + 1
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "public key-share coefficient sidecar trustee position does not match setup",
+        ));
+    }
+    for (sidecar_path, setup_path, label) in [
+        (
+            &["ceremonyId"][..],
+            &["setupInputs", "ceremonyId"][..],
+            "public key-share coefficient sidecar ceremony id",
+        ),
+        (
+            &["manifestHash"][..],
+            &["setupInputs", "manifestHash"][..],
+            "public key-share coefficient sidecar manifest hash",
+        ),
+        (
+            &["rosterHash"][..],
+            &["setupInputs", "rosterHash"][..],
+            "public key-share coefficient sidecar roster hash",
+        ),
+    ] {
+        compare_string_at_path(
+            sidecar,
+            sidecar_path,
+            string_at_path(setup_package, setup_path)?,
+            label,
+        )?;
+    }
+    compare_hash_at_path(
+        sidecar,
+        &["participantSetupRecordHash"],
+        hash_at_path(participant_record, &["participantSetupRecordHash"])?,
+        "public key-share coefficient sidecar participant setup hash",
+    )?;
+    compare_hash_at_path(
+        sidecar,
+        &["publicKeyShareRoot"],
+        hash_at_path(participant_record, &["publicKeyShareRoot"])?,
+        "public key-share coefficient sidecar public key-share root",
+    )?;
+    compare_hash_at_path(
+        sidecar,
+        &["localSecretShareCommitmentHash"],
+        hash_at_path(participant_record, &["localSecretShareCommitmentHash"])?,
+        "public key-share coefficient sidecar local secret commitment hash",
+    )?;
+    compare_hash_at_path(
+        sidecar,
+        &["localErrorCommitmentHash"],
+        hash_at_path(participant_record, &["localErrorCommitmentHash"])?,
+        "public key-share coefficient sidecar local error commitment hash",
+    )?;
+    if bool_at_path(sidecar, &["rawSecretShareExported"])?
+        || bool_at_path(sidecar, &["rawErrorShareExported"])?
+        || bool_at_path(sidecar, &["sampledLocalSecretCoefficientsIncluded"])?
+        || bool_at_path(sidecar, &["sampledLocalErrorCoefficientsIncluded"])?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "public key-share coefficient sidecar must not export trustee secret or error shares",
+        ));
+    }
+    validate_trustee_public_key_share_coefficient_tables(
+        setup_package,
+        array_at_path(sidecar, &["coefficientTables"])?,
+    )?;
+    let material_root =
+        derive_protocol_hash("TrusteePublicKeyShareCoefficientMaterialRoot", sidecar)?;
+    compare_hash_at_path(
+        trustee_key,
+        &["publicKeyShareCoefficientMaterialRoot"],
+        &material_root,
+        "trustee public key-share coefficient sidecar root",
+    )?;
+    let threshold_decryption_profile_hash =
+        string_at_path(trustee_key, &["thresholdDecryptionProfileHash"])?;
+    let kllps_target_decryption_profile_hash =
+        string_at_path(trustee_key, &["kllpsTargetDecryptionProfileHash"])?;
+    let material_hash = derive_protocol_hash(
+        "TrusteePublicKeyShareCoefficientMaterialHash",
+        &json!({
+            "publicKeyShareCoefficientMaterialRoot": material_root,
+            "publicKeyShareRoot": hash_at_path(participant_record, &["publicKeyShareRoot"])?,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        }),
+    )?;
+    compare_hash_at_path(
+        trustee_key,
+        &["publicKeyShareCoefficientMaterialHash"],
+        &material_hash,
+        "trustee public key-share coefficient sidecar hash",
+    )?;
+
+    Ok(json!({
+        "publicKeyShareCoefficientMaterialRoot": material_root,
+        "publicKeyShareCoefficientMaterialHash": material_hash,
+    }))
+}
+
+fn validate_trustee_public_key_share_coefficient_tables(
+    setup_package: &Value,
+    coefficient_tables: &[Value],
+) -> CanonicalResult<()> {
+    if coefficient_tables.len() != DATA_PRIMES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public key-share coefficient sidecar must include one table per data prime",
+        ));
+    }
+    let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
+    for (limb_index, table) in coefficient_tables.iter().enumerate() {
+        let modulus = DATA_PRIMES[limb_index];
+        if usize_at_path(table, &["limbIndex"])? != limb_index
+            || unsigned_at_path(table, &["modulus"])? != modulus
+            || usize_at_path(table, &["coefficientByteLength"])? != POLYNOMIAL_DEGREE * 8
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "public key-share coefficient sidecar table shape does not match the selected data basis",
+            ));
+        }
+        let component_zero_coefficients =
+            coefficient_vector_from_le_hex(string_at_path(table, &["componentZeroBLeHex"])?)?;
+        compare_hash_at_path(
+            table,
+            &["componentZeroBHash512"],
+            &coefficient_vector_hash512(&component_zero_coefficients),
+            "public key-share coefficient sidecar component-zero hash",
+        )?;
+        let expected_component_one_coefficients =
+            dense_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus);
+        compare_hash_at_path(
+            table,
+            &["componentOneAHash512"],
+            &coefficient_vector_hash512(&expected_component_one_coefficients),
+            "public key-share coefficient sidecar component-one hash",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn coefficient_vector_from_le_hex(value: &str) -> CanonicalResult<Vec<u64>> {
+    let bytes = crate::transcript_core::decode_hex(value)?;
+    if bytes.len() != POLYNOMIAL_DEGREE * 8 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public key-share coefficient sidecar vector width does not match the selected BGV profile",
+        ));
+    }
+
+    Ok(bytes
+        .chunks_exact(8)
+        .map(|chunk| {
+            let mut coefficient_bytes = [0_u8; 8];
+            coefficient_bytes.copy_from_slice(chunk);
+            u64::from_le_bytes(coefficient_bytes)
+        })
+        .collect())
+}
+
+fn find_trustee_algebraic_share_verification_key<'a>(
+    setup_package: &'a Value,
+    trustee_identity: &str,
+) -> CanonicalResult<&'a Value> {
+    array_at_path(
+        setup_package,
+        &[
+            "thresholdVerificationMaterial",
+            "verificationKeySet",
+            "algebraicShareVerificationKeySet",
+            "trusteeVerificationKeys",
+        ],
+    )?
+    .iter()
+    .find(|trustee_key| {
+        string_at_path(trustee_key, &["trusteeIdentity"])
+            .map(|identity| identity == trustee_identity)
+            .unwrap_or(false)
+    })
+    .ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "algebraic share-verification key is missing for trustee public key-share sidecar",
+        )
+    })
+}
+
+fn strict_less_than_one_third_decryption_threshold(
+    participant_count: usize,
+) -> CanonicalResult<usize> {
+    if participant_count == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "threshold LSSS verification key set requires at least one participant",
+        ));
+    }
+
+    Ok(((participant_count - 1) / 3) + 1)
 }
 
 pub(super) fn expected_evaluation_key_material_binding(

@@ -83,6 +83,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         input,
         &threshold_decryption_profile_hash,
         &kllps_target_decryption_profile_hash,
+        &participant_records,
         &participant_setup_record_hashes,
         &trustee_threshold_verification_key_hashes,
     )?;

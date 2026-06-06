@@ -8,7 +8,9 @@ use super::linear_proof_profile_constants::{
     GENERATED_COMPONENT_INFINITY_RESPONSE_BOUND,
     GENERATED_FIELD_COMPONENT_EXACT_NORM_BOUND_SQUARED,
     GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED,
-    GeneratedLinearProofProfileConstants, RECEIVER_KEY_GENERATED_PROFILE,
+    GeneratedLinearProofProfileConstants,
+    RANK_REFRESH_PART_DEC_PUBLIC_KEY_SHARE_CONSISTENCY_EXACT_NORM_BOUND_SQUARED,
+    RECEIVER_KEY_GENERATED_PROFILE,
 };
 #[cfg(test)]
 use super::linear_proof_profile_constants::{
@@ -244,6 +246,12 @@ pub(crate) fn linear_proof_profile_for_encoding(
             proof_encoding,
             AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED,
         )?,
+        "masked-rank-refresh-partdec-public-key-share-consistency-linear-proof-encoding-v1" => {
+            encoded_score_compatible_profile(
+                proof_encoding,
+                RANK_REFRESH_PART_DEC_PUBLIC_KEY_SHARE_CONSISTENCY_EXACT_NORM_BOUND_SQUARED,
+            )?
+        }
         _ => {
             return Err(invalid_parameter(
                 "proofEncoding.profileId is not a supported linear proof profile",

@@ -173,6 +173,53 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     assert_eq!(first["kllpsStatus"]["setupMaterialMatchesKLLPS"], true);
     assert_eq!(first["kllpsStatus"]["KLLPSPartDecStatusImplemented"], false);
     assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationProfileId"],
+        super::THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["decryptionThreshold"],
+        1
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["algebraicPartDecProofStatus"],
+        "ZeroKnowledgeShareEquationProofPending"
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["publicKeyShareCoefficientMaterialStatus"],
+        "root-bound-public-sidecar-required"
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["publicKeyShareCoefficientMaterialRoots"]
+            .as_array()
+            .expect("public key-share coefficient roots")
+            .len(),
+        3
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["lsssSecretSharesExported"],
+        false
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["trusteeVerificationKeys"][0]["proofSystemStatus"],
+        "ZeroKnowledgeShareEquationProofPending"
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["trusteeVerificationKeys"][0]["publicKeyShareCoefficientMaterialIncluded"],
+        false
+    );
+    assert_eq!(
+        first["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+            ["trusteeVerificationKeys"][0]["thresholdSecretShareExported"],
+        false
+    );
+    assert_eq!(
         first["certificates"]["setupParameterCertificate"]["finalSecurityStatus"],
         "acceptedForSetupBridgeEvaluatorTargetPending"
     );
@@ -1077,6 +1124,66 @@ fn passive_setup_verification_rejects_nested_secret_material() {
         }))
         .is_err()
     );
+}
+
+#[test]
+fn passive_setup_verification_rejects_algebraic_share_verification_mutations() {
+    let package = setup_package();
+    let mutations: Vec<SetupPackageMutation> = vec![
+        (
+            "algebraic threshold share verification key root",
+            Box::new(|mutated_package| {
+                mutated_package["thresholdVerificationMaterial"]["algebraicShareVerificationKeyRoot"] =
+                    serde_json::json!(valid_hash('1'));
+            }),
+        ),
+        (
+            "algebraic threshold share verification proof status",
+            Box::new(|mutated_package| {
+                mutated_package["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+                    ["algebraicPartDecProofStatus"] =
+                    serde_json::json!("AlgebraicPartDecShareEquationProofVerified");
+            }),
+        ),
+        (
+            "algebraic threshold share export flag",
+            Box::new(|mutated_package| {
+                mutated_package["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+                    ["trusteeVerificationKeys"][0]["thresholdSecretShareExported"] =
+                    serde_json::json!(true);
+            }),
+        ),
+        (
+            "public key-share coefficient material root",
+            Box::new(|mutated_package| {
+                mutated_package["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+                    ["trusteeVerificationKeys"][0]["publicKeyShareCoefficientMaterialRoot"] =
+                    serde_json::json!(valid_hash('2'));
+            }),
+        ),
+        (
+            "public key-share coefficient material set order",
+            Box::new(|mutated_package| {
+                mutated_package["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+                    ["publicKeyShareCoefficientMaterialRoots"][0] =
+                    serde_json::json!(valid_hash('3'));
+            }),
+        ),
+        (
+            "public key-share coefficient material inclusion flag",
+            Box::new(|mutated_package| {
+                mutated_package["thresholdVerificationMaterial"]["verificationKeySet"]["algebraicShareVerificationKeySet"]
+                    ["trusteeVerificationKeys"][0]["publicKeyShareCoefficientMaterialIncluded"] =
+                    serde_json::json!(true);
+            }),
+        ),
+    ];
+
+    for (mutation_description, mutate_package) in mutations {
+        let mut mutated_package = package.clone();
+        mutate_package(&mut mutated_package);
+        assert_rebound_package_is_rejected(mutated_package, mutation_description);
+    }
 }
 
 #[test]

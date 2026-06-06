@@ -14,6 +14,7 @@ use crate::{
                 Ciphertext, ciphertext_canonical_bytes_hex, ciphertext_from_canonical_hex,
                 ciphertext_object_root,
             },
+            rank_refresh::reject_rank_refresh_transcript_for_accepted_evaluation,
             reconstruction::{AggregateContributor, reconstruct_aggregate, score_from_histogram},
             records::{
                 EvaluationComparisonProfile, EvaluationParameters, EvaluatorOutputRoots,
@@ -2522,9 +2523,12 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation(request: &Value) -> Canon
             "canonicalBallotSetHash",
             "preTargetBoardHead",
             "evaluatorSignature",
+            "rankRefreshTranscript",
+            "rankRefreshTranscripts",
         ],
         "runEncryptedAggregateTopKEvaluation",
     )?;
+    reject_rank_refresh_transcript_for_accepted_evaluation(request)?;
     let setup_package = value_at_path(request, &["setupPackage"])?;
     if request.get("encryptedAggregateInputs").is_none() {
         return Err(CanonicalError::new(
@@ -2558,9 +2562,12 @@ pub(crate) fn run_encrypted_aggregate_top_k_evaluation_sweep(
             "canonicalBallotSetHash",
             "preTargetBoardHead",
             "evaluatorSignature",
+            "rankRefreshTranscript",
+            "rankRefreshTranscripts",
         ],
         "runEncryptedAggregateTopKEvaluationSweep",
     )?;
+    reject_rank_refresh_transcript_for_accepted_evaluation(request)?;
     let requested_top_counts = read_top_count_values(request)?;
     let setup_package = value_at_path(request, &["setupPackage"])?;
     if request.get("encryptedAggregateInputs").is_none() {
@@ -4412,6 +4419,39 @@ mod tests {
                 .contains("encryptedAggregateInputs.0.aggregateContribution.proofWitness"),
             "{}",
             nested_error.message
+        );
+    }
+
+    #[test]
+    fn accepted_evaluator_rejects_rank_refresh_transcript_until_share_verifier_exists() {
+        let request = json!({
+            "rankRefreshTranscript": {
+                "objectType": "MaskedRankRefreshTranscript",
+            },
+        });
+        let error = run_encrypted_aggregate_top_k_evaluation(&request)
+            .expect_err("rank refresh transcript must fail closed");
+        assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+        assert!(
+            error
+                .message
+                .contains("rank refresh PartDec/FinDec share verification"),
+            "{}",
+            error.message
+        );
+
+        let sweep_error = run_encrypted_aggregate_top_k_evaluation_sweep(&request)
+            .expect_err("rank refresh sweep transcript must fail closed");
+        assert_eq!(
+            sweep_error.code,
+            CanonicalErrorCode::ProfileComponentMismatch
+        );
+        assert!(
+            sweep_error
+                .message
+                .contains("rank refresh PartDec/FinDec share verification"),
+            "{}",
+            sweep_error.message
         );
     }
 

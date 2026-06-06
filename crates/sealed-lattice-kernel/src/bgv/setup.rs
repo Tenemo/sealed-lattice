@@ -71,6 +71,8 @@ use crate::{
 pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
     "sealed-lattice-bgv-rns-passive-full-roster-setup-v1";
 pub(crate) const THRESHOLD_DECRYPTION_PROFILE_ID: &str = "BGV-RNS-KLLPS26-AsyncLagrangeTarget-v1";
+pub(crate) const THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID: &str =
+    "sealed-lattice-bgv-threshold-lsss-share-verification-v1";
 pub(crate) const KEY_SWITCH_DECOMPOSITION_PROFILE_ID: &str =
     "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
 pub(crate) const SELECTED_ROT_SET_ID: &str = "compact-generator-basis-packed-rank-rot-set-v1";
@@ -137,11 +139,19 @@ pub(crate) struct PreparedPassiveSetupPublicEvaluationKeys {
     pub(crate) record: Value,
 }
 
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TrusteePublicKeyShareWitnessCoefficients {
+    pub(crate) secret_share_coefficients: Vec<i64>,
+    pub(crate) error_share_coefficients: Vec<i64>,
+}
+
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
         "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "thresholdDecryptionProfileId": THRESHOLD_DECRYPTION_PROFILE_ID,
+        "thresholdLsssShareVerificationProfileId": THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID,
         "keySwitchDecompositionProfileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
         "selectedRotSetId": SELECTED_ROT_SET_ID,
         "canonicalObjects": [
@@ -152,6 +162,8 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "BgvCollectivePublicKeyCoefficientMaterial",
             "ThresholdShareVerificationKeySet",
             "TrusteeThresholdVerificationKey",
+            "BgvThresholdLsssShareVerificationKeySet",
+            "BgvTrusteeAlgebraicThresholdShareVerificationKey",
             "BgvRelinearizationKey",
             "BgvRotationKey",
             "BgvKeySwitchKey",
@@ -175,6 +187,8 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "ThresholdShareVerificationKeyRoot",
             "ThresholdShareVerificationKeyHash",
             "TrusteeThresholdVerificationKeyHash",
+            "AlgebraicThresholdShareVerificationKeyRoot",
+            "AlgebraicThresholdShareVerificationKeyHash",
             "RelinearizationKeyRoot",
             "RotationKeyRoot",
             "KeySwitchKeyRoot",
@@ -355,6 +369,48 @@ pub(crate) fn validate_passive_setup_package_for_encrypted_evaluation(
 ) -> CanonicalResult<()> {
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)
+}
+
+#[cfg(test)]
+pub(crate) fn trustee_public_key_share_coefficient_material_from_setup_witness(
+    setup_package: &Value,
+    private_setup_seed: &str,
+    trustee_identity: &str,
+) -> CanonicalResult<Value> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+    key_material::trustee_public_key_share_coefficient_material_from_setup_witness(
+        setup_package,
+        private_setup_seed,
+        trustee_identity,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn trustee_public_key_share_witness_coefficients_from_setup_witness(
+    setup_package: &Value,
+    private_setup_seed: &str,
+    trustee_identity: &str,
+) -> CanonicalResult<TrusteePublicKeyShareWitnessCoefficients> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+    key_material::trustee_public_key_share_witness_coefficients_from_setup_witness(
+        setup_package,
+        private_setup_seed,
+        trustee_identity,
+    )
+}
+
+pub(crate) fn validate_trustee_public_key_share_coefficient_material_sidecar(
+    setup_package: &Value,
+    trustee_identity: &str,
+    sidecar: &Value,
+) -> CanonicalResult<Value> {
+    key_material::validate_trustee_public_key_share_coefficient_material_sidecar(
+        setup_package,
+        trustee_identity,
+        sidecar,
+    )
 }
 
 pub(crate) fn development_evaluator_key_from_passive_setup_package(

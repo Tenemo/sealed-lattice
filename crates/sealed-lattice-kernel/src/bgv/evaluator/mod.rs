@@ -16,6 +16,7 @@ pub(crate) mod circuit;
 pub(crate) mod commands;
 pub(crate) mod engine;
 pub(crate) mod key_switch;
+pub(crate) mod rank_refresh;
 pub(crate) mod reconstruction;
 pub(crate) mod records;
 pub(crate) mod top_k;

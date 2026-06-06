@@ -310,6 +310,14 @@ pub(super) fn validate_threshold_verification_material(
             "threshold interpolation universe does not match participant setup records",
         ));
     }
+    validate_algebraic_share_verification_key_set(
+        setup_package,
+        threshold_material,
+        verification_key_set,
+        participant_bindings,
+        threshold_decryption_profile_hash,
+        kllps_target_decryption_profile_hash,
+    )?;
 
     let threshold_share_verification_key_root =
         hash_at_path(threshold_material, &["thresholdShareVerificationKeyRoot"])?;
@@ -333,4 +341,324 @@ pub(super) fn validate_threshold_verification_material(
         &expected_threshold_share_verification_key_hash,
         "threshold share verification key hash",
     )
+}
+
+fn validate_algebraic_share_verification_key_set(
+    setup_package: &Value,
+    threshold_material: &Value,
+    verification_key_set: &Value,
+    participant_bindings: &[VerifiedParticipantSetupBinding],
+    threshold_decryption_profile_hash: &str,
+    kllps_target_decryption_profile_hash: &str,
+) -> CanonicalResult<()> {
+    let algebraic_key_set =
+        value_at_path(verification_key_set, &["algebraicShareVerificationKeySet"])?;
+    compare_string_at_path(
+        algebraic_key_set,
+        &["objectType"],
+        "BgvThresholdLsssShareVerificationKeySet",
+        "algebraic threshold share verification key set object type",
+    )?;
+    compare_string_at_path(
+        algebraic_key_set,
+        &["profileId"],
+        THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID,
+        "algebraic threshold share verification profile id",
+    )?;
+    compare_string_at_path(
+        algebraic_key_set,
+        &["thresholdDecryptionProfileId"],
+        THRESHOLD_DECRYPTION_PROFILE_ID,
+        "algebraic threshold share verification decryption profile id",
+    )?;
+    compare_hash_at_path(
+        algebraic_key_set,
+        &["thresholdDecryptionProfileHash"],
+        threshold_decryption_profile_hash,
+        "algebraic threshold share verification decryption profile hash",
+    )?;
+    compare_hash_at_path(
+        algebraic_key_set,
+        &["kllpsTargetDecryptionProfileHash"],
+        kllps_target_decryption_profile_hash,
+        "algebraic threshold share verification KLLPS profile hash",
+    )?;
+    compare_hash_at_path(
+        algebraic_key_set,
+        &["thresholdProfileHash"],
+        string_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?,
+        "algebraic threshold share verification threshold profile hash",
+    )?;
+    if usize_at_path(algebraic_key_set, &["participantCount"])? != participant_bindings.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "algebraic threshold share verification participant count does not match setup",
+        ));
+    }
+    let expected_decryption_threshold = ((participant_bindings.len().saturating_sub(1)) / 3) + 1;
+    if usize_at_path(algebraic_key_set, &["decryptionThreshold"])? != expected_decryption_threshold
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "algebraic threshold share verification decryption threshold does not match the selected setup profile",
+        ));
+    }
+    compare_string_at_path(
+        algebraic_key_set,
+        &["basisId"],
+        BgvBasisKind::Data.basis_id(),
+        "algebraic threshold share verification basis id",
+    )?;
+    if usize_at_path(algebraic_key_set, &["dataPrimeCount"])? != DATA_PRIMES.len()
+        || usize_at_path(algebraic_key_set, &["polynomialDegree"])? != POLYNOMIAL_DEGREE
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "algebraic threshold share verification profile dimensions do not match BGV setup",
+        ));
+    }
+    compare_string_at_path(
+        algebraic_key_set,
+        &["algebraicPartDecProofStatus"],
+        "ZeroKnowledgeShareEquationProofPending",
+        "algebraic PartDec proof status",
+    )?;
+    compare_string_at_path(
+        algebraic_key_set,
+        &["finDecShareCombinationStatus"],
+        "FinDecCorrectnessAndSmudgingBoundsPending",
+        "FinDec share-combination status",
+    )?;
+    compare_string_at_path(
+        algebraic_key_set,
+        &["maskReEncryptionProofStatus"],
+        "MaskReEncryptionProofPending",
+        "mask re-encryption proof status",
+    )?;
+    compare_string_at_path(
+        algebraic_key_set,
+        &["publicKeyShareCoefficientMaterialStatus"],
+        "root-bound-public-sidecar-required",
+        "public key-share coefficient material status",
+    )?;
+    if bool_at_path(algebraic_key_set, &["lsssSecretSharesExported"])? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "algebraic threshold share verification key set must not export LSSS secret shares",
+        ));
+    }
+
+    let algebraic_key_root =
+        hash_at_path(threshold_material, &["algebraicShareVerificationKeyRoot"])?;
+    compare_derived_hash(
+        "AlgebraicThresholdShareVerificationKeyRoot",
+        algebraic_key_set,
+        algebraic_key_root,
+        "algebraic threshold share verification key root",
+    )?;
+    compare_hash_at_path(
+        verification_key_set,
+        &["algebraicShareVerificationKeyRoot"],
+        algebraic_key_root,
+        "threshold verification key-set algebraic key root",
+    )?;
+    let expected_algebraic_key_hash = derive_protocol_hash(
+        "AlgebraicThresholdShareVerificationKeyHash",
+        &json!({
+            "algebraicShareVerificationKeyRoot": algebraic_key_root,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        }),
+    )?;
+    compare_hash_at_path(
+        threshold_material,
+        &["algebraicShareVerificationKeyHash"],
+        &expected_algebraic_key_hash,
+        "algebraic threshold share verification key hash",
+    )?;
+    compare_hash_at_path(
+        verification_key_set,
+        &["algebraicShareVerificationKeyHash"],
+        &expected_algebraic_key_hash,
+        "threshold verification key-set algebraic key hash",
+    )?;
+
+    let trustee_keys = array_at_path(algebraic_key_set, &["trusteeVerificationKeys"])?;
+    let participant_records = array_at_path(setup_package, &["participants"])?;
+    if trustee_keys.len() != participant_bindings.len()
+        || participant_records.len() != participant_bindings.len()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "algebraic threshold share verification trustee keys must match setup participants",
+        ));
+    }
+    let expected_public_key_share_coefficient_material_roots = trustee_keys
+        .iter()
+        .map(|trustee_key| {
+            hash_at_path(trustee_key, &["publicKeyShareCoefficientMaterialRoot"])
+                .map(|hash| Value::String(hash.to_string()))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let expected_public_key_share_coefficient_material_hashes = trustee_keys
+        .iter()
+        .map(|trustee_key| {
+            hash_at_path(trustee_key, &["publicKeyShareCoefficientMaterialHash"])
+                .map(|hash| Value::String(hash.to_string()))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    if array_at_path(
+        algebraic_key_set,
+        &["publicKeyShareCoefficientMaterialRoots"],
+    )? != &expected_public_key_share_coefficient_material_roots
+        || array_at_path(
+            algebraic_key_set,
+            &["publicKeyShareCoefficientMaterialHashes"],
+        )? != &expected_public_key_share_coefficient_material_hashes
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "public key-share coefficient material roots do not match trustee keys",
+        ));
+    }
+    for ((trustee_key, participant_binding), participant_record) in trustee_keys
+        .iter()
+        .zip(participant_bindings.iter())
+        .zip(participant_records.iter())
+    {
+        validate_trustee_algebraic_share_verification_key(
+            trustee_key,
+            participant_binding,
+            participant_record,
+            threshold_decryption_profile_hash,
+            kllps_target_decryption_profile_hash,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_trustee_algebraic_share_verification_key(
+    trustee_key: &Value,
+    participant_binding: &VerifiedParticipantSetupBinding,
+    participant_record: &Value,
+    threshold_decryption_profile_hash: &str,
+    kllps_target_decryption_profile_hash: &str,
+) -> CanonicalResult<()> {
+    compare_string_at_path(
+        trustee_key,
+        &["objectType"],
+        "BgvTrusteeAlgebraicThresholdShareVerificationKey",
+        "trustee algebraic share verification key object type",
+    )?;
+    compare_string_at_path(
+        trustee_key,
+        &["profileId"],
+        THRESHOLD_LSSS_SHARE_VERIFICATION_PROFILE_ID,
+        "trustee algebraic share verification profile id",
+    )?;
+    compare_hash_at_path(
+        trustee_key,
+        &["thresholdDecryptionProfileHash"],
+        threshold_decryption_profile_hash,
+        "trustee algebraic share verification decryption profile hash",
+    )?;
+    compare_hash_at_path(
+        trustee_key,
+        &["kllpsTargetDecryptionProfileHash"],
+        kllps_target_decryption_profile_hash,
+        "trustee algebraic share verification KLLPS profile hash",
+    )?;
+    compare_string_at_path(
+        trustee_key,
+        &["trusteeIdentity"],
+        &participant_binding.trustee_identity,
+        "trustee algebraic share verification identity",
+    )?;
+    if usize_at_path(trustee_key, &["rosterPosition"])? != participant_binding.roster_position
+        || usize_at_path(trustee_key, &["interpolationPoint"])?
+            != participant_binding.roster_position + 1
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "trustee algebraic share verification interpolation point does not match setup",
+        ));
+    }
+    compare_hash_at_path(
+        trustee_key,
+        &["participantSetupRecordHash"],
+        &participant_binding.participant_setup_record_hash,
+        "trustee algebraic share verification participant record hash",
+    )?;
+    compare_hash_at_path(
+        trustee_key,
+        &["publicKeyShareRoot"],
+        &participant_binding.public_key_share_root,
+        "trustee algebraic share verification public key-share root",
+    )?;
+    let public_key_share_coefficient_material_root =
+        hash_at_path(trustee_key, &["publicKeyShareCoefficientMaterialRoot"])?;
+    let expected_public_key_share_coefficient_material_hash = derive_protocol_hash(
+        "TrusteePublicKeyShareCoefficientMaterialHash",
+        &json!({
+            "publicKeyShareCoefficientMaterialRoot": public_key_share_coefficient_material_root,
+            "publicKeyShareRoot": participant_binding.public_key_share_root,
+            "thresholdDecryptionProfileHash": threshold_decryption_profile_hash,
+            "kllpsTargetDecryptionProfileHash": kllps_target_decryption_profile_hash,
+        }),
+    )?;
+    compare_hash_at_path(
+        trustee_key,
+        &["publicKeyShareCoefficientMaterialHash"],
+        &expected_public_key_share_coefficient_material_hash,
+        "trustee public key-share coefficient material hash",
+    )?;
+    compare_string_at_path(
+        trustee_key,
+        &["publicKeyShareCoefficientMaterialTransport"],
+        "root-bound-public-sidecar-required-for-claim-bearing-PartDec-verification",
+        "trustee public key-share coefficient material transport",
+    )?;
+    if bool_at_path(trustee_key, &["publicKeyShareCoefficientMaterialIncluded"])? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "trustee public key-share coefficient material must stay as a root-bound sidecar",
+        ));
+    }
+    compare_hash_at_path(
+        trustee_key,
+        &["trusteeThresholdVerificationKeyHash"],
+        &participant_binding.trustee_threshold_verification_key_hash,
+        "trustee algebraic share verification trustee key hash",
+    )?;
+    compare_hash_at_path(
+        trustee_key,
+        &["localSecretShareCommitmentHash"],
+        hash_at_path(participant_record, &["localSecretShareCommitmentHash"])?,
+        "trustee algebraic share verification local secret commitment hash",
+    )?;
+    compare_hash_at_path(
+        trustee_key,
+        &["localErrorCommitmentHash"],
+        hash_at_path(participant_record, &["localErrorCommitmentHash"])?,
+        "trustee algebraic share verification local error commitment hash",
+    )?;
+    hash_at_path(trustee_key, &["thresholdLsssWitnessCommitmentHash"])?;
+    compare_string_at_path(
+        trustee_key,
+        &["proofSystemStatus"],
+        "ZeroKnowledgeShareEquationProofPending",
+        "trustee algebraic share proof status",
+    )?;
+    if !bool_at_path(trustee_key, &["shareEquationProofRequired"])?
+        || bool_at_path(trustee_key, &["rawSecretShareExported"])?
+        || bool_at_path(trustee_key, &["thresholdSecretShareExported"])?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "trustee algebraic share verification key has invalid proof/export flags",
+        ));
+    }
+
+    Ok(())
 }

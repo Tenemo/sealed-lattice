@@ -170,6 +170,33 @@ describe('transcript-core kernel in browsers', () => {
         }
     });
 
+    it('exposes the masked rank refresh profile and refuses evaluator refresh transcripts before setup loading', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeMaskedRankRefreshProfile();
+        expect(profile.profile).toMatchObject({
+            profileId: 'sealed-lattice-masked-rank-refresh-v1',
+            partDecRequired: true,
+            finDecRequired: true,
+            semanticRankDecryptionAllowed: false,
+        });
+
+        expect(() =>
+            kernel.runEncryptedAggregateTopKEvaluation({
+                rankRefreshTranscript: {
+                    objectType: 'MaskedRankRefreshTranscript',
+                },
+            } as unknown as Parameters<
+                typeof kernel.runEncryptedAggregateTopKEvaluation
+            >[0]),
+        ).toThrow(
+            new TranscriptCoreKernelCommandError({
+                code: 'ProfileComponentMismatch',
+                message:
+                    'accepted encrypted aggregate evaluation cannot consume rank refresh transcripts until masked rank refresh PartDec/FinDec share verification is implemented',
+            }),
+        );
+    });
+
     it('produces byte-identical BGV canonical roots through browser WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeBgvRnsProfile();

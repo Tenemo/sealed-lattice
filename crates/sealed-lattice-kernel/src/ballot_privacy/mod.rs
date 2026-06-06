@@ -114,10 +114,14 @@ pub(crate) mod linear_proof {
                 | "payload-plaintext-field-linear-proof-encoding-v1"
                 | "receiver-encryption-linear-proof-encoding-v1"
                 | "share-commitment-linear-proof-encoding-v1"
-                | "aggregate-derivation-linear-proof-encoding-v1" => vec![
-                    "LinearProofParameterBoundsOnly",
-                    "LinearProofStandaloneSoundnessEvidenceMissing",
-                ],
+                | "aggregate-derivation-linear-proof-encoding-v1"
+                | "masked-rank-refresh-partdec-public-key-share-consistency-linear-proof-encoding-v1" =>
+                {
+                    vec![
+                        "LinearProofParameterBoundsOnly",
+                        "LinearProofStandaloneSoundnessEvidenceMissing",
+                    ]
+                }
                 _ => Vec::new(),
             }
         }
@@ -182,11 +186,23 @@ pub(crate) mod linear_proof {
         pub(crate) use crate::ballot_privacy::linear_proof_transcript::*;
     }
 
-    #[cfg(test)]
+    pub(crate) mod sparse_matrix {
+        pub(crate) use crate::ballot_privacy::{
+            polynomial_ring::PolynomialRing,
+            polynomial_vector::PolynomialVector,
+            sparse_polynomial_matrix::{SparsePolynomialMatrix, SparsePolynomialMatrixEntry},
+        };
+    }
+
     pub(crate) mod verifier {
+        #[cfg(test)]
+        pub(crate) use crate::ballot_privacy::linear_proof_verifier::verify_linear_proof_vector_case_value;
+        #[cfg(test)]
         pub(crate) use crate::ballot_privacy::linear_proof_verifier::{
-            SparseLinearProofVerificationInput, verify_linear_proof_vector_case_value,
-            verify_sparse_linear_proof_components,
+            SparseLinearProofVerificationInput, verify_sparse_linear_proof_components,
+        };
+        pub(crate) use crate::ballot_privacy::linear_proof_verifier::{
+            StreamedLinearProofVerificationInput, verify_streamed_linear_proof_components,
         };
     }
 }

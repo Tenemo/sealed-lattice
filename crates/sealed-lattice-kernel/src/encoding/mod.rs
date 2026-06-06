@@ -326,6 +326,8 @@ enum TranscriptCoreCommand {
     DescribeBgvRnsProfile,
     DescribeBgvOperationRegistry,
     ValidateBgvEvaluatorOperation,
+    DescribeMaskedRankRefreshProfile,
+    VerifyMaskedRankRefreshTranscript,
     DescribeBgvPassiveSetupObjectModel,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
@@ -519,6 +521,8 @@ fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
         TranscriptCoreCommand::DescribeBgvRnsProfile
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
+        | TranscriptCoreCommand::DescribeMaskedRankRefreshProfile
+        | TranscriptCoreCommand::VerifyMaskedRankRefreshTranscript
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
@@ -649,6 +653,12 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
             crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
+        }
+        TranscriptCoreCommand::DescribeMaskedRankRefreshProfile => {
+            crate::bgv::commands::describe_masked_rank_refresh_profile()
+        }
+        TranscriptCoreCommand::VerifyMaskedRankRefreshTranscript => {
+            crate::bgv::commands::verify_masked_rank_refresh_transcript_from_request(request)
         }
         TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
             crate::bgv::commands::describe_bgv_passive_setup_object_model()

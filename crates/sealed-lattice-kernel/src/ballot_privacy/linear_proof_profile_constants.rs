@@ -227,6 +227,12 @@ pub(crate) const GENERATED_SHARE_COMMITMENT_COMPONENT_EXACT_NORM_BOUND_SQUARED: 
 pub(crate) const AGGREGATE_DERIVATION_COMPONENT_EXACT_NORM_BOUND_SQUARED: u64 =
     3_000_000_000_000_000;
 
+// Rank refresh splits public-key-share consistency out from the full masked
+// PartDec relation. The split witness is the selected trustee secret share and
+// error share over the BGV data-basis source ring: N*(1^2 + 2^2).
+pub(crate) const RANK_REFRESH_PART_DEC_PUBLIC_KEY_SHARE_CONSISTENCY_EXACT_NORM_BOUND_SQUARED: u64 =
+    163_840;
+
 // Compatibility cap for generated component-proof experiments that reuse the
 // encoded-score decompression tuple over wider generated component statements.
 // This value is not present in the generated LaZer headers as `Bz3sqr`; it is

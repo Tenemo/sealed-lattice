@@ -76,6 +76,11 @@ const rebindSetupPackageHash = (
 
 type MutableJsonRecord = Record<string, unknown>;
 type JsonPathSegment = string | number;
+type AlgebraicShareVerificationMaterial = {
+    readonly verificationKeySet: {
+        readonly algebraicShareVerificationKeySet: Record<string, unknown>;
+    };
+};
 
 const validHash = (fill: string): string => fill.repeat(128);
 
@@ -156,6 +161,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'BGVPublicCommonRandomPolynomialRoot',
                 'EvaluationKeySizeProfileHash',
                 'ThresholdShareVerificationKeyRoot',
+                'AlgebraicThresholdShareVerificationKeyRoot',
+                'AlgebraicThresholdShareVerificationKeyHash',
             ]),
         );
         expect(
@@ -210,6 +217,19 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             setupMaterialMatchesKLLPS: true,
             KLLPSPartDecStatusImplemented: false,
             KLLPSC1C4StatusAccepted: false,
+        });
+        const thresholdVerificationMaterial =
+            setup.thresholdVerificationMaterial as AlgebraicShareVerificationMaterial;
+        expect(
+            thresholdVerificationMaterial.verificationKeySet
+                .algebraicShareVerificationKeySet,
+        ).toMatchObject({
+            objectType: 'BgvThresholdLsssShareVerificationKeySet',
+            profileId:
+                'sealed-lattice-bgv-threshold-lsss-share-verification-v1',
+            algebraicPartDecProofStatus:
+                'ZeroKnowledgeShareEquationProofPending',
+            lsssSecretSharesExported: false,
         });
         expect(certificates.setupParameterCertificate).toMatchObject({
             finalSecurityStatus: 'acceptedForSetupBridgeEvaluatorTargetPending',
@@ -416,15 +436,14 @@ describe('BGV passive passive BGV setup kernel commands', () => {
     it('rejects duplicate public evaluation-key rotation requests', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const selectedReturnRotation = arrayAtPath(setup, [
+        const selectedRotationRequest = arrayAtPath(setup, [
             'evaluationKeys',
             'rotationKeyRoots',
-        ]).find(
-            (rotationRoot) =>
-                (rotationRoot as { readonly level: number }).level === 5,
-        ) as { readonly rotation: number; readonly level: number } | undefined;
+        ])[0] as
+            | { readonly rotation: number; readonly level: number }
+            | undefined;
 
-        expect(selectedReturnRotation).toBeDefined();
+        expect(selectedRotationRequest).toBeDefined();
         expect(() =>
             kernel.generateBgvEvaluationKeyMaterial({
                 setupPackage: setup,
@@ -433,8 +452,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 },
                 workingLevel: 1,
                 rotationKeys: [
-                    selectedReturnRotation!,
-                    selectedReturnRotation!,
+                    selectedRotationRequest!,
+                    selectedRotationRequest!,
                 ],
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
@@ -862,6 +881,41 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         expect(nestedError.code).toBe('InvalidFixture');
         expect(nestedError.message).toContain(
             'encryptedAggregateInputs.0.aggregateContribution.proofWitness',
+        );
+    });
+
+    it('exposes a fail-closed masked rank refresh profile and refuses evaluator refresh transcripts', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeMaskedRankRefreshProfile();
+        expect(profile.profile).toMatchObject({
+            profileId: 'sealed-lattice-masked-rank-refresh-v1',
+            partDecRequired: true,
+            finDecRequired: true,
+            semanticRankDecryptionAllowed: false,
+        });
+
+        const error = expectKernelCommandError(() =>
+            kernel.runEncryptedAggregateTopKEvaluation({
+                rankRefreshTranscript: {
+                    objectType: 'MaskedRankRefreshTranscript',
+                },
+            } as unknown as TopKEvaluatorEncryptedAggregateEvaluationInput),
+        );
+        expect(error.code).toBe('ProfileComponentMismatch');
+        expect(error.message).toContain(
+            'rank refresh PartDec/FinDec share verification',
+        );
+
+        const sweepError = expectKernelCommandError(() =>
+            kernel.runEncryptedAggregateTopKEvaluationSweep({
+                rankRefreshTranscript: {
+                    objectType: 'MaskedRankRefreshTranscript',
+                },
+            } as unknown as TopKEvaluatorEncryptedAggregateEvaluationSweepInput),
+        );
+        expect(sweepError.code).toBe('ProfileComponentMismatch');
+        expect(sweepError.message).toContain(
+            'rank refresh PartDec/FinDec share verification',
         );
     });
 

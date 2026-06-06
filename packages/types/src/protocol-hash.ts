@@ -117,6 +117,12 @@ export const protocolHashNamespaceValues = [
     'BallotProofRecordHash',
     'ProofBytesHash',
     'ChallengeDomainHash',
+    'MaskedRankRefreshPartDecMaskedShareLinearProofBackendInputRoot',
+    'MaskedRankRefreshPartDecSplitSameWitnessBindingRoot',
+    'MaskedRankRefreshMaskCommitmentRoot',
+    'MaskedRankRefreshMaskEncryptionRandomnessEvidenceHash',
+    'MaskedRankRefreshEncryptedMaskCiphertextPayloadHash',
+    'MaskedRankRefreshRefreshedRankCiphertextPayloadHash',
 ] as const;
 
 export type ProtocolHashNamespace =
