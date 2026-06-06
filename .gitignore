@@ -5,8 +5,8 @@ npm-debug.log
 pnpm-debug.log*
 .tmp/
 .tmp-*
-sh.exe.stackdump
 debug.log
+*.stackdump
 
 # Build
 dist/

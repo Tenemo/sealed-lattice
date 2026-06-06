@@ -15,15 +15,13 @@ use super::{
         setup_commitment_profile_value, setup_commitment_root,
     },
     public_key_share_proof::{
-        PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-        PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
-        public_key_share_coefficient_vector_hash,
-        public_key_share_internal_relation_proof_bytes_hash,
-        verify_public_key_share_internal_relation_proof,
+        PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS, PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        PublicKeyShareLnpProofVerificationInput, public_key_share_coefficient_vector_hash,
+        public_key_share_lnp_relation_proof_bytes_hash, verify_public_key_share_lnp_relation_proof,
     },
     same_secret_proof::{
-        SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS, SAME_SECRET_INTERNAL_PROOF_VERIFICATION_STATUS,
-        same_secret_internal_relation_proof_bytes_hash, verify_same_secret_internal_relation_proof,
+        SAME_SECRET_LNP_PROOF_MODEL_STATUS, SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+        same_secret_lnp_relation_proof_bytes_hash, verify_same_secret_lnp_relation_proof,
     },
     sampling::reduce_unbiased_u64,
     setup_proof::{
@@ -66,6 +64,10 @@ const SAME_SECRET_PROOF_FAMILY_BINDING_OBJECT_TYPE: &str = "SameSecretProofFamil
 const SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretProofMaterialSet";
 const SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE: &str = "SetupTransportedSameSecretProofMaterial";
+const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
+    "SetupTransportedPublicKeyShareProofMaterialSet";
+const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedPublicKeyShareProofMaterial";
 const TRUSTEE_SECRET_COMMITMENT_OBJECT_TYPE: &str = "TrusteeSecretCommitment";
 const PUBLIC_KEY_SHARE_SET_OBJECT_TYPE: &str = "PublicKeyShareSet";
 const PUBLIC_KEY_SHARE_OBJECT_TYPE: &str = "PublicKeyShare";
@@ -73,8 +75,8 @@ const PUBLIC_KEY_SHARE_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareProofSet";
 const PUBLIC_KEY_SHARE_PROOF_OBJECT_TYPE: &str = "PublicKeyShareProof";
 const PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE: &str = "PublicKeyShareMaterialSet";
 const PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "PublicKeyShareMaterial";
-const PUBLIC_KEY_SHARE_INTERNAL_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareInternalProofSet";
-const PUBLIC_KEY_SHARE_INTERNAL_PROOF_OBJECT_TYPE: &str = "PublicKeyShareInternalProof";
+const PUBLIC_KEY_SHARE_LNP_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareLnpProofSet";
+const PUBLIC_KEY_SHARE_LNP_PROOF_OBJECT_TYPE: &str = "PublicKeyShareLnpProof";
 const COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE: &str = "CollectivePublicKey";
 const EVALUATOR_KEY_SCHEDULE_OBJECT_TYPE: &str = "EvaluatorKeySchedule";
 const REQUIRED_GALOIS_SET_OBJECT_TYPE: &str = "RequiredGaloisSet";
@@ -364,6 +366,7 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
             "expectedRosterHash",
             "expectedSetupPackageHash",
             "setupPackage",
+            "transportedPublicKeyShareProofMaterial",
             "transportedSameSecretProofMaterial",
             "transportedVssCoefficientCommitmentMaterial",
         ],
@@ -542,7 +545,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_same_secret_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_optional_same_secret_internal_proofs(setup_package, request)? {
+    if let Some(response) = verify_optional_same_secret_lnp_proofs(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_public_key_shares(setup_package)? {
@@ -551,9 +554,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_public_key_share_proofs(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) =
-        verify_optional_public_key_share_internal_proofs(setup_package, request)?
-    {
+    if let Some(response) = verify_optional_public_key_share_lnp_proofs(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_collective_public_key_material(setup_package)? {
@@ -929,6 +930,8 @@ fn setup_profile_binding() -> CanonicalResult<Value> {
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
+        "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
+        "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
         "setupTransportProfileHash": setup_transport_profile_hash()?,
         "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
     }))
@@ -1191,6 +1194,10 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             }
         },
         "proofFamilies": setup_proof_family_profiles()?,
+        "sameSecretTboxParameterProfile": super::setup_proof::same_secret_lnp_tbox_parameter_profile_value()?,
+        "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
+        "publicKeyShareTboxParameterProfile": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_value()?,
+        "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
         "proofSerialization": {
             "encoding": SETUP_PROOF_SERIALIZATION,
             "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
@@ -1222,7 +1229,7 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
                 "modulo-only relation check",
                 "generic or undeclared proof family"
             ],
-            "proofBytesAcceptedStatus": "not-accepted-until-family-verifier-is-implemented"
+            "proofBytesAcceptedStatus": "same-secret-and-public-key-share-verifiers-implemented-other-family-verifiers-pending"
         }
     }))
 }
@@ -7028,7 +7035,7 @@ fn trustee_secret_commitment_payload(
     }))
 }
 
-fn verify_optional_same_secret_internal_proofs(
+fn verify_optional_same_secret_lnp_proofs(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
@@ -7083,9 +7090,9 @@ fn verify_optional_same_secret_internal_proofs(
         ("proofFamily", "same-secret-consistency"),
         (
             "proofVerificationStatus",
-            SAME_SECRET_INTERNAL_PROOF_VERIFICATION_STATUS,
+            SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS),
+        ("proofModelStatus", SAME_SECRET_LNP_PROOF_MODEL_STATUS),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_proof_refusal(
@@ -7123,6 +7130,19 @@ fn verify_optional_same_secret_internal_proofs(
             "sameSecretProofSetProfileMismatch",
             error.message,
             "setupPackage.sameSecretProofs.setupProofBinding",
+        )?));
+    }
+    let expected_tbox_parameter_profile_hash =
+        super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
+    if proof_set
+        .get("sameSecretTboxParameterProfileHash")
+        .and_then(Value::as_str)
+        != Some(expected_tbox_parameter_profile_hash.as_str())
+    {
+        return Ok(Some(same_secret_proof_refusal(
+            "sameSecretProofSetProfileMismatch",
+            "sameSecretProofs.sameSecretTboxParameterProfileHash must match the accepted same-secret LNP tbox profile",
+            "setupPackage.sameSecretProofs.sameSecretTboxParameterProfileHash",
         )?));
     }
     let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
@@ -7190,7 +7210,7 @@ fn verify_optional_same_secret_internal_proofs(
         })?;
     let mut seen_roster_positions = BTreeSet::new();
     let mut proof_roots = Vec::new();
-    let verification_context = SameSecretInternalProofVerificationContext {
+    let verification_context = SameSecretLnpProofVerificationContext {
         setup_package,
         request,
         setup_context,
@@ -7199,7 +7219,7 @@ fn verify_optional_same_secret_internal_proofs(
         transported_constant_commitments: &transported_constant_commitments,
     };
     for proof_record in proof_records {
-        if let Err(error) = verify_same_secret_internal_proof_record(
+        if let Err(error) = verify_same_secret_lnp_proof_record(
             &verification_context,
             proof_record,
             &mut seen_roster_positions,
@@ -7254,7 +7274,7 @@ fn verify_optional_same_secret_internal_proofs(
     Ok(None)
 }
 
-struct SameSecretInternalProofVerificationContext<'a> {
+struct SameSecretLnpProofVerificationContext<'a> {
     setup_package: &'a Value,
     request: &'a Value,
     setup_context: &'a Value,
@@ -7264,8 +7284,8 @@ struct SameSecretInternalProofVerificationContext<'a> {
         &'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>,
 }
 
-fn verify_same_secret_internal_proof_record(
-    context: &SameSecretInternalProofVerificationContext<'_>,
+fn verify_same_secret_lnp_proof_record(
+    context: &SameSecretLnpProofVerificationContext<'_>,
     proof_record: &Value,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<()> {
@@ -7301,9 +7321,9 @@ fn verify_same_secret_internal_proof_record(
         ("proofFamily", "same-secret-consistency"),
         (
             "proofVerificationStatus",
-            SAME_SECRET_INTERNAL_PROOF_VERIFICATION_STATUS,
+            SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS),
+        ("proofModelStatus", SAME_SECRET_LNP_PROOF_MODEL_STATUS),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -7330,6 +7350,18 @@ fn verify_same_secret_internal_proof_record(
         COLLECTIVE_BGV_SETUP_PROFILE_ID,
         &setup_proof_profile_hash()?,
     )?;
+    let expected_tbox_parameter_profile_hash =
+        super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
+    if proof_record
+        .get("sameSecretTboxParameterProfileHash")
+        .and_then(Value::as_str)
+        != Some(expected_tbox_parameter_profile_hash.as_str())
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "same-secret proof sameSecretTboxParameterProfileHash must match the accepted same-secret LNP tbox profile",
+        ));
+    }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     if !seen_roster_positions.insert(trustee_roster_position) {
         return Err(CanonicalError::new(
@@ -7373,7 +7405,7 @@ fn verify_same_secret_internal_proof_record(
         ));
     }
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
-    if proof_bytes_hash != same_secret_internal_relation_proof_bytes_hash(&proof_bytes) {
+    if proof_bytes_hash != same_secret_lnp_relation_proof_bytes_hash(&proof_bytes) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "same-secret proofBytesHash must match proofBytesHex",
@@ -7384,7 +7416,7 @@ fn verify_same_secret_internal_proof_record(
         trustee_roster_position,
         context.transported_constant_commitments,
     )?;
-    let verification = verify_same_secret_internal_relation_proof(
+    let verification = verify_same_secret_lnp_relation_proof(
         context.public_matrix_seed_hash,
         statement_record,
         &constant_commitments,
@@ -7403,6 +7435,10 @@ fn verify_same_secret_internal_proof_record(
             .get("relationCommitmentHash")
             .and_then(Value::as_str)
             != Some(verification.relation_commitment_hash_hex.as_str())
+        || proof_record
+            .get("tboxCommitmentPrefixHash")
+            .and_then(Value::as_str)
+            != Some(verification.tbox_commitment_prefix_hash.as_str())
         || proof_record.get("challenge").and_then(Value::as_u64) != Some(verification.challenge)
         || proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(verified_proof_size)
     {
@@ -7486,6 +7522,7 @@ fn same_secret_proof_bytes_from_record(
             trustee_roster_position: value_u64(proof_record, "trusteeRosterPosition")?,
             statement_hash_hex: value_string(proof_record, "statementHash")?,
             relation_commitment_hash_hex: value_string(proof_record, "relationCommitmentHash")?,
+            tbox_commitment_prefix_hash: value_string(proof_record, "tboxCommitmentPrefixHash")?,
             proof_size_bytes: value_u64(proof_record, "proofSizeBytes")?,
             proof_bytes_hash: value_string(proof_record, "proofBytesHash")?,
             transport_hashes: &transport_hashes,
@@ -7823,6 +7860,417 @@ fn verify_transported_same_secret_proof_material_hashes(
     Ok(())
 }
 
+fn public_key_share_lnp_proof_bytes_from_record(
+    proof_record: &Value,
+    request: &Value,
+) -> CanonicalResult<Vec<u8>> {
+    let has_embedded_proof_bytes = proof_record.get("proofBytesHex").is_some();
+    let has_transport_reference = [
+        "proofBytesEncoding",
+        "proofMaterialRoot",
+        "proofChunkSizeBytes",
+        "proofChunkCount",
+        "proofTotalByteLength",
+        "proofFullObjectHash",
+        "proofChunkRoot",
+        "proofChunkHashes",
+    ]
+    .iter()
+    .any(|field_name| proof_record.get(*field_name).is_some());
+
+    if has_embedded_proof_bytes && has_transport_reference {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proof must not mix embedded proofBytesHex with transported proof material",
+        ));
+    }
+    if has_embedded_proof_bytes {
+        return decode_hex(value_string(proof_record, "proofBytesHex")?);
+    }
+    if !has_transport_reference {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proof requires proofBytesHex or transported proof material",
+        ));
+    }
+
+    let proof_bytes_encoding = value_string(proof_record, "proofBytesEncoding")?;
+    if proof_bytes_encoding != SETUP_PROOF_MATERIAL_ENCODING {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofBytesEncoding must be binary-chunked-proof-bytes",
+        ));
+    }
+    let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
+    validate_hash_string(
+        proof_material_root,
+        "publicKeyShareLnpProof.proofMaterialRoot",
+    )?;
+    let chunks = transported_public_key_share_proof_material_chunks(request, proof_material_root)?;
+    let transport_hashes = setup_proof_material_transport_hashes(
+        "public-key-share",
+        &chunks,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )?;
+    verify_public_key_share_lnp_proof_transport_reference(proof_record, &transport_hashes)?;
+    let expected_material_root =
+        setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
+            setup_profile_id: COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            proof_family: "public-key-share",
+            trustee_identity: value_string(proof_record, "trusteeIdentity")?,
+            trustee_roster_position: value_u64(proof_record, "trusteeRosterPosition")?,
+            statement_hash_hex: value_string(proof_record, "statementHash")?,
+            relation_commitment_hash_hex: value_string(proof_record, "relationCommitmentHash")?,
+            tbox_commitment_prefix_hash: value_string(proof_record, "tboxCommitmentPrefixHash")?,
+            proof_size_bytes: value_u64(proof_record, "proofSizeBytes")?,
+            proof_bytes_hash: value_string(proof_record, "proofBytesHash")?,
+            transport_hashes: &transport_hashes,
+        })?;
+    if proof_material_root != expected_material_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofMaterialRoot must match the canonical transported proof material reference",
+        ));
+    }
+
+    let mut proof_bytes = Vec::with_capacity(
+        usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key transported proof material length does not fit usize",
+            )
+        })?,
+    );
+    for chunk in chunks {
+        proof_bytes.extend_from_slice(&chunk);
+    }
+
+    Ok(proof_bytes)
+}
+
+fn verify_public_key_share_lnp_proof_transport_reference(
+    proof_record: &Value,
+    transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofChunkSizeBytes must match the setup proof transport profile",
+        ));
+    }
+    let expected_chunk_count =
+        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key proof material chunk count does not fit u64",
+            )
+        })?;
+    if value_u64(proof_record, "proofChunkCount")? != expected_chunk_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofChunkCount must match transported proof chunks",
+        ));
+    }
+    if value_u64(proof_record, "proofTotalByteLength")? != transport_hashes.total_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofTotalByteLength must match transported proof chunks",
+        ));
+    }
+    if value_u64(proof_record, "proofSizeBytes")? != transport_hashes.total_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofSizeBytes must match transported proof byte length",
+        ));
+    }
+    if value_string(proof_record, "proofFullObjectHash")?
+        != transport_hashes.full_object_hash.as_str()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofFullObjectHash must match transported proof chunks",
+        ));
+    }
+    if value_string(proof_record, "proofChunkRoot")? != transport_hashes.chunk_root.as_str() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofChunkRoot must match the canonical proof chunk manifest",
+        ));
+    }
+    let Some(chunk_hash_values) = proof_record
+        .get("proofChunkHashes")
+        .and_then(Value::as_array)
+    else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofChunkHashes must list every transported proof chunk",
+        ));
+    };
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proofChunkHashes length must match transported proof chunks",
+        ));
+    }
+    for (chunk_index, (chunk_hash_value, expected_chunk_hash)) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+        .enumerate()
+    {
+        let Some(chunk_hash) = chunk_hash_value.as_str() else {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("public-key LNP proofChunkHashes[{chunk_index}] must be a hash string"),
+            ));
+        };
+        validate_hash_string(
+            chunk_hash,
+            &format!("publicKeyShareLnpProof.proofChunkHashes[{chunk_index}]"),
+        )?;
+        if chunk_hash != expected_chunk_hash {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key LNP proofChunkHashes must match transported proof chunks",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn transported_public_key_share_proof_material_chunks(
+    request: &Value,
+    expected_proof_material_root: &str,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    let material_set = request
+        .get("transportedPublicKeyShareProofMaterial")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transportedPublicKeyShareProofMaterial was required by transported public-key LNP proof records",
+            )
+        })?;
+    verify_transported_public_key_share_proof_material_set_header(material_set)?;
+    let Some(proof_materials) = material_set.get("proofMaterials").and_then(Value::as_array) else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareProofMaterial.proofMaterials must list transported proof material objects",
+        ));
+    };
+    let mut matching_chunks = None;
+    for proof_material in proof_materials {
+        verify_transported_public_key_share_proof_material_header(proof_material)?;
+        let proof_material_root = value_string(proof_material, "proofMaterialRoot")?;
+        if proof_material_root != expected_proof_material_root {
+            continue;
+        }
+        if matching_chunks.is_some() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transportedPublicKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
+            ));
+        }
+        let chunks = transported_public_key_share_proof_chunks(proof_material)?;
+        let transport_hashes = setup_proof_material_transport_hashes(
+            "public-key-share",
+            &chunks,
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )?;
+        verify_transported_public_key_share_proof_material_hashes(
+            proof_material,
+            &transport_hashes,
+        )?;
+        matching_chunks = Some(chunks);
+    }
+
+    matching_chunks.ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareProofMaterial is missing the requested proofMaterialRoot",
+        )
+    })
+}
+
+fn verify_transported_public_key_share_proof_material_set_header(
+    value: &Value,
+) -> CanonicalResult<()> {
+    if let Some(unexpected_field) =
+        unexpected_transported_public_key_share_proof_material_set_field(value)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "transportedPublicKeyShareProofMaterial contains unexpected field {unexpected_field}"
+            ),
+        ));
+    }
+    for (field_name, expected_value) in [
+        (
+            "objectType",
+            PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE,
+        ),
+        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
+        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
+        ("proofFamily", "public-key-share"),
+    ] {
+        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "transportedPublicKeyShareProofMaterial.{field_name} must be {expected_value}"
+                ),
+            ));
+        }
+    }
+    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareProofMaterial.objectVersion must be 1",
+        ));
+    }
+
+    Ok(())
+}
+
+fn verify_transported_public_key_share_proof_material_header(value: &Value) -> CanonicalResult<()> {
+    if let Some(unexpected_field) =
+        unexpected_transported_public_key_share_proof_material_field(value)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "transported public-key LNP proof material contains unexpected field {unexpected_field}"
+            ),
+        ));
+    }
+    for (field_name, expected_value) in [
+        ("objectType", PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE),
+        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
+        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
+        ("proofFamily", "public-key-share"),
+    ] {
+        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "transported public-key LNP proof material {field_name} must be {expected_value}"
+                ),
+            ));
+        }
+    }
+    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof material objectVersion must be 1",
+        ));
+    }
+    validate_hash_string(
+        value_string(value, "proofMaterialRoot")?,
+        "transportedPublicKeyShareProofMaterial.proofMaterialRoot",
+    )?;
+
+    Ok(())
+}
+
+fn transported_public_key_share_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
+    if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof material chunkSizeBytes must match the setup proof transport profile",
+        ));
+    }
+    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public-key LNP proof material chunkCount does not fit usize",
+        )
+    })?;
+    let Some(chunk_values) = value.get("chunks").and_then(Value::as_array) else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof material chunks are required",
+        ));
+    };
+    if chunk_values.len() != expected_chunk_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof material chunks length must match chunkCount",
+        ));
+    }
+    let mut chunks = Vec::with_capacity(expected_chunk_count);
+    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
+        if let Some(unexpected_field) =
+            unexpected_transported_public_key_share_proof_chunk_field(chunk_value)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "transported public-key LNP proof chunk contains unexpected field {unexpected_field}"
+                ),
+            ));
+        }
+        let observed_chunk_index = value_u64(chunk_value, "chunkIndex")?;
+        if observed_chunk_index != expected_chunk_index as u64 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public-key LNP proof chunks must be supplied in ascending chunk-index order",
+            ));
+        }
+        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
+    }
+
+    Ok(chunks)
+}
+
+fn verify_transported_public_key_share_proof_material_hashes(
+    value: &Value,
+    transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    if value_u64(value, "totalByteLength")? != transport_hashes.total_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof totalByteLength must match supplied chunks",
+        ));
+    }
+    if value_string(value, "fullObjectHash")? != transport_hashes.full_object_hash.as_str() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof fullObjectHash must match supplied chunks",
+        ));
+    }
+    if value_string(value, "chunkRoot")? != transport_hashes.chunk_root.as_str() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof chunkRoot must match supplied chunks",
+        ));
+    }
+    let Some(chunk_hash_values) = value.get("chunkHashes").and_then(Value::as_array) else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof chunkHashes are required",
+        ));
+    };
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key LNP proof chunkHashes length must match supplied chunks",
+        ));
+    }
+    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+    {
+        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public-key LNP proof chunkHashes must match supplied chunks",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn same_secret_statement_records_by_roster_position(
     setup_package: &Value,
 ) -> CanonicalResult<BTreeMap<u64, Value>> {
@@ -8037,7 +8485,7 @@ fn same_secret_constant_commitment_values_from_material(
     if material_encoding != "full-public-setup-commitment-values" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "same-secret internal proof verification requires embedded or binary-transported public VSS commitment material",
+            "same-secret LNP proof verification requires embedded or binary-transported public VSS commitment material",
         ));
     }
     let material_records = material_set
@@ -8234,6 +8682,7 @@ fn unexpected_same_secret_proof_set_field(value: &Value) -> Option<String> {
             "proofFamily",
             "proofVerificationStatus",
             "proofModelStatus",
+            "sameSecretTboxParameterProfileHash",
             "ceremonyId",
             "manifestHash",
             "rosterHash",
@@ -8266,6 +8715,7 @@ fn unexpected_same_secret_proof_record_field(value: &Value) -> Option<String> {
             "proofFamily",
             "proofVerificationStatus",
             "proofModelStatus",
+            "sameSecretTboxParameterProfileHash",
             "ceremonyId",
             "manifestHash",
             "rosterHash",
@@ -8281,6 +8731,7 @@ fn unexpected_same_secret_proof_record_field(value: &Value) -> Option<String> {
             "setupProofBinding",
             "statementHash",
             "relationCommitmentHash",
+            "tboxCommitmentPrefixHash",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
@@ -8334,6 +8785,47 @@ fn unexpected_transported_same_secret_proof_material_field(value: &Value) -> Opt
 }
 
 fn unexpected_transported_same_secret_proof_chunk_field(value: &Value) -> Option<String> {
+    unexpected_field(value, &["chunkIndex", "bytesHex"])
+}
+
+fn unexpected_transported_public_key_share_proof_material_set_field(
+    value: &Value,
+) -> Option<String> {
+    unexpected_field(
+        value,
+        &[
+            "objectType",
+            "objectVersion",
+            "setupProfileId",
+            "setupProofProfileId",
+            "proofFamily",
+            "proofMaterials",
+        ],
+    )
+}
+
+fn unexpected_transported_public_key_share_proof_material_field(value: &Value) -> Option<String> {
+    unexpected_field(
+        value,
+        &[
+            "objectType",
+            "objectVersion",
+            "setupProfileId",
+            "setupProofProfileId",
+            "proofFamily",
+            "proofMaterialRoot",
+            "chunkSizeBytes",
+            "chunkCount",
+            "totalByteLength",
+            "fullObjectHash",
+            "chunkHashes",
+            "chunkRoot",
+            "chunks",
+        ],
+    )
+}
+
+fn unexpected_transported_public_key_share_proof_chunk_field(value: &Value) -> Option<String> {
     unexpected_field(value, &["chunkIndex", "bytesHex"])
 }
 
@@ -8923,12 +9415,12 @@ fn verify_public_key_share_proofs(setup_package: &Value) -> CanonicalResult<Opti
     Ok(None)
 }
 
-fn verify_optional_public_key_share_internal_proofs(
+fn verify_optional_public_key_share_lnp_proofs(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let material_set = setup_package.get("publicKeyShareMaterial");
-    let proof_set = setup_package.get("publicKeyShareInternalProofs");
+    let proof_set = setup_package.get("publicKeyShareLnpProofs");
     if material_set.is_none() && proof_set.is_none() {
         return Ok(None);
     }
@@ -8945,7 +9437,7 @@ fn verify_optional_public_key_share_internal_proofs(
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
-            vec!["publicKeyShareInternalProofs".to_string()],
+            vec!["publicKeyShareLnpProofs".to_string()],
             Vec::new(),
             Vec::new(),
         )?));
@@ -8953,7 +9445,7 @@ fn verify_optional_public_key_share_internal_proofs(
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "setupContext was required before public-key internal proof verification",
+            "setupContext was required before public-key LNP proof verification",
         )
     })?;
     let public_matrix_seed_hash = setup_package
@@ -8963,7 +9455,7 @@ fn verify_optional_public_key_share_internal_proofs(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "commonRandomness.publicMatrixSeedHash was required before public-key internal proof verification",
+                "commonRandomness.publicMatrixSeedHash was required before public-key LNP proof verification",
             )
     })?;
     let common_binding = public_key_common_binding(setup_package)?;
@@ -8985,7 +9477,7 @@ fn verify_optional_public_key_share_internal_proofs(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareSetRoot was required before public-key internal proof verification",
+                "publicKeyShareSetRoot was required before public-key LNP proof verification",
             )
         })?;
     let public_key_share_proof_set_root = setup_package
@@ -8995,7 +9487,7 @@ fn verify_optional_public_key_share_internal_proofs(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareProofSetRoot was required before public-key internal proof verification",
+                "publicKeyShareProofSetRoot was required before public-key LNP proof verification",
             )
         })?;
     let share_records = public_key_share_records_by_roster_position(setup_package)?;
@@ -9013,7 +9505,7 @@ fn verify_optional_public_key_share_internal_proofs(
     ) {
         Ok(bindings) => bindings,
         Err(error) => {
-            return Ok(Some(public_key_share_internal_proof_refusal(
+            return Ok(Some(public_key_share_lnp_proof_refusal(
                 "publicKeyShareMaterialVerificationFailed",
                 error.message,
                 "setupPackage.publicKeyShareMaterial",
@@ -9021,41 +9513,40 @@ fn verify_optional_public_key_share_internal_proofs(
         }
     };
     if !proof_set.is_object() {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofSetNotObject",
-            "publicKeyShareInternalProofs must be a root-bound object",
-            "setupPackage.publicKeyShareInternalProofs",
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetNotObject",
+            "publicKeyShareLnpProofs must be a root-bound object",
+            "setupPackage.publicKeyShareLnpProofs",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_public_key_share_internal_proof_set_field(proof_set)
-    {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofSetUnexpectedField",
-            format!("publicKeyShareInternalProofs contains unexpected field {unexpected_field}"),
-            format!("setupPackage.publicKeyShareInternalProofs.{unexpected_field}"),
+    if let Some(unexpected_field) = unexpected_public_key_share_lnp_proof_set_field(proof_set) {
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetUnexpectedField",
+            format!("publicKeyShareLnpProofs contains unexpected field {unexpected_field}"),
+            format!("setupPackage.publicKeyShareLnpProofs.{unexpected_field}"),
         )?));
     }
     if proof_set.get("objectType").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_INTERNAL_PROOF_SET_OBJECT_TYPE)
+        != Some(PUBLIC_KEY_SHARE_LNP_PROOF_SET_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofSetTypeMismatch",
-            "publicKeyShareInternalProofs.objectType must be PublicKeyShareInternalProofSet",
-            "setupPackage.publicKeyShareInternalProofs.objectType",
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetTypeMismatch",
+            "publicKeyShareLnpProofs.objectType must be PublicKeyShareLnpProofSet",
+            "setupPackage.publicKeyShareLnpProofs.objectType",
         )?));
     }
     if proof_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofSetVersionMismatch",
-            "publicKeyShareInternalProofs.objectVersion must be 1",
-            "setupPackage.publicKeyShareInternalProofs.objectVersion",
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetVersionMismatch",
+            "publicKeyShareLnpProofs.objectVersion must be 1",
+            "setupPackage.publicKeyShareLnpProofs.objectVersion",
         )?));
     }
     if let Err(error) = verify_same_secret_context(proof_set, setup_context) {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofSetContextMismatch",
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetContextMismatch",
             error.message,
-            "setupPackage.publicKeyShareInternalProofs",
+            "setupPackage.publicKeyShareLnpProofs",
         )?));
     }
     for (field_name, expected_value) in [
@@ -9064,30 +9555,55 @@ fn verify_optional_public_key_share_internal_proofs(
         ("proofFamily", "public-key-share"),
         (
             "proofVerificationStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
+            PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
         ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-        ),
+        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_share_internal_proof_refusal(
-                "publicKeyShareInternalProofSetProfileMismatch",
-                format!("publicKeyShareInternalProofs.{field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShareInternalProofs.{field_name}"),
+            return Ok(Some(public_key_share_lnp_proof_refusal(
+                "publicKeyShareLnpProofSetProfileMismatch",
+                format!("publicKeyShareLnpProofs.{field_name} must be {expected_value}"),
+                format!("setupPackage.publicKeyShareLnpProofs.{field_name}"),
             )?));
         }
+    }
+    let expected_tbox_parameter_profile_hash =
+        super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?;
+    if proof_set
+        .get("publicKeyShareTboxParameterProfileHash")
+        .and_then(Value::as_str)
+        != Some(expected_tbox_parameter_profile_hash.as_str())
+    {
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetTboxProfileMismatch",
+            "publicKeyShareLnpProofs.publicKeyShareTboxParameterProfileHash must match the accepted public-key share LNP tbox profile",
+            "setupPackage.publicKeyShareLnpProofs.publicKeyShareTboxParameterProfileHash",
+        )?));
+    }
+    let expected_setup_proof_binding = setup_proof_record_binding_value()?;
+    let Some(actual_setup_proof_binding) = proof_set.get("setupProofBinding") else {
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetBindingMissing",
+            "publicKeyShareLnpProofs.setupProofBinding is required",
+            "setupPackage.publicKeyShareLnpProofs.setupProofBinding",
+        )?));
+    };
+    if actual_setup_proof_binding != &expected_setup_proof_binding {
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetSetupProofBindingMismatch",
+            "publicKeyShareLnpProofs.setupProofBinding must match the accepted setup-proof profile binding",
+            "setupPackage.publicKeyShareLnpProofs.setupProofBinding",
+        )?));
     }
     for (field_name, expected_value) in [
         ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Ok(Some(public_key_share_internal_proof_refusal(
-                "publicKeyShareInternalProofSetCountMismatch",
-                format!("publicKeyShareInternalProofs.{field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShareInternalProofs.{field_name}"),
+            return Ok(Some(public_key_share_lnp_proof_refusal(
+                "publicKeyShareLnpProofSetCountMismatch",
+                format!("publicKeyShareLnpProofs.{field_name} must be {expected_value}"),
+                format!("setupPackage.publicKeyShareLnpProofs.{field_name}"),
             )?));
         }
     }
@@ -9124,36 +9640,37 @@ fn verify_optional_public_key_share_internal_proofs(
                 .get("publicKeyShareMaterialSetRoot")
                 .and_then(Value::as_str)
     {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofSetBindingMismatch",
-            "publicKeyShareInternalProofs must bind accepted public randomness, same-secret, share, proof, and material roots",
-            "setupPackage.publicKeyShareInternalProofs",
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetBindingMismatch",
+            "publicKeyShareLnpProofs must bind accepted public randomness, same-secret, share, proof, and material roots",
+            "setupPackage.publicKeyShareLnpProofs",
         )?));
     }
     let Some(proof_records_array) = proof_set.get("proofRecords").and_then(Value::as_array) else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
-            vec!["publicKeyShareInternalProofs.proofRecords".to_string()],
+            vec!["publicKeyShareLnpProofs.proofRecords".to_string()],
             Vec::new(),
             Vec::new(),
         )?));
     };
     if proof_records_array.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofCountMismatch",
-            "publicKeyShareInternalProofs.proofRecords must contain one proof per trustee",
-            "setupPackage.publicKeyShareInternalProofs.proofRecords",
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofCountMismatch",
+            "publicKeyShareLnpProofs.proofRecords must contain one proof per trustee",
+            "setupPackage.publicKeyShareLnpProofs.proofRecords",
         )?));
     }
     let mut seen_roster_positions = BTreeSet::new();
     let mut proof_roots = Vec::new();
-    for internal_proof_record in proof_records_array {
-        if let Err(error) = verify_public_key_share_internal_proof_record(
+    for lnp_proof_record in proof_records_array {
+        if let Err(error) = verify_public_key_share_lnp_proof_record(
             setup_package,
             setup_context,
+            request,
             public_matrix_seed_hash,
-            internal_proof_record,
+            lnp_proof_record,
             &share_records,
             &proof_records,
             &same_secret_records,
@@ -9162,55 +9679,55 @@ fn verify_optional_public_key_share_internal_proofs(
             &transported_constant_commitments,
             &mut seen_roster_positions,
         ) {
-            return Ok(Some(public_key_share_internal_proof_refusal(
-                "publicKeyShareInternalProofVerificationFailed",
+            return Ok(Some(public_key_share_lnp_proof_refusal(
+                "publicKeyShareLnpProofVerificationFailed",
                 error.message,
-                "setupPackage.publicKeyShareInternalProofs.proofRecords",
+                "setupPackage.publicKeyShareLnpProofs.proofRecords",
             )?));
         }
         proof_roots.push(json!({
-            "trusteeIdentity": value_string(internal_proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(internal_proof_record, "trusteeRosterPosition")?,
-            "publicKeyShareInternalProofRoot": value_string(
-                internal_proof_record,
-                "publicKeyShareInternalProofRoot",
+            "trusteeIdentity": value_string(lnp_proof_record, "trusteeIdentity")?,
+            "trusteeRosterPosition": value_u64(lnp_proof_record, "trusteeRosterPosition")?,
+            "publicKeyShareLnpProofRoot": value_string(
+                lnp_proof_record,
+                "publicKeyShareLnpProofRoot",
             )?,
         }));
     }
-    if proof_set.get("publicKeyShareInternalProofRoots") != Some(&Value::Array(proof_roots)) {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofRootListMismatch",
-            "publicKeyShareInternalProofs.publicKeyShareInternalProofRoots must match the ordered proof records",
-            "setupPackage.publicKeyShareInternalProofs.publicKeyShareInternalProofRoots",
+    if proof_set.get("publicKeyShareLnpProofRoots") != Some(&Value::Array(proof_roots)) {
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofRootListMismatch",
+            "publicKeyShareLnpProofs.publicKeyShareLnpProofRoots must match the ordered proof records",
+            "setupPackage.publicKeyShareLnpProofs.publicKeyShareLnpProofRoots",
         )?));
     }
-    let Some(internal_proof_set_root) = proof_set
-        .get("publicKeyShareInternalProofSetRoot")
+    let Some(lnp_proof_set_root) = proof_set
+        .get("publicKeyShareLnpProofSetRoot")
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
-            vec!["publicKeyShareInternalProofs.publicKeyShareInternalProofSetRoot".to_string()],
+            vec!["publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot".to_string()],
             Vec::new(),
             Vec::new(),
         )?));
     };
     validate_hash_string(
-        internal_proof_set_root,
-        "publicKeyShareInternalProofs.publicKeyShareInternalProofSetRoot",
+        lnp_proof_set_root,
+        "publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot",
     )?;
     let mut root_input = proof_set.clone();
     root_input
         .as_object_mut()
-        .expect("public-key internal proof set object was checked")
-        .remove("publicKeyShareInternalProofSetRoot");
+        .expect("public-key LNP proof set object was checked")
+        .remove("publicKeyShareLnpProofSetRoot");
     let expected_root = derive_protocol_hash("PublicKeyShareProofRoot", &root_input)?;
-    if internal_proof_set_root != expected_root {
-        return Ok(Some(public_key_share_internal_proof_refusal(
-            "publicKeyShareInternalProofSetRootMismatch",
-            "publicKeyShareInternalProofSetRoot does not match the canonical public-key internal proof set",
-            "setupPackage.publicKeyShareInternalProofs.publicKeyShareInternalProofSetRoot",
+    if lnp_proof_set_root != expected_root {
+        return Ok(Some(public_key_share_lnp_proof_refusal(
+            "publicKeyShareLnpProofSetRootMismatch",
+            "publicKeyShareLnpProofSetRoot does not match the canonical public-key LNP proof set",
+            "setupPackage.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot",
         )?));
     }
 
@@ -9242,7 +9759,7 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
     let Some(aggregate_object) = aggregate_object else {
         return Ok(Some(public_key_share_proof_refusal(
             "publicKeyMaterialBeforeProofVerification",
-            "collective public-key material is not accepted unless it is root-bound to verified public-key share material and internal proof records",
+            "collective public-key material is not accepted unless it is root-bound to verified public-key share material and LNP proof records",
             "setupPackage.collectivePublicKeyRoot",
         )?));
     };
@@ -9299,16 +9816,10 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
         ("proofFamily", "public-key-share"),
         (
             "proofVerificationStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
+            PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
         ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-        ),
-        (
-            "aggregationStatus",
-            "internal-proof-aggregated-claim-pending",
-        ),
+        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
+        ("aggregationStatus", "lnp-proof-aggregated-review-gated"),
         (
             "materialEncoding",
             "embedded-full-collective-public-key-coefficients",
@@ -9328,12 +9839,12 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
             "publicKeyShareMaterial was required before collective public-key verification",
         )
     })?;
-    let internal_proof_set = setup_package
-        .get("publicKeyShareInternalProofs")
+    let lnp_proof_set = setup_package
+        .get("publicKeyShareLnpProofs")
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareInternalProofs was required before collective public-key verification",
+                "publicKeyShareLnpProofs was required before collective public-key verification",
             )
         })?;
     let common_binding = public_key_common_binding(setup_package)?;
@@ -9422,9 +9933,9 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
                 .and_then(Value::as_str),
         ),
         (
-            "publicKeyShareInternalProofSetRoot",
-            internal_proof_set
-                .get("publicKeyShareInternalProofSetRoot")
+            "publicKeyShareLnpProofSetRoot",
+            lnp_proof_set
+                .get("publicKeyShareLnpProofSetRoot")
                 .and_then(Value::as_str),
         ),
     ];
@@ -9637,10 +10148,7 @@ fn verify_public_key_share_material_set(
             "materialEncoding",
             "embedded-full-public-key-share-coefficients",
         ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-        ),
+        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
     ] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -9803,10 +10311,7 @@ fn verify_public_key_share_material_record(
             "materialEncoding",
             "embedded-full-public-key-share-coefficients",
         ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-        ),
+        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
     ] {
         if material_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -9960,9 +10465,10 @@ fn verify_public_key_share_material_record(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn verify_public_key_share_internal_proof_record(
+fn verify_public_key_share_lnp_proof_record(
     setup_package: &Value,
     setup_context: &Value,
+    request: &Value,
     public_matrix_seed_hash: &str,
     proof_record: &Value,
     share_records: &BTreeMap<u64, Value>,
@@ -9976,29 +10482,28 @@ fn verify_public_key_share_internal_proof_record(
     if !proof_record.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proof records must be objects",
+            "public-key LNP proof records must be objects",
         ));
     }
-    if let Some(unexpected_field) =
-        unexpected_public_key_share_internal_proof_record_field(proof_record)
+    if let Some(unexpected_field) = unexpected_public_key_share_lnp_proof_record_field(proof_record)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("public-key internal proof contains unexpected field {unexpected_field}"),
+            format!("public-key LNP proof contains unexpected field {unexpected_field}"),
         ));
     }
     if proof_record.get("objectType").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_INTERNAL_PROOF_OBJECT_TYPE)
+        != Some(PUBLIC_KEY_SHARE_LNP_PROOF_OBJECT_TYPE)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proof objectType must be PublicKeyShareInternalProof",
+            "public-key LNP proof objectType must be PublicKeyShareLnpProof",
         ));
     }
     if proof_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proof objectVersion must be 1",
+            "public-key LNP proof objectVersion must be 1",
         ));
     }
     verify_same_secret_context(proof_record, setup_context)?;
@@ -10008,31 +10513,58 @@ fn verify_public_key_share_internal_proof_record(
         ("proofFamily", "public-key-share"),
         (
             "proofVerificationStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
+            PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
         ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-        ),
+        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                format!("public-key internal proof {field_name} must be {expected_value}"),
+                format!("public-key LNP proof {field_name} must be {expected_value}"),
             ));
         }
+    }
+    let expected_setup_proof_binding = setup_proof_record_binding_value()?;
+    let actual_setup_proof_binding = proof_record.get("setupProofBinding").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proof setupProofBinding must bind the fixed setup-proof profile",
+        )
+    })?;
+    if actual_setup_proof_binding != &expected_setup_proof_binding {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "public-key LNP proof setupProofBinding must match the fixed setup-proof profile",
+        ));
+    }
+    super::setup_proof::verify_setup_proof_record_binding(
+        actual_setup_proof_binding,
+        COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        &setup_proof_profile_hash()?,
+    )?;
+    let expected_tbox_parameter_profile_hash =
+        super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?;
+    if proof_record
+        .get("publicKeyShareTboxParameterProfileHash")
+        .and_then(Value::as_str)
+        != Some(expected_tbox_parameter_profile_hash.as_str())
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key LNP proof publicKeyShareTboxParameterProfileHash must match the accepted public-key share LNP tbox profile",
+        ));
     }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     if !seen_roster_positions.insert(trustee_roster_position) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proof records must have distinct trustee roster positions",
+            "public-key LNP proof records must have distinct trustee roster positions",
         ));
     }
     let share_record = share_records.get(&trustee_roster_position).ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proof must reference an accepted share record",
+            "public-key LNP proof must reference an accepted share record",
         )
     })?;
     let public_key_share_proof_record = public_key_share_proof_records
@@ -10040,7 +10572,7 @@ fn verify_public_key_share_internal_proof_record(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "public-key internal proof must reference an accepted public-key proof statement",
+                "public-key LNP proof must reference an accepted public-key proof statement",
             )
         })?;
     let same_secret_record = same_secret_records
@@ -10048,7 +10580,7 @@ fn verify_public_key_share_internal_proof_record(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "public-key internal proof must reference an accepted same-secret statement",
+                "public-key LNP proof must reference an accepted same-secret statement",
             )
         })?;
     let same_secret_proof_binding = same_secret_proof_bindings
@@ -10056,7 +10588,7 @@ fn verify_public_key_share_internal_proof_record(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "public-key internal proof must reference a verified same-secret proof",
+                "public-key LNP proof must reference a verified same-secret proof",
             )
         })?;
     let material_binding = material_bindings
@@ -10064,7 +10596,7 @@ fn verify_public_key_share_internal_proof_record(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "public-key internal proof must reference accepted public-key share material",
+                "public-key LNP proof must reference accepted public-key share material",
             )
         })?;
     for field_name in [
@@ -10076,7 +10608,7 @@ fn verify_public_key_share_internal_proof_record(
         if proof_record.get(field_name) != public_key_share_proof_record.get(field_name) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                format!("public-key internal proof {field_name} must match the proof statement"),
+                format!("public-key LNP proof {field_name} must match the proof statement"),
             ));
         }
     }
@@ -10099,7 +10631,7 @@ fn verify_public_key_share_internal_proof_record(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "public-key internal proof must bind the accepted share, proof statement, material, and same-secret roots",
+            "public-key LNP proof must bind the accepted share, proof statement, material, and same-secret roots",
         ));
     }
     if proof_record
@@ -10127,28 +10659,27 @@ fn verify_public_key_share_internal_proof_record(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "public-key internal proof must bind the verified same-secret proof root",
+            "public-key LNP proof must bind the verified same-secret proof root",
         ));
     }
-    let proof_bytes_hex = value_string(proof_record, "proofBytesHex")?;
-    let proof_bytes = decode_hex(proof_bytes_hex)?;
+    let proof_bytes = public_key_share_lnp_proof_bytes_from_record(proof_record, request)?;
     let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "public-key internal proof byte length does not fit u64",
+            "public-key LNP proof byte length does not fit u64",
         )
     })?;
     if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proofSizeBytes must match proofBytesHex",
+            "public-key LNP proofSizeBytes must match supplied proof bytes",
         ));
     }
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
-    if proof_bytes_hash != public_key_share_internal_relation_proof_bytes_hash(&proof_bytes) {
+    if proof_bytes_hash != public_key_share_lnp_relation_proof_bytes_hash(&proof_bytes) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proofBytesHash must match proofBytesHex",
+            "public-key LNP proofBytesHash must match supplied proof bytes",
         ));
     }
     let constant_commitments = same_secret_constant_commitment_values_from_material(
@@ -10156,15 +10687,17 @@ fn verify_public_key_share_internal_proof_record(
         trustee_roster_position,
         transported_constant_commitments,
     )?;
-    let verification = verify_public_key_share_internal_relation_proof(
-        public_matrix_seed_hash,
-        share_record,
-        public_key_share_proof_record,
-        same_secret_record,
-        &constant_commitments,
-        &material_binding.coefficients_by_limb,
-        &proof_bytes,
-    )?;
+    let verification =
+        verify_public_key_share_lnp_relation_proof(PublicKeyShareLnpProofVerificationInput {
+            public_matrix_seed_hash,
+            public_key_share_record: share_record,
+            public_key_share_proof_record,
+            same_secret_statement_record: same_secret_record,
+            constant_commitments: &constant_commitments,
+            public_share_coefficients_by_limb: &material_binding.coefficients_by_limb,
+            setup_proof_binding: actual_setup_proof_binding,
+            proof_bytes: &proof_bytes,
+        })?;
     let verified_proof_size = u64::try_from(verification.proof_size_bytes).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -10177,25 +10710,29 @@ fn verify_public_key_share_internal_proof_record(
             .get("relationCommitmentHash")
             .and_then(Value::as_str)
             != Some(verification.relation_commitment_hash_hex.as_str())
+        || proof_record
+            .get("tboxCommitmentPrefixHash")
+            .and_then(Value::as_str)
+            != Some(verification.tbox_commitment_prefix_hash.as_str())
         || proof_record.get("challenge").and_then(Value::as_u64) != Some(verification.challenge)
         || proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(verified_proof_size)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key internal proof transcript metadata must match verified proof bytes",
+            "public-key LNP proof transcript metadata must match verified proof bytes",
         ));
     }
-    let proof_root = value_string(proof_record, "publicKeyShareInternalProofRoot")?;
+    let proof_root = value_string(proof_record, "publicKeyShareLnpProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
         .as_object_mut()
-        .expect("public-key internal proof record object was checked")
-        .remove("publicKeyShareInternalProofRoot");
+        .expect("public-key LNP proof record object was checked")
+        .remove("publicKeyShareLnpProofRoot");
     let expected_root = derive_protocol_hash("PublicKeyShareProofRoot", &root_input)?;
     if proof_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareInternalProofRoot does not match the canonical public-key internal proof record",
+            "publicKeyShareLnpProofRoot does not match the canonical public-key LNP proof record",
         ));
     }
 
@@ -10212,7 +10749,7 @@ fn public_key_share_records_by_roster_position(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "publicKeyShares.shareRecords were required before public-key internal proof verification",
+                "publicKeyShares.shareRecords were required before public-key LNP proof verification",
             )
         })?;
     let mut records = BTreeMap::new();
@@ -10242,7 +10779,7 @@ fn public_key_share_proof_records_by_roster_position(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareProofs.proofRecords were required before public-key internal proof verification",
+                "publicKeyShareProofs.proofRecords were required before public-key LNP proof verification",
             )
         })?;
     let mut records = BTreeMap::new();
@@ -11292,7 +11829,7 @@ fn unexpected_public_key_share_material_record_field(value: &Value) -> Option<St
     )
 }
 
-fn unexpected_public_key_share_internal_proof_set_field(value: &Value) -> Option<String> {
+fn unexpected_public_key_share_lnp_proof_set_field(value: &Value) -> Option<String> {
     unexpected_field(
         value,
         &[
@@ -11303,6 +11840,8 @@ fn unexpected_public_key_share_internal_proof_set_field(value: &Value) -> Option
             "proofFamily",
             "proofVerificationStatus",
             "proofModelStatus",
+            "setupProofBinding",
+            "publicKeyShareTboxParameterProfileHash",
             "ceremonyId",
             "manifestHash",
             "rosterHash",
@@ -11321,14 +11860,14 @@ fn unexpected_public_key_share_internal_proof_set_field(value: &Value) -> Option
             "publicKeyShareSetRoot",
             "publicKeyShareProofSetRoot",
             "publicKeyShareMaterialSetRoot",
-            "publicKeyShareInternalProofRoots",
+            "publicKeyShareLnpProofRoots",
             "proofRecords",
-            "publicKeyShareInternalProofSetRoot",
+            "publicKeyShareLnpProofSetRoot",
         ],
     )
 }
 
-fn unexpected_public_key_share_internal_proof_record_field(value: &Value) -> Option<String> {
+fn unexpected_public_key_share_lnp_proof_record_field(value: &Value) -> Option<String> {
     unexpected_field(
         value,
         &[
@@ -11339,6 +11878,8 @@ fn unexpected_public_key_share_internal_proof_record_field(value: &Value) -> Opt
             "proofFamily",
             "proofVerificationStatus",
             "proofModelStatus",
+            "setupProofBinding",
+            "publicKeyShareTboxParameterProfileHash",
             "ceremonyId",
             "manifestHash",
             "rosterHash",
@@ -11357,11 +11898,20 @@ fn unexpected_public_key_share_internal_proof_record_field(value: &Value) -> Opt
             "sameSecretProofRoot",
             "statementHash",
             "relationCommitmentHash",
+            "tboxCommitmentPrefixHash",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
+            "proofBytesEncoding",
+            "proofMaterialRoot",
+            "proofChunkSizeBytes",
+            "proofChunkCount",
+            "proofTotalByteLength",
+            "proofFullObjectHash",
+            "proofChunkRoot",
+            "proofChunkHashes",
             "proofBytesHex",
-            "publicKeyShareInternalProofRoot",
+            "publicKeyShareLnpProofRoot",
         ],
     )
 }
@@ -11398,7 +11948,7 @@ fn unexpected_collective_public_key_field(value: &Value) -> Option<String> {
             "publicKeyShareSetRoot",
             "publicKeyShareProofSetRoot",
             "publicKeyShareMaterialSetRoot",
-            "publicKeyShareInternalProofSetRoot",
+            "publicKeyShareLnpProofSetRoot",
             "sourceShareMaterialRoots",
             "aggregateCoefficientVectorsByLimb",
             "collectivePublicKeyRoot",
@@ -11434,7 +11984,7 @@ fn public_key_share_proof_refusal(
     )
 }
 
-fn public_key_share_internal_proof_refusal(
+fn public_key_share_lnp_proof_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
@@ -11714,7 +12264,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "same-secret trustee commitment roots",
         ],
         "nonClosure": [
-            "same-secret proof bytes still require LNP verification",
+            "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
             "public-key share proof bytes still require no-wrap LNP verification",
             "relinearization and Galois proof bytes still require linked LNP verification",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
@@ -12892,8 +13442,8 @@ fn accepted_hashes_from_package(setup_package: &Value) -> Vec<String> {
         accepted_hashes.push(hash.to_string());
     }
     if let Some(hash) = setup_package
-        .get("publicKeyShareInternalProofs")
-        .and_then(|proof_set| proof_set.get("publicKeyShareInternalProofSetRoot"))
+        .get("publicKeyShareLnpProofs")
+        .and_then(|proof_set| proof_set.get("publicKeyShareLnpProofSetRoot"))
         .and_then(Value::as_str)
     {
         accepted_hashes.push(hash.to_string());

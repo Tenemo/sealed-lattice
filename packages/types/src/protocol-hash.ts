@@ -52,6 +52,7 @@ export const protocolHashNamespaceValues = [
     'CarryAwareVssShareRelationProfileHash',
     'SetupCommitmentProfileHash',
     'SetupProofProfileHash',
+    'SetupProofLnpTboxParameterProfileHash',
     'SetupProofMaterialRoot',
     'SetupProofChunkManifestRoot',
     'SetupTransportProfileHash',

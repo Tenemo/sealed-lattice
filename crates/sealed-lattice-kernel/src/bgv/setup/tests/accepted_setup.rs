@@ -2,17 +2,16 @@ use super::super::accepted_setup::{
     accepted_he_security_certificate_hash, accepted_he_security_certificate_value,
 };
 use super::super::public_key_share_proof::{
-    PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-    PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
-    PublicKeyShareInternalProofGenerationInput, PublicKeyShareInternalProofWitness,
-    generate_public_key_share_internal_relation_proof_for_tests,
-    public_key_share_coefficient_vector_hash, public_key_share_internal_relation_proof_bytes_hash,
-    verify_public_key_share_internal_relation_proof,
+    PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS, PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+    PublicKeyShareLnpProofGenerationInput, PublicKeyShareLnpProofVerificationInput,
+    PublicKeyShareLnpProofWitness, generate_public_key_share_lnp_relation_proof_for_tests,
+    public_key_share_coefficient_vector_hash, public_key_share_lnp_relation_proof_bytes_hash,
+    verify_public_key_share_lnp_relation_proof,
 };
 use super::super::same_secret_proof::{
-    SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS, SAME_SECRET_INTERNAL_PROOF_VERIFICATION_STATUS,
-    SameSecretInternalProofWitness, generate_same_secret_internal_relation_proof_for_tests,
-    same_secret_internal_relation_proof_bytes_hash, verify_same_secret_internal_relation_proof,
+    SAME_SECRET_LNP_PROOF_MODEL_STATUS, SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+    SameSecretLnpProofWitness, generate_same_secret_lnp_relation_proof_for_tests,
+    same_secret_lnp_relation_proof_bytes_hash, verify_same_secret_lnp_relation_proof,
 };
 use super::super::sampling::dense_public_residues;
 use super::super::setup_proof::{
@@ -915,7 +914,7 @@ fn collective_setup_verifier_refuses_malformed_same_secret_statements() {
 }
 
 #[test]
-fn collective_setup_verifier_checks_same_secret_internal_proofs_before_public_key_acceptance() {
+fn collective_setup_verifier_checks_same_secret_lnp_proofs_before_public_key_acceptance() {
     let package = same_secret_proof_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -932,7 +931,7 @@ fn collective_setup_verifier_checks_same_secret_internal_proofs_before_public_ke
 }
 
 #[test]
-fn collective_setup_verifier_checks_same_secret_internal_proofs_from_transported_material() {
+fn collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_material() {
     let mut package = same_secret_proof_bearing_collective_setup_package();
     let material_bytes = encode_transport_material_from_package(&package);
     let transported_material = transported_material_value(&material_bytes);
@@ -975,7 +974,7 @@ fn collective_setup_verifier_checks_same_secret_internal_proofs_from_transported
 }
 
 #[test]
-fn collective_setup_verifier_checks_same_secret_internal_proofs_from_transported_proof_material() {
+fn collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_proof_material() {
     let mut package = same_secret_proof_bearing_collective_setup_package();
     let transported_proof_material = move_same_secret_proof_bytes_to_transport(&mut package);
     rebind_collective_setup_package_hash(&mut package);
@@ -1016,7 +1015,7 @@ fn collective_setup_verifier_refuses_tampered_transported_same_secret_proof_chun
 }
 
 #[test]
-fn collective_setup_verifier_refuses_tampered_same_secret_internal_proofs() {
+fn collective_setup_verifier_refuses_tampered_same_secret_lnp_proofs() {
     let mut package = same_secret_proof_bearing_collective_setup_package();
     package["sameSecretProofs"]["proofRecords"][0]["proofBytesHash"] =
         serde_json::json!(valid_hash('6'));
@@ -1094,8 +1093,8 @@ fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
 }
 
 #[test]
-fn collective_setup_verifier_checks_public_key_share_internal_proofs() {
-    let package = public_key_share_internal_proof_bearing_collective_setup_package();
+fn collective_setup_verifier_checks_public_key_share_lnp_proofs() {
+    let package = public_key_share_lnp_proof_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
@@ -1111,8 +1110,51 @@ fn collective_setup_verifier_checks_public_key_share_internal_proofs() {
 }
 
 #[test]
-fn collective_setup_verifier_refuses_tampered_public_key_share_internal_material() {
-    let mut package = public_key_share_internal_proof_bearing_collective_setup_package();
+fn collective_setup_verifier_checks_public_key_share_lnp_proofs_from_transported_proof_material() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let transported_proof_material =
+        move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicKeyShareProofMaterial": transported_proof_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "vssCoefficientCommitmentMaterialOutsideProfile"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_transported_public_key_share_lnp_proof_chunk() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut transported_proof_material =
+        move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
+    transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
+        serde_json::json!("00");
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicKeyShareProofMaterial": transported_proof_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "publicKeyShareLnpProofVerificationFailed"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_material() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     let coefficients_hex = package["publicKeyShareMaterial"]["shareMaterialRecords"][0]
         ["shareCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
         .as_str()
@@ -1140,9 +1182,9 @@ fn collective_setup_verifier_refuses_tampered_public_key_share_internal_material
 }
 
 #[test]
-fn collective_setup_verifier_refuses_tampered_public_key_share_internal_proofs() {
-    let mut package = public_key_share_internal_proof_bearing_collective_setup_package();
-    package["publicKeyShareInternalProofs"]["proofRecords"][0]["proofBytesHash"] =
+fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_proofs() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHash"] =
         serde_json::json!(valid_hash('a'));
     rebind_collective_setup_package_hash(&mut package);
 
@@ -1154,13 +1196,13 @@ fn collective_setup_verifier_refuses_tampered_public_key_share_internal_proofs()
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareInternalProofVerificationFailed"
+        "publicKeyShareLnpProofVerificationFailed"
     );
 }
 
 #[test]
-fn collective_setup_verifier_requires_same_secret_proofs_before_public_key_internal_proofs() {
-    let mut package = public_key_share_internal_proof_bearing_collective_setup_package();
+fn collective_setup_verifier_requires_same_secret_proofs_before_public_key_lnp_proofs() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package
         .as_object_mut()
         .expect("setup package")
@@ -1181,11 +1223,11 @@ fn collective_setup_verifier_requires_same_secret_proofs_before_public_key_inter
 }
 
 #[test]
-fn collective_setup_verifier_refuses_public_key_internal_same_secret_proof_set_drift() {
-    let mut package = public_key_share_internal_proof_bearing_collective_setup_package();
-    package["publicKeyShareInternalProofs"]["sameSecretProofSetRoot"] =
+fn collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_set_drift() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    package["publicKeyShareLnpProofs"]["sameSecretProofSetRoot"] =
         serde_json::json!(valid_hash('b'));
-    rebind_collective_public_key_internal_proof_roots(&mut package);
+    rebind_collective_public_key_lnp_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -1196,16 +1238,16 @@ fn collective_setup_verifier_refuses_public_key_internal_same_secret_proof_set_d
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareInternalProofSetBindingMismatch"
+        "publicKeyShareLnpProofSetBindingMismatch"
     );
 }
 
 #[test]
-fn collective_setup_verifier_refuses_public_key_internal_same_secret_proof_root_drift() {
-    let mut package = public_key_share_internal_proof_bearing_collective_setup_package();
-    package["publicKeyShareInternalProofs"]["proofRecords"][0]["sameSecretProofRoot"] =
+fn collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_root_drift() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    package["publicKeyShareLnpProofs"]["proofRecords"][0]["sameSecretProofRoot"] =
         serde_json::json!(valid_hash('c'));
-    rebind_collective_public_key_internal_proof_roots(&mut package);
+    rebind_collective_public_key_lnp_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -1216,28 +1258,26 @@ fn collective_setup_verifier_refuses_public_key_internal_same_secret_proof_root_
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareInternalProofVerificationFailed"
+        "publicKeyShareLnpProofVerificationFailed"
     );
 }
 
 #[test]
-fn collective_setup_verifier_refuses_tampered_public_key_share_internal_carry_response() {
-    let mut package = public_key_share_internal_proof_bearing_collective_setup_package();
-    let proof_bytes_hex =
-        package["publicKeyShareInternalProofs"]["proofRecords"][0]["proofBytesHex"]
-            .as_str()
-            .expect("public-key proof bytes hex");
+fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_carry_response() {
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let proof_bytes_hex = package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHex"]
+        .as_str()
+        .expect("public-key proof bytes hex");
     let mut proof_bytes = decode_hex(proof_bytes_hex).expect("proof bytes");
     let last_byte = proof_bytes.last_mut().expect("proof bytes are non-empty");
     *last_byte ^= 1;
-    package["publicKeyShareInternalProofs"]["proofRecords"][0]["proofBytesHex"] =
+    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHex"] =
         serde_json::json!(to_hex(&proof_bytes));
-    package["publicKeyShareInternalProofs"]["proofRecords"][0]["proofBytesHash"] = serde_json::json!(
-        public_key_share_internal_relation_proof_bytes_hash(&proof_bytes)
-    );
-    package["publicKeyShareInternalProofs"]["proofRecords"][0]["proofSizeBytes"] =
+    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHash"] =
+        serde_json::json!(public_key_share_lnp_relation_proof_bytes_hash(&proof_bytes));
+    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofSizeBytes"] =
         serde_json::json!(proof_bytes.len());
-    rebind_collective_public_key_internal_proof_roots(&mut package);
+    rebind_collective_public_key_lnp_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -1248,12 +1288,12 @@ fn collective_setup_verifier_refuses_tampered_public_key_share_internal_carry_re
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareInternalProofVerificationFailed"
+        "publicKeyShareLnpProofVerificationFailed"
     );
 }
 
 #[test]
-fn collective_setup_verifier_checks_collective_public_key_from_internal_proof_bearing_shares() {
+fn collective_setup_verifier_checks_collective_public_key_from_lnp_proof_bearing_shares() {
     let package = collective_public_key_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -2103,7 +2143,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
             "same-secret trustee commitment roots",
         ],
         "nonClosure": [
-            "same-secret proof bytes still require LNP verification",
+            "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
             "public-key share proof bytes still require no-wrap LNP verification",
             "relinearization and Galois proof bytes still require linked LNP verification",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
@@ -2791,7 +2831,7 @@ fn same_secret_proofs_object(package: &serde_json::Value) -> serde_json::Value {
             .first()
             .expect("constant commitment")
             .ring_degree;
-        let witness = SameSecretInternalProofWitness {
+        let witness = SameSecretLnpProofWitness {
             secret_coefficients: (0..ring_degree)
                 .map(|coefficient_position| {
                     accepted_vss_secret_coefficient_fixture(
@@ -2819,7 +2859,7 @@ fn same_secret_proofs_object(package: &serde_json::Value) -> serde_json::Value {
             }),
         )
         .expect("same-secret proof randomness seed");
-        let proof_bytes = generate_same_secret_internal_relation_proof_for_tests(
+        let proof_bytes = generate_same_secret_lnp_relation_proof_for_tests(
             public_matrix_seed_hash,
             statement_record,
             &constant_commitments,
@@ -2828,7 +2868,7 @@ fn same_secret_proofs_object(package: &serde_json::Value) -> serde_json::Value {
             &proof_randomness_seed_hex,
         )
         .expect("same-secret proof bytes");
-        let verification = verify_same_secret_internal_relation_proof(
+        let verification = verify_same_secret_lnp_relation_proof(
             public_matrix_seed_hash,
             statement_record,
             &constant_commitments,
@@ -2837,7 +2877,10 @@ fn same_secret_proofs_object(package: &serde_json::Value) -> serde_json::Value {
         )
         .expect("same-secret proof verification");
         let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
-        let proof_bytes_hash = same_secret_internal_relation_proof_bytes_hash(&proof_bytes);
+        let proof_bytes_hash = same_secret_lnp_relation_proof_bytes_hash(&proof_bytes);
+        let same_secret_tbox_parameter_profile_hash =
+            super::super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()
+                .expect("same-secret tbox parameter profile hash");
         let mut proof_record = serde_json::json!({
             "objectType": "SameSecretProof",
             "objectVersion": 1,
@@ -2845,8 +2888,9 @@ fn same_secret_proofs_object(package: &serde_json::Value) -> serde_json::Value {
             "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
             "proofFamily": "same-secret-consistency",
-            "proofVerificationStatus": SAME_SECRET_INTERNAL_PROOF_VERIFICATION_STATUS,
-            "proofModelStatus": SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS,
+            "proofVerificationStatus": SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+            "proofModelStatus": SAME_SECRET_LNP_PROOF_MODEL_STATUS,
+            "sameSecretTboxParameterProfileHash": same_secret_tbox_parameter_profile_hash,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -2862,6 +2906,7 @@ fn same_secret_proofs_object(package: &serde_json::Value) -> serde_json::Value {
             "setupProofBinding": setup_proof_binding_for_test_package(package),
             "statementHash": verification.statement_hash_hex,
             "relationCommitmentHash": verification.relation_commitment_hash_hex,
+            "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
             "challenge": verification.challenge,
             "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
@@ -2885,8 +2930,10 @@ fn same_secret_proofs_object(package: &serde_json::Value) -> serde_json::Value {
         "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "same-secret-consistency",
-        "proofVerificationStatus": SAME_SECRET_INTERNAL_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS,
+        "proofVerificationStatus": SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": SAME_SECRET_LNP_PROOF_MODEL_STATUS,
+        "sameSecretTboxParameterProfileHash": super::super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()
+            .expect("same-secret tbox parameter profile hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -2923,7 +2970,7 @@ fn move_same_secret_proof_bytes_to_transport(package: &mut serde_json::Value) ->
             .expect("embedded proof bytes")
             .to_string();
         let proof_bytes = decode_hex(&proof_bytes_hex).expect("proof bytes");
-        let chunks = vec![proof_bytes];
+        let chunks = proof_bytes_transport_chunks(proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
             "same-secret-consistency",
             &chunks,
@@ -2945,6 +2992,10 @@ fn move_same_secret_proof_bytes_to_transport(package: &mut serde_json::Value) ->
             .as_str()
             .expect("relation commitment hash")
             .to_string();
+        let tbox_commitment_prefix_hash = proof_record["tboxCommitmentPrefixHash"]
+            .as_str()
+            .expect("tbox commitment prefix hash")
+            .to_string();
         let trustee_identity = proof_record["trusteeIdentity"]
             .as_str()
             .expect("trustee identity")
@@ -2960,6 +3011,7 @@ fn move_same_secret_proof_bytes_to_transport(package: &mut serde_json::Value) ->
                 trustee_roster_position,
                 statement_hash_hex: &statement_hash,
                 relation_commitment_hash_hex: &relation_commitment_hash,
+                tbox_commitment_prefix_hash: &tbox_commitment_prefix_hash,
                 proof_size_bytes,
                 proof_bytes_hash: &proof_bytes_hash,
                 transport_hashes: &transport_hashes,
@@ -3025,6 +3077,134 @@ fn move_same_secret_proof_bytes_to_transport(package: &mut serde_json::Value) ->
     })
 }
 
+fn move_public_key_share_lnp_proof_bytes_to_transport(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let proof_records = package["publicKeyShareLnpProofs"]["proofRecords"]
+        .as_array_mut()
+        .expect("public-key LNP proof records");
+    let mut proof_materials = Vec::new();
+    let mut proof_roots = Vec::new();
+    for proof_record in proof_records {
+        let proof_bytes_hex = proof_record["proofBytesHex"]
+            .as_str()
+            .expect("embedded public-key proof bytes")
+            .to_string();
+        let proof_bytes = decode_hex(&proof_bytes_hex).expect("public-key proof bytes");
+        let chunks = proof_bytes_transport_chunks(proof_bytes);
+        let transport_hashes = setup_proof_material_transport_hashes(
+            "public-key-share",
+            &chunks,
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )
+        .expect("public-key proof transport hashes");
+        let proof_size_bytes = proof_record["proofSizeBytes"]
+            .as_u64()
+            .expect("proof size bytes");
+        let proof_bytes_hash = proof_record["proofBytesHash"]
+            .as_str()
+            .expect("proof bytes hash")
+            .to_string();
+        let statement_hash = proof_record["statementHash"]
+            .as_str()
+            .expect("statement hash")
+            .to_string();
+        let relation_commitment_hash = proof_record["relationCommitmentHash"]
+            .as_str()
+            .expect("relation commitment hash")
+            .to_string();
+        let tbox_commitment_prefix_hash = proof_record["tboxCommitmentPrefixHash"]
+            .as_str()
+            .expect("tbox commitment prefix hash")
+            .to_string();
+        let trustee_identity = proof_record["trusteeIdentity"]
+            .as_str()
+            .expect("trustee identity")
+            .to_string();
+        let trustee_roster_position = proof_record["trusteeRosterPosition"]
+            .as_u64()
+            .expect("trustee roster position");
+        let proof_material_root =
+            setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
+                setup_profile_id: "CollectiveBgvSetup-v1",
+                proof_family: "public-key-share",
+                trustee_identity: &trustee_identity,
+                trustee_roster_position,
+                statement_hash_hex: &statement_hash,
+                relation_commitment_hash_hex: &relation_commitment_hash,
+                tbox_commitment_prefix_hash: &tbox_commitment_prefix_hash,
+                proof_size_bytes,
+                proof_bytes_hash: &proof_bytes_hash,
+                transport_hashes: &transport_hashes,
+            })
+            .expect("public-key proof material root");
+        let proof_record_object = proof_record
+            .as_object_mut()
+            .expect("public-key LNP proof record object");
+        proof_record_object.remove("proofBytesHex");
+        proof_record_object.remove("publicKeyShareLnpProofRoot");
+        proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
+        proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
+        proof_record["proofChunkSizeBytes"] =
+            serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
+        proof_record["proofChunkCount"] = serde_json::json!(transport_hashes.chunk_hashes.len());
+        proof_record["proofTotalByteLength"] =
+            serde_json::json!(transport_hashes.total_byte_length);
+        proof_record["proofFullObjectHash"] = serde_json::json!(transport_hashes.full_object_hash);
+        proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
+        proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
+        proof_record["publicKeyShareLnpProofRoot"] = serde_json::json!(
+            derive_protocol_hash("PublicKeyShareProofRoot", proof_record)
+                .expect("public-key LNP proof root")
+        );
+        proof_roots.push(serde_json::json!({
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
+            "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
+        }));
+        proof_materials.push(serde_json::json!({
+            "objectType": "SetupTransportedPublicKeyShareProofMaterial",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "proofFamily": "public-key-share",
+            "proofMaterialRoot": proof_record["proofMaterialRoot"],
+            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": transport_hashes.chunk_hashes.len(),
+            "totalByteLength": transport_hashes.total_byte_length,
+            "fullObjectHash": proof_record["proofFullObjectHash"],
+            "chunkHashes": proof_record["proofChunkHashes"],
+            "chunkRoot": proof_record["proofChunkRoot"],
+            "chunks": chunks
+                .into_iter()
+                .enumerate()
+                .map(|(chunk_index, chunk)| serde_json::json!({
+                    "chunkIndex": chunk_index,
+                    "bytesHex": to_hex(&chunk),
+                }))
+                .collect::<Vec<_>>(),
+        }));
+    }
+    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofRoots"] =
+        serde_json::json!(proof_roots);
+    rebind_collective_public_key_lnp_proof_roots(package);
+
+    serde_json::json!({
+        "objectType": "SetupTransportedPublicKeyShareProofMaterialSet",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "proofFamily": "public-key-share",
+        "proofMaterials": proof_materials,
+    })
+}
+
+fn proof_bytes_transport_chunks(proof_bytes: Vec<u8>) -> Vec<Vec<u8>> {
+    let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES)
+        .expect("proof transport chunk size");
+    proof_bytes.chunks(chunk_size).map(<[u8]>::to_vec).collect()
+}
+
 fn setup_proof_binding_for_test_package(package: &serde_json::Value) -> serde_json::Value {
     let profile = describe_collective_bgv_setup_profile().expect("setup profile");
     assert_eq!(
@@ -3040,18 +3220,18 @@ fn setup_proof_binding_for_test_package(package: &serde_json::Value) -> serde_js
     .expect("setup proof record binding")
 }
 
-fn public_key_share_internal_proof_bearing_collective_setup_package() -> serde_json::Value {
+fn public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareInternalProofs"] = public_key_share_internal_proofs_object(&package);
+    package["publicKeyShareLnpProofs"] = public_key_share_lnp_proofs_object(&package);
     rebind_collective_setup_package_hash(&mut package);
 
     package
 }
 
 fn collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = public_key_share_internal_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
@@ -3121,9 +3301,9 @@ fn collective_public_key_object(package: &serde_json::Value) -> serde_json::Valu
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofVerificationStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
-        "aggregationStatus": "internal-proof-aggregated-claim-pending",
+        "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+        "aggregationStatus": "lnp-proof-aggregated-review-gated",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -3144,7 +3324,7 @@ fn collective_public_key_object(package: &serde_json::Value) -> serde_json::Valu
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
-        "publicKeyShareInternalProofSetRoot": package["publicKeyShareInternalProofs"]["publicKeyShareInternalProofSetRoot"],
+        "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
         "sourceShareMaterialRoots": source_roots,
         "aggregateCoefficientVectorsByLimb": aggregate_limbs,
     });
@@ -3246,7 +3426,7 @@ fn public_key_share_material_object(package: &serde_json::Value) -> serde_json::
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
             "proofFamily": "public-key-share",
-            "proofModelStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
+            "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
             "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
@@ -3283,7 +3463,7 @@ fn public_key_share_material_object(package: &serde_json::Value) -> serde_json::
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofModelStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
+        "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
         "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -3311,8 +3491,12 @@ fn public_key_share_material_object(package: &serde_json::Value) -> serde_json::
     material_set
 }
 
-fn public_key_share_internal_proofs_object(package: &serde_json::Value) -> serde_json::Value {
+fn public_key_share_lnp_proofs_object(package: &serde_json::Value) -> serde_json::Value {
     let setup_context = &package["setupContext"];
+    let setup_proof_binding = setup_proof_binding_for_test_package(package);
+    let public_key_share_tbox_parameter_profile_hash =
+        super::super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()
+            .expect("public-key share tbox parameter profile hash");
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -3360,7 +3544,7 @@ fn public_key_share_internal_proofs_object(package: &serde_json::Value) -> serde
                 trustee_roster_position,
                 ring_degree,
             );
-        let witness = PublicKeyShareInternalProofWitness {
+        let witness = PublicKeyShareLnpProofWitness {
             secret_coefficients: (0..ring_degree)
                 .map(|coefficient_position| {
                     accepted_vss_secret_coefficient_fixture(
@@ -3384,44 +3568,49 @@ fn public_key_share_internal_proofs_object(package: &serde_json::Value) -> serde
         let proof_randomness_seed_hex = derive_protocol_hash(
             "PublicKeyShareProofRoot",
             &serde_json::json!({
-                "fixture": "public-key-share-internal-proof-randomness",
+                "fixture": "public-key-share-lnp-proof-randomness",
                 "trusteeRosterPosition": trustee_roster_position,
             }),
         )
         .expect("public-key proof randomness seed");
-        let proof_bytes = generate_public_key_share_internal_relation_proof_for_tests(
-            PublicKeyShareInternalProofGenerationInput {
+        let proof_bytes = generate_public_key_share_lnp_relation_proof_for_tests(
+            PublicKeyShareLnpProofGenerationInput {
                 public_matrix_seed_hash,
                 public_key_share_record: share_record,
                 public_key_share_proof_record: proof_statement_record,
                 same_secret_statement_record: statement_record,
                 constant_commitments: &constant_commitments,
                 public_share_coefficients_by_limb: &coefficients_by_limb,
+                setup_proof_binding: &setup_proof_binding,
                 witness: &witness,
                 proof_randomness_seed_hex: &proof_randomness_seed_hex,
             },
         )
         .expect("public-key proof bytes");
-        let verification = verify_public_key_share_internal_relation_proof(
-            public_matrix_seed_hash,
-            share_record,
-            proof_statement_record,
-            statement_record,
-            &constant_commitments,
-            &coefficients_by_limb,
-            &proof_bytes,
-        )
-        .expect("public-key proof verification");
+        let verification =
+            verify_public_key_share_lnp_relation_proof(PublicKeyShareLnpProofVerificationInput {
+                public_matrix_seed_hash,
+                public_key_share_record: share_record,
+                public_key_share_proof_record: proof_statement_record,
+                same_secret_statement_record: statement_record,
+                constant_commitments: &constant_commitments,
+                public_share_coefficients_by_limb: &coefficients_by_limb,
+                setup_proof_binding: &setup_proof_binding,
+                proof_bytes: &proof_bytes,
+            })
+            .expect("public-key proof verification");
         let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
-        let proof_bytes_hash = public_key_share_internal_relation_proof_bytes_hash(&proof_bytes);
+        let proof_bytes_hash = public_key_share_lnp_relation_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
-            "objectType": "PublicKeyShareInternalProof",
+            "objectType": "PublicKeyShareLnpProof",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
             "proofFamily": "public-key-share",
-            "proofVerificationStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
-            "proofModelStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
+            "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+            "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+            "setupProofBinding": setup_proof_binding.clone(),
+            "publicKeyShareTboxParameterProfileHash": public_key_share_tbox_parameter_profile_hash.clone(),
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -3440,30 +3629,33 @@ fn public_key_share_internal_proofs_object(package: &serde_json::Value) -> serde
             "sameSecretProofRoot": same_secret_proof_record["sameSecretProofRoot"],
             "statementHash": verification.statement_hash_hex,
             "relationCommitmentHash": verification.relation_commitment_hash_hex,
+            "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
             "challenge": verification.challenge,
             "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
         });
-        proof_record["publicKeyShareInternalProofRoot"] = serde_json::json!(
+        proof_record["publicKeyShareLnpProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
-                .expect("public-key internal proof root")
+                .expect("public-key LNP proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareInternalProofRoot": proof_record["publicKeyShareInternalProofRoot"],
+            "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
         }));
         proof_records.push(proof_record);
     }
     let mut proof_set = serde_json::json!({
-        "objectType": "PublicKeyShareInternalProofSet",
+        "objectType": "PublicKeyShareLnpProofSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofVerificationStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PUBLIC_KEY_SHARE_INTERNAL_PROOF_MODEL_STATUS,
+        "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+        "setupProofBinding": setup_proof_binding,
+        "publicKeyShareTboxParameterProfileHash": public_key_share_tbox_parameter_profile_hash,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -3482,12 +3674,12 @@ fn public_key_share_internal_proofs_object(package: &serde_json::Value) -> serde
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
-        "publicKeyShareInternalProofRoots": proof_roots,
+        "publicKeyShareLnpProofRoots": proof_roots,
         "proofRecords": proof_records,
     });
-    proof_set["publicKeyShareInternalProofSetRoot"] = serde_json::json!(
+    proof_set["publicKeyShareLnpProofSetRoot"] = serde_json::json!(
         derive_protocol_hash("PublicKeyShareProofRoot", &proof_set)
-            .expect("public-key internal proof set root")
+            .expect("public-key LNP proof set root")
     );
 
     proof_set
@@ -4803,38 +4995,38 @@ fn rebind_collective_same_secret_proof_set_root(package: &mut serde_json::Value)
     );
 }
 
-fn rebind_collective_public_key_internal_proof_roots(package: &mut serde_json::Value) {
-    let proof_records = package["publicKeyShareInternalProofs"]["proofRecords"]
+fn rebind_collective_public_key_lnp_proof_roots(package: &mut serde_json::Value) {
+    let proof_records = package["publicKeyShareLnpProofs"]["proofRecords"]
         .as_array_mut()
-        .expect("public-key internal proof records");
+        .expect("public-key LNP proof records");
     let mut proof_roots = Vec::new();
     for proof_record in proof_records {
         proof_record
             .as_object_mut()
-            .expect("public-key internal proof record")
-            .remove("publicKeyShareInternalProofRoot");
-        proof_record["publicKeyShareInternalProofRoot"] = serde_json::json!(
+            .expect("public-key LNP proof record")
+            .remove("publicKeyShareLnpProofRoot");
+        proof_record["publicKeyShareLnpProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", proof_record)
-                .expect("public-key internal proof root")
+                .expect("public-key LNP proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": proof_record["trusteeIdentity"],
             "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
-            "publicKeyShareInternalProofRoot": proof_record["publicKeyShareInternalProofRoot"],
+            "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
         }));
     }
-    package["publicKeyShareInternalProofs"]["publicKeyShareInternalProofRoots"] =
+    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofRoots"] =
         serde_json::json!(proof_roots);
-    package["publicKeyShareInternalProofs"]
+    package["publicKeyShareLnpProofs"]
         .as_object_mut()
-        .expect("public-key internal proof set")
-        .remove("publicKeyShareInternalProofSetRoot");
-    package["publicKeyShareInternalProofs"]["publicKeyShareInternalProofSetRoot"] = serde_json::json!(
+        .expect("public-key LNP proof set")
+        .remove("publicKeyShareLnpProofSetRoot");
+    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"] = serde_json::json!(
         derive_protocol_hash(
             "PublicKeyShareProofRoot",
-            &package["publicKeyShareInternalProofs"]
+            &package["publicKeyShareLnpProofs"]
         )
-        .expect("public-key internal proof set root")
+        .expect("public-key LNP proof set root")
     );
 }
 

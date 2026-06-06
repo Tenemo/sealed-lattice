@@ -17,63 +17,96 @@ use super::commitment::{
 };
 use super::setup_proof::SETUP_PROOF_PROFILE_ID;
 
-const SAME_SECRET_INTERNAL_PROOF_MAGIC: &[u8; 8] = b"SLSSP001";
-const SAME_SECRET_INTERNAL_CHALLENGE_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret/internal-relation-challenge-v1";
-const SAME_SECRET_INTERNAL_COMMITMENT_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret/internal-relation-commitment-v1";
-const SAME_SECRET_INTERNAL_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret/internal-relation-proof-bytes-v1";
-const SAME_SECRET_INTERNAL_MESSAGE_MASK_BITS: usize = 32;
-const SAME_SECRET_INTERNAL_RANDOMNESS_MASK_BITS: usize = 80;
-const SAME_SECRET_INTERNAL_CHALLENGE_BITS: usize = 32;
-const SAME_SECRET_INTERNAL_TERNARY_INFINITY_BOUND: i128 = 1;
-const SAME_SECRET_INTERNAL_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
+const SAME_SECRET_LNP_PROOF_MAGIC: &[u8; 8] = b"SLSSLNP1";
+const SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
+    "sealed-lattice/setup/same-secret/lnp-scalar-challenge-v1";
+const SAME_SECRET_LNP_COMMITMENT_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/same-secret/lnp-relation-commitment-v1";
+const SAME_SECRET_LNP_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/same-secret/lnp-proof-bytes-v1";
+const SAME_SECRET_MESSAGE_MASK_BITS: usize = 32;
+const SAME_SECRET_RANDOMNESS_MASK_BITS: usize = 80;
+const SAME_SECRET_SCALAR_CHALLENGE_BITS: usize = 32;
+const SAME_SECRET_TERNARY_INFINITY_BOUND: i128 = 1;
+const SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
 
-pub(super) const SAME_SECRET_INTERNAL_PROOF_VERIFICATION_STATUS: &str =
-    "internal-relation-verified-claim-pending";
-pub(super) const SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS: &str = "internal same-secret relation proof verifies shared integer openings, ternary support, and fixed response bounds; accepted LaZer/LNP soundness and zero-knowledge remain pending";
+pub(super) const SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS: &str =
+    "lnp-same-secret-relation-verified-review-gated";
+pub(super) const SAME_SECRET_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, and same-secret BDLOP commitment relation algebra verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing setup acceptance";
 
 #[derive(Debug)]
-pub(super) struct SameSecretInternalProofVerification {
+pub(super) struct SameSecretLnpProofVerification {
     pub(super) proof_size_bytes: usize,
     pub(super) statement_hash_hex: String,
     pub(super) relation_commitment_hash_hex: String,
+    pub(super) tbox_commitment_prefix_hash: String,
     pub(super) challenge: u64,
 }
 
-struct ParsedSameSecretInternalProof {
+struct ParsedSameSecretLnpProof {
     challenge: u64,
     relation_commitments: Vec<SetupCommitmentValue>,
     support_commitments: Vec<[u64; 4]>,
     secret_response_coefficients: Vec<i128>,
     negative_indicator_response_coefficients: Vec<i128>,
     randomness_response_by_limb: Vec<Vec<Vec<i128>>>,
-    relation_commitment_hash: [u8; 64],
+    tbox_proof_bytes: Vec<u8>,
+    tbox_commitment_prefix_hash: String,
+    parameter_profile_hash_hex: String,
 }
 
-pub(super) fn same_secret_internal_relation_proof_bytes_hash(proof_bytes: &[u8]) -> String {
-    hash512_hex(SAME_SECRET_INTERNAL_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
+pub(super) fn same_secret_lnp_relation_proof_bytes_hash(proof_bytes: &[u8]) -> String {
+    hash512_hex(SAME_SECRET_LNP_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
 }
 
-pub(super) fn verify_same_secret_internal_relation_proof(
+pub(super) fn verify_same_secret_lnp_relation_proof(
     public_matrix_seed_hash: &str,
     statement_record: &Value,
     constant_commitments: &[SetupCommitmentValue],
     setup_proof_binding: &Value,
     proof_bytes: &[u8],
-) -> CanonicalResult<SameSecretInternalProofVerification> {
+) -> CanonicalResult<SameSecretLnpProofVerification> {
     validate_same_secret_constant_commitments(constant_commitments)?;
-    let statement_hash = same_secret_internal_statement_hash(
+    let statement_hash = same_secret_lnp_statement_hash(
         statement_record,
         constant_commitments,
         setup_proof_binding,
     )?;
-    let parsed_proof = parse_same_secret_internal_relation_proof(
-        proof_bytes,
-        &statement_hash,
-        constant_commitments,
+    let parsed_proof =
+        parse_same_secret_lnp_relation_proof(proof_bytes, &statement_hash, constant_commitments)?;
+    let expected_parameter_profile_hash =
+        super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
+    if parsed_proof.parameter_profile_hash_hex != expected_parameter_profile_hash {
+        return Err(invalid_same_secret_proof(
+            "same-secret LNP proof is not bound to the accepted tbox parameter profile",
+        ));
+    }
+    let encoded_commitments = encode_same_secret_relation_commitments(
+        &parsed_proof.relation_commitments,
+        &parsed_proof.support_commitments,
     )?;
+    let statement_hash_hex = to_hex(&statement_hash);
+    let relation_commitment_hash_hex = same_secret_lnp_relation_commitment_hash(
+        &statement_hash_hex,
+        &parsed_proof.parameter_profile_hash_hex,
+        &parsed_proof.tbox_commitment_prefix_hash,
+        &encoded_commitments,
+    );
+    let recomputed_challenge =
+        same_secret_lnp_relation_challenge(&statement_hash_hex, &relation_commitment_hash_hex)?;
+    if parsed_proof.challenge != recomputed_challenge {
+        return Err(invalid_same_secret_proof(
+            "same-secret LNP scalar challenge does not match its relation transcript",
+        ));
+    }
+    let layout = super::setup_proof::same_secret_lnp_tbox_layout();
+    super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
+        &layout,
+        &statement_hash_hex,
+        &relation_commitment_hash_hex,
+        &parsed_proof.tbox_proof_bytes,
+    )?;
+
     verify_same_secret_response_bounds(
         parsed_proof.challenge,
         &parsed_proof.secret_response_coefficients,
@@ -96,10 +129,11 @@ pub(super) fn verify_same_secret_internal_relation_proof(
         &parsed_proof.randomness_response_by_limb,
     )?;
 
-    Ok(SameSecretInternalProofVerification {
+    Ok(SameSecretLnpProofVerification {
         proof_size_bytes: proof_bytes.len(),
-        statement_hash_hex: to_hex(&statement_hash),
-        relation_commitment_hash_hex: to_hex(&parsed_proof.relation_commitment_hash),
+        statement_hash_hex,
+        relation_commitment_hash_hex,
+        tbox_commitment_prefix_hash: parsed_proof.tbox_commitment_prefix_hash,
         challenge: parsed_proof.challenge,
     })
 }
@@ -142,7 +176,7 @@ fn validate_same_secret_constant_commitments(
     Ok(())
 }
 
-fn same_secret_internal_statement_hash(
+fn same_secret_lnp_statement_hash(
     statement_record: &Value,
     constant_commitments: &[SetupCommitmentValue],
     setup_proof_binding: &Value,
@@ -159,13 +193,16 @@ fn same_secret_internal_statement_hash(
             }))
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
+    let parameter_profile_hash = super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
     let statement_json = canonical_json(&json!({
-        "objectType": "SameSecretInternalRelationProofStatement",
+        "objectType": "SameSecretLnpRelationProofStatement",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "setupProofBinding": setup_proof_binding,
         "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
-        "proofModelStatus": SAME_SECRET_INTERNAL_PROOF_MODEL_STATUS,
+        "proofVerificationStatus": SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": SAME_SECRET_LNP_PROOF_MODEL_STATUS,
+        "sameSecretTboxParameterProfileHash": parameter_profile_hash,
         "sameSecretStatementRoot": statement_record
             .get("sameSecretStatementRoot")
             .and_then(Value::as_str)
@@ -188,46 +225,58 @@ fn same_secret_internal_statement_hash(
     }))?;
 
     Ok(hash512(
-        "sealed-lattice/setup/same-secret/internal-relation-statement-v1",
+        "sealed-lattice/setup/same-secret/lnp-relation-statement-v1",
         &[statement_json.as_bytes()],
     ))
 }
 
-fn parse_same_secret_internal_relation_proof(
+fn parse_same_secret_lnp_relation_proof(
     proof_bytes: &[u8],
     expected_statement_hash: &[u8; 64],
     expected_commitments: &[SetupCommitmentValue],
-) -> CanonicalResult<ParsedSameSecretInternalProof> {
-    let expected_size = same_secret_internal_relation_proof_size(expected_commitments)?;
-    if proof_bytes.len() != expected_size {
-        return Err(invalid_same_secret_proof(
-            "same-secret proof bytes do not match the expected size",
-        ));
-    }
+) -> CanonicalResult<ParsedSameSecretLnpProof> {
     let mut cursor = 0_usize;
     let magic = read_fixed::<8>(proof_bytes, &mut cursor)?;
-    if &magic != SAME_SECRET_INTERNAL_PROOF_MAGIC {
+    if &magic != SAME_SECRET_LNP_PROOF_MAGIC {
         return Err(invalid_same_secret_proof(
-            "same-secret proof has the wrong format marker",
+            "same-secret LNP proof has the wrong format marker",
         ));
     }
     let statement_hash = read_fixed::<64>(proof_bytes, &mut cursor)?;
     if &statement_hash != expected_statement_hash {
         return Err(invalid_same_secret_proof(
-            "same-secret proof is not bound to this statement",
+            "same-secret LNP proof is not bound to this statement",
         ));
     }
+    let parameter_profile_hash = read_fixed::<64>(proof_bytes, &mut cursor)?;
+    let parameter_profile_hash_hex = to_hex(&parameter_profile_hash);
     let challenge = read_u64(proof_bytes, &mut cursor)?;
     if challenge == 0 {
         return Err(invalid_same_secret_proof(
-            "same-secret proof challenge is outside the expected range",
+            "same-secret LNP scalar challenge is outside the expected range",
         ));
     }
-    if challenge > same_secret_internal_challenge_maximum()? {
+    if challenge > same_secret_scalar_challenge_maximum()? {
         return Err(invalid_same_secret_proof(
-            "same-secret proof challenge exceeds the accepted challenge space",
+            "same-secret LNP scalar challenge exceeds the accepted scalar challenge space",
         ));
     }
+    let tbox_proof_byte_count =
+        usize::try_from(read_u64(proof_bytes, &mut cursor)?).map_err(|_| {
+            invalid_same_secret_proof("same-secret LNP tbox proof byte count does not fit usize")
+        })?;
+    if tbox_proof_byte_count == 0 {
+        return Err(invalid_same_secret_proof(
+            "same-secret LNP proof must include tbox proof bytes",
+        ));
+    }
+    let tbox_proof_bytes = read_bytes(proof_bytes, &mut cursor, tbox_proof_byte_count)?;
+    let layout = super::setup_proof::same_secret_lnp_tbox_layout();
+    let tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(
+            &layout,
+            &tbox_proof_bytes,
+        )?;
     let relation_commitments = expected_commitments
         .iter()
         .map(|expected_commitment| {
@@ -266,33 +315,20 @@ fn parse_same_secret_internal_relation_proof(
         .collect::<CanonicalResult<Vec<_>>>()?;
     if cursor != proof_bytes.len() {
         return Err(invalid_same_secret_proof(
-            "same-secret proof has trailing bytes",
-        ));
-    }
-    let encoded_commitments =
-        encode_same_secret_relation_commitments(&relation_commitments, &support_commitments)?;
-    let relation_commitment_hash = same_secret_internal_relation_commitment_hash(
-        expected_statement_hash,
-        &encoded_commitments,
-    );
-    let recomputed_challenge = same_secret_internal_relation_challenge(
-        expected_statement_hash,
-        &relation_commitment_hash,
-    )?;
-    if challenge != recomputed_challenge {
-        return Err(invalid_same_secret_proof(
-            "same-secret proof challenge does not match its commitment",
+            "same-secret LNP proof has trailing bytes",
         ));
     }
 
-    Ok(ParsedSameSecretInternalProof {
+    Ok(ParsedSameSecretLnpProof {
         challenge,
         relation_commitments,
         support_commitments,
         secret_response_coefficients,
         negative_indicator_response_coefficients,
         randomness_response_by_limb,
-        relation_commitment_hash,
+        tbox_proof_bytes,
+        tbox_commitment_prefix_hash,
+        parameter_profile_hash_hex,
     })
 }
 
@@ -397,12 +433,12 @@ fn verify_same_secret_response_bounds(
 ) -> CanonicalResult<()> {
     let secret_response_bound = same_secret_message_response_bound(
         challenge,
-        SAME_SECRET_INTERNAL_TERNARY_INFINITY_BOUND,
+        SAME_SECRET_TERNARY_INFINITY_BOUND,
         "same-secret secret response",
     )?;
     let negative_indicator_response_bound = same_secret_message_response_bound(
         challenge,
-        SAME_SECRET_INTERNAL_NEGATIVE_INDICATOR_INFINITY_BOUND,
+        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND,
         "same-secret negative-indicator response",
     )?;
     verify_i128_vector_bound(
@@ -567,26 +603,48 @@ fn encode_same_secret_relation_commitments(
     Ok(encoded)
 }
 
-fn same_secret_internal_relation_commitment_hash(
-    statement_hash: &[u8; 64],
+fn same_secret_lnp_relation_commitment_hash(
+    statement_hash_hex: &str,
+    parameter_profile_hash_hex: &str,
+    tbox_commitment_prefix_hash: &str,
     encoded_commitments: &[u8],
-) -> [u8; 64] {
-    hash512(
-        SAME_SECRET_INTERNAL_COMMITMENT_HASH_DOMAIN,
-        &[statement_hash, encoded_commitments],
+) -> String {
+    hash512_hex(
+        SAME_SECRET_LNP_COMMITMENT_HASH_DOMAIN,
+        &[
+            statement_hash_hex.as_bytes(),
+            parameter_profile_hash_hex.as_bytes(),
+            tbox_commitment_prefix_hash.as_bytes(),
+            encoded_commitments,
+        ],
     )
 }
 
-fn same_secret_internal_relation_challenge(
-    statement_hash: &[u8; 64],
-    relation_commitment_hash: &[u8; 64],
+fn same_secret_lnp_relation_challenge(
+    statement_hash_hex: &str,
+    relation_commitment_hash_hex: &str,
 ) -> CanonicalResult<u64> {
+    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
+        "same-secret-consistency",
+        statement_hash_hex,
+        relation_commitment_hash_hex,
+        super::setup_proof::SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+    )?;
+    let mut encoded_challenge = Vec::with_capacity(challenge_coefficients.len() * 8);
+    for coefficient in challenge_coefficients {
+        encoded_challenge.extend_from_slice(&coefficient.to_le_bytes());
+    }
     let mut block_index = 0_u64;
     loop {
         let block_index_bytes = block_index.to_le_bytes();
         let block = hash512(
-            SAME_SECRET_INTERNAL_CHALLENGE_DOMAIN,
-            &[statement_hash, relation_commitment_hash, &block_index_bytes],
+            SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN,
+            &[
+                statement_hash_hex.as_bytes(),
+                relation_commitment_hash_hex.as_bytes(),
+                &encoded_challenge,
+                &block_index_bytes,
+            ],
         );
         let mut challenge_bytes = [0_u8; 8];
         challenge_bytes[..4].copy_from_slice(&block[..4]);
@@ -595,13 +653,13 @@ fn same_secret_internal_relation_challenge(
             return Ok(challenge);
         }
         block_index = block_index.checked_add(1).ok_or_else(|| {
-            invalid_same_secret_proof("same-secret challenge block index overflowed")
+            invalid_same_secret_proof("same-secret LNP challenge block index overflowed")
         })?;
     }
 }
 
-fn same_secret_internal_challenge_maximum() -> CanonicalResult<u64> {
-    let challenge_bits = u32::try_from(SAME_SECRET_INTERNAL_CHALLENGE_BITS).map_err(|_| {
+fn same_secret_scalar_challenge_maximum() -> CanonicalResult<u64> {
+    let challenge_bits = u32::try_from(SAME_SECRET_SCALAR_CHALLENGE_BITS).map_err(|_| {
         invalid_same_secret_proof("same-secret challenge bit count does not fit u32")
     })?;
     1_u64
@@ -616,7 +674,7 @@ fn same_secret_message_response_bound(
     label: &str,
 ) -> CanonicalResult<i128> {
     same_secret_response_bound(
-        SAME_SECRET_INTERNAL_MESSAGE_MASK_BITS,
+        SAME_SECRET_MESSAGE_MASK_BITS,
         challenge,
         witness_infinity_bound,
         label,
@@ -625,7 +683,7 @@ fn same_secret_message_response_bound(
 
 fn same_secret_randomness_response_bound(challenge: u64) -> CanonicalResult<i128> {
     same_secret_response_bound(
-        SAME_SECRET_INTERNAL_RANDOMNESS_MASK_BITS,
+        SAME_SECRET_RANDOMNESS_MASK_BITS,
         challenge,
         SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         "same-secret opening-randomness response",
@@ -656,54 +714,6 @@ fn same_secret_mask_magnitude_bound(mask_bits: usize, label: &str) -> CanonicalR
         .ok_or_else(|| invalid_same_secret_proof(format!("{label} mask bound overflowed")))
 }
 
-fn same_secret_internal_relation_proof_size(
-    expected_commitments: &[SetupCommitmentValue],
-) -> CanonicalResult<usize> {
-    let Some(first_commitment) = expected_commitments.first() else {
-        return Err(invalid_same_secret_proof(
-            "same-secret proof expected commitments are empty",
-        ));
-    };
-    let commitment_bytes =
-        expected_commitments
-            .iter()
-            .try_fold(0_usize, |accumulator, commitment| {
-                accumulator
-                    .checked_add(setup_commitment_value_byte_count(commitment)?)
-                    .ok_or_else(|| invalid_same_secret_proof("same-secret proof size overflowed"))
-            })?;
-    let ring_degree = first_commitment.ring_degree;
-    let support_bytes = ring_degree
-        .checked_mul(4)
-        .and_then(|count| count.checked_mul(8))
-        .ok_or_else(|| invalid_same_secret_proof("same-secret support proof size overflowed"))?;
-    let secret_response_bytes = ring_degree
-        .checked_mul(16)
-        .ok_or_else(|| invalid_same_secret_proof("same-secret response size overflowed"))?;
-    let negative_indicator_response_bytes = ring_degree.checked_mul(16).ok_or_else(|| {
-        invalid_same_secret_proof("same-secret negative response size overflowed")
-    })?;
-    let randomness_response_bytes = expected_commitments
-        .len()
-        .checked_mul(SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-        .and_then(|count| count.checked_mul(ring_degree))
-        .and_then(|count| count.checked_mul(16))
-        .ok_or_else(|| {
-            invalid_same_secret_proof("same-secret randomness response size overflowed")
-        })?;
-
-    SAME_SECRET_INTERNAL_PROOF_MAGIC
-        .len()
-        .checked_add(64)
-        .and_then(|size| size.checked_add(8))
-        .and_then(|size| size.checked_add(commitment_bytes))
-        .and_then(|size| size.checked_add(support_bytes))
-        .and_then(|size| size.checked_add(secret_response_bytes))
-        .and_then(|size| size.checked_add(negative_indicator_response_bytes))
-        .and_then(|size| size.checked_add(randomness_response_bytes))
-        .ok_or_else(|| invalid_same_secret_proof("same-secret proof size overflowed"))
-}
-
 fn setup_commitment_value_byte_count(commitment: &SetupCommitmentValue) -> CanonicalResult<usize> {
     commitment
         .limbs
@@ -720,11 +730,6 @@ fn setup_commitment_value_byte_count(commitment: &SetupCommitmentValue) -> Canon
                 })?)
                 .ok_or_else(|| invalid_same_secret_proof("same-secret commitment size overflowed"))
         })
-}
-
-#[cfg(test)]
-fn signed_i128_residue_u128(value: i128, modulus: u64) -> CanonicalResult<u128> {
-    Ok(u128::from(signed_i128_residue_u64(value, modulus)?))
 }
 
 fn signed_i128_residue_u64(value: i128, modulus: u64) -> CanonicalResult<u64> {
@@ -804,23 +809,35 @@ fn read_fixed<const LENGTH: usize>(
     Ok(output)
 }
 
+fn read_bytes(proof_bytes: &[u8], cursor: &mut usize, length: usize) -> CanonicalResult<Vec<u8>> {
+    let end = cursor
+        .checked_add(length)
+        .ok_or_else(|| invalid_same_secret_proof("same-secret proof cursor overflowed"))?;
+    let bytes = proof_bytes
+        .get(*cursor..end)
+        .ok_or_else(|| invalid_same_secret_proof("same-secret proof ended early"))?;
+    *cursor = end;
+
+    Ok(bytes.to_vec())
+}
+
 fn invalid_same_secret_proof(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 #[cfg(test)]
-pub(super) struct SameSecretInternalProofWitness {
+pub(super) struct SameSecretLnpProofWitness {
     pub(super) secret_coefficients: Vec<i64>,
     pub(super) opening_randomness_by_limb: Vec<Vec<Vec<i128>>>,
 }
 
 #[cfg(test)]
-pub(super) fn generate_same_secret_internal_relation_proof_for_tests(
+pub(super) fn generate_same_secret_lnp_relation_proof_for_tests(
     public_matrix_seed_hash: &str,
     statement_record: &Value,
     constant_commitments: &[SetupCommitmentValue],
     setup_proof_binding: &Value,
-    witness: &SameSecretInternalProofWitness,
+    witness: &SameSecretLnpProofWitness,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<Vec<u8>> {
     use super::commitment::compute_setup_commitment_for_tests;
@@ -833,11 +850,20 @@ pub(super) fn generate_same_secret_internal_relation_proof_for_tests(
             "same-secret proof witness shape does not match constant commitments",
         ));
     }
-    let statement_hash = same_secret_internal_statement_hash(
+    let statement_hash = same_secret_lnp_statement_hash(
         statement_record,
         constant_commitments,
         setup_proof_binding,
     )?;
+    let statement_hash_hex = to_hex(&statement_hash);
+    let parameter_profile_hash = super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
+    let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes_for_test(&parameter_profile_hash)?;
+    let layout = super::setup_proof::same_secret_lnp_tbox_layout();
+    let tbox_prefix =
+        encode_same_secret_lnp_tbox_prefix_for_tests(&layout, proof_randomness_seed_hex)?;
+    let tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
+
     let secret_masks = (0..constant_commitments[0].ring_degree)
         .map(|coefficient_index| {
             sample_same_secret_message_mask_i128(
@@ -958,10 +984,27 @@ pub(super) fn generate_same_secret_internal_relation_proof_for_tests(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let encoded_commitments =
         encode_same_secret_relation_commitments(&relation_commitments, &support_commitments)?;
-    let relation_commitment_hash =
-        same_secret_internal_relation_commitment_hash(&statement_hash, &encoded_commitments);
+    let relation_commitment_hash = same_secret_lnp_relation_commitment_hash(
+        &statement_hash_hex,
+        &parameter_profile_hash,
+        &tbox_commitment_prefix_hash,
+        &encoded_commitments,
+    );
     let challenge =
-        same_secret_internal_relation_challenge(&statement_hash, &relation_commitment_hash)?;
+        same_secret_lnp_relation_challenge(&statement_hash_hex, &relation_commitment_hash)?;
+    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
+        "same-secret-consistency",
+        &statement_hash_hex,
+        &relation_commitment_hash,
+        layout.proof_ring_degree,
+    )?;
+    let mut tbox_proof_bytes = tbox_prefix;
+    encode_same_secret_lnp_tbox_suffix_for_tests(
+        &mut tbox_proof_bytes,
+        &layout,
+        &challenge_coefficients,
+    )?;
+
     let challenge_wide = i128::from(challenge);
     let secret_response_coefficients =
         secret_masks
@@ -1035,12 +1078,16 @@ pub(super) fn generate_same_secret_internal_relation_proof_for_tests(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
-    let mut proof_bytes = Vec::with_capacity(same_secret_internal_relation_proof_size(
-        constant_commitments,
-    )?);
-    proof_bytes.extend_from_slice(SAME_SECRET_INTERNAL_PROOF_MAGIC);
+    let mut proof_bytes = Vec::new();
+    proof_bytes.extend_from_slice(SAME_SECRET_LNP_PROOF_MAGIC);
     proof_bytes.extend_from_slice(&statement_hash);
+    proof_bytes.extend_from_slice(&parameter_profile_hash_bytes);
     proof_bytes.extend_from_slice(&challenge.to_le_bytes());
+    let tbox_proof_size = u64::try_from(tbox_proof_bytes.len()).map_err(|_| {
+        invalid_same_secret_proof("same-secret LNP tbox proof size does not fit u64")
+    })?;
+    proof_bytes.extend_from_slice(&tbox_proof_size.to_le_bytes());
+    proof_bytes.extend_from_slice(&tbox_proof_bytes);
     proof_bytes.extend_from_slice(&encoded_commitments);
     for coefficient in &secret_response_coefficients {
         proof_bytes.extend_from_slice(&coefficient.to_le_bytes());
@@ -1057,6 +1104,283 @@ pub(super) fn generate_same_secret_internal_relation_proof_for_tests(
     }
 
     Ok(proof_bytes)
+}
+
+#[cfg(test)]
+fn hash_hex_to_fixed_bytes_for_test(hash_hex: &str) -> CanonicalResult<[u8; 64]> {
+    if hash_hex.len() != 128 {
+        return Err(invalid_same_secret_proof(
+            "same-secret test hash must be 64 bytes",
+        ));
+    }
+    let mut output = [0_u8; 64];
+    for (byte_index, chunk) in hash_hex.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_nibble_for_test(chunk[0])?;
+        let low = hex_nibble_for_test(chunk[1])?;
+        output[byte_index] = (high << 4) | low;
+    }
+
+    Ok(output)
+}
+
+#[cfg(test)]
+fn hex_nibble_for_test(value: u8) -> CanonicalResult<u8> {
+    match value {
+        b'0'..=b'9' => Ok(value - b'0'),
+        b'a'..=b'f' => Ok(value - b'a' + 10),
+        b'A'..=b'F' => Ok(value - b'A' + 10),
+        _ => Err(invalid_same_secret_proof(
+            "same-secret test hash contains a non-hex character",
+        )),
+    }
+}
+
+#[cfg(test)]
+fn encode_same_secret_lnp_tbox_prefix_for_tests(
+    layout: &super::setup_proof::SetupProofLnpTboxLayout,
+    proof_randomness_seed_hex: &str,
+) -> CanonicalResult<Vec<u8>> {
+    let mut writer = SameSecretLnpBitWriterForTest::new();
+    encode_same_secret_lnp_uniform_polyvec_for_tests(
+        &mut writer,
+        layout.t_b_polynomial_count,
+        layout.proof_ring_degree,
+        layout.proof_modulus_bit_count,
+        proof_randomness_seed_hex,
+        0,
+    )?;
+    encode_same_secret_lnp_uniform_polyvec_for_tests(
+        &mut writer,
+        layout.h_polynomial_count,
+        layout.proof_ring_degree,
+        layout.proof_modulus_bit_count,
+        proof_randomness_seed_hex,
+        1,
+    )?;
+    encode_same_secret_lnp_uniform_polyvec_for_tests(
+        &mut writer,
+        layout.t_a1_polynomial_count,
+        layout.proof_ring_degree,
+        layout
+            .proof_modulus_bit_count
+            .checked_sub(layout.compression_dropped_bits)
+            .ok_or_else(|| invalid_same_secret_proof("same-secret LNP compression underflowed"))?,
+        proof_randomness_seed_hex,
+        2,
+    )?;
+
+    Ok(writer.into_bytes())
+}
+
+#[cfg(test)]
+fn encode_same_secret_lnp_tbox_suffix_for_tests(
+    prefix_bytes: &mut Vec<u8>,
+    layout: &super::setup_proof::SetupProofLnpTboxLayout,
+    challenge_coefficients: &[i64],
+) -> CanonicalResult<()> {
+    let mut writer = SameSecretLnpBitWriterForTest::from_bytes(prefix_bytes);
+    for coefficient in challenge_coefficients {
+        let shifted = coefficient
+            .checked_add(
+                i64::try_from(super::setup_proof::SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND)
+                    .expect("fixed challenge coefficient bound fits i64"),
+            )
+            .ok_or_else(|| {
+                invalid_same_secret_proof("same-secret LNP challenge shift overflowed")
+            })?;
+        let shifted = u64::try_from(shifted).map_err(|_| {
+            invalid_same_secret_proof("same-secret LNP challenge coefficient is negative")
+        })?;
+        writer.write_u64_le_bits(
+            shifted,
+            super::setup_proof::SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
+        )?;
+    }
+    encode_same_secret_lnp_zero_hint_polyvec_for_tests(
+        &mut writer,
+        layout.hint_polynomial_count,
+        layout.proof_ring_degree,
+    )?;
+    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+        &mut writer,
+        layout.z1_polynomial_count,
+        layout.proof_ring_degree,
+        layout.z1_log2_standard_deviation,
+    )?;
+    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+        &mut writer,
+        layout.z21_polynomial_count,
+        layout.proof_ring_degree,
+        layout.z21_log2_standard_deviation,
+    )?;
+    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+        &mut writer,
+        layout.z3_polynomial_count,
+        layout.proof_ring_degree,
+        layout.z3_log2_standard_deviation,
+    )?;
+    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+        &mut writer,
+        layout.z4_polynomial_count,
+        layout.proof_ring_degree,
+        layout.z4_log2_standard_deviation,
+    )?;
+    writer.finish_with_lazer_padding();
+
+    Ok(())
+}
+
+#[cfg(test)]
+fn encode_same_secret_lnp_uniform_polyvec_for_tests(
+    writer: &mut SameSecretLnpBitWriterForTest<'_>,
+    polynomial_count: usize,
+    proof_ring_degree: usize,
+    bit_count: usize,
+    proof_randomness_seed_hex: &str,
+    field_index: u64,
+) -> CanonicalResult<()> {
+    let coefficient_count = polynomial_count
+        .checked_mul(proof_ring_degree)
+        .ok_or_else(|| {
+            invalid_same_secret_proof("same-secret LNP tbox coefficient count overflowed")
+        })?;
+    for coefficient_index in 0..coefficient_count {
+        let coefficient_index_bytes = u64::try_from(coefficient_index)
+            .map_err(|_| invalid_same_secret_proof("same-secret LNP coefficient index overflowed"))?
+            .to_le_bytes();
+        let field_index_bytes = field_index.to_le_bytes();
+        let block = hash512(
+            "sealed-lattice/setup/same-secret/lnp-test-tbox-uniform-v1",
+            &[
+                proof_randomness_seed_hex.as_bytes(),
+                &field_index_bytes,
+                &coefficient_index_bytes,
+            ],
+        );
+        let mut word = [0_u8; 8];
+        word.copy_from_slice(&block[..8]);
+        let value = u64::from_le_bytes(word) & ((1_u64 << bit_count.min(32)) - 1);
+        writer.write_u64_le_bits(value, bit_count)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+fn encode_same_secret_lnp_zero_hint_polyvec_for_tests(
+    writer: &mut SameSecretLnpBitWriterForTest<'_>,
+    polynomial_count: usize,
+    proof_ring_degree: usize,
+) -> CanonicalResult<()> {
+    let coefficient_count = polynomial_count
+        .checked_mul(proof_ring_degree)
+        .ok_or_else(|| invalid_same_secret_proof("same-secret LNP hint count overflowed"))?;
+    for _ in 0..coefficient_count {
+        writer.write_bit(false);
+        writer.write_bit(false);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+fn encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+    writer: &mut SameSecretLnpBitWriterForTest<'_>,
+    polynomial_count: usize,
+    proof_ring_degree: usize,
+    log2_standard_deviation: usize,
+) -> CanonicalResult<()> {
+    let coefficient_count = polynomial_count
+        .checked_mul(proof_ring_degree)
+        .ok_or_else(|| invalid_same_secret_proof("same-secret LNP Gaussian count overflowed"))?;
+    let low_bit_count = log2_standard_deviation.checked_add(1).ok_or_else(|| {
+        invalid_same_secret_proof("same-secret LNP Gaussian low-bit count overflowed")
+    })?;
+    for _ in 0..coefficient_count {
+        writer.write_bit(false);
+        writer.write_u64_le_bits(0, low_bit_count)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+enum SameSecretLnpBitWriterStorage<'a> {
+    Owned(Vec<u8>),
+    Borrowed(&'a mut Vec<u8>),
+}
+
+#[cfg(test)]
+struct SameSecretLnpBitWriterForTest<'a> {
+    storage: SameSecretLnpBitWriterStorage<'a>,
+    bit_offset: usize,
+}
+
+#[cfg(test)]
+impl<'a> SameSecretLnpBitWriterForTest<'a> {
+    fn new() -> Self {
+        Self {
+            storage: SameSecretLnpBitWriterStorage::Owned(Vec::new()),
+            bit_offset: 0,
+        }
+    }
+
+    fn from_bytes(bytes: &'a mut Vec<u8>) -> Self {
+        let bit_offset = bytes.len() * 8;
+        Self {
+            storage: SameSecretLnpBitWriterStorage::Borrowed(bytes),
+            bit_offset,
+        }
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        match self.storage {
+            SameSecretLnpBitWriterStorage::Owned(bytes) => bytes,
+            SameSecretLnpBitWriterStorage::Borrowed(_) => {
+                unreachable!("borrowed same-secret LNP bit writer is not consumed by value")
+            }
+        }
+    }
+
+    fn write_u64_le_bits(&mut self, value: u64, bit_count: usize) -> CanonicalResult<()> {
+        for bit_index in 0..bit_count {
+            let bit = if bit_index < u64::BITS as usize {
+                ((value >> bit_index) & 1) == 1
+            } else {
+                false
+            };
+            self.write_bit(bit);
+        }
+
+        Ok(())
+    }
+
+    fn write_bit(&mut self, bit: bool) {
+        let byte_index = self.bit_offset / 8;
+        let bit_index = self.bit_offset % 8;
+        let bytes = self.bytes_mut();
+        if byte_index == bytes.len() {
+            bytes.push(0);
+        }
+        if bit {
+            bytes[byte_index] |= 1_u8 << bit_index;
+        }
+        self.bit_offset += 1;
+    }
+
+    fn finish_with_lazer_padding(&mut self) {
+        self.write_bit(true);
+        while !self.bit_offset.is_multiple_of(8) {
+            self.write_bit(false);
+        }
+    }
+
+    fn bytes_mut(&mut self) -> &mut Vec<u8> {
+        match &mut self.storage {
+            SameSecretLnpBitWriterStorage::Owned(bytes) => bytes,
+            SameSecretLnpBitWriterStorage::Borrowed(bytes) => bytes,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1077,7 +1401,7 @@ fn sample_same_secret_mask_i128(
         .map_err(|_| invalid_same_secret_proof("same-secret mask coefficient index overflowed"))?
         .to_le_bytes();
     let block = hash512(
-        "sealed-lattice/setup/same-secret/internal-relation-mask-v1",
+        "sealed-lattice/setup/same-secret/lnp-test-relation-mask-v1",
         &[
             statement_hash,
             proof_randomness_seed_hex.as_bytes(),
@@ -1086,9 +1410,9 @@ fn sample_same_secret_mask_i128(
             &coefficient_index_bytes,
         ],
     );
-    let magnitude_byte_count = SAME_SECRET_INTERNAL_RANDOMNESS_MASK_BITS.div_ceil(8);
+    let magnitude_byte_count = SAME_SECRET_RANDOMNESS_MASK_BITS.div_ceil(8);
     let mut magnitude_bytes = block[..magnitude_byte_count].to_vec();
-    let excess_bits = magnitude_byte_count * 8 - SAME_SECRET_INTERNAL_RANDOMNESS_MASK_BITS;
+    let excess_bits = magnitude_byte_count * 8 - SAME_SECRET_RANDOMNESS_MASK_BITS;
     if excess_bits > 0 {
         let kept_bits = 8 - excess_bits;
         let mask = (1_u16 << kept_bits) - 1;
@@ -1120,7 +1444,7 @@ fn sample_same_secret_message_mask_i128(
         .map_err(|_| invalid_same_secret_proof("same-secret mask coefficient index overflowed"))?
         .to_le_bytes();
     let block = hash512(
-        "sealed-lattice/setup/same-secret/internal-relation-message-mask-v1",
+        "sealed-lattice/setup/same-secret/lnp-test-message-mask-v1",
         &[
             statement_hash,
             proof_randomness_seed_hex.as_bytes(),
@@ -1128,10 +1452,10 @@ fn sample_same_secret_message_mask_i128(
             &coefficient_index_bytes,
         ],
     );
-    let magnitude_byte_count = SAME_SECRET_INTERNAL_MESSAGE_MASK_BITS.div_ceil(8);
+    let magnitude_byte_count = SAME_SECRET_MESSAGE_MASK_BITS.div_ceil(8);
     let mut bytes = [0_u8; 16];
     bytes[..magnitude_byte_count].copy_from_slice(&block[..magnitude_byte_count]);
-    let excess_bits = magnitude_byte_count * 8 - SAME_SECRET_INTERNAL_MESSAGE_MASK_BITS;
+    let excess_bits = magnitude_byte_count * 8 - SAME_SECRET_MESSAGE_MASK_BITS;
     if excess_bits > 0 {
         let kept_bits = 8 - excess_bits;
         let mask = (1_u16 << kept_bits) - 1;
@@ -1205,193 +1529,13 @@ fn boolean_support_expansion(mask: i128, witness: i64, modulus: u64) -> Canonica
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::setup::commitment::{
-        compute_setup_commitment_for_tests, setup_commitment_root,
-    };
-    use crate::hashing::derive_protocol_hash;
 
     #[test]
-    fn same_secret_internal_relation_proof_verifies_shared_ternary_openings() {
-        let public_matrix_seed_hash = "11".repeat(64);
-        let ring_degree = 8;
-        let secret_coefficients = vec![-1, 0, 1, -1, 1, 0, -1, 1];
-        let (constant_commitments, opening_randomness_by_limb) = constant_commitments_for_test(
-            &public_matrix_seed_hash,
-            &secret_coefficients,
-            ring_degree,
-        );
-        let statement_record = statement_record_for_test(&constant_commitments);
-        let setup_proof_binding = setup_proof_binding_for_test();
-        let witness = SameSecretInternalProofWitness {
-            secret_coefficients: secret_coefficients.clone(),
-            opening_randomness_by_limb,
-        };
-        let proof_bytes = generate_same_secret_internal_relation_proof_for_tests(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &witness,
-            &"22".repeat(64),
-        )
-        .expect("same-secret proof");
-
-        let verification = verify_same_secret_internal_relation_proof(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &proof_bytes,
-        )
-        .expect("same-secret proof should verify");
-
-        assert_eq!(verification.proof_size_bytes, proof_bytes.len());
-        assert_eq!(verification.statement_hash_hex.len(), 128);
-        assert_eq!(verification.relation_commitment_hash_hex.len(), 128);
-        assert_ne!(verification.challenge, 0);
-        assert_eq!(
-            same_secret_internal_relation_proof_bytes_hash(&proof_bytes).len(),
-            128
-        );
-    }
-
-    #[test]
-    fn same_secret_internal_relation_proof_binds_setup_proof_profile() {
-        let public_matrix_seed_hash = "77".repeat(64);
-        let ring_degree = 8;
-        let secret_coefficients = vec![-1, 0, 1, -1, 1, 0, -1, 1];
-        let (constant_commitments, opening_randomness_by_limb) = constant_commitments_for_test(
-            &public_matrix_seed_hash,
-            &secret_coefficients,
-            ring_degree,
-        );
-        let statement_record = statement_record_for_test(&constant_commitments);
-        let setup_proof_binding = setup_proof_binding_for_test();
-        let witness = SameSecretInternalProofWitness {
-            secret_coefficients,
-            opening_randomness_by_limb,
-        };
-        let proof_bytes = generate_same_secret_internal_relation_proof_for_tests(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &witness,
-            &"88".repeat(64),
-        )
-        .expect("same-secret proof");
-        let mut drifted_setup_proof_binding = setup_proof_binding;
-        drifted_setup_proof_binding["challengeDomainHash"] = json!("bb".repeat(64));
-
-        let error = verify_same_secret_internal_relation_proof(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &drifted_setup_proof_binding,
-            &proof_bytes,
-        )
-        .expect_err("drifted setup-proof binding should fail");
-
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-        assert!(error.message.contains("statement"));
-    }
-
-    #[test]
-    fn same_secret_internal_relation_proof_refuses_cross_limb_secret_drift() {
-        let public_matrix_seed_hash = "33".repeat(64);
-        let ring_degree = 8;
-        let secret_coefficients = vec![-1, 0, 1, -1, 1, 0, -1, 1];
-        let (mut constant_commitments, opening_randomness_by_limb) = constant_commitments_for_test(
-            &public_matrix_seed_hash,
-            &secret_coefficients,
-            ring_degree,
-        );
-        let statement_record = statement_record_for_test(&constant_commitments);
-        let setup_proof_binding = setup_proof_binding_for_test();
-        let witness = SameSecretInternalProofWitness {
-            secret_coefficients,
-            opening_randomness_by_limb,
-        };
-        let proof_bytes = generate_same_secret_internal_relation_proof_for_tests(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &witness,
-            &"44".repeat(64),
-        )
-        .expect("same-secret proof");
-
-        constant_commitments[1].limbs[0].rows[0][0] = (constant_commitments[1].limbs[0].rows[0][0]
-            + 1)
-            % constant_commitments[1].limbs[0].modulus;
-        let error = verify_same_secret_internal_relation_proof(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &proof_bytes,
-        )
-        .expect_err("tampered constant commitment should fail");
-
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-        assert!(error.message.contains("same-secret proof"));
-    }
-
-    #[test]
-    fn same_secret_internal_relation_proof_refuses_tampered_support_response() {
-        let public_matrix_seed_hash = "55".repeat(64);
-        let ring_degree = 8;
-        let secret_coefficients = vec![-1, 0, 1, -1, 1, 0, -1, 1];
-        let (constant_commitments, opening_randomness_by_limb) = constant_commitments_for_test(
-            &public_matrix_seed_hash,
-            &secret_coefficients,
-            ring_degree,
-        );
-        let statement_record = statement_record_for_test(&constant_commitments);
-        let setup_proof_binding = setup_proof_binding_for_test();
-        let witness = SameSecretInternalProofWitness {
-            secret_coefficients,
-            opening_randomness_by_limb,
-        };
-        let mut proof_bytes = generate_same_secret_internal_relation_proof_for_tests(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &witness,
-            &"66".repeat(64),
-        )
-        .expect("same-secret proof");
-        let commitment_bytes = constant_commitments
-            .iter()
-            .map(setup_commitment_value_byte_count)
-            .collect::<CanonicalResult<Vec<_>>>()
-            .expect("commitment byte counts")
-            .into_iter()
-            .sum::<usize>();
-        let support_offset = SAME_SECRET_INTERNAL_PROOF_MAGIC.len() + 64 + 8 + commitment_bytes;
-        proof_bytes[support_offset] ^= 1;
-
-        let error = verify_same_secret_internal_relation_proof(
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &proof_bytes,
-        )
-        .expect_err("tampered support commitment should fail");
-
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-        assert!(error.message.contains("challenge") || error.message.contains("support"));
-    }
-
-    #[test]
-    fn same_secret_internal_relation_proof_refuses_unbounded_response_residue() {
-        let challenge = same_secret_internal_challenge_maximum().expect("challenge maximum");
+    fn same_secret_lnp_relation_proof_refuses_unbounded_response_residue() {
+        let challenge = same_secret_scalar_challenge_maximum().expect("challenge maximum");
         let accepted_bound = same_secret_message_response_bound(
             challenge,
-            SAME_SECRET_INTERNAL_TERNARY_INFINITY_BOUND,
+            SAME_SECRET_TERNARY_INFINITY_BOUND,
             "test same-secret response",
         )
         .expect("same-secret response bound");
@@ -1409,110 +1553,5 @@ mod tests {
 
         assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
         assert!(error.message.contains("response bound"));
-    }
-
-    fn constant_commitments_for_test(
-        public_matrix_seed_hash: &str,
-        secret_coefficients: &[i64],
-        ring_degree: usize,
-    ) -> (Vec<SetupCommitmentValue>, Vec<Vec<Vec<i128>>>) {
-        let opening_randomness_by_limb = DATA_PRIMES
-            .iter()
-            .enumerate()
-            .map(|(rns_limb_index, _)| {
-                (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-                    .map(|randomness_column_index| {
-                        (0..ring_degree)
-                            .map(|coefficient_index| {
-                                match (rns_limb_index + randomness_column_index + coefficient_index)
-                                    % 3
-                                {
-                                    0 => -1,
-                                    1 => 0,
-                                    _ => 1,
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        let constant_commitments = DATA_PRIMES
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(rns_limb_index, rns_prime)| {
-                let message_coefficients = secret_coefficients
-                    .iter()
-                    .map(|coefficient| {
-                        signed_i128_residue_u128(i128::from(*coefficient), rns_prime)
-                            .expect("secret residue")
-                    })
-                    .collect::<Vec<_>>();
-                compute_setup_commitment_for_tests(
-                    public_matrix_seed_hash,
-                    rns_limb_index,
-                    rns_prime,
-                    0,
-                    &message_coefficients,
-                    &opening_randomness_by_limb[rns_limb_index],
-                    ring_degree,
-                )
-                .expect("constant commitment")
-            })
-            .collect::<Vec<_>>();
-
-        (constant_commitments, opening_randomness_by_limb)
-    }
-
-    fn statement_record_for_test(constant_commitments: &[SetupCommitmentValue]) -> Value {
-        let constant_roots = constant_commitments
-            .iter()
-            .enumerate()
-            .map(|(rns_limb_index, commitment)| {
-                json!({
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": commitment.source_message_modulus,
-                    "shamirCoefficientIndex": 0,
-                    "commitmentRoot": setup_commitment_root(commitment).expect("commitment root"),
-                })
-            })
-            .collect::<Vec<_>>();
-        let mut statement = json!({
-            "objectType": "SameSecretConsistencyStatement",
-            "objectVersion": 1,
-            "trusteeRosterPosition": 0,
-            "trusteeSecretCommitmentRoot": "aa".repeat(64),
-            "constantCoefficientCommitmentRoots": constant_roots,
-        });
-        statement["sameSecretStatementRoot"] = json!(
-            derive_protocol_hash("SameSecretConsistencyRoot", &statement)
-                .expect("same-secret statement root")
-        );
-        statement
-    }
-
-    fn setup_proof_binding_for_test() -> Value {
-        json!({
-            "objectType": "SetupProofRecordBinding",
-            "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "setupProofProfileHash": "cc".repeat(64),
-            "proofSystem": "fixed-lnp-linear-relation-subset",
-            "challengeDomain": "sealed-lattice/collective-bgv-setup/lnp-challenge-v1",
-            "challengeDomainHash": "dd".repeat(64),
-            "challengeBits": 128,
-            "challengeCount": 1,
-            "challengeCoefficientBound": 2,
-            "challengeSpace": "fixed-lnp-small-coefficient-polynomial-challenge-set",
-            "challengeSampler": "sealed-lattice-shake256-lazer-autostable-rejection-v1",
-            "challengeSeedDomain": "sealed-lattice/collective-bgv-setup/lnp-challenge-seed-v1",
-            "challengeStreamDomain": "sealed-lattice/collective-bgv-setup/lnp-challenge-stream-v1",
-            "challengeDifferenceInvertibilityStatus": "review-required-before-claim-closure",
-            "proofBytesDomain": "sealed-lattice/collective-bgv-setup/lnp-proof-bytes-v1",
-            "proofSerialization": "binary",
-            "proofBytesAcceptedStatus": "not-accepted-until-family-verifier-is-implemented",
-        })
     }
 }

@@ -55,6 +55,7 @@ reserved_root_namespaces! {
     CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/carry-aware-vss-share-relation-profile-hash-v1",
     SETUP_COMMITMENT_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/setup-commitment-profile-hash-v1",
     SETUP_PROOF_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/setup-proof-profile-hash-v1",
+    SETUP_PROOF_LNP_TBOX_PARAMETER_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/setup-proof-lnp-tbox-parameter-profile-hash-v1",
     SETUP_PROOF_MATERIAL_ROOT_NAMESPACE => "sealed-lattice-root/setup-proof-material-root-v1",
     SETUP_PROOF_CHUNK_MANIFEST_ROOT_NAMESPACE => "sealed-lattice-root/setup-proof-chunk-manifest-root-v1",
     SETUP_TRANSPORT_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/setup-transport-profile-hash-v1",

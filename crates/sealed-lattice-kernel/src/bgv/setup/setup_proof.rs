@@ -7,10 +7,15 @@ use sha3::{
 };
 
 use crate::{
-    bgv::profile::POLYNOMIAL_DEGREE,
+    bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     bgv::setup_helpers::validate_hash_string,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint},
     hashing::{HASH512_PREIMAGE_PREFIX, derive_protocol_hash, hash512, hash512_hex, to_hex},
+};
+
+use super::commitment::{
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    SETUP_COMMITMENT_ROW_COUNT,
 };
 
 pub(super) const SETUP_PROOF_PROFILE_ID: &str = "SealedLattice-LNP-SetupProof-v1";
@@ -43,6 +48,10 @@ pub(crate) const SETUP_PROOF_MATERIAL_ENCODING: &str = "binary-chunked-proof-byt
 const SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupProofMaterialChunkManifest";
 const SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER: &str =
     "sealed-lattice-lnp-tbox-proof-byte-decoder-v1";
+pub(crate) const SAME_SECRET_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
+    "SealedLattice-LNP-SameSecretConsistency-Tbox-v1";
+pub(crate) const PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
+    "SealedLattice-LNP-PublicKeyShare-Tbox-v1";
 pub(super) const SETUP_PROOF_FAMILIES: &[&str] = &[
     "vss-opening-carry",
     "same-secret-consistency",
@@ -66,6 +75,7 @@ pub(crate) struct SetupProofMaterialReferenceInput<'a> {
     pub(crate) trustee_roster_position: u64,
     pub(crate) statement_hash_hex: &'a str,
     pub(crate) relation_commitment_hash_hex: &'a str,
+    pub(crate) tbox_commitment_prefix_hash: &'a str,
     pub(crate) proof_size_bytes: u64,
     pub(crate) proof_bytes_hash: &'a str,
     pub(crate) transport_hashes: &'a SetupProofMaterialTransportHashes,
@@ -78,6 +88,8 @@ pub(crate) struct SetupProofMaterialReferenceInput<'a> {
 )]
 pub(crate) struct SetupProofLnpTboxLayout {
     pub(crate) proof_family: &'static str,
+    pub(crate) tbox_parameter_profile_id: &'static str,
+    pub(crate) tbox_commitment_prefix_hash_domain: &'static str,
     pub(crate) proof_ring_degree: usize,
     pub(crate) proof_modulus: BigUint,
     pub(crate) proof_modulus_bit_count: usize,
@@ -94,6 +106,233 @@ pub(crate) struct SetupProofLnpTboxLayout {
     pub(crate) z21_log2_standard_deviation: usize,
     pub(crate) z3_log2_standard_deviation: usize,
     pub(crate) z4_log2_standard_deviation: usize,
+}
+
+pub(crate) fn same_secret_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
+    SetupProofLnpTboxLayout {
+        proof_family: "same-secret-consistency",
+        tbox_parameter_profile_id: SAME_SECRET_LNP_TBOX_PARAMETER_PROFILE_ID,
+        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/same-secret/lnp-tbox-commitment-prefix-v1",
+        proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        proof_modulus: setup_proof_lnp_tbox_proof_modulus(),
+        proof_modulus_bit_count: 255,
+        compression_dropped_bits: 23,
+        t_b_polynomial_count: 8,
+        h_polynomial_count: 4,
+        t_a1_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 2,
+        hint_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 2,
+        z1_polynomial_count: 4,
+        z21_polynomial_count: 16,
+        z3_polynomial_count: 2,
+        z4_polynomial_count: 2,
+        z1_log2_standard_deviation: 24,
+        z21_log2_standard_deviation: 40,
+        z3_log2_standard_deviation: 16,
+        z4_log2_standard_deviation: 16,
+    }
+}
+
+pub(crate) fn public_key_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
+    SetupProofLnpTboxLayout {
+        proof_family: "public-key-share",
+        tbox_parameter_profile_id: PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
+        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/public-key-share/lnp-tbox-commitment-prefix-v1",
+        proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        proof_modulus: setup_proof_lnp_tbox_proof_modulus(),
+        proof_modulus_bit_count: 255,
+        compression_dropped_bits: 23,
+        t_b_polynomial_count: DATA_PRIMES.len() * 8,
+        h_polynomial_count: DATA_PRIMES.len() * 6,
+        t_a1_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + DATA_PRIMES.len() * 2 + 2,
+        hint_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + DATA_PRIMES.len() * 2 + 2,
+        z1_polynomial_count: 4 + DATA_PRIMES.len() * 2,
+        z21_polynomial_count: 16 + DATA_PRIMES.len() * 8,
+        z3_polynomial_count: 2 + DATA_PRIMES.len(),
+        z4_polynomial_count: 2 + DATA_PRIMES.len(),
+        z1_log2_standard_deviation: 24,
+        z21_log2_standard_deviation: 40,
+        z3_log2_standard_deviation: 16,
+        z4_log2_standard_deviation: 16,
+    }
+}
+
+pub(crate) fn same_secret_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SetupProofLnpTboxParameterProfileHash",
+        &same_secret_lnp_tbox_parameter_profile_value()?,
+    )
+}
+
+pub(crate) fn public_key_share_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SetupProofLnpTboxParameterProfileHash",
+        &public_key_share_lnp_tbox_parameter_profile_value()?,
+    )
+}
+
+pub(crate) fn same_secret_lnp_tbox_parameter_profile_value() -> CanonicalResult<Value> {
+    let layout = same_secret_lnp_tbox_layout();
+    setup_proof_lnp_tbox_parameter_profile_value(
+        &layout,
+        "pinned sealed-lattice first-profile same-secret relation dimensions",
+        json!({
+            "rnsLimbCount": DATA_PRIMES.len(),
+            "commitmentModulusLimbCount": SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
+            "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
+            "openingRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+            "sharedSecretPolynomialCount": 1,
+            "negativeIndicatorPolynomialCount": 1,
+            "constantCommitmentCount": DATA_PRIMES.len(),
+            "supportRelationCountPerCoefficient": 2
+        }),
+        "SLSSLNP1",
+        "same-secret verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+    )
+}
+
+pub(crate) fn public_key_share_lnp_tbox_parameter_profile_value() -> CanonicalResult<Value> {
+    let layout = public_key_share_lnp_tbox_layout();
+    setup_proof_lnp_tbox_parameter_profile_value(
+        &layout,
+        "pinned sealed-lattice first-profile lifted public-key share relation dimensions",
+        json!({
+            "rnsLimbCount": DATA_PRIMES.len(),
+            "commitmentModulusLimbCount": SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
+            "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
+            "openingRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+            "sharedSecretPolynomialCount": 1,
+            "negativeIndicatorPolynomialCount": 1,
+            "publicKeySharePolynomialCountPerLimb": 1,
+            "publicKeyErrorPolynomialCountPerLimb": 1,
+            "publicKeyCarryPolynomialCountPerLimb": 1,
+            "constantCommitmentCount": DATA_PRIMES.len(),
+            "publicKeyLiftedRelationCountPerCoefficientPerLimb": 1,
+            "errorSupportRelationCountPerCoefficientPerLimb": 1,
+            "secretSupportRelationCountPerCoefficient": 2
+        }),
+        "SLPKLNP1",
+        "public-key share verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+    )
+}
+
+fn setup_proof_lnp_tbox_parameter_profile_value(
+    layout: &SetupProofLnpTboxLayout,
+    parameter_source: &str,
+    relation_dimensions: Value,
+    envelope_magic: &str,
+    review_status: &str,
+) -> CanonicalResult<Value> {
+    Ok(json!({
+        "objectType": "SetupProofLnpTboxParameterProfile",
+        "objectVersion": 1,
+        "profileId": layout.tbox_parameter_profile_id,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofFamily": layout.proof_family,
+        "referenceImplementation": "LaZer LNP tbox parameter model with sealed-lattice fixed relation dimensions",
+        "parameterSource": parameter_source,
+        "applicationRingDegree": POLYNOMIAL_DEGREE,
+        "proofRingDegree": layout.proof_ring_degree,
+        "proofModulusDecimal": layout.proof_modulus.to_string(),
+        "proofModulusBitCount": layout.proof_modulus_bit_count,
+        "compressionDroppedBits": layout.compression_dropped_bits,
+        "challengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
+        "challengeLog2Range": SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
+        "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
+        "challengeDomain": SETUP_PROOF_CHALLENGE_DOMAIN,
+        "proofByteDecoder": SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER,
+        "tboxLayout": {
+            "tBPolynomialCount": layout.t_b_polynomial_count,
+            "hPolynomialCount": layout.h_polynomial_count,
+            "tA1PolynomialCount": layout.t_a1_polynomial_count,
+            "hintPolynomialCount": layout.hint_polynomial_count,
+            "z1PolynomialCount": layout.z1_polynomial_count,
+            "z21PolynomialCount": layout.z21_polynomial_count,
+            "z3PolynomialCount": layout.z3_polynomial_count,
+            "z4PolynomialCount": layout.z4_polynomial_count,
+            "z1Log2StandardDeviation": layout.z1_log2_standard_deviation,
+            "z21Log2StandardDeviation": layout.z21_log2_standard_deviation,
+            "z3Log2StandardDeviation": layout.z3_log2_standard_deviation,
+            "z4Log2StandardDeviation": layout.z4_log2_standard_deviation
+        },
+        "relationDimensions": relation_dimensions,
+        "proofMaterialSchema": {
+            "encoding": "binary",
+            "envelopeMagic": envelope_magic,
+            "metadataTransport": "canonical-json-roots-only",
+            "largeProofTransport": SETUP_PROOF_MATERIAL_ENCODING,
+            "streaming": "root-bound binary chunks with canonical full-object and chunk hashes",
+            "tboxCommitmentPrefixHash": layout.tbox_commitment_prefix_hash_domain
+        },
+        "reviewStatus": review_status,
+    }))
+}
+
+pub(crate) fn setup_proof_lnp_tbox_commitment_prefix_byte_count(
+    layout: &SetupProofLnpTboxLayout,
+) -> CanonicalResult<usize> {
+    validate_lnp_tbox_layout(layout)?;
+    let compressed_bit_count = layout
+        .proof_modulus_bit_count
+        .checked_sub(layout.compression_dropped_bits)
+        .ok_or_else(|| setup_proof_error("setup proof compressed tA1 bit count underflowed"))?;
+    let prefix_bit_count = layout
+        .t_b_polynomial_count
+        .checked_mul(layout.proof_ring_degree)
+        .and_then(|count| count.checked_mul(layout.proof_modulus_bit_count))
+        .and_then(|count| {
+            layout
+                .h_polynomial_count
+                .checked_mul(layout.proof_ring_degree)
+                .and_then(|h_count| h_count.checked_mul(layout.proof_modulus_bit_count))
+                .and_then(|h_bits| count.checked_add(h_bits))
+        })
+        .and_then(|count| {
+            layout
+                .t_a1_polynomial_count
+                .checked_mul(layout.proof_ring_degree)
+                .and_then(|t_a1_count| t_a1_count.checked_mul(compressed_bit_count))
+                .and_then(|t_a1_bits| count.checked_add(t_a1_bits))
+        })
+        .ok_or_else(|| {
+            setup_proof_error("setup proof LNP tbox commitment prefix size overflowed")
+        })?;
+    if prefix_bit_count % 8 != 0 {
+        return Err(setup_proof_error(
+            "setup proof LNP tbox commitment prefix must end on a byte boundary",
+        ));
+    }
+
+    Ok(prefix_bit_count / 8)
+}
+
+pub(crate) fn setup_proof_lnp_tbox_commitment_prefix_hash(
+    layout: &SetupProofLnpTboxLayout,
+    proof_bytes: &[u8],
+) -> CanonicalResult<String> {
+    let prefix_byte_count = setup_proof_lnp_tbox_commitment_prefix_byte_count(layout)?;
+    let Some(prefix_bytes) = proof_bytes.get(..prefix_byte_count) else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof LNP tbox proof ended before the commitment prefix",
+        ));
+    };
+
+    Ok(hash512_hex(
+        layout.tbox_commitment_prefix_hash_domain,
+        &[
+            layout.proof_family.as_bytes(),
+            layout.tbox_parameter_profile_id.as_bytes(),
+            prefix_bytes,
+        ],
+    ))
+}
+
+fn setup_proof_lnp_tbox_proof_modulus() -> BigUint {
+    BigUint::parse_bytes(
+        b"57896044618658097711785492504343953926634992332820282019728792003956564819949",
+        10,
+    )
+    .expect("setup proof LNP tbox proof modulus is a fixed decimal integer")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,7 +437,9 @@ pub(super) fn setup_proof_record_binding_value(
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER,
-        "proofBytesAcceptedStatus": "not-accepted-until-family-verifier-is-implemented",
+        "sameSecretTboxParameterProfileHash": same_secret_lnp_tbox_parameter_profile_hash()?,
+        "publicKeyShareTboxParameterProfileHash": public_key_share_lnp_tbox_parameter_profile_hash()?,
+        "proofBytesAcceptedStatus": "same-secret-and-public-key-share-verifiers-implemented-other-family-verifiers-pending",
     }))
 }
 
@@ -324,6 +565,10 @@ pub(crate) fn setup_proof_material_reference_root(
         input.relation_commitment_hash_hex,
         "setupProofMaterial.relationCommitmentHash",
     )?;
+    validate_hash_string(
+        input.tbox_commitment_prefix_hash,
+        "setupProofMaterial.tboxCommitmentPrefixHash",
+    )?;
     validate_hash_string(input.proof_bytes_hash, "setupProofMaterial.proofBytesHash")?;
     validate_hash_string(
         &input.transport_hashes.full_object_hash,
@@ -353,6 +598,7 @@ pub(crate) fn setup_proof_material_reference_root(
             "trusteeRosterPosition": input.trustee_roster_position,
             "statementHash": input.statement_hash_hex,
             "relationCommitmentHash": input.relation_commitment_hash_hex,
+            "tboxCommitmentPrefixHash": input.tbox_commitment_prefix_hash,
             "proofSizeBytes": input.proof_size_bytes,
             "proofBytesHash": input.proof_bytes_hash,
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1417,6 +1663,8 @@ mod tests {
     fn small_lnp_tbox_layout_for_test() -> SetupProofLnpTboxLayout {
         SetupProofLnpTboxLayout {
             proof_family: "same-secret-consistency",
+            tbox_parameter_profile_id: SAME_SECRET_LNP_TBOX_PARAMETER_PROFILE_ID,
+            tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/same-secret/lnp-tbox-commitment-prefix-v1",
             proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
             proof_modulus: BigUint::from(12_289_u64),
             proof_modulus_bit_count: 14,

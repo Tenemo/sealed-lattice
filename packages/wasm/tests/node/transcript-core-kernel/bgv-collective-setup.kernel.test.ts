@@ -768,7 +768,7 @@ function acceptedSetupCommitmentSecurityCertificate(
             'same-secret trustee commitment roots',
         ],
         nonClosure: [
-            'same-secret proof bytes still require LNP verification',
+            'same-secret proof still requires external AB-DLOP/LNP review and full tbox closure',
             'public-key share proof bytes still require no-wrap LNP verification',
             'relinearization and Galois proof bytes still require linked LNP verification',
             'setup-proof Fiat-Shamir/QROM composition certificate remains separate',
