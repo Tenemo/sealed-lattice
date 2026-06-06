@@ -21,7 +21,7 @@ sidebar:
 - no complete threshold voting workflow is published yet
 - no production setup contribution, VSS, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, or result release API is public yet
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
-- active-static setup is not claim-bearing until per-RNS-prime VSS, same-secret consistency, public-key proofs, evaluation-key proofs, key transport, and supported-phone evidence close
+- active-static setup is not claim-bearing until per-RNS-prime VSS package integration, same-secret proof verification, public-key proofs, evaluation-key proofs, key transport, and supported-phone evidence close
 - the internal direct encrypted ballot proof is not claim-bearing until soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and supported-phone mobile evidence close
 - bounded-domain encrypted sparse target projection is not complete for every supported top count
 - target-bound decryption is not implemented as an accepted direct-path rule

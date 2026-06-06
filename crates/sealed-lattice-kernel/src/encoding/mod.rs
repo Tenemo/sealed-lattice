@@ -28,6 +28,7 @@ pub enum CanonicalErrorCode {
     InvalidChunkSize,
     InvalidEnum,
     InvalidFixture,
+    InvalidProtocolObject,
     InvalidHex,
     InvalidUtf8,
     MalformedLength,
@@ -58,6 +59,7 @@ pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
     CanonicalErrorCode::InvalidChunkSize,
     CanonicalErrorCode::InvalidEnum,
     CanonicalErrorCode::InvalidFixture,
+    CanonicalErrorCode::InvalidProtocolObject,
     CanonicalErrorCode::InvalidHex,
     CanonicalErrorCode::InvalidUtf8,
     CanonicalErrorCode::MalformedLength,
@@ -85,6 +87,7 @@ impl CanonicalErrorCode {
             Self::InvalidChunkSize => "InvalidChunkSize",
             Self::InvalidEnum => "InvalidEnum",
             Self::InvalidFixture => "InvalidFixture",
+            Self::InvalidProtocolObject => "InvalidProtocolObject",
             Self::InvalidHex => "InvalidHex",
             Self::InvalidUtf8 => "InvalidUtf8",
             Self::MalformedLength => "MalformedLength",
@@ -439,6 +442,7 @@ mod tests {
                 | CanonicalErrorCode::InvalidChunkSize
                 | CanonicalErrorCode::InvalidEnum
                 | CanonicalErrorCode::InvalidFixture
+                | CanonicalErrorCode::InvalidProtocolObject
                 | CanonicalErrorCode::InvalidHex
                 | CanonicalErrorCode::InvalidUtf8
                 | CanonicalErrorCode::MalformedLength
@@ -462,6 +466,6 @@ mod tests {
             ensure_exhaustive(code.clone());
         }
 
-        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 22);
+        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 23);
     }
 }

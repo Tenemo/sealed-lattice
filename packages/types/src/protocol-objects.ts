@@ -43,10 +43,13 @@ export type SignedObjectType =
     | 'RecoveryEpochUpdate'
     | 'RegistrationEntry'
     | 'RosterExternalAcceptance'
+    | 'SetupPhaseParticipantObject'
     | 'TargetAcceptedRecord'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
     | 'TrusteeSetupEntry'
+    | 'VssShareAcceptance'
+    | 'VssShareComplaint'
     | 'WitnessCheckpoint';
 
 /** Role asserted by a protocol signature envelope. */

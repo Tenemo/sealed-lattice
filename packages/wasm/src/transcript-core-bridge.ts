@@ -6,9 +6,14 @@ export type {
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
+    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupVerification,
+    BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
+    BgvPrivateVssShareEnvelopeVerification,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvThresholdShareCommitmentDerivation,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {

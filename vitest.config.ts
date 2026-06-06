@@ -19,6 +19,13 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
 
 const browserServerHost = '127.0.0.1';
 
+const browserOptimizedDependencies = [
+    '@noble/hashes/hkdf.js',
+    '@noble/hashes/sha2.js',
+    '@noble/hashes/utils.js',
+    '@noble/post-quantum/ml-kem.js',
+] as const;
+
 const publicPackageEntryPoint = resolveFromRepoRoot(
     'packages',
     'sdk',
@@ -231,6 +238,9 @@ const makeBrowserProject = ({
 
 export default defineConfig({
     plugins: [createPublicPackageResolutionPlugin()],
+    optimizeDeps: {
+        include: [...browserOptimizedDependencies],
+    },
     resolve: publicPackageTestResolve,
     test: {
         alias: [publicPackageAlias, ...rootPrivateAliases],

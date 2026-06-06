@@ -25,6 +25,7 @@ export const canonicalErrorCodeValues = [
     'InvalidChunkSize',
     'InvalidEnum',
     'InvalidFixture',
+    'InvalidProtocolObject',
     'InvalidHex',
     'InvalidUtf8',
     'MalformedLength',

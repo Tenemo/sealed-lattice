@@ -10,6 +10,7 @@ pub(crate) mod bgv;
 mod encoding;
 pub mod fixtures;
 pub(crate) mod hashing;
+pub(crate) mod protocol_signatures;
 pub(crate) mod ring;
 pub(crate) mod transcript_core;
 

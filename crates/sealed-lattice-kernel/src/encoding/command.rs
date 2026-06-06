@@ -16,8 +16,15 @@ enum TranscriptCoreCommand {
     DescribeBgvOperationRegistry,
     ValidateBgvEvaluatorOperation,
     DescribeBgvPassiveSetupObjectModel,
+    DescribeCollectiveBgvSetupProfile,
+    DeriveCollectiveBgvSetupPublicDerivations,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
+    VerifyCollectiveBgvSetup,
+    VerifyPrivateVssShareEnvelope,
+    DeriveThresholdShareCommitments,
+    DeriveThresholdShareCommitmentsFromTransport,
+    VerifyLocalTrusteeSetupState,
     GenerateBgvEvaluationKeyMaterial,
     EncodeBgvBatchPlaintext,
     ValidateBgvPlaintextObject,
@@ -189,8 +196,15 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
+        | TranscriptCoreCommand::DescribeCollectiveBgvSetupProfile
+        | TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
+        | TranscriptCoreCommand::VerifyCollectiveBgvSetup
+        | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
+        | TranscriptCoreCommand::DeriveThresholdShareCommitments
+        | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
+        | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
         | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
         | TranscriptCoreCommand::ValidateBgvPlaintextObject
@@ -221,11 +235,32 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
             crate::bgv::commands::describe_bgv_passive_setup_object_model()
         }
+        TranscriptCoreCommand::DescribeCollectiveBgvSetupProfile => {
+            crate::bgv::commands::describe_collective_bgv_setup_profile_from_request()
+        }
+        TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations => {
+            crate::bgv::commands::derive_collective_bgv_setup_public_derivations(request)
+        }
         TranscriptCoreCommand::GenerateBgvPassiveSetup => {
             crate::bgv::commands::generate_bgv_passive_setup_from_request(request)
         }
         TranscriptCoreCommand::VerifyBgvPassiveSetup => {
             crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
+        }
+        TranscriptCoreCommand::VerifyCollectiveBgvSetup => {
+            crate::bgv::commands::verify_collective_bgv_setup_from_request(request)
+        }
+        TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
+            crate::bgv::commands::verify_private_vss_share_envelope(request)
+        }
+        TranscriptCoreCommand::DeriveThresholdShareCommitments => {
+            crate::bgv::commands::derive_threshold_share_commitments(request)
+        }
+        TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport => {
+            crate::bgv::commands::derive_threshold_share_commitments_from_transport(request)
+        }
+        TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
+            crate::bgv::commands::verify_local_trustee_setup_state(request)
         }
         TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial => {
             crate::bgv::commands::generate_bgv_evaluation_key_material_from_request(request)

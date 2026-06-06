@@ -30,12 +30,19 @@ const PACKAGE_SECRET_FLAG_FIELD_NAMES: &[&str] =
     &["centralizedSecretReconstruction", "rawSecretShareExported"];
 
 pub(super) fn reject_forbidden_setup_fields(request: &Value) -> CanonicalResult<()> {
+    reject_forbidden_setup_fields_for_context(request, "passive BGV setup")
+}
+
+pub(super) fn reject_forbidden_setup_fields_for_context(
+    request: &Value,
+    setup_context_description: &str,
+) -> CanonicalResult<()> {
     for field_name in forbidden_setup_field_names() {
         if request.get(field_name).is_some() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "{field_name} would centralize BGV secret material and cannot be accepted by passive BGV setup"
+                    "{field_name} would centralize BGV secret material and cannot be accepted by {setup_context_description}"
                 ),
             ));
         }
@@ -308,10 +315,23 @@ fn is_setup_package_secret_flag_field(field_name: &str) -> bool {
 }
 
 pub(super) fn reject_forbidden_setup_package_secret_fields(value: &Value) -> CanonicalResult<()> {
+    reject_forbidden_setup_package_secret_fields_for_context(
+        value,
+        "passive BGV setup verification",
+    )
+}
+
+pub(super) fn reject_forbidden_setup_package_secret_fields_for_context(
+    value: &Value,
+    setup_context_description: &str,
+) -> CanonicalResult<()> {
     match value {
         Value::Array(items) => {
             for item in items {
-                reject_forbidden_setup_package_secret_fields(item)?;
+                reject_forbidden_setup_package_secret_fields_for_context(
+                    item,
+                    setup_context_description,
+                )?;
             }
         }
         Value::Object(fields) => {
@@ -320,7 +340,7 @@ pub(super) fn reject_forbidden_setup_package_secret_fields(value: &Value) -> Can
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
                         format!(
-                            "{field_name} would expose BGV secret material and cannot be accepted by passive BGV setup verification"
+                            "{field_name} would expose BGV secret material and cannot be accepted by {setup_context_description}"
                         ),
                     ));
                 }
@@ -329,10 +349,15 @@ pub(super) fn reject_forbidden_setup_package_secret_fields(value: &Value) -> Can
                 {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::ProfileComponentMismatch,
-                        format!("passive BGV setup package field {field_name} must remain false"),
+                        format!(
+                            "{setup_context_description} requires setup package field {field_name} to remain false"
+                        ),
                     ));
                 }
-                reject_forbidden_setup_package_secret_fields(field_value)?;
+                reject_forbidden_setup_package_secret_fields_for_context(
+                    field_value,
+                    setup_context_description,
+                )?;
             }
         }
         _ => {}

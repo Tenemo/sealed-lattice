@@ -19,9 +19,16 @@ use crate::{
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
         setup::{
-            describe_passive_setup_object_model, generate_passive_setup_package_from_request,
+            derive_collective_bgv_setup_public_derivations_from_request,
+            derive_threshold_share_commitments_from_request,
+            derive_threshold_share_commitments_from_transport_request,
+            describe_collective_bgv_setup_profile, describe_passive_setup_object_model,
+            generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
+            verify_collective_bgv_setup_package_from_request,
+            verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
+            verify_private_vss_share_envelope_from_request,
         },
         validation::{
             bgv_profile_rejection, reject_reference_oracle_artifact,
@@ -114,12 +121,44 @@ pub(crate) fn describe_bgv_passive_setup_object_model() -> CanonicalResult<Value
     describe_passive_setup_object_model()
 }
 
+pub(crate) fn describe_collective_bgv_setup_profile_from_request() -> CanonicalResult<Value> {
+    describe_collective_bgv_setup_profile()
+}
+
+pub(crate) fn derive_collective_bgv_setup_public_derivations(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    derive_collective_bgv_setup_public_derivations_from_request(request)
+}
+
 pub(crate) fn generate_bgv_passive_setup_from_request(request: &Value) -> CanonicalResult<Value> {
     generate_passive_setup_package_from_request(request)
 }
 
 pub(crate) fn verify_bgv_passive_setup_from_request(request: &Value) -> CanonicalResult<Value> {
     verify_passive_setup_package_from_request(request)
+}
+
+pub(crate) fn verify_collective_bgv_setup_from_request(request: &Value) -> CanonicalResult<Value> {
+    verify_collective_bgv_setup_package_from_request(request)
+}
+
+pub(crate) fn verify_private_vss_share_envelope(request: &Value) -> CanonicalResult<Value> {
+    verify_private_vss_share_envelope_from_request(request)
+}
+
+pub(crate) fn derive_threshold_share_commitments(request: &Value) -> CanonicalResult<Value> {
+    derive_threshold_share_commitments_from_request(request)
+}
+
+pub(crate) fn derive_threshold_share_commitments_from_transport(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    derive_threshold_share_commitments_from_transport_request(request)
+}
+
+pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {
+    verify_local_trustee_setup_state_from_request(request)
 }
 
 pub(crate) fn generate_bgv_evaluation_key_material_from_request(

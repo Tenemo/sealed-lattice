@@ -3,19 +3,35 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
 
+mod accepted_setup;
 mod certificates;
+mod commitment;
 mod development_fixtures;
 mod input;
 mod key_material;
+mod local_trustee_state;
 mod package_builder;
 mod participant_material;
+mod private_vss;
 mod public_evaluation_key_material;
+mod public_key_share_proof;
+mod same_secret_proof;
 mod sampling;
+mod setup_proof;
+mod sharing;
+mod threshold_share_commitments;
 mod validation;
+mod vss;
 
 #[cfg(test)]
 mod tests;
 
+pub(crate) use accepted_setup::{
+    derive_collective_bgv_setup_public_derivations_from_request,
+    describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
+};
+pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
+pub(crate) use private_vss::verify_private_vss_share_envelope_from_request;
 pub(crate) use public_evaluation_key_material::generate_passive_setup_public_evaluation_key_material_from_request;
 #[cfg(test)]
 pub(crate) use public_evaluation_key_material::public_evaluation_keys_from_material;
@@ -23,6 +39,8 @@ pub(crate) use public_evaluation_key_material::public_evaluation_keys_from_mater
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
+pub(crate) use threshold_share_commitments::derive_threshold_share_commitments_from_request;
+pub(crate) use threshold_share_commitments::derive_threshold_share_commitments_from_transport_request;
 
 use sampling::{
     dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,
@@ -66,8 +84,10 @@ use crate::{
             compare_hash_at_path, compare_string_at_path, forbidden_setup_field_names,
             hash_at_path, integer_at_path, read_hash_field, read_non_empty_string,
             read_optional_u64, read_optional_usize, reject_forbidden_setup_fields,
-            reject_forbidden_setup_package_secret_fields, string_at_path, unsigned_at_path,
-            usize_at_path, value_at_path,
+            reject_forbidden_setup_fields_for_context,
+            reject_forbidden_setup_package_secret_fields,
+            reject_forbidden_setup_package_secret_fields_for_context, string_at_path,
+            unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
         },
         validation::reject_unexpected_bgv_request_fields,
     },

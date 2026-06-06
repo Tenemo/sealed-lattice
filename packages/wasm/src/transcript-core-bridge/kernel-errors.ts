@@ -7,6 +7,7 @@ const bridgeCanonicalErrorCodeValues = [
     'InvalidChunkSize',
     'InvalidEnum',
     'InvalidFixture',
+    'InvalidProtocolObject',
     'InvalidHex',
     'InvalidUtf8',
     'MalformedLength',

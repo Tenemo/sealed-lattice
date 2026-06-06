@@ -3,9 +3,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
     canonicalJson,
+    collectForbiddenLocalTrusteeStateStorageFieldPaths,
+    createPrivateVssMailboxKeyPair,
+    decryptLocalTrusteeState,
+    decryptPrivateVssMailboxEnvelope,
     deriveMlDsaPublicKeyHash,
     deriveProtocolHash,
     deriveProtocolSignatureHash,
+    encryptLocalTrusteeSetupSealedMaterial,
+    encryptLocalTrusteeState,
+    encryptPrivateVssMailboxEnvelope,
     hash512Hex,
     resolveProtocolHashDomain,
     verifySignedObjectSignature,
@@ -228,6 +235,423 @@ describe('crypto primitive boundary', () => {
                 expect.objectContaining({ code: 'WrongPublicKey' }),
             ]),
         );
+    });
+
+    it('encrypts private VSS mailbox envelopes and rejects tampered delivery material', async () => {
+        const mailboxKeySeed = hash512Hex('test/private-vss-mailbox-key', [
+            new TextEncoder().encode('recipient-trustee-3'),
+        ]);
+        const encapsulationRandomnessBytesHex = hash512Hex(
+            'test/private-vss-mailbox-encapsulation',
+            [new TextEncoder().encode('dealer-2-to-recipient-3')],
+        ).slice(0, 64);
+        const aeadNonceBytesHex = hash512Hex('test/private-vss-mailbox-nonce', [
+            new TextEncoder().encode('dealer-2-to-recipient-3'),
+        ]).slice(0, 24);
+        const recipientMailboxKeyPair =
+            createPrivateVssMailboxKeyPair(mailboxKeySeed);
+        const privateEnvelopeAad = {
+            objectType: 'PrivateVssEnvelopeAad',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            mailboxEncryptionProfileId:
+                'sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1',
+            ceremonyId: 'ceremony',
+            manifestHash: deriveProtocolHash('ElectionManifestHash', {
+                manifest: 'mailbox-test',
+            }),
+            rosterHash: deriveProtocolHash('RosterHash', {
+                roster: 'mailbox-test',
+            }),
+            dealerIdentity: 'trustee-2',
+            recipientIdentity: 'trustee-3',
+            envelopeSequenceNumber: 23,
+        };
+        const privateEnvelope = {
+            objectType: 'PrivateVssShareEnvelope',
+            objectVersion: 1,
+            privateEnvelopeAadHash: deriveProtocolHash(
+                'PrivateVssEnvelopeAadHash',
+                privateEnvelopeAad,
+            ),
+            dealerIdentity: 'trustee-2',
+            recipientIdentity: 'trustee-3',
+            rnsShareOpenings: [
+                {
+                    rnsLimbIndex: 0,
+                    shareValues: [1, 2, 3],
+                    carryWitnessesDecimal: ['0', '0', '1'],
+                },
+            ],
+        };
+
+        const encrypted = await encryptPrivateVssMailboxEnvelope({
+            privateEnvelope,
+            privateEnvelopeAad,
+            recipientMailboxPublicKeyBytesHex:
+                recipientMailboxKeyPair.publicKeyBytesHex,
+            encapsulationRandomnessBytesHex,
+            aeadNonceBytesHex,
+        });
+
+        expect(encrypted.encryptedEnvelope).toMatchObject({
+            objectType: 'EncryptedPrivateVssShareEnvelope',
+            objectVersion: 1,
+            recipientMailboxPublicKeyHash:
+                recipientMailboxKeyPair.publicKeyHash,
+            aeadNonceHex: aeadNonceBytesHex,
+            aeadTagLength: 128,
+        });
+        expect(encrypted.encryptedEnvelope.encryptedEnvelopeHash).toMatch(
+            /^[0-9a-f]{128}$/u,
+        );
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: encrypted.encryptedEnvelope,
+                recipientMailboxSecretKeyBytesHex:
+                    recipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).resolves.toMatchObject({
+            privateEnvelope,
+            privateEnvelopeHash: encrypted.privateEnvelopeHash,
+            privateEnvelopeAadHash: encrypted.privateEnvelopeAadHash,
+        });
+
+        const tamperedCiphertext = {
+            ...encrypted.encryptedEnvelope,
+            ciphertextBytesHex: `${encrypted.encryptedEnvelope.ciphertextBytesHex.slice(0, -2)}${
+                encrypted.encryptedEnvelope.ciphertextBytesHex.endsWith('00')
+                    ? '01'
+                    : '00'
+            }`,
+        };
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: tamperedCiphertext,
+                recipientMailboxSecretKeyBytesHex:
+                    recipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).rejects.toThrow(/ciphertextBytesHash/u);
+
+        const wrongKemCiphertextHash = {
+            ...encrypted.encryptedEnvelope,
+            kemCiphertextHash: deriveProtocolHash(
+                'PrivateVssEncryptedEnvelopeHash',
+                {
+                    fixture: 'wrong-kem-ciphertext-hash',
+                },
+            ),
+        };
+        const wrongKemCiphertextHashWithoutHash = Object.fromEntries(
+            Object.entries(wrongKemCiphertextHash).filter(
+                ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
+            ),
+        );
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: {
+                    ...wrongKemCiphertextHash,
+                    encryptedEnvelopeHash: deriveProtocolHash(
+                        'PrivateVssEncryptedEnvelopeHash',
+                        wrongKemCiphertextHashWithoutHash,
+                    ),
+                },
+                recipientMailboxSecretKeyBytesHex:
+                    recipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).rejects.toThrow(/kemCiphertextHash/u);
+
+        const wrongCiphertextBytesHash = {
+            ...encrypted.encryptedEnvelope,
+            ciphertextBytesHash: deriveProtocolHash(
+                'PrivateVssEncryptedEnvelopeHash',
+                {
+                    fixture: 'wrong-ciphertext-bytes-hash',
+                },
+            ),
+        };
+        const wrongCiphertextBytesHashWithoutHash = Object.fromEntries(
+            Object.entries(wrongCiphertextBytesHash).filter(
+                ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
+            ),
+        );
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: {
+                    ...wrongCiphertextBytesHash,
+                    encryptedEnvelopeHash: deriveProtocolHash(
+                        'PrivateVssEncryptedEnvelopeHash',
+                        wrongCiphertextBytesHashWithoutHash,
+                    ),
+                },
+                recipientMailboxSecretKeyBytesHex:
+                    recipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).rejects.toThrow(/ciphertextBytesHash/u);
+
+        const wrongPrivateEnvelopeAadHash = {
+            ...encrypted.encryptedEnvelope,
+            privateEnvelopeAadHash: deriveProtocolHash(
+                'PrivateVssEnvelopeAadHash',
+                {
+                    fixture: 'wrong-private-envelope-aad-hash',
+                },
+            ),
+        };
+        const wrongPrivateEnvelopeAadHashWithoutHash = Object.fromEntries(
+            Object.entries(wrongPrivateEnvelopeAadHash).filter(
+                ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
+            ),
+        );
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: {
+                    ...wrongPrivateEnvelopeAadHash,
+                    encryptedEnvelopeHash: deriveProtocolHash(
+                        'PrivateVssEncryptedEnvelopeHash',
+                        wrongPrivateEnvelopeAadHashWithoutHash,
+                    ),
+                },
+                recipientMailboxSecretKeyBytesHex:
+                    recipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).rejects.toThrow(/AAD hash/u);
+
+        const reboundAad = {
+            ...encrypted.encryptedEnvelope,
+            privateEnvelopeAad: {
+                ...privateEnvelopeAad,
+                recipientIdentity: 'trustee-4',
+            },
+        };
+        const reboundAadWithoutHash = Object.fromEntries(
+            Object.entries(reboundAad).filter(
+                ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
+            ),
+        );
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: {
+                    ...reboundAad,
+                    encryptedEnvelopeHash: deriveProtocolHash(
+                        'PrivateVssEncryptedEnvelopeHash',
+                        reboundAadWithoutHash,
+                    ),
+                },
+                recipientMailboxSecretKeyBytesHex:
+                    recipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).rejects.toThrow();
+    });
+
+    it('encrypts local trustee setup state and rejects raw or rebound state', async () => {
+        const setupContext = {
+            ceremonyId: 'ceremony',
+            manifestHash: deriveProtocolHash('ElectionManifestHash', {
+                manifest: 'local-state-storage-test',
+            }),
+            rosterHash: deriveProtocolHash('RosterHash', {
+                roster: 'local-state-storage-test',
+            }),
+            setupProfileHash: deriveProtocolHash(
+                'CollectiveBgvSetupProfileHash',
+                {
+                    profile: 'local-state-storage-test',
+                },
+            ),
+            qShareHash: deriveProtocolHash('QSharePrimeListHash', {
+                qShare: 'local-state-storage-test',
+            }),
+            carryAwareVssShareRelationProfileHash: deriveProtocolHash(
+                'CarryAwareVssShareRelationProfileHash',
+                { relation: 'local-state-storage-test' },
+            ),
+            commitmentProfileHash: deriveProtocolHash(
+                'SetupCommitmentProfileHash',
+                { commitment: 'local-state-storage-test' },
+            ),
+            setupEpoch: 'setup-epoch-1',
+        };
+        const thresholdShareCommitmentRecipientRoot = deriveProtocolHash(
+            'ActionContextHash',
+            {
+                commitment: 'threshold-share-commitment-recipient',
+            },
+        );
+        const issuedVssAcceptanceRoot = deriveProtocolHash(
+            'VssShareAcceptanceRoot',
+            {
+                accepted: 'dealer-1',
+            },
+        );
+        const issuedVssComplaintRoots = [
+            deriveProtocolHash('VssComplaintRoot', {
+                complaint: 'dealer-2',
+            }),
+        ];
+        const storageKeyBytesHex = '11'.repeat(32);
+        const aeadNonceBytesHex = '22'.repeat(12);
+        const sealedAggregateThresholdShare =
+            await encryptLocalTrusteeSetupSealedMaterial({
+                materialClass: 'aggregate-threshold-share-sealed',
+                materialPlaintext: {
+                    objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
+                    objectVersion: 1,
+                    trusteeIdentity: 'trustee-3',
+                    trusteeRosterPosition: 3,
+                    thresholdShareCommitmentRecipientRoot,
+                    shareValues: [1, 2, 3],
+                },
+                setupContext,
+                trusteeIdentity: 'trustee-3',
+                trusteeRosterPosition: 3,
+                thresholdShareCommitmentRecipientRoot,
+                storageKeyBytesHex,
+                aeadNonceBytesHex: '33'.repeat(12),
+            });
+        const sealedAggregateOpening =
+            await encryptLocalTrusteeSetupSealedMaterial({
+                materialClass: 'aggregate-threshold-opening-sealed',
+                materialPlaintext: {
+                    objectType: 'LocalTrusteeAggregateThresholdOpeningMaterial',
+                    objectVersion: 1,
+                    trusteeIdentity: 'trustee-3',
+                    trusteeRosterPosition: 3,
+                    thresholdShareCommitmentRecipientRoot,
+                    openingColumnsDecimal: [['4', '-5', '6']],
+                },
+                setupContext,
+                trusteeIdentity: 'trustee-3',
+                trusteeRosterPosition: 3,
+                thresholdShareCommitmentRecipientRoot,
+                storageKeyBytesHex,
+                aeadNonceBytesHex: '44'.repeat(12),
+            });
+        const aggregateThresholdShareRoot =
+            sealedAggregateThresholdShare.materialRoot;
+        const aggregateOpeningRoot = sealedAggregateOpening.materialRoot;
+        const localStateCommitment = {
+            objectType: 'LocalTrusteeSetupStateCommitment',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            ceremonyId: setupContext.ceremonyId,
+            manifestHash: setupContext.manifestHash,
+            rosterHash: setupContext.rosterHash,
+            setupEpoch: setupContext.setupEpoch,
+            storageProfile: 'encrypted-local-device-state-required',
+            exportPolicy: 'roots-only-no-raw-share-or-opening-export',
+            localStateRoot: deriveProtocolHash('LocalTrusteeSetupStateRoot', {
+                trustee: 'trustee-3',
+            }),
+            trusteeIdentity: 'trustee-3',
+            trusteeRosterPosition: 3,
+            thresholdShareCommitmentRecipientRoot,
+            aggregateThresholdShareRoot,
+            aggregateOpeningRoot,
+            issuedVssAcceptanceRoot,
+            issuedVssComplaintRoots,
+        } as const;
+        const localStatePlaintext = {
+            objectType: 'LocalTrusteeSetupStateSealedPayload',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            ceremonyId: setupContext.ceremonyId,
+            manifestHash: setupContext.manifestHash,
+            rosterHash: setupContext.rosterHash,
+            setupEpoch: setupContext.setupEpoch,
+            trusteeIdentity: 'trustee-3',
+            trusteeRosterPosition: 3,
+            deviceEpoch: 0,
+            thresholdShareCommitmentRecipientRoot,
+            sealedAggregateThresholdShare: {
+                ...sealedAggregateThresholdShare.sealedMaterial,
+            },
+            sealedAggregateOpening: {
+                ...sealedAggregateOpening.sealedMaterial,
+            },
+            issuedVssAcceptanceRoots: [issuedVssAcceptanceRoot],
+            issuedVssComplaintRoots,
+        } as const;
+
+        const encrypted = await encryptLocalTrusteeState({
+            localStatePlaintext,
+            localStateCommitment,
+            setupContext,
+            storageKeyBytesHex,
+            aeadNonceBytesHex,
+        });
+
+        expect(encrypted.encryptedLocalState).toMatchObject({
+            objectType: 'EncryptedLocalTrusteeSetupState',
+            objectVersion: 1,
+            localStateRoot: localStateCommitment.localStateRoot,
+            aeadNonceHex: aeadNonceBytesHex,
+            aeadTagLength: 128,
+        });
+        expect(
+            collectForbiddenLocalTrusteeStateStorageFieldPaths(
+                encrypted.encryptedLocalState,
+                'encryptedLocalState',
+            ),
+        ).toEqual([]);
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: encrypted.encryptedLocalState,
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).resolves.toMatchObject({
+            localStatePlaintext,
+            localStatePlaintextHash: encrypted.localStatePlaintextHash,
+            storageAadHash: encrypted.storageAadHash,
+        });
+
+        await expect(
+            encryptLocalTrusteeState({
+                localStatePlaintext: {
+                    rawShamirShares: [1, 2, 3],
+                } as unknown as typeof localStatePlaintext,
+                localStateCommitment,
+                setupContext,
+                storageKeyBytesHex,
+                aeadNonceBytesHex,
+            }),
+        ).rejects.toThrow(/forbidden raw local state fields/u);
+        await expect(
+            encryptLocalTrusteeState({
+                localStatePlaintext: {
+                    ...localStatePlaintext,
+                    hiddenAggregateShareCopy: [1, 2, 3],
+                },
+                localStateCommitment,
+                setupContext,
+                storageKeyBytesHex,
+                aeadNonceBytesHex,
+            }),
+        ).rejects.toThrow(/not allowed by the local trustee state schema/u);
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: encrypted.encryptedLocalState,
+                expectedLocalStateRoot: deriveProtocolHash(
+                    'LocalTrusteeSetupStateRoot',
+                    { trustee: 'wrong' },
+                ),
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/expectedLocalStateRoot/u);
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: encrypted.encryptedLocalState,
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContext: {
+                    ...setupContext,
+                    setupEpoch: 'setup-epoch-2',
+                },
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/storageAad/u);
     });
 
     it('requires explicit signature expectation bindings unless unbound verification is requested', () => {

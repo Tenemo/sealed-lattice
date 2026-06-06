@@ -10,15 +10,22 @@ import type {
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
+    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupPublicDerivations,
+    BgvCollectiveSetupVerification,
     BgvEvaluatorOperationValidation,
+    BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
     BgvPassiveSetupPackage,
     BgvPassiveSetupVerification,
+    BgvPrivateVssShareEnvelopeVerification,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
+    BgvThresholdShareCommitmentDerivation,
+    BgvThresholdShareCommitmentTransportDerivation,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -26,6 +33,7 @@ import type {
 } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
 import {
+    TranscriptCoreKernelCommandError,
     copyFromKernelMemory,
     copyIntoKernelMemory,
     requireKernelIntegrityExpectation,
@@ -111,6 +119,31 @@ export const createTranscriptCoreKernelLoader = (
                         request,
                     ),
                 );
+            const executeAcceptedSetupCommand = <
+                Result extends BgvCollectiveSetupVerification,
+            >(
+                request: TranscriptCoreKernelCommand,
+            ): Result => {
+                try {
+                    return executeCommand<Result>(request);
+                } catch (error) {
+                    if (
+                        error instanceof TranscriptCoreKernelCommandError &&
+                        error.code === 'InvalidFixture'
+                    ) {
+                        const message = error.message.replace(
+                            /^InvalidFixture: /u,
+                            '',
+                        );
+                        throw new TranscriptCoreKernelCommandError({
+                            code: 'InvalidProtocolObject',
+                            message,
+                        });
+                    }
+
+                    throw error;
+                }
+            };
 
             return {
                 exportedFunctionNames,
@@ -224,6 +257,18 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<unknown>({
                         command: 'DescribeBgvPassiveSetupObjectModel',
                     }),
+                describeCollectiveBgvSetupProfile:
+                    (): BgvCollectiveSetupProfileDescription =>
+                        executeCommand<BgvCollectiveSetupProfileDescription>({
+                            command: 'DescribeCollectiveBgvSetupProfile',
+                        }),
+                deriveCollectiveBgvSetupPublicDerivations: (
+                    input,
+                ): BgvCollectiveSetupPublicDerivations =>
+                    executeCommand<BgvCollectiveSetupPublicDerivations>({
+                        command: 'DeriveCollectiveBgvSetupPublicDerivations',
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    }),
                 generateBgvPassiveSetup: (input): BgvPassiveSetupPackage =>
                     executeCommand<BgvPassiveSetupPackage>({
                         command: 'GenerateBgvPassiveSetup',
@@ -282,6 +327,74 @@ export const createTranscriptCoreKernelLoader = (
                         expectedRotSetHash: input.expectedRotSetHash,
                         expectedEvaluationKeyRoot:
                             input.expectedEvaluationKeyRoot,
+                    }),
+                verifyCollectiveBgvSetup: (
+                    input,
+                ): BgvCollectiveSetupVerification =>
+                    executeAcceptedSetupCommand<BgvCollectiveSetupVerification>(
+                        {
+                            command: 'VerifyCollectiveBgvSetup',
+                            setupPackage: input.setupPackage,
+                            expectedSetupPackageHash:
+                                input.expectedSetupPackageHash,
+                            expectedManifestHash: input.expectedManifestHash,
+                            expectedRosterHash: input.expectedRosterHash,
+                            transportedVssCoefficientCommitmentMaterial:
+                                input.transportedVssCoefficientCommitmentMaterial,
+                        },
+                    ),
+                verifyPrivateVssShareEnvelope: (
+                    input,
+                ): BgvPrivateVssShareEnvelopeVerification =>
+                    executeCommand<BgvPrivateVssShareEnvelopeVerification>({
+                        command: 'VerifyPrivateVssShareEnvelope',
+                        setupContext: input.setupContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        dealerCoefficientCommitmentRecord:
+                            input.dealerCoefficientCommitmentRecord,
+                        dealerCoefficientCommitmentMaterialRecords:
+                            input.dealerCoefficientCommitmentMaterialRecords,
+                        privateEnvelope: input.privateEnvelope,
+                        expectedPrivateEnvelopeHash:
+                            input.expectedPrivateEnvelopeHash,
+                        expectedLocalVerificationRoot:
+                            input.expectedLocalVerificationRoot,
+                    }),
+                deriveThresholdShareCommitments: (
+                    input,
+                ): BgvThresholdShareCommitmentDerivation =>
+                    executeCommand<BgvThresholdShareCommitmentDerivation>({
+                        command: 'DeriveThresholdShareCommitments',
+                        setupContext: input.setupContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        dealerCoefficientCommitmentRecords:
+                            input.dealerCoefficientCommitmentRecords,
+                        coefficientCommitments: input.coefficientCommitments,
+                    }),
+                deriveThresholdShareCommitmentsFromTransport: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportDerivation =>
+                    executeCommand<BgvThresholdShareCommitmentTransportDerivation>(
+                        {
+                            command:
+                                'DeriveThresholdShareCommitmentsFromTransport',
+                            setupContext: input.setupContext,
+                            publicMatrixSeedHash: input.publicMatrixSeedHash,
+                            vssCoefficientCommitmentRoot:
+                                input.vssCoefficientCommitmentRoot,
+                            dealerCoefficientCommitmentRecords:
+                                input.dealerCoefficientCommitmentRecords,
+                            transportedVssCoefficientCommitmentMaterial:
+                                input.transportedVssCoefficientCommitmentMaterial,
+                        },
+                    ),
+                verifyLocalTrusteeSetupState: (
+                    input,
+                ): BgvLocalTrusteeSetupStateVerification =>
+                    executeCommand<BgvLocalTrusteeSetupStateVerification>({
+                        command: 'VerifyLocalTrusteeSetupState',
+                        setupContext: input.setupContext,
+                        localStateCommitment: input.localStateCommitment,
                     }),
                 encodeBgvBatchPlaintext: (
                     input,
