@@ -64,7 +64,6 @@ export type SetupContributionAssembly = Readonly<
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash | null;
         readonly aggregateThresholdShareRoot: ProtocolHash | null;
-        readonly aggregateOpeningRoot: ProtocolHash | null;
         readonly localStateRoot: ProtocolHash | null;
         readonly localStateDeletionReceiptRoot: ProtocolHash | null;
         readonly publicKeyShareRoot: ProtocolHash | null;
@@ -105,6 +104,9 @@ const forbiddenContributionFieldNames = new Set([
     'coefficientMessage',
     'randomnessByColumn',
     'shareValues',
+    'aggregateOpening',
+    'aggregateOpeningColumns',
+    'openingColumnsDecimal',
     'carryWitnessesDecimal',
     'privateEnvelope',
     'privateEnvelopes',
@@ -451,8 +453,6 @@ export const createSetupContributionAssembly = (
             null,
         aggregateThresholdShareRoot:
             input.localStateCommitment?.aggregateThresholdShareRoot ?? null,
-        aggregateOpeningRoot:
-            input.localStateCommitment?.aggregateOpeningRoot ?? null,
         localStateRoot: input.localStateCommitment?.localStateRoot ?? null,
         localStateDeletionReceiptRoot:
             input.localStateCommitment?.deletionReceiptRoot ?? null,

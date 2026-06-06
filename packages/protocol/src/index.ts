@@ -30,6 +30,14 @@ export {
     publicKeyShareProofVerificationStatus,
 } from './setup/public-key-share-records.js';
 export {
+    createGaloisKeyShareBatches,
+    createRelinearizationKeyShareRounds,
+    galoisProofModelStatus,
+    galoisProofVerificationStatus,
+    relinearizationProofModelStatus,
+    relinearizationProofVerificationStatus,
+} from './setup/evaluation-key-proof-records.js';
+export {
     createEvaluatorKeySchedule,
     createRelinearizationLevelSchedule,
     createRequiredGaloisSet,
@@ -97,7 +105,23 @@ export type {
     PrivateVssMailboxDeliverySet,
     PrivateVssMailboxDeliverySetInput,
     PrivateVssMailboxRecipient,
+    PrivateVssShareProofFactory,
+    PrivateVssShareProofFactoryInput,
 } from './setup/private-vss-mailbox-delivery.js';
+export type {
+    EvaluationKeyProofCommonInput,
+    GaloisKeyShareBatch,
+    GaloisKeyShareBatchContribution,
+    GaloisKeyShareBatchesInput,
+    GaloisKeyShareRootReference,
+    RelinearizationKeyShareRoundOneRecord,
+    RelinearizationKeyShareRoundTwoRecord,
+    RelinearizationKeyShareRounds,
+    RelinearizationKeyShareRoundsInput,
+    RelinearizationRoundOneContribution,
+    RelinearizationRoundTwoContribution,
+    SameSecretProofReference,
+} from './setup/evaluation-key-proof-records.js';
 export type {
     EvaluatorKeySchedule,
     EvaluatorKeyScheduleInput,

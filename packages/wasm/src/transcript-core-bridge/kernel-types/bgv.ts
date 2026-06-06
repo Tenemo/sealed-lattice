@@ -486,17 +486,15 @@ export type BgvPrivateVssShareEnvelopeVerification = {
     readonly ringDegreeStatus?: 'profile-ring' | 'development-reduced-ring';
     readonly verifiedRnsLimbCount?: number;
     readonly verifiedShamirCoefficientCommitmentCount?: number;
-    readonly verifiedAggregateOpeningCount?: number;
+    readonly verifiedPrivateVssShareProofCount?: number;
     readonly limbVerifications: readonly {
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
         readonly ringDegree: number;
         readonly coefficientCommitmentRoots: readonly ProtocolHash[];
         readonly shareValuesHash: ProtocolHash;
-        readonly carryWitnessesHash: ProtocolHash;
-        readonly combinedCommitmentRoot: ProtocolHash;
-        readonly homomorphicRandomnessBound: number;
-        readonly maxCarryWitnessDecimal: string;
+        readonly privateVssShareProofHash: ProtocolHash;
+        readonly proofStatementRoot: ProtocolHash;
         readonly limbVerificationRoot: ProtocolHash;
     }[];
     readonly refusedObjects: readonly {

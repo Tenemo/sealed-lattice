@@ -73,31 +73,9 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
             storageKeyBytesHex: storageInputBase.storageKeyBytesHex,
             aeadNonceBytesHex: '33'.repeat(12),
         });
-    const sealedAggregateOpening = await encryptLocalTrusteeSetupSealedMaterial(
-        {
-            materialClass: 'aggregate-threshold-opening-sealed',
-            materialPlaintext: {
-                objectType: 'LocalTrusteeAggregateThresholdOpeningMaterial',
-                objectVersion: 1,
-                trusteeIdentity: storageInputBase.trusteeIdentity,
-                trusteeRosterPosition: storageInputBase.trusteeRosterPosition,
-                thresholdShareCommitmentRecipientRoot:
-                    storageInputBase.thresholdShareCommitmentRecipientRoot,
-                openingColumnsDecimal: [['10', '-11', '12']],
-            },
-            setupContext,
-            trusteeIdentity: storageInputBase.trusteeIdentity,
-            trusteeRosterPosition: storageInputBase.trusteeRosterPosition,
-            thresholdShareCommitmentRecipientRoot:
-                storageInputBase.thresholdShareCommitmentRecipientRoot,
-            storageKeyBytesHex: storageInputBase.storageKeyBytesHex,
-            aeadNonceBytesHex: '44'.repeat(12),
-        },
-    );
     const storageInput = {
         ...storageInputBase,
         aggregateThresholdShareRoot: sealedAggregateThresholdShare.materialRoot,
-        aggregateOpeningRoot: sealedAggregateOpening.materialRoot,
     } as const;
     const plaintext = {
         objectType: 'LocalTrusteeSetupStateSealedPayload',
@@ -114,7 +92,6 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
             storageInput.thresholdShareCommitmentRecipientRoot,
         sealedAggregateThresholdShare:
             sealedAggregateThresholdShare.sealedMaterial,
-        sealedAggregateOpening: sealedAggregateOpening.sealedMaterial,
         issuedVssAcceptanceRoots: [storageInput.issuedVssAcceptanceRoot],
         issuedVssComplaintRoots: storageInput.issuedVssComplaintRoots,
     } as const;

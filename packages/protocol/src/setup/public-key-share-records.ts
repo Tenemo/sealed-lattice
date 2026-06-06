@@ -91,9 +91,9 @@ export type PublicKeyShareProofRecord = Readonly<
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly rnsLimbCount: number;
         readonly noWrapRelation: 'PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 over lifted integers';
-        readonly errorSupport: 'accepted-error-support-pending-certificate';
-        readonly carryWitnessStatus: 'bounded-lifted-carry-proof-pending';
-        readonly proofBytesStatus: 'not-accepted-until-setup-proof-verifier';
+        readonly errorSupport: 'checked-by-public-key-share-lnp-proof-set';
+        readonly carryWitnessStatus: 'checked-by-public-key-share-lnp-proof-set';
+        readonly proofBytesStatus: 'supplied-by-public-key-share-lnp-proof-set';
         readonly publicKeyShareProofRoot: ProtocolHash;
     }
 >;
@@ -523,9 +523,9 @@ export const createPublicKeyShareProofSet = (
                 rnsLimbCount: input.qSharePrimes.length,
                 noWrapRelation:
                     'PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 over lifted integers',
-                errorSupport: 'accepted-error-support-pending-certificate',
-                carryWitnessStatus: 'bounded-lifted-carry-proof-pending',
-                proofBytesStatus: 'not-accepted-until-setup-proof-verifier',
+                errorSupport: 'checked-by-public-key-share-lnp-proof-set',
+                carryWitnessStatus: 'checked-by-public-key-share-lnp-proof-set',
+                proofBytesStatus: 'supplied-by-public-key-share-lnp-proof-set',
             } as const satisfies Omit<
                 PublicKeyShareProofRecord,
                 'publicKeyShareProofRoot'

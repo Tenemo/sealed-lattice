@@ -22,8 +22,7 @@ const aesGcmTagBitLength = 128;
 type JsonRecord = Record<string, unknown>;
 
 export type LocalTrusteeSetupStateSealedMaterialClass =
-    | 'aggregate-threshold-share-sealed'
-    | 'aggregate-threshold-opening-sealed';
+    'aggregate-threshold-share-sealed';
 
 export type EncryptedLocalTrusteeSetupMaterial = Readonly<
     JsonRecord & {
@@ -71,7 +70,6 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
         readonly deviceEpoch: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
         readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
-        readonly sealedAggregateOpening: LocalTrusteeSetupStateSealedMaterial;
         readonly issuedVssAcceptanceRoots: readonly ProtocolHash[];
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
     }
@@ -92,7 +90,6 @@ export type LocalTrusteeStateStorageEncryptionInput = {
             readonly trusteeRosterPosition: number;
             readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
             readonly aggregateThresholdShareRoot: ProtocolHash;
-            readonly aggregateOpeningRoot: ProtocolHash;
             readonly issuedVssAcceptanceRoot: ProtocolHash;
             readonly issuedVssComplaintRoots: readonly ProtocolHash[];
             readonly localStateRoot: ProtocolHash;
@@ -181,6 +178,9 @@ const forbiddenLocalStateFieldNames = new Set([
     'coefficientMessage',
     'randomnessByColumn',
     'shareValues',
+    'aggregateOpening',
+    'aggregateOpeningColumns',
+    'openingColumnsDecimal',
     'carryWitnessesDecimal',
     'privateEnvelope',
     'privateEnvelopes',
@@ -208,7 +208,6 @@ const localTrusteeSealedPayloadFieldNames = [
     'deviceEpoch',
     'thresholdShareCommitmentRecipientRoot',
     'sealedAggregateThresholdShare',
-    'sealedAggregateOpening',
     'issuedVssAcceptanceRoots',
     'issuedVssComplaintRoots',
 ] as const;
@@ -600,10 +599,6 @@ const assertCommitmentHeader = (
         'localStateCommitment.aggregateThresholdShareRoot',
     );
     assertProtocolHash(
-        localStateCommitment.aggregateOpeningRoot,
-        'localStateCommitment.aggregateOpeningRoot',
-    );
-    assertProtocolHash(
         localStateCommitment.issuedVssAcceptanceRoot,
         'localStateCommitment.issuedVssAcceptanceRoot',
     );
@@ -936,14 +931,6 @@ const validateLocalStatePlaintext = (
         setupContext,
         localStateCommitment,
         'localStatePlaintext.sealedAggregateThresholdShare',
-    );
-    validateSealedMaterial(
-        plaintext.sealedAggregateOpening,
-        'aggregate-threshold-opening-sealed',
-        localStateCommitment.aggregateOpeningRoot,
-        setupContext,
-        localStateCommitment,
-        'localStatePlaintext.sealedAggregateOpening',
     );
     const issuedVssAcceptanceRoots = protocolHashArrayField(
         plaintext,

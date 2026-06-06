@@ -1,53 +1,28 @@
 use super::*;
 
 #[test]
-fn private_vss_share_envelope_verifier_accepts_all_q_share_limb_openings() {
+fn private_vss_share_envelope_verifier_refuses_plaintext_aggregate_openings() {
     let request = private_vss_share_envelope_request(8);
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], true);
+    assert_eq!(result["ok"], false);
     assert_eq!(result["operation"], "verifyPrivateVssShareEnvelope");
-    assert_eq!(result["verifierStatus"], "accepted");
-    assert_eq!(result["ringDegree"], 8);
-    assert_eq!(result["ringDegreeStatus"], "development-reduced-ring");
+    assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
-        result["verifiedRnsLimbCount"],
-        serde_json::json!(DATA_PRIMES.len())
+        result["refusedObjects"][0]["reasonCode"],
+        "privateVssEnvelopeLeaksAggregateOpening"
     );
-    assert_eq!(
-        result["verifiedShamirCoefficientCommitmentCount"],
-        serde_json::json!(DATA_PRIMES.len() * 4)
-    );
-    assert_eq!(
-        result["verifiedAggregateOpeningCount"],
-        serde_json::json!(DATA_PRIMES.len())
-    );
-    assert_eq!(
-        result["limbVerifications"]
-            .as_array()
-            .expect("limb verifications")
-            .len(),
-        DATA_PRIMES.len()
-    );
-    assert!(
-        result["privateEnvelopeHash"]
-            .as_str()
-            .is_some_and(|hash| hash.len() == 128)
-    );
-    assert!(
-        result["localVerificationRoot"]
-            .as_str()
-            .is_some_and(|hash| hash.len() == 128)
-    );
+    assert_eq!(result["privateEnvelopeHash"], serde_json::Value::Null);
+    assert_eq!(result["localVerificationRoot"], serde_json::Value::Null);
 }
 
 #[test]
-fn private_vss_share_envelope_verifier_refuses_tampered_share_values() {
-    let mut request = private_vss_share_envelope_request(8);
-    request["privateEnvelope"]["rnsShareOpenings"][0]["shareValues"][0] =
-        serde_json::json!(DATA_PRIMES[0] - 1);
+fn private_vss_share_envelope_verifier_refuses_plaintext_carry_witnesses() {
+    let mut request = proof_shaped_private_vss_share_envelope_request(8);
+    request["privateEnvelope"]["rnsShareOpenings"][0]["carryWitnessesDecimal"] =
+        serde_json::json!(["0"]);
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
@@ -56,15 +31,13 @@ fn private_vss_share_envelope_verifier_refuses_tampered_share_values() {
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeInvalidOpening"
+        "privateVssEnvelopeLeaksCarryWitness"
     );
 }
 
 #[test]
-fn private_vss_share_envelope_verifier_refuses_tampered_aggregate_opening() {
-    let mut request = private_vss_share_envelope_request(8);
-    request["privateEnvelope"]["rnsShareOpenings"][0]["aggregateOpening"]["openingColumns"][0][0] =
-        serde_json::json!(9);
+fn private_vss_share_envelope_verifier_requires_accepted_private_share_proof_verifier() {
+    let request = proof_shaped_private_vss_share_envelope_request(8);
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
@@ -73,7 +46,7 @@ fn private_vss_share_envelope_verifier_refuses_tampered_aggregate_opening() {
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeInvalidOpening"
+        "privateVssShareProofVerifierMissing"
     );
 }
 
@@ -374,6 +347,58 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "dealerCoefficientCommitmentMaterialRecords": dealer_coefficient_commitment_material_records,
         "privateEnvelope": private_envelope,
     })
+}
+
+fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
+    let mut request = private_vss_share_envelope_request(ring_degree);
+    let rns_share_openings = request["privateEnvelope"]["rnsShareOpenings"]
+        .as_array_mut()
+        .expect("private envelope limb openings");
+    for (rns_limb_index, limb_opening) in rns_share_openings.iter_mut().enumerate() {
+        let limb_object = limb_opening
+            .as_object_mut()
+            .expect("private envelope limb opening object");
+        limb_object.remove("aggregateOpening");
+        limb_object.remove("carryWitnessesDecimal");
+        let proof_statement_root = derive_protocol_hash(
+            "PrivateVssLocalVerificationRoot",
+            &serde_json::json!({
+                "fixture": "private-vss-share-proof-statement",
+                "rnsLimbIndex": rns_limb_index,
+            }),
+        )
+        .expect("proof statement root");
+        let proof_material_root = derive_protocol_hash(
+            "PrivateVssLocalVerificationRoot",
+            &serde_json::json!({
+                "fixture": "private-vss-share-proof-material",
+                "rnsLimbIndex": rns_limb_index,
+            }),
+        )
+        .expect("proof material root");
+        let proof_bytes_hash = derive_protocol_hash(
+            "PrivateVssLocalVerificationRoot",
+            &serde_json::json!({
+                "fixture": "private-vss-share-proof-bytes",
+                "rnsLimbIndex": rns_limb_index,
+            }),
+        )
+        .expect("proof bytes hash");
+        limb_object.insert(
+            "privateVssShareProof".to_string(),
+            serde_json::json!({
+                "objectType": "PrivateVssShareProof",
+                "objectVersion": 1,
+                "proofProfileId": "sealed-lattice-private-vss-share-proof-lnp-v1",
+                "proofMaterialRoot": proof_material_root,
+                "proofBytesHash": proof_bytes_hash,
+                "proofStatementRoot": proof_statement_root,
+                "proofVerificationStatus": "verifier-required-not-implemented",
+            }),
+        );
+    }
+
+    request
 }
 
 fn coefficient_message_fixture(

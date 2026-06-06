@@ -39,6 +39,9 @@ const FORBIDDEN_LOCAL_STATE_FIELD_NAMES: &[&str] = &[
     "coefficientMessage",
     "randomnessByColumn",
     "shareValues",
+    "aggregateOpening",
+    "aggregateOpeningColumns",
+    "openingColumnsDecimal",
     "carryWitnessesDecimal",
     "privateEnvelope",
     "privateEnvelopes",
@@ -52,7 +55,6 @@ const DELETED_MATERIAL_CLASSES: &[&str] = &[
 
 const RETAINED_MATERIAL_CLASSES: &[&str] = &[
     "aggregate-threshold-share-sealed",
-    "aggregate-threshold-opening-sealed",
     "issued-vss-acceptance-roots",
     "issued-vss-complaint-roots",
     "setup-context",
@@ -93,7 +95,6 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
     for field_name in [
         "thresholdShareCommitmentRecipientRoot",
         "aggregateThresholdShareRoot",
-        "aggregateOpeningRoot",
         "issuedVssAcceptanceRoot",
     ] {
         validate_hash_string(
@@ -233,7 +234,6 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
             "trusteePoint",
             "thresholdShareCommitmentRecipientRoot",
             "aggregateThresholdShareRoot",
-            "aggregateOpeningRoot",
             "issuedVssAcceptanceRoot",
             "issuedVssComplaintRoots",
             "deletionReceiptRoot",

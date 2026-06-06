@@ -165,7 +165,6 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         ],
         "retainedMaterialClasses": [
             "aggregate-threshold-share-sealed",
-            "aggregate-threshold-opening-sealed",
             "issued-vss-acceptance-roots",
             "issued-vss-complaint-roots",
             "setup-context"
@@ -192,7 +191,6 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "trusteePoint": trustee_point,
         "thresholdShareCommitmentRecipientRoot": valid_hash('1'),
         "aggregateThresholdShareRoot": valid_hash('2'),
-        "aggregateOpeningRoot": valid_hash('3'),
         "issuedVssAcceptanceRoot": valid_hash('4'),
         "issuedVssComplaintRoots": [valid_hash('5')],
         "deletionReceiptRoot": deletion_receipt["deletionReceiptRoot"],

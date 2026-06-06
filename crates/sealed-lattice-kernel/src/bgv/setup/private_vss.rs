@@ -16,18 +16,15 @@ use super::{
         COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash, accepted_setup_profile_hash,
     },
     commitment::{
-        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SetupCommitmentValue,
-        parse_setup_commitment_full_value, setup_commitment_profile_hash, setup_commitment_root,
+        SetupCommitmentValue, parse_setup_commitment_full_value, setup_commitment_profile_hash,
+        setup_commitment_root,
     },
-    vss::{
-        CarryAwareVssAggregateCommitmentOpeningInput, carry_aware_vss_share_relation_profile_hash,
-        verify_carry_aware_vss_aggregate_commitment_opening,
-    },
+    vss::carry_aware_vss_share_relation_profile_hash,
 };
 
 const PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "PrivateVssShareEnvelope";
 const PRIVATE_VSS_LIMB_OPENING_OBJECT_TYPE: &str = "PrivateVssShareLimbOpening";
-const PRIVATE_VSS_AGGREGATE_OPENING_OBJECT_TYPE: &str = "PrivateVssAggregateOpening";
+const PRIVATE_VSS_SHARE_PROOF_OBJECT_TYPE: &str = "PrivateVssShareProof";
 const VSS_DEALER_COMMITMENT_OBJECT_TYPE: &str = "VssDealerCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
 const FIRST_PROFILE_DECRYPTION_THRESHOLD: usize = 4;
@@ -92,10 +89,8 @@ struct LimbVerification {
     ring_degree: usize,
     coefficient_commitment_roots: Vec<String>,
     share_values_hash: String,
-    carry_witnesses_hash: String,
-    combined_commitment_root: String,
-    homomorphic_randomness_bound: i128,
-    max_carry_witness_decimal: String,
+    private_vss_share_proof_hash: String,
+    proof_statement_root: String,
     limb_verification_root: String,
 }
 
@@ -296,7 +291,7 @@ fn verify_private_vss_share_envelope_inner(
     response["verifiedRnsLimbCount"] = json!(DATA_PRIMES.len());
     response["verifiedShamirCoefficientCommitmentCount"] =
         json!(DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD);
-    response["verifiedAggregateOpeningCount"] = json!(DATA_PRIMES.len());
+    response["verifiedPrivateVssShareProofCount"] = json!(DATA_PRIMES.len());
 
     Ok(Ok(response))
 }
@@ -843,6 +838,17 @@ fn verify_private_envelope_header(
             object_path,
         )));
     }
+    if let Some((reason_code, field_name, object_path)) =
+        find_private_vss_plaintext_witness_leakage(private_envelope, "privateEnvelope")
+    {
+        return Ok(Err(PrivateVssRefusal::new(
+            reason_code,
+            format!(
+                "private VSS envelope must not disclose {field_name}; it must be a proof witness"
+            ),
+            object_path,
+        )));
+    }
     if let Err(refusal) = reject_unexpected_fields(
         private_envelope,
         &[
@@ -1044,10 +1050,10 @@ fn verify_private_envelope_limbs(
 
 fn verify_private_envelope_limb(
     limb_opening: &Value,
-    public_matrix_seed_hash: &str,
+    _public_matrix_seed_hash: &str,
     dealer_binding: &DealerCommitmentBinding,
     coefficient_commitments: &BTreeMap<(usize, u64), CoefficientCommitmentBinding>,
-    envelope_binding: &PrivateEnvelopeBinding,
+    _envelope_binding: &PrivateEnvelopeBinding,
 ) -> CanonicalResult<Result<LimbVerification, PrivateVssRefusal>> {
     if limb_opening.get("objectType").and_then(Value::as_str)
         != Some(PRIVATE_VSS_LIMB_OPENING_OBJECT_TYPE)
@@ -1073,9 +1079,8 @@ fn verify_private_envelope_limb(
             "rnsLimbIndex",
             "rnsPrime",
             "shareValues",
-            "carryWitnessesDecimal",
             "coefficientCommitmentRoots",
-            "aggregateOpening",
+            "privateVssShareProof",
         ],
         "privateEnvelope.rnsShareOpenings",
     ) {
@@ -1119,22 +1124,12 @@ fn verify_private_envelope_limb(
         Ok(share_values) => share_values,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let carry_witnesses = match u128_vector_field(
-        limb_opening,
-        "carryWitnessesDecimal",
-        "privateEnvelope.rnsShareOpenings.carryWitnessesDecimal",
-        "privateVssCarryWitnessesMissing",
-        "private VSS limb opening must include carryWitnessesDecimal",
-    ) {
-        Ok(carry_witnesses) => carry_witnesses,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
     let ring_degree = share_values.len();
-    if ring_degree == 0 || carry_witnesses.len() != ring_degree {
+    if ring_degree == 0 {
         return Ok(Err(PrivateVssRefusal::new(
-            "privateVssShareCarryLengthMismatch",
-            "private VSS share and carry vectors must be non-empty and have the same length",
-            "privateEnvelope.rnsShareOpenings",
+            "privateVssShareValuesEmpty",
+            "private VSS share vector must be non-empty",
+            "privateEnvelope.rnsShareOpenings.shareValues",
         )));
     }
 
@@ -1156,7 +1151,6 @@ fn verify_private_envelope_limb(
         )));
     }
 
-    let mut coefficient_commitment_values = Vec::with_capacity(FIRST_PROFILE_DECRYPTION_THRESHOLD);
     for (shamir_coefficient_index, commitment_root) in
         coefficient_commitment_roots.iter().enumerate()
     {
@@ -1189,57 +1183,23 @@ fn verify_private_envelope_limb(
                 "dealerCoefficientCommitmentMaterialRecords.commitmentRoot",
             )));
         }
-        coefficient_commitment_values.push(material_binding.commitment.clone());
+        let _public_material_binding = &material_binding.commitment;
     }
 
-    let aggregate_opening = match object_field(
+    let private_vss_share_proof = match object_field(
         limb_opening,
-        "aggregateOpening",
-        "privateEnvelope.rnsShareOpenings.aggregateOpening",
-        "privateVssAggregateOpeningMissing",
-        "private VSS limb opening must include an aggregateOpening",
+        "privateVssShareProof",
+        "privateEnvelope.rnsShareOpenings.privateVssShareProof",
+        "privateVssShareProofMissing",
+        "private VSS limb opening must include a recipient-local zero-knowledge privateVssShareProof",
     ) {
-        Ok(aggregate_opening) => aggregate_opening,
+        Ok(private_vss_share_proof) => private_vss_share_proof,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let aggregate_opening_columns = match aggregate_opening_columns(aggregate_opening)? {
-        Ok(aggregate_opening_columns) => aggregate_opening_columns,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
+    if let Err(refusal) = verify_private_vss_share_proof_placeholder(private_vss_share_proof) {
+        return Ok(Err(refusal));
+    }
 
-    let recipient_roster_position = usize::try_from(envelope_binding.recipient_roster_position)
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "recipient roster position does not fit usize",
-            )
-        })?;
-    let opening_verification = match verify_carry_aware_vss_aggregate_commitment_opening(
-        CarryAwareVssAggregateCommitmentOpeningInput {
-            public_matrix_seed_hash,
-            coefficient_commitments: &coefficient_commitment_values,
-            recipient_roster_position,
-            share_values: &share_values,
-            carry_witnesses: &carry_witnesses,
-            aggregate_opening_columns: &aggregate_opening_columns,
-            modulus: rns_prime,
-            fresh_randomness_bound: SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
-        },
-    ) {
-        Ok(opening_verification) => opening_verification,
-        Err(error) => {
-            return Ok(Err(PrivateVssRefusal::new(
-                "privateVssEnvelopeInvalidOpening",
-                error.message,
-                "privateEnvelope.rnsShareOpenings",
-            )));
-        }
-    };
-
-    let carry_witnesses_decimal = carry_witnesses
-        .iter()
-        .map(u128::to_string)
-        .collect::<Vec<_>>();
     let share_values_hash = derive_protocol_hash(
         "PrivateVssLocalVerificationRoot",
         &json!({
@@ -1250,23 +1210,7 @@ fn verify_private_envelope_limb(
             "shareValues": share_values,
         }),
     )?;
-    let carry_witnesses_hash = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &json!({
-            "objectType": "PrivateVssCarryWitnessVector",
-            "objectVersion": 1,
-            "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
-            "carryWitnessesDecimal": carry_witnesses_decimal,
-        }),
-    )?;
-    let max_carry_witness_decimal = carry_witnesses
-        .iter()
-        .copied()
-        .max()
-        .unwrap_or(0)
-        .to_string();
-    let limb_record = json!({
+    let proof_statement_record = json!({
         "objectType": "PrivateVssLimbVerification",
         "objectVersion": 1,
         "rnsLimbIndex": rns_limb_index,
@@ -1274,26 +1218,16 @@ fn verify_private_envelope_limb(
         "ringDegree": ring_degree,
         "coefficientCommitmentRoots": coefficient_commitment_roots,
         "shareValuesHash": share_values_hash,
-        "carryWitnessesHash": carry_witnesses_hash,
-        "combinedCommitmentRoot": opening_verification.commitment_opening.commitment_root,
-        "homomorphicRandomnessBound": opening_verification.homomorphic_randomness_bound,
-        "maxCarryWitnessDecimal": max_carry_witness_decimal,
+        "privateVssShareProof": private_vss_share_proof,
     });
-    let limb_verification_root =
-        derive_protocol_hash("PrivateVssLocalVerificationRoot", &limb_record)?;
+    let _proof_statement_root =
+        derive_protocol_hash("PrivateVssLocalVerificationRoot", &proof_statement_record)?;
 
-    Ok(Ok(LimbVerification {
-        rns_limb_index,
-        rns_prime,
-        ring_degree,
-        coefficient_commitment_roots,
-        share_values_hash,
-        carry_witnesses_hash,
-        combined_commitment_root: opening_verification.commitment_opening.commitment_root,
-        homomorphic_randomness_bound: opening_verification.homomorphic_randomness_bound,
-        max_carry_witness_decimal,
-        limb_verification_root,
-    }))
+    Ok(Err(PrivateVssRefusal::new(
+        "privateVssShareProofVerifierMissing",
+        "private VSS recipient-local zero-knowledge proof verification is required before local acceptance; plaintext aggregate openings and carry witnesses are not accepted",
+        "privateEnvelope.rnsShareOpenings.privateVssShareProof",
+    )))
 }
 
 fn local_verification_record(
@@ -1376,7 +1310,7 @@ fn local_verification_record(
         "ringDegreeStatus": ring_degree_status,
         "verifiedRnsLimbCount": limb_verifications.len(),
         "verifiedShamirCoefficientCommitmentCount": limb_verifications.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD,
-        "verifiedAggregateOpeningCount": limb_verifications.len(),
+        "verifiedPrivateVssShareProofCount": limb_verifications.len(),
         "limbVerificationRoots": limb_verifications
             .iter()
             .map(|verification| verification.limb_verification_root.clone())
@@ -1391,10 +1325,8 @@ fn limb_verification_value(verification: LimbVerification) -> Value {
         "ringDegree": verification.ring_degree,
         "coefficientCommitmentRoots": verification.coefficient_commitment_roots,
         "shareValuesHash": verification.share_values_hash,
-        "carryWitnessesHash": verification.carry_witnesses_hash,
-        "combinedCommitmentRoot": verification.combined_commitment_root,
-        "homomorphicRandomnessBound": verification.homomorphic_randomness_bound,
-        "maxCarryWitnessDecimal": verification.max_carry_witness_decimal,
+        "privateVssShareProofHash": verification.private_vss_share_proof_hash,
+        "proofStatementRoot": verification.proof_statement_root,
         "limbVerificationRoot": verification.limb_verification_root,
     })
 }
@@ -1478,6 +1410,114 @@ fn find_private_vss_coefficient_leakage(
         }),
         _ => None,
     }
+}
+
+fn find_private_vss_plaintext_witness_leakage(
+    value: &Value,
+    object_path: &str,
+) -> Option<(&'static str, &'static str, String)> {
+    const FORBIDDEN_FIELD_NAMES: [(&str, &str); 4] = [
+        (
+            "aggregateOpening",
+            "privateVssEnvelopeLeaksAggregateOpening",
+        ),
+        (
+            "carryWitnessesDecimal",
+            "privateVssEnvelopeLeaksCarryWitness",
+        ),
+        ("carryWitnesses", "privateVssEnvelopeLeaksCarryWitness"),
+        (
+            "aggregateOpeningColumns",
+            "privateVssEnvelopeLeaksAggregateOpening",
+        ),
+    ];
+
+    match value {
+        Value::Object(fields) => {
+            for (field_name, field_value) in fields {
+                let field_path = format!("{object_path}.{field_name}");
+                if let Some((forbidden_field_name, reason_code)) = FORBIDDEN_FIELD_NAMES
+                    .iter()
+                    .copied()
+                    .find(|(forbidden_field_name, _reason_code)| field_name == forbidden_field_name)
+                {
+                    return Some((reason_code, forbidden_field_name, field_path));
+                }
+                if let Some(leakage) =
+                    find_private_vss_plaintext_witness_leakage(field_value, &field_path)
+                {
+                    return Some(leakage);
+                }
+            }
+            None
+        }
+        Value::Array(items) => items.iter().enumerate().find_map(|(item_index, item)| {
+            find_private_vss_plaintext_witness_leakage(item, &format!("{object_path}.{item_index}"))
+        }),
+        _ => None,
+    }
+}
+
+fn verify_private_vss_share_proof_placeholder(
+    private_vss_share_proof: &Value,
+) -> Result<(), PrivateVssRefusal> {
+    if private_vss_share_proof
+        .get("objectType")
+        .and_then(Value::as_str)
+        != Some(PRIVATE_VSS_SHARE_PROOF_OBJECT_TYPE)
+    {
+        return Err(PrivateVssRefusal::new(
+            "privateVssShareProofTypeMismatch",
+            "private VSS share proof objectType must be PrivateVssShareProof",
+            "privateEnvelope.rnsShareOpenings.privateVssShareProof.objectType",
+        ));
+    }
+    if private_vss_share_proof
+        .get("objectVersion")
+        .and_then(Value::as_u64)
+        != Some(1)
+    {
+        return Err(PrivateVssRefusal::new(
+            "privateVssShareProofVersionMismatch",
+            "private VSS share proof objectVersion must be 1",
+            "privateEnvelope.rnsShareOpenings.privateVssShareProof.objectVersion",
+        ));
+    }
+    reject_unexpected_fields(
+        private_vss_share_proof,
+        &[
+            "objectType",
+            "objectVersion",
+            "proofProfileId",
+            "proofMaterialRoot",
+            "proofBytesHash",
+            "proofStatementRoot",
+            "proofVerificationStatus",
+        ],
+        "privateEnvelope.rnsShareOpenings.privateVssShareProof",
+    )?;
+    for field_name in ["proofMaterialRoot", "proofBytesHash", "proofStatementRoot"] {
+        let hash = hash_string_field(
+            private_vss_share_proof,
+            field_name,
+            &format!("privateEnvelope.rnsShareOpenings.privateVssShareProof.{field_name}"),
+            "privateVssShareProofHashMissing",
+            format!("private VSS share proof must bind {field_name}"),
+        )?;
+        validate_hash_string(
+            hash,
+            &format!("privateEnvelope.rnsShareOpenings.privateVssShareProof.{field_name}"),
+        )
+        .map_err(|error| {
+            PrivateVssRefusal::new(
+                "privateVssShareProofHashMalformed",
+                error.message,
+                format!("privateEnvelope.rnsShareOpenings.privateVssShareProof.{field_name}"),
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 fn setup_context_field_names() -> [&'static str; 8] {
@@ -1631,86 +1671,6 @@ fn hash_vector_field(
         .collect()
 }
 
-fn u128_vector_field(
-    value: &Value,
-    field_name: &str,
-    object_path: &str,
-    reason_code: &'static str,
-    message: impl Into<String>,
-) -> Result<Vec<u128>, PrivateVssRefusal> {
-    let values = array_field(value, field_name, object_path, reason_code, message)?;
-    values
-        .iter()
-        .map(|value| match value {
-            Value::String(text) => text.parse::<u128>().map_err(|_| {
-                PrivateVssRefusal::new(
-                    reason_code,
-                    format!("{object_path} decimal string is malformed"),
-                    object_path,
-                )
-            }),
-            Value::Number(number) => number.as_u64().map(u128::from).ok_or_else(|| {
-                PrivateVssRefusal::new(
-                    reason_code,
-                    format!(
-                        "{object_path} must contain safe non-negative integers or decimal strings"
-                    ),
-                    object_path,
-                )
-            }),
-            _ => Err(PrivateVssRefusal::new(
-                reason_code,
-                format!("{object_path} must contain safe non-negative integers or decimal strings"),
-                object_path,
-            )),
-        })
-        .collect()
-}
-
-fn aggregate_opening_columns(
-    aggregate_opening: &Value,
-) -> CanonicalResult<Result<Vec<Vec<i128>>, PrivateVssRefusal>> {
-    if aggregate_opening.get("objectType").and_then(Value::as_str)
-        != Some(PRIVATE_VSS_AGGREGATE_OPENING_OBJECT_TYPE)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "privateVssAggregateOpeningTypeMismatch",
-            "private VSS aggregate opening objectType must be PrivateVssAggregateOpening",
-            "privateEnvelope.rnsShareOpenings.aggregateOpening.objectType",
-        )));
-    }
-    if aggregate_opening
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "privateVssAggregateOpeningVersionMismatch",
-            "private VSS aggregate opening objectVersion must be 1",
-            "privateEnvelope.rnsShareOpenings.aggregateOpening.objectVersion",
-        )));
-    }
-    if let Err(refusal) = reject_unexpected_fields(
-        aggregate_opening,
-        &["objectType", "objectVersion", "openingColumns"],
-        "privateEnvelope.rnsShareOpenings.aggregateOpening",
-    ) {
-        return Ok(Err(refusal));
-    }
-    Ok(
-        match i128_matrix_field(
-            aggregate_opening,
-            "openingColumns",
-            "privateEnvelope.rnsShareOpenings.aggregateOpening.openingColumns",
-            "privateVssAggregateOpeningColumnsMissing",
-            "private VSS aggregate opening must include openingColumns",
-        ) {
-            Ok(opening_columns) => Ok(opening_columns),
-            Err(refusal) => Err(refusal),
-        },
-    )
-}
-
 fn reject_unexpected_fields(
     value: &Value,
     allowed_fields: &[&str],
@@ -1735,40 +1695,6 @@ fn reject_unexpected_fields(
     }
 
     Ok(())
-}
-
-fn i128_matrix_field(
-    value: &Value,
-    field_name: &str,
-    object_path: &str,
-    reason_code: &'static str,
-    message: impl Into<String>,
-) -> Result<Vec<Vec<i128>>, PrivateVssRefusal> {
-    let columns = array_field(value, field_name, object_path, reason_code, message)?;
-    columns
-        .iter()
-        .map(|column| {
-            let Some(coefficients) = column.as_array() else {
-                return Err(PrivateVssRefusal::new(
-                    reason_code,
-                    format!("{object_path} must contain arrays of signed integers"),
-                    object_path,
-                ));
-            };
-            coefficients
-                .iter()
-                .map(|coefficient| {
-                    coefficient.as_i64().map(i128::from).ok_or_else(|| {
-                        PrivateVssRefusal::new(
-                            reason_code,
-                            format!("{object_path} must contain signed integers"),
-                            object_path,
-                        )
-                    })
-                })
-                .collect()
-        })
-        .collect()
 }
 
 fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {

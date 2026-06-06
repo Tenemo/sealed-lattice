@@ -280,7 +280,26 @@ describe('crypto primitive boundary', () => {
                 {
                     rnsLimbIndex: 0,
                     shareValues: [1, 2, 3],
-                    carryWitnessesDecimal: ['0', '0', '1'],
+                    privateVssShareProof: {
+                        objectType: 'PrivateVssShareProof',
+                        objectVersion: 1,
+                        proofProfileId:
+                            'sealed-lattice-private-vss-share-proof-lnp-v1',
+                        proofMaterialRoot: deriveProtocolHash(
+                            'PrivateVssShareEnvelopeHash',
+                            { proof: 'material-root' },
+                        ),
+                        proofBytesHash: deriveProtocolHash(
+                            'PrivateVssShareEnvelopeHash',
+                            { proof: 'bytes-hash' },
+                        ),
+                        proofStatementRoot: deriveProtocolHash(
+                            'PrivateVssShareEnvelopeHash',
+                            { proof: 'statement-root' },
+                        ),
+                        proofVerificationStatus:
+                            'verifier-required-not-implemented',
+                    },
                 },
             ],
         };
@@ -509,27 +528,8 @@ describe('crypto primitive boundary', () => {
                 storageKeyBytesHex,
                 aeadNonceBytesHex: '33'.repeat(12),
             });
-        const sealedAggregateOpening =
-            await encryptLocalTrusteeSetupSealedMaterial({
-                materialClass: 'aggregate-threshold-opening-sealed',
-                materialPlaintext: {
-                    objectType: 'LocalTrusteeAggregateThresholdOpeningMaterial',
-                    objectVersion: 1,
-                    trusteeIdentity: 'trustee-3',
-                    trusteeRosterPosition: 3,
-                    thresholdShareCommitmentRecipientRoot,
-                    openingColumnsDecimal: [['4', '-5', '6']],
-                },
-                setupContext,
-                trusteeIdentity: 'trustee-3',
-                trusteeRosterPosition: 3,
-                thresholdShareCommitmentRecipientRoot,
-                storageKeyBytesHex,
-                aeadNonceBytesHex: '44'.repeat(12),
-            });
         const aggregateThresholdShareRoot =
             sealedAggregateThresholdShare.materialRoot;
-        const aggregateOpeningRoot = sealedAggregateOpening.materialRoot;
         const localStateCommitment = {
             objectType: 'LocalTrusteeSetupStateCommitment',
             objectVersion: 1,
@@ -547,7 +547,6 @@ describe('crypto primitive boundary', () => {
             trusteeRosterPosition: 3,
             thresholdShareCommitmentRecipientRoot,
             aggregateThresholdShareRoot,
-            aggregateOpeningRoot,
             issuedVssAcceptanceRoot,
             issuedVssComplaintRoots,
         } as const;
@@ -565,9 +564,6 @@ describe('crypto primitive boundary', () => {
             thresholdShareCommitmentRecipientRoot,
             sealedAggregateThresholdShare: {
                 ...sealedAggregateThresholdShare.sealedMaterial,
-            },
-            sealedAggregateOpening: {
-                ...sealedAggregateOpening.sealedMaterial,
             },
             issuedVssAcceptanceRoots: [issuedVssAcceptanceRoot],
             issuedVssComplaintRoots,

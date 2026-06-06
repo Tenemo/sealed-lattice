@@ -44,6 +44,22 @@ export type PrivateVssMailboxRecipient = {
     readonly mailboxPublicKeyBytesHex: string;
 };
 
+export type PrivateVssShareProofFactoryInput = {
+    readonly setupContext: PrivateVssSetupContext;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly dealerContributionState: PrivateVssDealerContributionState;
+    readonly recipient: PrivateVssMailboxRecipient;
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly ringDegree: number;
+    readonly shareValues: readonly number[];
+    readonly coefficientCommitmentRoots: readonly ProtocolHash[];
+};
+
+export type PrivateVssShareProofFactory = (
+    input: PrivateVssShareProofFactoryInput,
+) => JsonRecord;
+
 export type PrivateVssMailboxDeliveryKernel = {
     readonly deriveProtocolHash: (input: {
         readonly namespace: string;
@@ -80,6 +96,7 @@ export type PrivateVssMailboxDeliverySetInput = {
     readonly participantCount: number;
     readonly deliveryPhaseNumber: number;
     readonly verificationPhaseNumber: number;
+    readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
     readonly dealerContributionStates: readonly PrivateVssDealerContributionState[];
     readonly recipients: readonly PrivateVssMailboxRecipient[];
 };
@@ -185,15 +202,12 @@ const assertFullRosterPositions = (
     });
 };
 
-const shareValuesAndCarries = (
+const shareValuesForRecipient = (
     coefficientMessagesByShamirIndex: readonly (readonly number[])[],
     recipientRosterPosition: number,
     rnsPrime: number,
     ringDegree: number,
-): {
-    readonly shareValues: readonly number[];
-    readonly carryWitnessesDecimal: readonly string[];
-} => {
+): readonly number[] => {
     const trusteePoint = BigInt(recipientRosterPosition + 1);
     const trusteePointPowers: bigint[] = [];
     let trusteePointPower = 1n;
@@ -203,7 +217,6 @@ const shareValuesAndCarries = (
     }
     const rnsPrimeWide = BigInt(rnsPrime);
     const shareValues: number[] = [];
-    const carryWitnessesDecimal: string[] = [];
     for (
         let coefficientPosition = 0;
         coefficientPosition < ringDegree;
@@ -228,75 +241,9 @@ const shareValuesAndCarries = (
             0n,
         );
         shareValues.push(Number(unreducedValue % rnsPrimeWide));
-        carryWitnessesDecimal.push((unreducedValue / rnsPrimeWide).toString());
     }
 
-    return { shareValues, carryWitnessesDecimal };
-};
-
-const aggregateOpeningColumns = (
-    coefficientOpenings: readonly PrivateVssCoefficientOpeningState[],
-    recipientRosterPosition: number,
-    ringDegree: number,
-): readonly (readonly number[])[] => {
-    const trusteePoint = BigInt(recipientRosterPosition + 1);
-    const trusteePointPowers: bigint[] = [];
-    let trusteePointPower = 1n;
-    for (const _opening of coefficientOpenings) {
-        trusteePointPowers.push(trusteePointPower);
-        trusteePointPower *= trusteePoint;
-    }
-    const firstOpening = coefficientOpenings[0];
-    if (firstOpening === undefined) {
-        throw new Error('VSS coefficient openings must be non-empty.');
-    }
-    const randomnessWidth = firstOpening.randomnessByColumn.length;
-    if (randomnessWidth === 0) {
-        throw new Error('VSS coefficient opening randomness width is empty.');
-    }
-
-    return Array.from({ length: randomnessWidth }, (_unused, columnIndex) =>
-        Array.from(
-            { length: ringDegree },
-            (_unusedCoefficient, coefficientPosition) => {
-                const aggregateValue = coefficientOpenings.reduce(
-                    (accumulatedValue, opening, shamirCoefficientIndex) => {
-                        const randomnessColumn =
-                            opening.randomnessByColumn[columnIndex];
-                        if (randomnessColumn === undefined) {
-                            throw new Error(
-                                'VSS coefficient opening randomness width mismatch.',
-                            );
-                        }
-                        const randomnessValue =
-                            randomnessColumn[coefficientPosition];
-                        if (randomnessValue === undefined) {
-                            throw new Error(
-                                'VSS coefficient opening randomness length must match ringDegree.',
-                            );
-                        }
-
-                        return (
-                            accumulatedValue +
-                            BigInt(randomnessValue) *
-                                trusteePointPowers[shamirCoefficientIndex]
-                        );
-                    },
-                    0n,
-                );
-                if (
-                    aggregateValue < BigInt(Number.MIN_SAFE_INTEGER) ||
-                    aggregateValue > BigInt(Number.MAX_SAFE_INTEGER)
-                ) {
-                    throw new Error(
-                        'VSS aggregate opening value exceeds JavaScript safe integer range.',
-                    );
-                }
-
-                return Number(aggregateValue);
-            },
-        ),
-    );
+    return shareValues;
 };
 
 const privateEnvelopeAad = (
@@ -371,7 +318,7 @@ const privateEnvelope = (
                     return opening.coefficientMessage;
                 },
             );
-            const shareOpening = shareValuesAndCarries(
+            const shareValues = shareValuesForRecipient(
                 coefficientMessagesByShamirIndex,
                 recipient.recipientRosterPosition,
                 rnsPrime,
@@ -380,25 +327,31 @@ const privateEnvelope = (
             const coefficientCommitmentRoots = coefficientOpenings.map(
                 (opening) => opening.commitmentRoot,
             );
-            const aggregateOpening = {
-                objectType: 'PrivateVssAggregateOpening',
-                objectVersion: 1,
-                openingColumns: aggregateOpeningColumns(
-                    coefficientOpenings,
-                    recipient.recipientRosterPosition,
-                    input.ringDegree,
-                ),
-            } as const;
+            if (input.privateVssShareProofFactory === undefined) {
+                throw new Error(
+                    'Private VSS mailbox delivery requires recipient-local zero-knowledge privateVssShareProof generation; plaintext aggregate openings and carry witnesses are refused.',
+                );
+            }
+            const privateVssShareProof = input.privateVssShareProofFactory({
+                setupContext: input.setupContext,
+                publicMatrixSeedHash: input.publicMatrixSeedHash,
+                dealerContributionState: dealerState,
+                recipient,
+                rnsLimbIndex,
+                rnsPrime,
+                ringDegree: input.ringDegree,
+                shareValues,
+                coefficientCommitmentRoots,
+            });
 
             return {
                 objectType: 'PrivateVssShareLimbOpening',
                 objectVersion: 1,
                 rnsLimbIndex,
                 rnsPrime,
-                shareValues: shareOpening.shareValues,
-                carryWitnessesDecimal: shareOpening.carryWitnessesDecimal,
+                shareValues,
                 coefficientCommitmentRoots,
-                aggregateOpening,
+                privateVssShareProof,
             };
         },
     );

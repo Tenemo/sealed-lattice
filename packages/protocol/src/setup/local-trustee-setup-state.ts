@@ -31,7 +31,6 @@ export const deletedLocalTrusteeSetupMaterialClasses = [
 
 export const retainedLocalTrusteeSetupMaterialClasses = [
     'aggregate-threshold-share-sealed',
-    'aggregate-threshold-opening-sealed',
     'issued-vss-acceptance-roots',
     'issued-vss-complaint-roots',
     'setup-context',
@@ -43,7 +42,6 @@ export type LocalTrusteeSetupStateCommitmentInput = {
     readonly trusteeRosterPosition: number;
     readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
     readonly aggregateThresholdShareRoot: ProtocolHash;
-    readonly aggregateOpeningRoot: ProtocolHash;
     readonly issuedVssAcceptanceRoot: ProtocolHash;
     readonly issuedVssComplaintRoots: readonly ProtocolHash[];
 };
@@ -75,7 +73,6 @@ export type GeneratedLocalTrusteeSetupStateInput = Readonly<{
     readonly storageKeyBytesHex: string;
     readonly localStateAeadNonceBytesHex?: string;
     readonly sealedAggregateThresholdShareAeadNonceBytesHex?: string;
-    readonly sealedAggregateOpeningAeadNonceBytesHex?: string;
 }>;
 
 export type GeneratedLocalTrusteeSetupStateResult =
@@ -131,7 +128,6 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly trusteePoint: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
         readonly aggregateThresholdShareRoot: ProtocolHash;
-        readonly aggregateOpeningRoot: ProtocolHash;
         readonly issuedVssAcceptanceRoot: ProtocolHash;
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly deletionReceiptRoot: ProtocolHash;
@@ -173,9 +169,31 @@ const forbiddenLocalStateFieldNames = new Set([
     'coefficientMessage',
     'randomnessByColumn',
     'shareValues',
+    'aggregateOpening',
+    'aggregateOpeningColumns',
+    'openingColumnsDecimal',
     'carryWitnessesDecimal',
     'privateEnvelope',
     'privateEnvelopes',
+]);
+
+const forbiddenVerifiedPrivateVssEnvelopeFieldNames = new Set([
+    'rawSecret',
+    'rawSecretShare',
+    'rawVssOpening',
+    'rawShamirShare',
+    'rawShamirShares',
+    'rawShare',
+    'rawShares',
+    'proofWitness',
+    'proofWitnesses',
+    'coefficientMessage',
+    'randomnessByColumn',
+    'aggregateOpening',
+    'aggregateOpeningColumns',
+    'openingColumnsDecimal',
+    'carryWitnessesDecimal',
+    'coefficientOpenings',
 ]);
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
@@ -225,12 +243,6 @@ const jsonRecordArray = (
     );
 };
 
-const objectField = (
-    value: JsonRecord,
-    fieldName: string,
-    objectPath: string,
-): JsonRecord => jsonRecord(value[fieldName], `${objectPath}.${fieldName}`);
-
 const stringField = (
     value: JsonRecord,
     fieldName: string,
@@ -279,19 +291,6 @@ const nonNegativeIntegerField = (
     return fieldValue;
 };
 
-const arrayField = (
-    value: JsonRecord,
-    fieldName: string,
-    objectPath: string,
-): readonly unknown[] => {
-    const fieldValue = value[fieldName];
-    if (!Array.isArray(fieldValue)) {
-        throw new TypeError(`${objectPath}.${fieldName} must be an array.`);
-    }
-
-    return fieldValue;
-};
-
 const assertSetupContextBinding = (
     setupContext: CollectiveBgvSetupContext,
     value: JsonRecord,
@@ -329,6 +328,35 @@ export const collectForbiddenLocalTrusteeSetupStateFieldPaths = (
         }
 
         return collectForbiddenLocalTrusteeSetupStateFieldPaths(
+            fieldValue,
+            fieldPath,
+        );
+    });
+};
+
+const collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths = (
+    value: unknown,
+    objectPath = 'verifiedPrivateVssShareEnvelopes',
+): string[] => {
+    if (Array.isArray(value)) {
+        return value.flatMap((item, itemIndex) =>
+            collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths(
+                item,
+                `${objectPath}.${String(itemIndex)}`,
+            ),
+        );
+    }
+    if (typeof value !== 'object' || value === null) {
+        return [];
+    }
+
+    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
+        const fieldPath = `${objectPath}.${fieldName}`;
+        if (forbiddenVerifiedPrivateVssEnvelopeFieldNames.has(fieldName)) {
+            return [fieldPath];
+        }
+
+        return collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths(
             fieldValue,
             fieldPath,
         );
@@ -379,7 +407,6 @@ const validateInput = (input: LocalTrusteeSetupStateCommitmentInput): void => {
         input.aggregateThresholdShareRoot,
         'aggregateThresholdShareRoot',
     );
-    assertProtocolHash(input.aggregateOpeningRoot, 'aggregateOpeningRoot');
     assertProtocolHash(
         input.issuedVssAcceptanceRoot,
         'issuedVssAcceptanceRoot',
@@ -427,7 +454,6 @@ export const createLocalTrusteeSetupStateCommitment = (
         thresholdShareCommitmentRecipientRoot:
             input.thresholdShareCommitmentRecipientRoot,
         aggregateThresholdShareRoot: input.aggregateThresholdShareRoot,
-        aggregateOpeningRoot: input.aggregateOpeningRoot,
         issuedVssAcceptanceRoot: input.issuedVssAcceptanceRoot,
         issuedVssComplaintRoots: input.issuedVssComplaintRoots,
         deletionReceiptRoot: deletionReceipt.deletionReceiptRoot,
@@ -672,7 +698,6 @@ type AggregateLimbAccumulator = {
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     shareValues: bigint[];
-    aggregateOpeningColumns: bigint[][];
 };
 
 const sourcePrivateEnvelopeReferences = (
@@ -740,10 +765,19 @@ const aggregateVerifiedPrivateVssMaterial = (
     envelopeReferences: readonly PrivateVssEnvelopeVerificationReference[],
 ): Readonly<{
     readonly aggregateThresholdShareMaterial: JsonRecord;
-    readonly aggregateOpeningMaterial: JsonRecord;
 }> => {
     const privateEnvelopeByHash = new Map<ProtocolHash, JsonRecord>();
     for (const privateEnvelopeValue of input.verifiedPrivateVssShareEnvelopes) {
+        const leakedWitnessFieldPaths =
+            collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths(
+                privateEnvelopeValue,
+                'verifiedPrivateVssShareEnvelopes',
+            );
+        if (leakedWitnessFieldPaths.length > 0) {
+            throw new Error(
+                `verifiedPrivateVssShareEnvelopes include forbidden private VSS witness fields: ${leakedWitnessFieldPaths.join(', ')}`,
+            );
+        }
         const privateEnvelope = jsonRecord(
             privateEnvelopeValue,
             'verifiedPrivateVssShareEnvelopes',
@@ -805,24 +839,6 @@ const aggregateVerifiedPrivateVssMaterial = (
                     );
                 }
             });
-            const aggregateOpening = objectField(
-                limbOpening,
-                'aggregateOpening',
-                'privateEnvelope.rnsShareOpenings',
-            );
-            const openingColumns = jsonRecordArray(
-                arrayField(
-                    aggregateOpening,
-                    'openingColumns',
-                    'privateEnvelope.rnsShareOpenings.aggregateOpening',
-                ).map((openingColumn) => ({ openingColumn })),
-                'privateEnvelope.rnsShareOpenings.aggregateOpening.openingColumns',
-            ).map((openingColumnRecord, openingColumnIndex) =>
-                numericVector(
-                    openingColumnRecord.openingColumn,
-                    `privateEnvelope.rnsShareOpenings.aggregateOpening.openingColumns.${String(openingColumnIndex)}`,
-                ),
-            );
             const existingAccumulator = aggregateByLimb.get(rnsLimbIndex);
             if (existingAccumulator === undefined) {
                 aggregateByLimb.set(rnsLimbIndex, {
@@ -831,31 +847,17 @@ const aggregateVerifiedPrivateVssMaterial = (
                     shareValues: shareValues.map((shareValue) =>
                         BigInt(shareValue),
                     ),
-                    aggregateOpeningColumns: openingColumns.map(
-                        (openingColumn) =>
-                            openingColumn.map((openingValue) =>
-                                BigInt(openingValue),
-                            ),
-                    ),
                 });
                 continue;
             }
             if (existingAccumulator.rnsPrime !== rnsPrime) {
                 throw new Error(
-                    'private VSS share openings must use one rnsPrime per limb.',
+                    'private VSS share values must use one rnsPrime per limb.',
                 );
             }
             if (existingAccumulator.shareValues.length !== shareValues.length) {
                 throw new Error(
                     'private VSS share vectors for the same limb must have equal length.',
-                );
-            }
-            if (
-                existingAccumulator.aggregateOpeningColumns.length !==
-                openingColumns.length
-            ) {
-                throw new Error(
-                    'private VSS aggregate openings for the same limb must have equal column count.',
                 );
             }
             const rnsPrimeWide = BigInt(rnsPrime);
@@ -864,22 +866,6 @@ const aggregateVerifiedPrivateVssMaterial = (
                     ((existingAccumulator.shareValues[shareValueIndex] ?? 0n) +
                         BigInt(shareValue)) %
                     rnsPrimeWide;
-            });
-            openingColumns.forEach((openingColumn, openingColumnIndex) => {
-                const existingColumn =
-                    existingAccumulator.aggregateOpeningColumns[
-                        openingColumnIndex
-                    ];
-                if (existingColumn?.length !== openingColumn.length) {
-                    throw new Error(
-                        'private VSS aggregate opening column lengths must match.',
-                    );
-                }
-                openingColumn.forEach((openingValue, openingValueIndex) => {
-                    existingColumn[openingValueIndex] =
-                        (existingColumn[openingValueIndex] ?? 0n) +
-                        BigInt(openingValue);
-                });
             });
         }
     }
@@ -912,25 +898,6 @@ const aggregateVerifiedPrivateVssMaterial = (
                 rnsPrime: aggregate.rnsPrime,
                 shareValues: aggregate.shareValues.map((shareValue) =>
                     Number(shareValue),
-                ),
-            })),
-        },
-        aggregateOpeningMaterial: {
-            objectType: 'LocalTrusteeAggregateThresholdOpeningMaterial',
-            objectVersion: 1,
-            ...materialCommonFields,
-            materialDerivation:
-                'sum-of-verified-private-vss-aggregate-openings-v1',
-            aggregateOpeningByRnsLimb: orderedAggregates.map((aggregate) => ({
-                objectType: 'LocalTrusteeAggregateThresholdOpeningLimb',
-                objectVersion: 1,
-                rnsLimbIndex: aggregate.rnsLimbIndex,
-                rnsPrime: aggregate.rnsPrime,
-                openingColumnsDecimal: aggregate.aggregateOpeningColumns.map(
-                    (openingColumn) =>
-                        openingColumn.map((openingValue) =>
-                            openingValue.toString(),
-                        ),
                 ),
             })),
         },
@@ -996,19 +963,6 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
             aeadNonceBytesHex:
                 input.sealedAggregateThresholdShareAeadNonceBytesHex,
         });
-    const sealedAggregateOpening = await encryptLocalTrusteeSetupSealedMaterial(
-        {
-            materialClass: 'aggregate-threshold-opening-sealed',
-            materialPlaintext: materialPlaintexts.aggregateOpeningMaterial,
-            setupContext: input.setupContext,
-            trusteeIdentity: input.trusteeIdentity,
-            trusteeRosterPosition: input.trusteeRosterPosition,
-            thresholdShareCommitmentRecipientRoot:
-                thresholdShareCommitmentRecipientRootValue,
-            storageKeyBytesHex: input.storageKeyBytesHex,
-            aeadNonceBytesHex: input.sealedAggregateOpeningAeadNonceBytesHex,
-        },
-    );
     const acceptanceRoot = issuedVssAcceptanceRoot(
         input,
         privateVssEnvelopeCommitmentRoot,
@@ -1033,7 +987,6 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
             thresholdShareCommitmentRecipientRootValue,
         sealedAggregateThresholdShare:
             sealedAggregateThresholdShare.sealedMaterial,
-        sealedAggregateOpening: sealedAggregateOpening.sealedMaterial,
         issuedVssAcceptanceRoots: [acceptanceRoot],
         issuedVssComplaintRoots: complaintRoots,
     } satisfies LocalTrusteeSetupStateSealedPayload;
@@ -1044,7 +997,6 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
         thresholdShareCommitmentRecipientRoot:
             thresholdShareCommitmentRecipientRootValue,
         aggregateThresholdShareRoot: sealedAggregateThresholdShare.materialRoot,
-        aggregateOpeningRoot: sealedAggregateOpening.materialRoot,
         issuedVssAcceptanceRoot: acceptanceRoot,
         issuedVssComplaintRoots: complaintRoots,
         localStatePlaintext,

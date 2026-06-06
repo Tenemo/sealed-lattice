@@ -1,24 +1,22 @@
 use serde_json::{Value, json};
 
-use crate::{
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
-};
+use crate::{encoding::CanonicalResult, hashing::derive_protocol_hash};
 
+#[cfg(test)]
+use crate::encoding::{CanonicalError, CanonicalErrorCode};
+
+pub(super) const CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_ID: &str =
+    "sealed-lattice-carry-aware-vss-share-opening-v1";
+
+#[cfg(test)]
 use super::{
     commitment::{
         SetupCommitmentOpeningVerification, SetupCommitmentValue,
         linear_combination_setup_commitments, setup_commitment_modulus_product,
         verify_setup_lifted_commitment_opening,
     },
-    sharing::canonical_trustee_point,
+    sharing::{canonical_trustee_point, evaluate_shamir_polynomial},
 };
-
-pub(super) const CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_ID: &str =
-    "sealed-lattice-carry-aware-vss-share-opening-v1";
-
-#[cfg(test)]
-use super::sharing::evaluate_shamir_polynomial;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg(test)]
@@ -40,14 +38,6 @@ pub(super) struct CarryAwareVssCommitmentOpeningVerification {
     pub(super) homomorphic_randomness_bound: i128,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct CarryAwareVssAggregateCommitmentOpeningVerification {
-    pub(super) commitment_opening: SetupCommitmentOpeningVerification,
-    pub(super) trustee_point: u64,
-    pub(super) homomorphic_randomness_bound: i128,
-    pub(super) carry_bound: u128,
-}
-
 #[cfg(test)]
 pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
     pub(super) public_matrix_seed_hash: &'a str,
@@ -57,17 +47,6 @@ pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
     pub(super) recipient_roster_position: usize,
     pub(super) share_values: &'a [u64],
     pub(super) carry_witnesses: &'a [u128],
-    pub(super) modulus: u64,
-    pub(super) fresh_randomness_bound: i128,
-}
-
-pub(super) struct CarryAwareVssAggregateCommitmentOpeningInput<'a> {
-    pub(super) public_matrix_seed_hash: &'a str,
-    pub(super) coefficient_commitments: &'a [SetupCommitmentValue],
-    pub(super) recipient_roster_position: usize,
-    pub(super) share_values: &'a [u64],
-    pub(super) carry_witnesses: &'a [u128],
-    pub(super) aggregate_opening_columns: &'a [Vec<i128>],
     pub(super) modulus: u64,
     pub(super) fresh_randomness_bound: i128,
 }
@@ -82,7 +61,8 @@ pub(super) fn carry_aware_vss_share_relation_profile_value() -> Value {
         "coefficientOrder": "constant-first",
         "relation": "sum(alpha_j^k * F_i,l,k) - sigma_i_to_j,l = q_l * z_i_to_j,l",
         "carryWitnessDomain": "non-negative-bounded-integer",
-        "commitmentReductionRule": "open-unreduced-lifted-share-with-explicit-carry",
+        "commitmentReductionRule": "prove-unreduced-lifted-share-with-hidden-carry-and-opening",
+        "recipientWitnessDisclosure": "share-values-only; aggregate openings and carry witnesses are zero-knowledge proof witnesses",
     })
 }
 
@@ -304,102 +284,7 @@ pub(super) fn verify_carry_aware_vss_commitment_opening(
     })
 }
 
-pub(super) fn verify_carry_aware_vss_aggregate_commitment_opening(
-    input: CarryAwareVssAggregateCommitmentOpeningInput<'_>,
-) -> CanonicalResult<CarryAwareVssAggregateCommitmentOpeningVerification> {
-    let CarryAwareVssAggregateCommitmentOpeningInput {
-        public_matrix_seed_hash,
-        coefficient_commitments,
-        recipient_roster_position,
-        share_values,
-        carry_witnesses,
-        aggregate_opening_columns,
-        modulus,
-        fresh_randomness_bound,
-    } = input;
-    let coefficient_count = coefficient_commitments.len();
-    if coefficient_count == 0 {
-        return Err(invalid_vss_input(
-            "VSS aggregate opening must provide at least one coefficient commitment",
-        ));
-    }
-    let ring_degree = share_values.len();
-    if ring_degree == 0 || carry_witnesses.len() != ring_degree {
-        return Err(invalid_vss_input(
-            "VSS aggregate share and carry vectors must be non-empty and have the same length",
-        ));
-    }
-
-    let trustee_point = canonical_trustee_point(recipient_roster_position, modulus)?;
-    let scalar_powers = trustee_point_powers(coefficient_count, trustee_point)?;
-    let carry_bound = carry_bound_for_coefficient_count(coefficient_count, trustee_point)?;
-    let modulus_wide = u128::from(modulus);
-    let mut lifted_message_coefficients = Vec::with_capacity(ring_degree);
-    for (share_value, carry_witness) in share_values.iter().zip(carry_witnesses.iter()) {
-        if *share_value >= modulus {
-            return Err(invalid_vss_input(
-                "VSS aggregate share value is outside the sharing field",
-            ));
-        }
-        if *carry_witness > carry_bound {
-            return Err(invalid_vss_input(
-                "VSS aggregate carry witness is outside the derived bound",
-            ));
-        }
-        lifted_message_coefficients.push(
-            u128::from(*share_value)
-                .checked_add(modulus_wide.checked_mul(*carry_witness).ok_or_else(|| {
-                    invalid_vss_input("lifted VSS aggregate share multiplication overflow")
-                })?)
-                .ok_or_else(|| invalid_vss_input("lifted VSS aggregate share overflow"))?,
-        );
-    }
-    if lifted_message_coefficients
-        .iter()
-        .any(|coefficient| *coefficient >= setup_commitment_modulus_product())
-    {
-        return Err(invalid_vss_input(
-            "lifted VSS aggregate share coefficient wraps in the commitment modulus product",
-        ));
-    }
-
-    for (coefficient_index, commitment) in coefficient_commitments.iter().enumerate() {
-        if commitment.source_message_modulus != modulus || commitment.ring_degree != ring_degree {
-            return Err(invalid_vss_input(
-                "VSS coefficient commitment domain does not match the aggregate share opening",
-            ));
-        }
-        if commitment.shamir_coefficient_index != coefficient_index as u64 {
-            return Err(invalid_vss_input(
-                "VSS coefficient commitment index does not match aggregate coefficient order",
-            ));
-        }
-    }
-
-    let combined_commitment_terms = coefficient_commitments
-        .iter()
-        .zip(scalar_powers.iter())
-        .map(|(commitment, scalar)| (commitment, *scalar))
-        .collect::<Vec<_>>();
-    let combined_commitment = linear_combination_setup_commitments(&combined_commitment_terms)?;
-    let homomorphic_randomness_bound =
-        homomorphic_randomness_bound(fresh_randomness_bound, &scalar_powers)?;
-    let commitment_opening = verify_setup_lifted_commitment_opening(
-        public_matrix_seed_hash,
-        &combined_commitment,
-        &lifted_message_coefficients,
-        aggregate_opening_columns,
-        homomorphic_randomness_bound,
-    )?;
-
-    Ok(CarryAwareVssAggregateCommitmentOpeningVerification {
-        commitment_opening,
-        trustee_point,
-        homomorphic_randomness_bound,
-        carry_bound,
-    })
-}
-
+#[cfg(test)]
 fn carry_bound_for_coefficient_count(
     coefficient_count: usize,
     trustee_point: u64,
@@ -427,6 +312,7 @@ fn carry_bound_for_coefficient_count(
     Ok(power_sum.saturating_sub(1))
 }
 
+#[cfg(test)]
 fn trustee_point_powers(
     coefficient_count: usize,
     trustee_point: u64,
@@ -499,6 +385,7 @@ fn combine_vss_commitment_randomness(
     Ok(combined_randomness)
 }
 
+#[cfg(test)]
 fn homomorphic_randomness_bound(
     fresh_randomness_bound: i128,
     scalar_powers: &[u128],
@@ -519,6 +406,7 @@ fn homomorphic_randomness_bound(
         .ok_or_else(|| invalid_vss_input("VSS homomorphic randomness bound overflow"))
 }
 
+#[cfg(test)]
 fn invalid_vss_input(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }

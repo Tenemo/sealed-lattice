@@ -19,9 +19,7 @@ import {
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
 import {
     collectForbiddenLocalTrusteeSetupStateFieldPaths,
-    createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     createLocalTrusteeSetupStateCommitment,
-    decryptLocalTrusteeSetupState,
 } from '#packages/protocol/src/setup/local-trustee-setup-state';
 import {
     createPrivateVssMailboxDeliverySet,
@@ -305,6 +303,8 @@ function collectForbiddenPrivateVssDeliveryFieldPaths(
         'coefficientMessage',
         'randomnessByColumn',
         'shareValues',
+        'aggregateOpening',
+        'aggregateOpeningColumns',
         'carryWitnessesDecimal',
     ]);
     if (Array.isArray(value)) {
@@ -326,6 +326,45 @@ function collectForbiddenPrivateVssDeliveryFieldPaths(
         }
 
         return collectForbiddenPrivateVssDeliveryFieldPaths(
+            fieldValue,
+            fieldPath,
+        );
+    });
+}
+
+function collectForbiddenDecryptedPrivateVssEnvelopeFieldPaths(
+    value: unknown,
+    objectPath = 'privateEnvelope',
+): string[] {
+    const forbiddenFieldNames = new Set([
+        'coefficientMessage',
+        'randomnessByColumn',
+        'coefficientOpenings',
+        'rawShamirCoefficientValues',
+        'F_i,l,0',
+        'aggregateOpening',
+        'aggregateOpeningColumns',
+        'carryWitnessesDecimal',
+    ]);
+    if (Array.isArray(value)) {
+        return value.flatMap((item, itemIndex) =>
+            collectForbiddenDecryptedPrivateVssEnvelopeFieldPaths(
+                item,
+                `${objectPath}.${String(itemIndex)}`,
+            ),
+        );
+    }
+    if (typeof value !== 'object' || value === null) {
+        return [];
+    }
+
+    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
+        const fieldPath = `${objectPath}.${fieldName}`;
+        if (forbiddenFieldNames.has(fieldName)) {
+            return [fieldPath];
+        }
+
+        return collectForbiddenDecryptedPrivateVssEnvelopeFieldPaths(
             fieldValue,
             fieldPath,
         );
@@ -369,7 +408,30 @@ async function acceptedPrivateVssEnvelopeCommitments(
     );
     const privateVssEnvelopeCommitmentSet =
         await createPrivateVssMailboxDeliverySet({
-            kernel,
+            kernel: {
+                deriveProtocolHash: (input) => kernel.deriveProtocolHash(input),
+                verifyPrivateVssShareEnvelope: (input) => {
+                    const privateEnvelopeHash = kernel.deriveProtocolHash({
+                        namespace: 'PrivateVssShareEnvelopeHash',
+                        value: input.privateEnvelope,
+                    });
+                    const localVerificationRoot = kernel.deriveProtocolHash({
+                        namespace: 'PrivateVssLocalVerificationRoot',
+                        value: {
+                            fixture:
+                                'proof-pending-private-vss-local-verification',
+                            privateEnvelopeHash,
+                        },
+                    });
+
+                    return {
+                        ok: true,
+                        privateEnvelopeHash,
+                        localVerificationRoot,
+                        refusedObjects: [],
+                    };
+                },
+            },
             setupContext:
                 setupContext as PrivateVssMailboxDeliverySetInput['setupContext'],
             phaseOrderHash,
@@ -409,6 +471,51 @@ async function acceptedPrivateVssEnvelopeCommitments(
                     };
                 },
             ),
+            privateVssShareProofFactory: ({
+                rnsLimbIndex,
+                rnsPrime,
+                recipient,
+                shareValues,
+                coefficientCommitmentRoots,
+            }) => ({
+                objectType: 'PrivateVssShareProof',
+                objectVersion: 1,
+                proofProfileId: 'sealed-lattice-private-vss-share-proof-lnp-v1',
+                proofMaterialRoot: kernel.deriveProtocolHash({
+                    namespace: 'PrivateVssLocalVerificationRoot',
+                    value: {
+                        fixture: 'private-vss-share-proof-material',
+                        rnsLimbIndex,
+                        rnsPrime,
+                        recipientRosterPosition:
+                            recipient.recipientRosterPosition,
+                        shareValues,
+                        coefficientCommitmentRoots,
+                    },
+                }),
+                proofBytesHash: kernel.deriveProtocolHash({
+                    namespace: 'PrivateVssLocalVerificationRoot',
+                    value: {
+                        fixture: 'private-vss-share-proof-bytes',
+                        rnsLimbIndex,
+                        rnsPrime,
+                        recipientRosterPosition:
+                            recipient.recipientRosterPosition,
+                    },
+                }),
+                proofStatementRoot: kernel.deriveProtocolHash({
+                    namespace: 'PrivateVssLocalVerificationRoot',
+                    value: {
+                        fixture: 'private-vss-share-proof-statement',
+                        rnsLimbIndex,
+                        rnsPrime,
+                        recipientRosterPosition:
+                            recipient.recipientRosterPosition,
+                        coefficientCommitmentRoots,
+                    },
+                }),
+                proofVerificationStatus: 'fixture-proof-pending',
+            }),
             recipients: mailboxRecipients,
         });
 
@@ -829,14 +936,14 @@ function acceptedSetupCommitmentSecurityCertificate(
         },
         multiOpeningLeakage: {
             recipientAggregateOpeningsArePublic: false,
-            recipientAggregateOpeningsAreMailboxPlaintext: true,
+            recipientAggregateOpeningsAreMailboxPlaintext: false,
             maxCorruptRecipientsBeforeThreshold:
                 firstProfileDecryptionThreshold - 1,
             shamirPolynomialDegree: firstProfileDecryptionThreshold - 1,
             rawCoefficientOpeningsExported: false,
             perCoefficientRandomnessExported: false,
             thresholdBoundary:
-                'fewer-than-qDec-recipient-aggregate-openings-remain-underdetermined; qDec-or-more-trustees-can-reconstruct-by-threshold-design',
+                'recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses',
             status: 'review-gated-active-static-threshold-leakage-bound-recorded',
         },
         bindingAssumption: {
@@ -875,12 +982,12 @@ function acceptedSetupCommitmentSecurityCertificate(
         },
         hidingAssumption: {
             assumption:
-                'Module-LWE with explicit recipient-local multi-opening leakage bound',
+                'Module-LWE with recipient-hidden proof-witness opening leakage boundary',
             openingDistribution: 'coefficientwise-centered-ternary',
             publicMatrixDistribution: 'hash-derived-uniform-residue-stream',
             lowEntropySecretHiding: true,
             statisticalLeakageStatus:
-                'review-gated-for-fewer-than-qDec-recipient-aggregate-openings',
+                'review-gated-for-recipient-hidden-aggregate-opening-proof-witnesses',
             estimatorStatus:
                 'review-gated-external-module-lwe-parameter-certificate-required',
         },
@@ -1705,7 +1812,6 @@ describe('collective BGV setup kernel commands', () => {
             trusteeRosterPosition: 3,
             thresholdShareCommitmentRecipientRoot: validHash('1'),
             aggregateThresholdShareRoot: validHash('2'),
-            aggregateOpeningRoot: validHash('3'),
             issuedVssAcceptanceRoot: validHash('4'),
             issuedVssComplaintRoots: [validHash('5'), validHash('6')],
         });
@@ -1731,14 +1837,13 @@ describe('collective BGV setup kernel commands', () => {
         });
     });
 
-    it('creates encrypted local trustee state from generated VSS setup artifacts', async () => {
+    it('refuses proof-shaped private VSS envelopes until private VSS proofs verify', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeCollectiveBgvSetupProfile();
         const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
         const setupContext =
             setupPackage.setupContext as CollectiveBgvSetupContext;
         const trusteeRosterPosition = 3;
-        const trusteeIdentity = `trustee-${String(trusteeRosterPosition)}`;
         const mailboxKeyPair = privateVssMailboxKeyPairForRosterPosition(
             trusteeRosterPosition,
         );
@@ -1751,6 +1856,12 @@ describe('collective BGV setup kernel commands', () => {
                 envelopeReference.recipientRosterPosition ===
                 trusteeRosterPosition,
         );
+        const envelopeReference = envelopeReferences[0];
+        if (envelopeReference === undefined) {
+            throw new Error(
+                'Missing generated private VSS envelope reference.',
+            );
+        }
         const vssCoefficientCommitments =
             setupPackage.vssCoefficientCommitments as JsonRecord;
         const dealerRecords =
@@ -1758,108 +1869,51 @@ describe('collective BGV setup kernel commands', () => {
         const materialRecords = (
             setupPackage.vssCoefficientCommitmentMaterial as JsonRecord
         ).coefficientCommitments as JsonRecord[];
-        const verifiedPrivateVssShareEnvelopes: unknown[] = [];
-
-        for (const envelopeReference of envelopeReferences) {
-            const decryptedEnvelope = await decryptPrivateVssMailboxEnvelope({
-                encryptedEnvelope:
-                    envelopeReference.encryptedEnvelope as PrivateVssEncryptedEnvelope,
-                recipientMailboxSecretKeyBytesHex:
-                    mailboxKeyPair.secretKeyBytesHex,
-            });
-            const dealerRosterPosition = Number(
-                envelopeReference.dealerRosterPosition,
-            );
-            const dealerRecord = dealerRecords[dealerRosterPosition];
-            if (dealerRecord === undefined) {
-                throw new Error('Missing generated dealer record.');
-            }
-            const localVerification = kernel.verifyPrivateVssShareEnvelope({
-                setupContext,
-                publicMatrixSeedHash: String(
-                    (setupPackage.commonRandomness as JsonRecord)
-                        .publicMatrixSeedHash,
-                ),
-                dealerCoefficientCommitmentRecord: dealerRecord,
-                dealerCoefficientCommitmentMaterialRecords:
-                    materialRecords.filter(
-                        (materialRecord) =>
-                            materialRecord.dealerRosterPosition ===
-                            dealerRosterPosition,
-                    ),
-                privateEnvelope: decryptedEnvelope.privateEnvelope,
-                expectedPrivateEnvelopeHash:
-                    decryptedEnvelope.privateEnvelopeHash,
-                expectedLocalVerificationRoot: String(
-                    envelopeReference.localVerificationRoot,
-                ),
-            });
-            expect(localVerification.ok).toBe(true);
-            verifiedPrivateVssShareEnvelopes.push(
+        const decryptedEnvelope = await decryptPrivateVssMailboxEnvelope({
+            encryptedEnvelope:
+                envelopeReference.encryptedEnvelope as PrivateVssEncryptedEnvelope,
+            recipientMailboxSecretKeyBytesHex: mailboxKeyPair.secretKeyBytesHex,
+        });
+        expect(
+            collectForbiddenDecryptedPrivateVssEnvelopeFieldPaths(
                 decryptedEnvelope.privateEnvelope,
-            );
-        }
-
-        const generatedLocalState =
-            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
-                setupContext,
-                trusteeIdentity,
-                trusteeRosterPosition,
-                deviceEpoch: 0,
-                thresholdShareCommitments:
-                    setupPackage.thresholdShareCommitments,
-                privateVssEnvelopeCommitments,
-                verifiedPrivateVssShareEnvelopes,
-                vssShareAcceptances: setupPackage.vssShareAcceptances,
-                storageKeyBytesHex: '66'.repeat(32),
-                localStateAeadNonceBytesHex: '77'.repeat(12),
-                sealedAggregateThresholdShareAeadNonceBytesHex: '88'.repeat(12),
-                sealedAggregateOpeningAeadNonceBytesHex: '99'.repeat(12),
-            });
-        const restoredLocalState = await decryptLocalTrusteeSetupState({
-            encryptedLocalState: generatedLocalState.encryptedLocalState,
-            expectedLocalStateRoot:
-                generatedLocalState.localStateCommitment.localStateRoot,
-            setupContext,
-            storageKeyBytesHex: '66'.repeat(32),
-        });
-
-        expect(
-            collectForbiddenLocalTrusteeSetupStateFieldPaths(
-                generatedLocalState.localStateCommitment,
+                'privateEnvelope',
             ),
         ).toEqual([]);
-        expect(
-            collectForbiddenLocalTrusteeSetupStateFieldPaths(
-                restoredLocalState.localStatePlaintext,
-                'localStatePlaintext',
-            ),
-        ).toEqual([]);
-        expect(
-            generatedLocalState.localStatePlaintext
-                .sealedAggregateThresholdShare.encryptedMaterial
-                .ciphertextBytesHash,
-        ).toHaveLength(128);
-        expect(
-            generatedLocalState.localStateCommitment
-                .aggregateThresholdShareRoot,
-        ).toBe(
-            generatedLocalState.localStatePlaintext
-                .sealedAggregateThresholdShare.materialRoot,
+        const dealerRosterPosition = Number(
+            envelopeReference.dealerRosterPosition,
         );
-        expect(
-            kernel.verifyLocalTrusteeSetupState({
-                setupContext,
-                localStateCommitment: generatedLocalState.localStateCommitment,
-            }),
-        ).toMatchObject({
-            ok: true,
-            operation: 'verifyLocalTrusteeSetupState',
-            trusteeIdentity,
-            trusteeRosterPosition,
-            localStateRoot:
-                generatedLocalState.localStateCommitment.localStateRoot,
+        const dealerRecord = dealerRecords[dealerRosterPosition];
+        if (dealerRecord === undefined) {
+            throw new Error('Missing generated dealer record.');
+        }
+        const localVerification = kernel.verifyPrivateVssShareEnvelope({
+            setupContext,
+            publicMatrixSeedHash: String(
+                (setupPackage.commonRandomness as JsonRecord)
+                    .publicMatrixSeedHash,
+            ),
+            dealerCoefficientCommitmentRecord: dealerRecord,
+            dealerCoefficientCommitmentMaterialRecords: materialRecords.filter(
+                (materialRecord) =>
+                    materialRecord.dealerRosterPosition ===
+                    dealerRosterPosition,
+            ),
+            privateEnvelope: decryptedEnvelope.privateEnvelope,
+            expectedPrivateEnvelopeHash: decryptedEnvelope.privateEnvelopeHash,
         });
+
+        expect(localVerification).toMatchObject({
+            ok: false,
+            operation: 'verifyPrivateVssShareEnvelope',
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            verifierStatus: 'refused',
+        });
+        expect(localVerification.privateEnvelopeHash).toBeNull();
+        expect(localVerification.localVerificationRoot).toBeNull();
+        expect(localVerification.refusedObjects[0]?.reasonCode).toBe(
+            'privateVssShareProofVerifierMissing',
+        );
     });
 
     it('routes local trustee setup state verification errors', async () => {
