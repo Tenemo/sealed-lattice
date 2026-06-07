@@ -3,14 +3,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
     computeSetupCommitmentFromOpening,
-    createVssDealerCoefficientOpeningState,
-    createVssDealerCoefficientCommitmentContribution,
+    createVssSourceTrusteeCoefficientOpeningState,
+    createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
     setupCommitmentRandomnessWidth,
     setupCommitmentRootPayload,
     type CollectiveBgvSetupContext,
     type VssCoefficientOpeningInput,
-    type VssDealerCoefficientOpeningState,
+    type VssSourceTrusteeCoefficientOpeningState,
     type VssOpeningRandomByteSource,
 } from '#packages/protocol/src/index';
 
@@ -80,14 +80,14 @@ const setupContext = {
 } satisfies CollectiveBgvSetupContext;
 
 const coefficientMessage = (
-    dealerRosterPosition: number,
+    sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
     rnsPrime: number,
 ): number[] =>
     Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
         const value =
-            (dealerRosterPosition + 1) * 19 +
+            (sourceTrusteeRosterPosition + 1) * 19 +
             (rnsLimbIndex + 1) * 7 +
             (shamirCoefficientIndex + 1) * 5 +
             coefficientIndex;
@@ -96,14 +96,14 @@ const coefficientMessage = (
     });
 
 const randomnessByColumn = (
-    dealerRosterPosition: number,
+    sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
 ): number[][] =>
     Array.from({ length: 5 }, (_unusedColumn, randomnessColumnIndex) =>
         Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
             const selector =
-                (dealerRosterPosition +
+                (sourceTrusteeRosterPosition +
                     rnsLimbIndex +
                     shamirCoefficientIndex +
                     randomnessColumnIndex +
@@ -115,7 +115,7 @@ const randomnessByColumn = (
     );
 
 const opening = (
-    dealerRosterPosition: number,
+    sourceTrusteeRosterPosition: number,
     rnsPrime: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
@@ -124,27 +124,27 @@ const opening = (
     rnsPrime,
     shamirCoefficientIndex,
     coefficientMessage: coefficientMessage(
-        dealerRosterPosition,
+        sourceTrusteeRosterPosition,
         rnsLimbIndex,
         shamirCoefficientIndex,
         rnsPrime,
     ),
     randomnessByColumn: randomnessByColumn(
-        dealerRosterPosition,
+        sourceTrusteeRosterPosition,
         rnsLimbIndex,
         shamirCoefficientIndex,
     ),
 });
 
-const dealerOpeningState = (
-    dealerRosterPosition: number,
-): VssDealerCoefficientOpeningState => ({
-    dealerIdentity: `trustee-${String(dealerRosterPosition)}`,
-    dealerRosterPosition,
+const sourceTrusteeOpeningState = (
+    sourceTrusteeRosterPosition: number,
+): VssSourceTrusteeCoefficientOpeningState => ({
+    sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
+    sourceTrusteeRosterPosition,
     coefficientOpenings: qSharePrimes.flatMap((rnsPrime, rnsLimbIndex) =>
         Array.from({ length: thresholdDegree }, (_unused, coefficientIndex) =>
             opening(
-                dealerRosterPosition,
+                sourceTrusteeRosterPosition,
                 rnsPrime,
                 rnsLimbIndex,
                 coefficientIndex,
@@ -154,10 +154,10 @@ const dealerOpeningState = (
 });
 
 const requiredOpening = (
-    dealerState: VssDealerCoefficientOpeningState,
+    sourceTrusteeState: VssSourceTrusteeCoefficientOpeningState,
     openingIndex: number,
 ): VssCoefficientOpeningInput => {
-    const openingState = dealerState.coefficientOpenings[openingIndex];
+    const openingState = sourceTrusteeState.coefficientOpenings[openingIndex];
     if (openingState === undefined) {
         throw new Error('fixture opening is missing');
     }
@@ -179,11 +179,11 @@ const requiredRandomnessColumn = (
 };
 
 const requiredOpeningByCoordinate = (
-    dealerState: VssDealerCoefficientOpeningState,
+    sourceTrusteeState: VssSourceTrusteeCoefficientOpeningState,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
 ): VssCoefficientOpeningInput => {
-    const openingState = dealerState.coefficientOpenings.find(
+    const openingState = sourceTrusteeState.coefficientOpenings.find(
         (candidateOpening) =>
             candidateOpening.rnsLimbIndex === rnsLimbIndex &&
             candidateOpening.shamirCoefficientIndex === shamirCoefficientIndex,
@@ -215,41 +215,43 @@ const decodeShortSecretResidues = (
 
 describe('VSS coefficient commitment builders', () => {
     it('generates local openings with one short secret shared across RNS limbs', () => {
-        const generatedDealerState = createVssDealerCoefficientOpeningState({
-            dealerIdentity: 'trustee-0',
-            dealerRosterPosition: 0,
-            participantCount,
-            qSharePrimes,
-            ringDegree,
-            thresholdDegree,
-            randomBytes: deterministicRandomBytes('trustee-0'),
-        });
+        const generatedSourceTrusteeState =
+            createVssSourceTrusteeCoefficientOpeningState({
+                sourceTrusteeIdentity: 'trustee-0',
+                sourceTrusteeRosterPosition: 0,
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                thresholdDegree,
+                randomBytes: deterministicRandomBytes('trustee-0'),
+            });
         const constantSecretForFirstLimb = decodeShortSecretResidues(
-            requiredOpeningByCoordinate(generatedDealerState, 0, 0),
+            requiredOpeningByCoordinate(generatedSourceTrusteeState, 0, 0),
         );
         const constantSecretForSecondLimb = decodeShortSecretResidues(
-            requiredOpeningByCoordinate(generatedDealerState, 1, 0),
+            requiredOpeningByCoordinate(generatedSourceTrusteeState, 1, 0),
         );
         const nonConstantOpening = requiredOpeningByCoordinate(
-            generatedDealerState,
+            generatedSourceTrusteeState,
             0,
             1,
         );
         const firstRandomnessColumn = requiredRandomnessColumn(
-            requiredOpeningByCoordinate(generatedDealerState, 0, 0),
+            requiredOpeningByCoordinate(generatedSourceTrusteeState, 0, 0),
             0,
         );
-        const contribution = createVssDealerCoefficientCommitmentContribution({
-            setupContext,
-            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            qSharePrimes,
-            ringDegree,
-            participantCount,
-            thresholdDegree,
-            dealerOpeningState: generatedDealerState,
-        });
+        const contribution =
+            createVssSourceTrusteeCoefficientCommitmentContribution({
+                setupContext,
+                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                qSharePrimes,
+                ringDegree,
+                participantCount,
+                thresholdDegree,
+                sourceTrusteeOpeningState: generatedSourceTrusteeState,
+            });
 
-        expect(generatedDealerState.coefficientOpenings).toHaveLength(
+        expect(generatedSourceTrusteeState.coefficientOpenings).toHaveLength(
             qSharePrimes.length * thresholdDegree,
         );
         expect(constantSecretForSecondLimb).toEqual(constantSecretForFirstLimb);
@@ -261,7 +263,7 @@ describe('VSS coefficient commitment builders', () => {
             ),
         ).toBe(true);
         expect(
-            requiredOpeningByCoordinate(generatedDealerState, 0, 0)
+            requiredOpeningByCoordinate(generatedSourceTrusteeState, 0, 0)
                 .randomnessByColumn,
         ).toHaveLength(setupCommitmentRandomnessWidth);
         expect(
@@ -286,7 +288,10 @@ describe('VSS coefficient commitment builders', () => {
             ringDegree,
             participantCount,
             thresholdDegree,
-            dealerOpeningStates: [dealerOpeningState(1), dealerOpeningState(0)],
+            sourceTrusteeOpeningStates: [
+                sourceTrusteeOpeningState(1),
+                sourceTrusteeOpeningState(0),
+            ],
         });
         const { vssCoefficientCommitmentRoot, ...commitmentSetWithoutRoot } =
             bundle.commitmentSet;
@@ -296,21 +301,21 @@ describe('VSS coefficient commitment builders', () => {
         } = bundle.materialSet;
         const firstMaterialRecord =
             bundle.materialSet.coefficientCommitments[0];
-        const firstOpening = requiredOpening(dealerOpeningState(0), 0);
-        const firstDealerContribution =
-            createVssDealerCoefficientCommitmentContribution({
+        const firstOpening = requiredOpening(sourceTrusteeOpeningState(0), 0);
+        const firstSourceTrusteeContribution =
+            createVssSourceTrusteeCoefficientCommitmentContribution({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
                 qSharePrimes,
                 ringDegree,
                 participantCount,
                 thresholdDegree,
-                dealerOpeningState: dealerOpeningState(0),
+                sourceTrusteeOpeningState: sourceTrusteeOpeningState(0),
             });
 
         expect(
-            bundle.commitmentSet.dealerRecords.map(
-                (record) => record.dealerRosterPosition,
+            bundle.commitmentSet.sourceTrusteeRecords.map(
+                (record) => record.sourceTrusteeRosterPosition,
             ),
         ).toEqual([0, 1]);
         expect(bundle.materialSet.materialRecordCount).toBe(
@@ -347,27 +352,27 @@ describe('VSS coefficient commitment builders', () => {
             ),
         );
         expect(
-            bundle.privateOpeningMaterialByDealer[0]?.coefficientOpenings[0]
-                ?.commitmentRoot,
+            bundle.privateOpeningMaterialBySourceTrustee[0]
+                ?.coefficientOpenings[0]?.commitmentRoot,
         ).toBe(firstMaterialRecord?.commitmentRoot);
-        expect(firstDealerContribution.dealerRecord).toEqual(
-            bundle.commitmentSet.dealerRecords[0],
+        expect(firstSourceTrusteeContribution.sourceTrusteeRecord).toEqual(
+            bundle.commitmentSet.sourceTrusteeRecords[0],
         );
-        expect(firstDealerContribution.materialRecords).toEqual(
+        expect(firstSourceTrusteeContribution.materialRecords).toEqual(
             bundle.materialSet.coefficientCommitments.slice(
                 0,
                 qSharePrimes.length * thresholdDegree,
             ),
         );
         expect(
-            bundle.commitmentSet.dealerRecords[0]?.coefficientCommitments[0]
-                ?.coefficientVectorHash512,
+            bundle.commitmentSet.sourceTrusteeRecords[0]
+                ?.coefficientCommitments[0]?.coefficientVectorHash512,
         ).toMatch(/^[0-9a-f]{128}$/u);
     });
 
     it('rejects malformed local opening state before root publication', () => {
-        const firstDealer = dealerOpeningState(0);
-        const secondDealer = dealerOpeningState(1);
+        const firstSourceTrustee = sourceTrusteeOpeningState(0);
+        const secondSourceTrustee = sourceTrusteeOpeningState(1);
 
         expect(() =>
             createVssCoefficientCommitmentBundle({
@@ -377,7 +382,7 @@ describe('VSS coefficient commitment builders', () => {
                 ringDegree,
                 participantCount,
                 thresholdDegree,
-                dealerOpeningStates: [firstDealer],
+                sourceTrusteeOpeningStates: [firstSourceTrustee],
             }),
         ).toThrow(/every accepted participant/u);
         expect(() =>
@@ -388,16 +393,16 @@ describe('VSS coefficient commitment builders', () => {
                 ringDegree,
                 participantCount,
                 thresholdDegree,
-                dealerOpeningStates: [
+                sourceTrusteeOpeningStates: [
                     {
-                        ...firstDealer,
+                        ...firstSourceTrustee,
                         coefficientOpenings: [
-                            requiredOpening(firstDealer, 0),
-                            requiredOpening(firstDealer, 0),
-                            ...firstDealer.coefficientOpenings.slice(2),
+                            requiredOpening(firstSourceTrustee, 0),
+                            requiredOpening(firstSourceTrustee, 0),
+                            ...firstSourceTrustee.coefficientOpenings.slice(2),
                         ],
                     },
-                    secondDealer,
+                    secondSourceTrustee,
                 ],
             }),
         ).toThrow(/distinct limb\/coefficient coordinates/u);
@@ -409,24 +414,24 @@ describe('VSS coefficient commitment builders', () => {
                 ringDegree,
                 participantCount,
                 thresholdDegree,
-                dealerOpeningStates: [
+                sourceTrusteeOpeningStates: [
                     {
-                        ...firstDealer,
+                        ...firstSourceTrustee,
                         coefficientOpenings: [
                             {
-                                ...requiredOpening(firstDealer, 0),
+                                ...requiredOpening(firstSourceTrustee, 0),
                                 coefficientMessage: [
                                     qSharePrimes[0],
                                     ...requiredOpening(
-                                        firstDealer,
+                                        firstSourceTrustee,
                                         0,
                                     ).coefficientMessage.slice(1),
                                 ],
                             },
-                            ...firstDealer.coefficientOpenings.slice(1),
+                            ...firstSourceTrustee.coefficientOpenings.slice(1),
                         ],
                     },
-                    secondDealer,
+                    secondSourceTrustee,
                 ],
             }),
         ).toThrow(/residue below the declared modulus/u);
@@ -438,37 +443,40 @@ describe('VSS coefficient commitment builders', () => {
                 ringDegree,
                 participantCount,
                 thresholdDegree,
-                dealerOpeningStates: [
+                sourceTrusteeOpeningStates: [
                     {
-                        ...firstDealer,
+                        ...firstSourceTrustee,
                         coefficientOpenings: [
                             {
-                                ...requiredOpening(firstDealer, 0),
+                                ...requiredOpening(firstSourceTrustee, 0),
                                 randomnessByColumn: [
                                     [
                                         2,
                                         ...requiredRandomnessColumn(
-                                            requiredOpening(firstDealer, 0),
+                                            requiredOpening(
+                                                firstSourceTrustee,
+                                                0,
+                                            ),
                                             0,
                                         ).slice(1),
                                     ],
                                     ...requiredOpening(
-                                        firstDealer,
+                                        firstSourceTrustee,
                                         0,
                                     ).randomnessByColumn.slice(1),
                                 ],
                             },
-                            ...firstDealer.coefficientOpenings.slice(1),
+                            ...firstSourceTrustee.coefficientOpenings.slice(1),
                         ],
                     },
-                    secondDealer,
+                    secondSourceTrustee,
                 ],
             }),
         ).toThrow(/centered ternary/u);
         expect(() =>
-            createVssDealerCoefficientOpeningState({
-                dealerIdentity: 'trustee-2',
-                dealerRosterPosition: 2,
+            createVssSourceTrusteeCoefficientOpeningState({
+                sourceTrusteeIdentity: 'trustee-2',
+                sourceTrusteeRosterPosition: 2,
                 participantCount,
                 qSharePrimes,
                 ringDegree,
@@ -477,9 +485,9 @@ describe('VSS coefficient commitment builders', () => {
             }),
         ).toThrow(/inside the accepted participant count/u);
         expect(() =>
-            createVssDealerCoefficientOpeningState({
-                dealerIdentity: 'trustee-0',
-                dealerRosterPosition: 0,
+            createVssSourceTrusteeCoefficientOpeningState({
+                sourceTrusteeIdentity: 'trustee-0',
+                sourceTrusteeRosterPosition: 0,
                 participantCount,
                 qSharePrimes: [],
                 ringDegree,
@@ -488,9 +496,9 @@ describe('VSS coefficient commitment builders', () => {
             }),
         ).toThrow(/at least one RNS prime/u);
         expect(() =>
-            createVssDealerCoefficientOpeningState({
-                dealerIdentity: 'trustee-0',
-                dealerRosterPosition: 0,
+            createVssSourceTrusteeCoefficientOpeningState({
+                sourceTrusteeIdentity: 'trustee-0',
+                sourceTrusteeRosterPosition: 0,
                 participantCount,
                 qSharePrimes,
                 ringDegree,

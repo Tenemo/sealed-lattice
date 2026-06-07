@@ -48,13 +48,15 @@ describe('private VSS mailbox delivery', () => {
                 participantCount: 1,
                 deliveryPhaseNumber: 6,
                 verificationPhaseNumber: 7,
-                dealerContributionStates: [
+                sourceTrusteeContributionStates: [
                     {
-                        dealerIdentity: 'trustee-0',
-                        dealerRosterPosition: 0,
-                        dealerCommitmentRoot: fixtureHash('dealer-root'),
-                        dealerCoefficientCommitmentRecord: {},
-                        dealerCoefficientCommitmentMaterialRecords: [],
+                        sourceTrusteeIdentity: 'trustee-0',
+                        sourceTrusteeRosterPosition: 0,
+                        sourceTrusteeCommitmentRoot: fixtureHash(
+                            'source-trustee-root',
+                        ),
+                        sourceTrusteeCoefficientCommitmentRecord: {},
+                        sourceTrusteeCoefficientCommitmentMaterialRecords: [],
                         coefficientOpenings: [
                             {
                                 rnsLimbIndex: 0,
@@ -153,13 +155,15 @@ describe('private VSS mailbox delivery', () => {
                 proofMaterialRoot: fixtureHash('embedded-material-root'),
                 proofBytesHex,
             }),
-            dealerContributionStates: [
+            sourceTrusteeContributionStates: [
                 {
-                    dealerIdentity: 'trustee-0',
-                    dealerRosterPosition: 0,
-                    dealerCommitmentRoot: fixtureHash('dealer-root'),
-                    dealerCoefficientCommitmentRecord: {},
-                    dealerCoefficientCommitmentMaterialRecords: [],
+                    sourceTrusteeIdentity: 'trustee-0',
+                    sourceTrusteeRosterPosition: 0,
+                    sourceTrusteeCommitmentRoot: fixtureHash(
+                        'source-trustee-root',
+                    ),
+                    sourceTrusteeCoefficientCommitmentRecord: {},
+                    sourceTrusteeCoefficientCommitmentMaterialRecords: [],
                     coefficientOpenings: [
                         {
                             rnsLimbIndex: 0,

@@ -256,7 +256,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
     })
 }
 
-#[cfg(test)]
 pub(crate) fn public_evaluation_keys_from_material(
     setup_package: &Value,
     material: &Value,
@@ -435,7 +434,6 @@ pub(crate) fn public_evaluation_keys_from_material(
     })
 }
 
-#[cfg(test)]
 fn reject_forbidden_public_evaluation_key_material_secret_fields(
     value: &Value,
 ) -> CanonicalResult<()> {
@@ -559,7 +557,6 @@ fn public_key_switch_material_entry(
     }))
 }
 
-#[cfg(test)]
 fn public_key_switch_material_entry_to_key(
     entry: &Value,
     expected_key_kind: &str,

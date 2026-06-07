@@ -8,7 +8,7 @@ import {
     createRequiredGaloisSet,
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
-    createVssDealerCoefficientOpeningState,
+    createVssSourceTrusteeCoefficientOpeningState,
     type CollectiveBgvSetupContext,
     type PublicKeyShareContributionInput,
     type PublicKeyShareProofSet,
@@ -92,18 +92,18 @@ const sameSecretConsistency = (): SameSecretConsistencyStatementSet => {
         ringDegree,
         participantCount,
         thresholdDegree,
-        dealerOpeningStates: Array.from(
+        sourceTrusteeOpeningStates: Array.from(
             { length: participantCount },
-            (_unused, dealerRosterPosition) =>
-                createVssDealerCoefficientOpeningState({
-                    dealerIdentity: `trustee-${String(dealerRosterPosition)}`,
-                    dealerRosterPosition,
+            (_unused, sourceTrusteeRosterPosition) =>
+                createVssSourceTrusteeCoefficientOpeningState({
+                    sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
+                    sourceTrusteeRosterPosition,
                     participantCount,
                     qSharePrimes,
                     ringDegree,
                     thresholdDegree,
                     randomBytes: deterministicRandomBytes(
-                        `trustee-${String(dealerRosterPosition)}`,
+                        `trustee-${String(sourceTrusteeRosterPosition)}`,
                     ),
                 }),
         ),

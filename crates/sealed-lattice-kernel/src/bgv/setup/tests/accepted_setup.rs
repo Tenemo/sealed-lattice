@@ -1,15 +1,29 @@
 use super::super::accepted_setup::{
-    accepted_hashes_from_package, accepted_he_security_certificate_hash,
-    accepted_he_security_certificate_value,
+    PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
+    PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+    PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING, accepted_hashes_from_package,
+    accepted_he_security_certificate_hash, accepted_he_security_certificate_value,
+    accepted_setup_collective_public_key_from_package,
+    accepted_setup_public_galois_keys_from_transport,
+    accepted_setup_public_relinearization_keys_from_transport,
+    encode_public_evaluation_key_material_manifest, public_evaluation_key_material_manifest,
+    public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
 };
 use super::super::evaluation_key_share_proof::{
+    EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE,
+    EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
     EvaluationKeyShareLnpProofGenerationInput, EvaluationKeyShareLnpProofVerificationInput,
     EvaluationKeyShareLnpProofWitness, EvaluationKeyShareProofFamily,
     GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS, GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
     KeySwitchComponentBFixtureInput, RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
     RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-    automorphism_i128_for_evaluation_key_fixture, evaluation_key_share_component_vector_hash,
-    evaluation_key_share_component_vector_root, evaluation_key_share_lnp_relation_proof_bytes_hash,
+    automorphism_i128_for_evaluation_key_fixture, encode_evaluation_key_share_component_vectors,
+    evaluation_key_share_component_material_reference_root,
+    evaluation_key_share_component_material_transport_hashes,
+    evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
+    evaluation_key_share_lnp_relation_proof_bytes_hash,
+    generate_evaluation_key_share_lnp_proof_from_request,
     generate_evaluation_key_share_lnp_relation_proof,
     key_switch_component_b_for_evaluation_key_fixture,
     negacyclic_i128_product_for_evaluation_key_fixture,
@@ -474,7 +488,7 @@ fn collective_setup_verifier_refuses_malformed_vss_commitment_records() {
     );
 
     let mut wrong_limb_package = minimal_collective_setup_package();
-    wrong_limb_package["vssCoefficientCommitments"]["dealerRecords"][0]["coefficientCommitments"]
+    wrong_limb_package["vssCoefficientCommitments"]["sourceTrusteeRecords"][0]["coefficientCommitments"]
         [0]["rnsPrime"] = serde_json::json!(65_537);
     rebind_collective_vss_commitment_roots(&mut wrong_limb_package);
     rebind_collective_setup_package_hash(&mut wrong_limb_package);
@@ -558,7 +572,7 @@ fn collective_setup_verifier_consumes_transported_threshold_material_when_suppli
             "setupContext": package["setupContext"],
             "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
             "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
-            "dealerCoefficientCommitmentRecords": package["vssCoefficientCommitments"]["dealerRecords"],
+            "sourceTrusteeCoefficientCommitmentRecords": package["vssCoefficientCommitments"]["sourceTrusteeRecords"],
             "transportedVssCoefficientCommitmentMaterial": transported_material,
         }))
         .expect("transported threshold derivation");
@@ -787,22 +801,25 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         "vssShareAcceptancesNotObject"
     );
 
-    let mut wrong_dealer_root_package = minimal_collective_setup_package();
-    wrong_dealer_root_package["vssShareAcceptances"]["acceptanceRecords"][0]["dealerCommitmentRoot"] =
+    let mut wrong_source_trustee_root_package = minimal_collective_setup_package();
+    wrong_source_trustee_root_package["vssShareAcceptances"]["acceptanceRecords"][0]["sourceTrusteeCommitmentRoot"] =
         serde_json::json!(valid_hash('3'));
-    rebind_collective_vss_acceptance_root(&mut wrong_dealer_root_package);
-    rebind_collective_setup_package_hash(&mut wrong_dealer_root_package);
+    rebind_collective_vss_acceptance_root(&mut wrong_source_trustee_root_package);
+    rebind_collective_setup_package_hash(&mut wrong_source_trustee_root_package);
 
-    let wrong_dealer_root_result =
+    let wrong_source_trustee_root_result =
         verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_dealer_root_package,
+            "setupPackage": wrong_source_trustee_root_package,
         }))
         .expect("verification response");
 
-    assert_eq!(wrong_dealer_root_result["verifierStatus"], "refused");
     assert_eq!(
-        wrong_dealer_root_result["refusedObjects"][0]["reasonCode"],
-        "vssShareAcceptanceDealerCommitmentRootMismatch"
+        wrong_source_trustee_root_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        wrong_source_trustee_root_result["refusedObjects"][0]["reasonCode"],
+        "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch"
     );
 
     let mut wrong_local_verification_package = minimal_collective_setup_package();
@@ -954,7 +971,7 @@ fn collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_mate
             "setupContext": package["setupContext"],
             "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
             "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
-            "dealerCoefficientCommitmentRecords": package["vssCoefficientCommitments"]["dealerRecords"],
+            "sourceTrusteeCoefficientCommitmentRecords": package["vssCoefficientCommitments"]["sourceTrusteeRecords"],
             "transportedVssCoefficientCommitmentMaterial": transported_material,
         }))
         .expect("transported threshold derivation");
@@ -1437,6 +1454,23 @@ fn collective_setup_verifier_refuses_tampered_collective_public_key_aggregate() 
 }
 
 #[test]
+fn collective_setup_public_key_loader_refuses_reduced_ring_material() {
+    let package = collective_public_key_bearing_collective_setup_package();
+
+    let error = match accepted_setup_collective_public_key_from_package(&package) {
+        Ok(_) => panic!("reduced-ring material must not become a runtime public key"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(
+        error
+            .message
+            .contains("requires profile-ring aggregate coefficients")
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_public_key_material_before_proof_verification() {
     let mut package = minimal_collective_setup_package();
     package["collectivePublicKeyRoot"] = serde_json::json!(valid_hash('8'));
@@ -1489,29 +1523,32 @@ fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_vss_complaint_records() {
-    let mut wrong_dealer_root_package = minimal_collective_setup_package();
-    wrong_dealer_root_package["vssComplaints"] = vss_complaints_object(
-        &wrong_dealer_root_package["setupContext"],
-        &wrong_dealer_root_package["privateVssEnvelopeCommitments"],
-        &wrong_dealer_root_package["vssCoefficientCommitments"],
+    let mut wrong_source_trustee_root_package = minimal_collective_setup_package();
+    wrong_source_trustee_root_package["vssComplaints"] = vss_complaints_object(
+        &wrong_source_trustee_root_package["setupContext"],
+        &wrong_source_trustee_root_package["privateVssEnvelopeCommitments"],
+        &wrong_source_trustee_root_package["vssCoefficientCommitments"],
         0,
         1,
     );
-    wrong_dealer_root_package["vssComplaints"]["complaintRecords"][0]["dealerCommitmentRoot"] =
+    wrong_source_trustee_root_package["vssComplaints"]["complaintRecords"][0]["sourceTrusteeCommitmentRoot"] =
         serde_json::json!(valid_hash('3'));
-    rebind_collective_vss_complaint_root(&mut wrong_dealer_root_package);
-    rebind_collective_setup_package_hash(&mut wrong_dealer_root_package);
+    rebind_collective_vss_complaint_root(&mut wrong_source_trustee_root_package);
+    rebind_collective_setup_package_hash(&mut wrong_source_trustee_root_package);
 
-    let wrong_dealer_root_result =
+    let wrong_source_trustee_root_result =
         verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_dealer_root_package,
+            "setupPackage": wrong_source_trustee_root_package,
         }))
         .expect("verification response");
 
-    assert_eq!(wrong_dealer_root_result["verifierStatus"], "refused");
     assert_eq!(
-        wrong_dealer_root_result["refusedObjects"][0]["reasonCode"],
-        "vssComplaintDealerCommitmentRootMismatch"
+        wrong_source_trustee_root_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        wrong_source_trustee_root_result["refusedObjects"][0]["reasonCode"],
+        "vssComplaintSourceTrusteeCommitmentRootMismatch"
     );
 
     let mut tampered_signature_package = minimal_collective_setup_package();
@@ -1584,23 +1621,23 @@ fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
         "acceptedPathForbiddenField"
     );
 
-    let mut dealer_supplied_threshold_package = minimal_collective_setup_package();
-    dealer_supplied_threshold_package["dealerThresholdShareCommitments"] =
+    let mut central_trusted_setup_authority_threshold_package = minimal_collective_setup_package();
+    central_trusted_setup_authority_threshold_package["centralTrustedSetupAuthorityThresholdShareCommitments"] =
         serde_json::json!({ "root": valid_hash('5') });
-    rebind_collective_setup_package_hash(&mut dealer_supplied_threshold_package);
+    rebind_collective_setup_package_hash(&mut central_trusted_setup_authority_threshold_package);
 
-    let dealer_supplied_threshold_result =
+    let central_trusted_setup_authority_threshold_result =
         verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": dealer_supplied_threshold_package,
+            "setupPackage": central_trusted_setup_authority_threshold_package,
         }))
         .expect("verification response");
 
     assert_eq!(
-        dealer_supplied_threshold_result["verifierStatus"],
+        central_trusted_setup_authority_threshold_result["verifierStatus"],
         "refused"
     );
     assert_eq!(
-        dealer_supplied_threshold_result["refusedObjects"][0]["reasonCode"],
+        central_trusted_setup_authority_threshold_result["refusedObjects"][0]["reasonCode"],
         "acceptedPathForbiddenField"
     );
 }
@@ -1724,6 +1761,590 @@ fn collective_setup_verifier_checks_evaluation_key_proof_container_roots() {
 }
 
 #[test]
+fn collective_setup_verifier_checks_transported_public_evaluation_key_material() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let transported_public_evaluation_key_material =
+        add_public_evaluation_key_material_transport(&mut package);
+    let evaluation_key_set_hash = package["evaluationKeys"]["evaluationKeySetHash"]
+        .as_str()
+        .expect("evaluation-key set hash")
+        .to_string();
+    let public_material_root = package["evaluationKeys"]["publicEvaluationKeyMaterialRoot"]
+        .as_str()
+        .expect("public evaluation-key material root")
+        .to_string();
+    let accepted_hashes = accepted_hashes_from_package(&package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicEvaluationKeyMaterial": transported_public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "vssCoefficientCommitmentMaterialOutsideProfile"
+    );
+    assert!(
+        accepted_hashes
+            .iter()
+            .any(|accepted_hash| accepted_hash == &evaluation_key_set_hash)
+    );
+    assert!(
+        accepted_hashes
+            .iter()
+            .any(|accepted_hash| accepted_hash == &public_material_root)
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let mut transported_public_evaluation_key_material =
+        add_public_evaluation_key_material_transport(&mut package);
+    let expected_manifest =
+        public_evaluation_key_material_manifest(&package, &package["evaluationKeys"])
+            .expect("public evaluation-key material manifest");
+    let mut tampered_manifest = expected_manifest;
+    tampered_manifest["materialSource"] =
+        serde_json::json!("tampered-public-evaluation-key-material");
+    let tampered_material_bytes =
+        encode_public_evaluation_key_material_manifest(&tampered_manifest)
+            .expect("tampered public evaluation-key material bytes");
+    rebind_public_evaluation_key_material_transport(
+        &mut package,
+        &mut transported_public_evaluation_key_material,
+        tampered_material_bytes,
+    );
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicEvaluationKeyMaterial": transported_public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "publicEvaluationKeyMaterialManifestMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_uses_public_evaluation_key_material_component_chunks() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let component_material_set =
+        move_first_galois_key_share_component_vectors_to_transport(&mut package);
+    let mut transported_public_evaluation_key_material =
+        add_public_evaluation_key_material_transport(&mut package);
+    add_component_materials_to_public_evaluation_key_material_transport(
+        &mut transported_public_evaluation_key_material,
+        &[component_material_set],
+    );
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicEvaluationKeyMaterial": transported_public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "vssCoefficientCommitmentMaterialOutsideProfile"
+    );
+}
+
+#[test]
+fn collective_setup_public_galois_key_loader_refuses_reduced_ring_material() {
+    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+
+    let error =
+        match accepted_setup_public_galois_keys_from_transport(&package, &serde_json::json!({})) {
+            Ok(_) => panic!("reduced-ring material must not become runtime Galois keys"),
+            Err(error) => error,
+        };
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(
+        error
+            .message
+            .contains("requires profile-ring component vectors")
+    );
+}
+
+#[test]
+fn collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material() {
+    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+
+    let error = match accepted_setup_public_relinearization_keys_from_transport(
+        &package,
+        &serde_json::json!({}),
+    ) {
+        Ok(_) => panic!("reduced-ring material must not become runtime relinearization keys"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(
+        error
+            .message
+            .contains("requires profile-ring component vectors")
+    );
+}
+
+#[test]
+fn relinearization_round_one_generation_refuses_independent_source_square() {
+    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let proof_record_snapshot =
+        package["relinearizationKeyShareRounds"]["roundOneRecords"][0].clone();
+    let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
+        .as_u64()
+        .expect("trustee roster position");
+    let level = proof_record_snapshot["level"].as_u64().expect("level");
+    let ring_degree = proof_record_snapshot["ringDegree"]
+        .as_u64()
+        .expect("ring degree") as usize;
+    let key_switch_seed_hex = proof_record_snapshot["keySwitchSeedHex"]
+        .as_str()
+        .expect("key-switch seed");
+    let legacy_source = legacy_relinearization_source_square_coefficients_for_fixture(
+        trustee_roster_position,
+        ring_degree,
+    );
+    let fixture_material = evaluation_key_share_fixture_material(
+        EvaluationKeyShareProofFamily::Relinearization,
+        trustee_roster_position,
+        level,
+        None,
+        ring_degree,
+        key_switch_seed_hex,
+        Some(&legacy_source),
+    );
+    let mut proof_record = proof_record_snapshot.clone();
+    proof_record["keySwitchComponentVectorRoot"] =
+        serde_json::json!(fixture_material.component_vector_root.clone());
+    proof_record["keySwitchComponentVectors"] =
+        serde_json::json!(fixture_material.component_vector_entries.clone());
+    let statement_record =
+        &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
+    let constant_commitments =
+        same_secret_constant_commitments_from_fixture_package(&package, trustee_roster_position);
+    let setup_proof_binding = setup_proof_binding_for_test_package(&package);
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let proof_randomness_seed_hex = derive_protocol_hash(
+        "RelinearizationRoundOneProofRandomness",
+        &serde_json::json!({
+            "trusteeRosterPosition": trustee_roster_position,
+            "level": level,
+            "rotation": serde_json::Value::Null,
+        }),
+    )
+    .expect("proof randomness seed");
+    let witness = EvaluationKeyShareLnpProofWitness {
+        secret_coefficients: evaluation_key_secret_coefficients_for_fixture(
+            trustee_roster_position,
+            ring_degree,
+        ),
+        opening_randomness_by_limb: (0..DATA_PRIMES.len())
+            .map(|rns_limb_index| {
+                accepted_vss_randomness_fixture(
+                    trustee_roster_position,
+                    rns_limb_index,
+                    0,
+                    ring_degree,
+                )
+            })
+            .collect(),
+        error_coefficients_by_digit: fixture_material.error_coefficients_by_digit.clone(),
+        relinearization_source_coefficients_by_digit: fixture_material
+            .relinearization_source_coefficients_by_digit
+            .clone(),
+        round_one_aggregate_source_coefficients_by_digit: Vec::new(),
+    };
+    let error = match generate_evaluation_key_share_lnp_relation_proof(
+        EvaluationKeyShareLnpProofGenerationInput {
+            proof_family: EvaluationKeyShareProofFamily::Relinearization,
+            public_matrix_seed_hash,
+            proof_record: &proof_record,
+            same_secret_statement_record: statement_record,
+            constant_commitments: &constant_commitments,
+            component_b_by_digit: &fixture_material.component_b_by_digit,
+            setup_proof_binding: &setup_proof_binding,
+            transported_key_switch_component_material: None,
+            witness: &witness,
+            proof_randomness_seed_hex: &proof_randomness_seed_hex,
+        },
+    ) {
+        Ok(_) => panic!("round-one source-square shortcut must reject"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error.message.contains(
+            "round-one relinearization source witness must equal the same-secret witness"
+        ),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn relinearization_round_two_generation_refuses_aggregate_source_product_mismatch() {
+    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let proof_record = package["relinearizationKeyShareRounds"]["roundTwoRecords"][0].clone();
+    let trustee_roster_position = proof_record["trusteeRosterPosition"]
+        .as_u64()
+        .expect("trustee roster position");
+    let level = proof_record["level"].as_u64().expect("level");
+    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
+    let key_switch_seed_hex = proof_record["keySwitchSeedHex"]
+        .as_str()
+        .expect("key-switch seed");
+    let round_two_source = relinearization_round_two_source_coefficients_for_fixture(
+        trustee_roster_position,
+        ring_degree,
+    );
+    let fixture_material = evaluation_key_share_fixture_material(
+        EvaluationKeyShareProofFamily::Relinearization,
+        trustee_roster_position,
+        level,
+        None,
+        ring_degree,
+        key_switch_seed_hex,
+        Some(&round_two_source),
+    );
+    let statement_record =
+        &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
+    let constant_commitments =
+        same_secret_constant_commitments_from_fixture_package(&package, trustee_roster_position);
+    let constant_commitment_values = constant_commitments
+        .iter()
+        .map(super::super::commitment::setup_commitment_full_value)
+        .collect::<Vec<_>>();
+    let setup_proof_binding = setup_proof_binding_for_test_package(&package);
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let proof_randomness_seed_hex = derive_protocol_hash(
+        "RelinearizationRoundTwoProofRandomness",
+        &serde_json::json!({
+            "trusteeRosterPosition": trustee_roster_position,
+            "level": level,
+            "rotation": serde_json::Value::Null,
+        }),
+    )
+    .expect("proof randomness seed");
+    let request = serde_json::json!({
+        "proofFamily": "relinearization-key-share",
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "proofRecord": proof_record,
+        "sameSecretStatementRecord": statement_record,
+        "constantCommitments": constant_commitment_values,
+        "setupProofBinding": setup_proof_binding,
+        "secretCoefficients": evaluation_key_secret_coefficients_for_fixture(
+            trustee_roster_position,
+            ring_degree,
+        ),
+        "openingRandomnessByLimb": (0..DATA_PRIMES.len())
+            .map(|rns_limb_index| {
+                accepted_vss_randomness_fixture(
+                    trustee_roster_position,
+                    rns_limb_index,
+                    0,
+                    ring_degree,
+                )
+            })
+            .collect::<Vec<_>>(),
+        "errorCoefficientsByDigit": fixture_material.error_coefficients_by_digit,
+        "relinearizationSourceCoefficientsByDigit": fixture_material
+            .relinearization_source_coefficients_by_digit,
+        "roundOneAggregateSourceCoefficientsByDigit": vec![
+            vec![0_i128; ring_degree];
+            fixture_material.component_b_by_digit.len()
+        ],
+        "proofRandomnessSource": "development-deterministic-fixture",
+        "proofRandomnessSeedHex": proof_randomness_seed_hex,
+    });
+
+    let error = match generate_evaluation_key_share_lnp_proof_from_request(&request) {
+        Ok(_) => panic!("round-two source product mismatch must reject"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error.message.contains(
+            "round-two relinearization source witness must equal the trustee secret times the accepted round-one aggregate source"
+        ),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof() {
+    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let proof_record = package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0].clone();
+    let trustee_roster_position = proof_record["trusteeRosterPosition"]
+        .as_u64()
+        .expect("trustee roster position");
+    let rotation = proof_record["rotation"].as_u64().expect("rotation");
+    let level = proof_record["level"].as_u64().expect("level");
+    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
+    let key_switch_seed_hex = proof_record["keySwitchSeedHex"]
+        .as_str()
+        .expect("key-switch seed");
+    let fixture_material = evaluation_key_share_fixture_material(
+        EvaluationKeyShareProofFamily::Galois,
+        trustee_roster_position,
+        level,
+        Some(rotation),
+        ring_degree,
+        key_switch_seed_hex,
+        None,
+    );
+    let statement_record =
+        &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
+    let constant_commitments =
+        same_secret_constant_commitments_from_fixture_package(&package, trustee_roster_position);
+    let constant_commitment_values = constant_commitments
+        .iter()
+        .map(super::super::commitment::setup_commitment_full_value)
+        .collect::<Vec<_>>();
+    let setup_proof_binding = setup_proof_binding_for_test_package(&package);
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let proof_randomness_seed_hex = derive_protocol_hash(
+        "GaloisKeyShareProofRandomness",
+        &serde_json::json!({
+            "trusteeRosterPosition": trustee_roster_position,
+            "level": level,
+            "rotation": rotation,
+        }),
+    )
+    .expect("proof randomness seed");
+    let request = serde_json::json!({
+        "proofFamily": "galois-key-share",
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "proofRecord": proof_record,
+        "sameSecretStatementRecord": statement_record,
+        "constantCommitments": constant_commitment_values,
+        "setupProofBinding": setup_proof_binding,
+        "secretCoefficients": evaluation_key_secret_coefficients_for_fixture(
+            trustee_roster_position,
+            ring_degree,
+        ),
+        "openingRandomnessByLimb": (0..DATA_PRIMES.len())
+            .map(|rns_limb_index| {
+                accepted_vss_randomness_fixture(
+                    trustee_roster_position,
+                    rns_limb_index,
+                    0,
+                    ring_degree,
+                )
+            })
+            .collect::<Vec<_>>(),
+        "errorCoefficientsByDigit": fixture_material.error_coefficients_by_digit,
+        "proofRandomnessSource": "development-deterministic-fixture",
+        "proofRandomnessSeedHex": proof_randomness_seed_hex,
+    });
+
+    let result = generate_evaluation_key_share_lnp_proof_from_request(&request)
+        .expect("generated evaluation-key proof");
+
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["operation"], "generateEvaluationKeyShareLnpProof");
+    assert_eq!(result["proofFamily"], "galois-key-share");
+    assert!(
+        result["galoisKeyShareTboxParameterProfileHash"]
+            .as_str()
+            .is_some()
+    );
+    let proof_bytes = decode_hex(result["proofBytesHex"].as_str().expect("proof bytes hex"))
+        .expect("proof bytes");
+    assert_eq!(
+        result["proofSizeBytes"].as_u64(),
+        Some(u64::try_from(proof_bytes.len()).expect("proof size fits u64"))
+    );
+    assert_eq!(
+        result["proofBytesHash"].as_str().expect("proof bytes hash"),
+        evaluation_key_share_lnp_relation_proof_bytes_hash(
+            EvaluationKeyShareProofFamily::Galois,
+            &proof_bytes,
+        ),
+    );
+    let verification = verify_evaluation_key_share_lnp_relation_proof(
+        EvaluationKeyShareLnpProofVerificationInput {
+            proof_family: EvaluationKeyShareProofFamily::Galois,
+            public_matrix_seed_hash,
+            proof_record: &request["proofRecord"],
+            same_secret_statement_record: statement_record,
+            constant_commitments: &constant_commitments,
+            setup_proof_binding: &setup_proof_binding,
+            transported_key_switch_component_material: None,
+            proof_bytes: &proof_bytes,
+        },
+    )
+    .expect("returned proof verifies");
+    assert_eq!(
+        result["statementHash"].as_str().expect("statement hash"),
+        verification.statement_hash_hex
+    );
+    assert_eq!(
+        result["relationCommitmentHash"]
+            .as_str()
+            .expect("relation commitment hash"),
+        verification.relation_commitment_hash_hex
+    );
+    assert_eq!(
+        result["tboxCommitmentPrefixHash"]
+            .as_str()
+            .expect("tbox commitment prefix hash"),
+        verification.tbox_commitment_prefix_hash
+    );
+
+    let mut rejected_request = request;
+    rejected_request["relinearizationSourceCoefficientsByDigit"] =
+        serde_json::json!([vec![0_i64; ring_degree]]);
+    let error = match generate_evaluation_key_share_lnp_proof_from_request(&rejected_request) {
+        Ok(_) => panic!("Galois command must reject relinearization-only source witness material"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("must not be provided for Galois proof generation"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_public_evaluation_key_component_chunk() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let component_material_set =
+        move_first_galois_key_share_component_vectors_to_transport(&mut package);
+    let mut transported_public_evaluation_key_material =
+        add_public_evaluation_key_material_transport(&mut package);
+    add_component_materials_to_public_evaluation_key_material_transport(
+        &mut transported_public_evaluation_key_material,
+        &[component_material_set],
+    );
+    transported_public_evaluation_key_material["componentMaterials"][0]["chunks"][0]["bytesHex"] =
+        serde_json::json!("00");
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicEvaluationKeyMaterial": transported_public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "evaluationKeyMaterialVerificationFailed"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_material() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let transported_proof_material =
+        move_first_galois_key_share_lnp_proof_bytes_to_transport(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedEvaluationKeyShareProofMaterial": transported_proof_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "vssCoefficientCommitmentMaterialOutsideProfile"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let mut transported_proof_material =
+        move_first_galois_key_share_lnp_proof_bytes_to_transport(&mut package);
+    transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
+        serde_json::json!("00");
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedEvaluationKeyShareProofMaterial": transported_proof_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "evaluationKeyMaterialVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("transported evaluation-key proof material hashes do not match chunks")
+    );
+}
+
+#[test]
+fn collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component_material() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let transported_component_material =
+        move_first_galois_key_share_component_vectors_to_transport(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedEvaluationKeyShareComponentMaterial": transported_component_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "vssCoefficientCommitmentMaterialOutsideProfile"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_transported_galois_component_material_chunk() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let mut transported_component_material =
+        move_first_galois_key_share_component_vectors_to_transport(&mut package);
+    transported_component_material["componentMaterials"][0]["chunks"][0]["bytesHex"] =
+        serde_json::json!("00");
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedEvaluationKeyShareComponentMaterial": transported_component_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "evaluationKeyMaterialVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("transported evaluation-key component material hash metadata does not match supplied chunks")
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift() {
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoAggregateRoot"] =
@@ -1780,6 +2401,31 @@ fn collective_setup_verifier_refuses_relinearization_source_square_binding_drift
     assert_eq!(
         result["refusedObjects"][0]["message"],
         "sourceSquareBindingRoot does not match the canonical relinearization source-square binding"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["keySwitchSeedHex"] =
+        serde_json::json!(valid_hash('8'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "evaluationKeyMaterialVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("shared by scheduled level and round")
     );
 }
 
@@ -1861,6 +2507,31 @@ fn collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drif
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed() {
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0]["keySwitchSeedHex"] =
+        serde_json::json!(valid_hash('9'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "evaluationKeyMaterialVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("shared by scheduled rotation and level")
     );
 }
 
@@ -2332,7 +3003,7 @@ fn minimal_collective_setup_package() -> serde_json::Value {
         derive_threshold_share_commitments_from_request(&serde_json::json!({
             "setupContext": setup_context.clone(),
             "publicMatrixSeedHash": public_matrix_seed_hash,
-            "dealerCoefficientCommitmentRecords": vss_coefficient_commitments["dealerRecords"].clone(),
+            "sourceTrusteeCoefficientCommitmentRecords": vss_coefficient_commitments["sourceTrusteeRecords"].clone(),
             "coefficientCommitments": vss_coefficient_commitment_material["coefficientCommitments"].clone(),
         }))
         .expect("threshold-share commitments")["thresholdShareCommitments"]
@@ -2501,7 +3172,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
         "nonClosure": [
             "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
             "public-key share proof bytes still require no-wrap LNP verification",
-            "relinearization and Galois proof bytes remain review-gated until quadratic source-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
+            "relinearization and Galois proof bytes remain review-gated until round-two aggregate-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
         ],
         "ringAndMatrixParameters": {
@@ -2541,7 +3212,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
             "recipientScalarPowerSumDecimal": recipient_scalar_sum.to_string(),
             "recipientAggregateOpeningInfinityBound": recipient_scalar_sum_u64,
             "maxRecipientLiftedCoefficientDecimal": max_recipient_lifted_coefficient.to_string(),
-            "dealerCountForThresholdAggregation": 10,
+            "sourceTrusteeCountForThresholdAggregation": 10,
             "thresholdScalarPowerSumDecimal": threshold_scalar_sum.to_string(),
             "thresholdShareOpeningInfinityBound": threshold_scalar_sum_u64,
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
@@ -2750,16 +3421,16 @@ fn vss_coefficient_commitments_object(
     public_matrix_seed_hash: &str,
 ) -> (serde_json::Value, serde_json::Value) {
     let development_ring_degree = 8_usize;
-    let mut dealer_records = Vec::new();
+    let mut source_trustee_records = Vec::new();
     let mut coefficient_commitment_material = Vec::new();
 
-    for dealer_roster_position in 0..10_u64 {
-        let dealer_identity = format!("trustee-{dealer_roster_position}");
+    for source_trustee_roster_position in 0..10_u64 {
+        let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
         let mut coefficient_commitments = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
             for shamir_coefficient_index in 0..4_u64 {
                 let coefficient_message = accepted_vss_coefficient_message_fixture(
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     shamir_coefficient_index,
                     rns_prime,
@@ -2770,7 +3441,7 @@ fn vss_coefficient_commitments_object(
                     .map(|coefficient| u128::from(*coefficient))
                     .collect::<Vec<_>>();
                 let randomness_by_column = accepted_vss_randomness_fixture(
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     shamir_coefficient_index,
                     development_ring_degree,
@@ -2790,7 +3461,7 @@ fn vss_coefficient_commitments_object(
                     "VssCoefficientCommitmentRoot",
                     &serde_json::json!({
                         "fixture": "vss-coefficient-commitment-chunk-root",
-                        "dealerRosterPosition": dealer_roster_position,
+                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
                         "rnsLimbIndex": rns_limb_index,
                         "shamirCoefficientIndex": shamir_coefficient_index,
                     }),
@@ -2800,7 +3471,7 @@ fn vss_coefficient_commitments_object(
                     "VssCoefficientCommitmentRoot",
                     &serde_json::json!({
                         "fixture": "vss-coefficient-vector-hash",
-                        "dealerRosterPosition": dealer_roster_position,
+                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
                         "rnsLimbIndex": rns_limb_index,
                         "shamirCoefficientIndex": shamir_coefficient_index,
                     }),
@@ -2817,8 +3488,8 @@ fn vss_coefficient_commitments_object(
                     "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                     "commitmentProfileHash": commitment_profile_hash,
                     "setupEpoch": setup_epoch,
-                    "dealerIdentity": dealer_identity.as_str(),
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": rns_prime,
@@ -2839,8 +3510,8 @@ fn vss_coefficient_commitments_object(
                     "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                     "commitmentProfileHash": commitment_profile_hash,
                     "setupEpoch": setup_epoch,
-                    "dealerIdentity": dealer_identity.as_str(),
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": rns_prime,
@@ -2851,8 +3522,8 @@ fn vss_coefficient_commitments_object(
             }
         }
 
-        let mut dealer_record = serde_json::json!({
-            "objectType": "VssDealerCoefficientCommitments",
+        let mut source_trustee_record = serde_json::json!({
+            "objectType": "VssSourceTrusteeCoefficientCommitments",
             "objectVersion": 1,
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
@@ -2862,16 +3533,16 @@ fn vss_coefficient_commitments_object(
             "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
             "commitmentProfileHash": commitment_profile_hash,
             "setupEpoch": setup_epoch,
-            "dealerIdentity": dealer_identity,
-            "dealerRosterPosition": dealer_roster_position,
+            "sourceTrusteeIdentity": source_trustee_identity,
+            "sourceTrusteeRosterPosition": source_trustee_roster_position,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "coefficientCommitments": coefficient_commitments,
         });
-        dealer_record["dealerCommitmentRoot"] = serde_json::json!(
-            derive_protocol_hash("VssCoefficientCommitmentRoot", &dealer_record)
-                .expect("dealer commitment root")
+        source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
+            derive_protocol_hash("VssCoefficientCommitmentRoot", &source_trustee_record)
+                .expect("source trustee commitment root")
         );
-        dealer_records.push(dealer_record);
+        source_trustee_records.push(source_trustee_record);
     }
 
     let mut commitment_set = serde_json::json!({
@@ -2886,7 +3557,7 @@ fn vss_coefficient_commitments_object(
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "dealerRecords": dealer_records,
+        "sourceTrusteeRecords": source_trustee_records,
     });
     commitment_set["vssCoefficientCommitmentRoot"] = serde_json::json!(
         derive_protocol_hash("VssCoefficientCommitmentRoot", &commitment_set)
@@ -2925,7 +3596,7 @@ fn vss_coefficient_commitments_object(
 }
 
 fn accepted_vss_coefficient_message_fixture(
-    dealer_roster_position: u64,
+    source_trustee_roster_position: u64,
     rns_limb_index: usize,
     shamir_coefficient_index: u64,
     rns_prime: u64,
@@ -2935,7 +3606,7 @@ fn accepted_vss_coefficient_message_fixture(
         return (0..ring_degree)
             .map(|coefficient_position| {
                 match accepted_vss_secret_coefficient_fixture(
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     coefficient_position,
                 ) {
                     -1 => rns_prime - 1,
@@ -2949,7 +3620,7 @@ fn accepted_vss_coefficient_message_fixture(
 
     (0..ring_degree)
         .map(|coefficient_position| {
-            let value = ((dealer_roster_position + 1) * 17)
+            let value = ((source_trustee_roster_position + 1) * 17)
                 + ((rns_limb_index as u64 + 1) * 5)
                 + ((shamir_coefficient_index + 1) * 3)
                 + (coefficient_position as u64 % 11);
@@ -2959,10 +3630,10 @@ fn accepted_vss_coefficient_message_fixture(
 }
 
 fn accepted_vss_secret_coefficient_fixture(
-    dealer_roster_position: u64,
+    source_trustee_roster_position: u64,
     coefficient_position: usize,
 ) -> i64 {
-    match (dealer_roster_position as usize + coefficient_position) % 3 {
+    match (source_trustee_roster_position as usize + coefficient_position) % 3 {
         0 => -1,
         1 => 0,
         _ => 1,
@@ -2970,7 +3641,7 @@ fn accepted_vss_secret_coefficient_fixture(
 }
 
 fn accepted_vss_randomness_fixture(
-    dealer_roster_position: u64,
+    source_trustee_roster_position: u64,
     rns_limb_index: usize,
     shamir_coefficient_index: u64,
     ring_degree: usize,
@@ -2979,7 +3650,7 @@ fn accepted_vss_randomness_fixture(
         .map(|randomness_column_index| {
             (0..ring_degree)
                 .map(|coefficient_position| {
-                    match (dealer_roster_position as usize
+                    match (source_trustee_roster_position as usize
                         + rns_limb_index
                         + shamir_coefficient_index as usize
                         + randomness_column_index
@@ -3032,16 +3703,17 @@ fn same_secret_consistency_object(
     .expect("same-secret proof family binding root");
     for trustee_roster_position in 0..10_u64 {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
-        let dealer_record =
-            &vss_coefficient_commitments["dealerRecords"][trustee_roster_position as usize];
-        let vss_dealer_commitment_root = dealer_record["dealerCommitmentRoot"]
-            .as_str()
-            .expect("dealer commitment root");
+        let source_trustee_record =
+            &vss_coefficient_commitments["sourceTrusteeRecords"][trustee_roster_position as usize];
+        let vss_source_trustee_commitment_root =
+            source_trustee_record["sourceTrusteeCommitmentRoot"]
+                .as_str()
+                .expect("source trustee commitment root");
         let constant_coefficient_commitment_roots = DATA_PRIMES
             .iter()
             .enumerate()
             .map(|(rns_limb_index, rns_prime)| {
-                let commitment_root = dealer_record["coefficientCommitments"]
+                let commitment_root = source_trustee_record["coefficientCommitments"]
                     .as_array()
                     .expect("coefficient commitments")
                     .iter()
@@ -3075,7 +3747,7 @@ fn same_secret_consistency_object(
             "setupEpoch": setup_epoch,
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
-            "vssDealerCommitmentRoot": vss_dealer_commitment_root,
+            "vssSourceTrusteeCommitmentRoot": vss_source_trustee_commitment_root,
             "secretCommitmentSource": "vss-constant-coefficient-commitments",
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
             "constantCoefficientCommitmentRoots": constant_coefficient_commitment_roots,
@@ -3103,7 +3775,7 @@ fn same_secret_consistency_object(
             "setupEpoch": setup_epoch,
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
-            "vssDealerCommitmentRoot": vss_dealer_commitment_root,
+            "vssSourceTrusteeCommitmentRoot": vss_source_trustee_commitment_root,
             "constantCoefficientCommitmentRoots": trustee_secret_commitment_payload["constantCoefficientCommitmentRoots"].clone(),
             "trusteeSecretCommitmentRoot": trustee_secret_commitment_root,
             "boundSecretDependentProofFamilies": [
@@ -3623,6 +4295,7 @@ fn evaluation_key_share_fixture_material(
     rotation: Option<u64>,
     ring_degree: usize,
     key_switch_seed_hex: &str,
+    relinearization_source_coefficients: Option<&[i128]>,
 ) -> EvaluationKeyShareFixtureMaterial {
     let level = usize::try_from(level).expect("level fits usize");
     let secret_coefficients =
@@ -3638,10 +4311,9 @@ fn evaluation_key_share_fixture_material(
         }
     };
     let base_source = match proof_family {
-        EvaluationKeyShareProofFamily::Relinearization => {
-            negacyclic_i128_product_for_evaluation_key_fixture(&secret_i128, &secret_i128)
-                .expect("relinearization source")
-        }
+        EvaluationKeyShareProofFamily::Relinearization => relinearization_source_coefficients
+            .expect("relinearization source coefficients")
+            .to_vec(),
         EvaluationKeyShareProofFamily::Galois => automorphism_i128_for_evaluation_key_fixture(
             &secret_i128,
             usize::try_from(rotation.expect("Galois rotation")).expect("rotation fits usize"),
@@ -3713,6 +4385,76 @@ fn evaluation_key_secret_coefficients_for_fixture(
             accepted_vss_secret_coefficient_fixture(trustee_roster_position, coefficient_position)
         })
         .collect()
+}
+
+fn evaluation_key_secret_coefficients_i128_for_fixture(
+    trustee_roster_position: u64,
+    ring_degree: usize,
+) -> Vec<i128> {
+    evaluation_key_secret_coefficients_for_fixture(trustee_roster_position, ring_degree)
+        .into_iter()
+        .map(i128::from)
+        .collect()
+}
+
+fn aggregate_evaluation_key_secret_coefficients_for_fixture(ring_degree: usize) -> Vec<i128> {
+    let mut aggregate = vec![0_i128; ring_degree];
+    for trustee_roster_position in 0..10_u64 {
+        let secret = evaluation_key_secret_coefficients_i128_for_fixture(
+            trustee_roster_position,
+            ring_degree,
+        );
+        for (aggregate_coefficient, secret_coefficient) in aggregate.iter_mut().zip(secret.iter()) {
+            *aggregate_coefficient += *secret_coefficient;
+        }
+    }
+
+    aggregate
+}
+
+fn round_one_aggregate_source_coefficients_for_generation(
+    proof_family: EvaluationKeyShareProofFamily,
+    proof_record: &serde_json::Value,
+    ring_degree: usize,
+    digit_count: usize,
+) -> Vec<Vec<i128>> {
+    if proof_family != EvaluationKeyShareProofFamily::Relinearization
+        || proof_record["objectType"].as_str() != Some("RelinearizationKeyShareRoundTwo")
+    {
+        return Vec::new();
+    }
+
+    vec![aggregate_evaluation_key_secret_coefficients_for_fixture(ring_degree); digit_count]
+}
+
+fn relinearization_round_one_source_coefficients_for_fixture(
+    trustee_roster_position: u64,
+    ring_degree: usize,
+) -> Vec<i128> {
+    evaluation_key_secret_coefficients_i128_for_fixture(trustee_roster_position, ring_degree)
+}
+
+fn relinearization_round_two_source_coefficients_for_fixture(
+    trustee_roster_position: u64,
+    ring_degree: usize,
+) -> Vec<i128> {
+    let trustee_secret =
+        evaluation_key_secret_coefficients_i128_for_fixture(trustee_roster_position, ring_degree);
+    let aggregate_secret = aggregate_evaluation_key_secret_coefficients_for_fixture(ring_degree);
+
+    negacyclic_i128_product_for_evaluation_key_fixture(&trustee_secret, &aggregate_secret)
+        .expect("round-two aggregate relinearization source")
+}
+
+fn legacy_relinearization_source_square_coefficients_for_fixture(
+    trustee_roster_position: u64,
+    ring_degree: usize,
+) -> Vec<i128> {
+    let trustee_secret =
+        evaluation_key_secret_coefficients_i128_for_fixture(trustee_roster_position, ring_degree);
+
+    negacyclic_i128_product_for_evaluation_key_fixture(&trustee_secret, &trustee_secret)
+        .expect("legacy relinearization source")
 }
 
 fn evaluation_key_error_coefficients_for_fixture(
@@ -3799,6 +4541,7 @@ fn populate_evaluation_key_share_lnp_proof_fields(
     setup_proof_binding: &serde_json::Value,
     fixture_material: &EvaluationKeyShareFixtureMaterial,
     trustee_roster_position: u64,
+    transported_key_switch_component_material: Option<&serde_json::Value>,
     proof_randomness_label: &str,
 ) {
     let proof_randomness_seed_hex = derive_protocol_hash(
@@ -3835,6 +4578,16 @@ fn populate_evaluation_key_share_lnp_proof_fields(
         relinearization_source_coefficients_by_digit: fixture_material
             .relinearization_source_coefficients_by_digit
             .clone(),
+        round_one_aggregate_source_coefficients_by_digit:
+            round_one_aggregate_source_coefficients_for_generation(
+                proof_family,
+                proof_record,
+                constant_commitments
+                    .first()
+                    .expect("constant commitment")
+                    .ring_degree,
+                fixture_material.component_b_by_digit.len(),
+            ),
     };
     let proof_bytes = generate_evaluation_key_share_lnp_relation_proof(
         EvaluationKeyShareLnpProofGenerationInput {
@@ -3845,6 +4598,7 @@ fn populate_evaluation_key_share_lnp_proof_fields(
             constant_commitments,
             component_b_by_digit: &fixture_material.component_b_by_digit,
             setup_proof_binding,
+            transported_key_switch_component_material,
             witness: &witness,
             proof_randomness_seed_hex: &proof_randomness_seed_hex,
         },
@@ -3858,6 +4612,7 @@ fn populate_evaluation_key_share_lnp_proof_fields(
             same_secret_statement_record: statement_record,
             constant_commitments,
             setup_proof_binding,
+            transported_key_switch_component_material,
             proof_bytes: &proof_bytes,
         },
     )
@@ -3880,6 +4635,8 @@ fn relinearization_source_square_binding_root_for_test(
     round: &str,
     share_root: &str,
 ) -> String {
+    let (source_relation, source_relation_status) =
+        relinearization_source_relation_for_round_for_test(round);
     derive_protocol_hash(
         "RelinearizationSourceSquareBindingRoot",
         &serde_json::json!({
@@ -3888,8 +4645,8 @@ fn relinearization_source_square_binding_root_for_test(
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
             "proofFamily": "relinearization-key-share",
-            "sourceRelation": "same-secret-square-for-relinearization-source",
-            "sourceRelationStatus": "review-gated-quadratic-tbox-closure-required",
+            "sourceRelation": source_relation,
+            "sourceRelationStatus": source_relation_status,
             "round": round,
             "evaluatorKeyScheduleRoot": record["evaluatorKeyScheduleRoot"],
             "sameSecretProofSetRoot": record["sameSecretProofSetRoot"],
@@ -3919,14 +4676,16 @@ fn relinearization_source_square_aggregate_root_for_test(
     source_square_binding_roots: &[serde_json::Value],
     round_one_source_square_aggregate_root: Option<&str>,
 ) -> String {
+    let (source_relation, source_relation_status) =
+        relinearization_source_relation_for_round_for_test(round);
     let mut aggregate = serde_json::json!({
         "objectType": "RelinearizationSourceSquareAggregate",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "relinearization-key-share",
-        "sourceRelation": "same-secret-square-for-relinearization-source",
-        "sourceRelationStatus": "review-gated-quadratic-tbox-closure-required",
+        "sourceRelation": source_relation,
+        "sourceRelationStatus": source_relation_status,
         "round": round,
         "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
         "level": level,
@@ -3939,6 +4698,67 @@ fn relinearization_source_square_aggregate_root_for_test(
 
     derive_protocol_hash("RelinearizationSourceSquareAggregateRoot", &aggregate)
         .expect("relinearization source-square aggregate root")
+}
+
+fn relinearization_source_relation_for_round_for_test(round: &str) -> (&'static str, &'static str) {
+    match round {
+        "round-one" => (
+            "same-secret-for-relinearization-round-one-source",
+            "verified-by-round-one-same-secret-source-response",
+        ),
+        "round-two" => (
+            "same-secret-times-round-one-aggregate-for-relinearization-source",
+            "review-gated-aggregate-square-proof-closure-required",
+        ),
+        _ => panic!("unsupported relinearization round"),
+    }
+}
+
+fn relinearization_key_switch_seed_for_test(
+    schedule: &serde_json::Value,
+    round: &str,
+    level: u64,
+) -> String {
+    derive_protocol_hash(
+        "RelinearizationKeyShareSeed",
+        &serde_json::json!({
+            "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "proofFamily": "relinearization-key-share",
+            "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
+            "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+            "relinearizationCrpRoot": schedule["relinearizationCrpRoot"],
+            "round": round,
+            "level": level,
+        }),
+    )
+    .expect("relinearization key-switch seed")
+}
+
+fn galois_key_switch_seed_for_test(
+    schedule: &serde_json::Value,
+    rotation: u64,
+    level: u64,
+) -> String {
+    derive_protocol_hash(
+        "GaloisKeyShareSeed",
+        &serde_json::json!({
+            "objectType": "GaloisKeySwitchPublicSampleSeed",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "proofFamily": "galois-key-share",
+            "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
+            "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+            "galoisKeyCrpRoot": schedule["galoisKeyCrpRoot"],
+            "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
+            "rotation": rotation,
+            "level": level,
+        }),
+    )
+    .expect("Galois key-switch seed")
 }
 
 fn relinearization_key_share_rounds_object(package: &serde_json::Value) -> serde_json::Value {
@@ -3984,15 +4804,12 @@ fn relinearization_key_share_rounds_object(package: &serde_json::Value) -> serde
                 .first()
                 .expect("constant commitment")
                 .ring_degree;
-            let key_switch_seed_hex = derive_protocol_hash(
-                "RelinearizationKeyShareSeed",
-                &serde_json::json!({
-                    "round": "one",
-                    "level": level,
-                    "trusteeRosterPosition": trustee_roster_position,
-                }),
-            )
-            .expect("relinearization seed");
+            let key_switch_seed_hex =
+                relinearization_key_switch_seed_for_test(schedule, "round-one", level);
+            let relinearization_source = relinearization_round_one_source_coefficients_for_fixture(
+                trustee_roster_position,
+                ring_degree,
+            );
             let fixture_material = evaluation_key_share_fixture_material(
                 EvaluationKeyShareProofFamily::Relinearization,
                 trustee_roster_position,
@@ -4000,6 +4817,7 @@ fn relinearization_key_share_rounds_object(package: &serde_json::Value) -> serde
                 None,
                 ring_degree,
                 &key_switch_seed_hex,
+                Some(&relinearization_source),
             );
             let round_one_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
@@ -4050,6 +4868,7 @@ fn relinearization_key_share_rounds_object(package: &serde_json::Value) -> serde
                 &setup_proof_binding,
                 &fixture_material,
                 trustee_roster_position,
+                None,
                 "RelinearizationRoundOneProofRandomness",
             );
             let source_square_binding_root = relinearization_source_square_binding_root_for_test(
@@ -4163,15 +4982,12 @@ fn relinearization_key_share_rounds_object(package: &serde_json::Value) -> serde
                 .first()
                 .expect("constant commitment")
                 .ring_degree;
-            let key_switch_seed_hex = derive_protocol_hash(
-                "RelinearizationKeyShareSeed",
-                &serde_json::json!({
-                    "round": "two",
-                    "level": level,
-                    "trusteeRosterPosition": trustee_roster_position,
-                }),
-            )
-            .expect("relinearization seed");
+            let key_switch_seed_hex =
+                relinearization_key_switch_seed_for_test(schedule, "round-two", level);
+            let relinearization_source = relinearization_round_two_source_coefficients_for_fixture(
+                trustee_roster_position,
+                ring_degree,
+            );
             let fixture_material = evaluation_key_share_fixture_material(
                 EvaluationKeyShareProofFamily::Relinearization,
                 trustee_roster_position,
@@ -4179,6 +4995,7 @@ fn relinearization_key_share_rounds_object(package: &serde_json::Value) -> serde
                 None,
                 ring_degree,
                 &key_switch_seed_hex,
+                Some(&relinearization_source),
             );
             let round_two_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
@@ -4244,6 +5061,7 @@ fn relinearization_key_share_rounds_object(package: &serde_json::Value) -> serde
                 &setup_proof_binding,
                 &fixture_material,
                 trustee_roster_position,
+                None,
                 "RelinearizationRoundTwoProofRandomness",
             );
             let source_square_binding_root = relinearization_source_square_binding_root_for_test(
@@ -4415,15 +5233,8 @@ fn galois_key_share_batches_object(package: &serde_json::Value) -> serde_json::V
                         .first()
                         .expect("constant commitment")
                         .ring_degree;
-                    let key_switch_seed_hex = derive_protocol_hash(
-                        "GaloisKeyShareSeed",
-                        &serde_json::json!({
-                            "rotation": rotation,
-                            "level": level,
-                            "trusteeRosterPosition": trustee_roster_position,
-                        }),
-                    )
-                    .expect("Galois seed");
+                    let key_switch_seed_hex =
+                        galois_key_switch_seed_for_test(schedule, rotation, level);
                     let fixture_material = evaluation_key_share_fixture_material(
                         EvaluationKeyShareProofFamily::Galois,
                         trustee_roster_position,
@@ -4431,6 +5242,7 @@ fn galois_key_share_batches_object(package: &serde_json::Value) -> serde_json::V
                         Some(rotation),
                         ring_degree,
                         &key_switch_seed_hex,
+                        None,
                     );
                     let root = fixture_material.component_vector_root.clone();
                     let mut galois_proof = serde_json::json!({
@@ -4480,11 +5292,12 @@ fn galois_key_share_batches_object(package: &serde_json::Value) -> serde_json::V
                         public_matrix_seed_hash,
                         statement_record,
                         &constant_commitments,
-                        &setup_proof_binding,
-                        &fixture_material,
-                        trustee_roster_position,
-                        "GaloisKeyShareProofRandomness",
-                    );
+                    &setup_proof_binding,
+                    &fixture_material,
+                    trustee_roster_position,
+                    None,
+                    "GaloisKeyShareProofRandomness",
+                );
                     let mut proof_root_input = galois_proof.clone();
                     proof_root_input
                         .as_object_mut()
@@ -4773,6 +5586,475 @@ fn public_evaluation_key_set_object(package: &serde_json::Value) -> serde_json::
     );
 
     evaluation_keys
+}
+
+fn add_public_evaluation_key_material_transport(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let manifest = public_evaluation_key_material_manifest(package, &package["evaluationKeys"])
+        .expect("public evaluation-key material manifest");
+    let material_bytes = encode_public_evaluation_key_material_manifest(&manifest)
+        .expect("public evaluation-key material bytes");
+    let chunks = proof_bytes_transport_chunks(material_bytes);
+    let transport_hashes = public_evaluation_key_material_transport_hashes(&chunks)
+        .expect("public evaluation-key material transport hashes");
+    let material_root = public_evaluation_key_material_reference_root(
+        &package["evaluationKeys"],
+        &manifest,
+        &transport_hashes,
+    )
+    .expect("public evaluation-key material root");
+    package["evaluationKeys"]["publicEvaluationKeyMaterialEncoding"] =
+        serde_json::json!(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialRoot"] = serde_json::json!(material_root);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialChunkSizeBytes"] =
+        serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialChunkCount"] =
+        serde_json::json!(transport_hashes.chunk_hashes.len());
+    package["evaluationKeys"]["publicEvaluationKeyMaterialTotalByteLength"] =
+        serde_json::json!(transport_hashes.total_byte_length);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialFullObjectHash"] =
+        serde_json::json!(transport_hashes.full_object_hash);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialChunkRoot"] =
+        serde_json::json!(transport_hashes.chunk_root);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialChunkHashes"] =
+        serde_json::json!(transport_hashes.chunk_hashes);
+    package["evaluationKeys"]
+        .as_object_mut()
+        .expect("evaluation key set")
+        .remove("evaluationKeySetHash");
+    package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
+        derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
+            .expect("evaluation key set hash")
+    );
+    rebind_collective_setup_package_hash(package);
+
+    serde_json::json!({
+        "objectType": PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+        "publicEvaluationKeyMaterials": [{
+            "objectType": PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+            "ceremonyId": package["evaluationKeys"]["ceremonyId"],
+            "manifestHash": package["evaluationKeys"]["manifestHash"],
+            "rosterHash": package["evaluationKeys"]["rosterHash"],
+            "setupProfileHash": package["evaluationKeys"]["setupProfileHash"],
+            "qShareHash": package["evaluationKeys"]["qShareHash"],
+            "carryAwareVssShareRelationProfileHash": package["evaluationKeys"]["carryAwareVssShareRelationProfileHash"],
+            "commitmentProfileHash": package["evaluationKeys"]["commitmentProfileHash"],
+            "setupEpoch": package["evaluationKeys"]["setupEpoch"],
+            "evaluationKeySetHash": package["evaluationKeys"]["evaluationKeySetHash"],
+            "publicEvaluationKeyMaterialRoot": package["evaluationKeys"]["publicEvaluationKeyMaterialRoot"],
+            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": package["evaluationKeys"]["publicEvaluationKeyMaterialChunkCount"],
+            "totalByteLength": package["evaluationKeys"]["publicEvaluationKeyMaterialTotalByteLength"],
+            "fullObjectHash": package["evaluationKeys"]["publicEvaluationKeyMaterialFullObjectHash"],
+            "chunkRoot": package["evaluationKeys"]["publicEvaluationKeyMaterialChunkRoot"],
+            "chunkHashes": package["evaluationKeys"]["publicEvaluationKeyMaterialChunkHashes"],
+            "chunks": chunks
+                .into_iter()
+                .enumerate()
+                .map(|(chunk_index, chunk)| serde_json::json!({
+                    "chunkIndex": chunk_index,
+                    "bytesHex": to_hex(&chunk),
+                }))
+                .collect::<Vec<_>>(),
+        }],
+    })
+}
+
+fn add_component_materials_to_public_evaluation_key_material_transport(
+    transported_public_evaluation_key_material: &mut serde_json::Value,
+    component_material_sets: &[serde_json::Value],
+) {
+    let mut component_materials = Vec::new();
+    for component_material_set in component_material_sets {
+        component_materials.extend(
+            component_material_set["componentMaterials"]
+                .as_array()
+                .expect("component materials")
+                .iter()
+                .cloned(),
+        );
+    }
+    transported_public_evaluation_key_material["componentMaterials"] =
+        serde_json::json!(component_materials);
+}
+
+fn rebind_public_evaluation_key_material_transport(
+    package: &mut serde_json::Value,
+    transported_public_evaluation_key_material: &mut serde_json::Value,
+    material_bytes: Vec<u8>,
+) {
+    let chunks = proof_bytes_transport_chunks(material_bytes);
+    let transport_hashes = public_evaluation_key_material_transport_hashes(&chunks)
+        .expect("public evaluation-key material transport hashes");
+    let expected_manifest =
+        public_evaluation_key_material_manifest(package, &package["evaluationKeys"])
+            .expect("public evaluation-key material manifest");
+    let material_root = public_evaluation_key_material_reference_root(
+        &package["evaluationKeys"],
+        &expected_manifest,
+        &transport_hashes,
+    )
+    .expect("public evaluation-key material root");
+
+    package["evaluationKeys"]["publicEvaluationKeyMaterialRoot"] = serde_json::json!(material_root);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialChunkCount"] =
+        serde_json::json!(transport_hashes.chunk_hashes.len());
+    package["evaluationKeys"]["publicEvaluationKeyMaterialTotalByteLength"] =
+        serde_json::json!(transport_hashes.total_byte_length);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialFullObjectHash"] =
+        serde_json::json!(transport_hashes.full_object_hash);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialChunkRoot"] =
+        serde_json::json!(transport_hashes.chunk_root);
+    package["evaluationKeys"]["publicEvaluationKeyMaterialChunkHashes"] =
+        serde_json::json!(transport_hashes.chunk_hashes);
+    package["evaluationKeys"]
+        .as_object_mut()
+        .expect("evaluation key set")
+        .remove("evaluationKeySetHash");
+    package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
+        derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
+            .expect("evaluation key set hash")
+    );
+    rebind_collective_setup_package_hash(package);
+
+    let material_entry =
+        &mut transported_public_evaluation_key_material["publicEvaluationKeyMaterials"][0];
+    material_entry["evaluationKeySetHash"] =
+        package["evaluationKeys"]["evaluationKeySetHash"].clone();
+    material_entry["publicEvaluationKeyMaterialRoot"] =
+        package["evaluationKeys"]["publicEvaluationKeyMaterialRoot"].clone();
+    material_entry["chunkCount"] =
+        package["evaluationKeys"]["publicEvaluationKeyMaterialChunkCount"].clone();
+    material_entry["totalByteLength"] =
+        package["evaluationKeys"]["publicEvaluationKeyMaterialTotalByteLength"].clone();
+    material_entry["fullObjectHash"] =
+        package["evaluationKeys"]["publicEvaluationKeyMaterialFullObjectHash"].clone();
+    material_entry["chunkRoot"] =
+        package["evaluationKeys"]["publicEvaluationKeyMaterialChunkRoot"].clone();
+    material_entry["chunkHashes"] =
+        package["evaluationKeys"]["publicEvaluationKeyMaterialChunkHashes"].clone();
+    material_entry["chunks"] = serde_json::Value::Array(
+        chunks
+            .into_iter()
+            .enumerate()
+            .map(|(chunk_index, chunk)| {
+                serde_json::json!({
+                    "chunkIndex": chunk_index,
+                    "bytesHex": to_hex(&chunk),
+                })
+            })
+            .collect::<Vec<_>>(),
+    );
+}
+
+fn move_first_galois_key_share_lnp_proof_bytes_to_transport(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let proof_material = {
+        let proof_record = &mut package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0];
+        move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
+            proof_record,
+            "galois-key-share",
+            "galoisKeyShareProofRoot",
+            "GaloisKeyShareProofRoot",
+        )
+    };
+    rebind_galois_key_batch_proof_root(package, 0);
+    rebind_galois_key_share_batch_root(package, 0);
+    package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    rebind_collective_setup_package_hash(package);
+
+    serde_json::json!({
+        "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "proofFamily": "galois-key-share",
+        "proofMaterials": [proof_material],
+    })
+}
+
+fn move_first_galois_key_share_component_vectors_to_transport(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let proof_record_snapshot =
+        package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0].clone();
+    let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
+        .as_u64()
+        .expect("trustee roster position");
+    let rotation = proof_record_snapshot["rotation"]
+        .as_u64()
+        .expect("Galois rotation");
+    let level = proof_record_snapshot["level"].as_u64().expect("level");
+    let ring_degree = proof_record_snapshot["ringDegree"]
+        .as_u64()
+        .expect("ring degree") as usize;
+    let key_switch_seed_hex = proof_record_snapshot["keySwitchSeedHex"]
+        .as_str()
+        .expect("key-switch seed")
+        .to_string();
+    let statement_record = package["sameSecretConsistency"]["statementRecords"]
+        [trustee_roster_position as usize]
+        .clone();
+    let constant_commitments =
+        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
+    let setup_proof_binding = setup_proof_binding_for_test_package(package);
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash")
+        .to_string();
+    let fixture_material = evaluation_key_share_fixture_material(
+        EvaluationKeyShareProofFamily::Galois,
+        trustee_roster_position,
+        level,
+        Some(rotation),
+        ring_degree,
+        &key_switch_seed_hex,
+        None,
+    );
+    let transported_component_material_set = {
+        let proof_record = &mut package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0];
+        move_evaluation_key_share_component_vectors_to_transport(
+            proof_record,
+            EvaluationKeyShareProofFamily::Galois,
+            &fixture_material,
+        )
+    };
+    {
+        let proof_record = &mut package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0];
+        proof_record
+            .as_object_mut()
+            .expect("Galois proof record object")
+            .remove("galoisKeyShareProofRoot");
+        populate_evaluation_key_share_lnp_proof_fields(
+            proof_record,
+            EvaluationKeyShareProofFamily::Galois,
+            &public_matrix_seed_hash,
+            &statement_record,
+            &constant_commitments,
+            &setup_proof_binding,
+            &fixture_material,
+            trustee_roster_position,
+            Some(&transported_component_material_set),
+            "GaloisKeyShareProofRandomness",
+        );
+        proof_record["galoisKeyShareProofRoot"] = serde_json::json!(
+            derive_protocol_hash("GaloisKeyShareProofRoot", proof_record)
+                .expect("transported Galois proof root")
+        );
+    }
+    rebind_galois_key_batch_proof_root(package, 0);
+    rebind_galois_key_share_batch_root(package, 0);
+    package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    rebind_collective_setup_package_hash(package);
+
+    transported_component_material_set
+}
+
+fn move_evaluation_key_share_component_vectors_to_transport(
+    proof_record: &mut serde_json::Value,
+    proof_family: EvaluationKeyShareProofFamily,
+    fixture_material: &EvaluationKeyShareFixtureMaterial,
+) -> serde_json::Value {
+    let level = proof_record["level"].as_u64().expect("level") as usize;
+    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
+    let material_bytes = encode_evaluation_key_share_component_vectors(
+        level,
+        ring_degree,
+        &fixture_material.component_b_by_digit,
+    )
+    .expect("evaluation-key component material bytes");
+    let chunks = proof_bytes_transport_chunks(material_bytes);
+    let transport_hashes = evaluation_key_share_component_material_transport_hashes(
+        proof_family,
+        &chunks,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )
+    .expect("evaluation-key component material transport hashes");
+    {
+        let proof_record_object = proof_record
+            .as_object_mut()
+            .expect("evaluation-key proof record object");
+        proof_record_object.remove("keySwitchComponentVectors");
+        proof_record_object.remove("statementHash");
+        proof_record_object.remove("relationCommitmentHash");
+        proof_record_object.remove("tboxCommitmentPrefixHash");
+        proof_record_object.remove("challenge");
+        proof_record_object.remove("proofSizeBytes");
+        proof_record_object.remove("proofBytesHash");
+        proof_record_object.remove("proofBytesHex");
+    }
+    proof_record["keySwitchMaterialEncoding"] =
+        serde_json::json!(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING);
+    let material_root = evaluation_key_share_component_material_reference_root(
+        proof_family,
+        proof_record,
+        &transport_hashes,
+    )
+    .expect("evaluation-key component material root");
+    proof_record["keySwitchComponentMaterialRoot"] = serde_json::json!(material_root);
+    proof_record["keySwitchComponentChunkSizeBytes"] =
+        serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
+    proof_record["keySwitchComponentChunkCount"] =
+        serde_json::json!(transport_hashes.chunk_hashes.len());
+    proof_record["keySwitchComponentTotalByteLength"] =
+        serde_json::json!(transport_hashes.total_byte_length);
+    proof_record["keySwitchComponentFullObjectHash"] =
+        serde_json::json!(transport_hashes.full_object_hash);
+    proof_record["keySwitchComponentChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
+    proof_record["keySwitchComponentChunkHashes"] =
+        serde_json::json!(transport_hashes.chunk_hashes.clone());
+
+    serde_json::json!({
+        "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "componentMaterials": [{
+            "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE,
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "proofFamily": proof_family.proof_family(),
+            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+            "trusteeIdentity": proof_record["trusteeIdentity"],
+            "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
+            "keySwitchDomain": proof_record["keySwitchDomain"],
+            "keySwitchSeedHex": proof_record["keySwitchSeedHex"],
+            "level": proof_record["level"],
+            "ringDegree": proof_record["ringDegree"],
+            "digitCount": level + 1,
+            "rnsLimbCount": level + 1,
+            "keySwitchComponentVectorRoot": proof_record["keySwitchComponentVectorRoot"],
+            "keySwitchComponentMaterialRoot": proof_record["keySwitchComponentMaterialRoot"],
+            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": transport_hashes.chunk_hashes.len(),
+            "totalByteLength": transport_hashes.total_byte_length,
+            "fullObjectHash": proof_record["keySwitchComponentFullObjectHash"],
+            "chunkRoot": proof_record["keySwitchComponentChunkRoot"],
+            "chunkHashes": proof_record["keySwitchComponentChunkHashes"],
+            "chunks": chunks
+                .into_iter()
+                .enumerate()
+                .map(|(chunk_index, chunk)| serde_json::json!({
+                    "chunkIndex": chunk_index,
+                    "bytesHex": to_hex(&chunk),
+                }))
+                .collect::<Vec<_>>(),
+        }],
+    })
+}
+
+fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
+    proof_record: &mut serde_json::Value,
+    proof_family: &str,
+    proof_root_field_name: &str,
+    proof_root_namespace: &str,
+) -> serde_json::Value {
+    let proof_bytes_hex = proof_record["proofBytesHex"]
+        .as_str()
+        .expect("embedded evaluation-key proof bytes")
+        .to_string();
+    let proof_bytes = decode_hex(&proof_bytes_hex).expect("evaluation-key proof bytes");
+    let chunks = proof_bytes_transport_chunks(proof_bytes);
+    let transport_hashes = setup_proof_material_transport_hashes(
+        proof_family,
+        &chunks,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )
+    .expect("evaluation-key proof transport hashes");
+    let proof_size_bytes = proof_record["proofSizeBytes"]
+        .as_u64()
+        .expect("proof size bytes");
+    let proof_bytes_hash = proof_record["proofBytesHash"]
+        .as_str()
+        .expect("proof bytes hash")
+        .to_string();
+    let statement_hash = proof_record["statementHash"]
+        .as_str()
+        .expect("statement hash")
+        .to_string();
+    let relation_commitment_hash = proof_record["relationCommitmentHash"]
+        .as_str()
+        .expect("relation commitment hash")
+        .to_string();
+    let tbox_commitment_prefix_hash = proof_record["tboxCommitmentPrefixHash"]
+        .as_str()
+        .expect("tbox commitment prefix hash")
+        .to_string();
+    let trustee_identity = proof_record["trusteeIdentity"]
+        .as_str()
+        .expect("trustee identity")
+        .to_string();
+    let trustee_roster_position = proof_record["trusteeRosterPosition"]
+        .as_u64()
+        .expect("trustee roster position");
+    let proof_material_root =
+        setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
+            setup_profile_id: "CollectiveBgvSetup-v1",
+            proof_family,
+            trustee_identity: &trustee_identity,
+            trustee_roster_position,
+            statement_hash_hex: &statement_hash,
+            relation_commitment_hash_hex: &relation_commitment_hash,
+            tbox_commitment_prefix_hash: &tbox_commitment_prefix_hash,
+            proof_size_bytes,
+            proof_bytes_hash: &proof_bytes_hash,
+            transport_hashes: &transport_hashes,
+        })
+        .expect("evaluation-key proof material root");
+    {
+        let proof_record_object = proof_record
+            .as_object_mut()
+            .expect("evaluation-key proof record object");
+        proof_record_object.remove("proofBytesHex");
+        proof_record_object.remove(proof_root_field_name);
+    }
+    proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
+    proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
+    proof_record["proofChunkSizeBytes"] = serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
+    proof_record["proofChunkCount"] = serde_json::json!(transport_hashes.chunk_hashes.len());
+    proof_record["proofTotalByteLength"] = serde_json::json!(transport_hashes.total_byte_length);
+    proof_record["proofFullObjectHash"] = serde_json::json!(transport_hashes.full_object_hash);
+    proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
+    proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
+    proof_record[proof_root_field_name] = serde_json::json!(
+        derive_protocol_hash(proof_root_namespace, proof_record)
+            .expect("transported evaluation-key proof root")
+    );
+
+    serde_json::json!({
+        "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "proofFamily": proof_family,
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "proofMaterialRoot": proof_record["proofMaterialRoot"],
+        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "proofChunkCount": transport_hashes.chunk_hashes.len(),
+        "proofTotalByteLength": transport_hashes.total_byte_length,
+        "proofFullObjectHash": proof_record["proofFullObjectHash"],
+        "proofChunkRoot": proof_record["proofChunkRoot"],
+        "proofChunkHashes": proof_record["proofChunkHashes"],
+        "chunks": chunks
+            .into_iter()
+            .enumerate()
+            .map(|(chunk_index, chunk)| serde_json::json!({
+                "chunkIndex": chunk_index,
+                "bytesHex": to_hex(&chunk),
+            }))
+            .collect::<Vec<_>>(),
+    })
 }
 
 fn collective_public_key_object(package: &serde_json::Value) -> serde_json::Value {
@@ -5344,7 +6626,7 @@ fn same_secret_constant_commitments_from_fixture_package(
         .expect("coefficient material records");
     let mut commitments_by_limb = BTreeMap::new();
     for material_record in material_records {
-        if material_record["dealerRosterPosition"].as_u64() != Some(trustee_roster_position)
+        if material_record["sourceTrusteeRosterPosition"].as_u64() != Some(trustee_roster_position)
             || material_record["shamirCoefficientIndex"].as_u64() != Some(0)
         {
             continue;
@@ -5696,22 +6978,22 @@ fn private_vss_envelope_commitments_object(
     )
     .expect("phase order hash");
     let envelope_references = (0..10_u64)
-        .flat_map(|dealer_roster_position| {
-            let dealer_identity = format!("trustee-{dealer_roster_position}");
-            let dealer_commitment_root = vss_coefficient_commitments["dealerRecords"]
-                [dealer_roster_position as usize]["dealerCommitmentRoot"]
+        .flat_map(|source_trustee_roster_position| {
+            let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
+            let source_trustee_commitment_root = vss_coefficient_commitments["sourceTrusteeRecords"]
+                [source_trustee_roster_position as usize]["sourceTrusteeCommitmentRoot"]
                 .as_str()
-                .expect("dealer commitment root")
+                .expect("source trustee commitment root")
                 .to_string();
             let phase_order_hash = phase_order_hash.clone();
             (0..10_u64).map(move |recipient_roster_position| {
                 let recipient_identity = format!("trustee-{recipient_roster_position}");
-                let envelope_sequence_number = dealer_roster_position * 10 + recipient_roster_position;
+                let envelope_sequence_number = source_trustee_roster_position * 10 + recipient_roster_position;
                 let private_envelope_hash = derive_protocol_hash(
                     "PrivateVssShareEnvelopeHash",
                     &serde_json::json!({
                         "fixture": "private-vss-share-envelope",
-                        "dealerRosterPosition": dealer_roster_position,
+                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
                         "recipientRosterPosition": recipient_roster_position,
                     }),
                 )
@@ -5720,9 +7002,9 @@ fn private_vss_envelope_commitments_object(
                     "PrivateVssLocalVerificationRoot",
                     &serde_json::json!({
                         "fixture": "recipient-vss-local-verification",
-                        "dealerRosterPosition": dealer_roster_position,
+                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
                         "recipientRosterPosition": recipient_roster_position,
-                        "dealerCommitmentRoot": dealer_commitment_root.as_str(),
+                        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
                         "privateEnvelopeHash": private_envelope_hash.as_str(),
                     }),
                 )
@@ -5745,11 +7027,11 @@ fn private_vss_envelope_commitments_object(
                     "phaseOrderHash": phase_order_hash.as_str(),
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-                    "dealerIdentity": dealer_identity.as_str(),
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "recipientIdentity": recipient_identity.as_str(),
                     "recipientRosterPosition": recipient_roster_position,
-                    "dealerCommitmentRoot": dealer_commitment_root.as_str(),
+                    "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
                     "envelopeSequenceNumber": envelope_sequence_number,
                     "deliveryPhaseNumber": 6,
                     "verificationPhaseNumber": 7,
@@ -5790,11 +7072,11 @@ fn private_vss_envelope_commitments_object(
                     "setupEpoch": setup_epoch,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-                    "dealerIdentity": dealer_identity.as_str(),
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "recipientIdentity": recipient_identity.as_str(),
                     "recipientRosterPosition": recipient_roster_position,
-                    "dealerCommitmentRoot": dealer_commitment_root.as_str(),
+                    "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
                     "envelopeSequenceNumber": envelope_sequence_number,
                     "deliveryPhaseNumber": 6,
                     "verificationPhaseNumber": 7,
@@ -5831,11 +7113,11 @@ fn private_vss_envelope_commitments_object(
                     "setupEpoch": setup_epoch,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-                    "dealerIdentity": dealer_identity.as_str(),
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "recipientIdentity": recipient_identity.as_str(),
                     "recipientRosterPosition": recipient_roster_position,
-                    "dealerCommitmentRoot": dealer_commitment_root.as_str(),
+                    "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
                     "envelopeSequenceNumber": envelope_sequence_number,
                     "deliveryPhaseNumber": 6,
                     "verificationPhaseNumber": 7,
@@ -5912,21 +7194,21 @@ fn vss_share_acceptances_object(
         .as_array()
         .expect("private VSS envelope references");
     let acceptance_records = (0..10_u64)
-        .flat_map(|dealer_roster_position| {
-            let dealer_identity = format!("trustee-{dealer_roster_position}");
-            let dealer_commitment_root = vss_coefficient_commitments["dealerRecords"]
-                [dealer_roster_position as usize]["dealerCommitmentRoot"]
+        .flat_map(|source_trustee_roster_position| {
+            let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
+            let source_trustee_commitment_root = vss_coefficient_commitments["sourceTrusteeRecords"]
+                [source_trustee_roster_position as usize]["sourceTrusteeCommitmentRoot"]
                 .as_str()
-                .expect("dealer commitment root")
+                .expect("source trustee commitment root")
                 .to_string();
             (0..10_u64).map(move |recipient_roster_position| {
                 let recipient_identity = format!("trustee-{recipient_roster_position}");
-                let signature_seed_label = format!("{recipient_identity}-accepts-{dealer_identity}");
+                let signature_seed_label = format!("{recipient_identity}-accepts-{source_trustee_identity}");
                 let signing_public_key_hash =
                     create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
                         .expect("signature key fixture");
                 let envelope_sequence_number =
-                    (dealer_roster_position * 10 + recipient_roster_position) as usize;
+                    (source_trustee_roster_position * 10 + recipient_roster_position) as usize;
                 let envelope_reference = &envelope_references[envelope_sequence_number];
                 let private_envelope_hash = envelope_reference["privateEnvelopeHash"]
                     .as_str()
@@ -5945,11 +7227,11 @@ fn vss_share_acceptances_object(
                     "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                     "commitmentProfileHash": commitment_profile_hash,
                     "setupEpoch": setup_epoch,
-                    "dealerIdentity": dealer_identity,
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity,
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "recipientIdentity": recipient_identity,
                     "recipientRosterPosition": recipient_roster_position,
-                    "dealerCommitmentRoot": dealer_commitment_root.as_str(),
+                    "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
                     "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
                     "privateEnvelopeHash": private_envelope_hash,
                     "localVerificationRoot": local_verification_root,
@@ -5976,11 +7258,11 @@ fn vss_share_acceptances_object(
                         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                         "commitmentProfileHash": commitment_profile_hash,
                         "setupEpoch": setup_epoch,
-                        "dealerIdentity": dealer_identity,
-                        "dealerRosterPosition": dealer_roster_position,
+                        "sourceTrusteeIdentity": source_trustee_identity,
+                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
                         "recipientIdentity": recipient_identity,
                         "recipientRosterPosition": recipient_roster_position,
-                        "dealerCommitmentRoot": dealer_commitment_root.as_str(),
+                        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
                         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
                         "privateEnvelopeHash": private_envelope_hash,
                         "localVerificationRoot": local_verification_root,
@@ -6048,7 +7330,7 @@ fn vss_complaints_object(
     setup_context: &serde_json::Value,
     private_vss_envelope_commitments: &serde_json::Value,
     vss_coefficient_commitments: &serde_json::Value,
-    dealer_roster_position: u64,
+    source_trustee_roster_position: u64,
     recipient_roster_position: u64,
 ) -> serde_json::Value {
     let private_vss_envelope_commitment_root =
@@ -6072,14 +7354,14 @@ fn vss_complaints_object(
         .as_str()
         .expect("commitment profile hash");
     let setup_epoch = setup_context["setupEpoch"].as_str().expect("setup epoch");
-    let dealer_identity = format!("trustee-{dealer_roster_position}");
+    let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
     let recipient_identity = format!("trustee-{recipient_roster_position}");
-    let dealer_commitment_root = vss_coefficient_commitments["dealerRecords"]
-        [dealer_roster_position as usize]["dealerCommitmentRoot"]
+    let source_trustee_commitment_root = vss_coefficient_commitments["sourceTrusteeRecords"]
+        [source_trustee_roster_position as usize]["sourceTrusteeCommitmentRoot"]
         .as_str()
-        .expect("dealer commitment root");
+        .expect("source trustee commitment root");
     let envelope_sequence_number =
-        (dealer_roster_position * 10 + recipient_roster_position) as usize;
+        (source_trustee_roster_position * 10 + recipient_roster_position) as usize;
     let private_envelope_hash = private_vss_envelope_commitments["envelopeReferences"]
         [envelope_sequence_number]["privateEnvelopeHash"]
         .as_str()
@@ -6089,15 +7371,16 @@ fn vss_complaints_object(
         "PrivateVssLocalVerificationRoot",
         &serde_json::json!({
             "fixture": "recipient-vss-complaint-evidence",
-            "dealerRosterPosition": dealer_roster_position,
+            "sourceTrusteeRosterPosition": source_trustee_roster_position,
             "recipientRosterPosition": recipient_roster_position,
-            "dealerCommitmentRoot": dealer_commitment_root,
+            "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
             "privateEnvelopeHash": private_envelope_hash,
             "complaintReasonCode": complaint_reason_code,
         }),
     )
     .expect("complaint evidence root");
-    let signature_seed_label = format!("{recipient_identity}-complains-about-{dealer_identity}");
+    let signature_seed_label =
+        format!("{recipient_identity}-complains-about-{source_trustee_identity}");
     let signing_public_key_hash = create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
         .expect("signature key fixture");
     let complaint_payload = serde_json::json!({
@@ -6111,11 +7394,11 @@ fn vss_complaints_object(
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
-        "dealerIdentity": dealer_identity.as_str(),
-        "dealerRosterPosition": dealer_roster_position,
+        "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+        "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": recipient_identity.as_str(),
         "recipientRosterPosition": recipient_roster_position,
-        "dealerCommitmentRoot": dealer_commitment_root,
+        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "privateEnvelopeHash": private_envelope_hash,
         "complaintEvidenceRoot": complaint_evidence_root.as_str(),
@@ -6145,11 +7428,11 @@ fn vss_complaints_object(
             "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
             "commitmentProfileHash": commitment_profile_hash,
             "setupEpoch": setup_epoch,
-            "dealerIdentity": dealer_identity.as_str(),
-            "dealerRosterPosition": dealer_roster_position,
+            "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+            "sourceTrusteeRosterPosition": source_trustee_roster_position,
             "recipientIdentity": recipient_identity.as_str(),
             "recipientRosterPosition": recipient_roster_position,
-            "dealerCommitmentRoot": dealer_commitment_root,
+            "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
             "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
             "privateEnvelopeHash": private_envelope_hash,
             "complaintEvidenceRoot": complaint_evidence_root.as_str(),
@@ -6414,17 +7697,17 @@ fn rebind_collective_phase_roots(package: &mut serde_json::Value) {
 }
 
 fn rebind_collective_vss_commitment_roots(package: &mut serde_json::Value) {
-    let dealer_records = package["vssCoefficientCommitments"]["dealerRecords"]
+    let source_trustee_records = package["vssCoefficientCommitments"]["sourceTrusteeRecords"]
         .as_array_mut()
-        .expect("dealer records");
-    for dealer_record in dealer_records {
-        dealer_record
+        .expect("source trustee records");
+    for source_trustee_record in source_trustee_records {
+        source_trustee_record
             .as_object_mut()
-            .expect("dealer record")
-            .remove("dealerCommitmentRoot");
-        dealer_record["dealerCommitmentRoot"] = serde_json::json!(
-            derive_protocol_hash("VssCoefficientCommitmentRoot", dealer_record)
-                .expect("dealer commitment root")
+            .expect("source trustee record")
+            .remove("sourceTrusteeCommitmentRoot");
+        source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
+            derive_protocol_hash("VssCoefficientCommitmentRoot", source_trustee_record)
+                .expect("source trustee commitment root")
         );
     }
     package["vssCoefficientCommitments"]
@@ -6728,6 +8011,39 @@ fn rebind_relinearization_key_share_rounds_root(package: &mut serde_json::Value)
     );
 }
 
+fn rebind_galois_key_batch_proof_root(package: &mut serde_json::Value, batch_index: usize) {
+    let batch = &mut package["galoisKeyShareBatches"][batch_index];
+    let proof_roots = batch["galoisKeyShareProofs"]
+        .as_array()
+        .expect("Galois key share proofs")
+        .iter()
+        .map(|proof| {
+            serde_json::json!({
+                "rotation": proof["rotation"],
+                "level": proof["level"],
+                "galoisKeyShareProofRoot": proof["galoisKeyShareProofRoot"],
+            })
+        })
+        .collect::<Vec<_>>();
+    batch["galoisKeyBatchProofRoot"] = serde_json::json!(
+        derive_protocol_hash(
+            "GaloisKeyBatchProofRoot",
+            &serde_json::json!({
+                "objectType": "GaloisKeyBatchProofAggregate",
+                "objectVersion": 1,
+                "setupProfileId": "CollectiveBgvSetup-v1",
+                "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+                "proofFamily": "galois-key-share",
+                "evaluatorKeyScheduleRoot": batch["evaluatorKeyScheduleRoot"],
+                "trusteeRosterPosition": batch["trusteeRosterPosition"],
+                "requiredGaloisSetHash": batch["requiredGaloisSetHash"],
+                "proofRoots": proof_roots,
+            })
+        )
+        .expect("Galois proof root")
+    );
+}
+
 fn rebind_galois_key_share_batch_root(package: &mut serde_json::Value, batch_index: usize) {
     package["galoisKeyShareBatches"][batch_index]
         .as_object_mut()
@@ -6785,14 +8101,16 @@ fn encode_transport_material_from_package(package: &serde_json::Value) -> Vec<u8
     crate::encoding::append_varuint(&mut output, 2);
     crate::encoding::append_varuint(&mut output, 3);
 
-    for dealer_roster_position in 0..10_u64 {
+    for source_trustee_roster_position in 0..10_u64 {
         for rns_limb_index in 0..DATA_PRIMES.len() {
             for shamir_coefficient_index in 0..4_u64 {
-                let record_index =
-                    (((dealer_roster_position as usize) * DATA_PRIMES.len() + rns_limb_index) * 4)
-                        + shamir_coefficient_index as usize;
+                let record_index = (((source_trustee_roster_position as usize)
+                    * DATA_PRIMES.len()
+                    + rns_limb_index)
+                    * 4)
+                    + shamir_coefficient_index as usize;
                 let commitment = &material_records[record_index]["commitment"];
-                crate::encoding::append_varuint(&mut output, dealer_roster_position);
+                crate::encoding::append_varuint(&mut output, source_trustee_roster_position);
                 crate::encoding::append_varuint(&mut output, rns_limb_index as u64);
                 crate::encoding::append_varuint(&mut output, shamir_coefficient_index);
                 for limb in commitment["commitmentLimbs"]

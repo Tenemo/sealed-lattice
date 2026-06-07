@@ -21,7 +21,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
             readonly setupProfileId: string;
             readonly reservedRootsAndHashes: readonly string[];
-            readonly trustedDealerBoundary: {
+            readonly centralTrustedSetupAuthorityBoundary: {
                 readonly transcriptValidCentralizedSecretReconstruction: boolean;
             };
             readonly statusLabels: readonly string[];
@@ -40,7 +40,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             ]),
         );
         expect(
-            objectModel.trustedDealerBoundary
+            objectModel.centralTrustedSetupAuthorityBoundary
                 .transcriptValidCentralizedSecretReconstruction,
         ).toBe(false);
         expect(objectModel.statusLabels).toContain(
@@ -145,14 +145,14 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         );
     });
 
-    it('refuses trusted-dealer setup fields and wrong expected roots', async () => {
+    it('refuses central-trusted-setup-authority setup fields and wrong expected roots', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
 
         for (const fieldName of [
             'globalSecretPolynomial',
-            'trustedDealerSecret',
-            'trustedDealerKeyMaterial',
+            'centralTrustedSetupAuthoritySecret',
+            'centralTrustedSetupAuthorityKeyMaterial',
             'fullSecretKey',
             'collectiveSecretKey',
             'fullSecretReconstruction',

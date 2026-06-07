@@ -8,7 +8,7 @@ import {
     type LocalTrusteeSetupStateCommitment,
     type PrivateVssEnvelopeVerificationReference,
     type SetupPhaseParticipantObject,
-    type VssDealerCoefficientCommitmentRecord,
+    type VssSourceTrusteeCoefficientCommitmentRecord,
     type VssShareAcceptanceRecord,
     type VssShareComplaintRecord,
 } from '#packages/protocol/src/index';
@@ -67,23 +67,23 @@ const phaseObject = (phaseNumber: number): SetupPhaseParticipantObject =>
         ceremonyId: setupContext.ceremonyId,
     }) as unknown as SetupPhaseParticipantObject;
 
-const dealerRecord = {
-    objectType: 'VssDealerCoefficientCommitments',
+const sourceTrusteeRecord = {
+    objectType: 'VssSourceTrusteeCoefficientCommitments',
     objectVersion: 1,
     ...contextFields,
-    dealerIdentity: 'trustee-3',
-    dealerRosterPosition: 3,
+    sourceTrusteeIdentity: 'trustee-3',
+    sourceTrusteeRosterPosition: 3,
     publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
     coefficientCommitments: [],
-    dealerCommitmentRoot: fixtureHash('dealer-root'),
-} as unknown as VssDealerCoefficientCommitmentRecord;
+    sourceTrusteeCommitmentRoot: fixtureHash('source-trustee-root'),
+} as unknown as VssSourceTrusteeCoefficientCommitmentRecord;
 
 const envelopeReference = {
     objectType: 'PrivateVssEnvelopeCommitment',
     objectVersion: 1,
     ...contextFields,
-    dealerIdentity: 'trustee-3',
-    dealerRosterPosition: 3,
+    sourceTrusteeIdentity: 'trustee-3',
+    sourceTrusteeRosterPosition: 3,
     recipientIdentity: 'trustee-4',
     recipientRosterPosition: 4,
     privateEnvelopeCommitmentRoot: fixtureHash('private-envelope-commitment'),
@@ -96,8 +96,8 @@ const acceptanceRecord = {
     objectType: 'VssShareAcceptance',
     objectVersion: 1,
     ...contextFields,
-    dealerIdentity: 'trustee-1',
-    dealerRosterPosition: 1,
+    sourceTrusteeIdentity: 'trustee-1',
+    sourceTrusteeRosterPosition: 1,
     recipientIdentity: 'trustee-3',
     recipientRosterPosition: 3,
     privateVssEnvelopeCommitmentRoot: fixtureHash('private-vss-envelope-set'),
@@ -110,8 +110,8 @@ const complaintRecord = {
     objectType: 'VssShareComplaint',
     objectVersion: 1,
     ...contextFields,
-    dealerIdentity: 'trustee-2',
-    dealerRosterPosition: 2,
+    sourceTrusteeIdentity: 'trustee-2',
+    sourceTrusteeRosterPosition: 2,
     recipientIdentity: 'trustee-3',
     recipientRosterPosition: 3,
     privateVssEnvelopeCommitmentRoot: fixtureHash('private-vss-envelope-set'),
@@ -149,7 +149,7 @@ describe('setup contribution orchestration', () => {
             setupPhaseParticipantObjects: [phaseObject(2), phaseObject(1)],
             commonRandomnessCommitRoot: fixtureHash('common-commit'),
             commonRandomnessRevealRoot: fixtureHash('common-reveal'),
-            vssDealerRecord: dealerRecord,
+            vssSourceTrusteeRecord: sourceTrusteeRecord,
             privateVssEnvelopeReferences: [envelopeReference],
             vssShareAcceptanceRecords: [acceptanceRecord],
             vssShareComplaintRecords: [complaintRecord],
@@ -161,7 +161,8 @@ describe('setup contribution orchestration', () => {
             setupProfileId: 'CollectiveBgvSetup-v1',
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,
-            vssDealerCommitmentRoot: dealerRecord.dealerCommitmentRoot,
+            vssSourceTrusteeCommitmentRoot:
+                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
             thresholdShareCommitmentRecipientRoot:
                 localStateCommitment.thresholdShareCommitmentRecipientRoot,
             aggregateThresholdShareRoot:

@@ -221,12 +221,15 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
     if bool_at_path(
         setup_package,
         &[
-            "trustedDealerBoundary",
+            "centralTrustedSetupAuthorityBoundary",
             "transcriptValidCentralizedSecretReconstruction",
         ],
     )? || bool_at_path(
         setup_package,
-        &["trustedDealerBoundary", "rawSecretSharesExported"],
+        &[
+            "centralTrustedSetupAuthorityBoundary",
+            "rawSecretSharesExported",
+        ],
     )? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,

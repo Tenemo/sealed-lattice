@@ -7,7 +7,7 @@ import type {
     PublicKeyShareRecord,
 } from './public-key-share-records.js';
 import type { SetupPhaseParticipantObject } from './setup-phase-records.js';
-import type { VssDealerCoefficientCommitmentRecord } from './vss-coefficient-commitments.js';
+import type { VssSourceTrusteeCoefficientCommitmentRecord } from './vss-coefficient-commitments.js';
 import type {
     CollectiveBgvSetupContext,
     PrivateVssEnvelopeVerificationReference,
@@ -24,7 +24,7 @@ export type SetupContributionAssemblyInput = Readonly<{
     readonly setupPhaseParticipantObjects: readonly SetupPhaseParticipantObject[];
     readonly commonRandomnessCommitRoot?: ProtocolHash;
     readonly commonRandomnessRevealRoot?: ProtocolHash;
-    readonly vssDealerRecord?: VssDealerCoefficientCommitmentRecord;
+    readonly vssSourceTrusteeRecord?: VssSourceTrusteeCoefficientCommitmentRecord;
     readonly privateVssEnvelopeReferences?: readonly PrivateVssEnvelopeVerificationReference[];
     readonly vssShareAcceptanceRecords?: readonly VssShareAcceptanceRecord[];
     readonly vssShareComplaintRecords?: readonly VssShareComplaintRecord[];
@@ -51,7 +51,7 @@ export type SetupContributionAssembly = Readonly<
         readonly phaseObjectRoots: readonly ProtocolHash[];
         readonly commonRandomnessCommitRoot: ProtocolHash | null;
         readonly commonRandomnessRevealRoot: ProtocolHash | null;
-        readonly vssDealerCommitmentRoot: ProtocolHash | null;
+        readonly vssSourceTrusteeCommitmentRoot: ProtocolHash | null;
         readonly privateVssEnvelopeReferences: readonly {
             readonly recipientIdentity: string;
             readonly recipientRosterPosition: number;
@@ -259,8 +259,8 @@ const privateVssEnvelopeRootReferences = (
             assertTrusteeMatches(
                 input,
                 reference,
-                'dealerIdentity',
-                'dealerRosterPosition',
+                'sourceTrusteeIdentity',
+                'sourceTrusteeRosterPosition',
                 objectPath,
             );
             assertProtocolHash(
@@ -297,7 +297,8 @@ const issuedAcceptanceRoots = (
     [...(input.vssShareAcceptanceRecords ?? [])]
         .sort(
             (left, right) =>
-                left.dealerRosterPosition - right.dealerRosterPosition,
+                left.sourceTrusteeRosterPosition -
+                right.sourceTrusteeRosterPosition,
         )
         .map((acceptance, acceptanceIndex) => {
             const objectPath = `vssShareAcceptanceRecords.${String(acceptanceIndex)}`;
@@ -323,7 +324,8 @@ const issuedComplaintRoots = (
     [...(input.vssShareComplaintRecords ?? [])]
         .sort(
             (left, right) =>
-                left.dealerRosterPosition - right.dealerRosterPosition,
+                left.sourceTrusteeRosterPosition -
+                right.sourceTrusteeRosterPosition,
         )
         .map((complaint, complaintIndex) => {
             const objectPath = `vssShareComplaintRecords.${String(complaintIndex)}`;
@@ -369,26 +371,26 @@ export const createSetupContributionAssembly = (
             'commonRandomnessRevealRoot',
         );
     }
-    const vssDealerCommitmentRoot =
-        input.vssDealerRecord === undefined
+    const vssSourceTrusteeCommitmentRoot =
+        input.vssSourceTrusteeRecord === undefined
             ? null
-            : input.vssDealerRecord.dealerCommitmentRoot;
-    if (input.vssDealerRecord !== undefined) {
+            : input.vssSourceTrusteeRecord.sourceTrusteeCommitmentRoot;
+    if (input.vssSourceTrusteeRecord !== undefined) {
         assertContextMatches(
             input.setupContext,
-            input.vssDealerRecord,
-            'vssDealerRecord',
+            input.vssSourceTrusteeRecord,
+            'vssSourceTrusteeRecord',
         );
         assertTrusteeMatches(
             input,
-            input.vssDealerRecord,
-            'dealerIdentity',
-            'dealerRosterPosition',
-            'vssDealerRecord',
+            input.vssSourceTrusteeRecord,
+            'sourceTrusteeIdentity',
+            'sourceTrusteeRosterPosition',
+            'vssSourceTrusteeRecord',
         );
         assertProtocolHash(
-            input.vssDealerRecord.dealerCommitmentRoot,
-            'vssDealerCommitmentRoot',
+            input.vssSourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+            'vssSourceTrusteeCommitmentRoot',
         );
     }
     if (input.localStateCommitment !== undefined) {
@@ -444,7 +446,7 @@ export const createSetupContributionAssembly = (
         phaseObjectRoots: phaseObjectRoots(input),
         commonRandomnessCommitRoot: input.commonRandomnessCommitRoot ?? null,
         commonRandomnessRevealRoot: input.commonRandomnessRevealRoot ?? null,
-        vssDealerCommitmentRoot,
+        vssSourceTrusteeCommitmentRoot,
         privateVssEnvelopeReferences: privateVssEnvelopeRootReferences(input),
         issuedVssAcceptanceRoots: issuedAcceptanceRoots(input),
         issuedVssComplaintRoots: issuedComplaintRoots(input),

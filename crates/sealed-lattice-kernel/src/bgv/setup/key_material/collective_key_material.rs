@@ -83,7 +83,7 @@ pub(in crate::bgv::setup) fn collective_public_key(
             "CollectivePublicKeyShareAggregationBound",
             "BgvPublicKeyCoefficientMaterialBound",
             "BgvAlgebraicPublicKeyProofMissing",
-            "NoTrustedDealerSecretReconstruction"
+            "NoCentralTrustedSetupAuthoritySecretReconstruction"
         ],
     }))
 }

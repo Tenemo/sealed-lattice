@@ -1,11 +1,11 @@
 use super::*;
 
 #[test]
-fn passive_setup_rejects_trusted_dealer_secret_fields() {
+fn passive_setup_rejects_central_trusted_setup_authority_secret_fields() {
     for field_name in [
         "globalSecretPolynomial",
-        "trustedDealerSecret",
-        "trustedDealerKeyMaterial",
+        "centralTrustedSetupAuthoritySecret",
+        "centralTrustedSetupAuthorityKeyMaterial",
         "fullSecretKey",
         "collectiveSecretKey",
         "fullSecretReconstruction",
@@ -341,7 +341,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
                 "participantCount": invalid_participant_count,
             },
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-            "trustedDealerBoundary": {
+            "centralTrustedSetupAuthorityBoundary": {
                 "rawSecretSharesExported": false,
                 "transcriptValidCentralizedSecretReconstruction": false,
             },
@@ -370,7 +370,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             "participantCount": 3,
         },
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "trustedDealerBoundary": {
+        "centralTrustedSetupAuthorityBoundary": {
             "rawSecretSharesExported": false,
             "transcriptValidCentralizedSecretReconstruction": false,
         },

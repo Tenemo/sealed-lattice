@@ -15,8 +15,8 @@ import {
     type SameSecretConsistencyStatementRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
-    type VssDealerCoefficientCommitmentRecord,
-    type VssDealerCoefficientOpeningState,
+    type VssSourceTrusteeCoefficientCommitmentRecord,
+    type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
 
 const qSharePrimes = [140_737_487_306_753, 140_737_486_716_929] as const;
@@ -44,14 +44,14 @@ const setupContext = {
 } satisfies CollectiveBgvSetupContext;
 
 const coefficientMessage = (
-    dealerRosterPosition: number,
+    sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
     rnsPrime: number,
 ): number[] =>
     Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
         const value =
-            (dealerRosterPosition + 1) * 23 +
+            (sourceTrusteeRosterPosition + 1) * 23 +
             (rnsLimbIndex + 1) * 11 +
             (shamirCoefficientIndex + 1) * 5 +
             coefficientIndex * 3;
@@ -60,14 +60,14 @@ const coefficientMessage = (
     });
 
 const randomnessByColumn = (
-    dealerRosterPosition: number,
+    sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
 ): number[][] =>
     Array.from({ length: 5 }, (_unusedColumn, randomnessColumnIndex) =>
         Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
             const selector =
-                (dealerRosterPosition * 2 +
+                (sourceTrusteeRosterPosition * 2 +
                     rnsLimbIndex +
                     shamirCoefficientIndex +
                     randomnessColumnIndex +
@@ -79,7 +79,7 @@ const randomnessByColumn = (
     );
 
 const opening = (
-    dealerRosterPosition: number,
+    sourceTrusteeRosterPosition: number,
     rnsPrime: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
@@ -88,27 +88,27 @@ const opening = (
     rnsPrime,
     shamirCoefficientIndex,
     coefficientMessage: coefficientMessage(
-        dealerRosterPosition,
+        sourceTrusteeRosterPosition,
         rnsLimbIndex,
         shamirCoefficientIndex,
         rnsPrime,
     ),
     randomnessByColumn: randomnessByColumn(
-        dealerRosterPosition,
+        sourceTrusteeRosterPosition,
         rnsLimbIndex,
         shamirCoefficientIndex,
     ),
 });
 
-const dealerOpeningState = (
-    dealerRosterPosition: number,
-): VssDealerCoefficientOpeningState => ({
-    dealerIdentity: `trustee-${String(dealerRosterPosition)}`,
-    dealerRosterPosition,
+const sourceTrusteeOpeningState = (
+    sourceTrusteeRosterPosition: number,
+): VssSourceTrusteeCoefficientOpeningState => ({
+    sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
+    sourceTrusteeRosterPosition,
     coefficientOpenings: qSharePrimes.flatMap((rnsPrime, rnsLimbIndex) =>
         Array.from({ length: thresholdDegree }, (_unused, coefficientIndex) =>
             opening(
-                dealerRosterPosition,
+                sourceTrusteeRosterPosition,
                 rnsPrime,
                 rnsLimbIndex,
                 coefficientIndex,
@@ -125,23 +125,24 @@ const acceptedCommitmentSet = (): VssCoefficientCommitmentSet =>
         ringDegree,
         participantCount,
         thresholdDegree,
-        dealerOpeningStates: [
-            dealerOpeningState(2),
-            dealerOpeningState(0),
-            dealerOpeningState(1),
+        sourceTrusteeOpeningStates: [
+            sourceTrusteeOpeningState(2),
+            sourceTrusteeOpeningState(0),
+            sourceTrusteeOpeningState(1),
         ],
     }).commitmentSet;
 
-const requiredDealerRecord = (
+const requiredSourceTrusteeRecord = (
     commitmentSet: VssCoefficientCommitmentSet,
-    dealerRecordIndex: number,
-): VssDealerCoefficientCommitmentRecord => {
-    const dealerRecord = commitmentSet.dealerRecords[dealerRecordIndex];
-    if (dealerRecord === undefined) {
-        throw new Error('fixture dealer record is missing');
+    sourceTrusteeRecordIndex: number,
+): VssSourceTrusteeCoefficientCommitmentRecord => {
+    const sourceTrusteeRecord =
+        commitmentSet.sourceTrusteeRecords[sourceTrusteeRecordIndex];
+    if (sourceTrusteeRecord === undefined) {
+        throw new Error('fixture source trustee record is missing');
     }
 
-    return dealerRecord;
+    return sourceTrusteeRecord;
 };
 
 const requiredStatementRecord = (
@@ -168,7 +169,7 @@ describe('same-secret consistency statement builders', () => {
         });
         const { sameSecretConsistencyRoot, ...statementSetWithoutRoot } =
             sameSecretConsistency;
-        const firstDealerRecord = requiredDealerRecord(
+        const firstSourceTrusteeRecord = requiredSourceTrusteeRecord(
             vssCoefficientCommitments,
             0,
         );
@@ -203,9 +204,11 @@ describe('same-secret consistency statement builders', () => {
                 commitmentProfileId: setupCommitmentProfileId,
                 setupProofProfileId,
                 ...setupContext,
-                trusteeIdentity: firstDealerRecord.dealerIdentity,
-                trusteeRosterPosition: firstDealerRecord.dealerRosterPosition,
-                vssDealerCommitmentRoot: firstDealerRecord.dealerCommitmentRoot,
+                trusteeIdentity: firstSourceTrusteeRecord.sourceTrusteeIdentity,
+                trusteeRosterPosition:
+                    firstSourceTrusteeRecord.sourceTrusteeRosterPosition,
+                vssSourceTrusteeCommitmentRoot:
+                    firstSourceTrusteeRecord.sourceTrusteeCommitmentRoot,
                 secretCommitmentSource: 'vss-constant-coefficient-commitments',
                 sameSecretRelation,
                 constantCoefficientCommitmentRoots:
@@ -226,12 +229,13 @@ describe('same-secret consistency statement builders', () => {
                 rnsLimbIndex,
                 rnsPrime,
                 shamirCoefficientIndex: 0,
-                commitmentRoot: firstDealerRecord.coefficientCommitments.find(
-                    (record) =>
-                        record.rnsLimbIndex === rnsLimbIndex &&
-                        record.rnsPrime === rnsPrime &&
-                        record.shamirCoefficientIndex === 0,
-                )?.commitmentRoot,
+                commitmentRoot:
+                    firstSourceTrusteeRecord.coefficientCommitments.find(
+                        (record) =>
+                            record.rnsLimbIndex === rnsLimbIndex &&
+                            record.rnsPrime === rnsPrime &&
+                            record.shamirCoefficientIndex === 0,
+                    )?.commitmentRoot,
             })),
         );
         expect(firstStatementRecord.trusteeSecretCommitmentRoot).toBe(
@@ -263,21 +267,22 @@ describe('same-secret consistency statement builders', () => {
 
     it('rejects malformed statement-set inputs before root publication', () => {
         const vssCoefficientCommitments = acceptedCommitmentSet();
-        const firstDealerRecord = requiredDealerRecord(
+        const firstSourceTrusteeRecord = requiredSourceTrusteeRecord(
             vssCoefficientCommitments,
             0,
         );
-        const commitmentSetMissingDealer = {
+        const commitmentSetMissingSourceTrustee = {
             ...vssCoefficientCommitments,
-            dealerRecords: vssCoefficientCommitments.dealerRecords.slice(1),
+            sourceTrusteeRecords:
+                vssCoefficientCommitments.sourceTrusteeRecords.slice(1),
         } satisfies VssCoefficientCommitmentSet;
         const commitmentSetMissingConstant = {
             ...vssCoefficientCommitments,
-            dealerRecords: [
+            sourceTrusteeRecords: [
                 {
-                    ...firstDealerRecord,
+                    ...firstSourceTrusteeRecord,
                     coefficientCommitments:
-                        firstDealerRecord.coefficientCommitments.filter(
+                        firstSourceTrusteeRecord.coefficientCommitments.filter(
                             (record) =>
                                 !(
                                     record.rnsLimbIndex === 0 &&
@@ -286,7 +291,7 @@ describe('same-secret consistency statement builders', () => {
                                 ),
                         ),
                 },
-                ...vssCoefficientCommitments.dealerRecords.slice(1),
+                ...vssCoefficientCommitments.sourceTrusteeRecords.slice(1),
             ],
         } satisfies VssCoefficientCommitmentSet;
 
@@ -308,7 +313,7 @@ describe('same-secret consistency statement builders', () => {
                 qSharePrimes,
                 participantCount,
                 thresholdDegree,
-                vssCoefficientCommitments: commitmentSetMissingDealer,
+                vssCoefficientCommitments: commitmentSetMissingSourceTrustee,
             }),
         ).toThrow(/cover every participant/u);
         expect(() =>

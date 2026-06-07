@@ -43,15 +43,25 @@ pub(crate) struct KeySwitchComponent {
     pub(crate) component_b: Option<Vec<Vec<u64>>>,
     component_b_ntt: Vec<Vec<u64>>,
     component_a_ntt: Option<Vec<Vec<u64>>>,
-    component_a_domain: String,
-    component_a_seed_hex: String,
+    component_a_source: KeySwitchComponentASource,
     digit_index: usize,
+}
+
+#[derive(Clone)]
+enum KeySwitchComponentASource {
+    DeterministicStream { domain: String, seed_hex: String },
+    RetainedPublicSample,
 }
 
 impl KeySwitchKey {
     pub(crate) fn drop_component_a_ntt(&mut self) {
         for component in &mut self.components {
-            component.component_a_ntt = None;
+            if matches!(
+                component.component_a_source,
+                KeySwitchComponentASource::DeterministicStream { .. }
+            ) {
+                component.component_a_ntt = None;
+            }
         }
     }
 }
@@ -65,6 +75,40 @@ impl KeySwitchComponent {
         seed_hex: &str,
         digit_index: usize,
     ) -> CanonicalResult<Self> {
+        Self::from_coefficients_with_source(
+            component_b,
+            component_a,
+            primes,
+            KeySwitchComponentASource::DeterministicStream {
+                domain: domain.to_string(),
+                seed_hex: seed_hex.to_string(),
+            },
+            digit_index,
+        )
+    }
+
+    fn from_retained_public_sample(
+        component_b: Vec<Vec<u64>>,
+        component_a: Vec<Vec<u64>>,
+        primes: &[u64],
+        digit_index: usize,
+    ) -> CanonicalResult<Self> {
+        Self::from_coefficients_with_source(
+            component_b,
+            component_a,
+            primes,
+            KeySwitchComponentASource::RetainedPublicSample,
+            digit_index,
+        )
+    }
+
+    fn from_coefficients_with_source(
+        component_b: Vec<Vec<u64>>,
+        component_a: Vec<Vec<u64>>,
+        primes: &[u64],
+        component_a_source: KeySwitchComponentASource,
+        digit_index: usize,
+    ) -> CanonicalResult<Self> {
         let component_b_ntt = ntt_limbs(&component_b, primes)?;
         let component_a_ntt = ntt_limbs(&component_a, primes)?;
         drop(component_a);
@@ -73,8 +117,7 @@ impl KeySwitchComponent {
             component_b: Some(component_b),
             component_b_ntt,
             component_a_ntt: Some(component_a_ntt),
-            component_a_domain: domain.to_string(),
-            component_a_seed_hex: seed_hex.to_string(),
+            component_a_source,
             digit_index,
         })
     }
@@ -87,13 +130,21 @@ impl KeySwitchComponent {
         if let Some(component_a_ntt) = &self.component_a_ntt {
             return Ok(component_a_ntt[limb_index].clone());
         }
+        let KeySwitchComponentASource::DeterministicStream { domain, seed_hex } =
+            &self.component_a_source
+        else {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "retained public key-switch component-a material is unavailable",
+            ));
+        };
         let digit_bytes = (self.digit_index as u64).to_le_bytes();
         let modulus_bytes = modulus.to_le_bytes();
         let public_sample = DeterministicSampler::new(
             KEY_SWITCH_SAMPLE_DOMAIN,
             &[
-                self.component_a_domain.as_bytes(),
-                self.component_a_seed_hex.as_bytes(),
+                domain.as_bytes(),
+                seed_hex.as_bytes(),
                 &digit_bytes,
                 &modulus_bytes,
             ],
@@ -306,12 +357,21 @@ fn generate_key_switch_component_for_digit(
     )
 }
 
-#[cfg(test)]
 pub(crate) fn key_switch_key_from_public_component_b(
     level: usize,
     domain: &str,
     seed_hex: &str,
     component_b_by_digit: Vec<Vec<Vec<u64>>>,
+) -> CanonicalResult<KeySwitchKey> {
+    let component_a_by_digit = public_component_a_by_digit(level, domain, seed_hex)?;
+
+    key_switch_key_from_public_components(level, component_b_by_digit, component_a_by_digit)
+}
+
+pub(crate) fn key_switch_key_from_public_components(
+    level: usize,
+    component_b_by_digit: Vec<Vec<Vec<u64>>>,
+    component_a_by_digit: Vec<Vec<Vec<u64>>>,
 ) -> CanonicalResult<KeySwitchKey> {
     let primes = DATA_PRIMES.get(..=level).ok_or_else(|| {
         CanonicalError::new(
@@ -325,45 +385,39 @@ pub(crate) fn key_switch_key_from_public_component_b(
             "public key-switch material digit count does not match its level",
         ));
     }
+    if component_a_by_digit.len() != primes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public key-switch component-a digit count does not match its level",
+        ));
+    }
     #[cfg(not(target_arch = "wasm32"))]
     let components = component_b_by_digit
         .into_par_iter()
+        .zip(component_a_by_digit.into_par_iter())
         .enumerate()
-        .map(|(digit_index, component_b)| {
-            public_key_switch_component_for_digit(
-                domain,
-                seed_hex,
-                primes,
-                digit_index,
-                component_b,
-            )
+        .map(|(digit_index, (component_b, component_a))| {
+            public_key_switch_component_for_digit(primes, digit_index, component_b, component_a)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     #[cfg(target_arch = "wasm32")]
     let components = component_b_by_digit
         .into_iter()
+        .zip(component_a_by_digit.into_iter())
         .enumerate()
-        .map(|(digit_index, component_b)| {
-            public_key_switch_component_for_digit(
-                domain,
-                seed_hex,
-                primes,
-                digit_index,
-                component_b,
-            )
+        .map(|(digit_index, (component_b, component_a))| {
+            public_key_switch_component_for_digit(primes, digit_index, component_b, component_a)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok(KeySwitchKey { level, components })
 }
 
-#[cfg(test)]
 fn public_key_switch_component_for_digit(
-    domain: &str,
-    seed_hex: &str,
     primes: &[u64],
     digit_index: usize,
     component_b: Vec<Vec<u64>>,
+    component_a: Vec<Vec<u64>>,
 ) -> CanonicalResult<KeySwitchComponent> {
     if component_b.len() != primes.len()
         || component_b
@@ -375,50 +429,91 @@ fn public_key_switch_component_for_digit(
             "public key-switch material component shape does not match its level",
         ));
     }
+    if component_a.len() != primes.len()
+        || component_a
+            .iter()
+            .any(|limb| limb.len() != POLYNOMIAL_DEGREE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public key-switch component-a shape does not match its level",
+        ));
+    }
+
+    KeySwitchComponent::from_retained_public_sample(component_b, component_a, primes, digit_index)
+}
+
+fn public_component_a_by_digit(
+    level: usize,
+    domain: &str,
+    seed_hex: &str,
+) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+    let primes = DATA_PRIMES.get(..=level).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public key-switch material level is outside the selected data basis",
+        )
+    })?;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        (0..=level)
+            .into_par_iter()
+            .map(|digit_index| public_component_a_for_digit(primes, domain, seed_hex, digit_index))
+            .collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        (0..=level)
+            .map(|digit_index| public_component_a_for_digit(primes, domain, seed_hex, digit_index))
+            .collect()
+    }
+}
+
+fn public_component_a_for_digit(
+    primes: &[u64],
+    domain: &str,
+    seed_hex: &str,
+    digit_index: usize,
+) -> CanonicalResult<Vec<Vec<u64>>> {
     let digit_bytes = (digit_index as u64).to_le_bytes();
     #[cfg(not(target_arch = "wasm32"))]
-    let component_a = primes
-        .par_iter()
-        .map(|modulus| {
-            let modulus_bytes = modulus.to_le_bytes();
-            DeterministicSampler::new(
-                KEY_SWITCH_SAMPLE_DOMAIN,
-                &[
-                    domain.as_bytes(),
-                    seed_hex.as_bytes(),
-                    &digit_bytes,
-                    &modulus_bytes,
-                ],
-            )
-            .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
-        })
-        .collect::<Vec<_>>();
+    {
+        Ok(primes
+            .par_iter()
+            .map(|modulus| {
+                let modulus_bytes = modulus.to_le_bytes();
+                DeterministicSampler::new(
+                    KEY_SWITCH_SAMPLE_DOMAIN,
+                    &[
+                        domain.as_bytes(),
+                        seed_hex.as_bytes(),
+                        &digit_bytes,
+                        &modulus_bytes,
+                    ],
+                )
+                .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
+            })
+            .collect::<Vec<_>>())
+    }
     #[cfg(target_arch = "wasm32")]
-    let component_a = primes
-        .iter()
-        .map(|modulus| {
-            let modulus_bytes = modulus.to_le_bytes();
-            DeterministicSampler::new(
-                KEY_SWITCH_SAMPLE_DOMAIN,
-                &[
-                    domain.as_bytes(),
-                    seed_hex.as_bytes(),
-                    &digit_bytes,
-                    &modulus_bytes,
-                ],
-            )
-            .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
-        })
-        .collect::<Vec<_>>();
-
-    KeySwitchComponent::from_coefficients(
-        component_b,
-        component_a,
-        primes,
-        domain,
-        seed_hex,
-        digit_index,
-    )
+    {
+        Ok(primes
+            .iter()
+            .map(|modulus| {
+                let modulus_bytes = modulus.to_le_bytes();
+                DeterministicSampler::new(
+                    KEY_SWITCH_SAMPLE_DOMAIN,
+                    &[
+                        domain.as_bytes(),
+                        seed_hex.as_bytes(),
+                        &digit_bytes,
+                        &modulus_bytes,
+                    ],
+                )
+                .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
+            })
+            .collect::<Vec<_>>())
+    }
 }
 
 // Apply a key-switching key to a single ciphertext component (the term that

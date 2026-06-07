@@ -194,7 +194,9 @@ export type BgvPassiveSetupPackage = {
     };
     readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
-    readonly trustedDealerBoundary: Readonly<Record<string, unknown>>;
+    readonly centralTrustedSetupAuthorityBoundary: Readonly<
+        Record<string, unknown>
+    >;
     readonly targetDecryptionStatus: {
         readonly targetDecryptionProfileId: string;
         readonly targetDecryptionProfileHash: ProtocolHash;
@@ -508,8 +510,8 @@ export type BgvPrivateVssShareProofGeneration = {
     readonly ok: true;
     readonly operation: 'generatePrivateVssShareProof';
     readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    readonly dealerIdentity: string;
-    readonly dealerRosterPosition: number;
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
@@ -567,6 +569,36 @@ export type BgvPublicKeyShareLnpProofGeneration = {
         readonly retention: string;
     };
 };
+
+type BgvEvaluationKeyShareLnpProofGenerationBase = {
+    readonly ok: true;
+    readonly operation: 'generateEvaluationKeyShareLnpProof';
+    readonly setupProofProfileId: string;
+    readonly proofVerificationStatus: string;
+    readonly proofModelStatus: string;
+    readonly statementHash: ProtocolHash;
+    readonly relationCommitmentHash: ProtocolHash;
+    readonly tboxCommitmentPrefixHash: ProtocolHash;
+    readonly challenge: number;
+    readonly proofSizeBytes: number;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofBytesHex: string;
+    readonly proofRandomness: {
+        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
+        readonly seedBytes: 64;
+        readonly retention: string;
+    };
+};
+
+export type BgvEvaluationKeyShareLnpProofGeneration =
+    | (BgvEvaluationKeyShareLnpProofGenerationBase & {
+          readonly proofFamily: 'relinearization-key-share';
+          readonly relinearizationKeyShareTboxParameterProfileHash: ProtocolHash;
+      })
+    | (BgvEvaluationKeyShareLnpProofGenerationBase & {
+          readonly proofFamily: 'galois-key-share';
+          readonly galoisKeyShareTboxParameterProfileHash: ProtocolHash;
+      });
 
 export type BgvThresholdShareCommitmentDerivation = {
     readonly ok: true;

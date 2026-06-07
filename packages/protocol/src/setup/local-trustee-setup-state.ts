@@ -24,8 +24,8 @@ export const localTrusteeSetupStateDeletionBoundary =
     'after-private-vss-aggregation';
 
 export const deletedLocalTrusteeSetupMaterialClasses = [
-    'raw-per-dealer-vss-shares',
-    'raw-per-dealer-vss-openings',
+    'raw-per-source-trustee-vss-shares',
+    'raw-per-source-trustee-vss-openings',
     'private-vss-envelope-payloads-after-aggregation',
 ] as const;
 
@@ -549,20 +549,20 @@ const recipientEnvelopeReferences = (
         )
         .sort(
             (left, right) =>
-                Number(left.dealerRosterPosition) -
-                Number(right.dealerRosterPosition),
+                Number(left.sourceTrusteeRosterPosition) -
+                Number(right.sourceTrusteeRosterPosition),
         );
     if (envelopeReferences.length !== participantCount) {
         throw new Error(
-            'privateVssEnvelopeCommitments must include one envelope reference from every dealer for the trustee.',
+            'privateVssEnvelopeCommitments must include one envelope reference from every source trustee for the trustee.',
         );
     }
     envelopeReferences.forEach((reference, referenceIndex) => {
         const objectPath = `privateVssEnvelopeCommitments.envelopeReferences.${String(referenceIndex)}`;
         assertSetupContextBinding(input.setupContext, reference, objectPath);
-        if (reference.dealerRosterPosition !== referenceIndex) {
+        if (reference.sourceTrusteeRosterPosition !== referenceIndex) {
             throw new Error(
-                'private VSS envelope references for a trustee must cover contiguous dealer roster positions.',
+                'private VSS envelope references for a trustee must cover contiguous source trustee roster positions.',
             );
         }
         if (reference.recipientIdentity !== input.trusteeIdentity) {
@@ -577,7 +577,7 @@ const recipientEnvelopeReferences = (
         }
         protocolHashField(reference, 'privateEnvelopeHash', objectPath);
         protocolHashField(reference, 'localVerificationRoot', objectPath);
-        protocolHashField(reference, 'dealerCommitmentRoot', objectPath);
+        protocolHashField(reference, 'sourceTrusteeCommitmentRoot', objectPath);
     });
 
     return envelopeReferences as unknown as readonly PrivateVssEnvelopeVerificationReference[];
@@ -607,8 +607,8 @@ const issuedVssAcceptanceRoot = (
         )
         .sort(
             (left, right) =>
-                Number(left.dealerRosterPosition) -
-                Number(right.dealerRosterPosition),
+                Number(left.sourceTrusteeRosterPosition) -
+                Number(right.sourceTrusteeRosterPosition),
         )
         .map((record, recordIndex) => {
             const objectPath = `vssShareAcceptances.acceptanceRecords.${String(recordIndex)}`;
@@ -631,7 +631,7 @@ const issuedVssAcceptanceRoot = (
         });
     if (acceptanceRoots.length !== expectedAcceptanceCount) {
         throw new Error(
-            'vssShareAcceptances must contain one acceptance issued by the trustee for every dealer.',
+            'vssShareAcceptances must contain one acceptance issued by the trustee for every source trustee.',
         );
     }
 
@@ -670,8 +670,8 @@ const issuedVssComplaintRoots = (
         )
         .sort(
             (left, right) =>
-                Number(left.dealerRosterPosition) -
-                Number(right.dealerRosterPosition),
+                Number(left.sourceTrusteeRosterPosition) -
+                Number(right.sourceTrusteeRosterPosition),
         )
         .map((record, recordIndex) => {
             const objectPath = `vssComplaints.complaintRecords.${String(recordIndex)}`;
@@ -706,9 +706,9 @@ const sourcePrivateEnvelopeReferences = (
     envelopeReferences.map((reference) => ({
         objectType: 'LocalTrusteePrivateVssEnvelopeReference',
         objectVersion: 1,
-        dealerIdentity: reference.dealerIdentity,
-        dealerRosterPosition: reference.dealerRosterPosition,
-        dealerCommitmentRoot: reference.dealerCommitmentRoot,
+        sourceTrusteeIdentity: reference.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition: reference.sourceTrusteeRosterPosition,
+        sourceTrusteeCommitmentRoot: reference.sourceTrusteeCommitmentRoot,
         privateEnvelopeHash: reference.privateEnvelopeHash,
         localVerificationRoot: reference.localVerificationRoot,
     }));
@@ -745,11 +745,11 @@ const assertPrivateEnvelopeMatchesReference = (
         );
     }
     for (const fieldName of [
-        'dealerIdentity',
-        'dealerRosterPosition',
+        'sourceTrusteeIdentity',
+        'sourceTrusteeRosterPosition',
         'recipientIdentity',
         'recipientRosterPosition',
-        'dealerCommitmentRoot',
+        'sourceTrusteeCommitmentRoot',
     ] as const) {
         if (privateEnvelope[fieldName] !== envelopeReference[fieldName]) {
             throw new Error(

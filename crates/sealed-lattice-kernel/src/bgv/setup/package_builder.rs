@@ -176,7 +176,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "evaluationKeys": evaluation_keys,
         "developmentEncryptionFixture": development_encryption_fixture,
         "certificates": certificates,
-        "trustedDealerBoundary": {
+        "centralTrustedSetupAuthorityBoundary": {
             "transcriptValidCentralizedSecretReconstruction": false,
             "centralizedSecretFixtureMayProduceAcceptedRoots": false,
             "rawSecretSharesExported": false,

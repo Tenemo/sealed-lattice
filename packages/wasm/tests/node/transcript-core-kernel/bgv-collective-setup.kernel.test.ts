@@ -37,10 +37,10 @@ import {
 } from '#packages/protocol/src/setup/setup-phase-records';
 import {
     createVssCoefficientCommitmentBundle,
-    createVssDealerCoefficientOpeningState,
+    createVssSourceTrusteeCoefficientOpeningState,
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentSet,
-    type VssDealerOpeningMaterial,
+    type VssSourceTrusteeOpeningMaterial,
     type VssOpeningRandomByteSource,
 } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import {
@@ -161,18 +161,18 @@ function acceptedVssCoefficientCommitments(
         ringDegree: acceptedDevelopmentRingDegree,
         participantCount: firstProfileParticipantCount,
         thresholdDegree: firstProfileDecryptionThreshold,
-        dealerOpeningStates: Array.from(
+        sourceTrusteeOpeningStates: Array.from(
             { length: firstProfileParticipantCount },
-            (_unusedDealer, dealerRosterPosition) =>
-                createVssDealerCoefficientOpeningState({
-                    dealerIdentity: `trustee-${String(dealerRosterPosition)}`,
-                    dealerRosterPosition,
+            (_unusedSourceTrustee, sourceTrusteeRosterPosition) =>
+                createVssSourceTrusteeCoefficientOpeningState({
+                    sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
+                    sourceTrusteeRosterPosition,
                     participantCount: firstProfileParticipantCount,
                     qSharePrimes: profile.qShare.primes,
                     ringDegree: acceptedDevelopmentRingDegree,
                     thresholdDegree: firstProfileDecryptionThreshold,
                     randomBytes: deterministicRandomBytes(
-                        `trustee-${String(dealerRosterPosition)}`,
+                        `trustee-${String(sourceTrusteeRosterPosition)}`,
                     ),
                 }),
         ),
@@ -337,10 +337,10 @@ async function acceptedPrivateVssEnvelopeCommitments(
     setupContext: JsonRecord,
     commonRandomness: JsonRecord,
     vssCoefficientCommitments: JsonRecord,
-    privateOpeningMaterialByDealer: readonly VssDealerOpeningMaterial[],
+    privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[],
 ): Promise<JsonRecord> {
-    const dealerRecords =
-        vssCoefficientCommitments.dealerRecords as JsonRecord[];
+    const sourceTrusteeRecords =
+        vssCoefficientCommitments.sourceTrusteeRecords as JsonRecord[];
     const publicMatrixSeedHash = String(commonRandomness.publicMatrixSeedHash);
     const vssCoefficientCommitmentRoot = String(
         vssCoefficientCommitments.vssCoefficientCommitmentRoot,
@@ -386,35 +386,38 @@ async function acceptedPrivateVssEnvelopeCommitments(
             deliveryPhaseNumber: 6,
             verificationPhaseNumber: 7,
             privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
-            dealerContributionStates: privateOpeningMaterialByDealer.map(
-                (dealerOpeningMaterial) => {
-                    const dealerRecord =
-                        dealerRecords[
-                            dealerOpeningMaterial.dealerRosterPosition
-                        ];
-                    if (dealerRecord === undefined) {
-                        throw new Error(
-                            'Missing VSS coefficient commitment dealer record.',
-                        );
-                    }
+            sourceTrusteeContributionStates:
+                privateOpeningMaterialBySourceTrustee.map(
+                    (sourceTrusteeOpeningMaterial) => {
+                        const sourceTrusteeRecord =
+                            sourceTrusteeRecords[
+                                sourceTrusteeOpeningMaterial
+                                    .sourceTrusteeRosterPosition
+                            ];
+                        if (sourceTrusteeRecord === undefined) {
+                            throw new Error(
+                                'Missing VSS coefficient commitment source trustee record.',
+                            );
+                        }
 
-                    return {
-                        dealerIdentity: `trustee-${String(
-                            dealerOpeningMaterial.dealerRosterPosition,
-                        )}`,
-                        dealerRosterPosition:
-                            dealerOpeningMaterial.dealerRosterPosition,
-                        dealerCommitmentRoot: String(
-                            dealerRecord.dealerCommitmentRoot,
-                        ),
-                        dealerCoefficientCommitmentRecord: dealerRecord,
-                        dealerCoefficientCommitmentMaterialRecords:
-                            dealerOpeningMaterial.dealerCoefficientCommitmentMaterialRecords,
-                        coefficientOpenings:
-                            dealerOpeningMaterial.coefficientOpenings,
-                    };
-                },
-            ),
+                        return {
+                            sourceTrusteeIdentity: `trustee-${String(
+                                sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
+                            )}`,
+                            sourceTrusteeRosterPosition:
+                                sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
+                            sourceTrusteeCommitmentRoot: String(
+                                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+                            ),
+                            sourceTrusteeCoefficientCommitmentRecord:
+                                sourceTrusteeRecord,
+                            sourceTrusteeCoefficientCommitmentMaterialRecords:
+                                sourceTrusteeOpeningMaterial.sourceTrusteeCoefficientCommitmentMaterialRecords,
+                            coefficientOpenings:
+                                sourceTrusteeOpeningMaterial.coefficientOpenings,
+                        };
+                    },
+                ),
             privateVssShareProofRandomnessFactory: ({
                 rnsLimbIndex,
                 rnsPrime,
@@ -469,22 +472,22 @@ async function acceptedVssShareAcceptances(
         privateVssEnvelopeCommitments.envelopeReferences as JsonRecord[];
     const acceptanceRecords: VssShareAcceptanceRecord[] = [];
     for (
-        let dealerRosterPosition = 0;
-        dealerRosterPosition < 10;
-        dealerRosterPosition += 1
+        let sourceTrusteeRosterPosition = 0;
+        sourceTrusteeRosterPosition < 10;
+        sourceTrusteeRosterPosition += 1
     ) {
-        const dealerIdentity = `trustee-${String(dealerRosterPosition)}`;
+        const sourceTrusteeIdentity = `trustee-${String(sourceTrusteeRosterPosition)}`;
         for (
             let recipientRosterPosition = 0;
             recipientRosterPosition < 10;
             recipientRosterPosition += 1
         ) {
             const recipientIdentity = `trustee-${String(recipientRosterPosition)}`;
-            const signatureSeedLabel = `${recipientIdentity}-accepts-${dealerIdentity}`;
+            const signatureSeedLabel = `${recipientIdentity}-accepts-${sourceTrusteeIdentity}`;
             const keyFixture = createMlDsaKeyPairFixture(signatureSeedLabel);
             const envelopeReference =
                 envelopeReferences[
-                    dealerRosterPosition * 10 + recipientRosterPosition
+                    sourceTrusteeRosterPosition * 10 + recipientRosterPosition
                 ];
             if (envelopeReference === undefined) {
                 throw new Error(
@@ -900,7 +903,8 @@ function acceptedSetupCommitmentSecurityCertificate(
             recipientAggregateOpeningInfinityBound: Number(recipientScalarSum),
             maxRecipientLiftedCoefficientDecimal:
                 maxRecipientLiftedCoefficient.toString(),
-            dealerCountForThresholdAggregation: firstProfileParticipantCount,
+            sourceTrusteeCountForThresholdAggregation:
+                firstProfileParticipantCount,
             thresholdScalarPowerSumDecimal: thresholdScalarSum.toString(),
             thresholdShareOpeningInfinityBound: Number(thresholdScalarSum),
             maxThresholdLiftedCoefficientDecimal:
@@ -1358,9 +1362,9 @@ async function acceptedShapedSetupPackage(
     const thresholdShareCommitments = kernel.deriveThresholdShareCommitments({
         setupContext,
         publicMatrixSeedHash: String(commonRandomness.publicMatrixSeedHash),
-        dealerCoefficientCommitmentRecords:
-            vssCoefficientCommitments.dealerRecords.map(
-                (dealerRecord) => dealerRecord as JsonRecord,
+        sourceTrusteeCoefficientCommitmentRecords:
+            vssCoefficientCommitments.sourceTrusteeRecords.map(
+                (sourceTrusteeRecord) => sourceTrusteeRecord as JsonRecord,
             ),
         coefficientCommitments:
             vssCoefficientCommitmentMaterial.coefficientCommitments.map(
@@ -1374,7 +1378,7 @@ async function acceptedShapedSetupPackage(
             setupContext,
             commonRandomness,
             vssCoefficientCommitments,
-            vssCoefficientCommitmentBundle.privateOpeningMaterialByDealer,
+            vssCoefficientCommitmentBundle.privateOpeningMaterialBySourceTrustee,
         );
     const publicPrivateVssEnvelopeCommitments =
         publicPrivateVssEnvelopeCommitmentSet(privateVssEnvelopeCommitments);
@@ -1742,8 +1746,8 @@ describe('collective BGV setup kernel commands', () => {
         const result = kernel.verifyPrivateVssShareEnvelope({
             setupContext: {},
             publicMatrixSeedHash: validHash('1'),
-            dealerCoefficientCommitmentRecord: {},
-            dealerCoefficientCommitmentMaterialRecords: [],
+            sourceTrusteeCoefficientCommitmentRecord: {},
+            sourceTrusteeCoefficientCommitmentMaterialRecords: [],
             privateEnvelope: {},
         });
 
@@ -1765,7 +1769,7 @@ describe('collective BGV setup kernel commands', () => {
             kernel.deriveThresholdShareCommitments({
                 setupContext: {},
                 publicMatrixSeedHash: validHash('1'),
-                dealerCoefficientCommitmentRecords: [],
+                sourceTrusteeCoefficientCommitmentRecords: [],
                 coefficientCommitments: [],
             });
         }).toThrow(TranscriptCoreKernelCommandError);
@@ -1773,7 +1777,7 @@ describe('collective BGV setup kernel commands', () => {
             kernel.deriveThresholdShareCommitments({
                 setupContext: {},
                 publicMatrixSeedHash: validHash('1'),
-                dealerCoefficientCommitmentRecords: [],
+                sourceTrusteeCoefficientCommitmentRecords: [],
                 coefficientCommitments: [],
             });
         }).toThrow(/setupContext\.ceremonyId is required/);

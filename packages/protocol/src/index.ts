@@ -19,7 +19,7 @@ export {
     verifyRosterManifestTranscript,
 } from './roster/index.js';
 export {
-    createPrivateVssMailboxDealerDeliveryReferences,
+    createPrivateVssMailboxSourceTrusteeDeliveryReferences,
     createPrivateVssMailboxDeliverySet,
 } from './setup/private-vss-mailbox-delivery.js';
 export {
@@ -49,8 +49,8 @@ export {
 export {
     acceptedBgvProfileRingDegree,
     computeSetupCommitmentFromOpening,
-    createVssDealerCoefficientOpeningState,
-    createVssDealerCoefficientCommitmentContribution,
+    createVssSourceTrusteeCoefficientOpeningState,
+    createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
     setupCommitmentFullValue,
     setupCommitmentModuleRank,
@@ -77,9 +77,22 @@ export {
     createSetupPhaseRecord,
 } from './setup/setup-phase-records.js';
 export {
+    createCommonRandomnessCommit,
+    createCommonRandomnessReveal,
+    createSetupCommonRandomness,
+} from './setup/common-randomness-records.js';
+export {
     collectForbiddenSetupContributionAssemblyFieldPaths,
     createSetupContributionAssembly,
 } from './setup/setup-contribution-orchestration.js';
+export { createSetupCeremonyAssembly } from './setup/setup-ceremony-assembly.js';
+export { createSetupCertificates } from './setup/setup-certificates.js';
+export { deriveThresholdShareCommitments } from './setup/threshold-share-commitments.js';
+export {
+    collectForbiddenSetupPackageAssemblyFieldPaths,
+    createSetupPackage,
+    setupPackageHashInput,
+} from './setup/setup-package-assembly.js';
 export {
     createSameSecretConsistencyStatementSet,
     sameSecretBoundProofFamilies,
@@ -99,9 +112,9 @@ export {
 } from './setup/vss-share-verification-records.js';
 export type {
     PrivateVssCoefficientOpeningState,
-    PrivateVssDealerContributionState,
+    PrivateVssSourceTrusteeContributionState,
     PrivateVssEnvelopeCommitment,
-    PrivateVssMailboxDealerDeliveryInput,
+    PrivateVssMailboxSourceTrusteeDeliveryInput,
     PrivateVssMailboxDeliveryKernel,
     PrivateVssMailboxDeliverySet,
     PrivateVssMailboxDeliverySetInput,
@@ -113,6 +126,9 @@ export type {
     EvaluationKeyProofCommonInput,
     GaloisKeyContributingShareRoot,
     EvaluationKeyShareEmbeddedProofBytes,
+    EvaluationKeyShareProofGenerationBase,
+    EvaluationKeyShareProofGenerationOutput,
+    EvaluationKeyShareProofGenerator,
     EvaluationKeyShareProofByteMaterial,
     EvaluationKeyShareProofMaterialBase,
     EvaluationKeyShareTransportedProofBytes,
@@ -123,6 +139,7 @@ export type {
     GaloisKeyRootReference,
     GaloisKeyShareProof,
     GaloisKeyShareProofContribution,
+    GaloisKeyShareProofGeneration,
     GaloisKeyShareProofMaterial,
     GaloisKeyShareRootReference,
     KeySwitchComponentVectorEntry,
@@ -131,6 +148,7 @@ export type {
     RelinearizationKeyRootReference,
     RelinearizationKeyShareRoundOneRecord,
     RelinearizationKeyShareRoundTwoRecord,
+    RelinearizationKeyShareProofGeneration,
     RelinearizationKeyShareProofMaterial,
     RelinearizationKeyShareRounds,
     RelinearizationKeyShareRoundsInput,
@@ -166,12 +184,12 @@ export type {
     VssCoefficientCommitmentSet,
     VssCoefficientOpeningInput,
     VssCoefficientOpeningMaterial,
-    VssDealerCoefficientOpeningStateGenerationInput,
-    VssDealerCoefficientCommitmentRecord,
-    VssDealerCoefficientCommitmentContribution,
-    VssDealerCoefficientCommitmentContributionInput,
-    VssDealerCoefficientOpeningState,
-    VssDealerOpeningMaterial,
+    VssSourceTrusteeCoefficientOpeningStateGenerationInput,
+    VssSourceTrusteeCoefficientCommitmentRecord,
+    VssSourceTrusteeCoefficientCommitmentContribution,
+    VssSourceTrusteeCoefficientCommitmentContributionInput,
+    VssSourceTrusteeCoefficientOpeningState,
+    VssSourceTrusteeOpeningMaterial,
     VssOpeningRandomByteSource,
 } from './setup/vss-coefficient-commitments.js';
 export type {
@@ -191,9 +209,46 @@ export type {
     SetupPhaseRecord,
 } from './setup/setup-phase-records.js';
 export type {
+    CommonRandomnessCommit,
+    CommonRandomnessCommitInput,
+    CommonRandomnessParticipantInput,
+    CommonRandomnessReveal,
+    CommonRandomnessRevealInput,
+    SetupCommonRandomness,
+    SetupCommonRandomnessInput,
+    SetupCommonRandomnessPublicDerivations,
+} from './setup/common-randomness-records.js';
+export type {
     SetupContributionAssembly,
     SetupContributionAssemblyInput,
 } from './setup/setup-contribution-orchestration.js';
+export type {
+    SetupCeremonyAssembly,
+    SetupCeremonyAssemblyInput,
+    SetupCeremonyLocalTrusteeState,
+    SetupCeremonyTrusteeInput,
+} from './setup/setup-ceremony-assembly.js';
+export type {
+    BgvHeSecurityCertificate,
+    BgvRnsProfileForCertificates,
+    CollectiveBgvSetupProfileForCertificates,
+    SetupCertificateTransportInput,
+    SetupCertificates,
+    SetupCertificatesInput,
+    SetupCommitmentSecurityCertificate,
+    SetupTransportCertificate,
+} from './setup/setup-certificates.js';
+export type {
+    SetupPackage,
+    SetupPackageCertificateInput,
+    SetupPackageInput,
+} from './setup/setup-package-assembly.js';
+export type {
+    ThresholdShareCommitmentLimb,
+    ThresholdShareCommitmentRecipient,
+    ThresholdShareCommitmentsInput,
+    ThresholdShareCommitmentSet,
+} from './setup/threshold-share-commitments.js';
 export type {
     SameSecretConsistencyStatementRecord,
     SameSecretConsistencyStatementSet,

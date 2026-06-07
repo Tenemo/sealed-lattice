@@ -58,7 +58,7 @@ const createMockKernelExports = ({
     readonly commandPointer?: number;
     readonly commandResponse?: unknown;
     readonly expectedKernelSha256Hex?: string;
-    readonly onCommand?: () => void;
+    readonly onCommand?: (command: unknown) => void;
     readonly outputLengthAllocationPointer?: number;
     readonly roundTripPointer?: number;
 } = {}): {
@@ -94,11 +94,18 @@ const createMockKernelExports = ({
                 sealed_lattice_deallocate: deallocate,
                 sealed_lattice_transcript_core_command_with_length: vi.fn(
                     (
-                        _pointer: number,
-                        _length: number,
+                        pointer: number,
+                        length: number,
                         outputLengthPointer: number,
                     ) => {
-                        onCommand?.();
+                        const encodedCommand = new Uint8Array(
+                            memory.buffer,
+                            pointer,
+                            length,
+                        );
+                        onCommand?.(
+                            JSON.parse(textDecoder.decode(encodedCommand)),
+                        );
                         new Uint8Array(memory.buffer).set(
                             encodedCommandResponse,
                             commandPointer,

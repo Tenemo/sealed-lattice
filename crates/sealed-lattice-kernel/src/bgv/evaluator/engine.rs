@@ -108,6 +108,59 @@ impl Ciphertext {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct BgvPublicKey {
+    public_b: Vec<Vec<u64>>,
+    public_a: Vec<Vec<u64>>,
+}
+
+impl BgvPublicKey {
+    pub(crate) fn from_components(
+        public_b: Vec<Vec<u64>>,
+        public_a: Vec<Vec<u64>>,
+    ) -> CanonicalResult<Self> {
+        validate_public_key_component_shape(&public_b, "component zero")?;
+        validate_public_key_component_shape(&public_a, "component one")?;
+
+        Ok(Self { public_b, public_a })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encrypt_slots(
+        &self,
+        slots: &[u64],
+        seed_hex: &str,
+    ) -> CanonicalResult<Ciphertext> {
+        let coefficients = encode_slots_to_coefficients(slots)?;
+
+        self.encrypt_coefficients(&coefficients, seed_hex)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encrypt_coefficients(
+        &self,
+        plaintext_coefficients: &[u64],
+        seed_hex: &str,
+    ) -> CanonicalResult<Ciphertext> {
+        Ok(self
+            .encrypt_coefficients_with_witness(plaintext_coefficients, seed_hex)?
+            .0)
+    }
+
+    pub(crate) fn encrypt_coefficients_with_witness(
+        &self,
+        plaintext_coefficients: &[u64],
+        seed_hex: &str,
+    ) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
+        encrypt_coefficients_with_public_key_components(
+            &self.public_b,
+            &self.public_a,
+            plaintext_coefficients,
+            seed_hex,
+        )
+    }
+}
+
 // The development BGV key set used to drive and check the evaluator. The
 // collective public key uses the claim-path convention `b = p*e - a*s`, so the
 // plaintext lives in the least-significant residue and decryption is exact mod
@@ -132,8 +185,8 @@ impl DevelopmentBgvKey {
                 "BGV evaluator collective secret width must match the polynomial degree",
             ));
         }
-        validate_public_key_component_shape(&public_b, "component zero")?;
-        validate_public_key_component_shape(&public_a, "component one")?;
+        let BgvPublicKey { public_b, public_a } =
+            BgvPublicKey::from_components(public_b, public_a)?;
 
         Ok(Self {
             secret,
@@ -279,85 +332,12 @@ impl DevelopmentBgvKey {
         plaintext_coefficients: &[u64],
         seed_hex: &str,
     ) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
-        if plaintext_coefficients.len() != POLYNOMIAL_DEGREE {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "BGV evaluator plaintext coefficient vector must match the polynomial degree",
-            ));
-        }
-        let randomizer = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-encryption-randomizer-v1",
-            &[seed_hex.as_bytes()],
+        encrypt_coefficients_with_public_key_components(
+            &self.public_b,
+            &self.public_a,
+            plaintext_coefficients,
+            seed_hex,
         )
-        .ternary(POLYNOMIAL_DEGREE);
-        let error_zero = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-encryption-error-zero-v1",
-            &[seed_hex.as_bytes()],
-        )
-        .centered_binomial_eta2(POLYNOMIAL_DEGREE);
-        let error_one = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-encryption-error-one-v1",
-            &[seed_hex.as_bytes()],
-        )
-        .centered_binomial_eta2(POLYNOMIAL_DEGREE);
-
-        let mut component_zero = Vec::with_capacity(DATA_PRIMES.len());
-        let mut component_one = Vec::with_capacity(DATA_PRIMES.len());
-        for (modulus_index, modulus) in DATA_PRIMES.into_iter().enumerate() {
-            let randomizer_residues = randomizer
-                .iter()
-                .map(|coefficient| signed_residue(*coefficient, modulus))
-                .collect::<Vec<_>>();
-            let public_key_product =
-                negacyclic_mul(&self.public_b[modulus_index], &randomizer_residues, modulus)?;
-            let public_sample_product =
-                negacyclic_mul(&self.public_a[modulus_index], &randomizer_residues, modulus)?;
-
-            let limb_zero = (0..POLYNOMIAL_DEGREE)
-                .map(|coefficient_index| {
-                    let scaled_error = signed_residue(
-                        error_zero[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
-                        modulus,
-                    );
-                    let with_error =
-                        add_mod(public_key_product[coefficient_index], scaled_error, modulus)?;
-                    add_mod(
-                        with_error,
-                        plaintext_coefficients[coefficient_index],
-                        modulus,
-                    )
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            let limb_one = (0..POLYNOMIAL_DEGREE)
-                .map(|coefficient_index| {
-                    let scaled_error = signed_residue(
-                        error_one[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
-                        modulus,
-                    );
-                    add_mod(
-                        public_sample_product[coefficient_index],
-                        scaled_error,
-                        modulus,
-                    )
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-
-            component_zero.push(limb_zero);
-            component_one.push(limb_one);
-        }
-
-        Ok((
-            Ciphertext {
-                components: vec![component_zero, component_one],
-                level: EVALUATOR_FULL_LEVEL,
-                decrypt_scaling: 1,
-            },
-            EncryptionWitness {
-                randomizer_coefficients: randomizer,
-                error_zero_coefficients: error_zero,
-                error_one_coefficients: error_one,
-            },
-        ))
     }
 
     pub(crate) fn decrypt_to_coefficients(
@@ -408,6 +388,95 @@ impl DevelopmentBgvKey {
 }
 
 const PLAINTEXT_MODULUS_I32: i32 = 65_537;
+
+fn encrypt_coefficients_with_public_key_components(
+    public_b: &[Vec<u64>],
+    public_a: &[Vec<u64>],
+    plaintext_coefficients: &[u64],
+    seed_hex: &str,
+) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
+    validate_public_key_component_shape(public_b, "component zero")?;
+    validate_public_key_component_shape(public_a, "component one")?;
+    if plaintext_coefficients.len() != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "BGV evaluator plaintext coefficient vector must match the polynomial degree",
+        ));
+    }
+    let randomizer = DeterministicSampler::new(
+        "sealed-lattice-bgv-evaluator/development-encryption-randomizer-v1",
+        &[seed_hex.as_bytes()],
+    )
+    .ternary(POLYNOMIAL_DEGREE);
+    let error_zero = DeterministicSampler::new(
+        "sealed-lattice-bgv-evaluator/development-encryption-error-zero-v1",
+        &[seed_hex.as_bytes()],
+    )
+    .centered_binomial_eta2(POLYNOMIAL_DEGREE);
+    let error_one = DeterministicSampler::new(
+        "sealed-lattice-bgv-evaluator/development-encryption-error-one-v1",
+        &[seed_hex.as_bytes()],
+    )
+    .centered_binomial_eta2(POLYNOMIAL_DEGREE);
+
+    let mut component_zero = Vec::with_capacity(DATA_PRIMES.len());
+    let mut component_one = Vec::with_capacity(DATA_PRIMES.len());
+    for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+        let randomizer_residues = randomizer
+            .iter()
+            .map(|coefficient| signed_residue(*coefficient, modulus))
+            .collect::<Vec<_>>();
+        let public_key_product =
+            negacyclic_mul(&public_b[modulus_index], &randomizer_residues, modulus)?;
+        let public_sample_product =
+            negacyclic_mul(&public_a[modulus_index], &randomizer_residues, modulus)?;
+
+        let limb_zero = (0..POLYNOMIAL_DEGREE)
+            .map(|coefficient_index| {
+                let scaled_error = signed_residue(
+                    error_zero[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
+                    modulus,
+                );
+                let with_error =
+                    add_mod(public_key_product[coefficient_index], scaled_error, modulus)?;
+                add_mod(
+                    with_error,
+                    plaintext_coefficients[coefficient_index],
+                    modulus,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let limb_one = (0..POLYNOMIAL_DEGREE)
+            .map(|coefficient_index| {
+                let scaled_error = signed_residue(
+                    error_one[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
+                    modulus,
+                );
+                add_mod(
+                    public_sample_product[coefficient_index],
+                    scaled_error,
+                    modulus,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        component_zero.push(limb_zero);
+        component_one.push(limb_one);
+    }
+
+    Ok((
+        Ciphertext {
+            components: vec![component_zero, component_one],
+            level: EVALUATOR_FULL_LEVEL,
+            decrypt_scaling: 1,
+        },
+        EncryptionWitness {
+            randomizer_coefficients: randomizer,
+            error_zero_coefficients: error_zero,
+            error_one_coefficients: error_one,
+        },
+    ))
+}
 
 fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> CanonicalResult<()> {
     if component.len() != DATA_PRIMES.len() {
@@ -460,8 +529,8 @@ pub(crate) fn encode_slots_to_coefficients(slots: &[u64]) -> CanonicalResult<Vec
 #[cfg(test)]
 mod tests {
     use super::{
-        Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_negate, ciphertext_sub,
-        ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
+        BgvPublicKey, Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_negate,
+        ciphertext_sub, ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
     };
     use crate::bgv::profile::PLAINTEXT_MODULUS;
 
@@ -490,6 +559,33 @@ mod tests {
         let slots = first_slots(&[0, 1, 2, 200, 65_536, 7]);
         let ciphertext = key.encrypt_slots(&slots, "aa01").expect("encrypt");
         assert_eq!(decrypt_prefix(key, &ciphertext, slots.len()), slots);
+    }
+
+    #[test]
+    fn public_key_encryption_matches_development_key_encryption() {
+        let key = shared_key();
+        let (component_b, component_a) = key.public_key_components();
+        let public_key = BgvPublicKey::from_components(component_b.to_vec(), component_a.to_vec())
+            .expect("public key");
+        let slots = first_slots(&[11, 0, 65_536, 29, 700]);
+
+        let development_ciphertext = key
+            .encrypt_slots(&slots, "public-key-parity")
+            .expect("development encrypt");
+        let public_ciphertext = public_key
+            .encrypt_slots(&slots, "public-key-parity")
+            .expect("public encrypt");
+
+        assert_eq!(
+            public_ciphertext.components,
+            development_ciphertext.components
+        );
+        assert_eq!(public_ciphertext.level, development_ciphertext.level);
+        assert_eq!(
+            public_ciphertext.decrypt_scaling,
+            development_ciphertext.decrypt_scaling
+        );
+        assert_eq!(decrypt_prefix(key, &public_ciphertext, slots.len()), slots);
     }
 
     #[test]

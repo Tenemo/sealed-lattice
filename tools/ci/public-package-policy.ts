@@ -1,5 +1,6 @@
 export type VendoredProtocolRuntimeEntryExport = {
     readonly exports: readonly string[];
+    readonly runtimeFacadeExports?: readonly string[];
     readonly source: string;
 };
 
@@ -23,9 +24,15 @@ export const forbiddenTypeExports = [
     'BgvReferenceOracleRejection',
     'DirectEncryptedBallotProofWitness',
     'DirectEncryptedBallotWitness',
+    'EvaluationKeyProofCommonInput',
+    'EvaluationKeyShareProofGenerationBase',
+    'EvaluationKeyShareProofGenerationOutput',
+    'EvaluationKeyShareProofGenerator',
+    'GaloisKeyShareProofGeneration',
     'PreparedBgvPublicEvaluationKeyMaterial',
     'RawBgvCiphertext',
     'RawBgvSecretKey',
+    'RelinearizationKeyShareProofGeneration',
     'SparseTargetProjectionWitness',
     'TopKEvaluatorDevelopmentEvaluation',
     'TopKEvaluatorDevelopmentEvaluationInput',
@@ -125,6 +132,19 @@ export const vendoredProtocolRuntimeModules = [
     'roster/index.ts',
     'roster/object-validation.ts',
     'roster/verification.ts',
+    'setup/common-randomness-records.ts',
+    'setup/evaluation-key-proof-records.ts',
+    'setup/evaluator-key-schedule.ts',
+    'setup/local-trustee-setup-state.ts',
+    'setup/public-key-share-records.ts',
+    'setup/same-secret-consistency-records.ts',
+    'setup/setup-contribution-orchestration.ts',
+    'setup/setup-certificates.ts',
+    'setup/setup-package-assembly.ts',
+    'setup/setup-phase-records.ts',
+    'setup/threshold-share-commitments.ts',
+    'setup/vss-coefficient-commitments.ts',
+    'setup/vss-share-verification-records.ts',
 ] as const;
 
 export const vendoredProtocolRuntimeEntryExports = [
@@ -184,6 +204,73 @@ export const vendoredProtocolRuntimeEntryExports = [
         exports: [
             'verifyRosterExternalAcceptance',
             'verifyRosterManifestTranscript',
+        ],
+    },
+    {
+        source: 'setup/local-trustee-setup-state.js',
+        exports: [
+            'createEncryptedLocalTrusteeSetupStateFromVerifiedShares',
+            'decryptLocalTrusteeSetupState',
+        ],
+        runtimeFacadeExports: [
+            'exportEncryptedLocalTrusteeSetupState',
+            'restoreLocalTrusteeSetupState',
+        ],
+    },
+    {
+        source: 'setup/common-randomness-records.js',
+        exports: [
+            'createCommonRandomnessCommit',
+            'createCommonRandomnessReveal',
+            'createSetupCommonRandomness',
+        ],
+    },
+    {
+        source: 'setup/public-key-share-records.js',
+        exports: ['createPublicKeyShareProofSet', 'createPublicKeyShareSet'],
+    },
+    {
+        source: 'setup/evaluator-key-schedule.js',
+        exports: ['createEvaluatorKeySchedule'],
+    },
+    {
+        source: 'setup/evaluation-key-proof-records.js',
+        exports: [
+            'createGaloisKeyShareBatches',
+            'createPublicEvaluationKeySet',
+            'createRelinearizationKeyShareRounds',
+        ],
+    },
+    {
+        source: 'setup/setup-contribution-orchestration.js',
+        exports: ['createSetupContributionAssembly'],
+        runtimeFacadeExports: ['createSetupContribution'],
+    },
+    {
+        source: 'setup/setup-certificates.js',
+        exports: ['createSetupCertificates'],
+    },
+    {
+        source: 'setup/setup-package-assembly.js',
+        exports: ['createSetupPackage'],
+    },
+    {
+        source: 'setup/setup-phase-records.js',
+        exports: [
+            'createSetupPhaseParticipantObject',
+            'createSetupPhaseRecord',
+        ],
+        runtimeFacadeExports: ['createSetupIntent', 'createSetupPhaseRecord'],
+    },
+    {
+        source: 'setup/vss-share-verification-records.js',
+        exports: [
+            'createVssShareAcceptanceRecord',
+            'createVssShareComplaintRecordFromLocalVerification',
+        ],
+        runtimeFacadeExports: [
+            'createVssShareAcceptance',
+            'createVssComplaint',
         ],
     },
 ] as const satisfies readonly VendoredProtocolRuntimeEntryExport[];

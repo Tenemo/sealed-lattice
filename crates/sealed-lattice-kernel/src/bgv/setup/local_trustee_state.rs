@@ -48,8 +48,8 @@ const FORBIDDEN_LOCAL_STATE_FIELD_NAMES: &[&str] = &[
 ];
 
 const DELETED_MATERIAL_CLASSES: &[&str] = &[
-    "raw-per-dealer-vss-shares",
-    "raw-per-dealer-vss-openings",
+    "raw-per-source-trustee-vss-shares",
+    "raw-per-source-trustee-vss-openings",
     "private-vss-envelope-payloads-after-aggregation",
 ];
 
@@ -137,7 +137,7 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
         "deletionBoundary": DELETION_BOUNDARY,
         "statusLabels": [
             "LocalTrusteeSetupStateCommitmentVerified",
-            "RawDealerShareOpeningDeletionRecorded",
+            "RawSourceTrusteeShareOpeningDeletionRecorded",
             "RootsOnlyStateExport"
         ],
     }))
@@ -338,7 +338,7 @@ fn verify_deletion_receipt(
     }
     if string_array_field(deletion_receipt, "deletedMaterialClasses")? != DELETED_MATERIAL_CLASSES {
         return Err(invalid_local_state_input(
-            "deletionReceipt.deletedMaterialClasses must record raw dealer share and opening deletion",
+            "deletionReceipt.deletedMaterialClasses must record raw source trustee share and opening deletion",
         ));
     }
     if string_array_field(deletion_receipt, "retainedMaterialClasses")? != RETAINED_MATERIAL_CLASSES

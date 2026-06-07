@@ -33,12 +33,12 @@ export type PrivateVssCoefficientOpeningState = {
     readonly randomnessByColumn: readonly (readonly number[])[];
 };
 
-export type PrivateVssDealerContributionState = {
-    readonly dealerIdentity: string;
-    readonly dealerRosterPosition: number;
-    readonly dealerCommitmentRoot: ProtocolHash;
-    readonly dealerCoefficientCommitmentRecord: unknown;
-    readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+export type PrivateVssSourceTrusteeContributionState = {
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+    readonly sourceTrusteeCommitmentRoot: ProtocolHash;
+    readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
+    readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
     readonly coefficientOpenings: readonly PrivateVssCoefficientOpeningState[];
 };
 
@@ -52,7 +52,7 @@ export type PrivateVssShareProofFactoryInput = {
     readonly setupContext: PrivateVssSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly privateEnvelopeAadHash: ProtocolHash;
-    readonly dealerContributionState: PrivateVssDealerContributionState;
+    readonly sourceTrusteeContributionState: PrivateVssSourceTrusteeContributionState;
     readonly recipient: PrivateVssMailboxRecipient;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
@@ -83,8 +83,8 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly privateEnvelopeAadHash: ProtocolHash;
-        readonly dealerCoefficientCommitmentRecord: unknown;
-        readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
+        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
         readonly rnsLimbIndex: number;
@@ -104,8 +104,8 @@ export type PrivateVssMailboxDeliveryKernel = {
     readonly verifyPrivateVssShareEnvelope: (input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly dealerCoefficientCommitmentRecord: unknown;
-        readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
+        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly privateEnvelope: unknown;
         readonly transportedPrivateVssShareProofMaterial?: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
@@ -138,20 +138,20 @@ export type PrivateVssMailboxDeliverySetInput = {
         | typeof transportedSetupProofMaterialEncoding;
     readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
     readonly privateVssShareProofRandomnessFactory?: PrivateVssShareProofRandomnessFactory;
-    readonly dealerContributionStates: readonly PrivateVssDealerContributionState[];
+    readonly sourceTrusteeContributionStates: readonly PrivateVssSourceTrusteeContributionState[];
     readonly recipients: readonly PrivateVssMailboxRecipient[];
 };
 
-export type PrivateVssMailboxDealerDeliveryInput = Omit<
+export type PrivateVssMailboxSourceTrusteeDeliveryInput = Omit<
     PrivateVssMailboxDeliverySetInput,
-    'dealerContributionStates'
+    'sourceTrusteeContributionStates'
 > & {
-    readonly dealerContributionState: PrivateVssDealerContributionState;
+    readonly sourceTrusteeContributionState: PrivateVssSourceTrusteeContributionState;
 };
 
 type PrivateVssMailboxDeliveryContext = Omit<
     PrivateVssMailboxDeliverySetInput,
-    'dealerContributionStates' | 'recipients'
+    'sourceTrusteeContributionStates' | 'recipients'
 >;
 
 const privateVssEnvelopeCommitmentRootInput = (
@@ -504,7 +504,7 @@ const shareValuesForRecipient = (
 
 const privateEnvelopeAad = (
     input: PrivateVssMailboxDeliveryContext,
-    dealerState: PrivateVssDealerContributionState,
+    sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
     recipient: PrivateVssMailboxRecipient,
     envelopeSequenceNumber: number,
 ): JsonRecord => ({
@@ -526,11 +526,11 @@ const privateEnvelopeAad = (
     phaseOrderHash: input.phaseOrderHash,
     publicMatrixSeedHash: input.publicMatrixSeedHash,
     vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
-    dealerIdentity: dealerState.dealerIdentity,
-    dealerRosterPosition: dealerState.dealerRosterPosition,
+    sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+    sourceTrusteeRosterPosition: sourceTrusteeState.sourceTrusteeRosterPosition,
     recipientIdentity: recipient.recipientIdentity,
     recipientRosterPosition: recipient.recipientRosterPosition,
-    dealerCommitmentRoot: dealerState.dealerCommitmentRoot,
+    sourceTrusteeCommitmentRoot: sourceTrusteeState.sourceTrusteeCommitmentRoot,
     envelopeSequenceNumber,
     deliveryPhaseNumber: input.deliveryPhaseNumber,
     verificationPhaseNumber: input.verificationPhaseNumber,
@@ -539,7 +539,7 @@ const privateEnvelopeAad = (
 
 const transportPrivateVssShareProofMaterial = (
     kernel: PrivateVssMailboxDeliveryKernel,
-    dealerState: PrivateVssDealerContributionState,
+    sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
     proofRecord: JsonRecord,
 ): {
     readonly proofRecord: JsonRecord;
@@ -626,8 +626,9 @@ const transportPrivateVssShareProofMaterial = (
             setupProofProfileId,
             proofFamily: privateVssShareProofFamily,
             proofBytesEncoding: transportedSetupProofMaterialEncoding,
-            trusteeIdentity: dealerState.dealerIdentity,
-            trusteeRosterPosition: dealerState.dealerRosterPosition,
+            trusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+            trusteeRosterPosition:
+                sourceTrusteeState.sourceTrusteeRosterPosition,
             statementHash,
             relationCommitmentHash,
             tboxCommitmentPrefixHash,
@@ -684,7 +685,7 @@ type PrivateVssShareEnvelopeBuild = Readonly<{
 
 const privateEnvelope = (
     input: PrivateVssMailboxDeliveryContext,
-    dealerState: PrivateVssDealerContributionState,
+    sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
     recipient: PrivateVssMailboxRecipient,
     privateEnvelopeAadHash: ProtocolHash,
 ): PrivateVssShareEnvelopeBuild => {
@@ -703,7 +704,7 @@ const privateEnvelope = (
         [];
     const rnsShareOpenings = input.qSharePrimes.map(
         (rnsPrime, rnsLimbIndex) => {
-            const coefficientOpenings = dealerState.coefficientOpenings
+            const coefficientOpenings = sourceTrusteeState.coefficientOpenings
                 .filter(
                     (opening) =>
                         opening.rnsLimbIndex === rnsLimbIndex &&
@@ -716,7 +717,7 @@ const privateEnvelope = (
                 );
             if (coefficientOpenings.length === 0) {
                 throw new Error(
-                    'Dealer local VSS state must contain every Q_share limb.',
+                    'Source trustee local VSS state must contain every Q_share limb.',
                 );
             }
             const coefficientMessagesByShamirIndex = coefficientOpenings.map(
@@ -745,7 +746,7 @@ const privateEnvelope = (
                 setupContext: input.setupContext,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 privateEnvelopeAadHash,
-                dealerContributionState: dealerState,
+                sourceTrusteeContributionState: sourceTrusteeState,
                 recipient,
                 rnsLimbIndex,
                 rnsPrime,
@@ -775,10 +776,10 @@ const privateEnvelope = (
                             setupContext: input.setupContext,
                             publicMatrixSeedHash: input.publicMatrixSeedHash,
                             privateEnvelopeAadHash,
-                            dealerCoefficientCommitmentRecord:
-                                dealerState.dealerCoefficientCommitmentRecord,
-                            dealerCoefficientCommitmentMaterialRecords:
-                                dealerState.dealerCoefficientCommitmentMaterialRecords,
+                            sourceTrusteeCoefficientCommitmentRecord:
+                                sourceTrusteeState.sourceTrusteeCoefficientCommitmentRecord,
+                            sourceTrusteeCoefficientCommitmentMaterialRecords:
+                                sourceTrusteeState.sourceTrusteeCoefficientCommitmentMaterialRecords,
                             recipientIdentity: recipient.recipientIdentity,
                             recipientRosterPosition:
                                 recipient.recipientRosterPosition,
@@ -804,7 +805,7 @@ const privateEnvelope = (
                           const transportedProof =
                               transportPrivateVssShareProofMaterial(
                                   input.kernel,
-                                  dealerState,
+                                  sourceTrusteeState,
                                   generatedPrivateVssShareProof,
                               );
                           transportedProofMaterials.push(
@@ -841,11 +842,13 @@ const privateEnvelope = (
         setupEpoch: input.setupContext.setupEpoch,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         privateEnvelopeAadHash,
-        dealerIdentity: dealerState.dealerIdentity,
-        dealerRosterPosition: dealerState.dealerRosterPosition,
+        sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition:
+            sourceTrusteeState.sourceTrusteeRosterPosition,
         recipientIdentity: recipient.recipientIdentity,
         recipientRosterPosition: recipient.recipientRosterPosition,
-        dealerCommitmentRoot: dealerState.dealerCommitmentRoot,
+        sourceTrusteeCommitmentRoot:
+            sourceTrusteeState.sourceTrusteeCommitmentRoot,
         rnsShareOpenings,
     };
 
@@ -868,15 +871,16 @@ const privateEnvelope = (
 
 const createEnvelopeCommitment = async (
     input: PrivateVssMailboxDeliveryContext,
-    dealerState: PrivateVssDealerContributionState,
+    sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
     recipient: PrivateVssMailboxRecipient,
 ): Promise<PrivateVssEnvelopeCommitment> => {
     const envelopeSequenceNumber =
-        dealerState.dealerRosterPosition * input.participantCount +
+        sourceTrusteeState.sourceTrusteeRosterPosition *
+            input.participantCount +
         recipient.recipientRosterPosition;
     const associatedData = privateEnvelopeAad(
         input,
-        dealerState,
+        sourceTrusteeState,
         recipient,
         envelopeSequenceNumber,
     );
@@ -886,17 +890,17 @@ const createEnvelopeCommitment = async (
     });
     const privateShareEnvelopeBuild = privateEnvelope(
         input,
-        dealerState,
+        sourceTrusteeState,
         recipient,
         associatedDataHash,
     );
     const localVerification = input.kernel.verifyPrivateVssShareEnvelope({
         setupContext: input.setupContext,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
-        dealerCoefficientCommitmentRecord:
-            dealerState.dealerCoefficientCommitmentRecord,
-        dealerCoefficientCommitmentMaterialRecords:
-            dealerState.dealerCoefficientCommitmentMaterialRecords,
+        sourceTrusteeCoefficientCommitmentRecord:
+            sourceTrusteeState.sourceTrusteeCoefficientCommitmentRecord,
+        sourceTrusteeCoefficientCommitmentMaterialRecords:
+            sourceTrusteeState.sourceTrusteeCoefficientCommitmentMaterialRecords,
         privateEnvelope: privateShareEnvelopeBuild.privateEnvelope,
         ...(privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial ===
         undefined
@@ -948,11 +952,13 @@ const createEnvelopeCommitment = async (
         setupEpoch: input.setupContext.setupEpoch,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
-        dealerIdentity: dealerState.dealerIdentity,
-        dealerRosterPosition: dealerState.dealerRosterPosition,
+        sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition:
+            sourceTrusteeState.sourceTrusteeRosterPosition,
         recipientIdentity: recipient.recipientIdentity,
         recipientRosterPosition: recipient.recipientRosterPosition,
-        dealerCommitmentRoot: dealerState.dealerCommitmentRoot,
+        sourceTrusteeCommitmentRoot:
+            sourceTrusteeState.sourceTrusteeCommitmentRoot,
         envelopeSequenceNumber,
         deliveryPhaseNumber: input.deliveryPhaseNumber,
         verificationPhaseNumber: input.verificationPhaseNumber,
@@ -984,21 +990,21 @@ const createEnvelopeCommitment = async (
     } satisfies PrivateVssEnvelopeCommitment;
 };
 
-export const createPrivateVssMailboxDealerDeliveryReferences = async (
-    input: PrivateVssMailboxDealerDeliveryInput,
+export const createPrivateVssMailboxSourceTrusteeDeliveryReferences = async (
+    input: PrivateVssMailboxSourceTrusteeDeliveryInput,
 ): Promise<readonly PrivateVssEnvelopeCommitment[]> => {
     validatePositiveSafeInteger(input.participantCount, 'participantCount');
     validatePositiveSafeInteger(input.ringDegree, 'ringDegree');
     validateSafeRosterPosition(
-        input.dealerContributionState.dealerRosterPosition,
-        'dealer contribution state roster position',
+        input.sourceTrusteeContributionState.sourceTrusteeRosterPosition,
+        'source trustee contribution state roster position',
     );
     if (
-        input.dealerContributionState.dealerRosterPosition >=
+        input.sourceTrusteeContributionState.sourceTrusteeRosterPosition >=
         input.participantCount
     ) {
         throw new Error(
-            'dealer contribution state roster position must be inside the accepted participant count.',
+            'source trustee contribution state roster position must be inside the accepted participant count.',
         );
     }
     const recipients = sortedByRosterPosition(
@@ -1016,7 +1022,7 @@ export const createPrivateVssMailboxDealerDeliveryReferences = async (
         recipients.map((recipient) =>
             createEnvelopeCommitment(
                 input,
-                input.dealerContributionState,
+                input.sourceTrusteeContributionState,
                 recipient,
             ),
         ),
@@ -1028,10 +1034,10 @@ export const createPrivateVssMailboxDeliverySet = async (
 ): Promise<PrivateVssMailboxDeliverySet> => {
     validatePositiveSafeInteger(input.participantCount, 'participantCount');
     validatePositiveSafeInteger(input.ringDegree, 'ringDegree');
-    const dealerStates = sortedByRosterPosition(
-        input.dealerContributionStates,
-        (dealerState) => dealerState.dealerRosterPosition,
-        'dealer contribution state',
+    const sourceTrusteeStates = sortedByRosterPosition(
+        input.sourceTrusteeContributionStates,
+        (sourceTrusteeState) => sourceTrusteeState.sourceTrusteeRosterPosition,
+        'source trustee contribution state',
     );
     const recipients = sortedByRosterPosition(
         input.recipients,
@@ -1039,9 +1045,12 @@ export const createPrivateVssMailboxDeliverySet = async (
         'mailbox recipient',
     );
     assertFullRosterPositions(
-        dealerStates.map((dealerState) => dealerState.dealerRosterPosition),
+        sourceTrusteeStates.map(
+            (sourceTrusteeState) =>
+                sourceTrusteeState.sourceTrusteeRosterPosition,
+        ),
         input.participantCount,
-        'dealer contribution state',
+        'source trustee contribution state',
     );
     assertFullRosterPositions(
         recipients.map((recipient) => recipient.recipientRosterPosition),
@@ -1051,10 +1060,10 @@ export const createPrivateVssMailboxDeliverySet = async (
 
     const envelopeReferences = (
         await Promise.all(
-            dealerStates.map((dealerContributionState) =>
-                createPrivateVssMailboxDealerDeliveryReferences({
+            sourceTrusteeStates.map((sourceTrusteeContributionState) =>
+                createPrivateVssMailboxSourceTrusteeDeliveryReferences({
                     ...input,
-                    dealerContributionState,
+                    sourceTrusteeContributionState,
                     recipients,
                 }),
             ),

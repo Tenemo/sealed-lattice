@@ -40,17 +40,17 @@ export type VssCoefficientOpeningMaterial = Readonly<
     }
 >;
 
-export type VssDealerCoefficientOpeningState = {
-    readonly dealerIdentity: string;
-    readonly dealerRosterPosition: number;
+export type VssSourceTrusteeCoefficientOpeningState = {
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
     readonly coefficientOpenings: readonly VssCoefficientOpeningInput[];
 };
 
 export type VssOpeningRandomByteSource = (byteLength: number) => Uint8Array;
 
-export type VssDealerCoefficientOpeningStateGenerationInput = {
-    readonly dealerIdentity: string;
-    readonly dealerRosterPosition: number;
+export type VssSourceTrusteeCoefficientOpeningStateGenerationInput = {
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
     readonly participantCount: number;
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
@@ -62,8 +62,8 @@ export type VssCoefficientCommitmentRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitment';
         readonly objectVersion: 1;
-        readonly dealerIdentity: string;
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -75,15 +75,15 @@ export type VssCoefficientCommitmentRecord = Readonly<
     }
 >;
 
-export type VssDealerCoefficientCommitmentRecord = Readonly<
+export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<
     JsonRecord & {
-        readonly objectType: 'VssDealerCoefficientCommitments';
+        readonly objectType: 'VssSourceTrusteeCoefficientCommitments';
         readonly objectVersion: 1;
-        readonly dealerIdentity: string;
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly coefficientCommitments: readonly VssCoefficientCommitmentRecord[];
-        readonly dealerCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCommitmentRoot: ProtocolHash;
     }
 >;
 
@@ -91,8 +91,8 @@ export type VssCoefficientCommitmentMaterialRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterial';
         readonly objectVersion: 1;
-        readonly dealerIdentity: string;
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -107,7 +107,7 @@ export type VssCoefficientCommitmentSet = Readonly<
         readonly objectType: 'VssCoefficientCommitmentSet';
         readonly objectVersion: 1;
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly dealerRecords: readonly VssDealerCoefficientCommitmentRecord[];
+        readonly sourceTrusteeRecords: readonly VssSourceTrusteeCoefficientCommitmentRecord[];
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
     }
 >;
@@ -131,25 +131,25 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
     }
 >;
 
-export type VssDealerOpeningMaterial = Readonly<{
-    readonly dealerIdentity: string;
-    readonly dealerRosterPosition: number;
-    readonly dealerCommitmentRoot: ProtocolHash;
-    readonly dealerCoefficientCommitmentRecord: VssDealerCoefficientCommitmentRecord;
-    readonly dealerCoefficientCommitmentMaterialRecords: readonly VssCoefficientCommitmentMaterialRecord[];
+export type VssSourceTrusteeOpeningMaterial = Readonly<{
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+    readonly sourceTrusteeCommitmentRoot: ProtocolHash;
+    readonly sourceTrusteeCoefficientCommitmentRecord: VssSourceTrusteeCoefficientCommitmentRecord;
+    readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly VssCoefficientCommitmentMaterialRecord[];
     readonly coefficientOpenings: readonly VssCoefficientOpeningMaterial[];
 }>;
 
-export type VssDealerCoefficientCommitmentContribution = Readonly<{
-    readonly dealerRecord: VssDealerCoefficientCommitmentRecord;
+export type VssSourceTrusteeCoefficientCommitmentContribution = Readonly<{
+    readonly sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord;
     readonly materialRecords: readonly VssCoefficientCommitmentMaterialRecord[];
-    readonly privateOpeningMaterial: VssDealerOpeningMaterial;
+    readonly privateOpeningMaterial: VssSourceTrusteeOpeningMaterial;
 }>;
 
 export type VssCoefficientCommitmentBundle = Readonly<{
     readonly commitmentSet: VssCoefficientCommitmentSet;
     readonly materialSet: VssCoefficientCommitmentMaterialSet;
-    readonly privateOpeningMaterialByDealer: readonly VssDealerOpeningMaterial[];
+    readonly privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[];
 }>;
 
 export type VssCoefficientCommitmentBundleInput = {
@@ -159,14 +159,14 @@ export type VssCoefficientCommitmentBundleInput = {
     readonly ringDegree: number;
     readonly participantCount: number;
     readonly thresholdDegree: number;
-    readonly dealerOpeningStates: readonly VssDealerCoefficientOpeningState[];
+    readonly sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[];
 };
 
-export type VssDealerCoefficientCommitmentContributionInput = Omit<
+export type VssSourceTrusteeCoefficientCommitmentContributionInput = Omit<
     VssCoefficientCommitmentBundleInput,
-    'dealerOpeningStates'
+    'sourceTrusteeOpeningStates'
 > & {
-    readonly dealerOpeningState: VssDealerCoefficientOpeningState;
+    readonly sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState;
 };
 
 const textEncoder = new TextEncoder();
@@ -310,28 +310,35 @@ const assertRandomness = (
 };
 
 const sortedByRosterPosition = (
-    dealerOpeningStates: readonly VssDealerCoefficientOpeningState[],
-): VssDealerCoefficientOpeningState[] =>
-    [...dealerOpeningStates].sort(
-        (left, right) => left.dealerRosterPosition - right.dealerRosterPosition,
+    sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[],
+): VssSourceTrusteeCoefficientOpeningState[] =>
+    [...sourceTrusteeOpeningStates].sort(
+        (left, right) =>
+            left.sourceTrusteeRosterPosition -
+            right.sourceTrusteeRosterPosition,
     );
 
 const assertFullRosterCoverage = (
-    dealerOpeningStates: readonly VssDealerCoefficientOpeningState[],
+    sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[],
     participantCount: number,
 ): void => {
-    if (dealerOpeningStates.length !== participantCount) {
+    if (sourceTrusteeOpeningStates.length !== participantCount) {
         throw new Error(
-            'dealerOpeningStates must contain every accepted participant.',
+            'sourceTrusteeOpeningStates must contain every accepted participant.',
         );
     }
-    dealerOpeningStates.forEach((dealerState, expectedRosterPosition) => {
-        if (dealerState.dealerRosterPosition !== expectedRosterPosition) {
-            throw new Error(
-                'dealerOpeningStates roster positions must be contiguous from zero.',
-            );
-        }
-    });
+    sourceTrusteeOpeningStates.forEach(
+        (sourceTrusteeState, expectedRosterPosition) => {
+            if (
+                sourceTrusteeState.sourceTrusteeRosterPosition !==
+                expectedRosterPosition
+            ) {
+                throw new Error(
+                    'sourceTrusteeOpeningStates roster positions must be contiguous from zero.',
+                );
+            }
+        },
+    );
 };
 
 const openingCoordinateKey = (
@@ -340,65 +347,69 @@ const openingCoordinateKey = (
 ): string => `${String(rnsLimbIndex)}:${String(shamirCoefficientIndex)}`;
 
 const openingStateByCoordinate = (
-    dealerState: VssDealerCoefficientOpeningState,
+    sourceTrusteeState: VssSourceTrusteeCoefficientOpeningState,
     qSharePrimes: readonly number[],
     ringDegree: number,
     thresholdDegree: number,
 ): ReadonlyMap<string, VssCoefficientOpeningInput> => {
     const expectedOpeningCount = qSharePrimes.length * thresholdDegree;
-    if (dealerState.coefficientOpenings.length !== expectedOpeningCount) {
+    if (
+        sourceTrusteeState.coefficientOpenings.length !== expectedOpeningCount
+    ) {
         throw new Error(
-            'dealer coefficientOpenings must cover every Q_share limb and Shamir coefficient.',
+            'source trustee coefficientOpenings must cover every Q_share limb and Shamir coefficient.',
         );
     }
     const openingsByCoordinate = new Map<string, VssCoefficientOpeningInput>();
-    dealerState.coefficientOpenings.forEach((openingState, openingIndex) => {
-        assertNonNegativeSafeInteger(
-            openingState.rnsLimbIndex,
-            `coefficientOpenings.${String(openingIndex)}.rnsLimbIndex`,
-        );
-        assertNonNegativeSafeInteger(
-            openingState.shamirCoefficientIndex,
-            `coefficientOpenings.${String(openingIndex)}.shamirCoefficientIndex`,
-        );
-        const expectedPrime = qSharePrimes[openingState.rnsLimbIndex];
-        if (expectedPrime === undefined) {
-            throw new Error(
-                'coefficient opening rnsLimbIndex is outside Q_share.',
+    sourceTrusteeState.coefficientOpenings.forEach(
+        (openingState, openingIndex) => {
+            assertNonNegativeSafeInteger(
+                openingState.rnsLimbIndex,
+                `coefficientOpenings.${String(openingIndex)}.rnsLimbIndex`,
             );
-        }
-        if (openingState.rnsPrime !== expectedPrime) {
-            throw new Error(
-                'coefficient opening rnsPrime must match Q_share at rnsLimbIndex.',
+            assertNonNegativeSafeInteger(
+                openingState.shamirCoefficientIndex,
+                `coefficientOpenings.${String(openingIndex)}.shamirCoefficientIndex`,
             );
-        }
-        if (openingState.shamirCoefficientIndex >= thresholdDegree) {
-            throw new Error(
-                'coefficient opening shamirCoefficientIndex is outside thresholdDegree.',
+            const expectedPrime = qSharePrimes[openingState.rnsLimbIndex];
+            if (expectedPrime === undefined) {
+                throw new Error(
+                    'coefficient opening rnsLimbIndex is outside Q_share.',
+                );
+            }
+            if (openingState.rnsPrime !== expectedPrime) {
+                throw new Error(
+                    'coefficient opening rnsPrime must match Q_share at rnsLimbIndex.',
+                );
+            }
+            if (openingState.shamirCoefficientIndex >= thresholdDegree) {
+                throw new Error(
+                    'coefficient opening shamirCoefficientIndex is outside thresholdDegree.',
+                );
+            }
+            assertResidueVector(
+                openingState.coefficientMessage,
+                openingState.rnsPrime,
+                ringDegree,
+                `coefficientOpenings.${String(openingIndex)}.coefficientMessage`,
             );
-        }
-        assertResidueVector(
-            openingState.coefficientMessage,
-            openingState.rnsPrime,
-            ringDegree,
-            `coefficientOpenings.${String(openingIndex)}.coefficientMessage`,
-        );
-        assertRandomness(
-            openingState.randomnessByColumn,
-            ringDegree,
-            `coefficientOpenings.${String(openingIndex)}.randomnessByColumn`,
-        );
-        const coordinateKey = openingCoordinateKey(
-            openingState.rnsLimbIndex,
-            openingState.shamirCoefficientIndex,
-        );
-        if (openingsByCoordinate.has(coordinateKey)) {
-            throw new Error(
-                'dealer coefficientOpenings must have distinct limb/coefficient coordinates.',
+            assertRandomness(
+                openingState.randomnessByColumn,
+                ringDegree,
+                `coefficientOpenings.${String(openingIndex)}.randomnessByColumn`,
             );
-        }
-        openingsByCoordinate.set(coordinateKey, openingState);
-    });
+            const coordinateKey = openingCoordinateKey(
+                openingState.rnsLimbIndex,
+                openingState.shamirCoefficientIndex,
+            );
+            if (openingsByCoordinate.has(coordinateKey)) {
+                throw new Error(
+                    'source trustee coefficientOpenings must have distinct limb/coefficient coordinates.',
+                );
+            }
+            openingsByCoordinate.set(coordinateKey, openingState);
+        },
+    );
 
     return openingsByCoordinate;
 };
@@ -536,20 +547,20 @@ const sampleCommitmentOpeningRandomness = (
         sampleCenteredTernaryVector(sampler, ringDegree),
     );
 
-export const createVssDealerCoefficientOpeningState = (
-    input: VssDealerCoefficientOpeningStateGenerationInput,
-): VssDealerCoefficientOpeningState => {
-    assertNonEmptyString(input.dealerIdentity, 'dealerIdentity');
+export const createVssSourceTrusteeCoefficientOpeningState = (
+    input: VssSourceTrusteeCoefficientOpeningStateGenerationInput,
+): VssSourceTrusteeCoefficientOpeningState => {
+    assertNonEmptyString(input.sourceTrusteeIdentity, 'sourceTrusteeIdentity');
     assertNonNegativeSafeInteger(
-        input.dealerRosterPosition,
-        'dealerRosterPosition',
+        input.sourceTrusteeRosterPosition,
+        'sourceTrusteeRosterPosition',
     );
     assertPositiveSafeInteger(input.participantCount, 'participantCount');
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
-    if (input.dealerRosterPosition >= input.participantCount) {
+    if (input.sourceTrusteeRosterPosition >= input.participantCount) {
         throw new Error(
-            'dealerRosterPosition must be inside the accepted participant count.',
+            'sourceTrusteeRosterPosition must be inside the accepted participant count.',
         );
     }
     if (input.qSharePrimes.length === 0) {
@@ -599,8 +610,8 @@ export const createVssDealerCoefficientOpeningState = (
     );
 
     return {
-        dealerIdentity: input.dealerIdentity,
-        dealerRosterPosition: input.dealerRosterPosition,
+        sourceTrusteeIdentity: input.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
         coefficientOpenings,
     };
 };
@@ -945,7 +956,10 @@ const commitmentChunkRoot = (
     });
 
 const validateCommitmentCommonInput = (
-    input: Omit<VssCoefficientCommitmentBundleInput, 'dealerOpeningStates'>,
+    input: Omit<
+        VssCoefficientCommitmentBundleInput,
+        'sourceTrusteeOpeningStates'
+    >,
 ): void => {
     assertHashLike(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
@@ -965,31 +979,36 @@ const validateCommitmentCommonInput = (
     }
 };
 
-export const createVssDealerCoefficientCommitmentContribution = (
-    input: VssDealerCoefficientCommitmentContributionInput,
-): VssDealerCoefficientCommitmentContribution => {
+export const createVssSourceTrusteeCoefficientCommitmentContribution = (
+    input: VssSourceTrusteeCoefficientCommitmentContributionInput,
+): VssSourceTrusteeCoefficientCommitmentContribution => {
     validateCommitmentCommonInput(input);
     const context = contextFields(input.setupContext);
-    const dealerState = input.dealerOpeningState;
-    assertNonEmptyString(dealerState.dealerIdentity, 'dealerIdentity');
-    assertNonNegativeSafeInteger(
-        dealerState.dealerRosterPosition,
-        'dealerRosterPosition',
+    const sourceTrusteeState = input.sourceTrusteeOpeningState;
+    assertNonEmptyString(
+        sourceTrusteeState.sourceTrusteeIdentity,
+        'sourceTrusteeIdentity',
     );
-    if (dealerState.dealerRosterPosition >= input.participantCount) {
+    assertNonNegativeSafeInteger(
+        sourceTrusteeState.sourceTrusteeRosterPosition,
+        'sourceTrusteeRosterPosition',
+    );
+    if (
+        sourceTrusteeState.sourceTrusteeRosterPosition >= input.participantCount
+    ) {
         throw new Error(
-            'dealerRosterPosition must be inside the accepted participant count.',
+            'sourceTrusteeRosterPosition must be inside the accepted participant count.',
         );
     }
     const openingsByCoordinate = openingStateByCoordinate(
-        dealerState,
+        sourceTrusteeState,
         input.qSharePrimes,
         input.ringDegree,
         input.thresholdDegree,
     );
     const materialRecords: VssCoefficientCommitmentMaterialRecord[] = [];
     const coefficientCommitments: VssCoefficientCommitmentRecord[] = [];
-    const dealerPrivateOpenings: VssCoefficientOpeningMaterial[] = [];
+    const sourceTrusteePrivateOpenings: VssCoefficientOpeningMaterial[] = [];
     input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
         for (
             let shamirCoefficientIndex = 0;
@@ -1001,7 +1020,7 @@ export const createVssDealerCoefficientCommitmentContribution = (
             );
             if (openingState === undefined) {
                 throw new Error(
-                    'dealer coefficientOpenings must cover every declared coordinate.',
+                    'source trustee coefficientOpenings must cover every declared coordinate.',
                 );
             }
             const commitment = computeSetupCommitmentFromOpening({
@@ -1018,7 +1037,7 @@ export const createVssDealerCoefficientCommitmentContribution = (
                 'SetupCommitmentRoot',
                 setupCommitmentRootPayload(commitment),
             );
-            dealerPrivateOpenings.push({
+            sourceTrusteePrivateOpenings.push({
                 ...openingState,
                 commitmentRoot,
             });
@@ -1026,8 +1045,9 @@ export const createVssDealerCoefficientCommitmentContribution = (
                 objectType: 'VssCoefficientCommitment',
                 objectVersion: 1,
                 ...context,
-                dealerIdentity: dealerState.dealerIdentity,
-                dealerRosterPosition: dealerState.dealerRosterPosition,
+                sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+                sourceTrusteeRosterPosition:
+                    sourceTrusteeState.sourceTrusteeRosterPosition,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 rnsLimbIndex,
                 rnsPrime,
@@ -1045,8 +1065,9 @@ export const createVssDealerCoefficientCommitmentContribution = (
                 objectType: 'VssCoefficientCommitmentMaterial',
                 objectVersion: 1,
                 ...context,
-                dealerIdentity: dealerState.dealerIdentity,
-                dealerRosterPosition: dealerState.dealerRosterPosition,
+                sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+                sourceTrusteeRosterPosition:
+                    sourceTrusteeState.sourceTrusteeRosterPosition,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 rnsLimbIndex,
                 rnsPrime,
@@ -1056,36 +1077,39 @@ export const createVssDealerCoefficientCommitmentContribution = (
             });
         }
     });
-    const dealerRecordWithoutRoot = {
-        objectType: 'VssDealerCoefficientCommitments',
+    const sourceTrusteeRecordWithoutRoot = {
+        objectType: 'VssSourceTrusteeCoefficientCommitments',
         objectVersion: 1,
         ...context,
-        dealerIdentity: dealerState.dealerIdentity,
-        dealerRosterPosition: dealerState.dealerRosterPosition,
+        sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition:
+            sourceTrusteeState.sourceTrusteeRosterPosition,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         coefficientCommitments,
     } as const satisfies Omit<
-        VssDealerCoefficientCommitmentRecord,
-        'dealerCommitmentRoot'
+        VssSourceTrusteeCoefficientCommitmentRecord,
+        'sourceTrusteeCommitmentRoot'
     >;
-    const dealerRecord = {
-        ...dealerRecordWithoutRoot,
-        dealerCommitmentRoot: deriveProtocolHash(
+    const sourceTrusteeRecord = {
+        ...sourceTrusteeRecordWithoutRoot,
+        sourceTrusteeCommitmentRoot: deriveProtocolHash(
             'VssCoefficientCommitmentRoot',
-            dealerRecordWithoutRoot,
+            sourceTrusteeRecordWithoutRoot,
         ),
-    } satisfies VssDealerCoefficientCommitmentRecord;
+    } satisfies VssSourceTrusteeCoefficientCommitmentRecord;
 
     return {
-        dealerRecord,
+        sourceTrusteeRecord,
         materialRecords,
         privateOpeningMaterial: {
-            dealerIdentity: dealerState.dealerIdentity,
-            dealerRosterPosition: dealerState.dealerRosterPosition,
-            dealerCommitmentRoot: dealerRecord.dealerCommitmentRoot,
-            dealerCoefficientCommitmentRecord: dealerRecord,
-            dealerCoefficientCommitmentMaterialRecords: materialRecords,
-            coefficientOpenings: dealerPrivateOpenings,
+            sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+            sourceTrusteeRosterPosition:
+                sourceTrusteeState.sourceTrusteeRosterPosition,
+            sourceTrusteeCommitmentRoot:
+                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+            sourceTrusteeCoefficientCommitmentRecord: sourceTrusteeRecord,
+            sourceTrusteeCoefficientCommitmentMaterialRecords: materialRecords,
+            coefficientOpenings: sourceTrusteePrivateOpenings,
         },
     };
 };
@@ -1095,38 +1119,40 @@ export const createVssCoefficientCommitmentBundle = (
 ): VssCoefficientCommitmentBundle => {
     validateCommitmentCommonInput(input);
     const context = contextFields(input.setupContext);
-    const sortedDealerStates = sortedByRosterPosition(
-        input.dealerOpeningStates,
+    const sortedSourceTrusteeStates = sortedByRosterPosition(
+        input.sourceTrusteeOpeningStates,
     );
-    assertFullRosterCoverage(sortedDealerStates, input.participantCount);
+    assertFullRosterCoverage(sortedSourceTrusteeStates, input.participantCount);
 
-    const dealerContributions = sortedDealerStates.map((dealerOpeningState) =>
-        createVssDealerCoefficientCommitmentContribution({
-            setupContext: input.setupContext,
-            publicMatrixSeedHash: input.publicMatrixSeedHash,
-            qSharePrimes: input.qSharePrimes,
-            ringDegree: input.ringDegree,
-            participantCount: input.participantCount,
-            thresholdDegree: input.thresholdDegree,
-            dealerOpeningState,
-        }),
+    const sourceTrusteeContributions = sortedSourceTrusteeStates.map(
+        (sourceTrusteeOpeningState) =>
+            createVssSourceTrusteeCoefficientCommitmentContribution({
+                setupContext: input.setupContext,
+                publicMatrixSeedHash: input.publicMatrixSeedHash,
+                qSharePrimes: input.qSharePrimes,
+                ringDegree: input.ringDegree,
+                participantCount: input.participantCount,
+                thresholdDegree: input.thresholdDegree,
+                sourceTrusteeOpeningState,
+            }),
     );
-    const dealerRecords = dealerContributions.map(
-        (contribution) => contribution.dealerRecord,
+    const sourceTrusteeRecords = sourceTrusteeContributions.map(
+        (contribution) => contribution.sourceTrusteeRecord,
     );
-    const coefficientCommitmentMaterial = dealerContributions.flatMap(
+    const coefficientCommitmentMaterial = sourceTrusteeContributions.flatMap(
         (contribution) => contribution.materialRecords,
     );
-    const privateOpeningMaterialByDealer = dealerContributions.map(
-        (contribution) => contribution.privateOpeningMaterial,
-    );
+    const privateOpeningMaterialBySourceTrustee =
+        sourceTrusteeContributions.map(
+            (contribution) => contribution.privateOpeningMaterial,
+        );
 
     const commitmentSetWithoutRoot = {
         objectType: 'VssCoefficientCommitmentSet',
         objectVersion: 1,
         ...context,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
-        dealerRecords,
+        sourceTrusteeRecords,
     } as const satisfies Omit<
         VssCoefficientCommitmentSet,
         'vssCoefficientCommitmentRoot'
@@ -1172,6 +1198,6 @@ export const createVssCoefficientCommitmentBundle = (
     return {
         commitmentSet,
         materialSet,
-        privateOpeningMaterialByDealer,
+        privateOpeningMaterialBySourceTrustee,
     };
 };

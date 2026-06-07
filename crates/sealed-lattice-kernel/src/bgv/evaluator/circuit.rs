@@ -89,7 +89,6 @@ impl EvaluatorContext {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn from_passive_setup_public_material(
         setup_package: &serde_json::Value,
         evaluation_key_material: &serde_json::Value,

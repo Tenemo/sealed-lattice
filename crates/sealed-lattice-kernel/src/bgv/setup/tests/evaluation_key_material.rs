@@ -208,18 +208,21 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
         raw_secret_error.message
     );
 
-    let mut trusted_dealer_material = public_material.clone();
-    trusted_dealer_material["trustedDealerKeyMaterial"] =
+    let mut central_trusted_setup_authority_material = public_material.clone();
+    central_trusted_setup_authority_material["centralTrustedSetupAuthorityKeyMaterial"] =
         serde_json::json!({ "secret": "forbidden" });
-    rebind_public_evaluation_key_material_hash(&mut trusted_dealer_material);
-    let trusted_dealer_error =
-        public_evaluation_key_material_error(&package, &trusted_dealer_material, 1);
+    rebind_public_evaluation_key_material_hash(&mut central_trusted_setup_authority_material);
+    let central_trusted_setup_authority_error = public_evaluation_key_material_error(
+        &package,
+        &central_trusted_setup_authority_material,
+        1,
+    );
     assert!(
-        trusted_dealer_error
+        central_trusted_setup_authority_error
             .message
-            .contains("trustedDealerKeyMaterial"),
+            .contains("centralTrustedSetupAuthorityKeyMaterial"),
         "{}",
-        trusted_dealer_error.message
+        central_trusted_setup_authority_error.message
     );
 
     let mut duplicate_relinearization = public_material.clone();

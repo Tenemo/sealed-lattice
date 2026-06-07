@@ -159,8 +159,8 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "trusteePoint": trustee_point,
         "deletionBoundary": "after-private-vss-aggregation",
         "deletedMaterialClasses": [
-            "raw-per-dealer-vss-shares",
-            "raw-per-dealer-vss-openings",
+            "raw-per-source-trustee-vss-shares",
+            "raw-per-source-trustee-vss-openings",
             "private-vss-envelope-payloads-after-aggregation"
         ],
         "retainedMaterialClasses": [

@@ -81,6 +81,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         .map(|proof_summary| proof_summary.proof_size_bytes)
         .sum::<usize>();
     let aggregation_result = verify_direct_ballot_aggregation(&evaluator_key, &encrypted_ballots)?;
+    let public_evaluation_key_material = request.get("publicEvaluationKeyMaterial");
     let evaluator_replay = match optional_direct_ballot_top_count_request(request)? {
         Some(top_count_request) => {
             let evaluations = run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
@@ -90,6 +91,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
                 &aggregation_result.aggregate_scores,
                 encrypted_ballots.len(),
                 &top_count_request.top_counts,
+                public_evaluation_key_material,
                 top_count_request.target_finality_policy_hash.as_deref(),
             )?;
             if top_count_request.report_single_result {

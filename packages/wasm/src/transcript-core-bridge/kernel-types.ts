@@ -15,6 +15,7 @@ import type {
     BgvCollectiveSetupProfileDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
+    BgvEvaluationKeyShareLnpProofGeneration,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -43,6 +44,7 @@ export type {
     BgvCollectiveSetupProfileDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
+    BgvEvaluationKeyShareLnpProofGeneration,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -162,12 +164,17 @@ export type TranscriptCoreKernel = {
         readonly expectedManifestHash?: ProtocolHash;
         readonly expectedRosterHash?: ProtocolHash;
         readonly transportedVssCoefficientCommitmentMaterial?: unknown;
+        readonly transportedSameSecretProofMaterial?: unknown;
+        readonly transportedPublicKeyShareProofMaterial?: unknown;
+        readonly transportedEvaluationKeyShareProofMaterial?: unknown;
+        readonly transportedEvaluationKeyShareComponentMaterial?: unknown;
+        readonly transportedPublicEvaluationKeyMaterial?: unknown;
     }): BgvCollectiveSetupVerification;
     verifyPrivateVssShareEnvelope(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly dealerCoefficientCommitmentRecord: unknown;
-        readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
+        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly privateEnvelope: unknown;
         readonly transportedPrivateVssShareProofMaterial?: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
@@ -177,8 +184,8 @@ export type TranscriptCoreKernel = {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly privateEnvelopeAadHash: ProtocolHash;
-        readonly dealerCoefficientCommitmentRecord: unknown;
-        readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
+        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
         readonly rnsLimbIndex: number;
@@ -227,17 +234,44 @@ export type TranscriptCoreKernel = {
             | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
     }): BgvPublicKeyShareLnpProofGeneration;
+    generateEvaluationKeyShareLnpProof(input: {
+        readonly proofFamily: 'relinearization-key-share' | 'galois-key-share';
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly proofRecord: unknown;
+        readonly sameSecretStatementRecord: unknown;
+        readonly constantCommitments: readonly unknown[];
+        readonly setupProofBinding: unknown;
+        readonly transportedKeySwitchComponentMaterial?: unknown;
+        readonly secretCoefficients: readonly number[];
+        readonly openingRandomnessByLimb: readonly (readonly (readonly (
+            | number
+            | string
+        )[])[])[];
+        readonly errorCoefficientsByDigit: readonly (readonly number[])[];
+        readonly relinearizationSourceCoefficientsByDigit?: readonly (readonly (
+            | number
+            | string
+        )[])[];
+        readonly roundOneAggregateSourceCoefficientsByDigit?: readonly (readonly (
+            | number
+            | string
+        )[])[];
+        readonly proofRandomnessSource?:
+            | 'fresh-csprng'
+            | 'development-deterministic-fixture';
+        readonly proofRandomnessSeedHex: string;
+    }): BgvEvaluationKeyShareLnpProofGeneration;
     deriveThresholdShareCommitments(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly dealerCoefficientCommitmentRecords: readonly unknown[];
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
         readonly coefficientCommitments: readonly unknown[];
     }): BgvThresholdShareCommitmentDerivation;
     deriveThresholdShareCommitmentsFromTransport(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly dealerCoefficientCommitmentRecords: readonly unknown[];
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
         readonly transportedVssCoefficientCommitmentMaterial: unknown;
     }): BgvThresholdShareCommitmentTransportDerivation;
     verifyLocalTrusteeSetupState(input: {
@@ -396,13 +430,18 @@ type TranscriptCoreKernelCommand =
           readonly expectedManifestHash?: ProtocolHash;
           readonly expectedRosterHash?: ProtocolHash;
           readonly transportedVssCoefficientCommitmentMaterial?: unknown;
+          readonly transportedSameSecretProofMaterial?: unknown;
+          readonly transportedPublicKeyShareProofMaterial?: unknown;
+          readonly transportedEvaluationKeyShareProofMaterial?: unknown;
+          readonly transportedEvaluationKeyShareComponentMaterial?: unknown;
+          readonly transportedPublicEvaluationKeyMaterial?: unknown;
       }
     | {
           readonly command: 'VerifyPrivateVssShareEnvelope';
           readonly setupContext: unknown;
           readonly publicMatrixSeedHash: ProtocolHash;
-          readonly dealerCoefficientCommitmentRecord: unknown;
-          readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+          readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
+          readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
           readonly privateEnvelope: unknown;
           readonly transportedPrivateVssShareProofMaterial?: unknown;
           readonly expectedPrivateEnvelopeHash?: ProtocolHash;
@@ -413,8 +452,8 @@ type TranscriptCoreKernelCommand =
           readonly setupContext: unknown;
           readonly publicMatrixSeedHash: ProtocolHash;
           readonly privateEnvelopeAadHash: ProtocolHash;
-          readonly dealerCoefficientCommitmentRecord: unknown;
-          readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+          readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
+          readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
           readonly recipientIdentity: string;
           readonly recipientRosterPosition: number;
           readonly rnsLimbIndex: number;
@@ -466,10 +505,40 @@ type TranscriptCoreKernelCommand =
           readonly proofRandomnessSeedHex: string;
       }
     | {
+          readonly command: 'GenerateEvaluationKeyShareLnpProof';
+          readonly proofFamily:
+              | 'relinearization-key-share'
+              | 'galois-key-share';
+          readonly publicMatrixSeedHash: ProtocolHash;
+          readonly proofRecord: unknown;
+          readonly sameSecretStatementRecord: unknown;
+          readonly constantCommitments: readonly unknown[];
+          readonly setupProofBinding: unknown;
+          readonly transportedKeySwitchComponentMaterial?: unknown;
+          readonly secretCoefficients: readonly number[];
+          readonly openingRandomnessByLimb: readonly (readonly (readonly (
+              | number
+              | string
+          )[])[])[];
+          readonly errorCoefficientsByDigit: readonly (readonly number[])[];
+          readonly relinearizationSourceCoefficientsByDigit?: readonly (readonly (
+              | number
+              | string
+          )[])[];
+          readonly roundOneAggregateSourceCoefficientsByDigit?: readonly (readonly (
+              | number
+              | string
+          )[])[];
+          readonly proofRandomnessSource?:
+              | 'fresh-csprng'
+              | 'development-deterministic-fixture';
+          readonly proofRandomnessSeedHex: string;
+      }
+    | {
           readonly command: 'DeriveThresholdShareCommitments';
           readonly setupContext: unknown;
           readonly publicMatrixSeedHash: ProtocolHash;
-          readonly dealerCoefficientCommitmentRecords: readonly unknown[];
+          readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
           readonly coefficientCommitments: readonly unknown[];
       }
     | {
@@ -477,7 +546,7 @@ type TranscriptCoreKernelCommand =
           readonly setupContext: unknown;
           readonly publicMatrixSeedHash: ProtocolHash;
           readonly vssCoefficientCommitmentRoot: ProtocolHash;
-          readonly dealerCoefficientCommitmentRecords: readonly unknown[];
+          readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
           readonly transportedVssCoefficientCommitmentMaterial: unknown;
       }
     | {
@@ -546,6 +615,7 @@ type TranscriptCoreKernelCommand =
           }[];
           readonly topCount?: number;
           readonly topCounts?: readonly number[];
+          readonly publicEvaluationKeyMaterial?: unknown;
           readonly targetFinalityPolicyHash?: string;
       };
 

@@ -33,13 +33,14 @@ use super::{
 
 const FIRST_PROFILE_PARTICIPANT_COUNT: usize = 10;
 const FIRST_PROFILE_DECRYPTION_THRESHOLD: usize = 4;
-const VSS_DEALER_COMMITMENT_OBJECT_TYPE: &str = "VssDealerCoefficientCommitments";
+const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_OBJECT_TYPE: &str = "VssCoefficientCommitment";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
 const THRESHOLD_SHARE_COMMITMENT_SET_OBJECT_TYPE: &str = "ThresholdShareCommitmentSet";
 const THRESHOLD_SHARE_RECIPIENT_COMMITMENT_OBJECT_TYPE: &str = "TrusteeThresholdShareCommitments";
 const THRESHOLD_SHARE_LIMB_COMMITMENT_OBJECT_TYPE: &str = "ThresholdShareCommitment";
-const THRESHOLD_SHARE_DERIVATION_RULE: &str = "sum-dealer-polynomial-commitments-at-trustee-point";
+const THRESHOLD_SHARE_DERIVATION_RULE: &str =
+    "sum-source-trustee-polynomial-commitments-at-trustee-point";
 const SETUP_TRANSPORT_PROFILE_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
 const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
@@ -59,19 +60,19 @@ pub(crate) struct SetupVssMaterialTransportHashes {
 
 pub(crate) struct VerifiedTransportedConstantVssCommitments {
     pub(crate) material_set: Value,
-    pub(crate) constant_commitments_by_dealer: BTreeMap<u64, Vec<SetupCommitmentValue>>,
+    pub(crate) constant_commitments_by_source_trustee: BTreeMap<u64, Vec<SetupCommitmentValue>>,
 }
 
 #[derive(Clone)]
-struct DealerCommitmentBinding {
-    dealer_identity: String,
-    dealer_roster_position: u64,
+struct SourceTrusteeCommitmentBinding {
+    source_trustee_identity: String,
+    source_trustee_roster_position: u64,
     coefficient_commitment_roots: BTreeMap<(usize, u64), String>,
 }
 
 #[derive(Clone)]
 struct CoefficientCommitmentBinding {
-    dealer_roster_position: u64,
+    source_trustee_roster_position: u64,
     rns_limb_index: usize,
     shamir_coefficient_index: u64,
     commitment_root: String,
@@ -94,7 +95,7 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
         &[
             "setupContext",
             "publicMatrixSeedHash",
-            "dealerCoefficientCommitmentRecords",
+            "sourceTrusteeCoefficientCommitmentRecords",
             "coefficientCommitments",
         ],
         "deriveThresholdShareCommitments",
@@ -102,13 +103,14 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
 
     let setup_context = object_field(request, "setupContext")?;
     let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
-    let dealer_record_values = array_field(request, "dealerCoefficientCommitmentRecords")?;
+    let source_trustee_record_values =
+        array_field(request, "sourceTrusteeCoefficientCommitmentRecords")?;
     let commitment_material_values = array_field(request, "coefficientCommitments")?;
 
     let threshold_share_commitments = derive_threshold_share_commitment_set_from_parts(
         setup_context,
         public_matrix_seed_hash,
-        dealer_record_values,
+        source_trustee_record_values,
         commitment_material_values,
     )?;
     let ring_degree = threshold_share_commitments
@@ -160,7 +162,7 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
             "setupContext",
             "publicMatrixSeedHash",
             "vssCoefficientCommitmentRoot",
-            "dealerCoefficientCommitmentRecords",
+            "sourceTrusteeCoefficientCommitmentRecords",
             "transportedVssCoefficientCommitmentMaterial",
         ],
         "deriveThresholdShareCommitmentsFromTransport",
@@ -170,14 +172,15 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
     let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
     let vss_coefficient_commitment_root =
         hash_string_field(request, "vssCoefficientCommitmentRoot")?;
-    let dealer_record_values = array_field(request, "dealerCoefficientCommitmentRecords")?;
+    let source_trustee_record_values =
+        array_field(request, "sourceTrusteeCoefficientCommitmentRecords")?;
     let transported_material =
         object_field(request, "transportedVssCoefficientCommitmentMaterial")?;
 
     verify_setup_context(setup_context)?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
-    let dealer_bindings = verify_dealer_commitment_records(
-        dealer_record_values,
+    let source_trustee_bindings = verify_source_trustee_commitment_records(
+        source_trustee_record_values,
         setup_context,
         public_matrix_seed_hash,
     )?;
@@ -189,7 +192,7 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
     let derivation = derive_threshold_share_commitment_set_from_transport_bytes(
         setup_context,
         public_matrix_seed_hash,
-        &dealer_bindings,
+        &source_trustee_bindings,
         &transport.chunks,
     )?;
     let material_record_count =
@@ -248,7 +251,7 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
             "setupContext",
             "publicMatrixSeedHash",
             "vssCoefficientCommitmentRoot",
-            "dealerCoefficientCommitmentRecords",
+            "sourceTrusteeCoefficientCommitmentRecords",
             "transportedVssCoefficientCommitmentMaterial",
         ],
         "verifyConstantVssCommitmentsFromTransport",
@@ -258,14 +261,15 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
     let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
     let vss_coefficient_commitment_root =
         hash_string_field(request, "vssCoefficientCommitmentRoot")?;
-    let dealer_record_values = array_field(request, "dealerCoefficientCommitmentRecords")?;
+    let source_trustee_record_values =
+        array_field(request, "sourceTrusteeCoefficientCommitmentRecords")?;
     let transported_material =
         object_field(request, "transportedVssCoefficientCommitmentMaterial")?;
 
     verify_setup_context(setup_context)?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
-    let dealer_bindings = verify_dealer_commitment_records(
-        dealer_record_values,
+    let source_trustee_bindings = verify_source_trustee_commitment_records(
+        source_trustee_record_values,
         setup_context,
         public_matrix_seed_hash,
     )?;
@@ -274,8 +278,10 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
         setup_vss_material_transport_hashes(&transport.chunks, SETUP_TRANSPORT_CHUNK_SIZE_BYTES)?;
     compare_transport_hashes(&transport, &hashes)?;
 
-    let constant_material =
-        read_constant_vss_commitments_from_transport_bytes(&dealer_bindings, &transport.chunks)?;
+    let constant_material = read_constant_vss_commitments_from_transport_bytes(
+        &source_trustee_bindings,
+        &transport.chunks,
+    )?;
     let material_record_count =
         FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
     let material_set = transported_vss_material_set_value(
@@ -290,20 +296,21 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
 
     Ok(VerifiedTransportedConstantVssCommitments {
         material_set,
-        constant_commitments_by_dealer: constant_material.constant_commitments_by_dealer,
+        constant_commitments_by_source_trustee: constant_material
+            .constant_commitments_by_source_trustee,
     })
 }
 
 pub(crate) fn derive_threshold_share_commitment_set_from_parts(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_record_values: &[Value],
+    source_trustee_record_values: &[Value],
     commitment_material_values: &[Value],
 ) -> CanonicalResult<Value> {
     verify_setup_context(setup_context)?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
-    let dealer_bindings = verify_dealer_commitment_records(
-        dealer_record_values,
+    let source_trustee_bindings = verify_source_trustee_commitment_records(
+        source_trustee_record_values,
         setup_context,
         public_matrix_seed_hash,
     )?;
@@ -311,7 +318,7 @@ pub(crate) fn derive_threshold_share_commitment_set_from_parts(
         commitment_material_values,
         setup_context,
         public_matrix_seed_hash,
-        &dealer_bindings,
+        &source_trustee_bindings,
     )?;
 
     let ring_degree = coefficient_commitments
@@ -330,7 +337,7 @@ pub(crate) fn derive_threshold_share_commitment_set_from_parts(
         public_matrix_seed_hash,
         ring_degree,
         ring_degree_status,
-        &dealer_bindings,
+        &source_trustee_bindings,
         &coefficient_commitments,
     )?;
 
@@ -353,7 +360,7 @@ struct TransportThresholdDerivation {
 struct TransportConstantVssMaterial {
     ring_degree: usize,
     ring_degree_status: &'static str,
-    constant_commitments_by_dealer: BTreeMap<u64, Vec<SetupCommitmentValue>>,
+    constant_commitments_by_source_trustee: BTreeMap<u64, Vec<SetupCommitmentValue>>,
 }
 
 struct TransportThresholdAccumulator {
@@ -767,7 +774,7 @@ fn setup_transport_chunk_manifest_root(
 }
 
 fn read_constant_vss_commitments_from_transport_bytes(
-    dealer_bindings: &BTreeMap<u64, DealerCommitmentBinding>,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     chunks: &[Vec<u8>],
 ) -> CanonicalResult<TransportConstantVssMaterial> {
     let mut reader = ChunkedMaterialReader::new(chunks)?;
@@ -809,40 +816,43 @@ fn read_constant_vss_commitments_from_transport_bytes(
         ));
     }
 
-    let mut constant_commitments_by_dealer = BTreeMap::<u64, Vec<SetupCommitmentValue>>::new();
-    for dealer_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
-        let dealer_binding = dealer_bindings
-            .get(&dealer_roster_position)
+    let mut constant_commitments_by_source_trustee =
+        BTreeMap::<u64, Vec<SetupCommitmentValue>>::new();
+    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        let source_trustee_binding = source_trustee_bindings
+            .get(&source_trustee_roster_position)
             .ok_or_else(|| {
-                invalid_threshold_commitment_input("transport material is missing a dealer binding")
+                invalid_threshold_commitment_input(
+                    "transport material is missing a source trustee binding",
+                )
             })?;
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
             for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
                 let commitment = read_binary_setup_commitment(
                     &mut reader,
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     rns_prime,
                     shamir_coefficient_index,
                     ring_degree,
                 )?;
                 let commitment_root = setup_commitment_root(&commitment)?;
-                let expected_commitment_root = dealer_binding
+                let expected_commitment_root = source_trustee_binding
                     .coefficient_commitment_roots
                     .get(&(rns_limb_index, shamir_coefficient_index))
                     .ok_or_else(|| {
                         invalid_threshold_commitment_input(
-                            "transport material coordinate is absent from the dealer record",
+                            "transport material coordinate is absent from the source trustee record",
                         )
                     })?;
                 if &commitment_root != expected_commitment_root {
                     return Err(invalid_threshold_commitment_input(
-                        "transported setup commitment material does not match the dealer commitment root",
+                        "transported setup commitment material does not match the source trustee commitment root",
                     ));
                 }
                 if shamir_coefficient_index == 0 {
-                    constant_commitments_by_dealer
-                        .entry(dealer_roster_position)
+                    constant_commitments_by_source_trustee
+                        .entry(source_trustee_roster_position)
                         .or_default()
                         .push(commitment);
                 }
@@ -854,9 +864,9 @@ fn read_constant_vss_commitments_from_transport_bytes(
             "transported VSS material has trailing bytes after the final commitment record",
         ));
     }
-    for dealer_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
-        if constant_commitments_by_dealer
-            .get(&dealer_roster_position)
+    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        if constant_commitments_by_source_trustee
+            .get(&source_trustee_roster_position)
             .map(Vec::len)
             != Some(DATA_PRIMES.len())
         {
@@ -873,14 +883,14 @@ fn read_constant_vss_commitments_from_transport_bytes(
         } else {
             "development-reduced-ring"
         },
-        constant_commitments_by_dealer,
+        constant_commitments_by_source_trustee,
     })
 }
 
 fn derive_threshold_share_commitment_set_from_transport_bytes(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_bindings: &BTreeMap<u64, DealerCommitmentBinding>,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     chunks: &[Vec<u8>],
 ) -> CanonicalResult<TransportThresholdDerivation> {
     let mut reader = ChunkedMaterialReader::new(chunks)?;
@@ -923,40 +933,42 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
     }
 
     let mut accumulators = BTreeMap::<(u64, usize), TransportThresholdAccumulator>::new();
-    for dealer_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
-        let dealer_binding = dealer_bindings
-            .get(&dealer_roster_position)
+    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        let source_trustee_binding = source_trustee_bindings
+            .get(&source_trustee_roster_position)
             .ok_or_else(|| {
-                invalid_threshold_commitment_input("transport material is missing a dealer binding")
+                invalid_threshold_commitment_input(
+                    "transport material is missing a source trustee binding",
+                )
             })?;
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
             for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
                 let commitment = read_binary_setup_commitment(
                     &mut reader,
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     rns_prime,
                     shamir_coefficient_index,
                     ring_degree,
                 )?;
                 let commitment_root = setup_commitment_root(&commitment)?;
-                let expected_commitment_root = dealer_binding
+                let expected_commitment_root = source_trustee_binding
                     .coefficient_commitment_roots
                     .get(&(rns_limb_index, shamir_coefficient_index))
                     .ok_or_else(|| {
                         invalid_threshold_commitment_input(
-                            "transport material coordinate is absent from the dealer record",
+                            "transport material coordinate is absent from the source trustee record",
                         )
                     })?;
                 if &commitment_root != expected_commitment_root {
                     return Err(invalid_threshold_commitment_input(
-                        "transported setup commitment material does not match the dealer commitment root",
+                        "transported setup commitment material does not match the source trustee commitment root",
                     ));
                 }
                 accumulate_transport_threshold_commitments(
                     setup_context,
                     public_matrix_seed_hash,
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     rns_prime,
                     shamir_coefficient_index,
@@ -994,15 +1006,15 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
 
 fn read_binary_setup_commitment(
     reader: &mut ChunkedMaterialReader<'_>,
-    expected_dealer_roster_position: u64,
+    expected_source_trustee_roster_position: u64,
     expected_rns_limb_index: usize,
     expected_rns_prime: u64,
     expected_shamir_coefficient_index: u64,
     expected_ring_degree: usize,
 ) -> CanonicalResult<SetupCommitmentValue> {
-    if reader.read_varuint()? != expected_dealer_roster_position {
+    if reader.read_varuint()? != expected_source_trustee_roster_position {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material dealer order is not canonical",
+            "transported VSS material source trustee order is not canonical",
         ));
     }
     if reader.read_varuint()? != expected_rns_limb_index as u64 {
@@ -1062,7 +1074,7 @@ fn read_binary_setup_commitment(
 fn accumulate_transport_threshold_commitments(
     _setup_context: &Value,
     _public_matrix_seed_hash: &str,
-    _dealer_roster_position: u64,
+    _source_trustee_roster_position: u64,
     rns_limb_index: usize,
     rns_prime: u64,
     shamir_coefficient_index: u64,
@@ -1321,84 +1333,98 @@ fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
     Ok(())
 }
 
-fn verify_dealer_commitment_records(
-    dealer_records: &[Value],
+fn verify_source_trustee_commitment_records(
+    source_trustee_records: &[Value],
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-) -> CanonicalResult<BTreeMap<u64, DealerCommitmentBinding>> {
-    if dealer_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT {
+) -> CanonicalResult<BTreeMap<u64, SourceTrusteeCommitmentBinding>> {
+    if source_trustee_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT {
         return Err(invalid_threshold_commitment_input(
-            "dealerCoefficientCommitmentRecords must contain one record for every accepted trustee",
+            "sourceTrusteeCoefficientCommitmentRecords must contain one record for every accepted trustee",
         ));
     }
 
-    let mut dealer_bindings = BTreeMap::new();
-    for dealer_record in dealer_records {
-        let dealer_binding =
-            verify_dealer_commitment_record(dealer_record, setup_context, public_matrix_seed_hash)?;
-        if dealer_bindings
-            .insert(dealer_binding.dealer_roster_position, dealer_binding)
+    let mut source_trustee_bindings = BTreeMap::new();
+    for source_trustee_record in source_trustee_records {
+        let source_trustee_binding = verify_source_trustee_commitment_record(
+            source_trustee_record,
+            setup_context,
+            public_matrix_seed_hash,
+        )?;
+        if source_trustee_bindings
+            .insert(
+                source_trustee_binding.source_trustee_roster_position,
+                source_trustee_binding,
+            )
             .is_some()
         {
             return Err(invalid_threshold_commitment_input(
-                "dealerCoefficientCommitmentRecords contains duplicate dealer roster positions",
+                "sourceTrusteeCoefficientCommitmentRecords contains duplicate source trustee roster positions",
             ));
         }
     }
     for roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
-        if !dealer_bindings.contains_key(&roster_position) {
+        if !source_trustee_bindings.contains_key(&roster_position) {
             return Err(invalid_threshold_commitment_input(
-                "dealerCoefficientCommitmentRecords must cover the full accepted roster",
+                "sourceTrusteeCoefficientCommitmentRecords must cover the full accepted roster",
             ));
         }
     }
 
-    Ok(dealer_bindings)
+    Ok(source_trustee_bindings)
 }
 
-fn verify_dealer_commitment_record(
-    dealer_record: &Value,
+fn verify_source_trustee_commitment_record(
+    source_trustee_record: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-) -> CanonicalResult<DealerCommitmentBinding> {
-    if dealer_record.get("objectType").and_then(Value::as_str)
-        != Some(VSS_DEALER_COMMITMENT_OBJECT_TYPE)
+) -> CanonicalResult<SourceTrusteeCommitmentBinding> {
+    if source_trustee_record
+        .get("objectType")
+        .and_then(Value::as_str)
+        != Some(VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE)
     {
         return Err(invalid_threshold_commitment_input(
-            "dealerCoefficientCommitmentRecord.objectType must be VssDealerCoefficientCommitments",
+            "sourceTrusteeCoefficientCommitmentRecord.objectType must be VssSourceTrusteeCoefficientCommitments",
         ));
     }
-    if dealer_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+    if source_trustee_record
+        .get("objectVersion")
+        .and_then(Value::as_u64)
+        != Some(1)
+    {
         return Err(invalid_threshold_commitment_input(
-            "dealerCoefficientCommitmentRecord.objectVersion must be 1",
+            "sourceTrusteeCoefficientCommitmentRecord.objectVersion must be 1",
         ));
     }
     compare_context_fields(
-        dealer_record,
+        source_trustee_record,
         setup_context,
-        "dealerCoefficientCommitmentRecord",
+        "sourceTrusteeCoefficientCommitmentRecord",
     )?;
-    if dealer_record
+    if source_trustee_record
         .get("publicMatrixSeedHash")
         .and_then(Value::as_str)
         != Some(public_matrix_seed_hash)
     {
         return Err(invalid_threshold_commitment_input(
-            "dealerCoefficientCommitmentRecord.publicMatrixSeedHash must match publicMatrixSeedHash",
+            "sourceTrusteeCoefficientCommitmentRecord.publicMatrixSeedHash must match publicMatrixSeedHash",
         ));
     }
-    let dealer_identity = string_field(dealer_record, "dealerIdentity")?.to_string();
-    let dealer_roster_position = u64_field(dealer_record, "dealerRosterPosition")?;
-    if dealer_roster_position >= FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    let source_trustee_identity =
+        string_field(source_trustee_record, "sourceTrusteeIdentity")?.to_string();
+    let source_trustee_roster_position =
+        u64_field(source_trustee_record, "sourceTrusteeRosterPosition")?;
+    if source_trustee_roster_position >= FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
         return Err(invalid_threshold_commitment_input(
-            "dealerCoefficientCommitmentRecord.dealerRosterPosition is outside the accepted roster",
+            "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeRosterPosition is outside the accepted roster",
         ));
     }
 
-    let coefficient_commitments = array_field(dealer_record, "coefficientCommitments")?;
+    let coefficient_commitments = array_field(source_trustee_record, "coefficientCommitments")?;
     if coefficient_commitments.len() != DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD {
         return Err(invalid_threshold_commitment_input(
-            "dealerCoefficientCommitmentRecord.coefficientCommitments must contain every Q_share limb and Shamir coefficient",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments must contain every Q_share limb and Shamir coefficient",
         ));
     }
     let mut seen_coordinates = BTreeSet::new();
@@ -1409,39 +1435,40 @@ fn verify_dealer_commitment_record(
                 coefficient_record,
                 setup_context,
                 public_matrix_seed_hash,
-                &dealer_identity,
-                dealer_roster_position,
+                &source_trustee_identity,
+                source_trustee_roster_position,
             )?;
         if !seen_coordinates.insert((rns_limb_index, shamir_coefficient_index)) {
             return Err(invalid_threshold_commitment_input(
-                "dealer coefficient commitments must have distinct limb/coefficient coordinates",
+                "source trustee coefficient commitments must have distinct limb/coefficient coordinates",
             ));
         }
         coefficient_commitment_roots
             .insert((rns_limb_index, shamir_coefficient_index), commitment_root);
     }
 
-    let dealer_commitment_root = hash_string_field(dealer_record, "dealerCommitmentRoot")?;
+    let source_trustee_commitment_root =
+        hash_string_field(source_trustee_record, "sourceTrusteeCommitmentRoot")?;
     validate_hash_string(
-        dealer_commitment_root,
-        "dealerCoefficientCommitmentRecord.dealerCommitmentRoot",
+        source_trustee_commitment_root,
+        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeCommitmentRoot",
     )?;
-    let mut root_input = dealer_record.clone();
+    let mut root_input = source_trustee_record.clone();
     root_input
         .as_object_mut()
-        .expect("dealer commitment record object was checked")
-        .remove("dealerCommitmentRoot");
-    let expected_dealer_commitment_root =
+        .expect("source trustee commitment record object was checked")
+        .remove("sourceTrusteeCommitmentRoot");
+    let expected_source_trustee_commitment_root =
         derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
-    if dealer_commitment_root != expected_dealer_commitment_root {
+    if source_trustee_commitment_root != expected_source_trustee_commitment_root {
         return Err(invalid_threshold_commitment_input(
-            "dealerCommitmentRoot does not match the canonical dealer coefficient commitment record",
+            "sourceTrusteeCommitmentRoot does not match the canonical source trustee coefficient commitment record",
         ));
     }
 
-    Ok(DealerCommitmentBinding {
-        dealer_identity,
-        dealer_roster_position,
+    Ok(SourceTrusteeCommitmentBinding {
+        source_trustee_identity,
+        source_trustee_roster_position,
         coefficient_commitment_roots,
     })
 }
@@ -1450,8 +1477,8 @@ fn verify_coefficient_record(
     coefficient_record: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_identity: &str,
-    dealer_roster_position: u64,
+    source_trustee_identity: &str,
+    source_trustee_roster_position: u64,
 ) -> CanonicalResult<(usize, u64, String)> {
     if coefficient_record.get("objectType").and_then(Value::as_str)
         != Some(VSS_COEFFICIENT_COMMITMENT_OBJECT_TYPE)
@@ -1480,16 +1507,16 @@ fn verify_coefficient_record(
         ));
     }
     if coefficient_record
-        .get("dealerIdentity")
+        .get("sourceTrusteeIdentity")
         .and_then(Value::as_str)
-        != Some(dealer_identity)
+        != Some(source_trustee_identity)
         || coefficient_record
-            .get("dealerRosterPosition")
+            .get("sourceTrusteeRosterPosition")
             .and_then(Value::as_u64)
-            != Some(dealer_roster_position)
+            != Some(source_trustee_roster_position)
     {
         return Err(invalid_threshold_commitment_input(
-            "VSS coefficient commitment dealer binding must match its dealer record",
+            "VSS coefficient commitment source trustee binding must match its source trustee record",
         ));
     }
     let rns_limb_index = usize_field(coefficient_record, "rnsLimbIndex")?;
@@ -1525,13 +1552,13 @@ fn verify_coefficient_commitment_material(
     commitment_material_values: &[Value],
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_bindings: &BTreeMap<u64, DealerCommitmentBinding>,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
 ) -> CanonicalResult<BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>> {
     let expected_count =
         FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
     if commitment_material_values.len() != expected_count {
         return Err(invalid_threshold_commitment_input(
-            "coefficientCommitments must contain full public commitment material for every dealer, Q_share limb, and Shamir coefficient",
+            "coefficientCommitments must contain full public commitment material for every source trustee, Q_share limb, and Shamir coefficient",
         ));
     }
 
@@ -1542,7 +1569,7 @@ fn verify_coefficient_commitment_material(
             material_value,
             setup_context,
             public_matrix_seed_hash,
-            dealer_bindings,
+            source_trustee_bindings,
         )?;
         match ring_degree {
             Some(expected_ring_degree)
@@ -1557,7 +1584,7 @@ fn verify_coefficient_commitment_material(
         }
 
         let coordinate = (
-            commitment_binding.dealer_roster_position,
+            commitment_binding.source_trustee_roster_position,
             commitment_binding.rns_limb_index,
             commitment_binding.shamir_coefficient_index,
         );
@@ -1566,16 +1593,16 @@ fn verify_coefficient_commitment_material(
             .is_some()
         {
             return Err(invalid_threshold_commitment_input(
-                "coefficientCommitments contains duplicate dealer/limb/coefficient material",
+                "coefficientCommitments contains duplicate source trustee/limb/coefficient material",
             ));
         }
     }
 
-    for dealer_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
         for rns_limb_index in 0..DATA_PRIMES.len() {
             for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
                 if !commitment_bindings.contains_key(&(
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     shamir_coefficient_index,
                 )) {
@@ -1594,7 +1621,7 @@ fn verify_coefficient_commitment_material_record(
     material_value: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_bindings: &BTreeMap<u64, DealerCommitmentBinding>,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
 ) -> CanonicalResult<CoefficientCommitmentBinding> {
     if material_value.get("objectType").and_then(Value::as_str)
         != Some(VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE)
@@ -1623,18 +1650,19 @@ fn verify_coefficient_commitment_material_record(
         ));
     }
 
-    let dealer_identity = string_field(material_value, "dealerIdentity")?.to_string();
-    let dealer_roster_position = u64_field(material_value, "dealerRosterPosition")?;
-    let dealer_binding = dealer_bindings
-        .get(&dealer_roster_position)
+    let source_trustee_identity =
+        string_field(material_value, "sourceTrusteeIdentity")?.to_string();
+    let source_trustee_roster_position = u64_field(material_value, "sourceTrusteeRosterPosition")?;
+    let source_trustee_binding = source_trustee_bindings
+        .get(&source_trustee_roster_position)
         .ok_or_else(|| {
             invalid_threshold_commitment_input(
-                "coefficient commitment material references an unknown dealer",
+                "coefficient commitment material references an unknown source trustee",
             )
         })?;
-    if dealer_binding.dealer_identity != dealer_identity {
+    if source_trustee_binding.source_trustee_identity != source_trustee_identity {
         return Err(invalid_threshold_commitment_input(
-            "coefficient commitment material dealer identity must match the dealer record",
+            "coefficient commitment material source trustee identity must match the source trustee record",
         ));
     }
 
@@ -1656,17 +1684,17 @@ fn verify_coefficient_commitment_material_record(
         commitment_root,
         "coefficientCommitmentMaterial.commitmentRoot",
     )?;
-    let expected_commitment_root = dealer_binding
+    let expected_commitment_root = source_trustee_binding
         .coefficient_commitment_roots
         .get(&(rns_limb_index, shamir_coefficient_index))
         .ok_or_else(|| {
             invalid_threshold_commitment_input(
-                "coefficient commitment material coordinate is absent from the dealer record",
+                "coefficient commitment material coordinate is absent from the source trustee record",
             )
         })?;
     if commitment_root != expected_commitment_root {
         return Err(invalid_threshold_commitment_input(
-            "coefficient commitment material root must match the dealer coefficient commitment record",
+            "coefficient commitment material root must match the source trustee coefficient commitment record",
         ));
     }
 
@@ -1692,7 +1720,7 @@ fn verify_coefficient_commitment_material_record(
     }
 
     Ok(CoefficientCommitmentBinding {
-        dealer_roster_position,
+        source_trustee_roster_position,
         rns_limb_index,
         shamir_coefficient_index,
         commitment_root: commitment_root.to_string(),
@@ -1705,7 +1733,7 @@ fn threshold_share_commitment_set(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     ring_degree_status: &str,
-    dealer_bindings: &BTreeMap<u64, DealerCommitmentBinding>,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
 ) -> CanonicalResult<Value> {
     let mut recipient_records = Vec::with_capacity(FIRST_PROFILE_PARTICIPANT_COUNT);
@@ -1718,7 +1746,7 @@ fn threshold_share_commitment_set(
             recipient_roster_position,
             ring_degree,
             ring_degree_status,
-            dealer_bindings,
+            source_trustee_bindings,
             coefficient_commitments,
         )?;
         recipient_records.push(recipient_record);
@@ -1754,7 +1782,7 @@ fn threshold_share_recipient_record(
     recipient_roster_position: u64,
     ring_degree: usize,
     ring_degree_status: &str,
-    dealer_bindings: &BTreeMap<u64, DealerCommitmentBinding>,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
 ) -> CanonicalResult<Value> {
     let recipient_roster_position_usize =
@@ -1771,7 +1799,7 @@ fn threshold_share_recipient_record(
             recipient_roster_position_usize,
             rns_limb_index,
             rns_prime,
-            dealer_bindings,
+            source_trustee_bindings,
             coefficient_commitments,
         )?;
         limb_commitments.push(threshold_limb_commitment_value(
@@ -1816,7 +1844,7 @@ fn derive_threshold_limb_commitment(
     recipient_roster_position_usize: usize,
     rns_limb_index: usize,
     rns_prime: u64,
-    dealer_bindings: &BTreeMap<u64, DealerCommitmentBinding>,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
 ) -> CanonicalResult<ThresholdLimbCommitment> {
     let trustee_point = canonical_trustee_point(recipient_roster_position_usize, rns_prime)?;
@@ -1825,18 +1853,18 @@ fn derive_threshold_limb_commitment(
         Vec::with_capacity(FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_DECRYPTION_THRESHOLD);
     let mut combination_terms =
         Vec::with_capacity(FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_DECRYPTION_THRESHOLD);
-    for dealer_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
-        let _dealer_binding = dealer_bindings
-            .get(&dealer_roster_position)
+    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        let _source_trustee_binding = source_trustee_bindings
+            .get(&source_trustee_roster_position)
             .ok_or_else(|| {
                 invalid_threshold_commitment_input(
-                    "threshold derivation is missing an accepted dealer binding",
+                    "threshold derivation is missing an accepted source trustee binding",
                 )
             })?;
         for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
             let coefficient_binding = coefficient_commitments
                 .get(&(
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     shamir_coefficient_index,
                 ))

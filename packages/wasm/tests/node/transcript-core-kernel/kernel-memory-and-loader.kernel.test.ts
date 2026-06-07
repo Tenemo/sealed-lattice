@@ -136,6 +136,85 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
+    it('forwards accepted setup transported proof material', async () => {
+        const decodedCommands: unknown[] = [];
+        const commandResponse = {
+            success: true,
+            value: {
+                ok: false,
+                operation: 'verifyCollectiveBgvSetupPackage',
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                verifierStatus: 'refused',
+                currentPhase: 'setupPackageVerification',
+                acceptedHashes: [],
+                refusedObjects: [],
+            },
+        };
+        const { loadMockKernel } = createMockKernelExports({
+            commandResponse,
+            onCommand: (command) => {
+                decodedCommands.push(command);
+            },
+        });
+        const kernel = await loadMockKernel();
+        const setupPackage = { objectType: 'SetupPackage' };
+        const transportedVssCoefficientCommitmentMaterial = {
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterialSet',
+            marker: 'vss-material',
+        };
+        const transportedSameSecretProofMaterial = {
+            objectType: 'SetupTransportedSameSecretProofMaterialSet',
+            marker: 'same-secret-proof',
+        };
+        const transportedPublicKeyShareProofMaterial = {
+            objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
+            marker: 'public-key-proof',
+        };
+        const transportedEvaluationKeyShareProofMaterial = {
+            objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
+            marker: 'evaluation-key-proof',
+        };
+        const transportedEvaluationKeyShareComponentMaterial = {
+            objectType:
+                'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+            marker: 'evaluation-key-component-material',
+        };
+        const transportedPublicEvaluationKeyMaterial = {
+            objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
+            marker: 'public-evaluation-key-material',
+        };
+
+        const result = kernel.verifyCollectiveBgvSetup({
+            setupPackage,
+            expectedSetupPackageHash: '1'.repeat(128),
+            expectedManifestHash: '2'.repeat(128),
+            expectedRosterHash: '3'.repeat(128),
+            transportedVssCoefficientCommitmentMaterial,
+            transportedSameSecretProofMaterial,
+            transportedPublicKeyShareProofMaterial,
+            transportedEvaluationKeyShareProofMaterial,
+            transportedEvaluationKeyShareComponentMaterial,
+            transportedPublicEvaluationKeyMaterial,
+        });
+
+        expect(result.verifierStatus).toBe('refused');
+        expect(decodedCommands).toEqual([
+            {
+                command: 'VerifyCollectiveBgvSetup',
+                setupPackage,
+                expectedSetupPackageHash: '1'.repeat(128),
+                expectedManifestHash: '2'.repeat(128),
+                expectedRosterHash: '3'.repeat(128),
+                transportedVssCoefficientCommitmentMaterial,
+                transportedSameSecretProofMaterial,
+                transportedPublicKeyShareProofMaterial,
+                transportedEvaluationKeyShareProofMaterial,
+                transportedEvaluationKeyShareComponentMaterial,
+                transportedPublicEvaluationKeyMaterial,
+            },
+        ]);
+    });
+
     it('rejects a transcript-core kernel with the wrong integrity hash', async () => {
         const { getInstantiateCallCount, loadMockKernel } =
             createMockKernelExports({

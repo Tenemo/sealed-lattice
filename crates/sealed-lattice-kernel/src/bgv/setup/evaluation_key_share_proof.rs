@@ -2,14 +2,17 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::{
-        coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_hash512},
+        coefficient_codec::{
+            coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
+        },
         evaluator::{
             key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64},
             prg::DeterministicSampler,
         },
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        validation::reject_unexpected_bgv_request_fields,
     },
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint},
     hashing::{canonical_json, derive_protocol_hash, hash512, hash512_hex, to_hex},
 };
 
@@ -18,27 +21,32 @@ use super::{
     commitment::{
         SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
-        linear_combination_setup_commitments, setup_commitment_modulus_product,
-        setup_commitment_root, verify_setup_lifted_commitment_opening,
+        compute_setup_commitment, linear_combination_setup_commitments,
+        parse_setup_commitment_full_value, setup_commitment_modulus_product, setup_commitment_root,
+        verify_setup_lifted_commitment_opening,
     },
-    setup_proof::SETUP_PROOF_PROFILE_ID,
+    setup_proof::{SETUP_PROOF_PROFILE_ID, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES},
 };
-
-#[cfg(test)]
-use super::commitment::compute_setup_commitment;
 
 pub(super) const RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
     "lnp-relinearization-key-share-relation-verified-review-gated";
-pub(super) const RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, fixed response bounds, and root-bound source-square binding records verified; quadratic source-square proof closure plus external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing relinearization acceptance";
+pub(super) const RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, and root-bound relinearization source binding records verified; verifier-side round-two aggregate-square source proof closure plus external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing relinearization acceptance";
 pub(super) const GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
     "lnp-galois-key-share-relation-verified-review-gated";
 pub(super) const GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, and fixed response bounds verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing Galois-key acceptance";
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1";
+pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING: &str =
+    "binary-chunked-key-switch-component-vectors";
+pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str =
+    "SetupTransportedEvaluationKeyShareComponentMaterialSet";
+pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedEvaluationKeyShareComponentMaterial";
 
 const RELINEARIZATION_KEY_SHARE_LNP_PROOF_MAGIC: &[u8; 8] = b"SLRKLNP1";
 const GALOIS_KEY_SHARE_LNP_PROOF_MAGIC: &[u8; 8] = b"SLGKLNP1";
+const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
 const RELINEARIZATION_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
     "sealed-lattice/setup/relinearization-key-share/lnp-scalar-challenge-v1";
 const GALOIS_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
@@ -51,28 +59,21 @@ const RELINEARIZATION_KEY_SHARE_LNP_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/relinearization-key-share/lnp-proof-bytes-v1";
 const GALOIS_KEY_SHARE_LNP_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/galois-key-share/lnp-proof-bytes-v1";
-#[cfg(test)]
+const RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE: &str = "RelinearizationKeyShareRoundOne";
 const RELINEARIZATION_KEY_SHARE_TBOX_UNIFORM_DOMAIN: &str =
     "sealed-lattice/setup/relinearization-key-share/lnp-tbox-uniform-v1";
-#[cfg(test)]
 const GALOIS_KEY_SHARE_TBOX_UNIFORM_DOMAIN: &str =
     "sealed-lattice/setup/galois-key-share/lnp-tbox-uniform-v1";
-#[cfg(test)]
 const EVALUATION_KEY_SHARE_SECRET_MASK_DOMAIN: &str =
     "sealed-lattice/setup/evaluation-key-share/lnp-secret-mask-v1";
-#[cfg(test)]
 const EVALUATION_KEY_SHARE_NEGATIVE_INDICATOR_MASK_DOMAIN: &str =
     "sealed-lattice/setup/evaluation-key-share/lnp-negative-indicator-mask-v1";
-#[cfg(test)]
 const EVALUATION_KEY_SHARE_RANDOMNESS_MASK_DOMAIN: &str =
     "sealed-lattice/setup/evaluation-key-share/lnp-opening-randomness-mask-v1";
-#[cfg(test)]
 const EVALUATION_KEY_SHARE_ERROR_MASK_DOMAIN: &str =
     "sealed-lattice/setup/evaluation-key-share/lnp-error-mask-v1";
-#[cfg(test)]
 const EVALUATION_KEY_SHARE_SOURCE_MASK_DOMAIN: &str =
     "sealed-lattice/setup/evaluation-key-share/lnp-source-mask-v1";
-#[cfg(test)]
 const EVALUATION_KEY_SHARE_CARRY_MASK_DOMAIN: &str =
     "sealed-lattice/setup/evaluation-key-share/lnp-carry-mask-v1";
 
@@ -84,6 +85,7 @@ const EVALUATION_KEY_SHARE_RANDOMNESS_MASK_BITS: usize = 80;
 const EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS: usize = 32;
 const EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND: i128 = 1;
 const EVALUATION_KEY_SHARE_ERROR_INFINITY_BOUND: i128 = 2;
+const EVALUATION_KEY_SHARE_ROUND_TWO_AGGREGATE_SOURCE_PARTICIPANT_BOUND: i128 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EvaluationKeyShareProofFamily {
@@ -173,7 +175,6 @@ impl EvaluationKeyShareProofFamily {
         }
     }
 
-    #[cfg(test)]
     fn tbox_uniform_domain(self) -> &'static str {
         match self {
             Self::Relinearization => RELINEARIZATION_KEY_SHARE_TBOX_UNIFORM_DOMAIN,
@@ -204,18 +205,18 @@ pub(super) struct EvaluationKeyShareLnpProofVerificationInput<'a> {
     pub(super) same_secret_statement_record: &'a Value,
     pub(super) constant_commitments: &'a [SetupCommitmentValue],
     pub(super) setup_proof_binding: &'a Value,
+    pub(super) transported_key_switch_component_material: Option<&'a Value>,
     pub(super) proof_bytes: &'a [u8],
 }
 
-#[cfg(test)]
 pub(super) struct EvaluationKeyShareLnpProofWitness {
     pub(super) secret_coefficients: Vec<i64>,
     pub(super) opening_randomness_by_limb: Vec<Vec<Vec<i128>>>,
     pub(super) error_coefficients_by_digit: Vec<Vec<i64>>,
     pub(super) relinearization_source_coefficients_by_digit: Vec<Vec<i128>>,
+    pub(super) round_one_aggregate_source_coefficients_by_digit: Vec<Vec<i128>>,
 }
 
-#[cfg(test)]
 pub(super) struct EvaluationKeyShareLnpProofGenerationInput<'a> {
     pub(super) proof_family: EvaluationKeyShareProofFamily,
     pub(super) public_matrix_seed_hash: &'a str,
@@ -224,8 +225,17 @@ pub(super) struct EvaluationKeyShareLnpProofGenerationInput<'a> {
     pub(super) constant_commitments: &'a [SetupCommitmentValue],
     pub(super) component_b_by_digit: &'a [Vec<Vec<u64>>],
     pub(super) setup_proof_binding: &'a Value,
+    pub(super) transported_key_switch_component_material: Option<&'a Value>,
     pub(super) witness: &'a EvaluationKeyShareLnpProofWitness,
     pub(super) proof_randomness_seed_hex: &'a str,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct EvaluationKeyShareComponentMaterialTransportHashes {
+    pub(super) full_object_hash: String,
+    pub(super) chunk_hashes: Vec<String>,
+    pub(super) chunk_root: String,
+    pub(super) total_byte_length: u64,
 }
 
 struct ParsedEvaluationKeyShareLnpProof {
@@ -248,6 +258,167 @@ pub(super) fn evaluation_key_share_lnp_relation_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
     hash512_hex(proof_family.proof_bytes_hash_domain(), &[proof_bytes])
+}
+
+pub(crate) fn generate_evaluation_key_share_lnp_proof_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &[
+            "proofFamily",
+            "publicMatrixSeedHash",
+            "proofRecord",
+            "sameSecretStatementRecord",
+            "constantCommitments",
+            "setupProofBinding",
+            "transportedKeySwitchComponentMaterial",
+            "secretCoefficients",
+            "openingRandomnessByLimb",
+            "errorCoefficientsByDigit",
+            "relinearizationSourceCoefficientsByDigit",
+            "roundOneAggregateSourceCoefficientsByDigit",
+            "proofRandomnessSource",
+            "proofRandomnessSeedHex",
+        ],
+        "generateEvaluationKeyShareLnpProof",
+    )?;
+
+    let proof_family = evaluation_key_share_proof_family_from_request(request)?;
+    let public_matrix_seed_hash = string_field(request, "publicMatrixSeedHash")?;
+    validate_lowercase_hash(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let proof_record = object_field(request, "proofRecord")?;
+    let same_secret_statement_record = object_field(request, "sameSecretStatementRecord")?;
+    let setup_proof_binding = object_field(request, "setupProofBinding")?;
+    let constant_commitments = setup_commitment_values_field(request, "constantCommitments")?;
+    let transported_key_switch_component_material = request
+        .get("transportedKeySwitchComponentMaterial")
+        .map(|material| {
+            if material.is_object() {
+                Ok(material)
+            } else {
+                Err(invalid_evaluation_key_share_proof(
+                    "transportedKeySwitchComponentMaterial must be an object",
+                ))
+            }
+        })
+        .transpose()?;
+    let component_b_by_digit = component_b_vectors_from_record(
+        proof_family,
+        proof_record,
+        transported_key_switch_component_material,
+    )?;
+    let secret_coefficients = i64_vector_field(request, "secretCoefficients")?;
+    let opening_randomness_by_limb = i128_matrix3_field(request, "openingRandomnessByLimb")?;
+    let error_coefficients_by_digit = i64_matrix_field(request, "errorCoefficientsByDigit")?;
+    let relinearization_source_coefficients_by_digit = match (
+        proof_family,
+        request.get("relinearizationSourceCoefficientsByDigit"),
+    ) {
+        (EvaluationKeyShareProofFamily::Relinearization, Some(_)) => {
+            i128_matrix_field(request, "relinearizationSourceCoefficientsByDigit")?
+        }
+        (EvaluationKeyShareProofFamily::Relinearization, None) => {
+            return Err(invalid_evaluation_key_share_proof(
+                "relinearizationSourceCoefficientsByDigit is required for relinearization proof generation",
+            ));
+        }
+        (EvaluationKeyShareProofFamily::Galois, Some(_)) => {
+            return Err(invalid_evaluation_key_share_proof(
+                "relinearizationSourceCoefficientsByDigit must not be provided for Galois proof generation",
+            ));
+        }
+        (EvaluationKeyShareProofFamily::Galois, None) => Vec::new(),
+    };
+    let round_one_aggregate_source_coefficients_by_digit = match (
+        proof_family,
+        relinearization_record_uses_same_secret_source(proof_record),
+        request.get("roundOneAggregateSourceCoefficientsByDigit"),
+    ) {
+        (EvaluationKeyShareProofFamily::Relinearization, false, Some(_)) => {
+            i128_matrix_field(request, "roundOneAggregateSourceCoefficientsByDigit")?
+        }
+        (EvaluationKeyShareProofFamily::Relinearization, false, None) => {
+            return Err(invalid_evaluation_key_share_proof(
+                "roundOneAggregateSourceCoefficientsByDigit is required for relinearization round-two proof generation",
+            ));
+        }
+        (EvaluationKeyShareProofFamily::Relinearization, true, Some(_)) => {
+            return Err(invalid_evaluation_key_share_proof(
+                "roundOneAggregateSourceCoefficientsByDigit must not be provided for relinearization round-one proof generation",
+            ));
+        }
+        (EvaluationKeyShareProofFamily::Relinearization, true, None)
+        | (EvaluationKeyShareProofFamily::Galois, _, None) => Vec::new(),
+        (EvaluationKeyShareProofFamily::Galois, _, Some(_)) => {
+            return Err(invalid_evaluation_key_share_proof(
+                "roundOneAggregateSourceCoefficientsByDigit must not be provided for Galois proof generation",
+            ));
+        }
+    };
+    let proof_randomness_source = proof_randomness_source(request)?;
+    let proof_randomness_seed_hex = string_field(request, "proofRandomnessSeedHex")?;
+    validate_proof_randomness_seed(proof_randomness_seed_hex, "proofRandomnessSeedHex")?;
+
+    let witness = EvaluationKeyShareLnpProofWitness {
+        secret_coefficients,
+        opening_randomness_by_limb,
+        error_coefficients_by_digit,
+        relinearization_source_coefficients_by_digit,
+        round_one_aggregate_source_coefficients_by_digit,
+    };
+    let generation_input = EvaluationKeyShareLnpProofGenerationInput {
+        proof_family,
+        public_matrix_seed_hash,
+        proof_record,
+        same_secret_statement_record,
+        constant_commitments: &constant_commitments,
+        component_b_by_digit: &component_b_by_digit,
+        setup_proof_binding,
+        transported_key_switch_component_material,
+        witness: &witness,
+        proof_randomness_seed_hex,
+    };
+    let proof_bytes = generate_evaluation_key_share_lnp_relation_proof(generation_input)?;
+    let verification = verify_evaluation_key_share_lnp_relation_proof(
+        EvaluationKeyShareLnpProofVerificationInput {
+            proof_family,
+            public_matrix_seed_hash,
+            proof_record,
+            same_secret_statement_record,
+            constant_commitments: &constant_commitments,
+            setup_proof_binding,
+            transported_key_switch_component_material,
+            proof_bytes: &proof_bytes,
+        },
+    )?;
+    let proof_bytes_hash =
+        evaluation_key_share_lnp_relation_proof_bytes_hash(proof_family, &proof_bytes);
+
+    let mut response = json!({
+        "ok": true,
+        "operation": "generateEvaluationKeyShareLnpProof",
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofFamily": proof_family.proof_family(),
+        "proofVerificationStatus": proof_family.proof_verification_status(),
+        "proofModelStatus": proof_family.proof_model_status(),
+        "statementHash": verification.statement_hash_hex,
+        "relationCommitmentHash": verification.relation_commitment_hash_hex,
+        "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
+        "challenge": verification.challenge,
+        "proofSizeBytes": verification.proof_size_bytes,
+        "proofBytesHash": proof_bytes_hash,
+        "proofBytesHex": to_hex(&proof_bytes),
+        "proofRandomness": {
+            "source": proof_randomness_source,
+            "seedBytes": 64,
+            "retention": "proof randomness seed material is consumed for proof generation and is not returned"
+        }
+    });
+    response[proof_family.tbox_parameter_profile_hash_field()] =
+        json!(proof_family.tbox_parameter_profile_hash()?);
+
+    Ok(response)
 }
 
 pub(super) fn evaluation_key_share_component_vector_hash(coefficients: &[u64]) -> String {
@@ -284,12 +455,301 @@ pub(super) fn evaluation_key_share_component_vector_root(
     )
 }
 
+pub(super) fn encode_evaluation_key_share_component_vectors(
+    level: usize,
+    ring_degree: usize,
+    component_b_by_digit: &[Vec<Vec<u64>>],
+) -> CanonicalResult<Vec<u8>> {
+    let digit_count = level.checked_add(1).ok_or_else(|| {
+        invalid_evaluation_key_share_proof("evaluation-key level digit count overflowed")
+    })?;
+    if component_b_by_digit.len() != digit_count {
+        return Err(invalid_evaluation_key_share_proof(
+            "evaluation-key component material digit count does not match the proof level",
+        ));
+    }
+    let mut output = Vec::new();
+    output.extend_from_slice(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC);
+    write_u64(
+        &mut output,
+        u64::try_from(level).map_err(|_| {
+            invalid_evaluation_key_share_proof("evaluation-key level does not fit u64")
+        })?,
+    );
+    write_u64(
+        &mut output,
+        u64::try_from(ring_degree).map_err(|_| {
+            invalid_evaluation_key_share_proof("evaluation-key ringDegree does not fit u64")
+        })?,
+    );
+    write_u64(
+        &mut output,
+        u64::try_from(digit_count).map_err(|_| {
+            invalid_evaluation_key_share_proof("evaluation-key digit count does not fit u64")
+        })?,
+    );
+    write_u64(
+        &mut output,
+        u64::try_from(digit_count).map_err(|_| {
+            invalid_evaluation_key_share_proof("evaluation-key limb count does not fit u64")
+        })?,
+    );
+    for (digit_index, component_b_by_limb) in component_b_by_digit.iter().enumerate() {
+        if component_b_by_limb.len() != digit_count {
+            return Err(invalid_evaluation_key_share_proof(
+                "evaluation-key component material limb count does not match the proof level",
+            ));
+        }
+        for (rns_limb_index, coefficients) in component_b_by_limb.iter().enumerate() {
+            if coefficients.len() != ring_degree {
+                return Err(invalid_evaluation_key_share_proof(
+                    "evaluation-key component material coefficient count does not match ringDegree",
+                ));
+            }
+            if coefficients
+                .iter()
+                .any(|coefficient| *coefficient >= DATA_PRIMES[rns_limb_index])
+            {
+                return Err(invalid_evaluation_key_share_proof(
+                    "evaluation-key component material contains non-canonical Q_share residues",
+                ));
+            }
+            write_u64(
+                &mut output,
+                u64::try_from(digit_index).map_err(|_| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key digit index does not fit u64",
+                    )
+                })?,
+            );
+            write_u64(
+                &mut output,
+                u64::try_from(rns_limb_index).map_err(|_| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key RNS limb index does not fit u64",
+                    )
+                })?,
+            );
+            write_u64(&mut output, DATA_PRIMES[rns_limb_index]);
+            write_u64(
+                &mut output,
+                u64::try_from(coefficients.len()).map_err(|_| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key coefficient count does not fit u64",
+                    )
+                })?,
+            );
+            for coefficient in coefficients {
+                write_u64(&mut output, *coefficient);
+            }
+        }
+    }
+
+    Ok(output)
+}
+
+pub(super) fn evaluation_key_share_component_material_transport_hashes(
+    proof_family: EvaluationKeyShareProofFamily,
+    chunks: &[Vec<u8>],
+    chunk_size_bytes: u64,
+) -> CanonicalResult<EvaluationKeyShareComponentMaterialTransportHashes> {
+    if chunk_size_bytes == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key component material chunk size must be positive",
+        ));
+    }
+    if chunks.is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key component material transport requires at least one chunk",
+        ));
+    }
+    let chunk_size_usize = usize::try_from(chunk_size_bytes).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key component material chunk size does not fit usize",
+        )
+    })?;
+    let total_byte_length =
+        chunks
+            .iter()
+            .enumerate()
+            .try_fold(0_u64, |byte_count, (chunk_index, chunk)| {
+                if chunk.is_empty() {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "evaluation-key component material chunks must be non-empty",
+                    ));
+                }
+                if chunk.len() > chunk_size_usize {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "evaluation-key component material chunk exceeds the accepted chunk size",
+                    ));
+                }
+                if chunk_index + 1 < chunks.len() && chunk.len() != chunk_size_usize {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "evaluation-key component material contains a short non-final chunk",
+                    ));
+                }
+                let chunk_length = u64::try_from(chunk.len()).map_err(|_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "evaluation-key component material chunk length does not fit u64",
+                    )
+                })?;
+                byte_count.checked_add(chunk_length).ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "evaluation-key component material byte length overflowed",
+                    )
+                })
+            })?;
+
+    let full_object_hash = evaluation_key_share_component_material_full_object_hash(
+        proof_family,
+        total_byte_length,
+        chunks,
+    )?;
+    let mut chunk_hashes = Vec::with_capacity(chunks.len());
+    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        chunk_hashes.push(evaluation_key_share_component_material_chunk_hash(
+            proof_family,
+            &full_object_hash,
+            chunk_index,
+            chunk,
+        )?);
+    }
+    let chunk_count = u64::try_from(chunks.len()).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key component material chunk count does not fit u64",
+        )
+    })?;
+    let chunk_root = derive_protocol_hash(
+        "EvaluationKeyShareComponentMaterialChunkRoot",
+        &json!({
+            "objectType": "EvaluationKeyShareComponentMaterialChunkManifest",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": proof_family.proof_family(),
+            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+            "chunkSizeBytes": chunk_size_bytes,
+            "chunkCount": chunk_count,
+            "totalByteLength": total_byte_length,
+            "chunkHashes": chunk_hashes,
+            "fullObjectHash": full_object_hash,
+        }),
+    )?;
+
+    Ok(EvaluationKeyShareComponentMaterialTransportHashes {
+        full_object_hash,
+        chunk_hashes,
+        chunk_root,
+        total_byte_length,
+    })
+}
+
+pub(super) fn evaluation_key_share_component_material_reference_root(
+    proof_family: EvaluationKeyShareProofFamily,
+    proof_record: &Value,
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
+) -> CanonicalResult<String> {
+    let level = value_u64(proof_record, "level")?;
+    let digit_count = level.checked_add(1).ok_or_else(|| {
+        invalid_evaluation_key_share_proof("evaluation-key digit count overflowed")
+    })?;
+    derive_protocol_hash(
+        "EvaluationKeyShareComponentMaterialRoot",
+        &json!({
+            "objectType": "EvaluationKeyShareComponentMaterialReference",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": proof_family.proof_family(),
+            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+            "trusteeIdentity": string_field(proof_record, "trusteeIdentity")?,
+            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+            "keySwitchDomain": string_field(proof_record, "keySwitchDomain")?,
+            "keySwitchSeedHex": string_field(proof_record, "keySwitchSeedHex")?,
+            "level": level,
+            "ringDegree": value_u64(proof_record, "ringDegree")?,
+            "digitCount": digit_count,
+            "rnsLimbCount": digit_count,
+            "keySwitchComponentVectorRoot": string_field(
+                proof_record,
+                "keySwitchComponentVectorRoot",
+            )?,
+            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": transport_hashes.chunk_hashes.len(),
+            "totalByteLength": transport_hashes.total_byte_length,
+            "fullObjectHash": transport_hashes.full_object_hash,
+            "chunkRoot": transport_hashes.chunk_root,
+            "chunkHashes": transport_hashes.chunk_hashes,
+        }),
+    )
+}
+
+fn evaluation_key_share_component_material_full_object_hash(
+    proof_family: EvaluationKeyShareProofFamily,
+    total_byte_length: u64,
+    chunks: &[Vec<u8>],
+) -> CanonicalResult<String> {
+    let mut total_length_bytes = Vec::new();
+    append_varuint(&mut total_length_bytes, total_byte_length);
+    let mut parts = Vec::with_capacity(chunks.len() + 2);
+    parts.push(proof_family.proof_family().as_bytes());
+    parts.push(total_length_bytes.as_slice());
+    for chunk in chunks {
+        parts.push(chunk.as_slice());
+    }
+
+    Ok(hash512_hex(
+        "sealed-lattice/setup/evaluation-key-share/component-material/full-object-v1",
+        &parts,
+    ))
+}
+
+fn evaluation_key_share_component_material_chunk_hash(
+    proof_family: EvaluationKeyShareProofFamily,
+    full_object_hash: &str,
+    chunk_index: usize,
+    chunk: &[u8],
+) -> CanonicalResult<String> {
+    let mut chunk_index_bytes = Vec::new();
+    append_varuint(
+        &mut chunk_index_bytes,
+        u64::try_from(chunk_index).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "evaluation-key component material chunk index does not fit u64",
+            )
+        })?,
+    );
+
+    Ok(hash512_hex(
+        "sealed-lattice/setup/evaluation-key-share/component-material/chunk-v1",
+        &[
+            proof_family.proof_family().as_bytes(),
+            full_object_hash.as_bytes(),
+            &chunk_index_bytes,
+            chunk,
+        ],
+    ))
+}
+
 pub(super) fn verify_evaluation_key_share_lnp_relation_proof(
     input: EvaluationKeyShareLnpProofVerificationInput<'_>,
 ) -> CanonicalResult<EvaluationKeyShareLnpProofVerification> {
     validate_evaluation_key_share_statement_material(&input)?;
-    let component_b_by_digit =
-        component_b_vectors_from_record(input.proof_family, input.proof_record)?;
+    let component_b_by_digit = component_b_vectors_from_record(
+        input.proof_family,
+        input.proof_record,
+        input.transported_key_switch_component_material,
+    )?;
     let statement_value = evaluation_key_share_lnp_statement_value(&input, &component_b_by_digit)?;
     let statement_hash =
         evaluation_key_share_lnp_statement_hash(input.proof_family, &statement_value)?;
@@ -337,6 +797,7 @@ pub(super) fn verify_evaluation_key_share_lnp_relation_proof(
     )?;
     verify_evaluation_key_share_response_bounds(
         input.proof_family,
+        input.proof_record,
         parsed_proof.challenge,
         &component_b_by_digit,
         &parsed_proof,
@@ -371,7 +832,6 @@ pub(super) fn verify_evaluation_key_share_lnp_relation_proof(
     })
 }
 
-#[cfg(test)]
 pub(super) fn generate_evaluation_key_share_lnp_relation_proof(
     input: EvaluationKeyShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<Vec<u8>> {
@@ -383,6 +843,7 @@ pub(super) fn generate_evaluation_key_share_lnp_relation_proof(
         same_secret_statement_record: input.same_secret_statement_record,
         constant_commitments: input.constant_commitments,
         setup_proof_binding: input.setup_proof_binding,
+        transported_key_switch_component_material: input.transported_key_switch_component_material,
         proof_bytes: &[],
     };
     let statement_value =
@@ -536,7 +997,6 @@ fn validate_evaluation_key_share_statement_material(
     Ok(())
 }
 
-#[cfg(test)]
 fn validate_evaluation_key_share_generation_material(
     input: &EvaluationKeyShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<()> {
@@ -547,11 +1007,15 @@ fn validate_evaluation_key_share_generation_material(
         same_secret_statement_record: input.same_secret_statement_record,
         constant_commitments: input.constant_commitments,
         setup_proof_binding: input.setup_proof_binding,
+        transported_key_switch_component_material: input.transported_key_switch_component_material,
         proof_bytes: &[],
     };
     validate_evaluation_key_share_statement_material(&verification_input)?;
-    let parsed_component_b =
-        component_b_vectors_from_record(input.proof_family, input.proof_record)?;
+    let parsed_component_b = component_b_vectors_from_record(
+        input.proof_family,
+        input.proof_record,
+        input.transported_key_switch_component_material,
+    )?;
     if parsed_component_b != input.component_b_by_digit {
         return Err(invalid_evaluation_key_share_proof(
             "evaluation-key generation component vectors must match the proof record",
@@ -566,10 +1030,35 @@ fn validate_evaluation_key_share_generation_material(
             "evaluation-key witness shape does not match proof statement",
         ));
     }
-    for error in &input.witness.error_coefficients_by_digit {
-        if error.len() != ring_degree {
+    if input
+        .witness
+        .secret_coefficients
+        .iter()
+        .any(|coefficient| !(-1..=1).contains(coefficient))
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "evaluation-key secret witness must be ternary",
+        ));
+    }
+    for limb_randomness in &input.witness.opening_randomness_by_limb {
+        if limb_randomness.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH
+            || limb_randomness
+                .iter()
+                .any(|column| column.len() != ring_degree)
+        {
             return Err(invalid_evaluation_key_share_proof(
-                "evaluation-key error witness width does not match proof ringDegree",
+                "evaluation-key opening-randomness witness shape does not match proof statement",
+            ));
+        }
+    }
+    for error in &input.witness.error_coefficients_by_digit {
+        if error.len() != ring_degree
+            || error
+                .iter()
+                .any(|coefficient| !(-2..=2).contains(coefficient))
+        {
+            return Err(invalid_evaluation_key_share_proof(
+                "evaluation-key error witness must be centered-binomial support with the proof ringDegree",
             ));
         }
     }
@@ -587,6 +1076,94 @@ fn validate_evaluation_key_share_generation_material(
     {
         return Err(invalid_evaluation_key_share_proof(
             "relinearization source witness shape does not match proof statement",
+        ));
+    }
+    if input.proof_family == EvaluationKeyShareProofFamily::Relinearization {
+        let is_round_one = relinearization_record_uses_same_secret_source(input.proof_record);
+        if is_round_one {
+            if !input
+                .witness
+                .round_one_aggregate_source_coefficients_by_digit
+                .is_empty()
+            {
+                return Err(invalid_evaluation_key_share_proof(
+                    "round-one relinearization proof generation must not include round-one aggregate source witness material",
+                ));
+            }
+        } else if input
+            .witness
+            .round_one_aggregate_source_coefficients_by_digit
+            .len()
+            != input.component_b_by_digit.len()
+            || input
+                .witness
+                .round_one_aggregate_source_coefficients_by_digit
+                .iter()
+                .any(|source| source.len() != ring_degree)
+        {
+            return Err(invalid_evaluation_key_share_proof(
+                "round-one aggregate source witness shape does not match proof statement",
+            ));
+        }
+        let source_bound = relinearization_source_witness_bound(input.proof_record, ring_degree)?;
+        let secret_coefficients = input
+            .witness
+            .secret_coefficients
+            .iter()
+            .map(|coefficient| i128::from(*coefficient))
+            .collect::<Vec<_>>();
+        for (digit_index, source_coefficients) in input
+            .witness
+            .relinearization_source_coefficients_by_digit
+            .iter()
+            .enumerate()
+        {
+            if is_round_one {
+                if source_coefficients != &secret_coefficients {
+                    return Err(invalid_evaluation_key_share_proof(format!(
+                        "round-one relinearization source witness must equal the same-secret witness at digit {digit_index}"
+                    )));
+                }
+            } else {
+                let expected_source = negacyclic_i128_product_lifted(
+                    &secret_coefficients,
+                    &input
+                        .witness
+                        .round_one_aggregate_source_coefficients_by_digit[digit_index],
+                )?;
+                if source_coefficients != &expected_source {
+                    return Err(invalid_evaluation_key_share_proof(format!(
+                        "round-two relinearization source witness must equal the trustee secret times the accepted round-one aggregate source at digit {digit_index}"
+                    )));
+                }
+            }
+            if source_coefficients
+                .iter()
+                .any(|coefficient| match coefficient.checked_abs() {
+                    Some(magnitude) => magnitude > source_bound,
+                    None => true,
+                })
+            {
+                return Err(invalid_evaluation_key_share_proof(
+                    "relinearization source witness exceeds the accepted no-wrap source bound",
+                ));
+            }
+        }
+    } else if !input
+        .witness
+        .relinearization_source_coefficients_by_digit
+        .is_empty()
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "Galois proof generation must not include relinearization source witness material",
+        ));
+    } else if !input
+        .witness
+        .round_one_aggregate_source_coefficients_by_digit
+        .is_empty()
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "Galois proof generation must not include round-one aggregate source witness material",
         ));
     }
 
@@ -615,8 +1192,13 @@ fn evaluation_key_share_lnp_statement_value(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let source_relation = match input.proof_family {
+        EvaluationKeyShareProofFamily::Relinearization
+            if relinearization_record_uses_same_secret_source(input.proof_record) =>
+        {
+            "round-one source response is the same response vector as the committed trustee secret"
+        }
         EvaluationKeyShareProofFamily::Relinearization => {
-            "hidden source response is bound as the relinearization source s^2; quadratic source-square proof closure remains review-gated"
+            "round-two source response is bound as a hidden contribution to the aggregate squared secret; aggregate-square proof closure remains review-gated"
         }
         EvaluationKeyShareProofFamily::Galois => {
             "source response is the public Galois automorphism applied to the same-secret response"
@@ -649,7 +1231,7 @@ fn evaluation_key_share_lnp_statement_value(
         "relation": "for every digit j and limb l, b_j,l + a_j,l*s - p*e_j - source_j,l - q_l*v_j,l = 0 over lifted integers",
         "sourceRelation": source_relation,
         "nonClosure": match input.proof_family {
-            EvaluationKeyShareProofFamily::Relinearization => "linear key-switch relation, same-secret binding, public component material, tbox byte layout, response bounds, and source-square record binding are verified; quadratic source-square tbox closure plus external AB-DLOP/LNP soundness and zero-knowledge review remain pending",
+            EvaluationKeyShareProofFamily::Relinearization => "linear key-switch relation, same-secret binding, round-one same-secret source response, public component material, tbox byte layout, response bounds, and relinearization source record binding are verified; round-two aggregate-square source proof closure plus external AB-DLOP/LNP soundness and zero-knowledge review remain pending",
             EvaluationKeyShareProofFamily::Galois => "linear key-switch relation, same-secret binding, Galois automorphism source response, public component material, tbox byte layout, and response bounds are verified; external AB-DLOP/LNP soundness and zero-knowledge review remain pending",
         },
     });
@@ -657,6 +1239,11 @@ fn evaluation_key_share_lnp_statement_value(
         json!(input.proof_family.tbox_parameter_profile_hash()?);
 
     Ok(statement)
+}
+
+fn relinearization_record_uses_same_secret_source(proof_record: &Value) -> bool {
+    proof_record.get("objectType").and_then(Value::as_str)
+        == Some(RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE)
 }
 
 fn proof_record_statement_projection(record: &Value) -> Value {
@@ -713,7 +1300,52 @@ fn evaluation_key_share_lnp_statement_hash(
     ))
 }
 
-fn component_b_vectors_from_record(
+pub(super) fn component_b_vectors_from_record(
+    proof_family: EvaluationKeyShareProofFamily,
+    record: &Value,
+    transported_key_switch_component_material: Option<&Value>,
+) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+    match string_field(record, "keySwitchMaterialEncoding")? {
+        "embedded-full-key-switch-component-vectors" => {
+            if record.get("keySwitchComponentMaterialRoot").is_some()
+                || record.get("keySwitchComponentChunkSizeBytes").is_some()
+                || record.get("keySwitchComponentChunkCount").is_some()
+                || record.get("keySwitchComponentTotalByteLength").is_some()
+                || record.get("keySwitchComponentFullObjectHash").is_some()
+                || record.get("keySwitchComponentChunkRoot").is_some()
+                || record.get("keySwitchComponentChunkHashes").is_some()
+            {
+                return Err(invalid_evaluation_key_share_proof(
+                    "embedded evaluation-key component material must not include transported component references",
+                ));
+            }
+            component_b_vectors_from_embedded_record(proof_family, record)
+        }
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING => {
+            if record.get("keySwitchComponentVectors").is_some() {
+                return Err(invalid_evaluation_key_share_proof(
+                    "binary evaluation-key component material must not embed keySwitchComponentVectors",
+                ));
+            }
+            let transported_material_set =
+                transported_key_switch_component_material.ok_or_else(|| {
+                    invalid_evaluation_key_share_proof(
+                        "transported evaluation-key component material is required by binary keySwitchMaterialEncoding",
+                    )
+                })?;
+            component_b_vectors_from_transported_material(
+                proof_family,
+                record,
+                transported_material_set,
+            )
+        }
+        _ => Err(invalid_evaluation_key_share_proof(
+            "evaluation-key keySwitchMaterialEncoding is not accepted",
+        )),
+    }
+}
+
+fn component_b_vectors_from_embedded_record(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
@@ -811,6 +1443,378 @@ fn component_b_vectors_from_record(
     {
         return Err(invalid_evaluation_key_share_proof(
             "evaluation-key component vector root does not match embedded public material",
+        ));
+    }
+
+    Ok(component_b_by_digit)
+}
+
+fn component_b_vectors_from_transported_material(
+    proof_family: EvaluationKeyShareProofFamily,
+    record: &Value,
+    material_set: &Value,
+) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+    if material_set.get("objectType").and_then(Value::as_str)
+        != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
+        || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
+        || material_set.get("setupProfileId").and_then(Value::as_str)
+            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+        || material_set
+            .get("setupProofProfileId")
+            .and_then(Value::as_str)
+            != Some(SETUP_PROOF_PROFILE_ID)
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material set header is invalid",
+        ));
+    }
+    let expected_material_root = string_field(record, "keySwitchComponentMaterialRoot")?;
+    let component_materials = array_field(material_set, "componentMaterials")?;
+    let mut matching_component_material = None;
+    for component_material in component_materials {
+        if string_field(component_material, "keySwitchComponentMaterialRoot")?
+            != expected_material_root
+        {
+            continue;
+        }
+        if matching_component_material.is_some() {
+            return Err(invalid_evaluation_key_share_proof(
+                "transported evaluation-key component material contains duplicate keySwitchComponentMaterialRoot entries",
+            ));
+        }
+        matching_component_material = Some(component_material);
+    }
+    let component_material = matching_component_material.ok_or_else(|| {
+        invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material is missing the requested keySwitchComponentMaterialRoot",
+        )
+    })?;
+    verify_evaluation_key_share_component_material_header(
+        proof_family,
+        record,
+        component_material,
+    )?;
+    let chunks = evaluation_key_share_component_material_chunks(component_material)?;
+    let transport_hashes = evaluation_key_share_component_material_transport_hashes(
+        proof_family,
+        &chunks,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )?;
+    verify_evaluation_key_share_component_material_hash_fields(
+        component_material,
+        &transport_hashes,
+        "transported evaluation-key component material",
+    )?;
+    verify_evaluation_key_share_component_material_hash_fields(
+        record,
+        &transport_hashes,
+        "evaluation-key component material reference",
+    )?;
+    let canonical_material_root = evaluation_key_share_component_material_reference_root(
+        proof_family,
+        record,
+        &transport_hashes,
+    )?;
+    if expected_material_root != canonical_material_root {
+        return Err(invalid_evaluation_key_share_proof(
+            "evaluation-key component material root must match the canonical transported material reference",
+        ));
+    }
+    let total_byte_length = usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key transported component material length does not fit usize",
+        )
+    })?;
+    let mut material_bytes = Vec::with_capacity(total_byte_length);
+    for chunk in chunks {
+        material_bytes.extend_from_slice(&chunk);
+    }
+
+    decode_evaluation_key_share_component_vectors(proof_family, record, &material_bytes)
+}
+
+fn verify_evaluation_key_share_component_material_header(
+    proof_family: EvaluationKeyShareProofFamily,
+    record: &Value,
+    component_material: &Value,
+) -> CanonicalResult<()> {
+    if component_material.get("objectType").and_then(Value::as_str)
+        != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE)
+        || component_material
+            .get("objectVersion")
+            .and_then(Value::as_u64)
+            != Some(1)
+        || component_material
+            .get("setupProfileId")
+            .and_then(Value::as_str)
+            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+        || component_material
+            .get("setupProofProfileId")
+            .and_then(Value::as_str)
+            != Some(SETUP_PROOF_PROFILE_ID)
+        || component_material
+            .get("proofFamily")
+            .and_then(Value::as_str)
+            != Some(proof_family.proof_family())
+        || component_material
+            .get("keySwitchMaterialEncoding")
+            .and_then(Value::as_str)
+            != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING)
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material header is invalid",
+        ));
+    }
+    for field_name in [
+        "trusteeIdentity",
+        "trusteeRosterPosition",
+        "keySwitchDomain",
+        "keySwitchSeedHex",
+        "level",
+        "ringDegree",
+        "keySwitchComponentVectorRoot",
+    ] {
+        if component_material.get(field_name) != record.get(field_name) {
+            return Err(invalid_evaluation_key_share_proof(format!(
+                "transported evaluation-key component material {field_name} must match the proof record"
+            )));
+        }
+    }
+    let level = value_u64(record, "level")?;
+    let digit_count = level.checked_add(1).ok_or_else(|| {
+        invalid_evaluation_key_share_proof("evaluation-key digit count overflowed")
+    })?;
+    if component_material.get("digitCount").and_then(Value::as_u64) != Some(digit_count)
+        || component_material
+            .get("rnsLimbCount")
+            .and_then(Value::as_u64)
+            != Some(digit_count)
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material digit and limb counts must match the proof level",
+        ));
+    }
+
+    Ok(())
+}
+
+fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
+    if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
+        return Err(invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material chunkSizeBytes must match the setup transport profile",
+        ));
+    }
+    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
+        invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material chunkCount does not fit usize",
+        )
+    })?;
+    let chunk_values = array_field(value, "chunks")?;
+    if chunk_values.len() != expected_chunk_count {
+        return Err(invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material chunks length must match chunkCount",
+        ));
+    }
+    let mut chunks = Vec::with_capacity(expected_chunk_count);
+    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
+        let observed_chunk_index = value_usize(chunk_value, "chunkIndex")?;
+        if observed_chunk_index != expected_chunk_index {
+            return Err(invalid_evaluation_key_share_proof(
+                "transported evaluation-key component material chunks must be in ascending chunk-index order",
+            ));
+        }
+        let bytes_hex = string_field(chunk_value, "bytesHex")?;
+        chunks.push(crate::transcript_core::decode_hex(bytes_hex)?);
+    }
+
+    Ok(chunks)
+}
+
+fn verify_evaluation_key_share_component_material_hash_fields(
+    value: &Value,
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
+    value_name: &str,
+) -> CanonicalResult<()> {
+    if value_u64(value, "chunkSizeBytes")
+        .or_else(|_| value_u64(value, "keySwitchComponentChunkSizeBytes"))?
+        != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
+        || value_u64(value, "chunkCount")
+            .or_else(|_| value_u64(value, "keySwitchComponentChunkCount"))?
+            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "evaluation-key component material chunk count does not fit u64",
+                )
+            })?
+        || value_u64(value, "totalByteLength")
+            .or_else(|_| value_u64(value, "keySwitchComponentTotalByteLength"))?
+            != transport_hashes.total_byte_length
+        || string_field(value, "fullObjectHash")
+            .or_else(|_| string_field(value, "keySwitchComponentFullObjectHash"))?
+            != transport_hashes.full_object_hash
+        || string_field(value, "chunkRoot")
+            .or_else(|_| string_field(value, "keySwitchComponentChunkRoot"))?
+            != transport_hashes.chunk_root
+    {
+        return Err(invalid_evaluation_key_share_proof(format!(
+            "{value_name} hash metadata does not match supplied chunks"
+        )));
+    }
+    let chunk_hash_values = value
+        .get("chunkHashes")
+        .or_else(|| value.get("keySwitchComponentChunkHashes"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_evaluation_key_share_proof(format!(
+                "{value_name} must list every component material chunk hash"
+            ))
+        })?;
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(invalid_evaluation_key_share_proof(format!(
+            "{value_name} chunk hash count must match supplied chunks"
+        )));
+    }
+    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+    {
+        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
+            return Err(invalid_evaluation_key_share_proof(format!(
+                "{value_name} chunk hashes must match supplied chunks"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn decode_evaluation_key_share_component_vectors(
+    proof_family: EvaluationKeyShareProofFamily,
+    record: &Value,
+    material_bytes: &[u8],
+) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+    let mut cursor = 0_usize;
+    let magic = read_fixed::<8>(material_bytes, &mut cursor)?;
+    if &magic != EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC {
+        return Err(invalid_evaluation_key_share_proof(
+            "evaluation-key component material has the wrong format marker",
+        ));
+    }
+    let level = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
+        invalid_evaluation_key_share_proof(
+            "evaluation-key component material level does not fit usize",
+        )
+    })?;
+    let ring_degree = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
+        invalid_evaluation_key_share_proof(
+            "evaluation-key component material ringDegree does not fit usize",
+        )
+    })?;
+    let digit_count = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
+        invalid_evaluation_key_share_proof(
+            "evaluation-key component material digit count does not fit usize",
+        )
+    })?;
+    let limb_count = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
+        invalid_evaluation_key_share_proof(
+            "evaluation-key component material limb count does not fit usize",
+        )
+    })?;
+    if level != value_usize(record, "level")?
+        || ring_degree != value_usize(record, "ringDegree")?
+        || ring_degree == 0
+        || ring_degree > POLYNOMIAL_DEGREE
+        || digit_count
+            != level.checked_add(1).ok_or_else(|| {
+                invalid_evaluation_key_share_proof("evaluation-key digit count overflowed")
+            })?
+        || limb_count != digit_count
+        || limb_count == 0
+        || limb_count > DATA_PRIMES.len()
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "evaluation-key component material shape does not match the proof record",
+        ));
+    }
+    let key_switch_domain = string_field(record, "keySwitchDomain")?;
+    let key_switch_seed_hex = string_field(record, "keySwitchSeedHex")?;
+    validate_hex_string(key_switch_seed_hex, "keySwitchSeedHex")?;
+    let mut component_b_by_digit = vec![vec![Vec::<u64>::new(); limb_count]; digit_count];
+    let mut entries = Vec::with_capacity(digit_count * limb_count);
+    for expected_digit_index in 0..digit_count {
+        for expected_rns_limb_index in 0..limb_count {
+            let digit_index =
+                usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key component material digit index does not fit usize",
+                    )
+                })?;
+            let rns_limb_index =
+                usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key component material RNS limb index does not fit usize",
+                    )
+                })?;
+            let rns_prime = read_u64(material_bytes, &mut cursor)?;
+            let coefficient_count = usize::try_from(read_u64(material_bytes, &mut cursor)?)
+                .map_err(|_| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key component material coefficient count does not fit usize",
+                    )
+                })?;
+            if digit_index != expected_digit_index
+                || rns_limb_index != expected_rns_limb_index
+                || rns_limb_index >= DATA_PRIMES.len()
+                || rns_prime != DATA_PRIMES[rns_limb_index]
+                || coefficient_count != ring_degree
+            {
+                return Err(invalid_evaluation_key_share_proof(
+                    "evaluation-key component material record order or metadata is invalid",
+                ));
+            }
+            let mut coefficients = Vec::with_capacity(ring_degree);
+            for _ in 0..ring_degree {
+                let coefficient = read_u64(material_bytes, &mut cursor)?;
+                if coefficient >= DATA_PRIMES[rns_limb_index] {
+                    return Err(invalid_evaluation_key_share_proof(
+                        "evaluation-key component material contains non-canonical Q_share residues",
+                    ));
+                }
+                coefficients.push(coefficient);
+            }
+            entries.push(json!({
+                "digitIndex": digit_index,
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": DATA_PRIMES[rns_limb_index],
+                "component": "b",
+                "coefficientByteLength": ring_degree.checked_mul(8).ok_or_else(|| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key coefficient byte length overflowed",
+                    )
+                })?,
+                "coefficientVectorHash512": evaluation_key_share_component_vector_hash(&coefficients),
+                "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
+            }));
+            component_b_by_digit[digit_index][rns_limb_index] = coefficients;
+        }
+    }
+    if cursor != material_bytes.len() {
+        return Err(invalid_evaluation_key_share_proof(
+            "evaluation-key component material has trailing bytes",
+        ));
+    }
+    let expected_root = evaluation_key_share_component_vector_root(
+        proof_family,
+        key_switch_domain,
+        key_switch_seed_hex,
+        level,
+        ring_degree,
+        &entries,
+    )?;
+    if string_field(record, "keySwitchComponentVectorRoot")? != expected_root {
+        return Err(invalid_evaluation_key_share_proof(
+            "evaluation-key component vector root does not match transported public material",
         ));
     }
 
@@ -979,6 +1983,7 @@ fn read_evaluation_key_share_relation_commitment(
 
 fn verify_evaluation_key_share_response_bounds(
     proof_family: EvaluationKeyShareProofFamily,
+    proof_record: &Value,
     challenge: u64,
     component_b_by_digit: &[Vec<Vec<u64>>],
     parsed_proof: &ParsedEvaluationKeyShareLnpProof,
@@ -1018,8 +2023,11 @@ fn verify_evaluation_key_share_response_bounds(
         )?;
     }
     if proof_family == EvaluationKeyShareProofFamily::Relinearization {
-        let source_response_bound =
-            evaluation_key_share_relinearization_source_response_bound(challenge, ring_degree)?;
+        let source_response_bound = evaluation_key_share_relinearization_source_response_bound(
+            challenge,
+            proof_record,
+            ring_degree,
+        )?;
         for source_response in &parsed_proof.relinearization_source_response_by_digit {
             verify_i128_vector_bound(
                 source_response,
@@ -1114,6 +2122,19 @@ fn verify_evaluation_key_share_key_switch_responses(
     let ring_degree = value_usize(proof_record, "ringDegree")?;
     let key_switch_domain = string_field(proof_record, "keySwitchDomain")?;
     let key_switch_seed_hex = string_field(proof_record, "keySwitchSeedHex")?;
+    if proof_family == EvaluationKeyShareProofFamily::Relinearization
+        && relinearization_record_uses_same_secret_source(proof_record)
+    {
+        for (digit_index, source_response) in
+            relinearization_source_response_by_digit.iter().enumerate()
+        {
+            if source_response != secret_response_coefficients {
+                return Err(invalid_evaluation_key_share_proof(format!(
+                    "relinearization round-one source response must match the same-secret response at digit {digit_index}"
+                )));
+            }
+        }
+    }
     let galois_element = proof_record
         .get("rotation")
         .and_then(Value::as_u64)
@@ -1252,7 +2273,6 @@ fn verify_evaluation_key_share_key_switch_responses(
     Ok(())
 }
 
-#[cfg(test)]
 struct EvaluationKeyShareMasks {
     secret_masks: Vec<i128>,
     negative_indicator_masks: Vec<i128>,
@@ -1262,7 +2282,6 @@ struct EvaluationKeyShareMasks {
     carry_masks_by_digit_by_limb: Vec<Vec<Vec<i128>>>,
 }
 
-#[cfg(test)]
 struct EvaluationKeyShareResponses {
     secret_response_coefficients: Vec<i128>,
     negative_indicator_response_coefficients: Vec<i128>,
@@ -1272,7 +2291,6 @@ struct EvaluationKeyShareResponses {
     carry_response_by_digit_by_limb: Vec<Vec<Vec<i128>>>,
 }
 
-#[cfg(test)]
 fn sample_evaluation_key_share_masks(
     input: &EvaluationKeyShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<EvaluationKeyShareMasks> {
@@ -1341,20 +2359,24 @@ fn sample_evaluation_key_share_masks(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let relinearization_source_masks_by_digit =
         if input.proof_family == EvaluationKeyShareProofFamily::Relinearization {
-            (0..digit_count)
-                .map(|digit_index| {
-                    (0..ring_degree)
-                        .map(|coefficient_index| {
-                            sample_signed_mask_i128(
-                                EVALUATION_KEY_SHARE_SOURCE_MASK_DOMAIN,
-                                input.proof_randomness_seed_hex,
-                                &[digit_index as u64, coefficient_index as u64],
-                                EVALUATION_KEY_SHARE_SOURCE_MASK_BITS,
-                            )
-                        })
-                        .collect::<CanonicalResult<Vec<_>>>()
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?
+            if relinearization_record_uses_same_secret_source(input.proof_record) {
+                vec![secret_masks.clone(); digit_count]
+            } else {
+                (0..digit_count)
+                    .map(|digit_index| {
+                        (0..ring_degree)
+                            .map(|coefficient_index| {
+                                sample_signed_mask_i128(
+                                    EVALUATION_KEY_SHARE_SOURCE_MASK_DOMAIN,
+                                    input.proof_randomness_seed_hex,
+                                    &[digit_index as u64, coefficient_index as u64],
+                                    EVALUATION_KEY_SHARE_SOURCE_MASK_BITS,
+                                )
+                            })
+                            .collect::<CanonicalResult<Vec<_>>>()
+                    })
+                    .collect::<CanonicalResult<Vec<_>>>()?
+            }
         } else {
             Vec::new()
         };
@@ -1391,7 +2413,6 @@ fn sample_evaluation_key_share_masks(
     })
 }
 
-#[cfg(test)]
 fn key_switch_relation_commitments_from_masks(
     input: &EvaluationKeyShareLnpProofGenerationInput<'_>,
     masks: &EvaluationKeyShareMasks,
@@ -1504,7 +2525,6 @@ fn key_switch_relation_commitments_from_masks(
         .collect()
 }
 
-#[cfg(test)]
 fn secret_commitment_relation_commitments_from_masks(
     input: &EvaluationKeyShareLnpProofGenerationInput<'_>,
     masks: &EvaluationKeyShareMasks,
@@ -1539,7 +2559,6 @@ fn secret_commitment_relation_commitments_from_masks(
         .collect()
 }
 
-#[cfg(test)]
 fn evaluation_key_share_responses(
     input: &EvaluationKeyShareLnpProofGenerationInput<'_>,
     masks: &EvaluationKeyShareMasks,
@@ -1727,7 +2746,6 @@ fn evaluation_key_share_responses(
     })
 }
 
-#[cfg(test)]
 fn key_switch_carry_witnesses(
     input: &EvaluationKeyShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<Vec<Vec<Vec<i128>>>> {
@@ -1961,16 +2979,33 @@ fn evaluation_key_share_randomness_response_bound(challenge: u64) -> CanonicalRe
 
 fn evaluation_key_share_relinearization_source_response_bound(
     challenge: u64,
+    proof_record: &Value,
     ring_degree: usize,
 ) -> CanonicalResult<i128> {
     evaluation_key_share_response_bound(
         EVALUATION_KEY_SHARE_SOURCE_MASK_BITS,
         challenge,
-        i128::try_from(ring_degree).map_err(|_| {
-            invalid_evaluation_key_share_proof("evaluation-key ringDegree does not fit i128")
-        })?,
+        relinearization_source_witness_bound(proof_record, ring_degree)?,
         "relinearization source response",
     )
+}
+
+fn relinearization_source_witness_bound(
+    proof_record: &Value,
+    ring_degree: usize,
+) -> CanonicalResult<i128> {
+    let ring_degree = i128::try_from(ring_degree).map_err(|_| {
+        invalid_evaluation_key_share_proof("evaluation-key ringDegree does not fit i128")
+    })?;
+    if relinearization_record_uses_same_secret_source(proof_record) {
+        return Ok(ring_degree);
+    }
+
+    ring_degree
+        .checked_mul(EVALUATION_KEY_SHARE_ROUND_TWO_AGGREGATE_SOURCE_PARTICIPANT_BOUND)
+        .ok_or_else(|| {
+            invalid_evaluation_key_share_proof("round-two relinearization source bound overflowed")
+        })
 }
 
 fn evaluation_key_share_carry_response_bound(
@@ -2136,14 +3171,10 @@ fn negacyclic_public_sample_secret_product_lifted(
     Ok(output)
 }
 
-#[cfg(test)]
-pub(super) fn negacyclic_i128_product_for_evaluation_key_fixture(
-    left: &[i128],
-    right: &[i128],
-) -> CanonicalResult<Vec<i128>> {
+fn negacyclic_i128_product_lifted(left: &[i128], right: &[i128]) -> CanonicalResult<Vec<i128>> {
     if left.len() != right.len() {
         return Err(invalid_evaluation_key_share_proof(
-            "evaluation-key product fixture inputs must have equal width",
+            "evaluation-key source product inputs must have equal width",
         ));
     }
     let ring_degree = left.len();
@@ -2152,18 +3183,16 @@ pub(super) fn negacyclic_i128_product_for_evaluation_key_fixture(
         for (right_index, right_value) in right.iter().enumerate() {
             let product = left_value.checked_mul(*right_value).ok_or_else(|| {
                 invalid_evaluation_key_share_proof(
-                    "evaluation-key fixture product multiplication overflowed",
+                    "evaluation-key source product multiplication overflowed",
                 )
             })?;
             let raw_index = left_index.checked_add(right_index).ok_or_else(|| {
-                invalid_evaluation_key_share_proof(
-                    "evaluation-key fixture product index overflowed",
-                )
+                invalid_evaluation_key_share_proof("evaluation-key source product index overflowed")
             })?;
             if raw_index < ring_degree {
                 output[raw_index] = output[raw_index].checked_add(product).ok_or_else(|| {
                     invalid_evaluation_key_share_proof(
-                        "evaluation-key fixture product accumulation overflowed",
+                        "evaluation-key source product accumulation overflowed",
                     )
                 })?;
             } else {
@@ -2171,7 +3200,7 @@ pub(super) fn negacyclic_i128_product_for_evaluation_key_fixture(
                     .checked_sub(product)
                     .ok_or_else(|| {
                         invalid_evaluation_key_share_proof(
-                            "evaluation-key fixture product accumulation overflowed",
+                            "evaluation-key source product accumulation overflowed",
                         )
                     })?;
             }
@@ -2179,6 +3208,14 @@ pub(super) fn negacyclic_i128_product_for_evaluation_key_fixture(
     }
 
     Ok(output)
+}
+
+#[cfg(test)]
+pub(super) fn negacyclic_i128_product_for_evaluation_key_fixture(
+    left: &[i128],
+    right: &[i128],
+) -> CanonicalResult<Vec<i128>> {
+    negacyclic_i128_product_lifted(left, right)
 }
 
 #[cfg(test)]
@@ -2299,7 +3336,6 @@ fn signed_i128_residue_u64(value: i128, modulus: u64) -> CanonicalResult<u64> {
     })
 }
 
-#[cfg(test)]
 fn encode_evaluation_key_share_lnp_tbox_prefix(
     proof_family: EvaluationKeyShareProofFamily,
     layout: &super::setup_proof::SetupProofLnpTboxLayout,
@@ -2342,7 +3378,6 @@ fn encode_evaluation_key_share_lnp_tbox_prefix(
     Ok(writer.into_bytes())
 }
 
-#[cfg(test)]
 fn encode_evaluation_key_share_lnp_tbox_suffix(
     prefix_bytes: &mut Vec<u8>,
     layout: &super::setup_proof::SetupProofLnpTboxLayout,
@@ -2402,7 +3437,6 @@ fn encode_evaluation_key_share_lnp_tbox_suffix(
     Ok(())
 }
 
-#[cfg(test)]
 fn encode_evaluation_key_share_lnp_uniform_polyvec(
     proof_family: EvaluationKeyShareProofFamily,
     writer: &mut EvaluationKeyShareLnpBitWriter<'_>,
@@ -2445,7 +3479,6 @@ fn encode_evaluation_key_share_lnp_uniform_polyvec(
     Ok(())
 }
 
-#[cfg(test)]
 fn encode_evaluation_key_share_lnp_zero_hint_polyvec(
     writer: &mut EvaluationKeyShareLnpBitWriter<'_>,
     polynomial_count: usize,
@@ -2464,7 +3497,6 @@ fn encode_evaluation_key_share_lnp_zero_hint_polyvec(
     Ok(())
 }
 
-#[cfg(test)]
 fn encode_evaluation_key_share_lnp_zero_gaussian_polyvec(
     writer: &mut EvaluationKeyShareLnpBitWriter<'_>,
     polynomial_count: usize,
@@ -2487,19 +3519,16 @@ fn encode_evaluation_key_share_lnp_zero_gaussian_polyvec(
     Ok(())
 }
 
-#[cfg(test)]
 enum EvaluationKeyShareLnpBitWriterStorage<'a> {
     Owned(Vec<u8>),
     Borrowed(&'a mut Vec<u8>),
 }
 
-#[cfg(test)]
 struct EvaluationKeyShareLnpBitWriter<'a> {
     storage: EvaluationKeyShareLnpBitWriterStorage<'a>,
     bit_offset: usize,
 }
 
-#[cfg(test)]
 impl<'a> EvaluationKeyShareLnpBitWriter<'a> {
     fn new() -> Self {
         Self {
@@ -2560,7 +3589,6 @@ impl<'a> EvaluationKeyShareLnpBitWriter<'a> {
     }
 }
 
-#[cfg(test)]
 fn sample_nonnegative_mask_i128(
     domain: &str,
     proof_randomness_seed_hex: &str,
@@ -2580,7 +3608,6 @@ fn sample_nonnegative_mask_i128(
         .ok_or_else(|| invalid_evaluation_key_share_proof("evaluation-key mask overflowed"))
 }
 
-#[cfg(test)]
 fn sample_signed_mask_i128(
     domain: &str,
     proof_randomness_seed_hex: &str,
@@ -2609,7 +3636,6 @@ fn sample_signed_mask_i128(
     }
 }
 
-#[cfg(test)]
 fn sample_unsigned_i128(
     domain: &str,
     proof_randomness_seed_hex: &str,
@@ -2642,7 +3668,6 @@ fn sample_unsigned_i128(
     Ok(value)
 }
 
-#[cfg(test)]
 fn hash_hex_to_fixed_bytes(hash_hex: &str) -> CanonicalResult<[u8; 64]> {
     if hash_hex.len() != 128 {
         return Err(invalid_evaluation_key_share_proof(
@@ -2754,21 +3779,18 @@ fn read_bytes(proof_bytes: &[u8], cursor: &mut usize, length: usize) -> Canonica
     Ok(bytes.to_vec())
 }
 
-#[cfg(test)]
 fn write_i128_matrix3(output: &mut Vec<u8>, values: &[Vec<Vec<i128>>]) {
     for matrix in values {
         write_i128_matrix(output, matrix);
     }
 }
 
-#[cfg(test)]
 fn write_i128_matrix(output: &mut Vec<u8>, values: &[Vec<i128>]) {
     for vector in values {
         write_i128_vector(output, vector);
     }
 }
 
-#[cfg(test)]
 fn write_i128_vector(output: &mut Vec<u8>, values: &[i128]) {
     for value in values {
         output.extend_from_slice(&value.to_le_bytes());
@@ -2785,6 +3807,10 @@ fn write_setup_commitments(output: &mut Vec<u8>, commitments: &[SetupCommitmentV
             }
         }
     }
+}
+
+fn write_u64(output: &mut Vec<u8>, value: u64) {
+    output.extend_from_slice(&value.to_le_bytes());
 }
 
 fn value_usize(value: &Value, field_name: &str) -> CanonicalResult<usize> {
@@ -2812,11 +3838,190 @@ fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a s
         })
 }
 
+fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Value> {
+    value
+        .get(field_name)
+        .filter(|field| field.is_object())
+        .ok_or_else(|| {
+            invalid_evaluation_key_share_proof(format!("{field_name} must be an object"))
+        })
+}
+
 fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
     value
         .get(field_name)
         .and_then(Value::as_array)
         .ok_or_else(|| invalid_evaluation_key_share_proof(format!("{field_name} must be an array")))
+}
+
+fn setup_commitment_values_field(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<SetupCommitmentValue>> {
+    array_field(value, field_name)?
+        .iter()
+        .map(parse_setup_commitment_full_value)
+        .collect()
+}
+
+fn i64_vector_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<i64>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(item_index, item)| {
+            decimal_i128_value(item)
+                .and_then(|item| i64::try_from(item).ok())
+                .ok_or_else(|| {
+                    invalid_evaluation_key_share_proof(format!(
+                        "{field_name}.{item_index} must be a signed 64-bit integer"
+                    ))
+                })
+        })
+        .collect()
+}
+
+fn i64_matrix_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<i64>>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            row.as_array()
+                .ok_or_else(|| {
+                    invalid_evaluation_key_share_proof(format!(
+                        "{field_name}.{row_index} must be an array"
+                    ))
+                })?
+                .iter()
+                .enumerate()
+                .map(|(column_index, item)| {
+                    decimal_i128_value(item)
+                        .and_then(|item| i64::try_from(item).ok())
+                        .ok_or_else(|| {
+                            invalid_evaluation_key_share_proof(format!(
+                                "{field_name}.{row_index}.{column_index} must be a signed 64-bit integer"
+                            ))
+                        })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn i128_matrix_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<i128>>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            row.as_array()
+                .ok_or_else(|| {
+                    invalid_evaluation_key_share_proof(format!(
+                        "{field_name}.{row_index} must be an array"
+                    ))
+                })?
+                .iter()
+                .enumerate()
+                .map(|(column_index, item)| {
+                    decimal_i128_value(item).ok_or_else(|| {
+                        invalid_evaluation_key_share_proof(format!(
+                            "{field_name}.{row_index}.{column_index} must be a signed integer or decimal string"
+                        ))
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn i128_matrix3_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<Vec<i128>>>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(outer_index, middle_value)| {
+            middle_value
+                .as_array()
+                .ok_or_else(|| {
+                    invalid_evaluation_key_share_proof(format!(
+                        "{field_name}.{outer_index} must be an array"
+                    ))
+                })?
+                .iter()
+                .enumerate()
+                .map(|(middle_index, inner_value)| {
+                    inner_value
+                        .as_array()
+                        .ok_or_else(|| {
+                            invalid_evaluation_key_share_proof(format!(
+                                "{field_name}.{outer_index}.{middle_index} must be an array"
+                            ))
+                        })?
+                        .iter()
+                        .enumerate()
+                        .map(|(inner_index, item)| {
+                            decimal_i128_value(item).ok_or_else(|| {
+                                invalid_evaluation_key_share_proof(format!(
+                                    "{field_name}.{outer_index}.{middle_index}.{inner_index} must be a signed integer or decimal string"
+                                ))
+                            })
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn decimal_i128_value(value: &Value) -> Option<i128> {
+    if let Some(value) = value.as_i64() {
+        return Some(i128::from(value));
+    }
+    if let Some(value) = value.as_u64() {
+        return Some(i128::from(value));
+    }
+    value.as_str()?.parse::<i128>().ok()
+}
+
+fn evaluation_key_share_proof_family_from_request(
+    value: &Value,
+) -> CanonicalResult<EvaluationKeyShareProofFamily> {
+    match string_field(value, "proofFamily")? {
+        "relinearization-key-share" => Ok(EvaluationKeyShareProofFamily::Relinearization),
+        "galois-key-share" => Ok(EvaluationKeyShareProofFamily::Galois),
+        _ => Err(invalid_evaluation_key_share_proof(
+            "proofFamily must be relinearization-key-share or galois-key-share",
+        )),
+    }
+}
+
+fn proof_randomness_source(value: &Value) -> CanonicalResult<&'static str> {
+    match value
+        .get("proofRandomnessSource")
+        .and_then(Value::as_str)
+        .unwrap_or("fresh-csprng")
+    {
+        "fresh-csprng" => Ok("fresh-csprng"),
+        "development-deterministic-fixture" => Ok("development-deterministic-fixture"),
+        _ => Err(invalid_evaluation_key_share_proof(
+            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
+        )),
+    }
+}
+
+fn validate_lowercase_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
+    if hash.len() == 128
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+
+    Err(invalid_evaluation_key_share_proof(format!(
+        "{field_name} must be lowercase 512-bit hex"
+    )))
+}
+
+fn validate_proof_randomness_seed(seed_hex: &str, field_name: &str) -> CanonicalResult<()> {
+    validate_lowercase_hash(seed_hex, field_name)
 }
 
 fn invalid_evaluation_key_share_proof(message: impl Into<String>) -> CanonicalError {

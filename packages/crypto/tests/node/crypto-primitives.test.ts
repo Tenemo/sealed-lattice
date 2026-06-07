@@ -243,10 +243,10 @@ describe('crypto primitive boundary', () => {
         ]);
         const encapsulationRandomnessBytesHex = hash512Hex(
             'test/private-vss-mailbox-encapsulation',
-            [new TextEncoder().encode('dealer-2-to-recipient-3')],
+            [new TextEncoder().encode('source-trustee-2-to-recipient-3')],
         ).slice(0, 64);
         const aeadNonceBytesHex = hash512Hex('test/private-vss-mailbox-nonce', [
-            new TextEncoder().encode('dealer-2-to-recipient-3'),
+            new TextEncoder().encode('source-trustee-2-to-recipient-3'),
         ]).slice(0, 24);
         const recipientMailboxKeyPair =
             createPrivateVssMailboxKeyPair(mailboxKeySeed);
@@ -263,7 +263,7 @@ describe('crypto primitive boundary', () => {
             rosterHash: deriveProtocolHash('RosterHash', {
                 roster: 'mailbox-test',
             }),
-            dealerIdentity: 'trustee-2',
+            sourceTrusteeIdentity: 'trustee-2',
             recipientIdentity: 'trustee-3',
             envelopeSequenceNumber: 23,
         };
@@ -274,7 +274,7 @@ describe('crypto primitive boundary', () => {
                 'PrivateVssEnvelopeAadHash',
                 privateEnvelopeAad,
             ),
-            dealerIdentity: 'trustee-2',
+            sourceTrusteeIdentity: 'trustee-2',
             recipientIdentity: 'trustee-3',
             rnsShareOpenings: [
                 {
@@ -500,12 +500,12 @@ describe('crypto primitive boundary', () => {
         const issuedVssAcceptanceRoot = deriveProtocolHash(
             'VssShareAcceptanceRoot',
             {
-                accepted: 'dealer-1',
+                accepted: 'source-trustee-1',
             },
         );
         const issuedVssComplaintRoots = [
             deriveProtocolHash('VssComplaintRoot', {
-                complaint: 'dealer-2',
+                complaint: 'source-trustee-2',
             }),
         ];
         const storageKeyBytesHex = '11'.repeat(32);

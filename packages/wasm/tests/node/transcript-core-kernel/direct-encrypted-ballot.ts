@@ -46,6 +46,8 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly scoreDomainMax: number;
     readonly tiePolicy: string;
     readonly workingLevel: number;
+    readonly evaluationKeyMaterialSource: string;
+    readonly publicEvaluationKeyMaterialHash?: string;
     readonly packedScoreRoot: string;
     readonly rankRoot: string;
     readonly targetProjection: string;
@@ -418,6 +420,7 @@ export const runDirectEncryptedBallot = (input: {
     readonly setupSeed?: string;
     readonly topCount?: number;
     readonly topCounts?: readonly number[];
+    readonly publicEvaluationKeyMaterial?: Record<string, unknown>;
     readonly targetFinalityPolicyHash?: string;
 }): Promise<DirectEncryptedBallotResult> => {
     const ballots = input.ballots ?? defaultDirectBallotInputs();
@@ -444,6 +447,12 @@ export const runDirectEncryptedBallot = (input: {
         ...(input.topCounts === undefined
             ? {}
             : { topCounts: input.topCounts }),
+        ...(input.publicEvaluationKeyMaterial === undefined
+            ? {}
+            : {
+                  publicEvaluationKeyMaterial:
+                      input.publicEvaluationKeyMaterial,
+              }),
         ...(input.targetFinalityPolicyHash === undefined
             ? {}
             : { targetFinalityPolicyHash: input.targetFinalityPolicyHash }),

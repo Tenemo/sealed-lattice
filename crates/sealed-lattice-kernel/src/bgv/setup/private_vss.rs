@@ -30,7 +30,7 @@ use super::{
 
 const PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "PrivateVssShareEnvelope";
 const PRIVATE_VSS_LIMB_OPENING_OBJECT_TYPE: &str = "PrivateVssShareLimbOpening";
-const VSS_DEALER_COMMITMENT_OBJECT_TYPE: &str = "VssDealerCoefficientCommitments";
+const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
 const FIRST_PROFILE_DECRYPTION_THRESHOLD: usize = 4;
 
@@ -63,10 +63,10 @@ impl PrivateVssRefusal {
     }
 }
 
-struct DealerCommitmentBinding {
-    dealer_identity: String,
-    dealer_roster_position: u64,
-    dealer_commitment_root: String,
+struct SourceTrusteeCommitmentBinding {
+    source_trustee_identity: String,
+    source_trustee_roster_position: u64,
+    source_trustee_commitment_root: String,
     coefficient_commitment_roots: BTreeMap<(usize, u64), String>,
 }
 
@@ -107,8 +107,8 @@ pub(crate) fn verify_private_vss_share_envelope_from_request(
         &[
             "setupContext",
             "publicMatrixSeedHash",
-            "dealerCoefficientCommitmentRecord",
-            "dealerCoefficientCommitmentMaterialRecords",
+            "sourceTrusteeCoefficientCommitmentRecord",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords",
             "privateEnvelope",
             "transportedPrivateVssShareProofMaterial",
             "expectedPrivateEnvelopeHash",
@@ -139,8 +139,8 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             "setupContext",
             "publicMatrixSeedHash",
             "privateEnvelopeAadHash",
-            "dealerCoefficientCommitmentRecord",
-            "dealerCoefficientCommitmentMaterialRecords",
+            "sourceTrusteeCoefficientCommitmentRecord",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords",
             "recipientIdentity",
             "recipientRosterPosition",
             "rnsLimbIndex",
@@ -186,30 +186,33 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     .map_err(private_vss_refusal_to_error)?;
     validate_hash_string(private_envelope_aad_hash, "privateEnvelopeAadHash")?;
 
-    let dealer_record = object_field(
+    let source_trustee_record = object_field(
         request,
-        "dealerCoefficientCommitmentRecord",
-        "dealerCoefficientCommitmentRecord",
-        "dealerCommitmentRecordMissing",
-        "dealerCoefficientCommitmentRecord must be provided for private VSS proof generation",
+        "sourceTrusteeCoefficientCommitmentRecord",
+        "sourceTrusteeCoefficientCommitmentRecord",
+        "sourceTrusteeCommitmentRecordMissing",
+        "sourceTrusteeCoefficientCommitmentRecord must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let dealer_binding =
-        verify_dealer_commitment_record(dealer_record, setup_context, public_matrix_seed_hash)?
-            .map_err(private_vss_refusal_to_error)?;
+    let source_trustee_binding = verify_source_trustee_commitment_record(
+        source_trustee_record,
+        setup_context,
+        public_matrix_seed_hash,
+    )?
+    .map_err(private_vss_refusal_to_error)?;
     let material_records = array_field(
         request,
-        "dealerCoefficientCommitmentMaterialRecords",
-        "dealerCoefficientCommitmentMaterialRecords",
-        "dealerCommitmentMaterialMissing",
-        "dealerCoefficientCommitmentMaterialRecords must be provided for private VSS proof generation",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords",
+        "sourceTrusteeCommitmentMaterialMissing",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
     let coefficient_commitments = verify_coefficient_commitment_material_records(
         material_records,
         setup_context,
         public_matrix_seed_hash,
-        &dealer_binding,
+        &source_trustee_binding,
     )?
     .map_err(private_vss_refusal_to_error)?;
 
@@ -304,7 +307,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         coefficient_commitment_roots.iter().enumerate()
     {
         let shamir_coefficient_index = shamir_coefficient_index as u64;
-        if dealer_binding
+        if source_trustee_binding
             .coefficient_commitment_roots
             .get(&(rns_limb_index, shamir_coefficient_index))
             .map(String::as_str)
@@ -312,7 +315,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "coefficientCommitmentRoots must match the public dealer commitment record",
+                "coefficientCommitmentRoots must match the public source trustee commitment record",
             ));
         }
         let Some(material_binding) =
@@ -320,7 +323,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         else {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "dealerCoefficientCommitmentMaterialRecords must include the requested proof limb",
+                "sourceTrusteeCoefficientCommitmentMaterialRecords must include the requested proof limb",
             ));
         };
         if material_binding.commitment_root != *commitment_root {
@@ -389,11 +392,11 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash,
-            dealer_identity: &dealer_binding.dealer_identity,
-            dealer_roster_position: dealer_binding.dealer_roster_position,
+            source_trustee_identity: &source_trustee_binding.source_trustee_identity,
+            source_trustee_roster_position: source_trustee_binding.source_trustee_roster_position,
             recipient_identity,
             recipient_roster_position,
-            dealer_commitment_root: &dealer_binding.dealer_commitment_root,
+            source_trustee_commitment_root: &source_trustee_binding.source_trustee_commitment_root,
             rns_limb_index,
             rns_prime,
             ring_degree,
@@ -413,8 +416,8 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "ok": true,
         "operation": "generatePrivateVssShareProof",
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "dealerIdentity": dealer_binding.dealer_identity,
-        "dealerRosterPosition": dealer_binding.dealer_roster_position,
+        "sourceTrusteeIdentity": source_trustee_binding.source_trustee_identity,
+        "sourceTrusteeRosterPosition": source_trustee_binding.source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
         "rnsLimbIndex": rns_limb_index,
@@ -457,14 +460,14 @@ fn verify_private_vss_share_envelope_inner(
         Ok(public_matrix_seed_hash) => public_matrix_seed_hash,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let dealer_record = match object_field(
+    let source_trustee_record = match object_field(
         request,
-        "dealerCoefficientCommitmentRecord",
-        "dealerCoefficientCommitmentRecord",
-        "dealerCommitmentRecordMissing",
-        "dealerCoefficientCommitmentRecord must be provided for private VSS verification",
+        "sourceTrusteeCoefficientCommitmentRecord",
+        "sourceTrusteeCoefficientCommitmentRecord",
+        "sourceTrusteeCommitmentRecordMissing",
+        "sourceTrusteeCoefficientCommitmentRecord must be provided for private VSS verification",
     ) {
-        Ok(dealer_record) => dealer_record,
+        Ok(source_trustee_record) => source_trustee_record,
         Err(refusal) => return Ok(Err(refusal)),
     };
     let private_envelope = match object_field(
@@ -478,20 +481,20 @@ fn verify_private_vss_share_envelope_inner(
         Err(refusal) => return Ok(Err(refusal)),
     };
 
-    let dealer_binding = match verify_dealer_commitment_record(
-        dealer_record,
+    let source_trustee_binding = match verify_source_trustee_commitment_record(
+        source_trustee_record,
         setup_context,
         public_matrix_seed_hash,
     )? {
-        Ok(dealer_binding) => dealer_binding,
+        Ok(source_trustee_binding) => source_trustee_binding,
         Err(refusal) => return Ok(Err(refusal)),
     };
     let material_records = match array_field(
         request,
-        "dealerCoefficientCommitmentMaterialRecords",
-        "dealerCoefficientCommitmentMaterialRecords",
-        "dealerCommitmentMaterialMissing",
-        "dealerCoefficientCommitmentMaterialRecords must provide full public commitment material for private VSS verification",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords",
+        "sourceTrusteeCommitmentMaterialMissing",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords must provide full public commitment material for private VSS verification",
     ) {
         Ok(material_records) => material_records,
         Err(refusal) => return Ok(Err(refusal)),
@@ -500,7 +503,7 @@ fn verify_private_vss_share_envelope_inner(
         material_records,
         setup_context,
         public_matrix_seed_hash,
-        &dealer_binding,
+        &source_trustee_binding,
     )? {
         Ok(coefficient_commitments) => coefficient_commitments,
         Err(refusal) => return Ok(Err(refusal)),
@@ -509,7 +512,7 @@ fn verify_private_vss_share_envelope_inner(
         private_envelope,
         setup_context,
         public_matrix_seed_hash,
-        &dealer_binding,
+        &source_trustee_binding,
     )? {
         Ok(envelope_binding) => envelope_binding,
         Err(refusal) => return Ok(Err(refusal)),
@@ -519,7 +522,7 @@ fn verify_private_vss_share_envelope_inner(
         request.get("transportedPrivateVssShareProofMaterial"),
         setup_context,
         public_matrix_seed_hash,
-        &dealer_binding,
+        &source_trustee_binding,
         &coefficient_commitments,
         &envelope_binding,
     )? {
@@ -539,7 +542,7 @@ fn verify_private_vss_share_envelope_inner(
     let local_verification_record = local_verification_record(
         setup_context,
         public_matrix_seed_hash,
-        &dealer_binding,
+        &source_trustee_binding,
         &envelope_binding,
         ring_degree,
         ring_degree_status,
@@ -711,71 +714,77 @@ fn verify_setup_context(setup_context: &Value) -> CanonicalResult<Result<(), Pri
     Ok(Ok(()))
 }
 
-fn verify_dealer_commitment_record(
-    dealer_record: &Value,
+fn verify_source_trustee_commitment_record(
+    source_trustee_record: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-) -> CanonicalResult<Result<DealerCommitmentBinding, PrivateVssRefusal>> {
-    if dealer_record.get("objectType").and_then(Value::as_str)
-        != Some(VSS_DEALER_COMMITMENT_OBJECT_TYPE)
+) -> CanonicalResult<Result<SourceTrusteeCommitmentBinding, PrivateVssRefusal>> {
+    if source_trustee_record
+        .get("objectType")
+        .and_then(Value::as_str)
+        != Some(VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE)
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentRecordTypeMismatch",
-            "dealerCoefficientCommitmentRecord.objectType must be VssDealerCoefficientCommitments",
-            "dealerCoefficientCommitmentRecord.objectType",
+            "sourceTrusteeCommitmentRecordTypeMismatch",
+            "sourceTrusteeCoefficientCommitmentRecord.objectType must be VssSourceTrusteeCoefficientCommitments",
+            "sourceTrusteeCoefficientCommitmentRecord.objectType",
         )));
     }
-    if dealer_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+    if source_trustee_record
+        .get("objectVersion")
+        .and_then(Value::as_u64)
+        != Some(1)
+    {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentRecordVersionMismatch",
-            "dealerCoefficientCommitmentRecord.objectVersion must be 1",
-            "dealerCoefficientCommitmentRecord.objectVersion",
+            "sourceTrusteeCommitmentRecordVersionMismatch",
+            "sourceTrusteeCoefficientCommitmentRecord.objectVersion must be 1",
+            "sourceTrusteeCoefficientCommitmentRecord.objectVersion",
         )));
     }
     if let Err(refusal) = compare_context_fields(
-        dealer_record,
+        source_trustee_record,
         setup_context,
-        "dealerCoefficientCommitmentRecord",
+        "sourceTrusteeCoefficientCommitmentRecord",
     ) {
         return Ok(Err(refusal));
     }
-    if dealer_record
+    if source_trustee_record
         .get("publicMatrixSeedHash")
         .and_then(Value::as_str)
         != Some(public_matrix_seed_hash)
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentPublicMatrixSeedMismatch",
-            "dealerCoefficientCommitmentRecord.publicMatrixSeedHash must match publicMatrixSeedHash",
-            "dealerCoefficientCommitmentRecord.publicMatrixSeedHash",
+            "sourceTrusteeCommitmentPublicMatrixSeedMismatch",
+            "sourceTrusteeCoefficientCommitmentRecord.publicMatrixSeedHash must match publicMatrixSeedHash",
+            "sourceTrusteeCoefficientCommitmentRecord.publicMatrixSeedHash",
         )));
     }
-    let dealer_identity = match string_field(
-        dealer_record,
-        "dealerIdentity",
-        "dealerCoefficientCommitmentRecord.dealerIdentity",
-        "dealerIdentityMissing",
-        "dealerCoefficientCommitmentRecord.dealerIdentity is required",
+    let source_trustee_identity = match string_field(
+        source_trustee_record,
+        "sourceTrusteeIdentity",
+        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeIdentity",
+        "sourceTrusteeIdentityMissing",
+        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeIdentity is required",
     ) {
-        Ok(dealer_identity) => dealer_identity.to_string(),
+        Ok(source_trustee_identity) => source_trustee_identity.to_string(),
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let dealer_roster_position = match u64_field(
-        dealer_record,
-        "dealerRosterPosition",
-        "dealerCoefficientCommitmentRecord.dealerRosterPosition",
-        "dealerRosterPositionMissing",
-        "dealerCoefficientCommitmentRecord.dealerRosterPosition is required",
+    let source_trustee_roster_position = match u64_field(
+        source_trustee_record,
+        "sourceTrusteeRosterPosition",
+        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeRosterPosition",
+        "sourceTrusteeRosterPositionMissing",
+        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeRosterPosition is required",
     ) {
-        Ok(dealer_roster_position) => dealer_roster_position,
+        Ok(source_trustee_roster_position) => source_trustee_roster_position,
         Err(refusal) => return Ok(Err(refusal)),
     };
     let coefficient_commitments = match array_field(
-        dealer_record,
+        source_trustee_record,
         "coefficientCommitments",
-        "dealerCoefficientCommitmentRecord.coefficientCommitments",
-        "dealerCoefficientCommitmentsMissing",
-        "dealerCoefficientCommitmentRecord.coefficientCommitments is required",
+        "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments",
+        "sourceTrusteeCoefficientCommitmentsMissing",
+        "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments is required",
     ) {
         Ok(coefficient_commitments) => coefficient_commitments,
         Err(refusal) => return Ok(Err(refusal)),
@@ -783,9 +792,9 @@ fn verify_dealer_commitment_record(
     let expected_coefficient_count = DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
     if coefficient_commitments.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCoefficientCommitmentCountMismatch",
-            "dealerCoefficientCommitmentRecord.coefficientCommitments must contain every Q_share limb and Shamir coefficient",
-            "dealerCoefficientCommitmentRecord.coefficientCommitments",
+            "sourceTrusteeCoefficientCommitmentCountMismatch",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments must contain every Q_share limb and Shamir coefficient",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments",
         )));
     }
 
@@ -795,9 +804,9 @@ fn verify_dealer_commitment_record(
         let rns_limb_index = match usize_field(
             coefficient_record,
             "rnsLimbIndex",
-            "dealerCoefficientCommitmentRecord.coefficientCommitments.rnsLimbIndex",
-            "dealerCoefficientRnsLimbMissing",
-            "dealer coefficient commitment must bind rnsLimbIndex",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.rnsLimbIndex",
+            "sourceTrusteeCoefficientRnsLimbMissing",
+            "source trustee coefficient commitment must bind rnsLimbIndex",
         ) {
             Ok(rns_limb_index) => rns_limb_index,
             Err(refusal) => return Ok(Err(refusal)),
@@ -805,50 +814,50 @@ fn verify_dealer_commitment_record(
         let rns_prime = match u64_field(
             coefficient_record,
             "rnsPrime",
-            "dealerCoefficientCommitmentRecord.coefficientCommitments.rnsPrime",
-            "dealerCoefficientRnsPrimeMissing",
-            "dealer coefficient commitment must bind rnsPrime",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.rnsPrime",
+            "sourceTrusteeCoefficientRnsPrimeMissing",
+            "source trustee coefficient commitment must bind rnsPrime",
         ) {
             Ok(rns_prime) => rns_prime,
             Err(refusal) => return Ok(Err(refusal)),
         };
         if DATA_PRIMES.get(rns_limb_index) != Some(&rns_prime) {
             return Ok(Err(PrivateVssRefusal::new(
-                "dealerCoefficientRnsPrimeMismatch",
-                "dealer coefficient commitment rnsPrime must match Q_share at rnsLimbIndex",
-                "dealerCoefficientCommitmentRecord.coefficientCommitments.rnsPrime",
+                "sourceTrusteeCoefficientRnsPrimeMismatch",
+                "source trustee coefficient commitment rnsPrime must match Q_share at rnsLimbIndex",
+                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.rnsPrime",
             )));
         }
         let shamir_coefficient_index = match u64_field(
             coefficient_record,
             "shamirCoefficientIndex",
-            "dealerCoefficientCommitmentRecord.coefficientCommitments.shamirCoefficientIndex",
-            "dealerCoefficientShamirIndexMissing",
-            "dealer coefficient commitment must bind shamirCoefficientIndex",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.shamirCoefficientIndex",
+            "sourceTrusteeCoefficientShamirIndexMissing",
+            "source trustee coefficient commitment must bind shamirCoefficientIndex",
         ) {
             Ok(shamir_coefficient_index) => shamir_coefficient_index,
             Err(refusal) => return Ok(Err(refusal)),
         };
         if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
             return Ok(Err(PrivateVssRefusal::new(
-                "dealerCoefficientShamirIndexInvalid",
-                "dealer coefficient commitment shamirCoefficientIndex is outside the accepted threshold degree",
-                "dealerCoefficientCommitmentRecord.coefficientCommitments.shamirCoefficientIndex",
+                "sourceTrusteeCoefficientShamirIndexInvalid",
+                "source trustee coefficient commitment shamirCoefficientIndex is outside the accepted threshold degree",
+                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.shamirCoefficientIndex",
             )));
         }
         if !seen_coordinates.insert((rns_limb_index, shamir_coefficient_index)) {
             return Ok(Err(PrivateVssRefusal::new(
-                "dealerCoefficientCommitmentDuplicate",
-                "dealer coefficient commitments must have distinct limb/coefficient coordinates",
-                "dealerCoefficientCommitmentRecord.coefficientCommitments",
+                "sourceTrusteeCoefficientCommitmentDuplicate",
+                "source trustee coefficient commitments must have distinct limb/coefficient coordinates",
+                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments",
             )));
         }
         let commitment_root = match hash_string_field(
             coefficient_record,
             "commitmentRoot",
-            "dealerCoefficientCommitmentRecord.coefficientCommitments.commitmentRoot",
-            "dealerCoefficientCommitmentRootMissing",
-            "dealer coefficient commitment must bind commitmentRoot",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.commitmentRoot",
+            "sourceTrusteeCoefficientCommitmentRootMissing",
+            "source trustee coefficient commitment must bind commitmentRoot",
         ) {
             Ok(commitment_root) => commitment_root.to_string(),
             Err(refusal) => return Ok(Err(refusal)),
@@ -857,35 +866,35 @@ fn verify_dealer_commitment_record(
             .insert((rns_limb_index, shamir_coefficient_index), commitment_root);
     }
 
-    let dealer_commitment_root = match hash_string_field(
-        dealer_record,
-        "dealerCommitmentRoot",
-        "dealerCoefficientCommitmentRecord.dealerCommitmentRoot",
-        "dealerCommitmentRootMissing",
-        "dealerCoefficientCommitmentRecord.dealerCommitmentRoot is required",
+    let source_trustee_commitment_root = match hash_string_field(
+        source_trustee_record,
+        "sourceTrusteeCommitmentRoot",
+        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeCommitmentRoot",
+        "sourceTrusteeCommitmentRootMissing",
+        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeCommitmentRoot is required",
     ) {
-        Ok(dealer_commitment_root) => dealer_commitment_root.to_string(),
+        Ok(source_trustee_commitment_root) => source_trustee_commitment_root.to_string(),
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let mut root_input = dealer_record.clone();
+    let mut root_input = source_trustee_record.clone();
     root_input
         .as_object_mut()
-        .expect("dealer commitment record object was checked")
-        .remove("dealerCommitmentRoot");
-    let expected_dealer_commitment_root =
+        .expect("source trustee commitment record object was checked")
+        .remove("sourceTrusteeCommitmentRoot");
+    let expected_source_trustee_commitment_root =
         derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
-    if dealer_commitment_root != expected_dealer_commitment_root {
+    if source_trustee_commitment_root != expected_source_trustee_commitment_root {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentRootMismatch",
-            "dealerCommitmentRoot does not match the canonical dealer coefficient commitment record",
-            "dealerCoefficientCommitmentRecord.dealerCommitmentRoot",
+            "sourceTrusteeCommitmentRootMismatch",
+            "sourceTrusteeCommitmentRoot does not match the canonical source trustee coefficient commitment record",
+            "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeCommitmentRoot",
         )));
     }
 
-    Ok(Ok(DealerCommitmentBinding {
-        dealer_identity,
-        dealer_roster_position,
-        dealer_commitment_root,
+    Ok(Ok(SourceTrusteeCommitmentBinding {
+        source_trustee_identity,
+        source_trustee_roster_position,
+        source_trustee_commitment_root,
         coefficient_commitment_roots,
     }))
 }
@@ -894,14 +903,14 @@ fn verify_coefficient_commitment_material_records(
     material_records: &[Value],
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_binding: &DealerCommitmentBinding,
+    source_trustee_binding: &SourceTrusteeCommitmentBinding,
 ) -> CanonicalResult<CoefficientCommitmentMaterialRecordsVerification> {
     let expected_coefficient_count = DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
     if material_records.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialCountMismatch",
-            "dealerCoefficientCommitmentMaterialRecords must contain full public commitment material for every Q_share limb and Shamir coefficient",
-            "dealerCoefficientCommitmentMaterialRecords",
+            "sourceTrusteeCommitmentMaterialCountMismatch",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords must contain full public commitment material for every Q_share limb and Shamir coefficient",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords",
         )));
     }
 
@@ -911,7 +920,7 @@ fn verify_coefficient_commitment_material_records(
             material_record,
             setup_context,
             public_matrix_seed_hash,
-            dealer_binding,
+            source_trustee_binding,
         )? {
             Ok(binding) => binding,
             Err(refusal) => return Ok(Err(refusal)),
@@ -922,9 +931,9 @@ fn verify_coefficient_commitment_material_records(
         );
         if bindings.insert(coordinate, binding).is_some() {
             return Ok(Err(PrivateVssRefusal::new(
-                "dealerCommitmentMaterialDuplicate",
-                "dealerCoefficientCommitmentMaterialRecords must have distinct limb/coefficient coordinates",
-                "dealerCoefficientCommitmentMaterialRecords",
+                "sourceTrusteeCommitmentMaterialDuplicate",
+                "sourceTrusteeCoefficientCommitmentMaterialRecords must have distinct limb/coefficient coordinates",
+                "sourceTrusteeCoefficientCommitmentMaterialRecords",
             )));
         }
     }
@@ -933,9 +942,9 @@ fn verify_coefficient_commitment_material_records(
         for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
             if !bindings.contains_key(&(rns_limb_index, shamir_coefficient_index)) {
                 return Ok(Err(PrivateVssRefusal::new(
-                    "dealerCommitmentMaterialCoverageMismatch",
-                    "dealerCoefficientCommitmentMaterialRecords must cover every Q_share limb and Shamir coefficient",
-                    "dealerCoefficientCommitmentMaterialRecords",
+                    "sourceTrusteeCommitmentMaterialCoverageMismatch",
+                    "sourceTrusteeCoefficientCommitmentMaterialRecords must cover every Q_share limb and Shamir coefficient",
+                    "sourceTrusteeCoefficientCommitmentMaterialRecords",
                 )));
             }
         }
@@ -948,28 +957,28 @@ fn verify_coefficient_commitment_material_record(
     material_record: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_binding: &DealerCommitmentBinding,
+    source_trustee_binding: &SourceTrusteeCommitmentBinding,
 ) -> CanonicalResult<Result<CoefficientCommitmentBinding, PrivateVssRefusal>> {
     if material_record.get("objectType").and_then(Value::as_str)
         != Some(VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE)
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialTypeMismatch",
+            "sourceTrusteeCommitmentMaterialTypeMismatch",
             "coefficient commitment material objectType must be VssCoefficientCommitmentMaterial",
-            "dealerCoefficientCommitmentMaterialRecords.objectType",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.objectType",
         )));
     }
     if material_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialVersionMismatch",
+            "sourceTrusteeCommitmentMaterialVersionMismatch",
             "coefficient commitment material objectVersion must be 1",
-            "dealerCoefficientCommitmentMaterialRecords.objectVersion",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.objectVersion",
         )));
     }
     if let Err(refusal) = compare_context_fields(
         material_record,
         setup_context,
-        "dealerCoefficientCommitmentMaterialRecords",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords",
     ) {
         return Ok(Err(refusal));
     }
@@ -979,32 +988,32 @@ fn verify_coefficient_commitment_material_record(
         != Some(public_matrix_seed_hash)
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialPublicMatrixSeedMismatch",
+            "sourceTrusteeCommitmentMaterialPublicMatrixSeedMismatch",
             "coefficient commitment material publicMatrixSeedHash must match publicMatrixSeedHash",
-            "dealerCoefficientCommitmentMaterialRecords.publicMatrixSeedHash",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.publicMatrixSeedHash",
         )));
     }
     if material_record
-        .get("dealerIdentity")
+        .get("sourceTrusteeIdentity")
         .and_then(Value::as_str)
-        != Some(dealer_binding.dealer_identity.as_str())
+        != Some(source_trustee_binding.source_trustee_identity.as_str())
         || material_record
-            .get("dealerRosterPosition")
+            .get("sourceTrusteeRosterPosition")
             .and_then(Value::as_u64)
-            != Some(dealer_binding.dealer_roster_position)
+            != Some(source_trustee_binding.source_trustee_roster_position)
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialDealerMismatch",
-            "coefficient commitment material dealer binding must match dealerCoefficientCommitmentRecord",
-            "dealerCoefficientCommitmentMaterialRecords.dealerIdentity",
+            "sourceTrusteeCommitmentMaterialSourceTrusteeMismatch",
+            "coefficient commitment material source trustee binding must match sourceTrusteeCoefficientCommitmentRecord",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.sourceTrusteeIdentity",
         )));
     }
 
     let rns_limb_index = match usize_field(
         material_record,
         "rnsLimbIndex",
-        "dealerCoefficientCommitmentMaterialRecords.rnsLimbIndex",
-        "dealerCommitmentMaterialRnsLimbMissing",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords.rnsLimbIndex",
+        "sourceTrusteeCommitmentMaterialRnsLimbMissing",
         "coefficient commitment material must bind rnsLimbIndex",
     ) {
         Ok(rns_limb_index) => rns_limb_index,
@@ -1013,8 +1022,8 @@ fn verify_coefficient_commitment_material_record(
     let rns_prime = match u64_field(
         material_record,
         "rnsPrime",
-        "dealerCoefficientCommitmentMaterialRecords.rnsPrime",
-        "dealerCommitmentMaterialRnsPrimeMissing",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords.rnsPrime",
+        "sourceTrusteeCommitmentMaterialRnsPrimeMissing",
         "coefficient commitment material must bind rnsPrime",
     ) {
         Ok(rns_prime) => rns_prime,
@@ -1022,16 +1031,16 @@ fn verify_coefficient_commitment_material_record(
     };
     if DATA_PRIMES.get(rns_limb_index) != Some(&rns_prime) {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialRnsPrimeMismatch",
+            "sourceTrusteeCommitmentMaterialRnsPrimeMismatch",
             "coefficient commitment material rnsPrime must match Q_share at rnsLimbIndex",
-            "dealerCoefficientCommitmentMaterialRecords.rnsPrime",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.rnsPrime",
         )));
     }
     let shamir_coefficient_index = match u64_field(
         material_record,
         "shamirCoefficientIndex",
-        "dealerCoefficientCommitmentMaterialRecords.shamirCoefficientIndex",
-        "dealerCommitmentMaterialShamirIndexMissing",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords.shamirCoefficientIndex",
+        "sourceTrusteeCommitmentMaterialShamirIndexMissing",
         "coefficient commitment material must bind shamirCoefficientIndex",
     ) {
         Ok(shamir_coefficient_index) => shamir_coefficient_index,
@@ -1039,38 +1048,38 @@ fn verify_coefficient_commitment_material_record(
     };
     if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialShamirIndexInvalid",
+            "sourceTrusteeCommitmentMaterialShamirIndexInvalid",
             "coefficient commitment material shamirCoefficientIndex is outside the accepted threshold degree",
-            "dealerCoefficientCommitmentMaterialRecords.shamirCoefficientIndex",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.shamirCoefficientIndex",
         )));
     }
     let commitment_root = match hash_string_field(
         material_record,
         "commitmentRoot",
-        "dealerCoefficientCommitmentMaterialRecords.commitmentRoot",
-        "dealerCommitmentMaterialRootMissing",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords.commitmentRoot",
+        "sourceTrusteeCommitmentMaterialRootMissing",
         "coefficient commitment material must bind commitmentRoot",
     ) {
         Ok(commitment_root) => commitment_root.to_string(),
         Err(refusal) => return Ok(Err(refusal)),
     };
-    if dealer_binding
+    if source_trustee_binding
         .coefficient_commitment_roots
         .get(&(rns_limb_index, shamir_coefficient_index))
         .map(String::as_str)
         != Some(commitment_root.as_str())
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialRootMismatch",
-            "coefficient commitment material root must match the dealer coefficient commitment record",
-            "dealerCoefficientCommitmentMaterialRecords.commitmentRoot",
+            "sourceTrusteeCommitmentMaterialRootMismatch",
+            "coefficient commitment material root must match the source trustee coefficient commitment record",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.commitmentRoot",
         )));
     }
     let commitment_value = match object_field(
         material_record,
         "commitment",
-        "dealerCoefficientCommitmentMaterialRecords.commitment",
-        "dealerCommitmentMaterialCommitmentMissing",
+        "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
+        "sourceTrusteeCommitmentMaterialCommitmentMissing",
         "coefficient commitment material must include the full public commitment",
     ) {
         Ok(commitment_value) => commitment_value,
@@ -1080,9 +1089,9 @@ fn verify_coefficient_commitment_material_record(
         Ok(commitment) => commitment,
         Err(error) => {
             return Ok(Err(PrivateVssRefusal::new(
-                "dealerCommitmentMaterialInvalid",
+                "sourceTrusteeCommitmentMaterialInvalid",
                 error.message,
-                "dealerCoefficientCommitmentMaterialRecords.commitment",
+                "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
             )));
         }
     };
@@ -1091,17 +1100,17 @@ fn verify_coefficient_commitment_material_record(
         || commitment.shamir_coefficient_index != shamir_coefficient_index
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialDomainMismatch",
+            "sourceTrusteeCommitmentMaterialDomainMismatch",
             "full setup commitment domain must match its material wrapper",
-            "dealerCoefficientCommitmentMaterialRecords.commitment",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
         )));
     }
     let computed_commitment_root = setup_commitment_root(&commitment)?;
     if commitment_root != computed_commitment_root {
         return Ok(Err(PrivateVssRefusal::new(
-            "dealerCommitmentMaterialRootMismatch",
+            "sourceTrusteeCommitmentMaterialRootMismatch",
             "full setup commitment material does not match commitmentRoot",
-            "dealerCoefficientCommitmentMaterialRecords.commitment",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
         )));
     }
 
@@ -1115,7 +1124,7 @@ fn verify_private_envelope_header(
     private_envelope: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_binding: &DealerCommitmentBinding,
+    source_trustee_binding: &SourceTrusteeCommitmentBinding,
 ) -> CanonicalResult<Result<PrivateEnvelopeBinding, PrivateVssRefusal>> {
     if private_envelope.get("objectType").and_then(Value::as_str)
         != Some(PRIVATE_VSS_ENVELOPE_OBJECT_TYPE)
@@ -1172,11 +1181,11 @@ fn verify_private_envelope_header(
             "setupEpoch",
             "publicMatrixSeedHash",
             "privateEnvelopeAadHash",
-            "dealerIdentity",
-            "dealerRosterPosition",
+            "sourceTrusteeIdentity",
+            "sourceTrusteeRosterPosition",
             "recipientIdentity",
             "recipientRosterPosition",
-            "dealerCommitmentRoot",
+            "sourceTrusteeCommitmentRoot",
             "rnsShareOpenings",
         ],
         "privateEnvelope",
@@ -1199,44 +1208,48 @@ fn verify_private_envelope_header(
         )));
     }
 
-    let dealer_identity = match string_field(
+    let source_trustee_identity = match string_field(
         private_envelope,
-        "dealerIdentity",
-        "privateEnvelope.dealerIdentity",
-        "privateEnvelopeDealerMissing",
-        "privateEnvelope.dealerIdentity is required",
+        "sourceTrusteeIdentity",
+        "privateEnvelope.sourceTrusteeIdentity",
+        "privateEnvelopeSourceTrusteeMissing",
+        "privateEnvelope.sourceTrusteeIdentity is required",
     ) {
-        Ok(dealer_identity) => dealer_identity.to_string(),
+        Ok(source_trustee_identity) => source_trustee_identity.to_string(),
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let dealer_roster_position = match u64_field(
+    let source_trustee_roster_position = match u64_field(
         private_envelope,
-        "dealerRosterPosition",
-        "privateEnvelope.dealerRosterPosition",
-        "privateEnvelopeDealerPositionMissing",
-        "privateEnvelope.dealerRosterPosition is required",
+        "sourceTrusteeRosterPosition",
+        "privateEnvelope.sourceTrusteeRosterPosition",
+        "privateEnvelopeSourceTrusteePositionMissing",
+        "privateEnvelope.sourceTrusteeRosterPosition is required",
     ) {
-        Ok(dealer_roster_position) => dealer_roster_position,
+        Ok(source_trustee_roster_position) => source_trustee_roster_position,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    if dealer_identity != dealer_binding.dealer_identity
-        || dealer_roster_position != dealer_binding.dealer_roster_position
+    if source_trustee_identity != source_trustee_binding.source_trustee_identity
+        || source_trustee_roster_position != source_trustee_binding.source_trustee_roster_position
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "privateEnvelopeDealerMismatch",
-            "privateEnvelope dealer binding must match dealerCoefficientCommitmentRecord",
-            "privateEnvelope.dealerIdentity",
+            "privateEnvelopeSourceTrusteeMismatch",
+            "privateEnvelope source trustee binding must match sourceTrusteeCoefficientCommitmentRecord",
+            "privateEnvelope.sourceTrusteeIdentity",
         )));
     }
     if private_envelope
-        .get("dealerCommitmentRoot")
+        .get("sourceTrusteeCommitmentRoot")
         .and_then(Value::as_str)
-        != Some(dealer_binding.dealer_commitment_root.as_str())
+        != Some(
+            source_trustee_binding
+                .source_trustee_commitment_root
+                .as_str(),
+        )
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "privateEnvelopeDealerCommitmentRootMismatch",
-            "privateEnvelope.dealerCommitmentRoot must match the accepted dealer commitment root",
-            "privateEnvelope.dealerCommitmentRoot",
+            "privateEnvelopeSourceTrusteeCommitmentRootMismatch",
+            "privateEnvelope.sourceTrusteeCommitmentRoot must match the accepted source trustee commitment root",
+            "privateEnvelope.sourceTrusteeCommitmentRoot",
         )));
     }
 
@@ -1297,7 +1310,7 @@ fn verify_private_envelope_limbs(
     transported_proof_material: Option<&Value>,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_binding: &DealerCommitmentBinding,
+    source_trustee_binding: &SourceTrusteeCommitmentBinding,
     coefficient_commitments: &BTreeMap<(usize, u64), CoefficientCommitmentBinding>,
     envelope_binding: &PrivateEnvelopeBinding,
 ) -> CanonicalResult<Result<Vec<LimbVerification>, PrivateVssRefusal>> {
@@ -1328,7 +1341,7 @@ fn verify_private_envelope_limbs(
             transported_proof_material,
             setup_context,
             public_matrix_seed_hash,
-            dealer_binding,
+            source_trustee_binding,
             coefficient_commitments,
             envelope_binding,
         )? {
@@ -1365,7 +1378,7 @@ fn verify_private_envelope_limb(
     transported_proof_material: Option<&Value>,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_binding: &DealerCommitmentBinding,
+    source_trustee_binding: &SourceTrusteeCommitmentBinding,
     coefficient_commitments: &BTreeMap<(usize, u64), CoefficientCommitmentBinding>,
     envelope_binding: &PrivateEnvelopeBinding,
 ) -> CanonicalResult<Result<LimbVerification, PrivateVssRefusal>> {
@@ -1470,7 +1483,7 @@ fn verify_private_envelope_limb(
         coefficient_commitment_roots.iter().enumerate()
     {
         let shamir_coefficient_index = shamir_coefficient_index as u64;
-        if dealer_binding
+        if source_trustee_binding
             .coefficient_commitment_roots
             .get(&(rns_limb_index, shamir_coefficient_index))
             .map(String::as_str)
@@ -1478,7 +1491,7 @@ fn verify_private_envelope_limb(
         {
             return Ok(Err(PrivateVssRefusal::new(
                 "privateVssCoefficientCommitmentRootMismatch",
-                "private VSS limb coefficientCommitmentRoots must match the public dealer commitment record",
+                "private VSS limb coefficientCommitmentRoots must match the public source trustee commitment record",
                 "privateEnvelope.rnsShareOpenings.coefficientCommitmentRoots",
             )));
         }
@@ -1488,14 +1501,14 @@ fn verify_private_envelope_limb(
             return Ok(Err(PrivateVssRefusal::new(
                 "privateVssCoefficientCommitmentMaterialMissing",
                 "private VSS limb references coefficient commitment material that was not provided",
-                "dealerCoefficientCommitmentMaterialRecords",
+                "sourceTrusteeCoefficientCommitmentMaterialRecords",
             )));
         };
         if material_binding.commitment_root != *commitment_root {
             return Ok(Err(PrivateVssRefusal::new(
                 "privateVssCoefficientCommitmentMaterialRootMismatch",
                 "coefficient commitment material root must match private envelope root reference",
-                "dealerCoefficientCommitmentMaterialRecords.commitmentRoot",
+                "sourceTrusteeCoefficientCommitmentMaterialRecords.commitmentRoot",
             )));
         }
         coefficient_commitment_values.push(material_binding.commitment.clone());
@@ -1527,11 +1540,11 @@ fn verify_private_envelope_limb(
             setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash: &envelope_binding.private_envelope_aad_hash,
-            dealer_identity: &dealer_binding.dealer_identity,
-            dealer_roster_position: dealer_binding.dealer_roster_position,
+            source_trustee_identity: &source_trustee_binding.source_trustee_identity,
+            source_trustee_roster_position: source_trustee_binding.source_trustee_roster_position,
             recipient_identity: &envelope_binding.recipient_identity,
             recipient_roster_position: envelope_binding.recipient_roster_position,
-            dealer_commitment_root: &dealer_binding.dealer_commitment_root,
+            source_trustee_commitment_root: &source_trustee_binding.source_trustee_commitment_root,
             rns_limb_index,
             rns_prime,
             ring_degree,
@@ -1587,7 +1600,7 @@ fn verify_private_envelope_limb(
 fn local_verification_record(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_binding: &DealerCommitmentBinding,
+    source_trustee_binding: &SourceTrusteeCommitmentBinding,
     envelope_binding: &PrivateEnvelopeBinding,
     ring_degree: usize,
     ring_degree_status: &str,
@@ -1655,11 +1668,11 @@ fn local_verification_record(
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeHash": envelope_binding.private_envelope_hash,
         "privateEnvelopeAadHash": envelope_binding.private_envelope_aad_hash,
-        "dealerIdentity": dealer_binding.dealer_identity,
-        "dealerRosterPosition": dealer_binding.dealer_roster_position,
+        "sourceTrusteeIdentity": source_trustee_binding.source_trustee_identity,
+        "sourceTrusteeRosterPosition": source_trustee_binding.source_trustee_roster_position,
         "recipientIdentity": envelope_binding.recipient_identity,
         "recipientRosterPosition": envelope_binding.recipient_roster_position,
-        "dealerCommitmentRoot": dealer_binding.dealer_commitment_root,
+        "sourceTrusteeCommitmentRoot": source_trustee_binding.source_trustee_commitment_root,
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
         "verifiedRnsLimbCount": limb_verifications.len(),

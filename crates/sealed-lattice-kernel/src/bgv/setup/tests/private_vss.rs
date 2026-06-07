@@ -354,8 +354,8 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
     )
     .expect("private VSS envelope AAD hash");
 
-    let mut dealer_coefficient_commitments = Vec::new();
-    let mut dealer_coefficient_commitment_material_records = Vec::new();
+    let mut source_trustee_coefficient_commitments = Vec::new();
+    let mut source_trustee_coefficient_commitment_material_records = Vec::new();
     let mut rns_share_openings = Vec::new();
     for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
         let mut coefficient_openings = Vec::new();
@@ -386,7 +386,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             .expect("setup commitment");
             let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
             coefficient_commitment_roots.push(commitment_root.clone());
-            dealer_coefficient_commitments.push(serde_json::json!({
+            source_trustee_coefficient_commitments.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitment",
                 "objectVersion": 1,
                 "ceremonyId": ceremony_id,
@@ -397,8 +397,8 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                 "commitmentProfileHash": commitment_profile_hash,
                 "setupEpoch": setup_epoch,
-                "dealerIdentity": "trustee-0",
-                "dealerRosterPosition": 0,
+                "sourceTrusteeIdentity": "trustee-0",
+                "sourceTrusteeRosterPosition": 0,
                 "publicMatrixSeedHash": public_matrix_seed_hash,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": rns_prime,
@@ -422,7 +422,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 ).expect("coefficient vector hash"),
                 "openingVerificationStatus": "pending-private-envelope-opening",
             }));
-            dealer_coefficient_commitment_material_records.push(serde_json::json!({
+            source_trustee_coefficient_commitment_material_records.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitmentMaterial",
                 "objectVersion": 1,
                 "ceremonyId": ceremony_id,
@@ -433,8 +433,8 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                 "commitmentProfileHash": commitment_profile_hash,
                 "setupEpoch": setup_epoch,
-                "dealerIdentity": "trustee-0",
-                "dealerRosterPosition": 0,
+                "sourceTrusteeIdentity": "trustee-0",
+                "sourceTrusteeRosterPosition": 0,
                 "publicMatrixSeedHash": public_matrix_seed_hash,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": rns_prime,
@@ -475,8 +475,8 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         }));
     }
 
-    let mut dealer_record = serde_json::json!({
-        "objectType": "VssDealerCoefficientCommitments",
+    let mut source_trustee_record = serde_json::json!({
+        "objectType": "VssSourceTrusteeCoefficientCommitments",
         "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
@@ -486,14 +486,14 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
-        "dealerIdentity": "trustee-0",
-        "dealerRosterPosition": 0,
+        "sourceTrusteeIdentity": "trustee-0",
+        "sourceTrusteeRosterPosition": 0,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "coefficientCommitments": dealer_coefficient_commitments,
+        "coefficientCommitments": source_trustee_coefficient_commitments,
     });
-    dealer_record["dealerCommitmentRoot"] = serde_json::json!(
-        derive_protocol_hash("VssCoefficientCommitmentRoot", &dealer_record)
-            .expect("dealer commitment root")
+    source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
+        derive_protocol_hash("VssCoefficientCommitmentRoot", &source_trustee_record)
+            .expect("source trustee commitment root")
     );
 
     let private_envelope = serde_json::json!({
@@ -509,19 +509,19 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeAadHash": private_envelope_aad_hash,
-        "dealerIdentity": "trustee-0",
-        "dealerRosterPosition": 0,
+        "sourceTrusteeIdentity": "trustee-0",
+        "sourceTrusteeRosterPosition": 0,
         "recipientIdentity": "trustee-2",
         "recipientRosterPosition": 2,
-        "dealerCommitmentRoot": dealer_record["dealerCommitmentRoot"],
+        "sourceTrusteeCommitmentRoot": source_trustee_record["sourceTrusteeCommitmentRoot"],
         "rnsShareOpenings": rns_share_openings,
     });
 
     serde_json::json!({
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "dealerCoefficientCommitmentRecord": dealer_record,
-        "dealerCoefficientCommitmentMaterialRecords": dealer_coefficient_commitment_material_records,
+        "sourceTrusteeCoefficientCommitmentRecord": source_trustee_record,
+        "sourceTrusteeCoefficientCommitmentMaterialRecords": source_trustee_coefficient_commitment_material_records,
         "privateEnvelope": private_envelope,
     })
 }
@@ -537,11 +537,11 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
         .as_str()
         .expect("private envelope AAD hash")
         .to_string();
-    let dealer_commitment_root = request["privateEnvelope"]["dealerCommitmentRoot"]
+    let source_trustee_commitment_root = request["privateEnvelope"]["sourceTrusteeCommitmentRoot"]
         .as_str()
-        .expect("dealer commitment root")
+        .expect("source trustee commitment root")
         .to_string();
-    let material_records = request["dealerCoefficientCommitmentMaterialRecords"]
+    let material_records = request["sourceTrusteeCoefficientCommitmentMaterialRecords"]
         .as_array()
         .expect("material records")
         .clone();
@@ -639,11 +639,11 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
                 setup_context: &setup_context,
                 public_matrix_seed_hash: &public_matrix_seed_hash,
                 private_envelope_aad_hash: &private_envelope_aad_hash,
-                dealer_identity: "trustee-0",
-                dealer_roster_position: 0,
+                source_trustee_identity: "trustee-0",
+                source_trustee_roster_position: 0,
                 recipient_identity: "trustee-2",
                 recipient_roster_position: 2,
-                dealer_commitment_root: &dealer_commitment_root,
+                source_trustee_commitment_root: &source_trustee_commitment_root,
                 rns_limb_index,
                 rns_prime,
                 ring_degree,
@@ -670,13 +670,13 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
 fn move_private_vss_share_proof_bytes_to_transport(
     request: &mut serde_json::Value,
 ) -> serde_json::Value {
-    let dealer_identity = request["privateEnvelope"]["dealerIdentity"]
+    let source_trustee_identity = request["privateEnvelope"]["sourceTrusteeIdentity"]
         .as_str()
-        .expect("dealer identity")
+        .expect("source trustee identity")
         .to_string();
-    let dealer_roster_position = request["privateEnvelope"]["dealerRosterPosition"]
+    let source_trustee_roster_position = request["privateEnvelope"]["sourceTrusteeRosterPosition"]
         .as_u64()
-        .expect("dealer roster position");
+        .expect("source trustee roster position");
     let proof_materials = request["privateEnvelope"]["rnsShareOpenings"]
         .as_array_mut()
         .expect("private VSS limb openings")
@@ -704,8 +704,8 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
                     setup_profile_id: "CollectiveBgvSetup-v1",
                     proof_family: "vss-opening-carry",
-                    trustee_identity: &dealer_identity,
-                    trustee_roster_position: dealer_roster_position,
+                    trustee_identity: &source_trustee_identity,
+                    trustee_roster_position: source_trustee_roster_position,
                     statement_hash_hex: proof_record["statementHash"]
                         .as_str()
                         .expect("statement hash"),

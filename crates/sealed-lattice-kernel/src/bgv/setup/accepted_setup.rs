@@ -15,10 +15,12 @@ use super::{
         setup_commitment_profile_value, setup_commitment_root,
     },
     evaluation_key_share_proof::{
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         EvaluationKeyShareLnpProofVerificationInput, EvaluationKeyShareProofFamily,
         GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS, GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
         RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS, component_b_vectors_from_record,
         evaluation_key_share_lnp_relation_proof_bytes_hash,
         verify_evaluation_key_share_lnp_relation_proof,
     },
@@ -98,12 +100,19 @@ const RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE: &str = "RelinearizationKe
 const GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE: &str = "GaloisKeyShareBatch";
 const GALOIS_KEY_SHARE_PROOF_OBJECT_TYPE: &str = "GaloisKeyShareProof";
 const PUBLIC_EVALUATION_KEY_SET_OBJECT_TYPE: &str = "PublicEvaluationKeySet";
+pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str =
+    "SetupTransportedPublicEvaluationKeyMaterialSet";
+pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedPublicEvaluationKeyMaterial";
 const PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS: &str =
     "assembled-from-review-gated-proof-bearing-shares";
 const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
     "root-bound-public-key-switch-component-roots";
+pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
+    "binary-chunked-public-evaluation-key-root-manifest";
 const PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE: &str =
     "verified-relinearization-and-galois-proof-records";
+const PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC: &[u8; 8] = b"SLEKPMV1";
 const RELINEARIZATION_PROOF_VERIFICATION_STATUS: &str =
     RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS;
 const RELINEARIZATION_PROOF_MODEL_STATUS: &str = RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS;
@@ -155,14 +164,14 @@ const ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES: &[&str] = &[
     "setupSeedHash",
     "privateSetupSeedHash",
     "setupPrivateWitness",
-    "trustedDealerBoundary",
-    "trustedDealerSetup",
+    "centralTrustedSetupAuthorityBoundary",
+    "centralTrustedSetupAuthoritySetup",
     "lattigoSetupMaterial",
     "lattigoPublicKey",
     "lattigoRelinearizationKey",
     "lattigoGaloisKey",
-    "dealerSuppliedThresholdShareCommitments",
-    "dealerThresholdShareCommitments",
+    "centralTrustedSetupAuthoritySuppliedThresholdShareCommitments",
+    "centralTrustedSetupAuthorityThresholdShareCommitments",
     "trustedThresholdShareCommitments",
 ];
 
@@ -264,9 +273,9 @@ impl Refusal {
 
 #[derive(Clone)]
 struct PrivateVssEnvelopeBinding {
-    dealer_identity: String,
+    source_trustee_identity: String,
     recipient_identity: String,
-    dealer_commitment_root: String,
+    source_trustee_commitment_root: String,
     private_envelope_hash: String,
     local_verification_root: String,
 }
@@ -299,7 +308,7 @@ enum VerificationFlow {
 struct SameSecretTrusteeBinding {
     trustee_identity: String,
     trustee_roster_position: u64,
-    vss_dealer_commitment_root: String,
+    vss_source_trustee_commitment_root: String,
     constant_commitment_roots: Vec<Value>,
 }
 
@@ -398,6 +407,8 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
             "setupPackage",
             "transportedPublicKeyShareProofMaterial",
             "transportedEvaluationKeyShareProofMaterial",
+            "transportedEvaluationKeyShareComponentMaterial",
+            "transportedPublicEvaluationKeyMaterial",
             "transportedSameSecretProofMaterial",
             "transportedVssCoefficientCommitmentMaterial",
         ],
@@ -616,7 +627,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_profile_ring_material(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_required_public_evaluation_key_set(setup_package)? {
+    if let Some(response) = verify_required_public_evaluation_key_set(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     Ok(VerificationFlow::Continue)
@@ -2991,30 +3002,30 @@ fn verify_vss_coefficient_commitments(setup_package: &Value) -> CanonicalResult<
     }
 
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let Some(dealer_records) = commitment_set
-        .get("dealerRecords")
+    let Some(source_trustee_records) = commitment_set
+        .get("sourceTrusteeRecords")
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
-            vec!["vssCoefficientCommitments.dealerRecords".to_string()],
+            vec!["vssCoefficientCommitments.sourceTrusteeRecords".to_string()],
             Vec::new(),
             Vec::new(),
         )?));
     };
-    if dealer_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if source_trustee_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerCommitmentCountMismatch",
-            "vssCoefficientCommitments.dealerRecords must contain one record for every trustee",
-            "setupPackage.vssCoefficientCommitments.dealerRecords",
+            "vssSourceTrusteeCommitmentCountMismatch",
+            "vssCoefficientCommitments.sourceTrusteeRecords must contain one record for every trustee",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords",
         )?));
     }
 
     let mut seen_roster_positions = BTreeSet::new();
-    for dealer_record in dealer_records {
-        if let Some(response) = verify_vss_dealer_commitment_record(
-            dealer_record,
+    for source_trustee_record in source_trustee_records {
+        if let Some(response) = verify_vss_source_trustee_commitment_record(
+            source_trustee_record,
             setup_context,
             &expected_trustees,
             public_matrix_seed_hash,
@@ -3271,7 +3282,7 @@ fn verify_vss_coefficient_commitment_material(
         if coefficient_commitments.len() != expected_material_count {
             return Ok(Some(vss_material_refusal(
                 "vssCoefficientCommitmentMaterialCountMismatch",
-                "vssCoefficientCommitmentMaterial.coefficientCommitments must cover every dealer, Q_share limb, and Shamir coefficient",
+                "vssCoefficientCommitmentMaterial.coefficientCommitments must cover every source trustee, Q_share limb, and Shamir coefficient",
                 "setupPackage.vssCoefficientCommitmentMaterial.coefficientCommitments",
             )?));
         }
@@ -3459,27 +3470,33 @@ fn vss_material_outside_profile(
     )
 }
 
-fn verify_vss_dealer_commitment_record(
-    dealer_record: &Value,
+fn verify_vss_source_trustee_commitment_record(
+    source_trustee_record: &Value,
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
     public_matrix_seed_hash: &str,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<Option<Value>> {
-    if dealer_record.get("objectType").and_then(Value::as_str)
-        != Some("VssDealerCoefficientCommitments")
+    if source_trustee_record
+        .get("objectType")
+        .and_then(Value::as_str)
+        != Some("VssSourceTrusteeCoefficientCommitments")
     {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerCommitmentTypeMismatch",
-            "dealer VSS commitment record objectType must be VssDealerCoefficientCommitments",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.objectType",
+            "vssSourceTrusteeCommitmentTypeMismatch",
+            "source trustee VSS commitment record objectType must be VssSourceTrusteeCoefficientCommitments",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.objectType",
         )?));
     }
-    if dealer_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+    if source_trustee_record
+        .get("objectVersion")
+        .and_then(Value::as_u64)
+        != Some(1)
+    {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerCommitmentVersionMismatch",
-            "dealer VSS commitment record objectVersion must be 1",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.objectVersion",
+            "vssSourceTrusteeCommitmentVersionMismatch",
+            "source trustee VSS commitment record objectVersion must be 1",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.objectVersion",
         )?));
     }
     for field_name in [
@@ -3492,69 +3509,74 @@ fn verify_vss_dealer_commitment_record(
         "commitmentProfileHash",
         "setupEpoch",
     ] {
-        if dealer_record.get(field_name) != setup_context.get(field_name) {
+        if source_trustee_record.get(field_name) != setup_context.get(field_name) {
             return Ok(Some(vss_commitment_refusal(
-                "vssDealerCommitmentContextMismatch",
-                format!("dealer VSS commitment {field_name} must match setupContext"),
-                format!("setupPackage.vssCoefficientCommitments.dealerRecords.{field_name}"),
+                "vssSourceTrusteeCommitmentContextMismatch",
+                format!("source trustee VSS commitment {field_name} must match setupContext"),
+                format!("setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.{field_name}"),
             )?));
         }
     }
-    if dealer_record
+    if source_trustee_record
         .get("publicMatrixSeedHash")
         .and_then(Value::as_str)
         != Some(public_matrix_seed_hash)
     {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerCommitmentPublicMatrixSeedMismatch",
-            "dealer VSS commitment publicMatrixSeedHash must match common randomness",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.publicMatrixSeedHash",
+            "vssSourceTrusteeCommitmentPublicMatrixSeedMismatch",
+            "source trustee VSS commitment publicMatrixSeedHash must match common randomness",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.publicMatrixSeedHash",
         )?));
     }
-    let Some(dealer_identity) = dealer_record.get("dealerIdentity").and_then(Value::as_str) else {
+    let Some(source_trustee_identity) = source_trustee_record
+        .get("sourceTrusteeIdentity")
+        .and_then(Value::as_str)
+    else {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerIdentityMissing",
-            "dealer VSS commitment record must bind dealerIdentity",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.dealerIdentity",
+            "vssSourceTrusteeIdentityMissing",
+            "source trustee VSS commitment record must bind sourceTrusteeIdentity",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeIdentity",
         )?));
     };
-    let Some(dealer_roster_position) = dealer_record
-        .get("dealerRosterPosition")
+    let Some(source_trustee_roster_position) = source_trustee_record
+        .get("sourceTrusteeRosterPosition")
         .and_then(Value::as_u64)
     else {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerRosterPositionMissing",
-            "dealer VSS commitment record must bind dealerRosterPosition",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.dealerRosterPosition",
+            "vssSourceTrusteeRosterPositionMissing",
+            "source trustee VSS commitment record must bind sourceTrusteeRosterPosition",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeRosterPosition",
         )?));
     };
-    if !seen_roster_positions.insert(dealer_roster_position) {
+    if !seen_roster_positions.insert(source_trustee_roster_position) {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerCommitmentDuplicate",
-            "dealer VSS commitment records must have distinct roster positions",
-            "setupPackage.vssCoefficientCommitments.dealerRecords",
+            "vssSourceTrusteeCommitmentDuplicate",
+            "source trustee VSS commitment records must have distinct roster positions",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords",
         )?));
     }
     if expected_trustees
-        .get(&dealer_roster_position)
+        .get(&source_trustee_roster_position)
         .map(String::as_str)
-        != Some(dealer_identity)
+        != Some(source_trustee_identity)
     {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerCommitmentTrusteeMismatch",
-            "dealer VSS commitment record must match the phase transcript trustee identity",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.dealerIdentity",
+            "vssSourceTrusteeCommitmentTrusteeMismatch",
+            "source trustee VSS commitment record must match the phase transcript trustee identity",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeIdentity",
         )?));
     }
 
-    let Some(coefficient_commitments) = dealer_record
+    let Some(coefficient_commitments) = source_trustee_record
         .get("coefficientCommitments")
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
-            vec!["vssCoefficientCommitments.dealerRecords.coefficientCommitments".to_string()],
+            vec![
+                "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments".to_string(),
+            ],
             Vec::new(),
             Vec::new(),
         )?));
@@ -3564,8 +3586,8 @@ fn verify_vss_dealer_commitment_record(
     if coefficient_commitments.len() != expected_coefficient_count {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentCountMismatch",
-            "dealer VSS commitment record must contain every Q_share limb and Shamir coefficient",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments",
+            "source trustee VSS commitment record must contain every Q_share limb and Shamir coefficient",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments",
         )?));
     }
     let mut seen_coefficients = BTreeSet::new();
@@ -3574,41 +3596,44 @@ fn verify_vss_dealer_commitment_record(
             coefficient_record,
             setup_context,
             public_matrix_seed_hash,
-            dealer_identity,
-            dealer_roster_position,
+            source_trustee_identity,
+            source_trustee_roster_position,
             &mut seen_coefficients,
         )? {
             return Ok(Some(response));
         }
     }
 
-    let Some(dealer_commitment_root) = dealer_record
-        .get("dealerCommitmentRoot")
+    let Some(source_trustee_commitment_root) = source_trustee_record
+        .get("sourceTrusteeCommitmentRoot")
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
-            vec!["vssCoefficientCommitments.dealerRecords.dealerCommitmentRoot".to_string()],
+            vec![
+                "vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeCommitmentRoot"
+                    .to_string(),
+            ],
             Vec::new(),
             Vec::new(),
         )?));
     };
     validate_hash_string(
-        dealer_commitment_root,
-        "vssCoefficientCommitments.dealerRecords.dealerCommitmentRoot",
+        source_trustee_commitment_root,
+        "vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeCommitmentRoot",
     )?;
-    let mut root_input = dealer_record.clone();
+    let mut root_input = source_trustee_record.clone();
     root_input
         .as_object_mut()
-        .expect("VSS dealer commitment object was checked")
-        .remove("dealerCommitmentRoot");
+        .expect("VSS source trustee commitment object was checked")
+        .remove("sourceTrusteeCommitmentRoot");
     let expected_root = derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
-    if dealer_commitment_root != expected_root {
+    if source_trustee_commitment_root != expected_root {
         return Ok(Some(vss_commitment_refusal(
-            "vssDealerCommitmentRootMismatch",
-            "dealerCommitmentRoot does not match the canonical dealer commitment record",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.dealerCommitmentRoot",
+            "vssSourceTrusteeCommitmentRootMismatch",
+            "sourceTrusteeCommitmentRoot does not match the canonical source trustee commitment record",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeCommitmentRoot",
         )?));
     }
 
@@ -3619,8 +3644,8 @@ fn verify_vss_coefficient_commitment_record(
     coefficient_record: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
-    dealer_identity: &str,
-    dealer_roster_position: u64,
+    source_trustee_identity: &str,
+    source_trustee_roster_position: u64,
     seen_coefficients: &mut BTreeSet<(u64, u64)>,
 ) -> CanonicalResult<Option<Value>> {
     if coefficient_record.get("objectType").and_then(Value::as_str)
@@ -3629,7 +3654,7 @@ fn verify_vss_coefficient_commitment_record(
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentTypeMismatch",
             "VSS coefficient commitment objectType must be VssCoefficientCommitment",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.objectType",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.objectType",
         )?));
     }
     if coefficient_record
@@ -3640,7 +3665,7 @@ fn verify_vss_coefficient_commitment_record(
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentVersionMismatch",
             "VSS coefficient commitment objectVersion must be 1",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.objectVersion",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.objectVersion",
         )?));
     }
     for field_name in [
@@ -3658,7 +3683,7 @@ fn verify_vss_coefficient_commitment_record(
                 "vssCoefficientCommitmentContextMismatch",
                 format!("VSS coefficient commitment {field_name} must match setupContext"),
                 format!(
-                    "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.{field_name}"
+                    "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
                 ),
             )?));
         }
@@ -3671,22 +3696,22 @@ fn verify_vss_coefficient_commitment_record(
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentPublicMatrixSeedMismatch",
             "VSS coefficient commitment publicMatrixSeedHash must match common randomness",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.publicMatrixSeedHash",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.publicMatrixSeedHash",
         )?));
     }
     if coefficient_record
-        .get("dealerIdentity")
+        .get("sourceTrusteeIdentity")
         .and_then(Value::as_str)
-        != Some(dealer_identity)
+        != Some(source_trustee_identity)
         || coefficient_record
-            .get("dealerRosterPosition")
+            .get("sourceTrusteeRosterPosition")
             .and_then(Value::as_u64)
-            != Some(dealer_roster_position)
+            != Some(source_trustee_roster_position)
     {
         return Ok(Some(vss_commitment_refusal(
-            "vssCoefficientCommitmentDealerMismatch",
-            "VSS coefficient commitment must bind its dealer record",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.dealerIdentity",
+            "vssCoefficientCommitmentSourceTrusteeMismatch",
+            "VSS coefficient commitment must bind its source trustee record",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.sourceTrusteeIdentity",
         )?));
     }
     let Some(rns_limb_index) = coefficient_record
@@ -3696,14 +3721,14 @@ fn verify_vss_coefficient_commitment_record(
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentRnsLimbMissing",
             "VSS coefficient commitment must bind rnsLimbIndex",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.rnsLimbIndex",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.rnsLimbIndex",
         )?));
     };
     let Ok(rns_limb_index_usize) = usize::try_from(rns_limb_index) else {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentRnsLimbInvalid",
             "VSS coefficient commitment rnsLimbIndex does not fit usize",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.rnsLimbIndex",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.rnsLimbIndex",
         )?));
     };
     if DATA_PRIMES.get(rns_limb_index_usize)
@@ -3715,7 +3740,7 @@ fn verify_vss_coefficient_commitment_record(
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentRnsPrimeMismatch",
             "VSS coefficient commitment rnsPrime must match Q_share at rnsLimbIndex",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.rnsPrime",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.rnsPrime",
         )?));
     }
     let Some(shamir_coefficient_index) = coefficient_record
@@ -3725,21 +3750,21 @@ fn verify_vss_coefficient_commitment_record(
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentShamirIndexMissing",
             "VSS coefficient commitment must bind shamirCoefficientIndex",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.shamirCoefficientIndex",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.shamirCoefficientIndex",
         )?));
     };
     if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentShamirIndexInvalid",
             "VSS coefficient commitment shamirCoefficientIndex is outside the first-profile threshold degree",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.shamirCoefficientIndex",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.shamirCoefficientIndex",
         )?));
     }
     if !seen_coefficients.insert((rns_limb_index, shamir_coefficient_index)) {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentDuplicate",
-            "dealer VSS coefficient commitments must have distinct limb/coefficient coordinates",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments",
+            "source trustee VSS coefficient commitments must have distinct limb/coefficient coordinates",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments",
         )?));
     }
     for field_name in [
@@ -3752,7 +3777,7 @@ fn verify_vss_coefficient_commitment_record(
                 VerifierStatus::Pending,
                 Some("vssCoefficientCommitments"),
                 vec![format!(
-                    "vssCoefficientCommitments.dealerRecords.coefficientCommitments.{field_name}"
+                    "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
                 )],
                 Vec::new(),
                 Vec::new(),
@@ -3760,7 +3785,9 @@ fn verify_vss_coefficient_commitment_record(
         };
         validate_hash_string(
             hash,
-            &format!("vssCoefficientCommitments.dealerRecords.coefficientCommitments.{field_name}"),
+            &format!(
+                "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
+            ),
         )?;
     }
     if coefficient_record
@@ -3771,7 +3798,7 @@ fn verify_vss_coefficient_commitment_record(
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentOpeningStatusMismatch",
             "VSS coefficient commitment openingVerificationStatus must be pending-private-envelope-opening until private VSS envelopes are verified",
-            "setupPackage.vssCoefficientCommitments.dealerRecords.coefficientCommitments.openingVerificationStatus",
+            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.openingVerificationStatus",
         )?));
     }
 
@@ -4032,7 +4059,7 @@ fn verify_private_vss_envelope_commitments(
     {
         return Ok(Some(private_vss_envelope_refusal(
             "privateVssEnvelopeCountMismatch",
-            "privateVssEnvelopeCommitments.envelopeCount must cover every dealer-recipient trustee pair",
+            "privateVssEnvelopeCommitments.envelopeCount must cover every source-trustee-recipient trustee pair",
             "setupPackage.privateVssEnvelopeCommitments.envelopeCount",
         )?));
     }
@@ -4105,13 +4132,14 @@ fn verify_private_vss_envelope_commitments(
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
     let setup_intent_mailbox_public_key_bindings =
         setup_intent_mailbox_public_key_bindings_from_phase_transcript(setup_package)?;
-    let dealer_commitment_roots = dealer_commitment_roots_from_vss_commitments(setup_package)?;
+    let source_trustee_commitment_roots =
+        source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     match private_vss_envelope_bindings_from_set(
         commitment_set,
         setup_context,
         &expected_trustees,
         &setup_intent_mailbox_public_key_bindings,
-        &dealer_commitment_roots,
+        &source_trustee_commitment_roots,
         public_matrix_seed_hash,
         vss_coefficient_commitment_root,
     )? {
@@ -4119,7 +4147,7 @@ fn verify_private_vss_envelope_commitments(
             if bindings.len() != expected_envelope_count as usize {
                 return Ok(Some(private_vss_envelope_refusal(
                     "privateVssEnvelopeCountMismatch",
-                    "privateVssEnvelopeCommitments.envelopeReferences must cover every dealer-recipient trustee pair",
+                    "privateVssEnvelopeCommitments.envelopeReferences must cover every source-trustee-recipient trustee pair",
                     "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
                 )?));
             }
@@ -4212,7 +4240,8 @@ fn private_vss_envelope_bindings_from_package(
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
     let setup_intent_mailbox_public_key_bindings =
         setup_intent_mailbox_public_key_bindings_from_phase_transcript(setup_package)?;
-    let dealer_commitment_roots = dealer_commitment_roots_from_vss_commitments(setup_package)?;
+    let source_trustee_commitment_roots =
+        source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     let public_matrix_seed_hash = setup_package
         .get("commonRandomness")
         .and_then(|common_randomness| common_randomness.get("publicMatrixSeedHash"))
@@ -4239,7 +4268,7 @@ fn private_vss_envelope_bindings_from_package(
         setup_context,
         &expected_trustees,
         &setup_intent_mailbox_public_key_bindings,
-        &dealer_commitment_roots,
+        &source_trustee_commitment_roots,
         public_matrix_seed_hash,
         vss_coefficient_commitment_root,
     )? {
@@ -4256,7 +4285,7 @@ fn private_vss_envelope_bindings_from_set(
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
     setup_intent_mailbox_public_key_bindings: &BTreeMap<u64, MailboxPublicKeyBinding>,
-    dealer_commitment_roots: &BTreeMap<u64, String>,
+    source_trustee_commitment_roots: &BTreeMap<u64, String>,
     public_matrix_seed_hash: &str,
     vss_coefficient_commitment_root: &str,
 ) -> CanonicalResult<Result<PrivateVssEnvelopeBindingMap, Refusal>> {
@@ -4266,7 +4295,7 @@ fn private_vss_envelope_bindings_from_set(
     else {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeReferencesMissing",
-            "privateVssEnvelopeCommitments.envelopeReferences must contain every dealer-recipient envelope commitment",
+            "privateVssEnvelopeCommitments.envelopeReferences must contain every source-trustee-recipient envelope commitment",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
         )));
     };
@@ -4275,7 +4304,7 @@ fn private_vss_envelope_bindings_from_set(
     if envelope_references.len() != expected_envelope_count {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeReferenceCountMismatch",
-            "privateVssEnvelopeCommitments.envelopeReferences must contain one record for every dealer-recipient trustee pair",
+            "privateVssEnvelopeCommitments.envelopeReferences must contain one record for every source-trustee-recipient trustee pair",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
         )));
     }
@@ -4287,22 +4316,26 @@ fn private_vss_envelope_bindings_from_set(
             setup_context,
             expected_trustees,
             setup_intent_mailbox_public_key_bindings,
-            dealer_commitment_roots,
+            source_trustee_commitment_roots,
             public_matrix_seed_hash,
             vss_coefficient_commitment_root,
         )? {
             Ok(binding) => binding,
             Err(refusal) => return Ok(Err(refusal)),
         };
-        let dealer_roster_position = value_u64(envelope_reference, "dealerRosterPosition")?;
+        let source_trustee_roster_position =
+            value_u64(envelope_reference, "sourceTrusteeRosterPosition")?;
         let recipient_roster_position = value_u64(envelope_reference, "recipientRosterPosition")?;
         if bindings
-            .insert((dealer_roster_position, recipient_roster_position), binding)
+            .insert(
+                (source_trustee_roster_position, recipient_roster_position),
+                binding,
+            )
             .is_some()
         {
             return Ok(Err(Refusal::new(
                 "privateVssEnvelopeReferenceDuplicate",
-                "privateVssEnvelopeCommitments.envelopeReferences must have distinct dealer-recipient trustee pairs",
+                "privateVssEnvelopeCommitments.envelopeReferences must have distinct source-trustee-recipient trustee pairs",
                 "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
             )));
         }
@@ -4316,7 +4349,7 @@ fn private_vss_envelope_binding_from_reference(
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
     setup_intent_mailbox_public_key_bindings: &BTreeMap<u64, MailboxPublicKeyBinding>,
-    dealer_commitment_roots: &BTreeMap<u64, String>,
+    source_trustee_commitment_roots: &BTreeMap<u64, String>,
     public_matrix_seed_hash: &str,
     vss_coefficient_commitment_root: &str,
 ) -> CanonicalResult<Result<PrivateVssEnvelopeBinding, Refusal>> {
@@ -4403,41 +4436,41 @@ fn private_vss_envelope_binding_from_reference(
         )));
     }
 
-    let dealer_identity = match envelope_reference
-        .get("dealerIdentity")
+    let source_trustee_identity = match envelope_reference
+        .get("sourceTrusteeIdentity")
         .and_then(Value::as_str)
     {
         Some(value) => value,
         None => {
             return Ok(Err(Refusal::new(
-                "privateVssEnvelopeDealerMissing",
-                "private VSS envelope commitment must bind dealerIdentity",
-                "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.dealerIdentity",
+                "privateVssEnvelopeSourceTrusteeMissing",
+                "private VSS envelope commitment must bind sourceTrusteeIdentity",
+                "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeIdentity",
             )));
         }
     };
-    let dealer_roster_position = match envelope_reference
-        .get("dealerRosterPosition")
+    let source_trustee_roster_position = match envelope_reference
+        .get("sourceTrusteeRosterPosition")
         .and_then(Value::as_u64)
     {
         Some(value) => value,
         None => {
             return Ok(Err(Refusal::new(
-                "privateVssEnvelopeDealerPositionMissing",
-                "private VSS envelope commitment must bind dealerRosterPosition",
-                "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.dealerRosterPosition",
+                "privateVssEnvelopeSourceTrusteePositionMissing",
+                "private VSS envelope commitment must bind sourceTrusteeRosterPosition",
+                "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeRosterPosition",
             )));
         }
     };
     if expected_trustees
-        .get(&dealer_roster_position)
+        .get(&source_trustee_roster_position)
         .map(String::as_str)
-        != Some(dealer_identity)
+        != Some(source_trustee_identity)
     {
         return Ok(Err(Refusal::new(
-            "privateVssEnvelopeDealerMismatch",
-            "private VSS envelope commitment dealer must match the phase transcript trustee identity",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.dealerIdentity",
+            "privateVssEnvelopeSourceTrusteeMismatch",
+            "private VSS envelope commitment source trustee must match the phase transcript trustee identity",
+            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeIdentity",
         )));
     }
 
@@ -4514,8 +4547,8 @@ fn private_vss_envelope_binding_from_reference(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientMailboxPublicKeyHash",
         )));
     }
-    let expected_sequence_number =
-        dealer_roster_position * FIRST_PROFILE_PARTICIPANT_COUNT + recipient_roster_position;
+    let expected_sequence_number = source_trustee_roster_position * FIRST_PROFILE_PARTICIPANT_COUNT
+        + recipient_roster_position;
     if envelope_reference
         .get("envelopeSequenceNumber")
         .and_then(Value::as_u64)
@@ -4523,32 +4556,32 @@ fn private_vss_envelope_binding_from_reference(
     {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeSequenceMismatch",
-            "private VSS envelope commitment envelopeSequenceNumber must follow dealer-major roster order",
+            "private VSS envelope commitment envelopeSequenceNumber must follow source-trustee-major roster order",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.envelopeSequenceNumber",
         )));
     }
 
-    let expected_dealer_commitment_root = match dealer_commitment_roots
-        .get(&dealer_roster_position)
+    let expected_source_trustee_commitment_root = match source_trustee_commitment_roots
+        .get(&source_trustee_roster_position)
         .map(String::as_str)
     {
         Some(value) => value,
         None => {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "dealer commitment root missing for private VSS envelope verification",
+                "source trustee commitment root missing for private VSS envelope verification",
             ));
         }
     };
     if envelope_reference
-        .get("dealerCommitmentRoot")
+        .get("sourceTrusteeCommitmentRoot")
         .and_then(Value::as_str)
-        != Some(expected_dealer_commitment_root)
+        != Some(expected_source_trustee_commitment_root)
     {
         return Ok(Err(Refusal::new(
-            "privateVssEnvelopeDealerCommitmentRootMismatch",
-            "private VSS envelope commitment dealerCommitmentRoot must match the accepted dealer coefficient commitments",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.dealerCommitmentRoot",
+            "privateVssEnvelopeSourceTrusteeCommitmentRootMismatch",
+            "private VSS envelope commitment sourceTrusteeCommitmentRoot must match the accepted source trustee coefficient commitments",
+            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeCommitmentRoot",
         )));
     }
 
@@ -4588,11 +4621,11 @@ fn private_vss_envelope_binding_from_reference(
         setup_context,
         public_matrix_seed_hash,
         vss_coefficient_commitment_root,
-        dealer_identity,
-        dealer_roster_position,
+        source_trustee_identity,
+        source_trustee_roster_position,
         recipient_identity,
         recipient_roster_position,
-        expected_dealer_commitment_root,
+        expected_source_trustee_commitment_root,
         expected_sequence_number,
     )?;
     let Some(private_envelope_aad) = envelope_reference.get("privateEnvelopeAad") else {
@@ -4631,13 +4664,13 @@ fn private_vss_envelope_binding_from_reference(
             &expected_aad_hash,
             public_matrix_seed_hash,
             vss_coefficient_commitment_root,
-            dealer_identity,
-            dealer_roster_position,
+            source_trustee_identity,
+            source_trustee_roster_position,
             recipient_identity,
             recipient_roster_position,
             expected_recipient_mailbox_public_key_hash,
             expected_recipient_mailbox_public_key_bytes_hash,
-            expected_dealer_commitment_root,
+            expected_source_trustee_commitment_root,
             expected_sequence_number,
             value_string(envelope_reference, "privateEnvelopeHash")?,
             value_string(envelope_reference, "encryptedEnvelopeHash")?,
@@ -4684,9 +4717,9 @@ fn private_vss_envelope_binding_from_reference(
     }
 
     Ok(Ok(PrivateVssEnvelopeBinding {
-        dealer_identity: dealer_identity.to_string(),
+        source_trustee_identity: source_trustee_identity.to_string(),
         recipient_identity: recipient_identity.to_string(),
-        dealer_commitment_root: expected_dealer_commitment_root.to_string(),
+        source_trustee_commitment_root: expected_source_trustee_commitment_root.to_string(),
         private_envelope_hash: value_string(envelope_reference, "privateEnvelopeHash")?.to_string(),
         local_verification_root: value_string(envelope_reference, "localVerificationRoot")?
             .to_string(),
@@ -4701,13 +4734,13 @@ fn verify_encrypted_private_vss_envelope(
     expected_aad_hash: &str,
     public_matrix_seed_hash: &str,
     vss_coefficient_commitment_root: &str,
-    dealer_identity: &str,
-    dealer_roster_position: u64,
+    source_trustee_identity: &str,
+    source_trustee_roster_position: u64,
     recipient_identity: &str,
     recipient_roster_position: u64,
     expected_recipient_mailbox_public_key_hash: &str,
     expected_recipient_mailbox_public_key_bytes_hash: &str,
-    dealer_commitment_root: &str,
+    source_trustee_commitment_root: &str,
     envelope_sequence_number: u64,
     private_envelope_hash: &str,
     encrypted_envelope_hash: &str,
@@ -4759,13 +4792,16 @@ fn verify_encrypted_private_vss_envelope(
             "vssCoefficientCommitmentRoot",
             vss_coefficient_commitment_root,
         ),
-        ("dealerIdentity", dealer_identity),
+        ("sourceTrusteeIdentity", source_trustee_identity),
         ("recipientIdentity", recipient_identity),
         (
             "recipientMailboxPublicKeyHash",
             expected_recipient_mailbox_public_key_hash,
         ),
-        ("dealerCommitmentRoot", dealer_commitment_root),
+        (
+            "sourceTrusteeCommitmentRoot",
+            source_trustee_commitment_root,
+        ),
         ("privateEnvelopeHash", private_envelope_hash),
         ("privateEnvelopeAadHash", expected_aad_hash),
     ] {
@@ -4782,7 +4818,10 @@ fn verify_encrypted_private_vss_envelope(
         }
     }
     for (field_name, expected_value) in [
-        ("dealerRosterPosition", dealer_roster_position),
+        (
+            "sourceTrusteeRosterPosition",
+            source_trustee_roster_position,
+        ),
         ("recipientRosterPosition", recipient_roster_position),
         ("envelopeSequenceNumber", envelope_sequence_number),
         (
@@ -4962,11 +5001,11 @@ fn private_vss_envelope_aad_value(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
     vss_coefficient_commitment_root: &str,
-    dealer_identity: &str,
-    dealer_roster_position: u64,
+    source_trustee_identity: &str,
+    source_trustee_roster_position: u64,
     recipient_identity: &str,
     recipient_roster_position: u64,
-    dealer_commitment_root: &str,
+    source_trustee_commitment_root: &str,
     envelope_sequence_number: u64,
 ) -> CanonicalResult<Value> {
     Ok(json!({
@@ -4990,11 +5029,11 @@ fn private_vss_envelope_aad_value(
         "phaseOrderHash": phase_order_hash()?,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "dealerIdentity": dealer_identity,
-        "dealerRosterPosition": dealer_roster_position,
+        "sourceTrusteeIdentity": source_trustee_identity,
+        "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
-        "dealerCommitmentRoot": dealer_commitment_root,
+        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
         "envelopeSequenceNumber": envelope_sequence_number,
         "deliveryPhaseNumber": PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER,
         "verificationPhaseNumber": PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER,
@@ -5082,7 +5121,8 @@ fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Option<Value>
     }
 
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let dealer_commitment_roots = dealer_commitment_roots_from_vss_commitments(setup_package)?;
+    let source_trustee_commitment_roots =
+        source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     let private_vss_envelope_bindings = private_vss_envelope_bindings_from_package(setup_package)?;
     let Some(complaint_records) = complaint_set
         .get("complaintRecords")
@@ -5108,7 +5148,7 @@ fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Option<Value>
             complaint_record,
             setup_context,
             &expected_trustees,
-            &dealer_commitment_roots,
+            &source_trustee_commitment_roots,
             private_vss_envelope_commitment_root,
             &private_vss_envelope_bindings,
             &mut seen_complaints,
@@ -5184,7 +5224,7 @@ fn verify_vss_complaint_record(
     complaint_record: &Value,
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
-    dealer_commitment_roots: &BTreeMap<u64, String>,
+    source_trustee_commitment_roots: &BTreeMap<u64, String>,
     private_vss_envelope_commitment_root: &str,
     private_vss_envelope_bindings: &PrivateVssEnvelopeBindingMap,
     seen_complaints: &mut BTreeSet<(u64, u64)>,
@@ -5237,35 +5277,35 @@ fn verify_vss_complaint_record(
         )?));
     }
 
-    let Some(dealer_identity) = complaint_record
-        .get("dealerIdentity")
+    let Some(source_trustee_identity) = complaint_record
+        .get("sourceTrusteeIdentity")
         .and_then(Value::as_str)
     else {
         return Ok(Some(vss_complaint_refusal(
-            "vssComplaintDealerMissing",
-            "VSS complaint must bind dealerIdentity",
-            "setupPackage.vssComplaints.complaintRecords.dealerIdentity",
+            "vssComplaintSourceTrusteeMissing",
+            "VSS complaint must bind sourceTrusteeIdentity",
+            "setupPackage.vssComplaints.complaintRecords.sourceTrusteeIdentity",
         )?));
     };
-    let Some(dealer_roster_position) = complaint_record
-        .get("dealerRosterPosition")
+    let Some(source_trustee_roster_position) = complaint_record
+        .get("sourceTrusteeRosterPosition")
         .and_then(Value::as_u64)
     else {
         return Ok(Some(vss_complaint_refusal(
-            "vssComplaintDealerPositionMissing",
-            "VSS complaint must bind dealerRosterPosition",
-            "setupPackage.vssComplaints.complaintRecords.dealerRosterPosition",
+            "vssComplaintSourceTrusteePositionMissing",
+            "VSS complaint must bind sourceTrusteeRosterPosition",
+            "setupPackage.vssComplaints.complaintRecords.sourceTrusteeRosterPosition",
         )?));
     };
     if expected_trustees
-        .get(&dealer_roster_position)
+        .get(&source_trustee_roster_position)
         .map(String::as_str)
-        != Some(dealer_identity)
+        != Some(source_trustee_identity)
     {
         return Ok(Some(vss_complaint_refusal(
-            "vssComplaintDealerMismatch",
-            "VSS complaint dealer must match the phase transcript trustee identity",
-            "setupPackage.vssComplaints.complaintRecords.dealerIdentity",
+            "vssComplaintSourceTrusteeMismatch",
+            "VSS complaint source trustee must match the phase transcript trustee identity",
+            "setupPackage.vssComplaints.complaintRecords.sourceTrusteeIdentity",
         )?));
     }
 
@@ -5300,48 +5340,48 @@ fn verify_vss_complaint_record(
             "setupPackage.vssComplaints.complaintRecords.recipientIdentity",
         )?));
     }
-    if !seen_complaints.insert((dealer_roster_position, recipient_roster_position)) {
+    if !seen_complaints.insert((source_trustee_roster_position, recipient_roster_position)) {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintDuplicate",
-            "VSS complaint records must have distinct dealer-recipient trustee pairs",
+            "VSS complaint records must have distinct source-trustee-recipient trustee pairs",
             "setupPackage.vssComplaints.complaintRecords",
         )?));
     }
 
-    let expected_dealer_commitment_root = dealer_commitment_roots
-        .get(&dealer_roster_position)
+    let expected_source_trustee_commitment_root = source_trustee_commitment_roots
+        .get(&source_trustee_roster_position)
         .map(String::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "dealer commitment root missing for VSS complaint verification",
+                "source trustee commitment root missing for VSS complaint verification",
             )
         })?;
     if complaint_record
-        .get("dealerCommitmentRoot")
+        .get("sourceTrusteeCommitmentRoot")
         .and_then(Value::as_str)
-        != Some(expected_dealer_commitment_root)
+        != Some(expected_source_trustee_commitment_root)
     {
         return Ok(Some(vss_complaint_refusal(
-            "vssComplaintDealerCommitmentRootMismatch",
-            "VSS complaint dealerCommitmentRoot must match the accepted dealer coefficient commitments",
-            "setupPackage.vssComplaints.complaintRecords.dealerCommitmentRoot",
+            "vssComplaintSourceTrusteeCommitmentRootMismatch",
+            "VSS complaint sourceTrusteeCommitmentRoot must match the accepted source trustee coefficient commitments",
+            "setupPackage.vssComplaints.complaintRecords.sourceTrusteeCommitmentRoot",
         )?));
     }
-    let Some(private_vss_envelope_binding) =
-        private_vss_envelope_bindings.get(&(dealer_roster_position, recipient_roster_position))
+    let Some(private_vss_envelope_binding) = private_vss_envelope_bindings
+        .get(&(source_trustee_roster_position, recipient_roster_position))
     else {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintPrivateEnvelopeBindingMissing",
-            "VSS complaint must match a private VSS envelope commitment for the dealer-recipient pair",
+            "VSS complaint must match a private VSS envelope commitment for the source-trustee-recipient pair",
             "setupPackage.vssComplaints.complaintRecords.privateEnvelopeHash",
         )?));
     };
-    if private_vss_envelope_binding.dealer_identity != dealer_identity {
+    if private_vss_envelope_binding.source_trustee_identity != source_trustee_identity {
         return Ok(Some(vss_complaint_refusal(
-            "vssComplaintPrivateEnvelopeDealerMismatch",
-            "VSS complaint dealer must match the private VSS envelope commitment dealer",
-            "setupPackage.vssComplaints.complaintRecords.dealerIdentity",
+            "vssComplaintPrivateEnvelopeSourceTrusteeMismatch",
+            "VSS complaint source trustee must match the private VSS envelope commitment source trustee",
+            "setupPackage.vssComplaints.complaintRecords.sourceTrusteeIdentity",
         )?));
     }
     if private_vss_envelope_binding.recipient_identity != recipient_identity {
@@ -5351,11 +5391,13 @@ fn verify_vss_complaint_record(
             "setupPackage.vssComplaints.complaintRecords.recipientIdentity",
         )?));
     }
-    if private_vss_envelope_binding.dealer_commitment_root != expected_dealer_commitment_root {
+    if private_vss_envelope_binding.source_trustee_commitment_root
+        != expected_source_trustee_commitment_root
+    {
         return Ok(Some(vss_complaint_refusal(
-            "vssComplaintPrivateEnvelopeDealerCommitmentRootMismatch",
-            "VSS complaint dealerCommitmentRoot must match the private VSS envelope commitment dealer root",
-            "setupPackage.vssComplaints.complaintRecords.dealerCommitmentRoot",
+            "vssComplaintPrivateEnvelopeSourceTrusteeCommitmentRootMismatch",
+            "VSS complaint sourceTrusteeCommitmentRoot must match the private VSS envelope commitment source trustee root",
+            "setupPackage.vssComplaints.complaintRecords.sourceTrusteeCommitmentRoot",
         )?));
     }
 
@@ -5587,11 +5629,11 @@ fn vss_complaint_payload_value(complaint_record: &Value) -> CanonicalResult<Valu
         )?,
         "commitmentProfileHash": value_string(complaint_record, "commitmentProfileHash")?,
         "setupEpoch": value_string(complaint_record, "setupEpoch")?,
-        "dealerIdentity": value_string(complaint_record, "dealerIdentity")?,
-        "dealerRosterPosition": value_u64(complaint_record, "dealerRosterPosition")?,
+        "sourceTrusteeIdentity": value_string(complaint_record, "sourceTrusteeIdentity")?,
+        "sourceTrusteeRosterPosition": value_u64(complaint_record, "sourceTrusteeRosterPosition")?,
         "recipientIdentity": value_string(complaint_record, "recipientIdentity")?,
         "recipientRosterPosition": value_u64(complaint_record, "recipientRosterPosition")?,
-        "dealerCommitmentRoot": value_string(complaint_record, "dealerCommitmentRoot")?,
+        "sourceTrusteeCommitmentRoot": value_string(complaint_record, "sourceTrusteeCommitmentRoot")?,
         "privateVssEnvelopeCommitmentRoot": value_string(
             complaint_record,
             "privateVssEnvelopeCommitmentRoot",
@@ -5625,11 +5667,11 @@ fn vss_complaint_signature_context_hash(
             )?,
             "commitmentProfileHash": value_string(complaint_record, "commitmentProfileHash")?,
             "setupEpoch": value_string(complaint_record, "setupEpoch")?,
-            "dealerIdentity": value_string(complaint_record, "dealerIdentity")?,
-            "dealerRosterPosition": value_u64(complaint_record, "dealerRosterPosition")?,
+            "sourceTrusteeIdentity": value_string(complaint_record, "sourceTrusteeIdentity")?,
+            "sourceTrusteeRosterPosition": value_u64(complaint_record, "sourceTrusteeRosterPosition")?,
             "recipientIdentity": value_string(complaint_record, "recipientIdentity")?,
             "recipientRosterPosition": value_u64(complaint_record, "recipientRosterPosition")?,
-            "dealerCommitmentRoot": value_string(complaint_record, "dealerCommitmentRoot")?,
+            "sourceTrusteeCommitmentRoot": value_string(complaint_record, "sourceTrusteeCommitmentRoot")?,
             "privateVssEnvelopeCommitmentRoot": value_string(
                 complaint_record,
                 "privateVssEnvelopeCommitmentRoot",
@@ -5728,7 +5770,8 @@ fn verify_vss_share_acceptances(setup_package: &Value) -> CanonicalResult<Option
     }
 
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let dealer_commitment_roots = dealer_commitment_roots_from_vss_commitments(setup_package)?;
+    let source_trustee_commitment_roots =
+        source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     let private_vss_envelope_bindings = private_vss_envelope_bindings_from_package(setup_package)?;
     let Some(acceptance_records) = acceptance_set
         .get("acceptanceRecords")
@@ -5747,7 +5790,7 @@ fn verify_vss_share_acceptances(setup_package: &Value) -> CanonicalResult<Option
     if acceptance_records.len() != expected_acceptance_count {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptanceCountMismatch",
-            "vssShareAcceptances.acceptanceRecords must contain one record for every dealer-recipient trustee pair",
+            "vssShareAcceptances.acceptanceRecords must contain one record for every source-trustee-recipient trustee pair",
             "setupPackage.vssShareAcceptances.acceptanceRecords",
         )?));
     }
@@ -5758,7 +5801,7 @@ fn verify_vss_share_acceptances(setup_package: &Value) -> CanonicalResult<Option
             acceptance_record,
             setup_context,
             &expected_trustees,
-            &dealer_commitment_roots,
+            &source_trustee_commitment_roots,
             private_vss_envelope_commitment_root,
             &private_vss_envelope_bindings,
             &mut seen_acceptances,
@@ -5825,50 +5868,53 @@ fn verify_vss_share_acceptance_context(
     Ok(())
 }
 
-fn dealer_commitment_roots_from_vss_commitments(
+fn source_trustee_commitment_roots_from_vss_commitments(
     setup_package: &Value,
 ) -> CanonicalResult<BTreeMap<u64, String>> {
-    let dealer_records = setup_package
+    let source_trustee_records = setup_package
         .get("vssCoefficientCommitments")
-        .and_then(|commitment_set| commitment_set.get("dealerRecords"))
+        .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "VSS dealer commitments were required before VSS share acceptance verification",
+                "VSS source trustee commitments were required before VSS share acceptance verification",
             )
         })?;
-    let mut dealer_roots = BTreeMap::new();
-    for dealer_record in dealer_records {
-        let dealer_roster_position = dealer_record
-            .get("dealerRosterPosition")
+    let mut source_trustee_roots = BTreeMap::new();
+    for source_trustee_record in source_trustee_records {
+        let source_trustee_roster_position = source_trustee_record
+            .get("sourceTrusteeRosterPosition")
             .and_then(Value::as_u64)
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "dealer VSS commitment record must bind dealerRosterPosition",
+                    "source trustee VSS commitment record must bind sourceTrusteeRosterPosition",
                 )
             })?;
-        let dealer_commitment_root = dealer_record
-            .get("dealerCommitmentRoot")
+        let source_trustee_commitment_root = source_trustee_record
+            .get("sourceTrusteeCommitmentRoot")
             .and_then(Value::as_str)
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "dealer VSS commitment record must bind dealerCommitmentRoot",
+                    "source trustee VSS commitment record must bind sourceTrusteeCommitmentRoot",
                 )
             })?;
-        dealer_roots.insert(dealer_roster_position, dealer_commitment_root.to_string());
+        source_trustee_roots.insert(
+            source_trustee_roster_position,
+            source_trustee_commitment_root.to_string(),
+        );
     }
 
-    Ok(dealer_roots)
+    Ok(source_trustee_roots)
 }
 
 fn verify_vss_share_acceptance_record(
     acceptance_record: &Value,
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
-    dealer_commitment_roots: &BTreeMap<u64, String>,
+    source_trustee_commitment_roots: &BTreeMap<u64, String>,
     private_vss_envelope_commitment_root: &str,
     private_vss_envelope_bindings: &PrivateVssEnvelopeBindingMap,
     seen_acceptances: &mut BTreeSet<(u64, u64)>,
@@ -5921,35 +5967,35 @@ fn verify_vss_share_acceptance_record(
         )?));
     }
 
-    let Some(dealer_identity) = acceptance_record
-        .get("dealerIdentity")
+    let Some(source_trustee_identity) = acceptance_record
+        .get("sourceTrusteeIdentity")
         .and_then(Value::as_str)
     else {
         return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceDealerMissing",
-            "VSS share acceptance must bind dealerIdentity",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.dealerIdentity",
+            "vssShareAcceptanceSourceTrusteeMissing",
+            "VSS share acceptance must bind sourceTrusteeIdentity",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeIdentity",
         )?));
     };
-    let Some(dealer_roster_position) = acceptance_record
-        .get("dealerRosterPosition")
+    let Some(source_trustee_roster_position) = acceptance_record
+        .get("sourceTrusteeRosterPosition")
         .and_then(Value::as_u64)
     else {
         return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceDealerPositionMissing",
-            "VSS share acceptance must bind dealerRosterPosition",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.dealerRosterPosition",
+            "vssShareAcceptanceSourceTrusteePositionMissing",
+            "VSS share acceptance must bind sourceTrusteeRosterPosition",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeRosterPosition",
         )?));
     };
     if expected_trustees
-        .get(&dealer_roster_position)
+        .get(&source_trustee_roster_position)
         .map(String::as_str)
-        != Some(dealer_identity)
+        != Some(source_trustee_identity)
     {
         return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceDealerMismatch",
-            "VSS share acceptance dealer must match the phase transcript trustee identity",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.dealerIdentity",
+            "vssShareAcceptanceSourceTrusteeMismatch",
+            "VSS share acceptance source trustee must match the phase transcript trustee identity",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeIdentity",
         )?));
     }
 
@@ -5984,48 +6030,48 @@ fn verify_vss_share_acceptance_record(
             "setupPackage.vssShareAcceptances.acceptanceRecords.recipientIdentity",
         )?));
     }
-    if !seen_acceptances.insert((dealer_roster_position, recipient_roster_position)) {
+    if !seen_acceptances.insert((source_trustee_roster_position, recipient_roster_position)) {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptanceDuplicate",
-            "VSS share acceptance records must have distinct dealer-recipient trustee pairs",
+            "VSS share acceptance records must have distinct source-trustee-recipient trustee pairs",
             "setupPackage.vssShareAcceptances.acceptanceRecords",
         )?));
     }
 
-    let expected_dealer_commitment_root = dealer_commitment_roots
-        .get(&dealer_roster_position)
+    let expected_source_trustee_commitment_root = source_trustee_commitment_roots
+        .get(&source_trustee_roster_position)
         .map(String::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "dealer commitment root missing for VSS share acceptance verification",
+                "source trustee commitment root missing for VSS share acceptance verification",
             )
         })?;
     if acceptance_record
-        .get("dealerCommitmentRoot")
+        .get("sourceTrusteeCommitmentRoot")
         .and_then(Value::as_str)
-        != Some(expected_dealer_commitment_root)
+        != Some(expected_source_trustee_commitment_root)
     {
         return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceDealerCommitmentRootMismatch",
-            "VSS share acceptance dealerCommitmentRoot must match the accepted dealer coefficient commitments",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.dealerCommitmentRoot",
+            "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch",
+            "VSS share acceptance sourceTrusteeCommitmentRoot must match the accepted source trustee coefficient commitments",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeCommitmentRoot",
         )?));
     }
-    let Some(private_vss_envelope_binding) =
-        private_vss_envelope_bindings.get(&(dealer_roster_position, recipient_roster_position))
+    let Some(private_vss_envelope_binding) = private_vss_envelope_bindings
+        .get(&(source_trustee_roster_position, recipient_roster_position))
     else {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptancePrivateEnvelopeBindingMissing",
-            "VSS share acceptance must match a private VSS envelope commitment for the dealer-recipient pair",
+            "VSS share acceptance must match a private VSS envelope commitment for the source-trustee-recipient pair",
             "setupPackage.vssShareAcceptances.acceptanceRecords.privateEnvelopeHash",
         )?));
     };
-    if private_vss_envelope_binding.dealer_identity != dealer_identity {
+    if private_vss_envelope_binding.source_trustee_identity != source_trustee_identity {
         return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptancePrivateEnvelopeDealerMismatch",
-            "VSS share acceptance dealer must match the private VSS envelope commitment dealer",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.dealerIdentity",
+            "vssShareAcceptancePrivateEnvelopeSourceTrusteeMismatch",
+            "VSS share acceptance source trustee must match the private VSS envelope commitment source trustee",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeIdentity",
         )?));
     }
     if private_vss_envelope_binding.recipient_identity != recipient_identity {
@@ -6035,11 +6081,13 @@ fn verify_vss_share_acceptance_record(
             "setupPackage.vssShareAcceptances.acceptanceRecords.recipientIdentity",
         )?));
     }
-    if private_vss_envelope_binding.dealer_commitment_root != expected_dealer_commitment_root {
+    if private_vss_envelope_binding.source_trustee_commitment_root
+        != expected_source_trustee_commitment_root
+    {
         return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptancePrivateEnvelopeDealerCommitmentRootMismatch",
-            "VSS share acceptance dealerCommitmentRoot must match the private VSS envelope commitment dealer root",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.dealerCommitmentRoot",
+            "vssShareAcceptancePrivateEnvelopeSourceTrusteeCommitmentRootMismatch",
+            "VSS share acceptance sourceTrusteeCommitmentRoot must match the private VSS envelope commitment source trustee root",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeCommitmentRoot",
         )?));
     }
 
@@ -6287,11 +6335,11 @@ fn vss_share_acceptance_payload_value(acceptance_record: &Value) -> CanonicalRes
         )?,
         "commitmentProfileHash": value_string(acceptance_record, "commitmentProfileHash")?,
         "setupEpoch": value_string(acceptance_record, "setupEpoch")?,
-        "dealerIdentity": value_string(acceptance_record, "dealerIdentity")?,
-        "dealerRosterPosition": value_u64(acceptance_record, "dealerRosterPosition")?,
+        "sourceTrusteeIdentity": value_string(acceptance_record, "sourceTrusteeIdentity")?,
+        "sourceTrusteeRosterPosition": value_u64(acceptance_record, "sourceTrusteeRosterPosition")?,
         "recipientIdentity": value_string(acceptance_record, "recipientIdentity")?,
         "recipientRosterPosition": value_u64(acceptance_record, "recipientRosterPosition")?,
-        "dealerCommitmentRoot": value_string(acceptance_record, "dealerCommitmentRoot")?,
+        "sourceTrusteeCommitmentRoot": value_string(acceptance_record, "sourceTrusteeCommitmentRoot")?,
         "privateVssEnvelopeCommitmentRoot": value_string(
             acceptance_record,
             "privateVssEnvelopeCommitmentRoot",
@@ -6324,11 +6372,11 @@ fn vss_share_acceptance_signature_context_hash(
             )?,
             "commitmentProfileHash": value_string(acceptance_record, "commitmentProfileHash")?,
             "setupEpoch": value_string(acceptance_record, "setupEpoch")?,
-            "dealerIdentity": value_string(acceptance_record, "dealerIdentity")?,
-            "dealerRosterPosition": value_u64(acceptance_record, "dealerRosterPosition")?,
+            "sourceTrusteeIdentity": value_string(acceptance_record, "sourceTrusteeIdentity")?,
+            "sourceTrusteeRosterPosition": value_u64(acceptance_record, "sourceTrusteeRosterPosition")?,
             "recipientIdentity": value_string(acceptance_record, "recipientIdentity")?,
             "recipientRosterPosition": value_u64(acceptance_record, "recipientRosterPosition")?,
-            "dealerCommitmentRoot": value_string(acceptance_record, "dealerCommitmentRoot")?,
+            "sourceTrusteeCommitmentRoot": value_string(acceptance_record, "sourceTrusteeCommitmentRoot")?,
             "privateVssEnvelopeCommitmentRoot": value_string(
                 acceptance_record,
                 "privateVssEnvelopeCommitmentRoot",
@@ -6415,14 +6463,14 @@ fn verify_threshold_share_commitments(
                 "commonRandomness.publicMatrixSeedHash was required before threshold-share commitment verification",
             )
         })?;
-    let dealer_records = setup_package
+    let source_trustee_records = setup_package
         .get("vssCoefficientCommitments")
-        .and_then(|commitment_set| commitment_set.get("dealerRecords"))
+        .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "VSS dealer commitments were required before threshold-share commitment verification",
+                "VSS source trustee commitments were required before threshold-share commitment verification",
             )
         })?;
     let material_set = setup_package
@@ -6469,7 +6517,7 @@ fn verify_threshold_share_commitments(
                 "setupContext": setup_context,
                 "publicMatrixSeedHash": public_matrix_seed_hash,
                 "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-                "dealerCoefficientCommitmentRecords": dealer_records,
+                "sourceTrusteeCoefficientCommitmentRecords": source_trustee_records,
                 "transportedVssCoefficientCommitmentMaterial": transported_material,
             }),
         ) {
@@ -6533,7 +6581,7 @@ fn verify_threshold_share_commitments(
         match derive_threshold_share_commitment_set_from_parts(
             setup_context,
             public_matrix_seed_hash,
-            dealer_records,
+            source_trustee_records,
             coefficient_commitments,
         ) {
             Ok(value) => value,
@@ -6896,19 +6944,19 @@ fn verify_same_secret_statement_record(
     if binding.trustee_identity != trustee_identity {
         return Ok(Some(same_secret_refusal(
             "sameSecretStatementTrusteeMismatch",
-            "same-secret statement trusteeIdentity must match the accepted VSS dealer",
+            "same-secret statement trusteeIdentity must match the accepted VSS source trustee",
             "setupPackage.sameSecretConsistency.statementRecords.trusteeIdentity",
         )?));
     }
     if statement_record
-        .get("vssDealerCommitmentRoot")
+        .get("vssSourceTrusteeCommitmentRoot")
         .and_then(Value::as_str)
-        != Some(binding.vss_dealer_commitment_root.as_str())
+        != Some(binding.vss_source_trustee_commitment_root.as_str())
     {
         return Ok(Some(same_secret_refusal(
-            "sameSecretVssDealerRootMismatch",
-            "same-secret statement vssDealerCommitmentRoot must match the accepted dealer VSS commitments",
-            "setupPackage.sameSecretConsistency.statementRecords.vssDealerCommitmentRoot",
+            "sameSecretVssSourceTrusteeRootMismatch",
+            "same-secret statement vssSourceTrusteeCommitmentRoot must match the accepted source trustee VSS commitments",
+            "setupPackage.sameSecretConsistency.statementRecords.vssSourceTrusteeCommitmentRoot",
         )?));
     }
     if statement_record.get("constantCoefficientCommitmentRoots")
@@ -6987,20 +7035,22 @@ fn same_secret_trustee_bindings_from_vss(
     setup_package: &Value,
     expected_trustees: &BTreeMap<u64, String>,
 ) -> CanonicalResult<BTreeMap<u64, SameSecretTrusteeBinding>> {
-    let dealer_records = setup_package
+    let source_trustee_records = setup_package
         .get("vssCoefficientCommitments")
-        .and_then(|commitment_set| commitment_set.get("dealerRecords"))
+        .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "VSS dealer records were required before same-secret statement verification",
+                "VSS source trustee records were required before same-secret statement verification",
             )
         })?;
     let mut bindings = BTreeMap::new();
-    for dealer_record in dealer_records {
-        let trustee_roster_position = value_u64(dealer_record, "dealerRosterPosition")?;
-        let trustee_identity = value_string(dealer_record, "dealerIdentity")?.to_string();
+    for source_trustee_record in source_trustee_records {
+        let trustee_roster_position =
+            value_u64(source_trustee_record, "sourceTrusteeRosterPosition")?;
+        let trustee_identity =
+            value_string(source_trustee_record, "sourceTrusteeIdentity")?.to_string();
         if expected_trustees
             .get(&trustee_roster_position)
             .map(String::as_str)
@@ -7008,20 +7058,20 @@ fn same_secret_trustee_bindings_from_vss(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "VSS dealer record does not match the accepted setup roster",
+                "VSS source trustee record does not match the accepted setup roster",
             ));
         }
-        let vss_dealer_commitment_root =
-            value_string(dealer_record, "dealerCommitmentRoot")?.to_string();
+        let vss_source_trustee_commitment_root =
+            value_string(source_trustee_record, "sourceTrusteeCommitmentRoot")?.to_string();
         let constant_commitment_roots =
-            same_secret_constant_commitment_roots_from_dealer(dealer_record)?;
+            same_secret_constant_commitment_roots_from_source_trustee(source_trustee_record)?;
         if bindings
             .insert(
                 trustee_roster_position,
                 SameSecretTrusteeBinding {
                     trustee_identity,
                     trustee_roster_position,
-                    vss_dealer_commitment_root,
+                    vss_source_trustee_commitment_root,
                     constant_commitment_roots,
                 },
             )
@@ -7029,7 +7079,7 @@ fn same_secret_trustee_bindings_from_vss(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "VSS dealer records contain a duplicate roster position",
+                "VSS source trustee records contain a duplicate roster position",
             ));
         }
     }
@@ -7037,10 +7087,10 @@ fn same_secret_trustee_bindings_from_vss(
     Ok(bindings)
 }
 
-fn same_secret_constant_commitment_roots_from_dealer(
-    dealer_record: &Value,
+fn same_secret_constant_commitment_roots_from_source_trustee(
+    source_trustee_record: &Value,
 ) -> CanonicalResult<Vec<Value>> {
-    let coefficient_commitments = dealer_record
+    let coefficient_commitments = source_trustee_record
         .get("coefficientCommitments")
         .and_then(Value::as_array)
         .ok_or_else(|| {
@@ -7109,7 +7159,7 @@ fn trustee_secret_commitment_payload(
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
         "trusteeIdentity": binding.trustee_identity,
         "trusteeRosterPosition": binding.trustee_roster_position,
-        "vssDealerCommitmentRoot": binding.vss_dealer_commitment_root,
+        "vssSourceTrusteeCommitmentRoot": binding.vss_source_trustee_commitment_root,
         "secretCommitmentSource": "vss-constant-coefficient-commitments",
         "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         "constantCoefficientCommitmentRoots": binding.constant_commitment_roots,
@@ -8495,21 +8545,21 @@ fn same_secret_transported_constant_commitments_by_roster_position(
                 "vssCoefficientCommitmentMaterial.vssCoefficientCommitmentRoot was required before transported same-secret proof verification",
             )
         })?;
-    let dealer_records = setup_package
+    let source_trustee_records = setup_package
         .get("vssCoefficientCommitments")
-        .and_then(|commitment_set| commitment_set.get("dealerRecords"))
+        .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "VSS dealer commitments were required before transported same-secret proof verification",
+                "VSS source trustee commitments were required before transported same-secret proof verification",
             )
         })?;
     let verified_transport = verify_constant_vss_commitments_from_transport_request(&json!({
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "dealerCoefficientCommitmentRecords": dealer_records,
+        "sourceTrusteeCoefficientCommitmentRecords": source_trustee_records,
         "transportedVssCoefficientCommitmentMaterial": transported_material,
     }))?;
     let derived_material_root = verified_transport
@@ -8538,7 +8588,7 @@ fn same_secret_transported_constant_commitments_by_roster_position(
         ));
     }
 
-    Ok(verified_transport.constant_commitments_by_dealer)
+    Ok(verified_transport.constant_commitments_by_source_trustee)
 }
 
 fn same_secret_constant_commitment_values_from_material(
@@ -8592,7 +8642,7 @@ fn same_secret_constant_commitment_values_from_material(
     let mut commitments_by_limb = BTreeMap::new();
     for material_record in material_records {
         if material_record
-            .get("dealerRosterPosition")
+            .get("sourceTrusteeRosterPosition")
             .and_then(Value::as_u64)
             != Some(trustee_roster_position)
             || material_record
@@ -8749,7 +8799,7 @@ fn unexpected_same_secret_statement_field(value: &Value) -> Option<String> {
             "setupEpoch",
             "trusteeIdentity",
             "trusteeRosterPosition",
-            "vssDealerCommitmentRoot",
+            "vssSourceTrusteeCommitmentRoot",
             "constantCoefficientCommitmentRoots",
             "trusteeSecretCommitmentRoot",
             "boundSecretDependentProofFamilies",
@@ -10093,8 +10143,139 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
             "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
         )?));
     }
+    if ring_degree == POLYNOMIAL_DEGREE as u64 {
+        if let Err(error) = accepted_setup_collective_public_key_from_package(setup_package) {
+            return Ok(Some(public_key_share_proof_refusal(
+                "collectivePublicKeyRuntimeMaterialInvalid",
+                error.message,
+                "setupPackage.collectivePublicKey",
+            )?));
+        }
+    }
 
     Ok(None)
+}
+
+pub(super) fn accepted_setup_collective_public_key_from_package(
+    setup_package: &Value,
+) -> CanonicalResult<BgvPublicKey> {
+    let aggregate_object = setup_package.get("collectivePublicKey").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "collectivePublicKey was required before accepted public-key runtime loading",
+        )
+    })?;
+    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "commonRandomness was required before accepted public-key runtime loading",
+        )
+    })?;
+    let public_matrix_seed_hash = value_string(common_randomness, "publicMatrixSeedHash")?;
+    if value_string(aggregate_object, "publicMatrixSeedHash")? != public_matrix_seed_hash {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key must bind the accepted public matrix seed",
+        ));
+    }
+    let expected_public_derivations =
+        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)?;
+    if common_randomness.get("publicDerivations") != Some(&expected_public_derivations) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "accepted public-key runtime loading requires canonical public derivations",
+        ));
+    }
+    let expected_public_a = derive_bgv_public_a_polynomial(public_matrix_seed_hash)?;
+    if value_string(aggregate_object, "publicAPolynomialRoot")?
+        != value_string(&expected_public_a, "publicPolynomialRoot")?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "collective public key must bind the accepted BGV public a polynomial",
+        ));
+    }
+    if value_u64(aggregate_object, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "accepted collective public-key runtime material requires profile-ring aggregate coefficients",
+        ));
+    }
+    let public_b = collective_public_key_component_b_from_aggregate_object(aggregate_object)?;
+    let public_a = DATA_PRIMES
+        .iter()
+        .copied()
+        .map(|modulus| {
+            dense_public_residues(public_matrix_seed_hash, "accepted-bgv-public-a", modulus)
+        })
+        .collect::<Vec<_>>();
+
+    BgvPublicKey::from_components(public_b, public_a)
+}
+
+fn collective_public_key_component_b_from_aggregate_object(
+    aggregate_object: &Value,
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    let aggregate_limbs = aggregate_object
+        .get("aggregateCoefficientVectorsByLimb")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "collectivePublicKey.aggregateCoefficientVectorsByLimb is required",
+            )
+        })?;
+    if aggregate_limbs.len() != DATA_PRIMES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public key must contain one runtime component-b limb per Q_share prime",
+        ));
+    }
+    let mut public_b = Vec::with_capacity(DATA_PRIMES.len());
+    for (rns_limb_index, aggregate_limb) in aggregate_limbs.iter().enumerate() {
+        if aggregate_limb.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
+            || aggregate_limb.get("rnsPrime").and_then(Value::as_u64)
+                != Some(DATA_PRIMES[rns_limb_index])
+            || aggregate_limb.get("component").and_then(Value::as_str) != Some("b")
+            || aggregate_limb
+                .get("coefficientByteLength")
+                .and_then(Value::as_u64)
+                != Some((POLYNOMIAL_DEGREE * 8) as u64)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "collective public-key runtime limb metadata must follow Q_share order",
+            ));
+        }
+        let coefficients = coefficient_vector_from_le_hex(
+            value_string(aggregate_limb, "coefficientsLeHex")?,
+            POLYNOMIAL_DEGREE,
+            "collective public-key runtime coefficient vector width must match the profile ring degree",
+        )?;
+        if coefficients
+            .iter()
+            .any(|coefficient| *coefficient >= DATA_PRIMES[rns_limb_index])
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "collective public-key runtime component contains non-canonical Q_share residues",
+            ));
+        }
+        let coefficient_hash = public_key_share_coefficient_vector_hash(&coefficients);
+        if aggregate_limb
+            .get("coefficientVectorHash512")
+            .and_then(Value::as_str)
+            != Some(coefficient_hash.as_str())
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "collective public-key runtime component hash must match the aggregate coefficients",
+            ));
+        }
+        public_b.push(coefficients);
+    }
+
+    Ok(public_b)
 }
 
 fn verify_collective_public_key_coefficients(
@@ -11672,7 +11853,7 @@ fn verify_pending_evaluation_key_material_boundary(
         return Ok(Some(response));
     }
 
-    if let Some(response) = verify_public_evaluation_key_set(setup_package, false)? {
+    if let Some(response) = verify_public_evaluation_key_set(setup_package, request, false)? {
         return Ok(Some(response));
     }
 
@@ -11681,12 +11862,14 @@ fn verify_pending_evaluation_key_material_boundary(
 
 fn verify_required_public_evaluation_key_set(
     setup_package: &Value,
+    request: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    verify_public_evaluation_key_set(setup_package, true)
+    verify_public_evaluation_key_set(setup_package, request, true)
 }
 
 fn verify_public_evaluation_key_set(
     setup_package: &Value,
+    request: &Value,
     require_material: bool,
 ) -> CanonicalResult<Option<Value>> {
     let Some(evaluation_keys) = setup_package.get("evaluationKeys") else {
@@ -11937,8 +12120,968 @@ fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys.evaluationKeySetHash",
         )?));
     }
+    if public_evaluation_key_set_has_material_reference(evaluation_keys) {
+        if let Some(response) = verify_public_evaluation_key_material_transport(
+            setup_package,
+            evaluation_keys,
+            request,
+        )? {
+            return Ok(Some(response));
+        }
+    } else if request
+        .get("transportedPublicEvaluationKeyMaterial")
+        .is_some()
+    {
+        return Ok(Some(evaluation_key_material_refusal(
+            "publicEvaluationKeyMaterialUndeclared",
+            "transported public evaluation-key material must be declared by evaluationKeys",
+            "transportedPublicEvaluationKeyMaterial",
+        )?));
+    }
 
     Ok(None)
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PublicEvaluationKeyMaterialTransportHashes {
+    pub(super) full_object_hash: String,
+    pub(super) chunk_hashes: Vec<String>,
+    pub(super) chunk_root: String,
+    pub(super) total_byte_length: u64,
+}
+
+fn public_evaluation_key_set_has_material_reference(evaluation_keys: &Value) -> bool {
+    [
+        "publicEvaluationKeyMaterialEncoding",
+        "publicEvaluationKeyMaterialRoot",
+        "publicEvaluationKeyMaterialChunkSizeBytes",
+        "publicEvaluationKeyMaterialChunkCount",
+        "publicEvaluationKeyMaterialTotalByteLength",
+        "publicEvaluationKeyMaterialFullObjectHash",
+        "publicEvaluationKeyMaterialChunkRoot",
+        "publicEvaluationKeyMaterialChunkHashes",
+    ]
+    .into_iter()
+    .any(|field_name| evaluation_keys.get(field_name).is_some())
+}
+
+fn transported_evaluation_key_share_component_material_from_request(
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
+    if request
+        .get("transportedEvaluationKeyShareComponentMaterial")
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let Some(public_evaluation_key_material) =
+        request.get("transportedPublicEvaluationKeyMaterial")
+    else {
+        return Ok(None);
+    };
+    let Some(component_materials) = public_evaluation_key_material.get("componentMaterials") else {
+        return Ok(None);
+    };
+    if !component_materials.is_array() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public evaluation-key material componentMaterials must be an array",
+        ));
+    }
+
+    Ok(Some(json!({
+        "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "componentMaterials": component_materials,
+    })))
+}
+
+fn verify_public_evaluation_key_material_transport(
+    setup_package: &Value,
+    evaluation_keys: &Value,
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
+    for field_name in [
+        "publicEvaluationKeyMaterialEncoding",
+        "publicEvaluationKeyMaterialRoot",
+        "publicEvaluationKeyMaterialChunkSizeBytes",
+        "publicEvaluationKeyMaterialChunkCount",
+        "publicEvaluationKeyMaterialTotalByteLength",
+        "publicEvaluationKeyMaterialFullObjectHash",
+        "publicEvaluationKeyMaterialChunkRoot",
+        "publicEvaluationKeyMaterialChunkHashes",
+    ] {
+        if evaluation_keys.get(field_name).is_none() {
+            return Ok(Some(evaluation_key_material_refusal(
+                "publicEvaluationKeyMaterialReferenceIncomplete",
+                format!(
+                    "evaluationKeys.{field_name} is required when public evaluation-key material is declared"
+                ),
+                format!("setupPackage.evaluationKeys.{field_name}"),
+            )?));
+        }
+    }
+    if evaluation_keys
+        .get("publicEvaluationKeyMaterialEncoding")
+        .and_then(Value::as_str)
+        != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
+    {
+        return Ok(Some(evaluation_key_material_refusal(
+            "publicEvaluationKeyMaterialEncodingMismatch",
+            format!(
+                "evaluationKeys.publicEvaluationKeyMaterialEncoding must be {PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING}"
+            ),
+            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
+        )?));
+    }
+    let Some(transported_material_set) = request.get("transportedPublicEvaluationKeyMaterial")
+    else {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageAssembly"),
+            vec!["transportedPublicEvaluationKeyMaterial".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    if transported_material_set
+        .get("objectType")
+        .and_then(Value::as_str)
+        != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
+        || transported_material_set
+            .get("objectVersion")
+            .and_then(Value::as_u64)
+            != Some(1)
+        || transported_material_set
+            .get("setupProfileId")
+            .and_then(Value::as_str)
+            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+        || transported_material_set
+            .get("setupProofProfileId")
+            .and_then(Value::as_str)
+            != Some(SETUP_PROOF_PROFILE_ID)
+        || transported_material_set
+            .get("materialEncoding")
+            .and_then(Value::as_str)
+            != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
+    {
+        return Ok(Some(evaluation_key_material_refusal(
+            "publicEvaluationKeyMaterialTransportHeaderMismatch",
+            "transportedPublicEvaluationKeyMaterial must be a public evaluation-key material transport set",
+            "transportedPublicEvaluationKeyMaterial",
+        )?));
+    }
+    if let Err(error) = verify_public_evaluation_key_material_component_roots(
+        setup_package,
+        transported_material_set,
+    ) {
+        return Ok(Some(evaluation_key_material_verification_failure(
+            error,
+            "transportedPublicEvaluationKeyMaterial.componentMaterials",
+        )?));
+    }
+    let expected_material_root = value_string(evaluation_keys, "publicEvaluationKeyMaterialRoot")?;
+    validate_hash_string(
+        expected_material_root,
+        "evaluationKeys.publicEvaluationKeyMaterialRoot",
+    )?;
+    let material_entries = array_value(transported_material_set, "publicEvaluationKeyMaterials")?;
+    let mut matching_material = None;
+    for material_entry in material_entries {
+        if value_string(material_entry, "publicEvaluationKeyMaterialRoot")?
+            != expected_material_root
+        {
+            continue;
+        }
+        if matching_material.is_some() {
+            return Ok(Some(evaluation_key_material_refusal(
+                "publicEvaluationKeyMaterialDuplicateRoot",
+                "transported public evaluation-key material contains duplicate material roots",
+                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+            )?));
+        }
+        matching_material = Some(material_entry);
+    }
+    let Some(material_entry) = matching_material else {
+        return Ok(Some(evaluation_key_material_refusal(
+            "publicEvaluationKeyMaterialMissingRoot",
+            "transported public evaluation-key material is missing the declared publicEvaluationKeyMaterialRoot",
+            "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+        )?));
+    };
+    if let Err(error) =
+        verify_public_evaluation_key_material_entry_header(evaluation_keys, material_entry)
+    {
+        return Ok(Some(evaluation_key_material_verification_failure(
+            error,
+            "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+        )?));
+    }
+    let chunks = match public_evaluation_key_material_chunks(material_entry) {
+        Ok(chunks) => chunks,
+        Err(error) => {
+            return Ok(Some(evaluation_key_material_verification_failure(
+                error,
+                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials.chunks",
+            )?));
+        }
+    };
+    let transport_hashes = match public_evaluation_key_material_transport_hashes(&chunks) {
+        Ok(transport_hashes) => transport_hashes,
+        Err(error) => {
+            return Ok(Some(evaluation_key_material_verification_failure(
+                error,
+                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials.chunks",
+            )?));
+        }
+    };
+    if let Err(error) = verify_public_evaluation_key_material_hash_fields(
+        material_entry,
+        &transport_hashes,
+        "transported public evaluation-key material",
+    ) {
+        return Ok(Some(evaluation_key_material_verification_failure(
+            error,
+            "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+        )?));
+    }
+    if let Err(error) = verify_public_evaluation_key_material_hash_fields(
+        evaluation_keys,
+        &transport_hashes,
+        "public evaluation-key material reference",
+    ) {
+        return Ok(Some(evaluation_key_material_verification_failure(
+            error,
+            "setupPackage.evaluationKeys",
+        )?));
+    }
+    let expected_manifest =
+        public_evaluation_key_material_manifest(setup_package, evaluation_keys)?;
+    let canonical_material_root = public_evaluation_key_material_reference_root(
+        evaluation_keys,
+        &expected_manifest,
+        &transport_hashes,
+    )?;
+    if expected_material_root != canonical_material_root {
+        return Ok(Some(evaluation_key_material_refusal(
+            "publicEvaluationKeyMaterialRootMismatch",
+            "publicEvaluationKeyMaterialRoot does not match the canonical material reference",
+            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialRoot",
+        )?));
+    }
+    let decoded_manifest =
+        match decode_public_evaluation_key_material_manifest(&chunks, &transport_hashes) {
+            Ok(decoded_manifest) => decoded_manifest,
+            Err(error) => {
+                return Ok(Some(evaluation_key_material_verification_failure(
+                    error,
+                    "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+                )?));
+            }
+        };
+    if decoded_manifest != expected_manifest {
+        return Ok(Some(evaluation_key_material_refusal(
+            "publicEvaluationKeyMaterialManifestMismatch",
+            "transported public evaluation-key material manifest does not match the verified setup package",
+            "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+        )?));
+    }
+    if accepted_setup_evaluation_key_records_use_profile_ring(setup_package)? {
+        if let Err(error) =
+            accepted_setup_public_relinearization_keys_from_transport(setup_package, request)
+        {
+            return Ok(Some(evaluation_key_material_verification_failure(
+                error,
+                "transportedPublicEvaluationKeyMaterial.componentMaterials",
+            )?));
+        }
+        if let Err(error) = accepted_setup_public_galois_keys_from_transport(setup_package, request)
+        {
+            return Ok(Some(evaluation_key_material_verification_failure(
+                error,
+                "transportedPublicEvaluationKeyMaterial.componentMaterials",
+            )?));
+        }
+    }
+
+    Ok(None)
+}
+
+fn evaluation_key_material_verification_failure(
+    error: CanonicalError,
+    object_path: impl Into<String>,
+) -> CanonicalResult<Value> {
+    evaluation_key_material_refusal(
+        "evaluationKeyMaterialVerificationFailed",
+        error.message,
+        object_path,
+    )
+}
+
+fn verify_public_evaluation_key_material_component_roots(
+    setup_package: &Value,
+    transported_material_set: &Value,
+) -> CanonicalResult<()> {
+    let expected_roots = expected_public_evaluation_key_component_material_roots(setup_package)?;
+    let supplied_component_materials = match transported_material_set.get("componentMaterials") {
+        Some(component_materials) => Some(component_materials.as_array().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public evaluation-key material componentMaterials must be an array",
+            )
+        })?),
+        None => None,
+    };
+    if expected_roots.is_empty() {
+        if supplied_component_materials.is_some_and(|materials| !materials.is_empty()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public evaluation-key material must not include undeclared component material",
+            ));
+        }
+        return Ok(());
+    }
+    let Some(component_materials) = supplied_component_materials else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public evaluation-key material must include componentMaterials for binary proof records",
+        ));
+    };
+    if component_materials.len() != expected_roots.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public evaluation-key material componentMaterials count does not match proof records",
+        ));
+    }
+    let mut supplied_roots = BTreeSet::new();
+    for component_material in component_materials {
+        let material_root = value_string(component_material, "keySwitchComponentMaterialRoot")?;
+        validate_hash_string(
+            material_root,
+            "transportedPublicEvaluationKeyMaterial.componentMaterials.keySwitchComponentMaterialRoot",
+        )?;
+        if !supplied_roots.insert(material_root.to_string()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public evaluation-key material contains duplicate component material roots",
+            ));
+        }
+    }
+    if supplied_roots != expected_roots {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public evaluation-key material component roots do not match proof records",
+        ));
+    }
+
+    Ok(())
+}
+
+fn expected_public_evaluation_key_component_material_roots(
+    setup_package: &Value,
+) -> CanonicalResult<BTreeSet<String>> {
+    let mut expected_roots = BTreeSet::new();
+    let rounds = setup_package
+        .get("relinearizationKeyShareRounds")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "relinearizationKeyShareRounds was required before public evaluation-key material verification",
+            )
+        })?;
+    for record_field_name in ["roundOneRecords", "roundTwoRecords"] {
+        for record in array_value(rounds, record_field_name)? {
+            collect_binary_key_switch_component_material_root(record, &mut expected_roots)?;
+        }
+    }
+    let batches = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "galoisKeyShareBatches was required before public evaluation-key material verification",
+            )
+        })?;
+    for batch in batches {
+        for proof_record in array_value(batch, "galoisKeyShareProofs")? {
+            collect_binary_key_switch_component_material_root(proof_record, &mut expected_roots)?;
+        }
+    }
+
+    Ok(expected_roots)
+}
+
+fn collect_binary_key_switch_component_material_root(
+    record: &Value,
+    expected_roots: &mut BTreeSet<String>,
+) -> CanonicalResult<()> {
+    if record
+        .get("keySwitchMaterialEncoding")
+        .and_then(Value::as_str)
+        == Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING)
+    {
+        expected_roots.insert(value_string(record, "keySwitchComponentMaterialRoot")?.to_string());
+    }
+
+    Ok(())
+}
+
+fn verify_public_evaluation_key_material_entry_header(
+    evaluation_keys: &Value,
+    material_entry: &Value,
+) -> CanonicalResult<()> {
+    if material_entry.get("objectType").and_then(Value::as_str)
+        != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE)
+        || material_entry.get("objectVersion").and_then(Value::as_u64) != Some(1)
+        || material_entry.get("setupProfileId").and_then(Value::as_str)
+            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+        || material_entry
+            .get("setupProofProfileId")
+            .and_then(Value::as_str)
+            != Some(SETUP_PROOF_PROFILE_ID)
+        || material_entry
+            .get("materialEncoding")
+            .and_then(Value::as_str)
+            != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public evaluation-key material entry header is invalid",
+        ));
+    }
+    for field_name in [
+        "ceremonyId",
+        "manifestHash",
+        "rosterHash",
+        "setupProfileHash",
+        "qShareHash",
+        "carryAwareVssShareRelationProfileHash",
+        "commitmentProfileHash",
+        "setupEpoch",
+        "evaluationKeySetHash",
+        "publicEvaluationKeyMaterialRoot",
+    ] {
+        if material_entry.get(field_name) != evaluation_keys.get(field_name) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!(
+                    "transported public evaluation-key material {field_name} must match evaluationKeys"
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn public_evaluation_key_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
+    if value_u64(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public evaluation-key material chunkSizeBytes must match the setup transport profile",
+        ));
+    }
+    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public evaluation-key material chunkCount does not fit usize",
+        )
+    })?;
+    let chunk_values = array_value(value, "chunks")?;
+    if chunk_values.len() != expected_chunk_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public evaluation-key material chunks length must match chunkCount",
+        ));
+    }
+    let mut chunks = Vec::with_capacity(expected_chunk_count);
+    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
+        if value_u64(chunk_value, "chunkIndex")?
+            != u64::try_from(expected_chunk_index).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "public evaluation-key material chunk index does not fit u64",
+                )
+            })?
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public evaluation-key material chunks must be in ascending chunk-index order",
+            ));
+        }
+        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
+    }
+
+    Ok(chunks)
+}
+
+pub(super) fn public_evaluation_key_material_transport_hashes(
+    chunks: &[Vec<u8>],
+) -> CanonicalResult<PublicEvaluationKeyMaterialTransportHashes> {
+    if chunks.is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public evaluation-key material transport requires at least one chunk",
+        ));
+    }
+    let chunk_size = usize::try_from(SETUP_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup transport chunk size does not fit usize",
+        )
+    })?;
+    let total_byte_length =
+        chunks
+            .iter()
+            .enumerate()
+            .try_fold(0_u64, |byte_count, (chunk_index, chunk)| {
+                if chunk.is_empty() {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "public evaluation-key material chunks must be non-empty",
+                    ));
+                }
+                if chunk.len() > chunk_size {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "public evaluation-key material chunk exceeds the accepted chunk size",
+                    ));
+                }
+                if chunk_index + 1 < chunks.len() && chunk.len() != chunk_size {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "public evaluation-key material contains a short non-final chunk",
+                    ));
+                }
+                byte_count
+                    .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "public evaluation-key material chunk length does not fit u64",
+                        )
+                    })?)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "public evaluation-key material byte length overflowed",
+                        )
+                    })
+            })?;
+    let full_object_hash =
+        public_evaluation_key_material_full_object_hash(total_byte_length, chunks);
+    let chunk_hashes = chunks
+        .iter()
+        .enumerate()
+        .map(|(chunk_index, chunk)| {
+            public_evaluation_key_material_chunk_hash(&full_object_hash, chunk_index, chunk)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let chunk_root = derive_protocol_hash(
+        "PublicEvaluationKeyMaterialChunkRoot",
+        &json!({
+            "objectType": "PublicEvaluationKeyMaterialChunkManifest",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": chunk_hashes.len(),
+            "totalByteLength": total_byte_length,
+            "chunkHashes": chunk_hashes,
+            "fullObjectHash": full_object_hash,
+        }),
+    )?;
+
+    Ok(PublicEvaluationKeyMaterialTransportHashes {
+        full_object_hash,
+        chunk_hashes,
+        chunk_root,
+        total_byte_length,
+    })
+}
+
+fn public_evaluation_key_material_full_object_hash(
+    total_byte_length: u64,
+    chunks: &[Vec<u8>],
+) -> String {
+    let total_length_bytes = total_byte_length.to_le_bytes();
+    let mut parts = Vec::with_capacity(chunks.len() + 1);
+    parts.push(total_length_bytes.as_slice());
+    for chunk in chunks {
+        parts.push(chunk.as_slice());
+    }
+
+    hash512_hex(
+        "sealed-lattice/setup/public-evaluation-key-material/full-object-v1",
+        &parts,
+    )
+}
+
+fn public_evaluation_key_material_chunk_hash(
+    full_object_hash: &str,
+    chunk_index: usize,
+    chunk: &[u8],
+) -> CanonicalResult<String> {
+    let chunk_index_bytes = u64::try_from(chunk_index)
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public evaluation-key material chunk index does not fit u64",
+            )
+        })?
+        .to_le_bytes();
+
+    Ok(hash512_hex(
+        "sealed-lattice/setup/public-evaluation-key-material/chunk-v1",
+        &[full_object_hash.as_bytes(), &chunk_index_bytes, chunk],
+    ))
+}
+
+fn verify_public_evaluation_key_material_hash_fields(
+    value: &Value,
+    transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
+    value_name: &str,
+) -> CanonicalResult<()> {
+    let chunk_size = value_u64(value, "chunkSizeBytes")
+        .or_else(|_| value_u64(value, "publicEvaluationKeyMaterialChunkSizeBytes"))?;
+    let chunk_count = value_u64(value, "chunkCount")
+        .or_else(|_| value_u64(value, "publicEvaluationKeyMaterialChunkCount"))?;
+    let total_byte_length = value_u64(value, "totalByteLength")
+        .or_else(|_| value_u64(value, "publicEvaluationKeyMaterialTotalByteLength"))?;
+    let full_object_hash = value_string(value, "fullObjectHash")
+        .or_else(|_| value_string(value, "publicEvaluationKeyMaterialFullObjectHash"))?;
+    let chunk_root = value_string(value, "chunkRoot")
+        .or_else(|_| value_string(value, "publicEvaluationKeyMaterialChunkRoot"))?;
+    if chunk_size != SETUP_TRANSPORT_CHUNK_SIZE_BYTES
+        || chunk_count
+            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "public evaluation-key material chunk count does not fit u64",
+                )
+            })?
+        || total_byte_length != transport_hashes.total_byte_length
+        || full_object_hash != transport_hashes.full_object_hash
+        || chunk_root != transport_hashes.chunk_root
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{value_name} hash metadata does not match supplied chunks"),
+        ));
+    }
+    let chunk_hash_values = value
+        .get("chunkHashes")
+        .or_else(|| value.get("publicEvaluationKeyMaterialChunkHashes"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{value_name} must list every public evaluation-key material chunk hash"),
+            )
+        })?;
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{value_name} chunk hash count must match supplied chunks"),
+        ));
+    }
+    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+    {
+        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{value_name} chunk hashes must match supplied chunks"),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn public_evaluation_key_material_reference_root(
+    evaluation_keys: &Value,
+    expected_manifest: &Value,
+    transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "PublicEvaluationKeyMaterialRoot",
+        &json!({
+            "objectType": "PublicEvaluationKeyMaterialReference",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
+            "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+            "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
+            "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
+            "manifestHash": value_string(evaluation_keys, "manifestHash")?,
+            "rosterHash": value_string(evaluation_keys, "rosterHash")?,
+            "setupProfileHash": value_string(evaluation_keys, "setupProfileHash")?,
+            "qShareHash": value_string(evaluation_keys, "qShareHash")?,
+            "carryAwareVssShareRelationProfileHash": value_string(
+                evaluation_keys,
+                "carryAwareVssShareRelationProfileHash",
+            )?,
+            "commitmentProfileHash": value_string(evaluation_keys, "commitmentProfileHash")?,
+            "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
+            "evaluatorKeyScheduleRoot": value_string(
+                evaluation_keys,
+                "evaluatorKeyScheduleRoot",
+            )?,
+            "sameSecretProofFamilyBindingRoot": value_string(
+                evaluation_keys,
+                "sameSecretProofFamilyBindingRoot",
+            )?,
+            "publicKeyShareLnpProofSetRoot": value_string(
+                evaluation_keys,
+                "publicKeyShareLnpProofSetRoot",
+            )?,
+            "relinearizationKeyShareRoundsRoot": value_string(
+                evaluation_keys,
+                "relinearizationKeyShareRoundsRoot",
+            )?,
+            "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
+            "expectedMaterialManifest": expected_manifest,
+            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": transport_hashes.chunk_hashes.len(),
+            "totalByteLength": transport_hashes.total_byte_length,
+            "fullObjectHash": transport_hashes.full_object_hash,
+            "chunkRoot": transport_hashes.chunk_root,
+            "chunkHashes": transport_hashes.chunk_hashes,
+        }),
+    )
+}
+
+pub(super) fn public_evaluation_key_material_manifest(
+    setup_package: &Value,
+    evaluation_keys: &Value,
+) -> CanonicalResult<Value> {
+    Ok(json!({
+        "objectType": "PublicEvaluationKeyMaterialManifest",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
+        "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
+        "materialTransportEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+        "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
+        "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
+        "manifestHash": value_string(evaluation_keys, "manifestHash")?,
+        "rosterHash": value_string(evaluation_keys, "rosterHash")?,
+        "setupProfileHash": value_string(evaluation_keys, "setupProfileHash")?,
+        "qShareHash": value_string(evaluation_keys, "qShareHash")?,
+        "carryAwareVssShareRelationProfileHash": value_string(
+            evaluation_keys,
+            "carryAwareVssShareRelationProfileHash",
+        )?,
+        "commitmentProfileHash": value_string(evaluation_keys, "commitmentProfileHash")?,
+        "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
+        "participantCount": value_u64(evaluation_keys, "participantCount")?,
+        "rnsLimbCount": value_u64(evaluation_keys, "rnsLimbCount")?,
+        "evaluatorKeyScheduleRoot": value_string(evaluation_keys, "evaluatorKeyScheduleRoot")?,
+        "sameSecretProofFamilyBindingRoot": value_string(
+            evaluation_keys,
+            "sameSecretProofFamilyBindingRoot",
+        )?,
+        "publicKeyShareLnpProofSetRoot": value_string(
+            evaluation_keys,
+            "publicKeyShareLnpProofSetRoot",
+        )?,
+        "relinearizationKeyShareRoundsRoot": value_string(
+            evaluation_keys,
+            "relinearizationKeyShareRoundsRoot",
+        )?,
+        "relinearizationLevelSchedule": evaluation_keys["relinearizationLevelSchedule"],
+        "relinearizationKeyRoots": evaluation_keys["relinearizationKeyRoots"],
+        "relinearizationShareMaterialRoots": relinearization_share_material_manifest(setup_package)?,
+        "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
+        "requiredGaloisKeySchedule": evaluation_keys["requiredGaloisKeySchedule"],
+        "galoisKeyShareBatchRoots": evaluation_keys["galoisKeyShareBatchRoots"],
+        "galoisKeyRoots": evaluation_keys["galoisKeyRoots"],
+        "galoisShareMaterialRoots": galois_share_material_manifest(setup_package)?,
+        "genericKeySwitchKeyRoots": evaluation_keys["genericKeySwitchKeyRoots"],
+        "rawKeyBytesEmbedded": false,
+        "verifierGeneratedKeyMaterial": false,
+    }))
+}
+
+fn relinearization_share_material_manifest(setup_package: &Value) -> CanonicalResult<Vec<Value>> {
+    let rounds = setup_package
+        .get("relinearizationKeyShareRounds")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "relinearizationKeyShareRounds was required before public evaluation-key material binding",
+            )
+        })?;
+    let mut entries = Vec::new();
+    for (
+        round_label,
+        record_field_name,
+        share_root_field_name,
+        proof_root_field_name,
+        record_root_field_name,
+    ) in [
+        (
+            "round-one",
+            "roundOneRecords",
+            "roundOneShareRoot",
+            "roundOneProofRoot",
+            "roundOneRecordRoot",
+        ),
+        (
+            "round-two",
+            "roundTwoRecords",
+            "roundTwoShareRoot",
+            "roundTwoProofRoot",
+            "roundTwoRecordRoot",
+        ),
+    ] {
+        for record in array_value(rounds, record_field_name)? {
+            entries.push((
+                value_u64(record, "level")?,
+                value_u64(record, "trusteeRosterPosition")?,
+                if round_label == "round-one" {
+                    0_u8
+                } else {
+                    1_u8
+                },
+                json!({
+                    "round": round_label,
+                    "trusteeIdentity": value_string(record, "trusteeIdentity")?,
+                    "trusteeRosterPosition": value_u64(record, "trusteeRosterPosition")?,
+                    "level": value_u64(record, "level")?,
+                    "keySwitchMaterialEncoding": value_string(record, "keySwitchMaterialEncoding")?,
+                    "keySwitchDomain": value_string(record, "keySwitchDomain")?,
+                    "keySwitchSeedHex": value_string(record, "keySwitchSeedHex")?,
+                    "keySwitchComponentVectorRoot": value_string(
+                        record,
+                        "keySwitchComponentVectorRoot",
+                    )?,
+                    "keySwitchComponentMaterialRoot": record
+                        .get("keySwitchComponentMaterialRoot")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    "shareRoot": value_string(record, share_root_field_name)?,
+                    "proofRoot": value_string(record, proof_root_field_name)?,
+                    "recordRoot": value_string(record, record_root_field_name)?,
+                }),
+            ));
+        }
+    }
+    entries.sort_by_key(|(level, trustee_roster_position, round_order, _)| {
+        (*level, *round_order, *trustee_roster_position)
+    });
+
+    Ok(entries.into_iter().map(|(_, _, _, entry)| entry).collect())
+}
+
+fn galois_share_material_manifest(setup_package: &Value) -> CanonicalResult<Vec<Value>> {
+    let batches = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "galoisKeyShareBatches was required before public evaluation-key material binding",
+            )
+        })?;
+    let mut entries = Vec::new();
+    for batch in batches {
+        for proof_record in array_value(batch, "galoisKeyShareProofs")? {
+            entries.push((
+                value_u64(proof_record, "rotation")?,
+                value_u64(proof_record, "level")?,
+                value_u64(proof_record, "trusteeRosterPosition")?,
+                json!({
+                    "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
+                    "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+                    "rotation": value_u64(proof_record, "rotation")?,
+                    "level": value_u64(proof_record, "level")?,
+                    "keySwitchMaterialEncoding": value_string(
+                        proof_record,
+                        "keySwitchMaterialEncoding",
+                    )?,
+                    "keySwitchDomain": value_string(proof_record, "keySwitchDomain")?,
+                    "keySwitchSeedHex": value_string(proof_record, "keySwitchSeedHex")?,
+                    "keySwitchComponentVectorRoot": value_string(
+                        proof_record,
+                        "keySwitchComponentVectorRoot",
+                    )?,
+                    "keySwitchComponentMaterialRoot": proof_record
+                        .get("keySwitchComponentMaterialRoot")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    "galoisKeyShareRoot": value_string(proof_record, "galoisKeyShareRoot")?,
+                    "galoisKeyShareProofRoot": value_string(
+                        proof_record,
+                        "galoisKeyShareProofRoot",
+                    )?,
+                }),
+            ));
+        }
+    }
+    entries.sort_by_key(|(rotation, level, trustee_roster_position, _)| {
+        (*rotation, *level, *trustee_roster_position)
+    });
+
+    Ok(entries.into_iter().map(|(_, _, _, entry)| entry).collect())
+}
+
+fn decode_public_evaluation_key_material_manifest(
+    chunks: &[Vec<u8>],
+    transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
+) -> CanonicalResult<Value> {
+    let total_byte_length = usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public evaluation-key material byte length does not fit usize",
+        )
+    })?;
+    let mut material_bytes = Vec::with_capacity(total_byte_length);
+    for chunk in chunks {
+        material_bytes.extend_from_slice(chunk);
+    }
+    if material_bytes.len() < PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC.len()
+        || &material_bytes[..PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC.len()]
+            != PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public evaluation-key material has the wrong format marker",
+        ));
+    }
+    let manifest_bytes = &material_bytes[PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC.len()..];
+    let manifest: Value = serde_json::from_slice(manifest_bytes).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public evaluation-key material manifest is not valid JSON",
+        )
+    })?;
+    if canonical_json(&manifest)?.as_bytes() != manifest_bytes {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public evaluation-key material manifest must use canonical JSON bytes",
+        ));
+    }
+
+    Ok(manifest)
+}
+
+#[cfg(test)]
+pub(super) fn encode_public_evaluation_key_material_manifest(
+    manifest: &Value,
+) -> CanonicalResult<Vec<u8>> {
+    let mut material_bytes = Vec::new();
+    material_bytes.extend_from_slice(PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC);
+    material_bytes.extend_from_slice(canonical_json(manifest)?.as_bytes());
+
+    Ok(material_bytes)
 }
 
 fn verify_relinearization_key_share_rounds(
@@ -12086,12 +13229,17 @@ fn verify_relinearization_key_share_rounds(
     let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    let transported_key_switch_component_material =
+        transported_evaluation_key_share_component_material_from_request(request)?;
     let proof_context = EvaluationKeyProofVerificationContext {
         setup_package,
         request,
         same_secret_proof_bindings: &same_secret_proof_bindings,
         same_secret_records: &same_secret_records,
         transported_constant_commitments: &transported_constant_commitments,
+        transported_key_switch_component_material: request
+            .get("transportedEvaluationKeyShareComponentMaterial")
+            .or(transported_key_switch_component_material.as_ref()),
     };
     let round_one_records = array_value(rounds, "roundOneRecords")?;
     let round_two_records = array_value(rounds, "roundTwoRecords")?;
@@ -12436,12 +13584,17 @@ fn verify_galois_key_share_batches(
     let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    let transported_key_switch_component_material =
+        transported_evaluation_key_share_component_material_from_request(request)?;
     let proof_context = EvaluationKeyProofVerificationContext {
         setup_package,
         request,
         same_secret_proof_bindings: &same_secret_proof_bindings,
         same_secret_records: &same_secret_records,
         transported_constant_commitments: &transported_constant_commitments,
+        transported_key_switch_component_material: request
+            .get("transportedEvaluationKeyShareComponentMaterial")
+            .or(transported_key_switch_component_material.as_ref()),
     };
     let expected_schedule = expected_required_galois_key_schedule()?;
     let mut seen_roster_positions = BTreeSet::new();
@@ -12750,6 +13903,7 @@ struct EvaluationKeyProofVerificationContext<'a> {
     same_secret_records: &'a BTreeMap<u64, Value>,
     transported_constant_commitments:
         &'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>,
+    transported_key_switch_component_material: Option<&'a Value>,
 }
 
 struct RelinearizationRoundOneVerificationState<'a> {
@@ -12924,6 +14078,459 @@ fn relinearization_aggregate_roots_by_level(
     Ok(roots)
 }
 
+fn expected_relinearization_key_switch_seed(
+    binding: &EvaluationKeyProofCommonBinding,
+    round: &str,
+    level: u64,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "RelinearizationKeyShareSeed",
+        &json!({
+            "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": "relinearization-key-share",
+            "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
+            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+            "relinearizationCrpRoot": binding.relinearization_crp_root.as_str(),
+            "round": round,
+            "level": level,
+        }),
+    )
+}
+
+fn expected_galois_key_switch_seed(
+    binding: &EvaluationKeyProofCommonBinding,
+    rotation: u64,
+    level: u64,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "GaloisKeyShareSeed",
+        &json!({
+            "objectType": "GaloisKeySwitchPublicSampleSeed",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": "galois-key-share",
+            "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
+            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+            "galoisKeyCrpRoot": binding.galois_key_crp_root.as_str(),
+            "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
+            "rotation": rotation,
+            "level": level,
+        }),
+    )
+}
+
+fn verify_relinearization_key_switch_sample_binding(
+    record: &Value,
+    binding: &EvaluationKeyProofCommonBinding,
+    round: &str,
+    level: u64,
+) -> CanonicalResult<()> {
+    if value_string(record, "keySwitchDomain")? != "relinearization" {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "relinearization key-switch domain must be shared relinearization material",
+        ));
+    }
+    let expected_seed = expected_relinearization_key_switch_seed(binding, round, level)?;
+    if value_string(record, "keySwitchSeedHex")? != expected_seed {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "relinearization key-switch seed must be shared by scheduled level and round",
+        ));
+    }
+
+    Ok(())
+}
+
+fn verify_galois_key_switch_sample_binding(
+    record: &Value,
+    binding: &EvaluationKeyProofCommonBinding,
+    rotation: u64,
+    level: u64,
+) -> CanonicalResult<()> {
+    let expected_domain = format!("galois-{rotation}");
+    if value_string(record, "keySwitchDomain")? != expected_domain {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "Galois key-switch domain must match the scheduled rotation",
+        ));
+    }
+    let expected_seed = expected_galois_key_switch_seed(binding, rotation, level)?;
+    if value_string(record, "keySwitchSeedHex")? != expected_seed {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "Galois key-switch seed must be shared by scheduled rotation and level",
+        ));
+    }
+
+    Ok(())
+}
+
+fn accepted_setup_evaluation_key_records_use_profile_ring(
+    setup_package: &Value,
+) -> CanonicalResult<bool> {
+    let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") else {
+        return Ok(false);
+    };
+    for field_name in ["roundOneRecords", "roundTwoRecords"] {
+        for record in array_value(rounds, field_name)? {
+            if value_u64(record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+                return Ok(false);
+            }
+        }
+    }
+    let Some(galois_batches) = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+    else {
+        return Ok(false);
+    };
+    for batch in galois_batches {
+        for proof_record in array_value(batch, "galoisKeyShareProofs")? {
+            if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+                return Ok(false);
+            }
+        }
+    }
+
+    Ok(true)
+}
+
+pub(super) fn accepted_setup_public_relinearization_keys_from_transport(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<BTreeMap<usize, KeySwitchKey>> {
+    let binding = evaluation_key_proof_common_binding(setup_package)?;
+    let transported_key_switch_component_material =
+        transported_evaluation_key_share_component_material_from_request(request)?;
+    let transported_key_switch_component_material = request
+        .get("transportedEvaluationKeyShareComponentMaterial")
+        .or(transported_key_switch_component_material.as_ref());
+    let rounds = setup_package
+        .get("relinearizationKeyShareRounds")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "relinearizationKeyShareRounds was required before public relinearization key material loading",
+            )
+        })?;
+    let round_two_records = array_value(rounds, "roundTwoRecords")?;
+    let mut records_by_level_and_trustee = BTreeMap::new();
+    for record in round_two_records {
+        if value_string(record, "objectType")? != RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "accepted public relinearization key material must use round-two records",
+            ));
+        }
+        let level = value_u64(record, "level")?;
+        let trustee_roster_position = value_u64(record, "trusteeRosterPosition")?;
+        if records_by_level_and_trustee
+            .insert((level, trustee_roster_position), record)
+            .is_some()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "accepted public relinearization key material must not repeat a trustee record for a level",
+            ));
+        }
+    }
+
+    let expected_levels = expected_relinearization_levels();
+    let expected_record_count = expected_levels
+        .len()
+        .checked_mul(FIRST_PROFILE_PARTICIPANT_COUNT as usize)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "accepted public relinearization key material record count overflowed",
+            )
+        })?;
+    if records_by_level_and_trustee.len() != expected_record_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "accepted public relinearization key material requires one round-two record per scheduled level and trustee",
+        ));
+    }
+
+    let mut relinearization_keys = BTreeMap::new();
+    for level in expected_levels {
+        let level_usize = usize::try_from(level).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "relinearization key level does not fit usize",
+            )
+        })?;
+        let key_switch_seed_hex =
+            expected_relinearization_key_switch_seed(&binding, "round-two", level)?;
+        let mut aggregate_component_b = None;
+        for trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT {
+            let proof_record = records_by_level_and_trustee
+                .get(&(level, trustee_roster_position))
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "accepted public relinearization key material is missing a trustee record for a scheduled level",
+                    )
+                })?;
+            verify_relinearization_key_switch_sample_binding(
+                proof_record,
+                &binding,
+                "round-two",
+                level,
+            )?;
+            if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "accepted public relinearization key runtime material requires profile-ring component vectors",
+                ));
+            }
+            let component_b = component_b_vectors_from_record(
+                EvaluationKeyShareProofFamily::Relinearization,
+                proof_record,
+                transported_key_switch_component_material,
+            )?;
+            add_accepted_key_switch_component_b(
+                &mut aggregate_component_b,
+                component_b,
+                level_usize,
+            )?;
+        }
+        let aggregate_component_b = aggregate_component_b.ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public relinearization key aggregation requires at least one component share",
+            )
+        })?;
+        let key_switch_key = key_switch_key_from_public_component_b(
+            level_usize,
+            "relinearization",
+            &key_switch_seed_hex,
+            aggregate_component_b,
+        )?;
+        relinearization_keys.insert(level_usize, key_switch_key);
+    }
+
+    Ok(relinearization_keys)
+}
+
+pub(super) fn accepted_setup_public_galois_keys_from_transport(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<BTreeMap<(usize, usize), KeySwitchKey>> {
+    let binding = evaluation_key_proof_common_binding(setup_package)?;
+    let transported_key_switch_component_material =
+        transported_evaluation_key_share_component_material_from_request(request)?;
+    let transported_key_switch_component_material = request
+        .get("transportedEvaluationKeyShareComponentMaterial")
+        .or(transported_key_switch_component_material.as_ref());
+    let batches = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "galoisKeyShareBatches was required before public Galois key material loading",
+            )
+        })?;
+    let mut sorted_batches = batches
+        .iter()
+        .map(|batch| Ok((value_u64(batch, "trusteeRosterPosition")?, batch)))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    sorted_batches.sort_by_key(|(trustee_roster_position, _)| *trustee_roster_position);
+    if sorted_batches.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "accepted public Galois key material requires one proof batch per trustee",
+        ));
+    }
+    let mut seen_trustee_roster_positions = BTreeSet::new();
+    for (trustee_roster_position, _) in &sorted_batches {
+        if !seen_trustee_roster_positions.insert(*trustee_roster_position) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "accepted public Galois key material must not repeat a trustee batch",
+            ));
+        }
+    }
+    let expected_schedule = expected_required_galois_key_schedule()?;
+    let expected_schedule = expected_schedule.as_array().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "required Galois key schedule must be an array",
+        )
+    })?;
+    let mut rotation_keys = BTreeMap::new();
+    for schedule_entry in expected_schedule {
+        let rotation = value_u64(schedule_entry, "rotation")?;
+        let level = value_u64(schedule_entry, "level")?;
+        let level_usize = usize::try_from(level).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "Galois key level does not fit usize",
+            )
+        })?;
+        let rotation_usize = usize::try_from(rotation).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "Galois key rotation does not fit usize",
+            )
+        })?;
+        let key_switch_domain = format!("galois-{rotation}");
+        let key_switch_seed_hex = expected_galois_key_switch_seed(&binding, rotation, level)?;
+        let mut aggregate_component_b = None;
+        for (_, batch) in &sorted_batches {
+            let proof_record = galois_key_share_proof_for_schedule(batch, rotation, level)?;
+            verify_galois_key_switch_sample_binding(proof_record, &binding, rotation, level)?;
+            if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "accepted public Galois key runtime material requires profile-ring component vectors",
+                ));
+            }
+            let component_b = component_b_vectors_from_record(
+                EvaluationKeyShareProofFamily::Galois,
+                proof_record,
+                transported_key_switch_component_material,
+            )?;
+            add_accepted_key_switch_component_b(
+                &mut aggregate_component_b,
+                component_b,
+                level_usize,
+            )?;
+        }
+        let aggregate_component_b = aggregate_component_b.ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public Galois key aggregation requires at least one component share",
+            )
+        })?;
+        let key_switch_key = key_switch_key_from_public_component_b(
+            level_usize,
+            &key_switch_domain,
+            &key_switch_seed_hex,
+            aggregate_component_b,
+        )?;
+        rotation_keys.insert((rotation_usize, level_usize), key_switch_key);
+    }
+
+    Ok(rotation_keys)
+}
+
+fn add_accepted_key_switch_component_b(
+    aggregate_component_b: &mut Option<Vec<Vec<Vec<u64>>>>,
+    component_b: Vec<Vec<Vec<u64>>>,
+    level: usize,
+) -> CanonicalResult<()> {
+    let primes = DATA_PRIMES.get(..=level).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "key-switch component aggregation level is outside Q_share",
+        )
+    })?;
+    if component_b.len() != primes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "key-switch component aggregation digit count does not match its level",
+        ));
+    }
+    match aggregate_component_b {
+        None => {
+            validate_key_switch_component_shape(&component_b, primes)?;
+            *aggregate_component_b = Some(component_b);
+        }
+        Some(aggregate) => {
+            validate_key_switch_component_shape(aggregate, primes)?;
+            validate_key_switch_component_shape(&component_b, primes)?;
+            for (digit_index, (aggregate_by_limb, component_by_limb)) in
+                aggregate.iter_mut().zip(component_b.iter()).enumerate()
+            {
+                if aggregate_by_limb.len() != primes.len()
+                    || component_by_limb.len() != primes.len()
+                {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "key-switch component aggregation limb count does not match its level",
+                    ));
+                }
+                for (rns_limb_index, (aggregate_coefficients, component_coefficients)) in
+                    aggregate_by_limb
+                        .iter_mut()
+                        .zip(component_by_limb.iter())
+                        .enumerate()
+                {
+                    if aggregate_coefficients.len() != POLYNOMIAL_DEGREE
+                        || component_coefficients.len() != POLYNOMIAL_DEGREE
+                    {
+                        return Err(CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "key-switch component aggregation requires profile-ring coefficient vectors",
+                        ));
+                    }
+                    let modulus = primes[rns_limb_index];
+                    for (coefficient, addend) in aggregate_coefficients
+                        .iter_mut()
+                        .zip(component_coefficients.iter())
+                    {
+                        *coefficient = add_mod(*coefficient, *addend, modulus)?;
+                    }
+                }
+                if digit_index >= primes.len() {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "key-switch component aggregation digit index is outside its level",
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_key_switch_component_shape(
+    component_b: &[Vec<Vec<u64>>],
+    primes: &[u64],
+) -> CanonicalResult<()> {
+    if component_b.len() != primes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "key-switch component digit count does not match its level",
+        ));
+    }
+    for component_by_limb in component_b {
+        if component_by_limb.len() != primes.len() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "key-switch component limb count does not match its level",
+            ));
+        }
+        for (rns_limb_index, coefficients) in component_by_limb.iter().enumerate() {
+            if coefficients.len() != POLYNOMIAL_DEGREE {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "key-switch component coefficient count must match the profile ring degree",
+                ));
+            }
+            if coefficients
+                .iter()
+                .any(|coefficient| *coefficient >= primes[rns_limb_index])
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "key-switch component contains non-canonical Q_share residues",
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn verify_relinearization_round_one_record(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
@@ -12954,6 +14561,7 @@ fn verify_relinearization_round_one_record(
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
     )?;
+    verify_relinearization_key_switch_sample_binding(record, binding, "round-one", level)?;
     let round_one_share_root = value_string(record, "roundOneShareRoot")?;
     validate_hash_string(round_one_share_root, "roundOneShareRoot")?;
     let source_square_binding_root = value_string(record, "sourceSquareBindingRoot")?;
@@ -13028,6 +14636,7 @@ fn verify_relinearization_round_two_record(
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
     )?;
+    verify_relinearization_key_switch_sample_binding(record, binding, "round-two", level)?;
     for field_name in [
         "roundOneShareRoot",
         "roundOneRecordRoot",
@@ -13191,6 +14800,9 @@ fn verify_galois_key_share_batch(
         .zip(key_roots.iter())
         .zip(expected_entries)
     {
+        let rotation = value_u64(expected_entry, "rotation")?;
+        let level = value_u64(expected_entry, "level")?;
+        verify_galois_key_switch_sample_binding(proof_record, binding, rotation, level)?;
         let proof_root = verify_galois_key_share_lnp_proof_record(
             proof_record,
             batch,
@@ -13322,6 +14934,8 @@ fn verify_relinearization_key_share_lnp_proof_record(
             same_secret_statement_record: same_secret_record,
             constant_commitments: &constant_commitments,
             setup_proof_binding,
+            transported_key_switch_component_material: proof_context
+                .transported_key_switch_component_material,
             proof_bytes: &proof_bytes,
         },
     )?;
@@ -13470,6 +15084,8 @@ fn verify_galois_key_share_lnp_proof_record(
             same_secret_statement_record: same_secret_record,
             constant_commitments: &constant_commitments,
             setup_proof_binding,
+            transported_key_switch_component_material: proof_context
+                .transported_key_switch_component_material,
             proof_bytes: &proof_bytes,
         },
     )?;
@@ -13519,20 +15135,88 @@ fn verify_evaluation_key_lnp_proof_record_common_fields(
             .get(tbox_profile_field_name)
             .and_then(Value::as_str)
             != Some(expected_tbox_hash.as_str())
-        || proof_record
-            .get("keySwitchMaterialEncoding")
-            .and_then(Value::as_str)
-            != Some("embedded-full-key-switch-component-vectors")
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "evaluation-key proof profile and material encoding fields must match the accepted verifier",
+            "evaluation-key proof profile fields must match the accepted verifier",
         ));
+    }
+    let material_encoding = proof_record
+        .get("keySwitchMaterialEncoding")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "evaluation-key proof keySwitchMaterialEncoding is required",
+            )
+        })?;
+    match material_encoding {
+        "embedded-full-key-switch-component-vectors" => {
+            if proof_record.get("keySwitchComponentVectors").is_none()
+                || proof_record.get("keySwitchComponentMaterialRoot").is_some()
+                || proof_record
+                    .get("keySwitchComponentChunkSizeBytes")
+                    .is_some()
+                || proof_record.get("keySwitchComponentChunkCount").is_some()
+                || proof_record
+                    .get("keySwitchComponentTotalByteLength")
+                    .is_some()
+                || proof_record
+                    .get("keySwitchComponentFullObjectHash")
+                    .is_some()
+                || proof_record.get("keySwitchComponentChunkRoot").is_some()
+                || proof_record.get("keySwitchComponentChunkHashes").is_some()
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "embedded evaluation-key proof material must include component vectors and no component transport reference",
+                ));
+            }
+        }
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING => {
+            if proof_record.get("keySwitchComponentVectors").is_some() {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "binary evaluation-key proof material must not embed keySwitchComponentVectors",
+                ));
+            }
+            for field_name in [
+                "keySwitchComponentMaterialRoot",
+                "keySwitchComponentChunkSizeBytes",
+                "keySwitchComponentChunkCount",
+                "keySwitchComponentTotalByteLength",
+                "keySwitchComponentFullObjectHash",
+                "keySwitchComponentChunkRoot",
+                "keySwitchComponentChunkHashes",
+            ] {
+                if proof_record.get(field_name).is_none() {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ProfileComponentMismatch,
+                        format!("binary evaluation-key proof material requires {field_name}"),
+                    ));
+                }
+            }
+        }
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "evaluation-key proof keySwitchMaterialEncoding is not accepted",
+            ));
+        }
     }
     validate_hash_string(
         value_string(proof_record, "keySwitchComponentVectorRoot")?,
         "evaluationKeyShareProof.keySwitchComponentVectorRoot",
     )?;
+    if let Some(material_root) = proof_record
+        .get("keySwitchComponentMaterialRoot")
+        .and_then(Value::as_str)
+    {
+        validate_hash_string(
+            material_root,
+            "evaluationKeyShareProof.keySwitchComponentMaterialRoot",
+        )?;
+    }
 
     Ok(())
 }
@@ -13624,6 +15308,8 @@ fn relinearization_source_square_binding_root(
     round: &str,
     share_root: &str,
 ) -> CanonicalResult<String> {
+    let (source_relation, source_relation_status) =
+        relinearization_source_relation_for_round(round)?;
     derive_protocol_hash(
         "RelinearizationSourceSquareBindingRoot",
         &json!({
@@ -13632,8 +15318,8 @@ fn relinearization_source_square_binding_root(
             "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
             "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "relinearization-key-share",
-            "sourceRelation": "same-secret-square-for-relinearization-source",
-            "sourceRelationStatus": "review-gated-quadratic-tbox-closure-required",
+            "sourceRelation": source_relation,
+            "sourceRelationStatus": source_relation_status,
             "round": round,
             "evaluatorKeyScheduleRoot": value_string(record, "evaluatorKeyScheduleRoot")?,
             "sameSecretProofSetRoot": value_string(record, "sameSecretProofSetRoot")?,
@@ -13662,14 +15348,16 @@ fn relinearization_source_square_aggregate_root(
     source_square_binding_roots: &[Value],
     round_one_source_square_aggregate_root: Option<&str>,
 ) -> CanonicalResult<String> {
+    let (source_relation, source_relation_status) =
+        relinearization_source_relation_for_round(round)?;
     let mut aggregate = json!({
         "objectType": "RelinearizationSourceSquareAggregate",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "proofFamily": "relinearization-key-share",
-        "sourceRelation": "same-secret-square-for-relinearization-source",
-        "sourceRelationStatus": "review-gated-quadratic-tbox-closure-required",
+        "sourceRelation": source_relation,
+        "sourceRelationStatus": source_relation_status,
         "round": round,
         "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
         "level": level,
@@ -13681,6 +15369,25 @@ fn relinearization_source_square_aggregate_root(
     }
 
     derive_protocol_hash("RelinearizationSourceSquareAggregateRoot", &aggregate)
+}
+
+fn relinearization_source_relation_for_round(
+    round: &str,
+) -> CanonicalResult<(&'static str, &'static str)> {
+    match round {
+        "round-one" => Ok((
+            "same-secret-for-relinearization-round-one-source",
+            "verified-by-round-one-same-secret-source-response",
+        )),
+        "round-two" => Ok((
+            "same-secret-times-round-one-aggregate-for-relinearization-source",
+            "review-gated-aggregate-square-proof-closure-required",
+        )),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "relinearization source relation round is outside the accepted schedule",
+        )),
+    }
 }
 
 fn galois_key_share_proof_root(proof_record: &Value) -> CanonicalResult<String> {
@@ -14162,6 +15869,13 @@ fn unexpected_relinearization_round_one_record_field(value: &Value) -> Option<St
             "ringDegree",
             "keySwitchComponentVectorRoot",
             "keySwitchComponentVectors",
+            "keySwitchComponentMaterialRoot",
+            "keySwitchComponentChunkSizeBytes",
+            "keySwitchComponentChunkCount",
+            "keySwitchComponentTotalByteLength",
+            "keySwitchComponentFullObjectHash",
+            "keySwitchComponentChunkRoot",
+            "keySwitchComponentChunkHashes",
             "relinearizationKeyShareTboxParameterProfileHash",
             "statementHash",
             "relationCommitmentHash",
@@ -14230,6 +15944,13 @@ fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<St
             "ringDegree",
             "keySwitchComponentVectorRoot",
             "keySwitchComponentVectors",
+            "keySwitchComponentMaterialRoot",
+            "keySwitchComponentChunkSizeBytes",
+            "keySwitchComponentChunkCount",
+            "keySwitchComponentTotalByteLength",
+            "keySwitchComponentFullObjectHash",
+            "keySwitchComponentChunkRoot",
+            "keySwitchComponentChunkHashes",
             "relinearizationKeyShareTboxParameterProfileHash",
             "statementHash",
             "relationCommitmentHash",
@@ -14333,6 +16054,13 @@ fn unexpected_galois_key_share_proof_field(value: &Value) -> Option<String> {
             "ringDegree",
             "keySwitchComponentVectorRoot",
             "keySwitchComponentVectors",
+            "keySwitchComponentMaterialRoot",
+            "keySwitchComponentChunkSizeBytes",
+            "keySwitchComponentChunkCount",
+            "keySwitchComponentTotalByteLength",
+            "keySwitchComponentFullObjectHash",
+            "keySwitchComponentChunkRoot",
+            "keySwitchComponentChunkHashes",
             "galoisKeyShareTboxParameterProfileHash",
             "statementHash",
             "relationCommitmentHash",
@@ -14388,6 +16116,14 @@ fn unexpected_public_evaluation_key_set_field(value: &Value) -> Option<String> {
             "genericKeySwitchKeyRoots",
             "rawKeyBytesEmbedded",
             "verifierGeneratedKeyMaterial",
+            "publicEvaluationKeyMaterialEncoding",
+            "publicEvaluationKeyMaterialRoot",
+            "publicEvaluationKeyMaterialChunkSizeBytes",
+            "publicEvaluationKeyMaterialChunkCount",
+            "publicEvaluationKeyMaterialTotalByteLength",
+            "publicEvaluationKeyMaterialFullObjectHash",
+            "publicEvaluationKeyMaterialChunkRoot",
+            "publicEvaluationKeyMaterialChunkHashes",
             "evaluationKeySetHash",
         ],
     )
@@ -15043,7 +16779,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
         "nonClosure": [
             "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
             "public-key share proof bytes still require no-wrap LNP verification",
-            "relinearization and Galois proof bytes remain review-gated until quadratic source-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
+            "relinearization and Galois proof bytes remain review-gated until round-two aggregate-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
         ],
         "ringAndMatrixParameters": {
@@ -15083,7 +16819,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "recipientScalarPowerSumDecimal": recipient_scalar_sum.to_string(),
             "recipientAggregateOpeningInfinityBound": recipient_scalar_sum_u64,
             "maxRecipientLiftedCoefficientDecimal": max_recipient_lifted_coefficient.to_string(),
-            "dealerCountForThresholdAggregation": FIRST_PROFILE_PARTICIPANT_COUNT,
+            "sourceTrusteeCountForThresholdAggregation": FIRST_PROFILE_PARTICIPANT_COUNT,
             "thresholdScalarPowerSumDecimal": threshold_scalar_sum.to_string(),
             "thresholdShareOpeningInfinityBound": threshold_scalar_sum_u64,
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
@@ -16262,6 +17998,13 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
     if let Some(hash) = setup_package
         .get("evaluationKeys")
         .and_then(|evaluation_keys| evaluation_keys.get("evaluationKeySetHash"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
+        .get("evaluationKeys")
+        .and_then(|evaluation_keys| evaluation_keys.get("publicEvaluationKeyMaterialRoot"))
         .and_then(Value::as_str)
     {
         accepted_hashes.push(hash.to_string());

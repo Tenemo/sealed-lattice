@@ -55,6 +55,53 @@ const requiredPublicFunctions = [
         publicApiRuntimeRecord.evaluateActionCapability,
     ],
     [
+        'createCommonRandomnessCommit',
+        publicApiRuntimeRecord.createCommonRandomnessCommit,
+    ],
+    [
+        'createCommonRandomnessReveal',
+        publicApiRuntimeRecord.createCommonRandomnessReveal,
+    ],
+    [
+        'createEvaluatorKeySchedule',
+        publicApiRuntimeRecord.createEvaluatorKeySchedule,
+    ],
+    [
+        'createGaloisKeyShareBatches',
+        publicApiRuntimeRecord.createGaloisKeyShareBatches,
+    ],
+    [
+        'createPublicEvaluationKeySet',
+        publicApiRuntimeRecord.createPublicEvaluationKeySet,
+    ],
+    [
+        'createPublicKeyShareProofSet',
+        publicApiRuntimeRecord.createPublicKeyShareProofSet,
+    ],
+    ['createPublicKeyShareSet', publicApiRuntimeRecord.createPublicKeyShareSet],
+    [
+        'createRelinearizationKeyShareRounds',
+        publicApiRuntimeRecord.createRelinearizationKeyShareRounds,
+    ],
+    ['createSetupCertificates', publicApiRuntimeRecord.createSetupCertificates],
+    ['createSetupPackage', publicApiRuntimeRecord.createSetupPackage],
+    [
+        'createSetupCommonRandomness',
+        publicApiRuntimeRecord.createSetupCommonRandomness,
+    ],
+    ['createSetupContribution', publicApiRuntimeRecord.createSetupContribution],
+    ['createSetupIntent', publicApiRuntimeRecord.createSetupIntent],
+    ['createSetupPhaseRecord', publicApiRuntimeRecord.createSetupPhaseRecord],
+    [
+        'createVssShareAcceptance',
+        publicApiRuntimeRecord.createVssShareAcceptance,
+    ],
+    ['createVssComplaint', publicApiRuntimeRecord.createVssComplaint],
+    [
+        'exportEncryptedLocalTrusteeSetupState',
+        publicApiRuntimeRecord.exportEncryptedLocalTrusteeSetupState,
+    ],
+    [
         'isActionCurrentForRecoveryEpoch',
         publicApiRuntimeRecord.isActionCurrentForRecoveryEpoch,
     ],
@@ -85,6 +132,12 @@ const requiredPublicFunctions = [
         'verifyTranscriptCoreFixture',
         publicApiRuntimeRecord.verifyTranscriptCoreFixture,
     ],
+    [
+        'restoreLocalTrusteeSetupState',
+        publicApiRuntimeRecord.restoreLocalTrusteeSetupState,
+    ],
+    ['verifySetupPackage', publicApiRuntimeRecord.verifySetupPackage],
+    ['verifyPrivateVssShare', publicApiRuntimeRecord.verifyPrivateVssShare],
 ] as const;
 
 const requiredPublicFunctionNames = requiredPublicFunctions

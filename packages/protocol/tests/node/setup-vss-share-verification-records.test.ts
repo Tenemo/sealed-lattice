@@ -44,33 +44,33 @@ const setupContext = {
 } satisfies CollectiveBgvSetupContext;
 
 const envelopeReference = (
-    dealerRosterPosition: number,
+    sourceTrusteeRosterPosition: number,
     recipientRosterPosition: number,
 ): PrivateVssEnvelopeVerificationReference =>
     ({
         objectType: 'PrivateVssEnvelopeCommitment',
         objectVersion: 1,
         ...setupContext,
-        dealerIdentity: `trustee-${String(dealerRosterPosition)}`,
-        dealerRosterPosition,
+        sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
+        sourceTrusteeRosterPosition,
         recipientIdentity: `trustee-${String(recipientRosterPosition)}`,
         recipientRosterPosition,
-        dealerCommitmentRoot: fixtureHash(
-            `dealer-commitment-${String(dealerRosterPosition)}`,
+        sourceTrusteeCommitmentRoot: fixtureHash(
+            `source-trustee-commitment-${String(sourceTrusteeRosterPosition)}`,
         ),
         privateEnvelopeHash: fixtureHash(
-            `private-envelope-${String(dealerRosterPosition)}-${String(
+            `private-envelope-${String(sourceTrusteeRosterPosition)}-${String(
                 recipientRosterPosition,
             )}`,
         ),
         encryptedEnvelopeHash: fixtureHash(
-            `encrypted-envelope-${String(dealerRosterPosition)}-${String(
+            `encrypted-envelope-${String(sourceTrusteeRosterPosition)}-${String(
                 recipientRosterPosition,
             )}`,
         ),
         privateEnvelopeAad: {},
         privateEnvelopeAadHash: fixtureHash(
-            `private-envelope-aad-${String(dealerRosterPosition)}-${String(
+            `private-envelope-aad-${String(sourceTrusteeRosterPosition)}-${String(
                 recipientRosterPosition,
             )}`,
         ),
@@ -79,13 +79,13 @@ const envelopeReference = (
             `recipient-mailbox-${String(recipientRosterPosition)}`,
         ),
         localVerificationRoot: fixtureHash(
-            `local-verification-${String(dealerRosterPosition)}-${String(
+            `local-verification-${String(sourceTrusteeRosterPosition)}-${String(
                 recipientRosterPosition,
             )}`,
         ),
         privateEnvelopeCommitmentRoot: fixtureHash(
             `private-envelope-commitment-${String(
-                dealerRosterPosition,
+                sourceTrusteeRosterPosition,
             )}-${String(recipientRosterPosition)}`,
         ),
     }) as unknown as PrivateVssEnvelopeVerificationReference;
@@ -151,11 +151,13 @@ describe('VSS share verification record builders', () => {
                         setupContext.carryAwareVssShareRelationProfileHash,
                     commitmentProfileHash: setupContext.commitmentProfileHash,
                     setupEpoch: setupContext.setupEpoch,
-                    dealerIdentity: 'trustee-1',
-                    dealerRosterPosition: 1,
+                    sourceTrusteeIdentity: 'trustee-1',
+                    sourceTrusteeRosterPosition: 1,
                     recipientIdentity: 'trustee-0',
                     recipientRosterPosition: 0,
-                    dealerCommitmentRoot: fixtureHash('dealer-commitment-1'),
+                    sourceTrusteeCommitmentRoot: fixtureHash(
+                        'source-trustee-commitment-1',
+                    ),
                     privateVssEnvelopeCommitmentRoot: fixtureHash(
                         'private-envelope-set',
                     ),
@@ -203,7 +205,7 @@ describe('VSS share verification record builders', () => {
         });
         expect(
             acceptanceSet.acceptanceRecords.map(
-                (record) => record.dealerRosterPosition,
+                (record) => record.sourceTrusteeRosterPosition,
             ),
         ).toEqual([0, 1]);
         expect(acceptanceSet.vssShareAcceptanceRoot).toBe(
@@ -248,7 +250,7 @@ describe('VSS share verification record builders', () => {
                 ),
                 acceptanceRecords: [acceptedRecord, acceptedRecord],
             }),
-        ).toThrow(/distinct dealer-recipient pairs/u);
+        ).toThrow(/distinct source-trustee-recipient pairs/u);
         await expect(
             createVssShareAcceptanceRecord({
                 setupContext,
@@ -414,14 +416,15 @@ describe('VSS share verification record builders', () => {
                     setupContext.carryAwareVssShareRelationProfileHash,
                 commitmentProfileHash: setupContext.commitmentProfileHash,
                 setupEpoch: setupContext.setupEpoch,
-                dealerIdentity: failedEnvelopeReference.dealerIdentity,
-                dealerRosterPosition:
-                    failedEnvelopeReference.dealerRosterPosition,
+                sourceTrusteeIdentity:
+                    failedEnvelopeReference.sourceTrusteeIdentity,
+                sourceTrusteeRosterPosition:
+                    failedEnvelopeReference.sourceTrusteeRosterPosition,
                 recipientIdentity: failedEnvelopeReference.recipientIdentity,
                 recipientRosterPosition:
                     failedEnvelopeReference.recipientRosterPosition,
-                dealerCommitmentRoot:
-                    failedEnvelopeReference.dealerCommitmentRoot,
+                sourceTrusteeCommitmentRoot:
+                    failedEnvelopeReference.sourceTrusteeCommitmentRoot,
                 privateVssEnvelopeCommitmentRoot,
                 privateEnvelopeHash:
                     failedEnvelopeReference.privateEnvelopeHash,

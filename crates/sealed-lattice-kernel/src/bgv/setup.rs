@@ -32,13 +32,15 @@ pub(crate) use accepted_setup::{
     derive_collective_bgv_setup_public_derivations_from_request,
     describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
 };
+pub(crate) use evaluation_key_share_proof::generate_evaluation_key_share_lnp_proof_from_request;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
 };
-pub(crate) use public_evaluation_key_material::generate_passive_setup_public_evaluation_key_material_from_request;
-#[cfg(test)]
-pub(crate) use public_evaluation_key_material::public_evaluation_keys_from_material;
+pub(crate) use public_evaluation_key_material::{
+    generate_passive_setup_public_evaluation_key_material_from_request,
+    public_evaluation_keys_from_material,
+};
 #[cfg(test)]
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
@@ -56,14 +58,15 @@ use sampling::{
     signed_to_modulus_residue, signed_to_plaintext_scaled_residue,
 };
 
-#[cfg(test)]
 use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
 use crate::{
     bgv::{
-        coefficient_codec::{coefficient_vector_hash512, coefficient_vector_le_hex},
+        coefficient_codec::{
+            coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
+        },
         encoding::encode_batch_plaintext_slots,
         evaluator::{
-            engine::DevelopmentBgvKey,
+            engine::{BgvPublicKey, DevelopmentBgvKey},
             key_switch::{KeySwitchKey, generate_galois_key, generate_relinearization_key},
             records::MAXIMUM_OPTION_COUNT,
             top_k::selected_evaluator_rotation_key_schedule,
@@ -100,9 +103,6 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
 };
-
-#[cfg(test)]
-use crate::bgv::coefficient_codec::coefficient_vector_from_le_hex;
 
 pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
     "sealed-lattice-bgv-rns-passive-full-roster-setup-v1";
@@ -212,7 +212,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "EncryptedComparisonInputHash",
             "EncryptedSparseTargetProjectionHash"
         ],
-        "trustedDealerBoundary": {
+        "centralTrustedSetupAuthorityBoundary": {
             "transcriptValidCentralizedSecretReconstruction": false,
             "centralizedSecretFixtureMayProduceAcceptedRoots": false,
             "rawSecretSharesExported": false

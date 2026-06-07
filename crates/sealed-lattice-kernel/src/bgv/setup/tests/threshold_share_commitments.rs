@@ -104,7 +104,7 @@ fn threshold_share_commitment_derivation_consumes_transported_binary_material() 
         "setupContext": request["setupContext"],
         "publicMatrixSeedHash": request["publicMatrixSeedHash"],
         "vssCoefficientCommitmentRoot": vss_commitment_root_from_derivation_request(&request),
-        "dealerCoefficientCommitmentRecords": request["dealerCoefficientCommitmentRecords"],
+        "sourceTrusteeCoefficientCommitmentRecords": request["sourceTrusteeCoefficientCommitmentRecords"],
         "transportedVssCoefficientCommitmentMaterial": transported_material,
     });
 
@@ -151,7 +151,7 @@ fn threshold_share_commitment_transport_refuses_chunk_hash_drift() {
         "setupContext": request["setupContext"],
         "publicMatrixSeedHash": request["publicMatrixSeedHash"],
         "vssCoefficientCommitmentRoot": vss_commitment_root_from_derivation_request(&request),
-        "dealerCoefficientCommitmentRecords": request["dealerCoefficientCommitmentRecords"],
+        "sourceTrusteeCoefficientCommitmentRecords": request["sourceTrusteeCoefficientCommitmentRecords"],
         "transportedVssCoefficientCommitmentMaterial": transported_material,
     });
 
@@ -216,22 +216,22 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
     )
     .expect("public matrix seed hash");
 
-    let mut dealer_records = Vec::new();
+    let mut source_trustee_records = Vec::new();
     let mut coefficient_commitment_material = Vec::new();
-    for dealer_roster_position in 0..10_u64 {
-        let dealer_identity = format!("trustee-{dealer_roster_position}");
+    for source_trustee_roster_position in 0..10_u64 {
+        let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
         let mut coefficient_commitments = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
             for shamir_coefficient_index in 0..4_u64 {
                 let coefficient_message = threshold_coefficient_message_fixture(
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     shamir_coefficient_index,
                     rns_prime,
                     ring_degree,
                 );
                 let randomness_by_column = threshold_randomness_fixture(
-                    dealer_roster_position,
+                    source_trustee_roster_position,
                     rns_limb_index,
                     shamir_coefficient_index,
                     ring_degree,
@@ -262,8 +262,8 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                     "commitmentProfileHash": commitment_profile_hash,
                     "setupEpoch": setup_epoch,
-                    "dealerIdentity": dealer_identity.as_str(),
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": rns_prime,
@@ -273,7 +273,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                         "VssCoefficientCommitmentRoot",
                         &serde_json::json!({
                             "fixture": "threshold-share-commitment-chunk",
-                            "dealerRosterPosition": dealer_roster_position,
+                            "sourceTrusteeRosterPosition": source_trustee_roster_position,
                             "rnsLimbIndex": rns_limb_index,
                             "shamirCoefficientIndex": shamir_coefficient_index,
                         }),
@@ -282,7 +282,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                         "VssCoefficientCommitmentRoot",
                         &serde_json::json!({
                             "fixture": "threshold-share-coefficient-vector",
-                            "dealerRosterPosition": dealer_roster_position,
+                            "sourceTrusteeRosterPosition": source_trustee_roster_position,
                             "rnsLimbIndex": rns_limb_index,
                             "shamirCoefficientIndex": shamir_coefficient_index,
                         }),
@@ -300,8 +300,8 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
                     "commitmentProfileHash": commitment_profile_hash,
                     "setupEpoch": setup_epoch,
-                    "dealerIdentity": dealer_identity.as_str(),
-                    "dealerRosterPosition": dealer_roster_position,
+                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": rns_prime,
@@ -311,8 +311,8 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                 }));
             }
         }
-        let mut dealer_record = serde_json::json!({
-            "objectType": "VssDealerCoefficientCommitments",
+        let mut source_trustee_record = serde_json::json!({
+            "objectType": "VssSourceTrusteeCoefficientCommitments",
             "objectVersion": 1,
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
@@ -322,22 +322,22 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
             "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
             "commitmentProfileHash": commitment_profile_hash,
             "setupEpoch": setup_epoch,
-            "dealerIdentity": dealer_identity,
-            "dealerRosterPosition": dealer_roster_position,
+            "sourceTrusteeIdentity": source_trustee_identity,
+            "sourceTrusteeRosterPosition": source_trustee_roster_position,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "coefficientCommitments": coefficient_commitments,
         });
-        dealer_record["dealerCommitmentRoot"] = serde_json::json!(
-            derive_protocol_hash("VssCoefficientCommitmentRoot", &dealer_record)
-                .expect("dealer commitment root")
+        source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
+            derive_protocol_hash("VssCoefficientCommitmentRoot", &source_trustee_record)
+                .expect("source trustee commitment root")
         );
-        dealer_records.push(dealer_record);
+        source_trustee_records.push(source_trustee_record);
     }
 
     serde_json::json!({
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "dealerCoefficientCommitmentRecords": dealer_records,
+        "sourceTrusteeCoefficientCommitmentRecords": source_trustee_records,
         "coefficientCommitments": coefficient_commitment_material,
     })
 }
@@ -359,14 +359,16 @@ fn encode_transport_material_from_request(request: &serde_json::Value) -> Vec<u8
     let material_records = request["coefficientCommitments"]
         .as_array()
         .expect("coefficient material records");
-    for dealer_roster_position in 0..10_u64 {
+    for source_trustee_roster_position in 0..10_u64 {
         for rns_limb_index in 0..DATA_PRIMES.len() {
             for shamir_coefficient_index in 0..4_u64 {
-                let record_index =
-                    (((dealer_roster_position as usize) * DATA_PRIMES.len() + rns_limb_index) * 4)
-                        + shamir_coefficient_index as usize;
+                let record_index = (((source_trustee_roster_position as usize)
+                    * DATA_PRIMES.len()
+                    + rns_limb_index)
+                    * 4)
+                    + shamir_coefficient_index as usize;
                 let commitment = &material_records[record_index]["commitment"];
-                crate::encoding::append_varuint(&mut output, dealer_roster_position);
+                crate::encoding::append_varuint(&mut output, source_trustee_roster_position);
                 crate::encoding::append_varuint(&mut output, rns_limb_index as u64);
                 crate::encoding::append_varuint(&mut output, shamir_coefficient_index);
                 let commitment_limbs = commitment["commitmentLimbs"]
@@ -444,7 +446,7 @@ fn vss_commitment_root_from_derivation_request(request: &serde_json::Value) -> S
         "participantCount": 10,
         "thresholdDegree": 4,
         "rnsLimbCount": DATA_PRIMES.len(),
-        "dealerRecords": request["dealerCoefficientCommitmentRecords"],
+        "sourceTrusteeRecords": request["sourceTrusteeCoefficientCommitmentRecords"],
     });
     for field_name in [
         "ceremonyId",
@@ -464,7 +466,7 @@ fn vss_commitment_root_from_derivation_request(request: &serde_json::Value) -> S
 }
 
 fn threshold_coefficient_message_fixture(
-    dealer_roster_position: u64,
+    source_trustee_roster_position: u64,
     rns_limb_index: usize,
     shamir_coefficient_index: u64,
     rns_prime: u64,
@@ -472,7 +474,7 @@ fn threshold_coefficient_message_fixture(
 ) -> Vec<u64> {
     (0..ring_degree)
         .map(|coefficient_position| {
-            let value = ((dealer_roster_position + 1) * 17)
+            let value = ((source_trustee_roster_position + 1) * 17)
                 + ((rns_limb_index as u64 + 1) * 5)
                 + ((shamir_coefficient_index + 1) * 3)
                 + (coefficient_position as u64 % 11);
@@ -482,7 +484,7 @@ fn threshold_coefficient_message_fixture(
 }
 
 fn threshold_randomness_fixture(
-    dealer_roster_position: u64,
+    source_trustee_roster_position: u64,
     rns_limb_index: usize,
     shamir_coefficient_index: u64,
     ring_degree: usize,
@@ -491,7 +493,7 @@ fn threshold_randomness_fixture(
         .map(|randomness_column_index| {
             (0..ring_degree)
                 .map(|coefficient_position| {
-                    match (dealer_roster_position as usize
+                    match (source_trustee_roster_position as usize
                         + rns_limb_index
                         + shamir_coefficient_index as usize
                         + randomness_column_index

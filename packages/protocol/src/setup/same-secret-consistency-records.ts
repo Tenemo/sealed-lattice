@@ -5,7 +5,7 @@ import {
     setupCommitmentProfileId,
     type VssCoefficientCommitmentRecord,
     type VssCoefficientCommitmentSet,
-    type VssDealerCoefficientCommitmentRecord,
+    type VssSourceTrusteeCoefficientCommitmentRecord,
 } from './vss-coefficient-commitments.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
@@ -53,7 +53,7 @@ export type SameSecretConsistencyStatementRecord = Readonly<
         readonly proofVerificationStatus: typeof sameSecretProofVerificationStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
-        readonly vssDealerCommitmentRoot: ProtocolHash;
+        readonly vssSourceTrusteeCommitmentRoot: ProtocolHash;
         readonly constantCoefficientCommitmentRoots: readonly SameSecretConstantCoefficientCommitmentRoot[];
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly boundSecretDependentProofFamilies: typeof sameSecretBoundProofFamilies;
@@ -185,54 +185,69 @@ const validateInput = (input: SameSecretConsistencyStatementSetInput): void => {
     );
 };
 
-const sortedDealerRecords = (
+const sortedSourceTrusteeRecords = (
     input: SameSecretConsistencyStatementSetInput,
-): VssDealerCoefficientCommitmentRecord[] => {
-    const dealerRecords = [
-        ...input.vssCoefficientCommitments.dealerRecords,
+): VssSourceTrusteeCoefficientCommitmentRecord[] => {
+    const sourceTrusteeRecords = [
+        ...input.vssCoefficientCommitments.sourceTrusteeRecords,
     ].sort(
-        (left, right) => left.dealerRosterPosition - right.dealerRosterPosition,
+        (left, right) =>
+            left.sourceTrusteeRosterPosition -
+            right.sourceTrusteeRosterPosition,
     );
-    if (dealerRecords.length !== input.participantCount) {
+    if (sourceTrusteeRecords.length !== input.participantCount) {
         throw new Error(
-            'vssCoefficientCommitments.dealerRecords must cover every participant.',
+            'vssCoefficientCommitments.sourceTrusteeRecords must cover every participant.',
         );
     }
-    dealerRecords.forEach((dealerRecord, expectedRosterPosition) => {
-        assertNonEmptyString(dealerRecord.dealerIdentity, 'dealerIdentity');
-        assertNonNegativeSafeInteger(
-            dealerRecord.dealerRosterPosition,
-            'dealerRosterPosition',
-        );
-        if (dealerRecord.dealerRosterPosition !== expectedRosterPosition) {
-            throw new Error(
-                'vssCoefficientCommitments.dealerRecords roster positions must be contiguous from zero.',
+    sourceTrusteeRecords.forEach(
+        (sourceTrusteeRecord, expectedRosterPosition) => {
+            assertNonEmptyString(
+                sourceTrusteeRecord.sourceTrusteeIdentity,
+                'sourceTrusteeIdentity',
             );
-        }
-        assertContextMatches(input.setupContext, dealerRecord, 'dealerRecord');
-        assertProtocolHash(
-            dealerRecord.dealerCommitmentRoot,
-            'dealerRecord.dealerCommitmentRoot',
-        );
-    });
+            assertNonNegativeSafeInteger(
+                sourceTrusteeRecord.sourceTrusteeRosterPosition,
+                'sourceTrusteeRosterPosition',
+            );
+            if (
+                sourceTrusteeRecord.sourceTrusteeRosterPosition !==
+                expectedRosterPosition
+            ) {
+                throw new Error(
+                    'vssCoefficientCommitments.sourceTrusteeRecords roster positions must be contiguous from zero.',
+                );
+            }
+            assertContextMatches(
+                input.setupContext,
+                sourceTrusteeRecord,
+                'sourceTrusteeRecord',
+            );
+            assertProtocolHash(
+                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+                'sourceTrusteeRecord.sourceTrusteeCommitmentRoot',
+            );
+        },
+    );
 
-    return dealerRecords;
+    return sourceTrusteeRecords;
 };
 
 const constantCoefficientCommitmentRoots = (
-    dealerRecord: VssDealerCoefficientCommitmentRecord,
+    sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord,
     qSharePrimes: readonly number[],
 ): SameSecretConstantCoefficientCommitmentRoot[] =>
     qSharePrimes.map((rnsPrime, rnsLimbIndex) => {
-        const coefficientRecord = dealerRecord.coefficientCommitments.find(
-            (candidateRecord: VssCoefficientCommitmentRecord) =>
-                candidateRecord.rnsLimbIndex === rnsLimbIndex &&
-                candidateRecord.rnsPrime === rnsPrime &&
-                candidateRecord.shamirCoefficientIndex === 0,
-        );
+        const coefficientRecord =
+            sourceTrusteeRecord.coefficientCommitments.find(
+                (candidateRecord: VssCoefficientCommitmentRecord) =>
+                    candidateRecord.rnsLimbIndex === rnsLimbIndex &&
+                    candidateRecord.rnsPrime === rnsPrime &&
+                    candidateRecord.shamirCoefficientIndex === 0,
+            );
         if (coefficientRecord === undefined) {
             throw new Error(
-                'dealerRecord.coefficientCommitments must include every constant coefficient commitment.',
+                'sourceTrusteeRecord.coefficientCommitments must include every constant coefficient commitment.',
             );
         }
         assertProtocolHash(
@@ -250,7 +265,7 @@ const constantCoefficientCommitmentRoots = (
 
 const trusteeSecretCommitmentPayload = (
     setupContext: CollectiveBgvSetupContext,
-    dealerRecord: VssDealerCoefficientCommitmentRecord,
+    sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord,
     constantRoots: readonly SameSecretConstantCoefficientCommitmentRoot[],
 ): JsonRecord => ({
     objectType: 'TrusteeSecretCommitment',
@@ -259,9 +274,10 @@ const trusteeSecretCommitmentPayload = (
     commitmentProfileId: setupCommitmentProfileId,
     setupProofProfileId,
     ...contextFields(setupContext),
-    trusteeIdentity: dealerRecord.dealerIdentity,
-    trusteeRosterPosition: dealerRecord.dealerRosterPosition,
-    vssDealerCommitmentRoot: dealerRecord.dealerCommitmentRoot,
+    trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
+    trusteeRosterPosition: sourceTrusteeRecord.sourceTrusteeRosterPosition,
+    vssSourceTrusteeCommitmentRoot:
+        sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
     secretCommitmentSource: 'vss-constant-coefficient-commitments',
     sameSecretRelation,
     constantCoefficientCommitmentRoots: constantRoots,
@@ -287,7 +303,7 @@ const sameSecretProofFamilyBindingRoot = (): ProtocolHash =>
 
 const createStatementRecord = (
     setupContext: CollectiveBgvSetupContext,
-    dealerRecord: VssDealerCoefficientCommitmentRecord,
+    sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord,
     constantRoots: readonly SameSecretConstantCoefficientCommitmentRoot[],
 ): {
     readonly statementRecord: SameSecretConsistencyStatementRecord;
@@ -297,7 +313,7 @@ const createStatementRecord = (
         'TrusteeSecretCommitmentRoot',
         trusteeSecretCommitmentPayload(
             setupContext,
-            dealerRecord,
+            sourceTrusteeRecord,
             constantRoots,
         ),
     );
@@ -311,9 +327,10 @@ const createStatementRecord = (
         proofFamily: sameSecretProofFamily,
         proofVerificationStatus: sameSecretProofVerificationStatus,
         ...contextFields(setupContext),
-        trusteeIdentity: dealerRecord.dealerIdentity,
-        trusteeRosterPosition: dealerRecord.dealerRosterPosition,
-        vssDealerCommitmentRoot: dealerRecord.dealerCommitmentRoot,
+        trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
+        trusteeRosterPosition: sourceTrusteeRecord.sourceTrusteeRosterPosition,
+        vssSourceTrusteeCommitmentRoot:
+            sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
         constantCoefficientCommitmentRoots: constantRoots,
         trusteeSecretCommitmentRoot,
         boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
@@ -336,8 +353,9 @@ const createStatementRecord = (
     return {
         statementRecord,
         trusteeSecretCommitmentRootReference: {
-            trusteeIdentity: dealerRecord.dealerIdentity,
-            trusteeRosterPosition: dealerRecord.dealerRosterPosition,
+            trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
+            trusteeRosterPosition:
+                sourceTrusteeRecord.sourceTrusteeRosterPosition,
             trusteeSecretCommitmentRoot,
         },
     };
@@ -348,15 +366,16 @@ export const createSameSecretConsistencyStatementSet = (
 ): SameSecretConsistencyStatementSet => {
     validateInput(input);
     const proofFamilyBindingRoot = sameSecretProofFamilyBindingRoot();
-    const statementOutputs = sortedDealerRecords(input).map((dealerRecord) =>
-        createStatementRecord(
-            input.setupContext,
-            dealerRecord,
-            constantCoefficientCommitmentRoots(
-                dealerRecord,
-                input.qSharePrimes,
+    const statementOutputs = sortedSourceTrusteeRecords(input).map(
+        (sourceTrusteeRecord) =>
+            createStatementRecord(
+                input.setupContext,
+                sourceTrusteeRecord,
+                constantCoefficientCommitmentRoots(
+                    sourceTrusteeRecord,
+                    input.qSharePrimes,
+                ),
             ),
-        ),
     );
     const statementSetWithoutRoot = {
         objectType: 'SameSecretConsistencyStatementSet',

@@ -33,6 +33,21 @@ type BlockedDirectInternalTypes = [
     publicTypes.TopKEvaluatorDirectAggregateInput,
 ];
 
+type BlockedSetupWitnessTypes = [
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.EvaluationKeyProofCommonInput,
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.EvaluationKeyShareProofGenerationBase,
+    // @ts-expect-error evaluation-key proof-generation outputs are not a public facade contract.
+    publicTypes.EvaluationKeyShareProofGenerationOutput,
+    // @ts-expect-error evaluation-key proof generators are not public facade inputs.
+    publicTypes.EvaluationKeyShareProofGenerator,
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.GaloisKeyShareProofGeneration,
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.RelinearizationKeyShareProofGeneration,
+];
+
 type PublicFoundationTypes = [
     publicTypes.AcceptedTargetFinalityCheckpoint,
     publicTypes.BoardConsistencyInput,
@@ -52,11 +67,90 @@ type PublicFoundationTypes = [
     publicTypes.TrusteeSetupEntry,
 ];
 
+type PublicSetupTypes = [
+    publicTypes.BgvHeSecurityCertificate,
+    publicTypes.CommonRandomnessCommit,
+    publicTypes.CommonRandomnessCommitInput,
+    publicTypes.CommonRandomnessReveal,
+    publicTypes.CommonRandomnessRevealInput,
+    publicTypes.CollectiveBgvSetupContext,
+    publicTypes.EncryptedLocalTrusteeSetupState,
+    publicTypes.EvaluatorKeySchedule,
+    publicTypes.EvaluatorKeyScheduleInput,
+    publicTypes.ExportEncryptedLocalTrusteeSetupStateInput,
+    publicTypes.ExportEncryptedLocalTrusteeSetupStateResult,
+    publicTypes.GaloisKeyRootReference,
+    publicTypes.GaloisKeyShareBatch,
+    publicTypes.GaloisKeyShareBatchContribution,
+    publicTypes.GaloisKeyShareBatchesInput,
+    publicTypes.GaloisKeyShareBatchRootReference,
+    publicTypes.GaloisKeyShareProof,
+    publicTypes.GaloisKeyShareProofContribution,
+    publicTypes.GaloisKeyShareProofMaterial,
+    publicTypes.GaloisKeyShareRootReference,
+    publicTypes.LocalTrusteeSetupStateCommitment,
+    publicTypes.LocalTrusteeSetupStateDeletionReceipt,
+    publicTypes.LocalTrusteeSetupStateSealedMaterial,
+    publicTypes.LocalTrusteeSetupStateSealedPayload,
+    publicTypes.LocalTrusteeSetupStateVerification,
+    publicTypes.PrivateVssEnvelopeVerificationReference,
+    publicTypes.PrivateVssShareVerification,
+    publicTypes.ProtocolRootSigner,
+    publicTypes.PublicEvaluationKeySet,
+    publicTypes.PublicEvaluationKeySetInput,
+    publicTypes.PublicKeyShareCoefficientVectorHash,
+    publicTypes.PublicKeyShareContributionInput,
+    publicTypes.PublicKeyShareProofRecord,
+    publicTypes.PublicKeyShareProofSet,
+    publicTypes.PublicKeyShareProofSetInput,
+    publicTypes.PublicKeyShareRecord,
+    publicTypes.PublicKeyShareSet,
+    publicTypes.PublicKeyShareSetInput,
+    publicTypes.RelinearizationKeyRootReference,
+    publicTypes.RelinearizationKeyShareProofMaterial,
+    publicTypes.RelinearizationKeyShareRoundOneRecord,
+    publicTypes.RelinearizationKeyShareRoundTwoRecord,
+    publicTypes.RelinearizationKeyShareRounds,
+    publicTypes.RelinearizationKeyShareRoundsInput,
+    publicTypes.RelinearizationLevelScheduleEntry,
+    publicTypes.RelinearizationRoundOneContribution,
+    publicTypes.RelinearizationRoundTwoContribution,
+    publicTypes.RequiredGaloisKeyScheduleEntry,
+    publicTypes.RequiredGaloisSet,
+    publicTypes.RestoreLocalTrusteeSetupStateInput,
+    publicTypes.RestoredLocalTrusteeSetupState,
+    publicTypes.SameSecretProofReference,
+    publicTypes.SetupCertificateTransportInput,
+    publicTypes.SetupCertificates,
+    publicTypes.SetupCertificatesInput,
+    publicTypes.SetupCommonRandomness,
+    publicTypes.SetupCommonRandomnessInput,
+    publicTypes.SetupCommitmentSecurityCertificate,
+    publicTypes.SetupContribution,
+    publicTypes.SetupContributionInput,
+    publicTypes.SetupIntentInput,
+    publicTypes.SetupPackage,
+    publicTypes.SetupPackageInput,
+    publicTypes.SetupPackageVerification,
+    publicTypes.SetupPhaseParticipantObject,
+    publicTypes.SetupPhaseRecord,
+    publicTypes.SetupPhaseRecordInput,
+    publicTypes.SetupTransportCertificate,
+    publicTypes.VerifySetupPackageInput,
+    publicTypes.VerifyPrivateVssShareInput,
+    publicTypes.VssComplaint,
+    publicTypes.VssComplaintInput,
+    publicTypes.VssShareAcceptance,
+    publicTypes.VssShareAcceptanceInput,
+];
+
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedDirectInternalTypes: BlockedDirectInternalTypes;
     readonly blockedTargetOpeningTypes: BlockedTargetOpeningTypes;
+    readonly blockedSetupWitnessTypes: BlockedSetupWitnessTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
+    readonly publicSetupTypes: PublicSetupTypes;
 };
 
 type PublicFoundationTypeNames = readonly string[] & {
@@ -82,8 +176,93 @@ const publicFoundationTypeNames = [
     'TrusteeSetupEntry',
 ] as const satisfies PublicFoundationTypeNames;
 
+type PublicSetupTypeNames = readonly string[] & {
+    readonly length: PublicTypeSurfaceProbe['publicSetupTypes']['length'];
+};
+
+const publicSetupTypeNames = [
+    'BgvHeSecurityCertificate',
+    'CommonRandomnessCommit',
+    'CommonRandomnessCommitInput',
+    'CommonRandomnessReveal',
+    'CommonRandomnessRevealInput',
+    'CollectiveBgvSetupContext',
+    'EncryptedLocalTrusteeSetupState',
+    'EvaluatorKeySchedule',
+    'EvaluatorKeyScheduleInput',
+    'ExportEncryptedLocalTrusteeSetupStateInput',
+    'ExportEncryptedLocalTrusteeSetupStateResult',
+    'GaloisKeyRootReference',
+    'GaloisKeyShareBatch',
+    'GaloisKeyShareBatchContribution',
+    'GaloisKeyShareBatchesInput',
+    'GaloisKeyShareBatchRootReference',
+    'GaloisKeyShareProof',
+    'GaloisKeyShareProofContribution',
+    'GaloisKeyShareProofMaterial',
+    'GaloisKeyShareRootReference',
+    'LocalTrusteeSetupStateCommitment',
+    'LocalTrusteeSetupStateDeletionReceipt',
+    'LocalTrusteeSetupStateSealedMaterial',
+    'LocalTrusteeSetupStateSealedPayload',
+    'LocalTrusteeSetupStateVerification',
+    'PrivateVssEnvelopeVerificationReference',
+    'PrivateVssShareVerification',
+    'ProtocolRootSigner',
+    'PublicEvaluationKeySet',
+    'PublicEvaluationKeySetInput',
+    'PublicKeyShareCoefficientVectorHash',
+    'PublicKeyShareContributionInput',
+    'PublicKeyShareProofRecord',
+    'PublicKeyShareProofSet',
+    'PublicKeyShareProofSetInput',
+    'PublicKeyShareRecord',
+    'PublicKeyShareSet',
+    'PublicKeyShareSetInput',
+    'RelinearizationKeyRootReference',
+    'RelinearizationKeyShareProofMaterial',
+    'RelinearizationKeyShareRoundOneRecord',
+    'RelinearizationKeyShareRoundTwoRecord',
+    'RelinearizationKeyShareRounds',
+    'RelinearizationKeyShareRoundsInput',
+    'RelinearizationLevelScheduleEntry',
+    'RelinearizationRoundOneContribution',
+    'RelinearizationRoundTwoContribution',
+    'RequiredGaloisKeyScheduleEntry',
+    'RequiredGaloisSet',
+    'RestoreLocalTrusteeSetupStateInput',
+    'RestoredLocalTrusteeSetupState',
+    'SameSecretProofReference',
+    'SetupCertificateTransportInput',
+    'SetupCertificates',
+    'SetupCertificatesInput',
+    'SetupCommonRandomness',
+    'SetupCommonRandomnessInput',
+    'SetupCommitmentSecurityCertificate',
+    'SetupContribution',
+    'SetupContributionInput',
+    'SetupIntentInput',
+    'SetupPackage',
+    'SetupPackageInput',
+    'SetupPackageVerification',
+    'SetupPhaseParticipantObject',
+    'SetupPhaseRecord',
+    'SetupPhaseRecordInput',
+    'SetupTransportCertificate',
+    'VerifySetupPackageInput',
+    'VerifyPrivateVssShareInput',
+    'VssComplaint',
+    'VssComplaintInput',
+    'VssShareAcceptance',
+    'VssShareAcceptanceInput',
+] as const satisfies PublicSetupTypeNames;
+
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
         expect(publicFoundationTypeNames).toHaveLength(16);
+    });
+
+    it('keeps accepted setup phase, randomness, key-record, and local-state types available', () => {
+        expect(publicSetupTypeNames).toHaveLength(74);
     });
 });

@@ -28,11 +28,11 @@ export type CollectiveBgvSetupContext = Readonly<
 
 export type PrivateVssEnvelopeVerificationReference = Readonly<
     PrivateVssEnvelopeCommitment & {
-        readonly dealerIdentity: string;
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
-        readonly dealerCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCommitmentRoot: ProtocolHash;
     }
 >;
 
@@ -84,11 +84,11 @@ export type VssShareAcceptanceRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareAcceptance';
         readonly objectVersion: 1;
-        readonly dealerIdentity: string;
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
-        readonly dealerCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCommitmentRoot: ProtocolHash;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly privateEnvelopeHash: ProtocolHash;
         readonly localVerificationRoot: ProtocolHash;
@@ -108,11 +108,11 @@ export type VssShareComplaintRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareComplaint';
         readonly objectVersion: 1;
-        readonly dealerIdentity: string;
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
-        readonly dealerCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCommitmentRoot: ProtocolHash;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly privateEnvelopeHash: ProtocolHash;
         readonly complaintEvidenceRoot: ProtocolHash;
@@ -158,11 +158,11 @@ type VssShareVerificationPayloadFields = Readonly<{
     readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
     readonly commitmentProfileHash: ProtocolHash;
     readonly setupEpoch: string;
-    readonly dealerIdentity: string;
-    readonly dealerRosterPosition: number;
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
-    readonly dealerCommitmentRoot: ProtocolHash;
+    readonly sourceTrusteeCommitmentRoot: ProtocolHash;
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly privateEnvelopeHash: ProtocolHash;
 }>;
@@ -270,47 +270,48 @@ const shareVerificationPayloadFields = (
         setupContext.carryAwareVssShareRelationProfileHash,
     commitmentProfileHash: setupContext.commitmentProfileHash,
     setupEpoch: setupContext.setupEpoch,
-    dealerIdentity: envelopeReference.dealerIdentity,
-    dealerRosterPosition: envelopeReference.dealerRosterPosition,
+    sourceTrusteeIdentity: envelopeReference.sourceTrusteeIdentity,
+    sourceTrusteeRosterPosition: envelopeReference.sourceTrusteeRosterPosition,
     recipientIdentity: envelopeReference.recipientIdentity,
     recipientRosterPosition: envelopeReference.recipientRosterPosition,
-    dealerCommitmentRoot: envelopeReference.dealerCommitmentRoot,
+    sourceTrusteeCommitmentRoot: envelopeReference.sourceTrusteeCommitmentRoot,
     privateVssEnvelopeCommitmentRoot,
     privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
 });
 
-const sortedByDealerThenRecipient = <
+const sortedBySourceTrusteeThenRecipient = <
     RecordValue extends {
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeRosterPosition: number;
         readonly recipientRosterPosition: number;
     },
 >(
     records: readonly RecordValue[],
 ): RecordValue[] =>
     [...records].sort((left, right) => {
-        const dealerOrder =
-            left.dealerRosterPosition - right.dealerRosterPosition;
+        const sourceTrusteeOrder =
+            left.sourceTrusteeRosterPosition -
+            right.sourceTrusteeRosterPosition;
 
-        return dealerOrder === 0
+        return sourceTrusteeOrder === 0
             ? left.recipientRosterPosition - right.recipientRosterPosition
-            : dealerOrder;
+            : sourceTrusteeOrder;
     });
 
-const assertDistinctDealerRecipientPairs = (
+const assertDistinctSourceTrusteeRecipientPairs = (
     records: readonly {
-        readonly dealerRosterPosition: number;
+        readonly sourceTrusteeRosterPosition: number;
         readonly recipientRosterPosition: number;
     }[],
     recordLabel: string,
 ): void => {
     const seenPairs = new Set<string>();
     for (const record of records) {
-        const pairKey = `${String(record.dealerRosterPosition)}:${String(
+        const pairKey = `${String(record.sourceTrusteeRosterPosition)}:${String(
             record.recipientRosterPosition,
         )}`;
         if (seenPairs.has(pairKey)) {
             throw new Error(
-                `${recordLabel} records must have distinct dealer-recipient pairs.`,
+                `${recordLabel} records must have distinct source-trustee-recipient pairs.`,
             );
         }
         seenPairs.add(pairKey);
@@ -391,10 +392,10 @@ export const createVssShareAcceptanceSet = (input: {
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly acceptanceRecords: readonly VssShareAcceptanceRecord[];
 }): VssShareAcceptanceSet => {
-    const acceptanceRecords = sortedByDealerThenRecipient(
+    const acceptanceRecords = sortedBySourceTrusteeThenRecipient(
         input.acceptanceRecords,
     );
-    assertDistinctDealerRecipientPairs(
+    assertDistinctSourceTrusteeRecipientPairs(
         acceptanceRecords,
         'VSS share acceptance',
     );
@@ -559,10 +560,13 @@ export const createVssComplaintSet = (input: {
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly complaintRecords: readonly VssShareComplaintRecord[];
 }): VssComplaintSet => {
-    const complaintRecords = sortedByDealerThenRecipient(
+    const complaintRecords = sortedBySourceTrusteeThenRecipient(
         input.complaintRecords,
     );
-    assertDistinctDealerRecipientPairs(complaintRecords, 'VSS complaint');
+    assertDistinctSourceTrusteeRecipientPairs(
+        complaintRecords,
+        'VSS complaint',
+    );
     const complaintSetWithoutRoot = {
         objectType: 'VssComplaintSet',
         objectVersion: 1,

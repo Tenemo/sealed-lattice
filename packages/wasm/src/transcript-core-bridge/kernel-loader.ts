@@ -13,6 +13,7 @@ import type {
     BgvCollectiveSetupProfileDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
+    BgvEvaluationKeyShareLnpProofGeneration,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -344,6 +345,16 @@ export const createTranscriptCoreKernelLoader = (
                             expectedRosterHash: input.expectedRosterHash,
                             transportedVssCoefficientCommitmentMaterial:
                                 input.transportedVssCoefficientCommitmentMaterial,
+                            transportedSameSecretProofMaterial:
+                                input.transportedSameSecretProofMaterial,
+                            transportedPublicKeyShareProofMaterial:
+                                input.transportedPublicKeyShareProofMaterial,
+                            transportedEvaluationKeyShareProofMaterial:
+                                input.transportedEvaluationKeyShareProofMaterial,
+                            transportedEvaluationKeyShareComponentMaterial:
+                                input.transportedEvaluationKeyShareComponentMaterial,
+                            transportedPublicEvaluationKeyMaterial:
+                                input.transportedPublicEvaluationKeyMaterial,
                         },
                     ),
                 verifyPrivateVssShareEnvelope: (
@@ -353,10 +364,10 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'VerifyPrivateVssShareEnvelope',
                         setupContext: input.setupContext,
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        dealerCoefficientCommitmentRecord:
-                            input.dealerCoefficientCommitmentRecord,
-                        dealerCoefficientCommitmentMaterialRecords:
-                            input.dealerCoefficientCommitmentMaterialRecords,
+                        sourceTrusteeCoefficientCommitmentRecord:
+                            input.sourceTrusteeCoefficientCommitmentRecord,
+                        sourceTrusteeCoefficientCommitmentMaterialRecords:
+                            input.sourceTrusteeCoefficientCommitmentMaterialRecords,
                         privateEnvelope: input.privateEnvelope,
                         transportedPrivateVssShareProofMaterial:
                             input.transportedPrivateVssShareProofMaterial,
@@ -373,10 +384,10 @@ export const createTranscriptCoreKernelLoader = (
                         setupContext: input.setupContext,
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
                         privateEnvelopeAadHash: input.privateEnvelopeAadHash,
-                        dealerCoefficientCommitmentRecord:
-                            input.dealerCoefficientCommitmentRecord,
-                        dealerCoefficientCommitmentMaterialRecords:
-                            input.dealerCoefficientCommitmentMaterialRecords,
+                        sourceTrusteeCoefficientCommitmentRecord:
+                            input.sourceTrusteeCoefficientCommitmentRecord,
+                        sourceTrusteeCoefficientCommitmentMaterialRecords:
+                            input.sourceTrusteeCoefficientCommitmentMaterialRecords,
                         recipientIdentity: input.recipientIdentity,
                         recipientRosterPosition: input.recipientRosterPosition,
                         rnsLimbIndex: input.rnsLimbIndex,
@@ -427,6 +438,31 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                     }),
+                generateEvaluationKeyShareLnpProof: (
+                    input,
+                ): BgvEvaluationKeyShareLnpProofGeneration =>
+                    executeCommand<BgvEvaluationKeyShareLnpProofGeneration>({
+                        command: 'GenerateEvaluationKeyShareLnpProof',
+                        proofFamily: input.proofFamily,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        proofRecord: input.proofRecord,
+                        sameSecretStatementRecord:
+                            input.sameSecretStatementRecord,
+                        constantCommitments: input.constantCommitments,
+                        setupProofBinding: input.setupProofBinding,
+                        transportedKeySwitchComponentMaterial:
+                            input.transportedKeySwitchComponentMaterial,
+                        secretCoefficients: input.secretCoefficients,
+                        openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        errorCoefficientsByDigit:
+                            input.errorCoefficientsByDigit,
+                        relinearizationSourceCoefficientsByDigit:
+                            input.relinearizationSourceCoefficientsByDigit,
+                        roundOneAggregateSourceCoefficientsByDigit:
+                            input.roundOneAggregateSourceCoefficientsByDigit,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                    }),
                 deriveThresholdShareCommitments: (
                     input,
                 ): BgvThresholdShareCommitmentDerivation =>
@@ -434,8 +470,8 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'DeriveThresholdShareCommitments',
                         setupContext: input.setupContext,
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        dealerCoefficientCommitmentRecords:
-                            input.dealerCoefficientCommitmentRecords,
+                        sourceTrusteeCoefficientCommitmentRecords:
+                            input.sourceTrusteeCoefficientCommitmentRecords,
                         coefficientCommitments: input.coefficientCommitments,
                     }),
                 deriveThresholdShareCommitmentsFromTransport: (
@@ -449,8 +485,8 @@ export const createTranscriptCoreKernelLoader = (
                             publicMatrixSeedHash: input.publicMatrixSeedHash,
                             vssCoefficientCommitmentRoot:
                                 input.vssCoefficientCommitmentRoot,
-                            dealerCoefficientCommitmentRecords:
-                                input.dealerCoefficientCommitmentRecords,
+                            sourceTrusteeCoefficientCommitmentRecords:
+                                input.sourceTrusteeCoefficientCommitmentRecords,
                             transportedVssCoefficientCommitmentMaterial:
                                 input.transportedVssCoefficientCommitmentMaterial,
                         },
