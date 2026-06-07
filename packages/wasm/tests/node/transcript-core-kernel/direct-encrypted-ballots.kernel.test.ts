@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     createDirectBallotInputs,
     createDirectBallotSetupPackage,
-    runMeasuredDirectEncryptedBallot,
+    runDirectEncryptedBallot,
 } from './direct-encrypted-ballot';
 
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
@@ -13,7 +13,7 @@ describe('direct encrypted ballot kernel command', () => {
     it('generates and verifies one full direct ballot proof through Node/WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setupPackage = createDirectBallotSetupPackage(kernel);
-        const { result, memory } = await runMeasuredDirectEncryptedBallot({
+        const result = await runDirectEncryptedBallot({
             setupPackage,
         });
 
@@ -167,11 +167,6 @@ describe('direct encrypted ballot kernel command', () => {
         );
         expect(result.aggregation).not.toHaveProperty('aggregateScores');
         expect(result.aggregation).not.toHaveProperty('plaintextOracleScores');
-        expect(memory.wasmLinearMemoryBytesAfter).toBeGreaterThanOrEqual(
-            memory.wasmLinearMemoryBytesBefore,
-        );
-        expect(memory.runtimeBefore).toBeTypeOf('object');
-        expect(memory.runtimeAfter).toBeTypeOf('object');
         expect(result.evaluatorReplay).toBe(
             'Not run in this command. Supply topCount to attempt the packed batched-pair evaluator route over the direct aggregate.',
         );
@@ -191,7 +186,7 @@ describe('direct encrypted ballot kernel command', () => {
         }));
 
         await expect(
-            runMeasuredDirectEncryptedBallot({
+            runDirectEncryptedBallot({
                 ballots,
                 setupPackage,
             }),
@@ -204,7 +199,7 @@ describe('direct encrypted ballot kernel command', () => {
         const ballots = [...createDirectBallotInputs(2)].reverse();
 
         await expect(
-            runMeasuredDirectEncryptedBallot({
+            runDirectEncryptedBallot({
                 ballots,
                 setupPackage,
             }),
@@ -220,7 +215,7 @@ describe('direct encrypted ballot kernel command', () => {
         }
 
         await expect(
-            runMeasuredDirectEncryptedBallot({
+            runDirectEncryptedBallot({
                 ballots: [
                     {
                         ...ballot,
@@ -239,7 +234,7 @@ describe('direct encrypted ballot kernel command', () => {
         const setupPackage = createDirectBallotSetupPackage(kernel);
 
         await expect(
-            runMeasuredDirectEncryptedBallot({
+            runDirectEncryptedBallot({
                 setupPackage,
                 setupSeed: 'direct-encrypted-ballot-wrong-setup-seed',
             }),

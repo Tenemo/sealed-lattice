@@ -4,13 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import type { PluginOption } from 'vite';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
-import type { BrowserCommand, BrowserInstanceOption } from 'vitest/node';
+import type { BrowserInstanceOption } from 'vitest/node';
 
 import {
     browserTestLaneDefinitions,
     nodeHookTimeoutMs,
     nodeTestProjectDefinitions,
-    proofBenchmarkLaneDefinitions,
 } from './tools/ci/test-lanes.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -99,22 +98,6 @@ const mobileContextOptions = {
     },
 } as const;
 
-const desktopProofBenchmarkContextOptions = {
-    userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.15 Safari/537.36',
-    viewport: {
-        width: 1280,
-        height: 720,
-    },
-    screen: {
-        width: 1280,
-        height: 720,
-    },
-    deviceScaleFactor: 1,
-    isMobile: false,
-    hasTouch: false,
-} as const;
-
 const desktopBrowserInstances: BrowserInstanceOption[] = [
     { browser: 'chromium', name: 'chromium-desktop' },
     { browser: 'firefox', name: 'firefox-desktop' },
@@ -137,28 +120,6 @@ const mobileBrowserInstances: BrowserInstanceOption[] = [
         }),
     },
 ];
-
-const desktopProofBenchmarkBrowserInstances: BrowserInstanceOption[] = [
-    {
-        browser: 'chromium',
-        name: 'chromium-desktop-proof-benchmark',
-        provider: playwright({
-            contextOptions: desktopProofBenchmarkContextOptions,
-        }),
-    },
-];
-
-// Browser proof-benchmark lanes run in headless Chromium, where Vitest forwards
-// browser console only to a TTY/UI and not to the piped stdout the local run log
-// tees. This node-side command lets browser benchmarks push their report lines
-// straight to stdout so they are captured under logs/ like the node lane.
-const writeBenchmarkLogLine: BrowserCommand<[string]> = (_context, line) => {
-    process.stdout.write(`${line}\n`);
-};
-
-const benchmarkBrowserCommands: Record<string, BrowserCommand<[string]>> = {
-    writeBenchmarkLogLine,
-};
 
 type NodeProjectInput = {
     readonly disableConsoleIntercept?: boolean;
@@ -194,7 +155,6 @@ const makeNodeProject = ({
 });
 
 type BrowserProjectInput = {
-    readonly commands?: Record<string, BrowserCommand<[string]>>;
     readonly fileParallelism?: boolean;
     readonly hookTimeout?: number;
     readonly include: readonly string[];
@@ -205,7 +165,6 @@ type BrowserProjectInput = {
 };
 
 const makeBrowserProject = ({
-    commands,
     fileParallelism,
     hookTimeout,
     include,
@@ -231,7 +190,6 @@ const makeBrowserProject = ({
             provider,
             headless: true,
             instances,
-            ...(commands === undefined ? {} : { commands }),
         },
     },
 });
@@ -259,10 +217,6 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            makeNodeProject({
-                ...proofBenchmarkLaneDefinitions.node,
-                disableConsoleIntercept: true,
-            }),
             makeBrowserProject({
                 ...browserTestLaneDefinitions.desktop,
                 instances: desktopBrowserInstances,
@@ -270,12 +224,6 @@ export default defineConfig({
             makeBrowserProject({
                 ...browserTestLaneDefinitions.mobile,
                 instances: mobileBrowserInstances,
-            }),
-            makeBrowserProject({
-                ...proofBenchmarkLaneDefinitions.desktop,
-                instances: desktopProofBenchmarkBrowserInstances,
-                hookTimeout: nodeHookTimeoutMs,
-                commands: benchmarkBrowserCommands,
             }),
         ],
     },

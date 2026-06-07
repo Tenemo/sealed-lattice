@@ -29,21 +29,9 @@ export const evaluatorReplayProfileId =
 export const directComparisonProfileId =
     'direct-encrypted-ballot-comparison-v1';
 
-/** Fully verified result profile emitted by transcript-core fixtures. */
-export const fullyVerifiedResultProfileId =
-    'transcript-core-fully-verified-result-profile-v1';
-
 /** Foundation transcript profile emitted by transcript-core fixtures. */
 export const foundationTranscriptProfileId =
     'transcript-core-foundation-transcript-profile-v1';
-
-/** Passive MHE prototype profile emitted by transcript-core fixtures. */
-export const passiveMhePrototypeProfileId =
-    'transcript-core-passive-mhe-prototype-profile-v1';
-
-/** Active malicious MHE profile emitted by transcript-core fixtures. */
-export const activeMaliciousMheProfileId =
-    'transcript-core-active-malicious-mhe-profile-v1';
 
 /** Foundation-only profile emitted by transcript-core fixtures. */
 export const foundationOnlyProfileId =

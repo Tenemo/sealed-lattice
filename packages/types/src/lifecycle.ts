@@ -1,6 +1,4 @@
 import type { ProtocolHash } from './protocol-hash.js';
-import type { MheSecurityClosure } from './transcript-core.js';
-
 /** Result claim labels used after decryption and verification complete. */
 export type ResultClaimLabel = 'fullyVerified';
 
@@ -49,14 +47,14 @@ export type ThresholdProfileInput = {
 /** Roster profile classification for the derived threshold parameters. */
 export type RosterProfileKind =
     | 'CasualMicroRoster'
-    | 'MandatoryBenchmarkRoster'
+    | 'FirstProfileRoster'
     | 'SupportedDynamicRosterRange'
     | 'UncertifiedDynamicRoster';
 
 /** Claim boundary carried by a derived threshold profile. */
 export type ThresholdProfileClaimBoundary =
     | 'CasualMicroRoster'
-    | 'MandatoryBenchmark'
+    | 'FirstProfile'
     | 'DynamicRosterCertificate'
     | 'DynamicRosterCertificateMissing';
 
@@ -265,7 +263,6 @@ export type ModeStatusLabel =
     | 'longRunningCryptographicCheck'
     | 'measuredRuntimeProfile'
     | 'mobileReplayProfile'
-    | 'passiveMhePrototype'
     | 'targetDecryptionClosure';
 
 /** Allowed lifecycle transition edge. */
@@ -278,7 +275,6 @@ export type LifecycleTransition = {
 export type LifecycleLabelInput = {
     readonly lifecycleState: LifecycleState;
     readonly thresholdProfile: ThresholdProfile;
-    readonly mheSecurityClosure?: MheSecurityClosure;
     readonly securityProfileIds?: readonly string[];
     readonly localRosterAccepted?: boolean;
     readonly ownBallotSubmitted?: boolean;

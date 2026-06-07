@@ -23,78 +23,59 @@ pub(super) const REQUIRED_FIELDS: [u64; 6] = [
     FIELD_CHECKPOINTS,
 ];
 
-pub const FULLY_VERIFIED_RESULT_PROFILE_ID: &str =
-    "transcript-core-fully-verified-result-profile-v1";
 pub const FOUNDATION_TRANSCRIPT_PROFILE_ID: &str =
     "transcript-core-foundation-transcript-profile-v1";
-pub const PASSIVE_MHE_PROTOTYPE_PROFILE_ID: &str =
-    "transcript-core-passive-mhe-prototype-profile-v1";
-pub const ACTIVE_MALICIOUS_MHE_PROFILE_ID: &str = "transcript-core-active-malicious-mhe-profile-v1";
 pub const FOUNDATION_ONLY_PROFILE_ID: &str = "transcript-core-foundation-only-profile-v1";
 pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
-pub const MANDATORY_EVALUATOR_REPLAY_PROFILE_ID: &str =
-    "direct-encrypted-ballot-evaluator-replay-v1";
 pub const NO_EVALUATOR_REPLAY_PROFILE_ID: &str = "transcript-core-no-evaluator-replay-proof-v1";
 pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-proof-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BaseClaimProfile {
     FoundationTranscript,
-    FullyVerifiedResult,
 }
 
 impl BaseClaimProfile {
     pub fn code(self) -> u64 {
         match self {
             Self::FoundationTranscript => 1,
-            Self::FullyVerifiedResult => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::FoundationTranscript => "FoundationTranscript",
-            Self::FullyVerifiedResult => "FullyVerifiedResult",
         }
     }
 
     pub fn expected_profile_id(self) -> &'static str {
         match self {
             Self::FoundationTranscript => FOUNDATION_TRANSCRIPT_PROFILE_ID,
-            Self::FullyVerifiedResult => FULLY_VERIFIED_RESULT_PROFILE_ID,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum MheSecurityClosure {
+pub enum TranscriptCoreSecurityClosure {
     FoundationOnly,
-    PassiveMhePrototype,
-    ActiveMalicious,
 }
 
-impl MheSecurityClosure {
+impl TranscriptCoreSecurityClosure {
     pub fn code(self) -> u64 {
         match self {
             Self::FoundationOnly => 3,
-            Self::PassiveMhePrototype => 1,
-            Self::ActiveMalicious => 2,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::FoundationOnly => "FoundationOnly",
-            Self::PassiveMhePrototype => "PassiveMHEPrototype",
-            Self::ActiveMalicious => "ActiveMalicious",
         }
     }
 
     pub fn expected_profile_id(self) -> &'static str {
         match self {
             Self::FoundationOnly => FOUNDATION_ONLY_PROFILE_ID,
-            Self::PassiveMhePrototype => PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
-            Self::ActiveMalicious => ACTIVE_MALICIOUS_MHE_PROFILE_ID,
         }
     }
 }
@@ -103,18 +84,18 @@ impl MheSecurityClosure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TranscriptCoreProfile {
     pub base_claim_profile: BaseClaimProfile,
-    pub mhe_security_closure: MheSecurityClosure,
+    pub security_closure: TranscriptCoreSecurityClosure,
 }
 
 #[cfg(test)]
 impl TranscriptCoreProfile {
     pub const fn new(
         base_claim_profile: BaseClaimProfile,
-        mhe_security_closure: MheSecurityClosure,
+        security_closure: TranscriptCoreSecurityClosure,
     ) -> Self {
         Self {
             base_claim_profile,
-            mhe_security_closure,
+            security_closure,
         }
     }
 
@@ -122,22 +103,16 @@ impl TranscriptCoreProfile {
         format!(
             "{}:{}",
             self.base_claim_profile.label(),
-            self.mhe_security_closure.label()
+            self.security_closure.label()
         )
     }
 }
 
 #[cfg(test)]
-pub const FULLY_VERIFIED_PASSIVE_MHE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
-    BaseClaimProfile::FullyVerifiedResult,
-    MheSecurityClosure::PassiveMhePrototype,
+pub const FOUNDATION_TRANSCRIPT_CORE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
+    BaseClaimProfile::FoundationTranscript,
+    TranscriptCoreSecurityClosure::FoundationOnly,
 );
-#[cfg(test)]
-pub const FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE: TranscriptCoreProfile =
-    TranscriptCoreProfile::new(
-        BaseClaimProfile::FullyVerifiedResult,
-        MheSecurityClosure::ActiveMalicious,
-    );
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TranscriptCoreStatus {
@@ -161,9 +136,9 @@ impl TranscriptCoreStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptCoreObject {
     pub base_claim_profile: BaseClaimProfile,
-    pub mhe_security_closure: MheSecurityClosure,
+    pub security_closure: TranscriptCoreSecurityClosure,
     pub base_claim_profile_id: String,
-    pub mhe_security_profile_id: String,
+    pub security_profile_id: String,
     pub he_setup_proof_profile_id: String,
     pub evaluator_replay_profile_id: String,
     pub decryption_proof_profile_id: String,
@@ -185,12 +160,12 @@ pub struct TranscriptCoreAnalysis {
     pub object_version: u64,
     #[serde(rename = "baseClaimProfile")]
     pub base_claim_profile: &'static str,
-    #[serde(rename = "mheSecurityClosure")]
-    pub mhe_security_closure: &'static str,
+    #[serde(rename = "securityClosure")]
+    pub security_closure: &'static str,
     #[serde(rename = "baseClaimProfileId")]
     pub base_claim_profile_id: String,
-    #[serde(rename = "mheSecurityProfileId")]
-    pub mhe_security_profile_id: String,
+    #[serde(rename = "securityProfileId")]
+    pub security_profile_id: String,
     #[serde(rename = "heSetupProofProfileId")]
     pub he_setup_proof_profile_id: String,
     #[serde(rename = "evaluatorReplayProfileId")]

@@ -108,7 +108,7 @@ This evidence is not active-static setup closure and is not an accepted mobile s
 - external review for the current root-bound Galois-key batch proof verifier;
 - claim-bearing evaluation-key correctness evidence beyond review-gated root assembly;
 - setup and evaluation-key footprint reduction, package-level lazy loading from the enforced setup transport manifest, and extension of the transported binary path beyond public VSS, same-secret proof, and public-key proof material to relinearization, Galois, and evaluation-key material;
-- public package setup contribution creation, encrypted local-state import/export surfaces, and setup package verification surfaces around the internal roots-only assembly helpers;
+- public package setup contribution creation, encrypted local-state import/export and restore-after-restart surfaces, setup/device epoch verification for restored state, stale or incomplete local-state refusal, later target-bound decryption-share production from restored state, and setup package verification surfaces around the internal roots-only assembly helpers;
 - active-static secure-with-abort setup theorem closure;
 - target-decryption handoff closure for `Q_target`, smudging, C1-C4, share proofs, and target-decryption readiness refusal.
 
@@ -120,9 +120,7 @@ The direct encrypted ballot implementation has useful internal evidence:
 - the current internal proof is 18,626,400 bytes;
 - binary proof transport is chunked and publicly hash-bound inside the internal command, including proof length, chunk size/count, chunk hashes, chunk Merkle root, full proof hash, statement hash, ciphertext root, voter identity, action context, profile, collective key, ballot layout, and proof profile;
 - Node/WASM one-proof verification and aggregation pass through the internal command path;
-- Node/WASM 20-ballot proof verification and aggregation pass with internal binary chunk transport in about 76.4 s outer wall time, 372,528,000 total proof bytes, about 396 MB WASM linear memory after the run, and about 603 MB Node resident set after the run;
-- desktop Chromium proof smoke verifies one widened proof and aggregates one ballot with internal binary chunk transport in about 4.7 s and about 179 MB WASM linear memory after the run;
-- the internal command uses fresh CSPRNG proof-mask and ballot-encryption randomness by default in Node/WASM and browser helpers;
+- the internal command uses fresh CSPRNG proof-mask and ballot-encryption randomness by default in Node/WASM helpers;
 - the internal command rejects reused encryption randomness, reused proof-mask randomness, and proof/encryption randomness overlap;
 - duplicate voter identities, out-of-order voter identities, invalid scores, and mismatched setup witness seeds reject before encryption and proof generation;
 - current evaluator evidence produces encrypted sparse target roots for requested top counts without publishing aggregate scores, ranks, comparisons, masks, evaluator intermediates, or decoded target slots;
@@ -229,14 +227,11 @@ pnpm run test:node:kernel
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
-pnpm run test:proof-benchmark
-pnpm run test:proof-benchmark:node
-pnpm run test:proof-benchmark:browser:desktop
 pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
 
-Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should remain explicit and direct-path-only.
+Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
 
 Build and package-smoke the published SDK:
 

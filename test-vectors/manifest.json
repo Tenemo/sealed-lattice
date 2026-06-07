@@ -20,18 +20,6 @@
     {
       "path": "plaintext-oracle/top-k.json",
       "sha256": "b8582beb7a1767cb9e9b87ce0ea86dc60b2f69b876ea45855ca15be01adda442"
-    },
-    {
-      "path": "transcript-core/golden-transcript-core.json",
-      "sha256": "639653f67ec61b3655fa392dc9a196b4bea750e66c2f1342e098f2251942d959"
-    },
-    {
-      "path": "transcript-core/malformed-objects.json",
-      "sha256": "6035e51b74677e7e880f1fbfa60edd4a034d5d8a4271118ddb9107555eb86270"
-    },
-    {
-      "path": "transcript-core/transcript-core-replay.json",
-      "sha256": "95d917d620fe3f05e6fa7540fc30e902c4d4f8a0a02f0cd80b4cf98c38c738ac"
     }
   ]
 }

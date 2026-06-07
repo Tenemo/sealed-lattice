@@ -2,8 +2,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    fullyVerifiedActiveFixture,
-    fullyVerifiedPassiveMhePrototypeFixture,
+    foundationTranscriptCoreFixture,
     invalidEnumFixture,
     textDecoder,
     textEncoder,
@@ -140,28 +139,21 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
-    it('analyzes golden transcript-core fixtures through WASM', async () => {
+    it('analyzes the foundation transcript-core fixture through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const fullyVerifiedPassiveMhePrototypeAnalysis =
-            kernel.analyzeCanonicalObject({
-                canonicalBytesHex:
-                    fullyVerifiedPassiveMhePrototypeFixture.canonicalBytesHex,
-                chunkSize: fullyVerifiedPassiveMhePrototypeFixture.chunkSize,
-            });
-        const fullyVerifiedActiveAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: fullyVerifiedActiveFixture.canonicalBytesHex,
-            chunkSize: fullyVerifiedActiveFixture.chunkSize,
+        const foundationAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex:
+                foundationTranscriptCoreFixture.canonicalBytesHex,
+            chunkSize: foundationTranscriptCoreFixture.chunkSize,
         });
 
-        expect(fullyVerifiedPassiveMhePrototypeAnalysis.baseClaimProfile).toBe(
-            'FullyVerifiedResult',
+        expect(foundationAnalysis.baseClaimProfile).toBe(
+            'FoundationTranscript',
         );
-        expect(fullyVerifiedActiveAnalysis.mheSecurityClosure).toBe(
-            'ActiveMalicious',
-        );
-        expect(fullyVerifiedPassiveMhePrototypeAnalysis.objectHash512).not.toBe(
-            fullyVerifiedActiveAnalysis.objectHash512,
+        expect(foundationAnalysis.securityClosure).toBe('FoundationOnly');
+        expect(foundationAnalysis.evaluatorReplayProfileId).toBe(
+            'transcript-core-no-evaluator-replay-proof-v1',
         );
     });
 
@@ -275,17 +267,13 @@ describe('transcript-core kernel in Node', () => {
     it('verifies golden and malformed fixtures with stable outputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(
-            kernel.verifyFixture(fullyVerifiedPassiveMhePrototypeFixture),
-        ).toEqual({
+        expect(kernel.verifyFixture(foundationTranscriptCoreFixture)).toEqual({
             verified: true,
-            caseName: 'fully-verified-passive-mhe-prototype-transcript-core',
+            caseName: 'foundation-transcript-roots',
             objectHash512:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedObjectHash512,
-            chunkRoot:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedChunkRoot,
-            statusLabels:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedStatusLabels,
+                foundationTranscriptCoreFixture.expectedObjectHash512,
+            chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
+            statusLabels: foundationTranscriptCoreFixture.expectedStatusLabels,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
             verified: true,

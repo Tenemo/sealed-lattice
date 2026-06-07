@@ -1,6 +1,4 @@
 import {
-    activeMaliciousMheProfileId,
-    passiveMhePrototypeProfileId,
     targetDecryptionProfileId,
     type LifecycleLabelInput,
     type LifecycleState,
@@ -40,7 +38,6 @@ const fullyVerifiedLabelInput = (
 ): LifecycleLabelInput => ({
     lifecycleState: 'fullyVerified',
     thresholdProfile,
-    mheSecurityClosure: 'ActiveMalicious',
     localRosterAccepted: true,
     runtimeClaimGatePassed: true,
     directProofTransportPresent: true,
@@ -177,14 +174,10 @@ describe('election foundation lifecycle', () => {
         },
     );
 
-    it('derives closure mode labels from transcript-visible profile IDs', () => {
+    it('derives closure mode labels from current direct-path claim gates', () => {
         const labels = deriveLifecycleLabels(
             fullyVerifiedLabelInput({
-                securityProfileIds: [
-                    passiveMhePrototypeProfileId,
-                    targetDecryptionProfileId,
-                    activeMaliciousMheProfileId,
-                ],
+                securityProfileIds: [targetDecryptionProfileId],
             }),
         );
 
@@ -192,7 +185,6 @@ describe('election foundation lifecycle', () => {
             expect.arrayContaining([
                 'targetDecryptionClosure',
                 'activeMaliciousClosure',
-                'passiveMhePrototype',
             ]),
         );
         expect(labels.resultClaimLabels).toEqual(['fullyVerified']);

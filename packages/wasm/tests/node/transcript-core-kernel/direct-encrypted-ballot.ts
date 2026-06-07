@@ -11,10 +11,6 @@ import {
     resolveNumberExport,
     runKernelCommand,
 } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
-import {
-    captureRuntimeMemorySnapshot,
-    type RuntimeMemorySnapshot,
-} from '#tests/support/proof-benchmark-memory';
 
 const wasmKernelUrl = new URL(
     '../../../dist/sealed-lattice-kernel.wasm',
@@ -179,16 +175,6 @@ export type DirectEncryptedBallotResult = {
         | string
         | DirectEncryptedBallotEvaluatorReplayResult
         | readonly DirectEncryptedBallotEvaluatorReplayResult[];
-};
-
-export type DirectEncryptedBallotMeasurement = {
-    readonly result: DirectEncryptedBallotResult;
-    readonly memory: {
-        readonly runtimeBefore: RuntimeMemorySnapshot;
-        readonly runtimeAfter: RuntimeMemorySnapshot;
-        readonly wasmLinearMemoryBytesBefore: number;
-        readonly wasmLinearMemoryBytesAfter: number;
-    };
 };
 
 export const createDirectBallotSetupPackage = (
@@ -389,19 +375,14 @@ const createProofMaskRandomness = (
     };
 };
 
-export const runMeasuredInternalKernelCommand = async <Result>(
+export const runInternalKernelCommand = async <Result>(
     request: Record<string, unknown>,
-): Promise<{
-    readonly result: Result;
-    readonly memory: DirectEncryptedBallotMeasurement['memory'];
-}> => {
-    const runtimeBefore = captureRuntimeMemorySnapshot();
+): Promise<Result> => {
     const bytes = await resolveKernelBytes(wasmKernelUrl);
     const instantiatedSource = await WebAssembly.instantiate(bytes, {});
     const exports = instantiatedSource.instance
         .exports as TranscriptCoreKernelExports;
     const memory = resolveMemory(exports);
-    const wasmLinearMemoryBytesBefore = memory.buffer.byteLength;
     const allocate = resolveNumberExport(
         exports,
         'sealed_lattice_allocate',
@@ -419,33 +400,13 @@ export const runMeasuredInternalKernelCommand = async <Result>(
         outputLengthPointer: number,
     ) => number;
 
-    const result = await runKernelCommand<Result>(
+    return runKernelCommand<Result>(
         memory,
         allocate,
         deallocate,
         commandWithLength,
         request as unknown as TranscriptCoreKernelCommand,
     );
-    const runtimeAfter = captureRuntimeMemorySnapshot();
-    const wasmLinearMemoryBytesAfter = memory.buffer.byteLength;
-
-    return {
-        result,
-        memory: {
-            runtimeBefore,
-            runtimeAfter,
-            wasmLinearMemoryBytesBefore,
-            wasmLinearMemoryBytesAfter,
-        },
-    };
-};
-
-export const runInternalKernelCommand = async <Result>(
-    request: Record<string, unknown>,
-): Promise<Result> => {
-    const measured = await runMeasuredInternalKernelCommand<Result>(request);
-
-    return measured.result;
 };
 
 export const runDirectEncryptedBallot = (input: {
@@ -462,48 +423,6 @@ export const runDirectEncryptedBallot = (input: {
     const ballots = input.ballots ?? defaultDirectBallotInputs();
 
     return runInternalKernelCommand<DirectEncryptedBallotResult>({
-        command: 'RunDirectEncryptedBallot',
-        setupPackage: input.setupPackage,
-        setupPrivateWitness: {
-            setupSeed: input.setupSeed ?? directBallotSetupSeed,
-        },
-        ballotEncryptionRandomness: createBallotEncryptionRandomness({
-            ballotCount: ballots.length,
-            ballotEncryptionSeedHexes: input.ballotEncryptionSeedHexes,
-            developmentRandomnessOverrideAcknowledged:
-                input.developmentRandomnessOverrideAcknowledged,
-        }),
-        proofMaskRandomness: createProofMaskRandomness({
-            ballotCount: ballots.length,
-            ballotProofRandomnessHexes: input.ballotProofRandomnessHexes,
-            developmentRandomnessOverrideAcknowledged:
-                input.developmentRandomnessOverrideAcknowledged,
-        }),
-        ...(input.topCount === undefined ? {} : { topCount: input.topCount }),
-        ...(input.topCounts === undefined
-            ? {}
-            : { topCounts: input.topCounts }),
-        ...(input.targetFinalityPolicyHash === undefined
-            ? {}
-            : { targetFinalityPolicyHash: input.targetFinalityPolicyHash }),
-        ballots,
-    });
-};
-
-export const runMeasuredDirectEncryptedBallot = async (input: {
-    readonly ballots?: readonly DirectEncryptedBallotInput[];
-    readonly ballotEncryptionSeedHexes?: readonly string[];
-    readonly ballotProofRandomnessHexes?: readonly string[];
-    readonly developmentRandomnessOverrideAcknowledged?: boolean;
-    readonly setupPackage: BgvPassiveSetupPackage;
-    readonly setupSeed?: string;
-    readonly topCount?: number;
-    readonly topCounts?: readonly number[];
-    readonly targetFinalityPolicyHash?: string;
-}): Promise<DirectEncryptedBallotMeasurement> => {
-    const ballots = input.ballots ?? defaultDirectBallotInputs();
-
-    return runMeasuredInternalKernelCommand<DirectEncryptedBallotResult>({
         command: 'RunDirectEncryptedBallot',
         setupPackage: input.setupPackage,
         setupPrivateWitness: {

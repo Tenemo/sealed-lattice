@@ -1,44 +1,22 @@
-import type {
-    GoldenTranscriptCoreFixture,
-    MalformedObjectFixture,
-} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
 } from '#packages/wasm/src/index';
-import goldenTranscriptCoreFixturesJson from '#test-vectors/transcript-core/golden-transcript-core.json';
-import malformedObjectFixturesJson from '#test-vectors/transcript-core/malformed-objects.json';
+import {
+    createFoundationTranscriptCoreFixture,
+    createFoundationTranscriptFixture,
+    createInvalidFoundationTranscriptStatusFixture,
+} from '#tests/support/foundation-transcript-fixture';
 
-type NamedFixture = {
-    readonly caseName: string;
-};
-
-const goldenTranscriptCoreFixtures =
-    goldenTranscriptCoreFixturesJson as readonly GoldenTranscriptCoreFixture[];
-const malformedObjectFixtures =
-    malformedObjectFixturesJson as readonly MalformedObjectFixture[];
-
-const findFixture = <Fixture extends NamedFixture>(
-    fixtures: readonly Fixture[],
-    caseName: string,
-): Fixture => {
-    const fixture = fixtures.find(
-        (candidate) => candidate.caseName === caseName,
-    );
-    if (fixture === undefined) {
-        throw new Error(`Missing fixture: ${caseName}`);
-    }
-
-    return fixture;
-};
-
-const fullyVerifiedPassiveMhePrototypeFixture = findFixture(
-    goldenTranscriptCoreFixtures,
-    'fully-verified-passive-mhe-prototype-transcript-core',
+const foundationTranscriptFixture = createFoundationTranscriptFixture();
+const foundationTranscriptCoreFixture = createFoundationTranscriptCoreFixture(
+    foundationTranscriptFixture.expectedHashes,
 );
-const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
+const invalidEnumFixture = createInvalidFoundationTranscriptStatusFixture(
+    foundationTranscriptFixture.expectedHashes,
+);
 const protocolHashPattern = /^[a-f0-9]{128}$/u;
 
 describe('transcript-core kernel in browsers', () => {
@@ -55,20 +33,16 @@ describe('transcript-core kernel in browsers', () => {
         );
     });
 
-    it('verifies the golden transcript-core fixture', async () => {
+    it('verifies the foundation transcript-core fixture', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(
-            kernel.verifyFixture(fullyVerifiedPassiveMhePrototypeFixture),
-        ).toEqual({
+        expect(kernel.verifyFixture(foundationTranscriptCoreFixture)).toEqual({
             verified: true,
-            caseName: 'fully-verified-passive-mhe-prototype-transcript-core',
+            caseName: 'foundation-transcript-roots',
             objectHash512:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedObjectHash512,
-            chunkRoot:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedChunkRoot,
-            statusLabels:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedStatusLabels,
+                foundationTranscriptCoreFixture.expectedObjectHash512,
+            chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
+            statusLabels: foundationTranscriptCoreFixture.expectedStatusLabels,
         });
     });
 

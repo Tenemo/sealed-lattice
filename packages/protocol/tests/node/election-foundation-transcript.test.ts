@@ -84,7 +84,7 @@ describe('integrated election foundation transcript', () => {
                 .thresholdProfile,
         ).toMatchObject({
             claimBearing: true,
-            claimBoundary: 'MandatoryBenchmark',
+            claimBoundary: 'FirstProfile',
             rosterSize: foundationParticipantCount,
         });
         expect(verification.ok).toBe(true);

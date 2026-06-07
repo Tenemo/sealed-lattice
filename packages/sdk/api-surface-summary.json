@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "9ed1b090dc8c66a38e7dd73b3267bebc51faeaacc81d6fc588fc33ff7387a65c",
+    "reachableDeclarationHash": "364e7ca752dc404c8687d5aa3a0e2df825a07c88e700bebb26cfd151aed3a362",
     "runtimeExports": [
         "deriveFrozenRosterProfile",
         "deriveLifecycleLabels",
@@ -85,7 +85,6 @@
         "MalformedObjectFixtureVerification",
         "ManifestOpaqueBindings",
         "ManifestPolicyHashes",
-        "MheSecurityClosure",
         "MlDsaSignatureMode",
         "MlDsaSignatureProfile",
         "ModeStatusLabel",
@@ -140,8 +139,7 @@
         "TranscriptCoreAnalysis",
         "TranscriptCoreFixture",
         "TranscriptCoreFixtureVerification",
-        "TranscriptCoreMheSecurityClosure",
-        "TranscriptCoreReplayFixture",
+        "TranscriptCoreSecurityClosure",
         "TranscriptCoreStatusLabel",
         "TranscriptCoreVerificationLabel",
         "TranscriptCoreVerificationResult",

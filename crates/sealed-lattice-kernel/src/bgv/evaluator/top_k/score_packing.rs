@@ -105,23 +105,6 @@ pub(crate) fn packed_score_weighted_selector(
     encode_slots_to_coefficients(&slots)
 }
 
-#[cfg(test)]
-pub(crate) fn pack_broadcast_scores(scores: &[Ciphertext]) -> CanonicalResult<Ciphertext> {
-    let option_count = scores.len();
-    let mut packed_terms = Vec::with_capacity(option_count);
-    for (option_index, score) in scores.iter().enumerate() {
-        let duplicate_index = option_index + option_count;
-        let mut logical_indices = vec![option_index];
-        if duplicate_index < POLYNOMIAL_DEGREE {
-            logical_indices.push(duplicate_index);
-        }
-        let selector = packed_score_slot_selector(&logical_indices)?;
-        packed_terms.push(plaintext_mul(&normalize_scaling(score)?, &selector)?);
-    }
-
-    sum_aligned(&packed_terms)
-}
-
 pub(crate) fn packed_pair_lower_mask(
     option_count: usize,
     shift: usize,

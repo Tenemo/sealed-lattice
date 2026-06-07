@@ -173,7 +173,7 @@ describe('election foundation public package API in Node', () => {
         expect(transcriptCoreFixture.baseClaimProfile).toBe(
             'FoundationTranscript',
         );
-        expect(transcriptCoreFixture.mheSecurityClosure).toBe('FoundationOnly');
+        expect(transcriptCoreFixture.securityClosure).toBe('FoundationOnly');
         expect(transcriptCoreVerification).toMatchObject({
             caseName: 'foundation-transcript-roots',
             label: 'TranscriptCoreVerified',

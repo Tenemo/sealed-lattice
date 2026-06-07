@@ -29,20 +29,6 @@ pub(crate) fn comparison_polynomials(
     ))
 }
 
-#[cfg(test)]
-pub(crate) fn evaluate_direct_comparison_polynomial(
-    context: &EvaluatorContext,
-    comparison_input: &Ciphertext,
-    polynomial: &[u64],
-) -> CanonicalResult<Ciphertext> {
-    evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
-        context,
-        comparison_input,
-        polynomial,
-        DIRECT_COMPARISON_BABY_STEP_COUNT,
-    )
-}
-
 pub(crate) fn evaluate_direct_comparison_polynomial_with_baby_step_count(
     context: &EvaluatorContext,
     comparison_input: &Ciphertext,

@@ -1,14 +1,8 @@
 /** Claim profile label attached to transcript-core fixtures and results. */
-export type BaseClaimProfile = 'FoundationTranscript' | 'FullyVerifiedResult';
+export type BaseClaimProfile = 'FoundationTranscript';
 
-/** High-level malicious security closure claimed by transcript-core fixtures. */
-export type TranscriptCoreMheSecurityClosure =
-    | 'FoundationOnly'
-    | 'PassiveMHEPrototype'
-    | 'ActiveMalicious';
-
-/** Public lifecycle alias for the transcript-core MHE security closure label. */
-export type MheSecurityClosure = TranscriptCoreMheSecurityClosure;
+/** Security closure claimed by transcript-core fixtures. */
+export type TranscriptCoreSecurityClosure = 'FoundationOnly';
 
 /** Successful transcript-core status label returned by fixture verification. */
 export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
@@ -37,7 +31,7 @@ export const canonicalErrorCodeValues = [
     'TrailingBytes',
     'UnknownBaseClaimProfile',
     'UnknownField',
-    'UnknownMheSecurityClosure',
+    'UnknownSecurityClosure',
     'UnknownProofProfile',
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',
@@ -62,9 +56,9 @@ export type GoldenTranscriptCoreFixture = {
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityClosure: TranscriptCoreMheSecurityClosure;
+    readonly securityClosure: TranscriptCoreSecurityClosure;
     readonly baseClaimProfileId: string;
-    readonly mheSecurityProfileId: string;
+    readonly securityProfileId: string;
     readonly heSetupProofProfileId: string;
     readonly evaluatorReplayProfileId: string;
     readonly decryptionProofProfileId: string;
@@ -88,23 +82,15 @@ export type TranscriptCoreFixture =
     | GoldenTranscriptCoreFixture
     | MalformedObjectFixture;
 
-/** Replay fixture that binds a golden transcript-core fixture to expected labels. */
-export type TranscriptCoreReplayFixture = {
-    readonly schemaVersion: 1;
-    readonly caseName: string;
-    readonly fixture: GoldenTranscriptCoreFixture;
-    readonly expectedStatusLabels: readonly TranscriptCoreStatusLabel[];
-};
-
 /** Decoded transcript-core analysis output used by fixture tooling. */
 export type TranscriptCoreAnalysis = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
     readonly baseClaimProfile: BaseClaimProfile;
-    readonly mheSecurityClosure: TranscriptCoreMheSecurityClosure;
+    readonly securityClosure: TranscriptCoreSecurityClosure;
     readonly baseClaimProfileId: string;
-    readonly mheSecurityProfileId: string;
+    readonly securityProfileId: string;
     readonly heSetupProofProfileId: string;
     readonly evaluatorReplayProfileId: string;
     readonly decryptionProofProfileId: string;

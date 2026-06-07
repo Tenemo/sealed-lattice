@@ -16,10 +16,6 @@ pub(crate) use score_packing::*;
 pub(crate) use sparse_target::*;
 use std::collections::BTreeSet;
 
-#[cfg(test)]
-use crate::bgv::evaluator::circuit::{
-    evaluate_polynomial, multiply, multiply_without_immediate_modulus_switch,
-};
 use crate::{
     bgv::{
         evaluator::{
@@ -43,8 +39,6 @@ use crate::{
 // The deterministic tie policy: a higher aggregate score ranks first, and equal
 // scores are broken by the lower option index.
 pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
-#[cfg(test)]
-pub(crate) const DIRECT_COMPARISON_BABY_STEP_COUNT: usize = 31;
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;
@@ -59,14 +53,6 @@ pub(crate) struct PackedRankEvaluation {
 pub(crate) struct EncryptedSparseTarget {
     pub(crate) target_id: Ciphertext,
     pub(crate) target_order: Ciphertext,
-}
-
-#[cfg(test)]
-// The encrypted outputs of one top-k evaluation: the per-option ranks and the
-// sparse target ciphertexts.
-pub(crate) struct TopKEvaluationOutputs {
-    pub(crate) ranks: Vec<Ciphertext>,
-    pub(crate) target: EncryptedSparseTarget,
 }
 
 #[cfg(test)]

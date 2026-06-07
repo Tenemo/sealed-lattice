@@ -27,9 +27,6 @@ pnpm run test:node:fast
 pnpm run test:node:protocol
 pnpm run test:node:kernel
 pnpm run test
-pnpm run test:proof-benchmark
-pnpm run test:proof-benchmark:node
-pnpm run test:proof-benchmark:browser:desktop
 pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
@@ -44,9 +41,6 @@ pnpm run smoke:pack:npm
 - `pnpm run test:node:protocol`: slower protocol and relation tests that remain useful for the selected direct path and shared substrate
 - `pnpm run test:node:kernel`: transcript-core WASM loader, parity, fixture, proof, and kernel integration tests
 - `pnpm run test`: runs the Node lanes and browser lanes through the package scripts
-- `pnpm run test:proof-benchmark`: direct proof benchmark evidence where applicable
-- `pnpm run test:proof-benchmark:node`: Node proof benchmark lane
-- `pnpm run test:proof-benchmark:browser:desktop`: desktop Chromium proof benchmark lane
 - `pnpm run coverage:badge`: runs the fast Node coverage lane and writes the Shields-compatible badge and summary JSON that GitHub Pages publishes for the README badge
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
 - `pnpm run docs:build`: builds the docs site without the surrounding verification checks when that narrower target is needed
@@ -56,7 +50,7 @@ pnpm run smoke:pack:npm
 
 The pre-commit hook runs `pnpm run check`.
 
-Protocol, kernel, browser, and proof benchmark lanes remain explicit commands so they can use targeted reruns instead of slowing every local commit. The coverage badge is generated locally in the Pages workflow, not by Codecov.
+Protocol, kernel, and browser lanes remain explicit commands so they can use targeted reruns instead of slowing every local commit. The coverage badge is generated locally in the Pages workflow, not by Codecov.
 
 ## Local run logs
 
@@ -73,11 +67,11 @@ Default and release gates should stay lean and direct-path-only.
 Use explicit heavy lanes only when the change touches the selected direct path area:
 
 ```text
-direct proof benchmark;
+accepted direct proof evidence;
 direct Node/WASM proof-copy measurement;
 direct browser proof-copy measurement;
-bounded-domain evaluator replay benchmark;
-target-bound decryption benchmark;
+bounded-domain evaluator replay evidence;
+target-bound decryption evidence;
 manual mobile proof and replay lane.
 ```
 

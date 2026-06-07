@@ -20,7 +20,7 @@ import {
 
 import { derivePollSpecHash } from './poll-spec.js';
 import {
-    mandatoryBenchmarkRosterSize,
+    firstProfileRosterSize,
     maximumSupportedRosterSize,
     minimumDynamicRosterSize,
     minimumSupportedRosterSize,
@@ -222,12 +222,12 @@ const deriveRosterProfile = (
             warnings: ['CasualMicroRoster'],
         };
     }
-    if (rosterSize === mandatoryBenchmarkRosterSize) {
+    if (rosterSize === firstProfileRosterSize) {
         return {
-            claimBoundary: 'MandatoryBenchmark',
+            claimBoundary: 'FirstProfile',
             claimBearing: true,
             dynamicRosterProfileCertificateHash: null,
-            rosterProfileKind: 'MandatoryBenchmarkRoster',
+            rosterProfileKind: 'FirstProfileRoster',
             warnings: [],
         };
     }
@@ -407,7 +407,7 @@ export const deriveFrozenRosterProfile = (input: {
     }
     if (
         rosterSize >= minimumDynamicRosterSize &&
-        rosterSize !== mandatoryBenchmarkRosterSize &&
+        rosterSize !== firstProfileRosterSize &&
         dynamicRosterProfileCertificateHash === null
     ) {
         throw new Error(

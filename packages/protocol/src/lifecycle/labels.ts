@@ -1,8 +1,4 @@
-import {
-    activeMaliciousMheProfileId,
-    passiveMhePrototypeProfileId,
-    targetDecryptionProfileId,
-} from '@sealed-lattice/types';
+import { targetDecryptionProfileId } from '@sealed-lattice/types';
 import type {
     FailureStatusLabel,
     LifecycleLabelInput,
@@ -120,9 +116,7 @@ const deriveResultClaimLabels = (
 };
 
 const securityProfileModeLabelsById = new Map<string, ModeStatusLabel>([
-    [passiveMhePrototypeProfileId, 'passiveMhePrototype'],
     [targetDecryptionProfileId, 'targetDecryptionClosure'],
-    [activeMaliciousMheProfileId, 'activeMaliciousClosure'],
 ]);
 
 const deriveSecurityProfileModes = (
@@ -136,13 +130,11 @@ const deriveSecurityProfileModes = (
             labels.push(label);
         }
     }
-    if (
-        (input.securityProfileIds === undefined ||
-            input.securityProfileIds.length === 0) &&
-        (input.mheSecurityClosure ?? 'PassiveMHEPrototype') ===
-            'PassiveMHEPrototype'
-    ) {
-        labels.push('passiveMhePrototype');
+    if (input.targetDecryptionClosureApplied === true) {
+        labels.push('targetDecryptionClosure');
+    }
+    if (input.activeMaliciousClosureApplied === true) {
+        labels.push('activeMaliciousClosure');
     }
 
     return Array.from(new Set(labels));

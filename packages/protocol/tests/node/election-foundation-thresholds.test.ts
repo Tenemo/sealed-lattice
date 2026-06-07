@@ -206,17 +206,17 @@ describe('election foundation threshold profiles', () => {
         },
     );
 
-    it('marks roster size 10 as the mandatory benchmark profile', () => {
+    it('marks roster size 10 as the first profile roster', () => {
         const profile = deriveThresholdProfile({ rosterSize: 10 });
 
-        expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
-        expect(profile.claimBoundary).toBe('MandatoryBenchmark');
+        expect(profile.rosterProfileKind).toBe('FirstProfileRoster');
+        expect(profile.claimBoundary).toBe('FirstProfile');
         expect(profile.claimBearing).toBe(true);
         expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
         expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
     });
 
-    it('keeps mandatory benchmark profiles independent from dynamic roster certificate inputs', () => {
+    it('keeps first profile rosters independent from dynamic roster certificate inputs', () => {
         const baselineProfile = deriveThresholdProfile({ rosterSize: 10 });
         const profileWithCertificate = deriveThresholdProfile({
             dynamicRosterProfileCertificateHash,
@@ -242,15 +242,15 @@ describe('election foundation threshold profiles', () => {
         );
     });
 
-    it('does not carry invalid dynamic roster certificate hashes into mandatory benchmark profiles', () => {
+    it('does not carry invalid dynamic roster certificate hashes into first profile rosters', () => {
         const profile = deriveThresholdProfile({
             dynamicRosterProfileCertificateHash:
                 invalidDynamicRosterProfileCertificateHash,
             rosterSize: 10,
         });
 
-        expect(profile.rosterProfileKind).toBe('MandatoryBenchmarkRoster');
-        expect(profile.claimBoundary).toBe('MandatoryBenchmark');
+        expect(profile.rosterProfileKind).toBe('FirstProfileRoster');
+        expect(profile.claimBoundary).toBe('FirstProfile');
         expect(profile.claimBearing).toBe(true);
         expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
 

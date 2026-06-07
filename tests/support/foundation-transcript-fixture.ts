@@ -32,6 +32,7 @@ import {
 import type {
     FoundationTranscriptInput,
     GoldenTranscriptCoreFixture,
+    MalformedObjectFixture,
     ProtocolHash,
     RegistrationEntry,
     RosterExternalAcceptance,
@@ -173,6 +174,7 @@ const transcriptCoreChunkRoot = (
 
 const encodeFoundationTranscriptCoreBytes = (
     payloadBytes: Uint8Array,
+    statusCode = 1,
 ): Uint8Array => {
     const bytes: number[] = [];
     const tags = [
@@ -205,7 +207,7 @@ const encodeFoundationTranscriptCoreBytes = (
     appendVarUint(bytes, 3);
     appendBytes(bytes, payloadBytes);
     appendVarUint(bytes, 4);
-    appendVarUint(bytes, 1);
+    appendVarUint(bytes, statusCode);
     appendVarUint(bytes, 5);
     appendVarUint(bytes, tags.length);
     for (const tag of tags) {
@@ -220,10 +222,10 @@ const encodeFoundationTranscriptCoreBytes = (
     return Uint8Array.from(bytes);
 };
 
-export const createFoundationTranscriptCoreFixture = (
+const encodeFoundationTranscriptCorePayload = (
     expectedHashes: FoundationTranscriptExpectedHashes,
-): GoldenTranscriptCoreFixture => {
-    const payloadBytes = textEncoder.encode(
+): Uint8Array =>
+    textEncoder.encode(
         canonicalJson({
             expectedHashes,
             optionCount: foundationOptionCount,
@@ -233,6 +235,11 @@ export const createFoundationTranscriptCoreFixture = (
             topOptionCount: foundationTopOptionCount,
         }),
     );
+
+export const createFoundationTranscriptCoreFixture = (
+    expectedHashes: FoundationTranscriptExpectedHashes,
+): GoldenTranscriptCoreFixture => {
+    const payloadBytes = encodeFoundationTranscriptCorePayload(expectedHashes);
     const canonicalBytes = encodeFoundationTranscriptCoreBytes(payloadBytes);
 
     return {
@@ -252,10 +259,28 @@ export const createFoundationTranscriptCoreFixture = (
         fixtureVersion: 1,
         heSetupProofProfileId: noHeSetupProofProfileId,
         kind: 'golden-transcript-core',
-        mheSecurityClosure: 'FoundationOnly',
-        mheSecurityProfileId: foundationOnlyProfileId,
+        securityClosure: 'FoundationOnly',
+        securityProfileId: foundationOnlyProfileId,
         objectType: 'TranscriptCore',
         objectVersion: 1,
+    };
+};
+
+export const createInvalidFoundationTranscriptStatusFixture = (
+    expectedHashes: FoundationTranscriptExpectedHashes,
+): MalformedObjectFixture => {
+    const payloadBytes = encodeFoundationTranscriptCorePayload(expectedHashes);
+    const canonicalBytes = encodeFoundationTranscriptCoreBytes(
+        payloadBytes,
+        99,
+    );
+
+    return {
+        canonicalBytesHex: bytesToHex(canonicalBytes),
+        caseName: 'invalid-enum',
+        expectedErrorCode: 'InvalidEnum',
+        fixtureVersion: 1,
+        kind: 'malformed-object',
     };
 };
 
