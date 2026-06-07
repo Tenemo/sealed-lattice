@@ -85,14 +85,18 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
     let evaluator_replay = match optional_direct_ballot_top_count_request(request)? {
         Some(top_count_request) => {
             let evaluations = run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
-                setup_package,
-                &evaluator_key,
-                &aggregation_result.aggregate_ciphertext,
-                &aggregation_result.aggregate_scores,
-                encrypted_ballots.len(),
-                &top_count_request.top_counts,
-                public_evaluation_key_material,
-                top_count_request.target_finality_policy_hash.as_deref(),
+                DirectBallotPackedBatchedPairEvaluatorInput {
+                    setup_package,
+                    evaluator_key: &evaluator_key,
+                    aggregate_ciphertext: &aggregation_result.aggregate_ciphertext,
+                    aggregate_scores: &aggregation_result.aggregate_scores,
+                    ballot_count: encrypted_ballots.len(),
+                    top_counts: &top_count_request.top_counts,
+                    public_evaluation_key_material,
+                    target_finality_policy_hash: top_count_request
+                        .target_finality_policy_hash
+                        .as_deref(),
+                },
             )?;
             if top_count_request.report_single_result {
                 evaluations

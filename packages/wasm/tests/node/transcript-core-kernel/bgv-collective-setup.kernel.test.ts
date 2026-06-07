@@ -857,7 +857,7 @@ function acceptedSetupCommitmentSecurityCertificate(
         nonClosure: [
             'same-secret proof still requires external AB-DLOP/LNP review and full tbox closure',
             'public-key share proof bytes still require no-wrap LNP verification',
-            'relinearization and Galois proof bytes remain review-gated until quadratic source-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
+            'relinearization and Galois proof bytes remain review-gated until round-two aggregate-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
             'setup-proof Fiat-Shamir/QROM composition certificate remains separate',
         ],
         ringAndMatrixParameters: {
@@ -1275,7 +1275,9 @@ function acceptedSetupTransportCertificate(
     };
 }
 
-async function acceptedShapedSetupPackage(
+let acceptedShapedSetupPackageCache: Promise<string> | undefined;
+
+async function buildAcceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): Promise<JsonRecord> {
@@ -1462,6 +1464,29 @@ async function acceptedShapedSetupPackage(
     rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
     return setupPackage;
+}
+
+async function acceptedShapedSetupPackage(
+    kernel: TranscriptCoreKernel,
+    profile: BgvCollectiveSetupProfileDescription,
+): Promise<JsonRecord> {
+    acceptedShapedSetupPackageCache ??= buildAcceptedShapedSetupPackage(
+        kernel,
+        profile,
+    ).then((setupPackage) => JSON.stringify(setupPackage));
+
+    const setupPackage: unknown = JSON.parse(
+        await acceptedShapedSetupPackageCache,
+    );
+    if (
+        typeof setupPackage !== 'object' ||
+        setupPackage === null ||
+        Array.isArray(setupPackage)
+    ) {
+        throw new Error('Cached accepted setup package must be a JSON object.');
+    }
+
+    return setupPackage as JsonRecord;
 }
 
 describe('collective BGV setup kernel commands', () => {
@@ -1658,7 +1683,7 @@ describe('collective BGV setup kernel commands', () => {
         );
     });
 
-    it('refuses undeclared generic key-switch material and non-binary transport', async () => {
+    it('refuses undeclared generic key-switch material', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeCollectiveBgvSetupProfile();
         const genericKeySwitchPackage = await acceptedShapedSetupPackage(
@@ -1678,7 +1703,11 @@ describe('collective BGV setup kernel commands', () => {
         expect(genericKeySwitchResult.refusedObjects[0]?.reasonCode).toBe(
             'genericKeySwitchOutsideProfile',
         );
+    });
 
+    it('refuses malformed commitment security certificates', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeCollectiveBgvSetupProfile();
         const malformedCommitmentCertificatePackage =
             await acceptedShapedSetupPackage(kernel, profile);
         const malformedCommitmentCertificate =
@@ -1702,7 +1731,11 @@ describe('collective BGV setup kernel commands', () => {
         expect(
             malformedCommitmentCertificateResult.refusedObjects[0]?.reasonCode,
         ).toBe('commitmentSecurityCertificatePayloadMismatch');
+    });
 
+    it('refuses JSON setup transport certificates', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeCollectiveBgvSetupProfile();
         const jsonTransportPackage = await acceptedShapedSetupPackage(
             kernel,
             profile,
@@ -1720,7 +1753,11 @@ describe('collective BGV setup kernel commands', () => {
         expect(jsonTransportResult.refusedObjects[0]?.reasonCode).toBe(
             'transportEncodingMismatch',
         );
+    });
 
+    it('refuses setup transport chunk hash count mismatches', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeCollectiveBgvSetupProfile();
         const malformedTransportPackage = await acceptedShapedSetupPackage(
             kernel,
             profile,

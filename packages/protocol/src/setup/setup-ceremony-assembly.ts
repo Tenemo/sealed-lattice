@@ -1,7 +1,4 @@
-import {
-    decryptPrivateVssMailboxEnvelope,
-    type PrivateVssEncryptedEnvelope,
-} from '@sealed-lattice/crypto';
+import { decryptPrivateVssMailboxEnvelope } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
@@ -16,18 +13,25 @@ import {
     type PrivateVssShareProofFactory,
     type PrivateVssShareProofRandomnessFactory,
 } from './private-vss-mailbox-delivery.js';
+import type {
+    PublicKeyShareProofRecord,
+    PublicKeyShareRecord,
+} from './public-key-share-records.js';
 import {
     createSetupContributionAssembly,
     type SetupContributionAssembly,
 } from './setup-contribution-orchestration.js';
+import type { SetupPhaseParticipantObject } from './setup-phase-records.js';
 import {
     deriveThresholdShareCommitments,
     type ThresholdShareCommitmentSet,
 } from './threshold-share-commitments.js';
 import {
     createVssCoefficientCommitmentBundle,
+    type VssCoefficientCommitmentMaterialRecord,
     type VssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentSet,
+    type VssSourceTrusteeCoefficientCommitmentRecord,
     type VssSourceTrusteeCoefficientOpeningState,
 } from './vss-coefficient-commitments.js';
 import {
@@ -39,11 +43,6 @@ import {
     type VssShareAcceptanceRecord,
     type VssShareAcceptanceSet,
 } from './vss-share-verification-records.js';
-import type {
-    PublicKeyShareProofRecord,
-    PublicKeyShareRecord,
-} from './public-key-share-records.js';
-import type { SetupPhaseParticipantObject } from './setup-phase-records.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -108,10 +107,7 @@ export type SetupCeremonyAssembly = Readonly<{
     readonly setupContributions: readonly SetupContributionAssembly[];
 }>;
 
-const assertPositiveSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
+const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
         throw new TypeError(`${fieldName} must be a positive safe integer.`);
     }
@@ -255,17 +251,15 @@ const assertOpeningStatesMatchTrustees = (
     sortedOpeningStates.forEach((sourceTrusteeState, expectedPosition) => {
         const trustee = trustees[expectedPosition];
         if (
-            sourceTrusteeState.sourceTrusteeRosterPosition !==
-            expectedPosition
+            sourceTrusteeState.sourceTrusteeRosterPosition !== expectedPosition
         ) {
             throw new Error(
                 'sourceTrusteeOpeningStates roster positions must match trustees.',
             );
         }
         if (
-            trustee === undefined ||
             sourceTrusteeState.sourceTrusteeIdentity !==
-                trustee.trusteeIdentity
+            trustee?.trusteeIdentity
         ) {
             throw new Error(
                 'sourceTrusteeOpeningStates identities must match trustees.',
@@ -278,10 +272,7 @@ const trusteeByRecipientPosition = (
     trustees: readonly SetupCeremonyTrusteeInput[],
 ): ReadonlyMap<number, SetupCeremonyTrusteeInput> =>
     new Map(
-        trustees.map((trustee) => [
-            trustee.trusteeRosterPosition,
-            trustee,
-        ]),
+        trustees.map((trustee) => [trustee.trusteeRosterPosition, trustee]),
     );
 
 const envelopeVerificationReference = (
@@ -364,7 +355,7 @@ const envelopeReferencesForSource = (
 const sourceTrusteeRecordForEnvelope = (
     vssCoefficientCommitments: VssCoefficientCommitmentSet,
     envelopeReference: PrivateVssEnvelopeVerificationReference,
-) => {
+): VssSourceTrusteeCoefficientCommitmentRecord => {
     const sourceTrusteeRecord =
         vssCoefficientCommitments.sourceTrusteeRecords.find(
             (record) =>
@@ -393,7 +384,7 @@ const sourceTrusteeRecordForEnvelope = (
 const sourceTrusteeMaterialRecords = (
     vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialSet,
     envelopeReference: PrivateVssEnvelopeVerificationReference,
-) => {
+): readonly VssCoefficientCommitmentMaterialRecord[] => {
     const materialRecords =
         vssCoefficientCommitmentMaterial.coefficientCommitments.filter(
             (record) =>
@@ -425,10 +416,7 @@ const decryptAndVerifyRecipientEnvelopes = async (
         input.privateVssEnvelopeCommitments,
         input.trustee.trusteeRosterPosition,
     );
-    if (
-        envelopeReferences.length !==
-        input.expectedParticipantCount
-    ) {
+    if (envelopeReferences.length !== input.expectedParticipantCount) {
         throw new Error(
             'private VSS envelope commitments must include one envelope from every source trustee for each recipient.',
         );
@@ -445,8 +433,7 @@ const decryptAndVerifyRecipientEnvelopes = async (
                 );
             }
             const decryptedEnvelope = await decryptPrivateVssMailboxEnvelope({
-                encryptedEnvelope:
-                    envelopeReference.encryptedEnvelope as PrivateVssEncryptedEnvelope,
+                encryptedEnvelope: envelopeReference.encryptedEnvelope,
                 recipientMailboxSecretKeyBytesHex:
                     input.trustee.mailboxSecretKeyBytesHex,
             });
@@ -536,8 +523,7 @@ const createAcceptanceRecords = async (
                     envelopeReference,
                     recoveryEpoch: recipientTrustee.recoveryEpoch,
                     deviceEpoch: recipientTrustee.deviceEpoch,
-                    signingPublicKeyHash:
-                        recipientTrustee.signingPublicKeyHash,
+                    signingPublicKeyHash: recipientTrustee.signingPublicKeyHash,
                     signRoot: recipientTrustee.signRoot,
                 });
             }),
@@ -545,10 +531,7 @@ const createAcceptanceRecords = async (
 };
 
 const createLocalTrusteeSetupStates = async (
-    input: Pick<
-        SetupCeremonyAssemblyInput,
-        'setupContext'
-    > & {
+    input: Pick<SetupCeremonyAssemblyInput, 'setupContext'> & {
         readonly trustees: readonly SetupCeremonyTrusteeInput[];
         readonly thresholdShareCommitments: ThresholdShareCommitmentSet;
         readonly privateVssEnvelopeCommitments: PrivateVssMailboxDeliverySet;
@@ -576,8 +559,7 @@ const createLocalTrusteeSetupStates = async (
                     trusteeIdentity: trustee.trusteeIdentity,
                     trusteeRosterPosition: trustee.trusteeRosterPosition,
                     deviceEpoch: trustee.deviceEpoch,
-                    thresholdShareCommitments:
-                        input.thresholdShareCommitments,
+                    thresholdShareCommitments: input.thresholdShareCommitments,
                     privateVssEnvelopeCommitments:
                         input.privateVssEnvelopeCommitments,
                     verifiedPrivateVssShareEnvelopes,
@@ -587,7 +569,7 @@ const createLocalTrusteeSetupStates = async (
                         trustee.localStateAeadNonceBytesHex,
                     sealedAggregateThresholdShareAeadNonceBytesHex:
                         trustee.sealedAggregateThresholdShareAeadNonceBytesHex,
-            });
+                });
             void localStatePlaintext;
 
             return {
@@ -599,10 +581,7 @@ const createLocalTrusteeSetupStates = async (
     );
 
 const createSetupContributions = (
-    input: Pick<
-        SetupCeremonyAssemblyInput,
-        'setupContext'
-    > & {
+    input: Pick<SetupCeremonyAssemblyInput, 'setupContext'> & {
         readonly trustees: readonly SetupCeremonyTrusteeInput[];
         readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
         readonly privateVssEnvelopeCommitments: PrivateVssMailboxDeliverySet;
@@ -662,7 +641,10 @@ export const createSetupCeremonyAssembly = async (
         'verificationPhaseNumber',
     );
     const trustees = orderedTrustees(input.trustees);
-    assertOpeningStatesMatchTrustees(trustees, input.sourceTrusteeOpeningStates);
+    assertOpeningStatesMatchTrustees(
+        trustees,
+        input.sourceTrusteeOpeningStates,
+    );
 
     const vssCoefficientCommitmentBundle = createVssCoefficientCommitmentBundle(
         {
@@ -738,8 +720,7 @@ export const createSetupCeremonyAssembly = async (
     });
     const thresholdShareCommitments = deriveThresholdShareCommitments({
         setupContext: input.setupContext,
-        vssCoefficientCommitments:
-            vssCoefficientCommitmentBundle.commitmentSet,
+        vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
         vssCoefficientCommitmentMaterial:
             vssCoefficientCommitmentBundle.materialSet,
     });
@@ -754,8 +735,7 @@ export const createSetupCeremonyAssembly = async (
     const setupContributions = createSetupContributions({
         setupContext: input.setupContext,
         trustees,
-        vssCoefficientCommitments:
-            vssCoefficientCommitmentBundle.commitmentSet,
+        vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
         privateVssEnvelopeCommitments,
         vssShareAcceptances,
         localTrusteeSetupStates,
@@ -766,8 +746,7 @@ export const createSetupCeremonyAssembly = async (
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupContext: input.setupContext,
-        vssCoefficientCommitments:
-            vssCoefficientCommitmentBundle.commitmentSet,
+        vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
         vssCoefficientCommitmentMaterial:
             vssCoefficientCommitmentBundle.materialSet,
         privateVssEnvelopeCommitments,

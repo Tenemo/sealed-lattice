@@ -76,7 +76,10 @@ describe('public package policy', () => {
     it('rejects target-decryption implementation exports if they reach the SDK facade', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
-                (entry) => entry.exports,
+                (entry) =>
+                    'runtimeFacadeExports' in entry
+                        ? entry.runtimeFacadeExports
+                        : entry.exports,
             );
         const failures = await validatePublicPackagePolicy(
             publicPackagePolicy,

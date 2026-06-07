@@ -10143,14 +10143,14 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
             "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
         )?));
     }
-    if ring_degree == POLYNOMIAL_DEGREE as u64 {
-        if let Err(error) = accepted_setup_collective_public_key_from_package(setup_package) {
-            return Ok(Some(public_key_share_proof_refusal(
-                "collectivePublicKeyRuntimeMaterialInvalid",
-                error.message,
-                "setupPackage.collectivePublicKey",
-            )?));
-        }
+    if ring_degree == POLYNOMIAL_DEGREE as u64
+        && let Err(error) = accepted_setup_collective_public_key_from_package(setup_package)
+    {
+        return Ok(Some(public_key_share_proof_refusal(
+            "collectivePublicKeyRuntimeMaterialInvalid",
+            error.message,
+            "setupPackage.collectivePublicKey",
+        )?));
     }
 
     Ok(None)

@@ -57,6 +57,19 @@ use crate::protocol_signatures::{
 };
 use crate::transcript_core::decode_hex;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
+static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
+    OnceLock::new();
+static PUBLIC_KEY_SHARE_LNP_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+    serde_json::Value,
+> = OnceLock::new();
+static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
+    OnceLock::new();
+static EVALUATION_KEY_PROOF_CONTAINER_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+    serde_json::Value,
+> = OnceLock::new();
 
 fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
     derive_protocol_hash(
@@ -2794,6 +2807,12 @@ fn collective_setup_verifier_rejects_reduced_ring_material_outside_profile() {
 }
 
 fn minimal_collective_setup_package() -> serde_json::Value {
+    MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_minimal_collective_setup_package)
+        .clone()
+}
+
+fn build_minimal_collective_setup_package() -> serde_json::Value {
     let profile = describe_collective_bgv_setup_profile().expect("profile");
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_protocol_hash(
@@ -3833,6 +3852,12 @@ fn same_secret_consistency_object(
 }
 
 fn same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
+    SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_same_secret_proof_bearing_collective_setup_package)
+        .clone()
+}
+
+fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = minimal_collective_setup_package();
     package["sameSecretProofs"] = same_secret_proofs_object(&package);
     rebind_collective_setup_package_hash(&mut package);
@@ -4251,6 +4276,12 @@ fn setup_proof_binding_for_test_package(package: &serde_json::Value) -> serde_js
 }
 
 fn public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::Value {
+    PUBLIC_KEY_SHARE_LNP_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_public_key_share_lnp_proof_bearing_collective_setup_package)
+        .clone()
+}
+
+fn build_public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
@@ -4261,6 +4292,12 @@ fn public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::
 }
 
 fn collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
+    COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_collective_public_key_bearing_collective_setup_package)
+        .clone()
+}
+
+fn build_collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
@@ -4271,6 +4308,12 @@ fn collective_public_key_bearing_collective_setup_package() -> serde_json::Value
 }
 
 fn evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value {
+    EVALUATION_KEY_PROOF_CONTAINER_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_evaluation_key_proof_container_bearing_collective_setup_package)
+        .clone()
+}
+
+fn build_evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = collective_public_key_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds_object(&package);
     package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);

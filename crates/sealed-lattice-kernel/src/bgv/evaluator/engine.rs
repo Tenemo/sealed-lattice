@@ -147,6 +147,7 @@ impl BgvPublicKey {
             .0)
     }
 
+    #[cfg(test)]
     pub(crate) fn encrypt_coefficients_with_witness(
         &self,
         plaintext_coefficients: &[u64],

@@ -455,6 +455,7 @@ pub(super) fn evaluation_key_share_component_vector_root(
     )
 }
 
+#[cfg(test)]
 pub(super) fn encode_evaluation_key_share_component_vectors(
     level: usize,
     ring_degree: usize,
@@ -3809,6 +3810,7 @@ fn write_setup_commitments(output: &mut Vec<u8>, commitments: &[SetupCommitmentV
     }
 }
 
+#[cfg(test)]
 fn write_u64(output: &mut Vec<u8>, value: u64) {
     output.extend_from_slice(&value.to_le_bytes());
 }
