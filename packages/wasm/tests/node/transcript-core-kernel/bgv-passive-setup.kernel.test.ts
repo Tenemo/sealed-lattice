@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 
 import {
     arrayAtPath,
@@ -21,8 +21,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
             readonly setupProfileId: string;
             readonly reservedRootsAndHashes: readonly string[];
-            readonly centralTrustedSetupAuthorityBoundary: {
-                readonly transcriptValidCentralizedSecretReconstruction: boolean;
+            readonly externallySuppliedSetupMaterialBoundary: {
+                readonly transcriptAcceptsExternallySuppliedSecretReconstruction: boolean;
             };
             readonly statusLabels: readonly string[];
         };
@@ -40,8 +40,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             ]),
         );
         expect(
-            objectModel.centralTrustedSetupAuthorityBoundary
-                .transcriptValidCentralizedSecretReconstruction,
+            objectModel.externallySuppliedSetupMaterialBoundary
+                .transcriptAcceptsExternallySuppliedSecretReconstruction,
         ).toBe(false);
         expect(objectModel.statusLabels).toContain(
             'PassiveBgvSetupCanonicalObjectModelFrozen',
@@ -145,14 +145,14 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         );
     });
 
-    it('refuses central-trusted-setup-authority setup fields and wrong expected roots', async () => {
+    it('refuses externally-supplied-setup-material setup fields and wrong expected roots', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
 
         for (const fieldName of [
             'globalSecretPolynomial',
-            'centralTrustedSetupAuthoritySecret',
-            'centralTrustedSetupAuthorityKeyMaterial',
+            'externallySuppliedSetupSecret',
+            'externallySuppliedSetupKeyMaterial',
             'fullSecretKey',
             'collectiveSecretKey',
             'fullSecretReconstruction',

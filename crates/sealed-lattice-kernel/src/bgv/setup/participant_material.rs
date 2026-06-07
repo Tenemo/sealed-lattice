@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 pub(super) fn participant_setup_material(
     input: &PassiveSetupInput,
@@ -50,7 +50,7 @@ pub(super) fn participant_setup_material(
         "localErrorCommitmentHash": local_error_commitment_hash,
         "publicShareConstruction": "owner-routed-standard-ternary-share-b_i=p*e_i-a*s_i-over-selected-BGV-RNS-profile",
         "rawSecretShareExported": false,
-        "centralizedSecretReconstruction": false,
+        "externallySuppliedSecretReconstruction": false,
         "sampledLocalSecretCoefficients": sample_bounded_collective_secret_share_distribution(
             &input.private_setup_seed_hash,
             &participant_identities,
@@ -105,7 +105,7 @@ pub(super) fn participant_setup_material(
         "localSecretShareCommitmentHash": local_secret_share_commitment_hash,
         "localErrorCommitmentHash": local_error_commitment_hash,
         "rawSecretShareExported": false,
-        "centralizedSecretReconstruction": false,
+        "externallySuppliedSecretReconstruction": false,
         "sampleDisclosure": "commitment-hashes-and-roots-only",
         "sampledLocalSecretCoefficientsIncluded": false,
         "sampledLocalErrorCoefficientsIncluded": false,

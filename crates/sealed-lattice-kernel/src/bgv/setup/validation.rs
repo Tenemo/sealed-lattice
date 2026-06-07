@@ -1,4 +1,4 @@
-use super::certificates::{
+﻿use super::certificates::{
     passive_setup_evaluator_context_bindings, target_decryption_profile,
     target_threshold_decryptability_certificate_from_setup_package,
 };
@@ -221,19 +221,19 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
     if bool_at_path(
         setup_package,
         &[
-            "centralTrustedSetupAuthorityBoundary",
-            "transcriptValidCentralizedSecretReconstruction",
+            "externallySuppliedSetupMaterialBoundary",
+            "transcriptAcceptsExternallySuppliedSecretReconstruction",
         ],
     )? || bool_at_path(
         setup_package,
         &[
-            "centralTrustedSetupAuthorityBoundary",
+            "externallySuppliedSetupMaterialBoundary",
             "rawSecretSharesExported",
         ],
     )? {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must not claim centralized secret reconstruction or raw share export",
+            "passive BGV setup package must not claim externally supplied secret reconstruction or raw share export",
         ));
     }
     if string_at_path(

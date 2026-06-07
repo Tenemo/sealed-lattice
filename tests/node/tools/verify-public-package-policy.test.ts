@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { publicPackagePolicy } from '#tools/ci/public-package-policy';
+import {
+    publicPackagePolicy,
+    type VendoredProtocolRuntimeEntryExport,
+} from '#tools/ci/public-package-policy';
 import {
     collectEntryPointTypeExportNames,
     validatePublicPackagePolicy,
@@ -12,6 +15,10 @@ const emptyPackagePolicy = {
     vendoredProtocolRuntimeEntryExports: [],
     vendoredProtocolRuntimeModules: [],
 } as const satisfies Parameters<typeof validatePublicPackagePolicy>[0];
+
+const runtimeFacadeExportNamesForPolicyEntry = (
+    entry: VendoredProtocolRuntimeEntryExport,
+): readonly string[] => entry.runtimeFacadeExports ?? entry.exports;
 
 describe('public package policy', () => {
     it('collects direct type exports from the package entry declaration', () => {
@@ -76,10 +83,7 @@ describe('public package policy', () => {
     it('rejects target-decryption implementation exports if they reach the SDK facade', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
-                (entry) =>
-                    'runtimeFacadeExports' in entry
-                        ? entry.runtimeFacadeExports
-                        : entry.exports,
+                runtimeFacadeExportNamesForPolicyEntry,
             );
         const failures = await validatePublicPackagePolicy(
             publicPackagePolicy,

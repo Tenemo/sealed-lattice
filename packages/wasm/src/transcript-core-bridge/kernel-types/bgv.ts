@@ -1,4 +1,4 @@
-import type { ProtocolHash } from '@sealed-lattice/types';
+﻿import type { ProtocolHash } from '@sealed-lattice/types';
 
 export type BgvRnsProfileDescription = {
     readonly profile: {
@@ -194,7 +194,7 @@ export type BgvPassiveSetupPackage = {
     };
     readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
-    readonly centralTrustedSetupAuthorityBoundary: Readonly<
+    readonly externallySuppliedSetupMaterialBoundary: Readonly<
         Record<string, unknown>
     >;
     readonly targetDecryptionStatus: {

@@ -21,7 +21,8 @@ sidebar:
 - no complete threshold voting workflow is published yet
 - no production setup contribution, VSS, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, or result release API is public yet
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
-- active-static setup is not claim-bearing until per-RNS-prime VSS package integration, same-secret proof verification, public-key proofs, evaluation-key proofs, key transport, and supported-phone evidence close
+- active-static setup is not claim-bearing until the `CollectiveBgvSetup-v1` public verifier accepts a full-profile setup with repo-owned setup proof accounting, per-RNS-prime VSS package integration, same-secret proof verification, public-key proofs, evaluation-key proofs, key transport, and downstream integration bindings
+- independent external validation is not a prerequisite for the active-static setup prototype claim, but production use would still require separate production hardening and review
 - the internal direct encrypted ballot proof is not claim-bearing until soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and supported-phone mobile evidence close
 - bounded-domain encrypted sparse target projection is not complete for every supported top count
 - target-bound decryption is not implemented as an accepted direct-path rule

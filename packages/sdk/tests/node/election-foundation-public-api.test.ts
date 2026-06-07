@@ -78,6 +78,18 @@ const requiredPublicFunctions = [
         'createPublicKeyShareProofSet',
         publicApiRuntimeRecord.createPublicKeyShareProofSet,
     ],
+    [
+        'createSameSecretProofSet',
+        publicApiRuntimeRecord.createSameSecretProofSet,
+    ],
+    [
+        'createPublicKeyShareMaterialSet',
+        publicApiRuntimeRecord.createPublicKeyShareMaterialSet,
+    ],
+    [
+        'createPublicKeyShareLnpProofSet',
+        publicApiRuntimeRecord.createPublicKeyShareLnpProofSet,
+    ],
     ['createPublicKeyShareSet', publicApiRuntimeRecord.createPublicKeyShareSet],
     [
         'createRelinearizationKeyShareRounds',

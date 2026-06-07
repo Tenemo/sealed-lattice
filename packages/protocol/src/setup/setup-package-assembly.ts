@@ -1,4 +1,4 @@
-import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
+﻿import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { SetupCommonRandomness } from './common-randomness-records.js';
@@ -159,7 +159,7 @@ const forbiddenPackageFieldNames = new Set([
     'aggregateOpening',
     'aggregateOpeningColumns',
     'carryWitnessesDecimal',
-    'centralTrustedSetupAuthoritySetup',
+    'externallySuppliedSetupMaterial',
     'coefficientMessage',
     'coefficientMessagesByShamirIndex',
     'coefficientOpenings',
@@ -188,6 +188,20 @@ const forbiddenPackageFieldNames = new Set([
     'setupSeedHash',
     'shareValues',
 ]);
+const legacyExternalSetupRoleFieldNameTokens = [
+    'setup',
+    'authority',
+    'central',
+    'trusted',
+];
+const fieldNameSuggestsLegacyExternalSetupRole = (
+    fieldName: string,
+): boolean => {
+    const lowercaseFieldName = fieldName.toLowerCase();
+    return legacyExternalSetupRoleFieldNameTokens.every((token) =>
+        lowercaseFieldName.includes(token),
+    );
+};
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
@@ -396,7 +410,10 @@ export const collectForbiddenSetupPackageAssemblyFieldPaths = (
 
     return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
         const fieldPath = `${objectPath}.${fieldName}`;
-        if (forbiddenPackageFieldNames.has(fieldName)) {
+        if (
+            forbiddenPackageFieldNames.has(fieldName) ||
+            fieldNameSuggestsLegacyExternalSetupRole(fieldName)
+        ) {
             return [fieldPath];
         }
 

@@ -1,6 +1,26 @@
 import { decryptPrivateVssMailboxEnvelope } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import type { SetupCommonRandomness } from './common-randomness-records.js';
+import {
+    createGaloisKeyShareBatches,
+    createPublicEvaluationKeySet,
+    createRelinearizationKeyShareRounds,
+    type EvaluationKeyShareProofGenerator,
+    type GaloisKeyShareBatch,
+    type GaloisKeyShareBatchContribution,
+    type PublicEvaluationKeyMaterialReference,
+    type PublicEvaluationKeySet,
+    type RelinearizationKeyShareRounds,
+    type RelinearizationRoundOneContribution,
+    type RelinearizationRoundTwoContribution,
+    type SameSecretProofReference,
+} from './evaluation-key-proof-records.js';
+import {
+    createEvaluatorKeySchedule,
+    type EvaluatorKeySchedule,
+    type RequiredGaloisKeyScheduleEntry,
+} from './evaluator-key-schedule.js';
 import {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     type GeneratedLocalTrusteeSetupStateResult,
@@ -13,15 +33,39 @@ import {
     type PrivateVssShareProofFactory,
     type PrivateVssShareProofRandomnessFactory,
 } from './private-vss-mailbox-delivery.js';
-import type {
-    PublicKeyShareProofRecord,
-    PublicKeyShareRecord,
+import {
+    createPublicKeyShareLnpProofSet,
+    createPublicKeyShareMaterialSet,
+    createPublicKeyShareProofSet,
+    createPublicKeyShareSet,
+    type PublicKeyShareLnpProofMaterial,
+    type PublicKeyShareLnpProofSet,
+    type PublicKeyShareContributionInput,
+    type PublicKeyShareMaterialContributionInput,
+    type PublicKeyShareMaterialSet,
+    type PublicKeyShareProofSet,
+    type PublicKeyShareSet,
 } from './public-key-share-records.js';
+import {
+    createSameSecretProofSet,
+    createSameSecretConsistencyStatementSet,
+    type SameSecretConsistencyStatementSet,
+    type SameSecretProofMaterial,
+    type SameSecretProofSet,
+} from './same-secret-consistency-records.js';
 import {
     createSetupContributionAssembly,
     type SetupContributionAssembly,
 } from './setup-contribution-orchestration.js';
-import type { SetupPhaseParticipantObject } from './setup-phase-records.js';
+import {
+    createSetupPackage,
+    type SetupPackage,
+    type SetupPackageCertificateInput,
+} from './setup-package-assembly.js';
+import type {
+    SetupPhaseParticipantObject,
+    SetupPhaseRecord,
+} from './setup-phase-records.js';
 import {
     deriveThresholdShareCommitments,
     type ThresholdShareCommitmentSet,
@@ -61,18 +105,37 @@ export type SetupCeremonyTrusteeInput = Readonly<{
     readonly setupPhaseParticipantObjects?: readonly SetupPhaseParticipantObject[];
     readonly commonRandomnessCommitRoot?: ProtocolHash;
     readonly commonRandomnessRevealRoot?: ProtocolHash;
-    readonly publicKeyShareRecord?: PublicKeyShareRecord;
-    readonly publicKeyShareProofRecord?: PublicKeyShareProofRecord;
 }>;
 
 export type SetupCeremonyAssemblyInput = Readonly<{
     readonly kernel: PrivateVssMailboxDeliveryKernel;
     readonly setupContext: CollectiveBgvSetupContext;
+    readonly qShare: JsonRecord;
+    readonly phaseTranscript: readonly SetupPhaseRecord[];
+    readonly commonRandomness: SetupCommonRandomness;
     readonly phaseOrderHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
     readonly thresholdDegree: number;
+    readonly publicKeyCrpRoot: ProtocolHash;
+    readonly publicAPolynomialRoot: ProtocolHash;
+    readonly setupProofBinding: JsonRecord;
+    readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+    readonly sameSecretProofMaterials: readonly SameSecretProofMaterial[];
+    readonly publicKeyShareMaterialContributions: readonly PublicKeyShareMaterialContributionInput[];
+    readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
+    readonly publicKeyShareLnpProofMaterials: readonly PublicKeyShareLnpProofMaterial[];
+    readonly collectivePublicKey?: JsonRecord;
+    readonly relinearizationCrpRoot: ProtocolHash;
+    readonly galoisKeyCrpRoot: ProtocolHash;
+    readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
+    readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
+    readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
+    readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
+    readonly publicEvaluationKeyMaterialReference?: PublicEvaluationKeyMaterialReference;
+    readonly evaluationKeyShareProofGenerator?: EvaluationKeyShareProofGenerator;
+    readonly setupCertificateInput: SetupPackageCertificateInput;
     readonly trustees: readonly SetupCeremonyTrusteeInput[];
     readonly sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[];
     readonly deliveryPhaseNumber: number;
@@ -103,6 +166,17 @@ export type SetupCeremonyAssembly = Readonly<{
     readonly privateVssEnvelopeCommitments: PrivateVssMailboxDeliverySet;
     readonly vssShareAcceptances: VssShareAcceptanceSet;
     readonly thresholdShareCommitments: ThresholdShareCommitmentSet;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs: SameSecretProofSet;
+    readonly publicKeyShares: PublicKeyShareSet;
+    readonly publicKeyShareProofs: PublicKeyShareProofSet;
+    readonly publicKeyShareMaterial: PublicKeyShareMaterialSet;
+    readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet;
+    readonly evaluatorKeySchedule: EvaluatorKeySchedule;
+    readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
+    readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
+    readonly evaluationKeys: PublicEvaluationKeySet;
+    readonly setupPackage: SetupPackage;
     readonly localTrusteeSetupStates: readonly SetupCeremonyLocalTrusteeState[];
     readonly setupContributions: readonly SetupContributionAssembly[];
 }>;
@@ -266,6 +340,93 @@ const assertOpeningStatesMatchTrustees = (
             );
         }
     });
+};
+
+const publicKeyShareContributionsFromMaterial = (
+    materialContributions: readonly PublicKeyShareMaterialContributionInput[],
+): PublicKeyShareContributionInput[] =>
+    materialContributions.map((contribution) => ({
+        trusteeIdentity: contribution.trusteeIdentity,
+        trusteeRosterPosition: contribution.trusteeRosterPosition,
+        shareCoefficientVectorHash512ByLimb:
+            contribution.shareCoefficientVectorsByLimb.map(
+                (coefficientVector) => ({
+                    rnsLimbIndex: coefficientVector.rnsLimbIndex,
+                    rnsPrime: coefficientVector.rnsPrime,
+                    component: coefficientVector.component,
+                    coefficientVectorHash512:
+                        coefficientVector.coefficientVectorHash512,
+                }),
+            ),
+    }));
+
+const sameSecretProofReferencesForConsistency = (
+    sameSecretConsistency: SameSecretConsistencyStatementSet,
+    sameSecretProofs: SameSecretProofSet,
+): readonly SameSecretProofReference[] => {
+    const sortedProofRecords = [...sameSecretProofs.proofRecords].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    const sortedStatements = [...sameSecretConsistency.statementRecords].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    if (
+        sameSecretProofs.sameSecretConsistencyRoot !==
+            sameSecretConsistency.sameSecretConsistencyRoot ||
+        sameSecretProofs.sameSecretProofFamilyBindingRoot !==
+            sameSecretConsistency.sameSecretProofFamilyBindingRoot
+    ) {
+        throw new Error(
+            'sameSecretProofs must bind the derived same-secret statement set.',
+        );
+    }
+    if (sortedProofRecords.length !== sortedStatements.length) {
+        throw new Error(
+            'sameSecretProofs must contain one proof per same-secret statement.',
+        );
+    }
+    sortedProofRecords.forEach((proofRecord, expectedRosterPosition) => {
+        const statementRecord = sortedStatements[expectedRosterPosition];
+        if (statementRecord === undefined) {
+            throw new Error(
+                'sameSecretProofs must match same-secret statement order.',
+            );
+        }
+        assertNonEmptyString(
+            proofRecord.trusteeIdentity,
+            'sameSecretProofs.proofRecords.trusteeIdentity',
+        );
+        assertNonNegativeSafeInteger(
+            proofRecord.trusteeRosterPosition,
+            'sameSecretProofs.proofRecords.trusteeRosterPosition',
+        );
+        if (
+            proofRecord.trusteeRosterPosition !== expectedRosterPosition ||
+            proofRecord.trusteeIdentity !== statementRecord.trusteeIdentity ||
+            proofRecord.sameSecretStatementRoot !==
+                statementRecord.sameSecretStatementRoot ||
+            proofRecord.trusteeSecretCommitmentRoot !==
+                statementRecord.trusteeSecretCommitmentRoot
+        ) {
+            throw new Error(
+                'sameSecretProofs must bind the derived same-secret statements.',
+            );
+        }
+        assertProtocolHash(
+            proofRecord.sameSecretProofRoot,
+            'sameSecretProofs.proofRecords.sameSecretProofRoot',
+        );
+    });
+
+    return sortedProofRecords.map((proofRecord) => ({
+        trusteeIdentity: proofRecord.trusteeIdentity,
+        trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+        sameSecretStatementRoot: proofRecord.sameSecretStatementRoot,
+        trusteeSecretCommitmentRoot: proofRecord.trusteeSecretCommitmentRoot,
+        sameSecretProofRoot: proofRecord.sameSecretProofRoot,
+    }));
 };
 
 const trusteeByRecipientPosition = (
@@ -586,6 +747,8 @@ const createSetupContributions = (
         readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
         readonly privateVssEnvelopeCommitments: PrivateVssMailboxDeliverySet;
         readonly vssShareAcceptances: VssShareAcceptanceSet;
+        readonly publicKeyShares: PublicKeyShareSet;
+        readonly publicKeyShareProofs: PublicKeyShareProofSet;
         readonly localTrusteeSetupStates: readonly SetupCeremonyLocalTrusteeState[];
     },
 ): readonly SetupContributionAssembly[] =>
@@ -602,6 +765,25 @@ const createSetupContributions = (
         if (sourceTrusteeRecord === undefined || localState === undefined) {
             throw new Error(
                 'setup contribution assembly requires source trustee and local-state records for every trustee.',
+            );
+        }
+        const publicKeyShareRecord = input.publicKeyShares.shareRecords.find(
+            (shareRecord) =>
+                shareRecord.trusteeRosterPosition ===
+                trustee.trusteeRosterPosition,
+        );
+        const publicKeyShareProofRecord =
+            input.publicKeyShareProofs.proofRecords.find(
+                (proofRecord) =>
+                    proofRecord.trusteeRosterPosition ===
+                    trustee.trusteeRosterPosition,
+            );
+        if (
+            publicKeyShareRecord === undefined ||
+            publicKeyShareProofRecord === undefined
+        ) {
+            throw new Error(
+                'setup contribution assembly requires public-key share and proof records for every trustee.',
             );
         }
 
@@ -625,8 +807,8 @@ const createSetupContributions = (
                         trustee.trusteeRosterPosition,
                 ),
             localStateCommitment: localState.localStateCommitment,
-            publicKeyShareRecord: trustee.publicKeyShareRecord,
-            publicKeyShareProofRecord: trustee.publicKeyShareProofRecord,
+            publicKeyShareRecord,
+            publicKeyShareProofRecord,
         });
     });
 
@@ -640,6 +822,10 @@ export const createSetupCeremonyAssembly = async (
         input.verificationPhaseNumber,
         'verificationPhaseNumber',
     );
+    assertProtocolHash(input.publicKeyCrpRoot, 'publicKeyCrpRoot');
+    assertProtocolHash(input.publicAPolynomialRoot, 'publicAPolynomialRoot');
+    assertProtocolHash(input.relinearizationCrpRoot, 'relinearizationCrpRoot');
+    assertProtocolHash(input.galoisKeyCrpRoot, 'galoisKeyCrpRoot');
     const trustees = orderedTrustees(input.trustees);
     assertOpeningStatesMatchTrustees(
         trustees,
@@ -657,6 +843,125 @@ export const createSetupCeremonyAssembly = async (
             sourceTrusteeOpeningStates: input.sourceTrusteeOpeningStates,
         },
     );
+    const sameSecretConsistency = createSameSecretConsistencyStatementSet({
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        thresholdDegree: input.thresholdDegree,
+        vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
+    });
+    const sameSecretProofs = createSameSecretProofSet({
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        sameSecretConsistency,
+        vssCoefficientCommitmentMaterial:
+            vssCoefficientCommitmentBundle.materialSet,
+        setupProofBinding: input.setupProofBinding,
+        sameSecretTboxParameterProfileHash:
+            input.sameSecretTboxParameterProfileHash,
+        proofMaterials: input.sameSecretProofMaterials,
+    });
+    const publicKeyShares = createPublicKeyShareSet({
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        publicKeyCrpRoot: input.publicKeyCrpRoot,
+        publicAPolynomialRoot: input.publicAPolynomialRoot,
+        sameSecretConsistency,
+        shareContributions: publicKeyShareContributionsFromMaterial(
+            input.publicKeyShareMaterialContributions,
+        ),
+    });
+    const publicKeyShareProofs = createPublicKeyShareProofSet({
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        publicKeyCrpRoot: input.publicKeyCrpRoot,
+        publicAPolynomialRoot: input.publicAPolynomialRoot,
+        sameSecretConsistency,
+        publicKeyShares,
+    });
+    const publicKeyShareMaterial = createPublicKeyShareMaterialSet({
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        ringDegree: input.ringDegree,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        publicKeyCrpRoot: input.publicKeyCrpRoot,
+        publicAPolynomialRoot: input.publicAPolynomialRoot,
+        publicKeyShares,
+        materialContributions: input.publicKeyShareMaterialContributions,
+    });
+    const publicKeyShareLnpProofs = createPublicKeyShareLnpProofSet({
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        publicKeyCrpRoot: input.publicKeyCrpRoot,
+        publicAPolynomialRoot: input.publicAPolynomialRoot,
+        sameSecretConsistency,
+        sameSecretProofs,
+        publicKeyShares,
+        publicKeyShareProofs,
+        publicKeyShareMaterial,
+        setupProofBinding: input.setupProofBinding,
+        publicKeyShareTboxParameterProfileHash:
+            input.publicKeyShareTboxParameterProfileHash,
+        proofMaterials: input.publicKeyShareLnpProofMaterials,
+    });
+    const sameSecretProofReferences = sameSecretProofReferencesForConsistency(
+        sameSecretConsistency,
+        sameSecretProofs,
+    );
+    const evaluatorKeySchedule = createEvaluatorKeySchedule({
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        relinearizationCrpRoot: input.relinearizationCrpRoot,
+        galoisKeyCrpRoot: input.galoisKeyCrpRoot,
+        sameSecretConsistency,
+        publicKeyShares,
+        publicKeyShareProofs,
+        requiredGaloisKeySchedule: input.requiredGaloisKeySchedule,
+    });
+    const evaluationKeyProofCommonInput = {
+        setupContext: input.setupContext,
+        qSharePrimes: input.qSharePrimes,
+        participantCount: trustees.length,
+        evaluatorKeySchedule,
+        sameSecretProofSetRoot: sameSecretProofs.sameSecretProofSetRoot,
+        sameSecretProofFamilyBindingRoot:
+            sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+        publicKeyShareLnpProofSetRoot:
+            publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+        sameSecretProofReferences,
+        evaluationKeyShareProofGenerator:
+            input.evaluationKeyShareProofGenerator,
+    } as const;
+    const relinearizationKeyShareRounds = createRelinearizationKeyShareRounds({
+        ...evaluationKeyProofCommonInput,
+        roundOneContributions: input.relinearizationRoundOneContributions,
+        roundTwoContributions: input.relinearizationRoundTwoContributions,
+    });
+    const galoisKeyShareBatches = createGaloisKeyShareBatches({
+        ...evaluationKeyProofCommonInput,
+        batchContributions: input.galoisKeyShareBatchContributions,
+    });
+    const evaluationKeys = createPublicEvaluationKeySet({
+        ...evaluationKeyProofCommonInput,
+        relinearizationKeyShareRounds,
+        galoisKeyShareBatches,
+        ...(input.publicEvaluationKeyMaterialReference === undefined
+            ? {}
+            : {
+                  publicEvaluationKeyMaterialReference:
+                      input.publicEvaluationKeyMaterialReference,
+              }),
+    });
     const privateVssEnvelopeCommitments =
         await createPrivateVssMailboxDeliverySet({
             kernel: input.kernel,
@@ -738,7 +1043,35 @@ export const createSetupCeremonyAssembly = async (
         vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
         privateVssEnvelopeCommitments,
         vssShareAcceptances,
+        publicKeyShares,
+        publicKeyShareProofs,
         localTrusteeSetupStates,
+    });
+    const setupPackage = createSetupPackage({
+        setupContext: input.setupContext,
+        qShare: input.qShare,
+        phaseTranscript: input.phaseTranscript,
+        commonRandomness: input.commonRandomness,
+        vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
+        vssCoefficientCommitmentMaterial:
+            vssCoefficientCommitmentBundle.materialSet,
+        privateVssEnvelopeCommitments,
+        vssShareAcceptances,
+        thresholdShareCommitments,
+        sameSecretConsistency,
+        sameSecretProofs,
+        publicKeyShares,
+        publicKeyShareProofs,
+        publicKeyShareMaterial,
+        publicKeyShareLnpProofs,
+        ...(input.collectivePublicKey === undefined
+            ? {}
+            : { collectivePublicKey: input.collectivePublicKey }),
+        evaluatorKeySchedule,
+        relinearizationKeyShareRounds,
+        galoisKeyShareBatches,
+        evaluationKeys,
+        setupCertificateInput: input.setupCertificateInput,
     });
 
     return {
@@ -752,6 +1085,17 @@ export const createSetupCeremonyAssembly = async (
         privateVssEnvelopeCommitments,
         vssShareAcceptances,
         thresholdShareCommitments,
+        sameSecretConsistency,
+        sameSecretProofs,
+        publicKeyShares,
+        publicKeyShareProofs,
+        publicKeyShareMaterial,
+        publicKeyShareLnpProofs,
+        evaluatorKeySchedule,
+        relinearizationKeyShareRounds,
+        galoisKeyShareBatches,
+        evaluationKeys,
+        setupPackage,
         localTrusteeSetupStates,
         setupContributions,
     };

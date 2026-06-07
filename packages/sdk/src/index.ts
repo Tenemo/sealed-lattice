@@ -4,10 +4,13 @@ import {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares as exportEncryptedLocalTrusteeSetupStateInternal,
     createEvaluatorKeySchedule as createEvaluatorKeyScheduleInternal,
     createGaloisKeyShareBatches as createGaloisKeyShareBatchesInternal,
+    createPublicKeyShareLnpProofSet as createPublicKeyShareLnpProofSetInternal,
+    createPublicKeyShareMaterialSet as createPublicKeyShareMaterialSetInternal,
     createPublicEvaluationKeySet as createPublicEvaluationKeySetInternal,
     createPublicKeyShareProofSet as createPublicKeyShareProofSetInternal,
     createPublicKeyShareSet as createPublicKeyShareSetInternal,
     createRelinearizationKeyShareRounds as createRelinearizationKeyShareRoundsInternal,
+    createSameSecretProofSet as createSameSecretProofSetInternal,
     createSetupCommonRandomness as createSetupCommonRandomnessInternal,
     createSetupContributionAssembly as createSetupContributionInternal,
     createSetupCertificates as createSetupCertificatesInternal,
@@ -49,7 +52,16 @@ import type {
     PublicEvaluationKeySet as ProtocolPublicEvaluationKeySet,
     PublicEvaluationKeySetInput as ProtocolPublicEvaluationKeySetInput,
     PublicKeyShareCoefficientVectorHash as ProtocolPublicKeyShareCoefficientVectorHash,
+    PublicKeyShareCoefficientVectorMaterial as ProtocolPublicKeyShareCoefficientVectorMaterial,
     PublicKeyShareContributionInput as ProtocolPublicKeyShareContributionInput,
+    PublicKeyShareLnpProofMaterial as ProtocolPublicKeyShareLnpProofMaterial,
+    PublicKeyShareLnpProofRecord as ProtocolPublicKeyShareLnpProofRecord,
+    PublicKeyShareLnpProofSet as ProtocolPublicKeyShareLnpProofSet,
+    PublicKeyShareLnpProofSetInput as ProtocolPublicKeyShareLnpProofSetInput,
+    PublicKeyShareMaterialContributionInput as ProtocolPublicKeyShareMaterialContributionInput,
+    PublicKeyShareMaterialRecord as ProtocolPublicKeyShareMaterialRecord,
+    PublicKeyShareMaterialSet as ProtocolPublicKeyShareMaterialSet,
+    PublicKeyShareMaterialSetInput as ProtocolPublicKeyShareMaterialSetInput,
     PublicKeyShareProofRecord as ProtocolPublicKeyShareProofRecord,
     PublicKeyShareProofSet as ProtocolPublicKeyShareProofSet,
     PublicKeyShareProofSetInput as ProtocolPublicKeyShareProofSetInput,
@@ -65,7 +77,11 @@ import type {
     RelinearizationLevelScheduleEntry as ProtocolRelinearizationLevelScheduleEntry,
     RequiredGaloisKeyScheduleEntry as ProtocolRequiredGaloisKeyScheduleEntry,
     RequiredGaloisSet as ProtocolRequiredGaloisSet,
+    SameSecretProofMaterial as ProtocolSameSecretProofMaterial,
+    SameSecretProofRecord as ProtocolSameSecretProofRecord,
     SameSecretProofReference as ProtocolSameSecretProofReference,
+    SameSecretProofSet as ProtocolSameSecretProofSet,
+    SameSecretProofSetInput as ProtocolSameSecretProofSetInput,
     BgvHeSecurityCertificate as ProtocolBgvHeSecurityCertificate,
     SetupCertificates as ProtocolSetupCertificates,
     SetupCommitmentSecurityCertificate as ProtocolSetupCommitmentSecurityCertificate,
@@ -730,6 +746,8 @@ export type SetupPackage = ProtocolSetupPackage;
 
 export type PublicKeyShareCoefficientVectorHash =
     ProtocolPublicKeyShareCoefficientVectorHash;
+export type PublicKeyShareCoefficientVectorMaterial =
+    ProtocolPublicKeyShareCoefficientVectorMaterial;
 export type PublicKeyShareContributionInput =
     ProtocolPublicKeyShareContributionInput;
 export type PublicKeyShareRecord = ProtocolPublicKeyShareRecord;
@@ -738,6 +756,18 @@ export type PublicKeyShareSetInput = ProtocolPublicKeyShareSetInput;
 export type PublicKeyShareProofRecord = ProtocolPublicKeyShareProofRecord;
 export type PublicKeyShareProofSet = ProtocolPublicKeyShareProofSet;
 export type PublicKeyShareProofSetInput = ProtocolPublicKeyShareProofSetInput;
+export type PublicKeyShareMaterialContributionInput =
+    ProtocolPublicKeyShareMaterialContributionInput;
+export type PublicKeyShareMaterialRecord = ProtocolPublicKeyShareMaterialRecord;
+export type PublicKeyShareMaterialSet = ProtocolPublicKeyShareMaterialSet;
+export type PublicKeyShareMaterialSetInput =
+    ProtocolPublicKeyShareMaterialSetInput;
+export type PublicKeyShareLnpProofMaterial =
+    ProtocolPublicKeyShareLnpProofMaterial;
+export type PublicKeyShareLnpProofRecord = ProtocolPublicKeyShareLnpProofRecord;
+export type PublicKeyShareLnpProofSet = ProtocolPublicKeyShareLnpProofSet;
+export type PublicKeyShareLnpProofSetInput =
+    ProtocolPublicKeyShareLnpProofSetInput;
 export type RelinearizationLevelScheduleEntry =
     ProtocolRelinearizationLevelScheduleEntry;
 export type RequiredGaloisKeyScheduleEntry =
@@ -745,7 +775,11 @@ export type RequiredGaloisKeyScheduleEntry =
 export type RequiredGaloisSet = ProtocolRequiredGaloisSet;
 export type EvaluatorKeySchedule = ProtocolEvaluatorKeySchedule;
 export type EvaluatorKeyScheduleInput = ProtocolEvaluatorKeyScheduleInput;
+export type SameSecretProofMaterial = ProtocolSameSecretProofMaterial;
+export type SameSecretProofRecord = ProtocolSameSecretProofRecord;
 export type SameSecretProofReference = ProtocolSameSecretProofReference;
+export type SameSecretProofSet = ProtocolSameSecretProofSet;
+export type SameSecretProofSetInput = ProtocolSameSecretProofSetInput;
 export type RelinearizationKeyShareProofMaterial =
     ProtocolRelinearizationKeyShareProofMaterial;
 export type RelinearizationRoundOneContribution = Readonly<{
@@ -1221,6 +1255,21 @@ export const createPublicKeyShareSet = (
 export const createPublicKeyShareProofSet = (
     input: PublicKeyShareProofSetInput,
 ): PublicKeyShareProofSet => createPublicKeyShareProofSetInternal(input);
+
+/** Creates root-bound same-secret proof records from generated proof material. */
+export const createSameSecretProofSet = (
+    input: SameSecretProofSetInput,
+): SameSecretProofSet => createSameSecretProofSetInternal(input);
+
+/** Creates root-bound public-key share material records from public coefficients. */
+export const createPublicKeyShareMaterialSet = (
+    input: PublicKeyShareMaterialSetInput,
+): PublicKeyShareMaterialSet => createPublicKeyShareMaterialSetInternal(input);
+
+/** Creates root-bound public-key LNP proof records from generated proof material. */
+export const createPublicKeyShareLnpProofSet = (
+    input: PublicKeyShareLnpProofSetInput,
+): PublicKeyShareLnpProofSet => createPublicKeyShareLnpProofSetInternal(input);
 
 /** Freezes the evaluator-key schedule used by setup verification. */
 export const createEvaluatorKeySchedule = (

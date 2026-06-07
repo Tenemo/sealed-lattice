@@ -358,10 +358,10 @@ pub(crate) fn relinearization_key_share_lnp_tbox_parameter_profile_value() -> Ca
             "constantCommitmentCount": DATA_PRIMES.len(),
             "keySwitchLiftedRelationCountPerCoefficientPerDigitAndLimb": 1,
             "roundTwoAggregateSourceParticipantBound": 10,
-            "sourceSquareClosureStatus": "review-gated-aggregate-square-proof-closure-required",
+            "sourceSquareClosureStatus": "verifier-checked-round-two-source-square-aggregate-binding",
         }),
         "SLRKLNP1",
-        "relinearization key-share verifier pins and checks this linear key-switch profile with round-one same-secret source responses and generator-side round-two aggregate-source product validation; verifier-side aggregate-square proof closure plus external AB-DLOP/LNP soundness and zero-knowledge review remain required",
+        "relinearization key-share verifier pins and checks this linear key-switch profile with round-one same-secret source responses, generator-side round-two aggregate-source product validation, and verifier-side round-two source-square aggregate-root binding; external AB-DLOP/LNP soundness and zero-knowledge review remain required",
     )
 }
 

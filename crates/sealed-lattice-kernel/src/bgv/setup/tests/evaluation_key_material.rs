@@ -208,21 +208,18 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
         raw_secret_error.message
     );
 
-    let mut central_trusted_setup_authority_material = public_material.clone();
-    central_trusted_setup_authority_material["centralTrustedSetupAuthorityKeyMaterial"] =
+    let mut externally_supplied_material = public_material.clone();
+    externally_supplied_material["externallySuppliedSetupKeyMaterial"] =
         serde_json::json!({ "secret": "forbidden" });
-    rebind_public_evaluation_key_material_hash(&mut central_trusted_setup_authority_material);
-    let central_trusted_setup_authority_error = public_evaluation_key_material_error(
-        &package,
-        &central_trusted_setup_authority_material,
-        1,
-    );
+    rebind_public_evaluation_key_material_hash(&mut externally_supplied_material);
+    let externally_supplied_material_error =
+        public_evaluation_key_material_error(&package, &externally_supplied_material, 1);
     assert!(
-        central_trusted_setup_authority_error
+        externally_supplied_material_error
             .message
-            .contains("centralTrustedSetupAuthorityKeyMaterial"),
+            .contains("externallySuppliedSetupKeyMaterial"),
         "{}",
-        central_trusted_setup_authority_error.message
+        externally_supplied_material_error.message
     );
 
     let mut duplicate_relinearization = public_material.clone();

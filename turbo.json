@@ -28,6 +28,7 @@
                 "!../../crates/**/target/**",
                 "../../tools/ci/build-sdk-bridge.ts",
                 "../../tools/ci/build-wasm-kernel.ts",
+                "../../tools/ci/public-package-policy.ts",
                 "../../tools/internal/**"
             ],
             "outputs": ["dist/**"]
