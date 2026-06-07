@@ -85,8 +85,10 @@ import type {
     BgvHeSecurityCertificate as ProtocolBgvHeSecurityCertificate,
     SetupCertificates as ProtocolSetupCertificates,
     SetupCommitmentSecurityCertificate as ProtocolSetupCommitmentSecurityCertificate,
+    SetupProofAccountingCertificate as ProtocolSetupProofAccountingCertificate,
     SetupTransportCertificate as ProtocolSetupTransportCertificate,
     SetupContributionAssemblyInput,
+    SetupKeyCorrectnessCertificate as ProtocolSetupKeyCorrectnessCertificate,
     SetupPackage as ProtocolSetupPackage,
     SetupPackageInput as ProtocolSetupPackageInput,
     SetupPhaseParticipantObjectInput as ProtocolSetupPhaseParticipantObjectInput,
@@ -708,8 +710,12 @@ export type SetupCertificatesInput = Readonly<{
 export type SetupCertificates = ProtocolSetupCertificates;
 export type SetupCommitmentSecurityCertificate =
     ProtocolSetupCommitmentSecurityCertificate;
+export type SetupProofAccountingCertificate =
+    ProtocolSetupProofAccountingCertificate;
 export type SetupTransportCertificate = ProtocolSetupTransportCertificate;
 export type BgvHeSecurityCertificate = ProtocolBgvHeSecurityCertificate;
+export type SetupKeyCorrectnessCertificate =
+    ProtocolSetupKeyCorrectnessCertificate;
 
 export type SetupPackageInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
@@ -723,12 +729,11 @@ export type SetupPackageInput = Readonly<{
     readonly vssComplaints?: JsonRecord;
     readonly thresholdShareCommitments?: JsonRecord;
     readonly sameSecretConsistency: JsonRecord;
-    readonly sameSecretProofs?: JsonRecord;
+    readonly sameSecretProofs: JsonRecord;
     readonly publicKeyShares: JsonRecord;
     readonly publicKeyShareProofs: JsonRecord;
-    readonly publicKeyShareMaterial?: JsonRecord;
-    readonly publicKeyShareLnpProofs?: JsonRecord;
-    readonly collectivePublicKey?: JsonRecord;
+    readonly publicKeyShareMaterial: JsonRecord;
+    readonly publicKeyShareLnpProofs: JsonRecord;
     readonly evaluatorKeySchedule: JsonRecord;
     readonly relinearizationKeyShareRounds: JsonRecord;
     readonly galoisKeyShareBatches: readonly JsonRecord[];
@@ -739,6 +744,7 @@ export type SetupPackageInput = Readonly<{
     >;
     readonly setupCommitmentSecurityCertificate?: JsonRecord;
     readonly setupTransportCertificate?: JsonRecord;
+    readonly setupProofAccountingCertificate?: JsonRecord;
     readonly heSecurityCertificate?: JsonRecord;
 }>;
 

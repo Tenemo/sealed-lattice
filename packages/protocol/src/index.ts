@@ -23,6 +23,7 @@ export {
     createPrivateVssMailboxDeliverySet,
 } from './setup/private-vss-mailbox-delivery.js';
 export {
+    createCollectivePublicKey,
     createPublicKeyShareLnpProofSet,
     createPublicKeyShareMaterialSet,
     createPublicKeyShareProofSet,
@@ -173,6 +174,10 @@ export type {
     RequiredGaloisSet,
 } from './setup/evaluator-key-schedule.js';
 export type {
+    CollectivePublicKey,
+    CollectivePublicKeyCoefficientVectorMaterial,
+    CollectivePublicKeyInput,
+    CollectivePublicKeySourceShareMaterialRoot,
     PublicKeyShareCoefficientVectorHash,
     PublicKeyShareCoefficientVectorMaterial,
     PublicKeyShareContributionInput,
@@ -259,12 +264,14 @@ export type {
     SetupCertificates,
     SetupCertificatesInput,
     SetupCommitmentSecurityCertificate,
+    SetupProofAccountingCertificate,
     SetupTransportCertificate,
 } from './setup/setup-certificates.js';
 export type {
     SetupPackage,
     SetupPackageCertificateInput,
     SetupPackageInput,
+    SetupKeyCorrectnessCertificate,
 } from './setup/setup-package-assembly.js';
 export type {
     ThresholdShareCommitmentLimb,

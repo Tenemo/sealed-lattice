@@ -12,10 +12,17 @@ import type {
     RequiredGaloisKeyScheduleEntry,
 } from './evaluator-key-schedule.js';
 import type {
+    CollectivePublicKey,
     PublicKeyShareProofSet,
+    PublicKeyShareLnpProofSet,
+    PublicKeyShareMaterialSet,
     PublicKeyShareSet,
 } from './public-key-share-records.js';
-import type { SameSecretConsistencyStatementSet } from './same-secret-consistency-records.js';
+import { createCollectivePublicKey } from './public-key-share-records.js';
+import type {
+    SameSecretConsistencyStatementSet,
+    SameSecretProofSet,
+} from './same-secret-consistency-records.js';
 import {
     createSetupCertificates,
     type SetupCertificatesInput,
@@ -45,8 +52,26 @@ export type SetupPackageCertificateInput = Omit<
 type SetupPackageCertificateRecords = Readonly<{
     readonly setupCommitmentSecurityCertificate: JsonRecord;
     readonly setupTransportCertificate: JsonRecord;
+    readonly setupProofAccountingCertificate: JsonRecord;
     readonly heSecurityCertificate: JsonRecord;
 }>;
+
+export type SetupKeyCorrectnessCertificate = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupKeyCorrectnessCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
+    }
+>;
+
+type SetupKeyCorrectnessCertificateBody = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupKeyCorrectnessCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    }
+>;
 
 export type SetupPackageInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
@@ -64,12 +89,12 @@ export type SetupPackageInput = Readonly<{
         | ThresholdShareCommitmentSet
         | JsonRecord;
     readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
-    readonly sameSecretProofs?: JsonRecord;
+    readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
-    readonly publicKeyShareMaterial?: JsonRecord;
-    readonly publicKeyShareLnpProofs?: JsonRecord;
-    readonly collectivePublicKey?: JsonRecord;
+    readonly publicKeyShareMaterial: PublicKeyShareMaterialSet | JsonRecord;
+    readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet | JsonRecord;
+    readonly collectivePublicKey?: never;
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
     readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
@@ -77,6 +102,7 @@ export type SetupPackageInput = Readonly<{
     readonly setupCertificateInput?: SetupPackageCertificateInput;
     readonly setupCommitmentSecurityCertificate?: JsonRecord;
     readonly setupTransportCertificate?: JsonRecord;
+    readonly setupProofAccountingCertificate?: JsonRecord;
     readonly heSecurityCertificate?: JsonRecord;
 }>;
 
@@ -99,12 +125,15 @@ export type SetupPackage = Readonly<
         readonly vssComplaints?: VssComplaintSet | JsonRecord;
         readonly thresholdShareCommitments: ThresholdShareCommitmentSet;
         readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
-        readonly sameSecretProofs?: JsonRecord;
+        readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
         readonly publicKeyShares: PublicKeyShareSet;
         readonly publicKeyShareProofs: PublicKeyShareProofSet;
-        readonly publicKeyShareMaterial?: JsonRecord;
-        readonly publicKeyShareLnpProofs?: JsonRecord;
-        readonly collectivePublicKey?: JsonRecord;
+        readonly publicKeyShareMaterial: PublicKeyShareMaterialSet | JsonRecord;
+        readonly publicKeyShareLnpProofs:
+            | PublicKeyShareLnpProofSet
+            | JsonRecord;
+        readonly collectivePublicKey: CollectivePublicKey | JsonRecord;
+        readonly collectivePublicKeyRoot: ProtocolHash;
         readonly evaluatorKeySchedule: EvaluatorKeySchedule;
         readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
@@ -113,11 +142,23 @@ export type SetupPackage = Readonly<
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
         readonly setupTransportCertificate: JsonRecord;
         readonly setupTransportCertificateHash: ProtocolHash;
+        readonly setupProofAccountingCertificate: JsonRecord;
+        readonly setupProofAccountingCertificateHash: ProtocolHash;
+        readonly setupKeyCorrectnessCertificate: SetupKeyCorrectnessCertificate;
+        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
         readonly heSecurityCertificate: JsonRecord;
         readonly heSecurityCertificateHash: ProtocolHash;
         readonly setupPackageHash: ProtocolHash;
     }
 >;
+
+type SetupPackageInputWithDerivedCollectivePublicKey = Omit<
+    SetupPackageInput,
+    'collectivePublicKey'
+> &
+    Readonly<{
+        readonly collectivePublicKey: CollectivePublicKey;
+    }>;
 
 const setupProfileId = 'CollectiveBgvSetup-v1';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -286,17 +327,18 @@ const objectTypeAt = (
 };
 
 const assertObjectType = (
-    value: Readonly<Record<string, unknown>>,
+    value: unknown,
     fieldName: string,
     expectedObjectType: string,
 ): void => {
-    const objectType = objectTypeAt(value, fieldName);
+    const objectRecord = assertObjectRecord(value, fieldName);
+    const objectType = objectTypeAt(objectRecord, fieldName);
     if (objectType !== expectedObjectType) {
         throw new Error(
             `${fieldName}.objectType must be ${expectedObjectType}.`,
         );
     }
-    if (value.objectVersion !== 1) {
+    if (objectRecord.objectVersion !== 1) {
         throw new Error(`${fieldName}.objectVersion must be 1.`);
     }
 };
@@ -553,6 +595,16 @@ const assertKeyRecordBindings = (input: SetupPackageInput): void => {
         'sameSecretConsistency',
     );
     assertObjectType(
+        input.sameSecretProofs,
+        'sameSecretProofs',
+        'SameSecretProofSet',
+    );
+    hashField(
+        input.sameSecretProofs,
+        'sameSecretProofSetRoot',
+        'sameSecretProofs',
+    );
+    assertObjectType(
         input.publicKeyShares,
         'publicKeyShares',
         'PublicKeyShareSet',
@@ -571,6 +623,26 @@ const assertKeyRecordBindings = (input: SetupPackageInput): void => {
         input.publicKeyShareProofs,
         'publicKeyShareProofSetRoot',
         'publicKeyShareProofs',
+    );
+    assertObjectType(
+        input.publicKeyShareMaterial,
+        'publicKeyShareMaterial',
+        'PublicKeyShareMaterialSet',
+    );
+    hashField(
+        input.publicKeyShareMaterial,
+        'publicKeyShareMaterialSetRoot',
+        'publicKeyShareMaterial',
+    );
+    assertObjectType(
+        input.publicKeyShareLnpProofs,
+        'publicKeyShareLnpProofs',
+        'PublicKeyShareLnpProofSet',
+    );
+    hashField(
+        input.publicKeyShareLnpProofs,
+        'publicKeyShareLnpProofSetRoot',
+        'publicKeyShareLnpProofs',
     );
     assertObjectType(
         input.evaluatorKeySchedule,
@@ -636,6 +708,7 @@ const resolveSetupCertificateRecords = (
         if (
             input.setupCommitmentSecurityCertificate !== undefined ||
             input.setupTransportCertificate !== undefined ||
+            input.setupProofAccountingCertificate !== undefined ||
             input.heSecurityCertificate !== undefined
         ) {
             throw new Error(
@@ -653,6 +726,7 @@ const resolveSetupCertificateRecords = (
     if (
         input.setupCommitmentSecurityCertificate === undefined ||
         input.setupTransportCertificate === undefined ||
+        input.setupProofAccountingCertificate === undefined ||
         input.heSecurityCertificate === undefined
     ) {
         throw new Error(
@@ -664,6 +738,7 @@ const resolveSetupCertificateRecords = (
         setupCommitmentSecurityCertificate:
             input.setupCommitmentSecurityCertificate,
         setupTransportCertificate: input.setupTransportCertificate,
+        setupProofAccountingCertificate: input.setupProofAccountingCertificate,
         heSecurityCertificate: input.heSecurityCertificate,
     };
 };
@@ -690,6 +765,16 @@ const assertCertificateBindings = (
         certificates.setupTransportCertificate,
         'setupTransportCertificateHash',
         'setupTransportCertificate',
+    );
+    assertObjectType(
+        certificates.setupProofAccountingCertificate,
+        'setupProofAccountingCertificate',
+        'SetupProofAccountingCertificate',
+    );
+    hashField(
+        certificates.setupProofAccountingCertificate,
+        'setupProofAccountingCertificateHash',
+        'setupProofAccountingCertificate',
     );
     assertObjectType(
         certificates.heSecurityCertificate,
@@ -751,10 +836,213 @@ const validateInput = (
     assertGaloisScheduleCovered(input);
 };
 
+const contextFieldsForCertificate = (
+    setupContext: CollectiveBgvSetupContext,
+): JsonRecord =>
+    Object.fromEntries(
+        contextFieldNames.map((fieldName) => [
+            fieldName,
+            setupContext[fieldName],
+        ]),
+    );
+
+const qSharePrimesFromPublicKeyShareMaterial = (
+    publicKeyShareMaterial: PublicKeyShareMaterialSet,
+): readonly number[] => {
+    const [firstMaterialRecord] = publicKeyShareMaterial.shareMaterialRecords;
+    if (firstMaterialRecord === undefined) {
+        throw new Error(
+            'publicKeyShareMaterial must contain source share material records.',
+        );
+    }
+
+    return firstMaterialRecord.shareCoefficientVectorsByLimb.map(
+        (coefficientVector, rnsLimbIndex) => {
+            if (
+                coefficientVector.rnsLimbIndex !== rnsLimbIndex ||
+                !Number.isSafeInteger(coefficientVector.rnsPrime) ||
+                coefficientVector.rnsPrime <= 0
+            ) {
+                throw new Error(
+                    'publicKeyShareMaterial coefficient vector limbs must expose accepted Q_share primes in order.',
+                );
+            }
+
+            return coefficientVector.rnsPrime;
+        },
+    );
+};
+
+const derivedCollectivePublicKey = (
+    input: SetupPackageInput,
+): CollectivePublicKey => {
+    if (
+        Object.prototype.hasOwnProperty.call(input, 'collectivePublicKey') &&
+        (input as Readonly<{ readonly collectivePublicKey?: unknown }>)
+            .collectivePublicKey !== undefined
+    ) {
+        throw new Error(
+            'collectivePublicKey is derived from accepted public-key material and must not be supplied by callers.',
+        );
+    }
+    const publicKeyShareMaterial =
+        input.publicKeyShareMaterial as PublicKeyShareMaterialSet;
+
+    return createCollectivePublicKey({
+        setupContext: input.setupContext,
+        qSharePrimes: qSharePrimesFromPublicKeyShareMaterial(
+            publicKeyShareMaterial,
+        ),
+        participantCount: input.publicKeyShares.participantCount,
+        ringDegree: publicKeyShareMaterial.ringDegree,
+        publicMatrixSeedHash: publicKeyShareMaterial.publicMatrixSeedHash,
+        publicKeyCrpRoot: publicKeyShareMaterial.publicKeyCrpRoot,
+        publicAPolynomialRoot: publicKeyShareMaterial.publicAPolynomialRoot,
+        sameSecretConsistency: input.sameSecretConsistency,
+        sameSecretProofs: input.sameSecretProofs as SameSecretProofSet,
+        publicKeyShares: input.publicKeyShares,
+        publicKeyShareProofs: input.publicKeyShareProofs,
+        publicKeyShareMaterial,
+        publicKeyShareLnpProofs:
+            input.publicKeyShareLnpProofs as PublicKeyShareLnpProofSet,
+    });
+};
+
+const galoisBatchRootEntries = (
+    galoisKeyShareBatches: readonly GaloisKeyShareBatch[],
+): readonly JsonRecord[] =>
+    galoisKeyShareBatches.map((batch, batchIndex) => ({
+        trusteeIdentity: batch.trusteeIdentity,
+        trusteeRosterPosition: batch.trusteeRosterPosition,
+        galoisKeyShareBatchRoot: hashField(
+            batch,
+            'galoisKeyShareBatchRoot',
+            `galoisKeyShareBatches.${String(batchIndex)}`,
+        ),
+    }));
+
+const setupKeyCorrectnessCertificateBody = (
+    input: SetupPackageInputWithDerivedCollectivePublicKey,
+    certificates: SetupPackageCertificateRecords,
+): SetupKeyCorrectnessCertificateBody => {
+    const collectivePublicKeyRoot = hashField(
+        input.collectivePublicKey,
+        'collectivePublicKeyRoot',
+        'collectivePublicKey',
+    );
+    const evaluationKeySetHash = hashField(
+        input.evaluationKeys,
+        'evaluationKeySetHash',
+        'evaluationKeys',
+    );
+    const publicKeyShareMaterialSetRoot = hashField(
+        input.publicKeyShareMaterial,
+        'publicKeyShareMaterialSetRoot',
+        'publicKeyShareMaterial',
+    );
+    const publicKeyShareLnpProofSetRoot = hashField(
+        input.publicKeyShareLnpProofs,
+        'publicKeyShareLnpProofSetRoot',
+        'publicKeyShareLnpProofs',
+    );
+
+    return {
+        objectType: 'SetupKeyCorrectnessCertificate',
+        objectVersion: 1,
+        setupProfileId,
+        ...contextFieldsForCertificate(input.setupContext),
+        setupProofProfileBinding:
+            'fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate',
+        keyCorrectnessScope:
+            'collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records',
+        collectivePublicKey: {
+            status: 'collective-public-key-root-bound-to-public-key-share-material-and-LNP-proof-roots',
+            collectivePublicKeyRoot,
+            sourceRoots: {
+                publicKeyShareSetRoot: hashField(
+                    input.publicKeyShares,
+                    'publicKeyShareSetRoot',
+                    'publicKeyShares',
+                ),
+                publicKeyShareProofSetRoot: hashField(
+                    input.publicKeyShareProofs,
+                    'publicKeyShareProofSetRoot',
+                    'publicKeyShareProofs',
+                ),
+                publicKeyShareMaterialSetRoot,
+                publicKeyShareLnpProofSetRoot,
+            },
+        },
+        publicEvaluationKeys: {
+            status: 'public-evaluation-key-roots-bound-to-frozen-schedule-and-proof-bearing-relinearization-and-galois-records',
+            evaluationKeySetHash,
+            evaluatorKeyScheduleRoot: hashField(
+                input.evaluatorKeySchedule,
+                'evaluatorKeyScheduleRoot',
+                'evaluatorKeySchedule',
+            ),
+            relinearizationKeyShareRoundsRoot: hashField(
+                input.relinearizationKeyShareRounds,
+                'relinearizationKeyShareRoundsRoot',
+                'relinearizationKeyShareRounds',
+            ),
+            galoisKeyShareBatchRoots: galoisBatchRootEntries(
+                input.galoisKeyShareBatches,
+            ),
+            requiredGaloisSetHash: hashField(
+                input.evaluatorKeySchedule,
+                'requiredGaloisSetHash',
+                'evaluatorKeySchedule',
+            ),
+        },
+        certificateDependencies: {
+            setupProofAccountingCertificateHash: hashField(
+                certificates.setupProofAccountingCertificate,
+                'setupProofAccountingCertificateHash',
+                'setupProofAccountingCertificate',
+            ),
+            heSecurityCertificateHash: hashField(
+                certificates.heSecurityCertificate,
+                'heSecurityCertificateHash',
+                'heSecurityCertificate',
+            ),
+        },
+        claimBoundary:
+            'claim-bearing key correctness still requires proof-accounting and theorem closure before accepted setup can close',
+    };
+};
+
+const createSetupKeyCorrectnessCertificate = (
+    input: SetupPackageInputWithDerivedCollectivePublicKey,
+    certificates: SetupPackageCertificateRecords,
+): SetupKeyCorrectnessCertificate => {
+    const certificateBody = setupKeyCorrectnessCertificateBody(
+        input,
+        certificates,
+    );
+
+    return {
+        ...certificateBody,
+        setupKeyCorrectnessCertificateHash: deriveProtocolHash(
+            'SetupKeyCorrectnessCertificateHash',
+            certificateBody,
+        ),
+    };
+};
+
 export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
     const certificates = resolveSetupCertificateRecords(input);
     const thresholdShareCommitments = resolveThresholdShareCommitments(input);
     validateInput(input, certificates, thresholdShareCommitments);
+    const collectivePublicKey = derivedCollectivePublicKey(input);
+    const resolvedInput: SetupPackageInputWithDerivedCollectivePublicKey = {
+        ...input,
+        collectivePublicKey,
+    };
+    const setupKeyCorrectnessCertificate = createSetupKeyCorrectnessCertificate(
+        resolvedInput,
+        certificates,
+    );
 
     const privateVssEnvelopeCommitments = publicPrivateVssEnvelopeCommitmentSet(
         input.privateVssEnvelopeCommitments,
@@ -769,15 +1057,30 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         'setupTransportCertificateHash',
         'setupTransportCertificate',
     );
+    const setupProofAccountingCertificateHash = hashField(
+        certificates.setupProofAccountingCertificate,
+        'setupProofAccountingCertificateHash',
+        'setupProofAccountingCertificate',
+    );
     const heSecurityCertificateHash = hashField(
         certificates.heSecurityCertificate,
         'heSecurityCertificateHash',
         'heSecurityCertificate',
     );
+    const setupKeyCorrectnessCertificateHash = hashField(
+        setupKeyCorrectnessCertificate,
+        'setupKeyCorrectnessCertificateHash',
+        'setupKeyCorrectnessCertificate',
+    );
     const privateVssEnvelopeCommitmentRoot = hashField(
         privateVssEnvelopeCommitments,
         'privateVssEnvelopeCommitmentRoot',
         'privateVssEnvelopeCommitments',
+    );
+    const collectivePublicKeyRoot = hashField(
+        collectivePublicKey,
+        'collectivePublicKeyRoot',
+        'collectivePublicKey',
     );
 
     const packageWithoutHash = {
@@ -799,20 +1102,13 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         vssShareAcceptances: input.vssShareAcceptances,
         thresholdShareCommitments,
         sameSecretConsistency: input.sameSecretConsistency,
-        ...(input.sameSecretProofs === undefined
-            ? {}
-            : { sameSecretProofs: input.sameSecretProofs }),
+        sameSecretProofs: input.sameSecretProofs,
         publicKeyShares: input.publicKeyShares,
         publicKeyShareProofs: input.publicKeyShareProofs,
-        ...(input.publicKeyShareMaterial === undefined
-            ? {}
-            : { publicKeyShareMaterial: input.publicKeyShareMaterial }),
-        ...(input.publicKeyShareLnpProofs === undefined
-            ? {}
-            : { publicKeyShareLnpProofs: input.publicKeyShareLnpProofs }),
-        ...(input.collectivePublicKey === undefined
-            ? {}
-            : { collectivePublicKey: input.collectivePublicKey }),
+        publicKeyShareMaterial: input.publicKeyShareMaterial,
+        publicKeyShareLnpProofs: input.publicKeyShareLnpProofs,
+        collectivePublicKey,
+        collectivePublicKeyRoot,
         evaluatorKeySchedule: input.evaluatorKeySchedule,
         relinearizationKeyShareRounds: input.relinearizationKeyShareRounds,
         galoisKeyShareBatches: input.galoisKeyShareBatches,
@@ -822,6 +1118,11 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         setupCommitmentSecurityCertificateHash,
         setupTransportCertificate: certificates.setupTransportCertificate,
         setupTransportCertificateHash,
+        setupProofAccountingCertificate:
+            certificates.setupProofAccountingCertificate,
+        setupProofAccountingCertificateHash,
+        setupKeyCorrectnessCertificate,
+        setupKeyCorrectnessCertificateHash,
         heSecurityCertificate: certificates.heSecurityCertificate,
         heSecurityCertificateHash,
     } as const satisfies Omit<SetupPackage, 'setupPackageHash'>;

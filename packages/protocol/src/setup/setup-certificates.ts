@@ -110,6 +110,23 @@ type SetupTransportCertificateBody = Readonly<
     }
 >;
 
+export type SetupProofAccountingCertificate = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupProofAccountingCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofAccountingCertificateHash: ProtocolHash;
+    }
+>;
+
+type SetupProofAccountingCertificateBody = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupProofAccountingCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    }
+>;
+
 export type BgvHeSecurityCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'BgvHeSecurityCertificate';
@@ -130,11 +147,40 @@ type BgvHeSecurityCertificateBody = Readonly<
 export type SetupCertificates = Readonly<{
     readonly setupCommitmentSecurityCertificate: SetupCommitmentSecurityCertificate;
     readonly setupTransportCertificate: SetupTransportCertificate;
+    readonly setupProofAccountingCertificate: SetupProofAccountingCertificate;
     readonly heSecurityCertificate: BgvHeSecurityCertificate;
 }>;
 
 const setupProfileId = 'CollectiveBgvSetup-v1';
 const setupCommitmentProfileId = 'SealedLattice-BDLOP-LNP-Commitment-v1';
+const setupProofProfileId = 'SealedLattice-LNP-SetupProof-v1';
+const setupProofChallengeDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-challenge-v1';
+const setupProofChallengeSampler =
+    'sealed-lattice-shake256-lazer-autostable-rejection-v1';
+const setupProofChallengeSpace =
+    'fixed-lnp-small-coefficient-polynomial-challenge-set';
+const setupProofChallengeSeedDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-challenge-seed-v1';
+const setupProofChallengeStreamDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-challenge-stream-v1';
+const setupProofBytesDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-proof-bytes-v1';
+const setupProofSerialization = 'binary';
+const setupProofByteDecoder = 'sealed-lattice-lnp-tbox-proof-byte-decoder-v1';
+const setupProofChallengeSpaceAuditHashNamespace =
+    'SetupProofChallengeSpaceAuditHash';
+const setupProofChallengeDifferenceInvertibilityStatus =
+    'repo-owned-lnp22-small-coefficient-challenge-differences-invertible';
+const setupProofBytesAcceptedStatus =
+    'private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-claim-accounting-pending';
+const setupProofFamilies = [
+    'vss-opening-carry',
+    'same-secret-consistency',
+    'public-key-share',
+    'relinearization-key-share',
+    'galois-key-share',
+] as const;
 const setupTransportProfileId =
     'sealed-lattice-setup-binary-chunked-transport-v1';
 const setupTransportChunkSizeBytes = 1_048_576;
@@ -275,6 +321,66 @@ const numberArrayField = (
 
         return item;
     });
+};
+
+const stringArrayField = (
+    value: Readonly<Record<string, unknown>>,
+    fieldName: string,
+    objectPath: string,
+): string[] => {
+    const fieldValue = value[fieldName];
+    if (!Array.isArray(fieldValue)) {
+        throw new TypeError(`${objectPath}.${fieldName} must be an array.`);
+    }
+
+    return fieldValue.map((item, itemIndex) => {
+        if (typeof item !== 'string' || item.length === 0) {
+            throw new TypeError(
+                `${objectPath}.${fieldName}.${String(itemIndex)} must be a non-empty string.`,
+            );
+        }
+
+        return item;
+    });
+};
+
+const proofFamilyNamesFromProfile = (
+    setupProofProfile: Readonly<Record<string, unknown>>,
+): string[] => {
+    const familyProfiles = setupProofProfile.proofFamilies;
+    if (!Array.isArray(familyProfiles)) {
+        throw new TypeError(
+            'setupProfile.setupProofProfile.proofFamilies must be an array.',
+        );
+    }
+
+    return familyProfiles.map((familyProfile, familyIndex) =>
+        stringField(
+            assertObjectRecord(
+                familyProfile,
+                `setupProfile.setupProofProfile.proofFamilies.${String(familyIndex)}`,
+            ),
+            'proofFamily',
+            `setupProfile.setupProofProfile.proofFamilies.${String(familyIndex)}`,
+        ),
+    );
+};
+
+const assertSetupProofFamiliesMatchProfile = (
+    setupProofProfile: Readonly<Record<string, unknown>>,
+): void => {
+    const profileFamilyNames = proofFamilyNamesFromProfile(setupProofProfile);
+    if (
+        profileFamilyNames.length !== setupProofFamilies.length ||
+        profileFamilyNames.some(
+            (familyName, familyIndex) =>
+                familyName !== setupProofFamilies[familyIndex],
+        )
+    ) {
+        throw new Error(
+            'setupProfile.setupProofProfile.proofFamilies must match the accepted setup proof family order.',
+        );
+    }
 };
 
 const assertDerivedHashMatches = (
@@ -606,9 +712,9 @@ const setupCommitmentSecurityCertificateBody = (
             'same-secret trustee commitment roots',
         ],
         nonClosure: [
-            'same-secret proof still requires external AB-DLOP/LNP review and full tbox closure',
-            'public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure',
-            'relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
+            'same-secret proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure',
+            'public-key share proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure',
+            'relinearization and Galois proof bytes need repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting, full tbox closure, profile-scale streaming, and accepted assembly closure',
             'setup-proof Fiat-Shamir/QROM composition certificate remains separate',
         ],
         ringAndMatrixParameters: {
@@ -645,7 +751,7 @@ const setupCommitmentSecurityCertificateBody = (
                 commitmentModulusProduct.toString(),
             freshMessageNoWrap:
                 BigInt(maxSourceMessageModulus - 1) < commitmentModulusProduct,
-            status: 'review-gated-full-width-per-rns-message-bound-recorded',
+            status: 'claim-accounting-full-width-per-rns-message-bound-recorded',
         },
         aggregateOpeningBounds: {
             shamirCoefficientCount: setupProfile.qDec,
@@ -664,7 +770,7 @@ const setupCommitmentSecurityCertificateBody = (
                 commitmentModulusProduct.toString(),
             recipientAndThresholdNoWrap: true,
             boundStatus:
-                'review-gated-first-profile-homomorphic-opening-bounds-recorded',
+                'claim-accounting-first-profile-homomorphic-opening-bounds-recorded',
         },
         multiOpeningLeakage: {
             recipientAggregateOpeningsArePublic: false,
@@ -675,7 +781,7 @@ const setupCommitmentSecurityCertificateBody = (
             perCoefficientRandomnessExported: false,
             thresholdBoundary:
                 'recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses',
-            status: 'review-gated-active-static-threshold-leakage-bound-recorded',
+            status: 'claim-accounting-active-static-threshold-leakage-bound-recorded',
         },
         bindingAssumption: {
             assumption: 'Module-SIS',
@@ -709,7 +815,7 @@ const setupCommitmentSecurityCertificateBody = (
                 },
             ],
             estimatorStatus:
-                'review-gated-external-module-sis-parameter-certificate-required',
+                'repo-owned-module-sis-parameter-accounting-required',
         },
         hidingAssumption: {
             assumption:
@@ -718,9 +824,9 @@ const setupCommitmentSecurityCertificateBody = (
             publicMatrixDistribution: 'hash-derived-uniform-residue-stream',
             lowEntropySecretHiding: true,
             statisticalLeakageStatus:
-                'review-gated-for-recipient-hidden-aggregate-opening-proof-witnesses',
+                'repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-required',
             estimatorStatus:
-                'review-gated-external-module-lwe-parameter-certificate-required',
+                'repo-owned-module-lwe-parameter-accounting-required',
         },
         estimatorRows: [
             {
@@ -731,7 +837,7 @@ const setupCommitmentSecurityCertificateBody = (
                 moduleRank: 2,
                 modulusCeilBits: commitmentModulusProductBits,
                 shortVectorInfinityBoundDecimal: thresholdScalarSum.toString(),
-                status: 'review-gated',
+                status: 'claim-accounting-pending',
             },
             {
                 rowId: 'first-profile-module-lwe-hiding-row',
@@ -741,11 +847,11 @@ const setupCommitmentSecurityCertificateBody = (
                 moduleRank: 2,
                 secretDistribution: 'centered-ternary-opening',
                 modulusCeilBits: commitmentModulusProductBits,
-                status: 'review-gated',
+                status: 'claim-accounting-pending',
             },
         ],
         certificateStatus:
-            'review-gated-not-claim-bearing-until-external-parameter-certificate-and-setup-proof-verifiers',
+            'not-claim-bearing-until-repo-owned-parameter-certificate-and-setup-proof-accounting-close',
     };
 };
 
@@ -759,6 +865,346 @@ const createSetupCommitmentSecurityCertificate = (
         ...certificateBody,
         setupCommitmentSecurityCertificateHash: deriveProtocolHash(
             'SetupCommitmentSecurityCertificateHash',
+            certificateBody,
+        ),
+    };
+};
+
+const setupProofRecordBindingForCertificate = (
+    setupProfile: CollectiveBgvSetupProfileForCertificates,
+): JsonRecord => {
+    const setupProofProfile = setupProfile.setupProofProfile;
+    const challengeBinding = objectField(
+        setupProofProfile,
+        'challengeBinding',
+        'setupProfile.setupProofProfile',
+    );
+    assertSetupProofFamiliesMatchProfile(setupProofProfile);
+    const verificationPolicy = objectField(
+        setupProofProfile,
+        'verificationPolicy',
+        'setupProfile.setupProofProfile',
+    );
+
+    return {
+        objectType: 'SetupProofRecordBinding',
+        objectVersion: 1,
+        setupProfileId,
+        setupProofProfileId: stringField(
+            setupProofProfile,
+            'profileId',
+            'setupProfile.setupProofProfile',
+        ),
+        setupProofProfileHash: setupProfile.setupProofProfileHash,
+        proofSystem: stringField(
+            setupProofProfile,
+            'proofSystem',
+            'setupProfile.setupProofProfile',
+        ),
+        challengeDomain: stringField(
+            challengeBinding,
+            'challengeDomain',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeDomainHash: hashField(
+            challengeBinding,
+            'challengeDomainHash',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeBits: numberField(
+            challengeBinding,
+            'challengeBits',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeCount: numberField(
+            challengeBinding,
+            'challengeCount',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeCoefficientBound: numberField(
+            challengeBinding,
+            'challengeCoefficientBound',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        applicationRingDegree: numberField(
+            objectField(
+                setupProofProfile,
+                'relationModel',
+                'setupProfile.setupProofProfile',
+            ),
+            'applicationRingDegree',
+            'setupProfile.setupProofProfile.relationModel',
+        ),
+        lnpTboxProofRingDegree: numberField(
+            challengeBinding,
+            'lnpTboxProofRingDegree',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        lnpTboxChallengeLog2Range: numberField(
+            challengeBinding,
+            'lnpTboxChallengeLog2Range',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        lnpTboxChallengeEncodedBits: numberField(
+            challengeBinding,
+            'lnpTboxChallengeEncodedBits',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        lnpTboxChallengeSpaceBits: numberField(
+            challengeBinding,
+            'lnpTboxChallengeSpaceBits',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeSpace: stringField(
+            challengeBinding,
+            'challengeSpace',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeSampler: stringField(
+            challengeBinding,
+            'challengeSampler',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeSeedDomain: setupProofChallengeSeedDomain,
+        challengeStreamDomain: setupProofChallengeStreamDomain,
+        challengeDifferenceInvertibilityStatus: stringField(
+            challengeBinding,
+            'challengeDifferenceInvertibilityStatus',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        challengeDifferenceInvertibilityAccounting: objectField(
+            challengeBinding,
+            'challengeDifferenceInvertibilityAccounting',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ),
+        proofBytesDomain: setupProofBytesDomain,
+        proofSerialization: setupProofSerialization,
+        proofByteDecoder: setupProofByteDecoder,
+        privateVssShareTboxParameterProfileHash: hashField(
+            setupProofProfile,
+            'privateVssShareTboxParameterProfileHash',
+            'setupProfile.setupProofProfile',
+        ),
+        sameSecretTboxParameterProfileHash: hashField(
+            setupProofProfile,
+            'sameSecretTboxParameterProfileHash',
+            'setupProfile.setupProofProfile',
+        ),
+        publicKeyShareTboxParameterProfileHash: hashField(
+            setupProofProfile,
+            'publicKeyShareTboxParameterProfileHash',
+            'setupProfile.setupProofProfile',
+        ),
+        relinearizationKeyShareTboxParameterProfileHash: hashField(
+            setupProofProfile,
+            'relinearizationKeyShareTboxParameterProfileHash',
+            'setupProfile.setupProofProfile',
+        ),
+        galoisKeyShareTboxParameterProfileHash: hashField(
+            setupProofProfile,
+            'galoisKeyShareTboxParameterProfileHash',
+            'setupProfile.setupProofProfile',
+        ),
+        proofBytesAcceptedStatus: stringField(
+            verificationPolicy,
+            'proofBytesAcceptedStatus',
+            'setupProfile.setupProofProfile.verificationPolicy',
+        ),
+    };
+};
+
+const setupProofAccountingCertificateBody = (
+    setupProfile: CollectiveBgvSetupProfileForCertificates,
+): SetupProofAccountingCertificateBody => {
+    const setupProofProfile = setupProfile.setupProofProfile;
+    if (
+        stringField(
+            setupProofProfile,
+            'profileId',
+            'setupProfile.setupProofProfile',
+        ) !== setupProofProfileId
+    ) {
+        throw new Error(
+            `setupProfile.setupProofProfile.profileId must be ${setupProofProfileId}.`,
+        );
+    }
+    const challengeBinding = objectField(
+        setupProofProfile,
+        'challengeBinding',
+        'setupProfile.setupProofProfile',
+    );
+    if (
+        stringField(
+            challengeBinding,
+            'challengeDomain',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ) !== setupProofChallengeDomain
+    ) {
+        throw new Error(
+            `setupProfile.setupProofProfile.challengeBinding.challengeDomain must be ${setupProofChallengeDomain}.`,
+        );
+    }
+    if (
+        stringField(
+            challengeBinding,
+            'challengeSampler',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ) !== setupProofChallengeSampler
+    ) {
+        throw new Error(
+            `setupProfile.setupProofProfile.challengeBinding.challengeSampler must be ${setupProofChallengeSampler}.`,
+        );
+    }
+    if (
+        stringField(
+            challengeBinding,
+            'challengeSpace',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ) !== setupProofChallengeSpace
+    ) {
+        throw new Error(
+            `setupProfile.setupProofProfile.challengeBinding.challengeSpace must be ${setupProofChallengeSpace}.`,
+        );
+    }
+    if (
+        stringField(
+            challengeBinding,
+            'challengeDifferenceInvertibilityStatus',
+            'setupProfile.setupProofProfile.challengeBinding',
+        ) !== setupProofChallengeDifferenceInvertibilityStatus
+    ) {
+        throw new Error(
+            `setupProfile.setupProofProfile.challengeBinding.challengeDifferenceInvertibilityStatus must be ${setupProofChallengeDifferenceInvertibilityStatus}.`,
+        );
+    }
+    const verificationPolicy = objectField(
+        setupProofProfile,
+        'verificationPolicy',
+        'setupProfile.setupProofProfile',
+    );
+    if (
+        stringField(
+            verificationPolicy,
+            'proofBytesAcceptedStatus',
+            'setupProfile.setupProofProfile.verificationPolicy',
+        ) !== setupProofBytesAcceptedStatus
+    ) {
+        throw new Error(
+            `setupProfile.setupProofProfile.verificationPolicy.proofBytesAcceptedStatus must be ${setupProofBytesAcceptedStatus}.`,
+        );
+    }
+    const setupProofRecordBinding =
+        setupProofRecordBindingForCertificate(setupProfile);
+    const challengeSpaceAudit = objectField(
+        setupProofProfile,
+        'challengeSpaceAudit',
+        'setupProfile.setupProofProfile',
+    );
+
+    return {
+        objectType: 'SetupProofAccountingCertificate',
+        objectVersion: 1,
+        setupProfileId,
+        setupProfileHash: setupProfile.setupProfileHash,
+        setupProofProfileId,
+        setupProofProfileHash: setupProfile.setupProofProfileHash,
+        setupProofRecordBinding,
+        setupProofRecordBindingHash: deriveProtocolHash(
+            'SetupProofRecordBindingHash',
+            setupProofRecordBinding,
+        ),
+        proofFamilies: setupProofFamilies,
+        proofFamilyAccounting: [
+            {
+                proofFamily: 'vss-opening-carry',
+                claimScope:
+                    'recipient-local private VSS share proof relation over accepted Q_share limbs',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'same-secret-consistency',
+                claimScope:
+                    'same trustee secret across accepted VSS constant commitments',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'public-key-share',
+                claimScope:
+                    'public-key share relation bound to the accepted same-secret proof and public-key material roots',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'relinearization-key-share',
+                claimScope:
+                    'relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'galois-key-share',
+                claimScope:
+                    'Galois key-share relation bound to the required automorphism schedule and key-switch component roots',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+        ],
+        challengeAccounting: {
+            transform: 'Fiat-Shamir',
+            challengeDomain: setupProofChallengeDomain,
+            challengeDomainHash: hashField(
+                challengeBinding,
+                'challengeDomainHash',
+                'setupProfile.setupProofProfile.challengeBinding',
+            ),
+            challengeSampler: setupProofChallengeSampler,
+            challengeSpace: setupProofChallengeSpace,
+            challengeDifferenceInvertibilityStatus:
+                setupProofChallengeDifferenceInvertibilityStatus,
+            challengeDifferenceInvertibilityAccounting: objectField(
+                challengeBinding,
+                'challengeDifferenceInvertibilityAccounting',
+                'setupProfile.setupProofProfile.challengeBinding',
+            ),
+            challengeSpaceAudit,
+            challengeSpaceAuditHash: deriveProtocolHash(
+                setupProofChallengeSpaceAuditHashNamespace,
+                challengeSpaceAudit,
+            ),
+            randomOracleModel:
+                'repo-owned Fiat-Shamir/QROM accounting required before claim-bearing proof acceptance',
+            qromStatus:
+                'repo-owned-qrom-accounting-required-before-claim-closure',
+            transcriptBinding: stringArrayField(
+                challengeBinding,
+                'transcriptBinding',
+                'setupProfile.setupProofProfile.challengeBinding',
+            ),
+        },
+        tboxAccounting: {
+            tboxProfileHashBinding:
+                'all-required-setup-proof-tbox-profile-hashes-bound',
+            requiredFamilies: setupProofFamilies,
+            status: 'full setup LNP tbox quadratic and range accounting required before claim-bearing proof acceptance',
+        },
+        completionBoundary:
+            'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
+        certificateStatus:
+            'not-claim-bearing-until-repo-owned-proof-accounting-and-theorem-closure',
+    };
+};
+
+const createSetupProofAccountingCertificate = (
+    setupProfile: CollectiveBgvSetupProfileForCertificates,
+): SetupProofAccountingCertificate => {
+    const certificateBody = setupProofAccountingCertificateBody(setupProfile);
+
+    return {
+        ...certificateBody,
+        setupProofAccountingCertificateHash: deriveProtocolHash(
+            'SetupProofAccountingCertificateHash',
             certificateBody,
         ),
     };
@@ -959,7 +1405,7 @@ const bgvHeSecurityCertificateBody = (
                 relinearizationScheduleEntries(setupProfile).length,
             scheduledGaloisKeyCount: galoisScheduleEntries(setupProfile).length,
             evaluationKeyExposureStatus:
-                'root-bound-review-gated-relinearization-and-galois-key-material-exposed',
+                'root-bound-claim-accounting-pending-relinearization-and-galois-key-material-exposed',
             commitmentAndSetupProofPublicMatrices:
                 'covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples',
         },
@@ -1079,6 +1525,8 @@ export const createSetupCertificates = (
             vssCoefficientCommitmentMaterial,
             transportInput,
         ),
+        setupProofAccountingCertificate:
+            createSetupProofAccountingCertificate(setupProfile),
         heSecurityCertificate: createBgvHeSecurityCertificate(
             setupProfile,
             bgvProfile,

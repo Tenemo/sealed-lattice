@@ -15,9 +15,9 @@ export const publicKeyShareProofFamily = 'public-key-share';
 export const publicKeyShareProofVerificationStatus =
     'lnp-proof-verification-pending';
 export const publicKeyShareLnpProofVerificationStatus =
-    'lnp-public-key-share-relation-verified-review-gated';
+    'lnp-public-key-share-relation-verified-claim-accounting-pending';
 export const publicKeyShareLnpProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, VSS-bound secret opening, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, and fixed response bounds verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing public-key acceptance';
+    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, VSS-bound secret opening, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing public-key acceptance';
 export const publicKeyShareProofBindingStatus =
     'public-key-share-proof-required';
 export const publicKeyShareMaterialEncoding =
@@ -301,6 +301,70 @@ export type PublicKeyShareLnpProofSet = Readonly<
     }
 >;
 
+export type CollectivePublicKeySourceShareMaterialRoot = Readonly<{
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly publicKeyShareRoot: ProtocolHash;
+    readonly publicKeyShareMaterialRoot: ProtocolHash;
+}>;
+
+export type CollectivePublicKeyCoefficientVectorMaterial = Readonly<
+    JsonRecord & {
+        readonly rnsLimbIndex: number;
+        readonly rnsPrime: number;
+        readonly component: 'b';
+        readonly coefficientByteLength: number;
+        readonly coefficientVectorHash512: ProtocolHash;
+        readonly coefficientsLeHex: string;
+    }
+>;
+
+export type CollectivePublicKey = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CollectivePublicKey';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof publicKeyShareProofFamily;
+        readonly proofVerificationStatus: typeof publicKeyShareLnpProofVerificationStatus;
+        readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
+        readonly aggregationStatus: 'lnp-proof-aggregated-claim-accounting-pending';
+        readonly materialEncoding: 'embedded-full-collective-public-key-coefficients';
+        readonly participantCount: number;
+        readonly rnsLimbCount: number;
+        readonly ringDegree: number;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly publicKeyCrpRoot: ProtocolHash;
+        readonly publicAPolynomialRoot: ProtocolHash;
+        readonly sameSecretConsistencyRoot: ProtocolHash;
+        readonly sameSecretProofSetRoot: ProtocolHash;
+        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+        readonly publicKeyShareSetRoot: ProtocolHash;
+        readonly publicKeyShareProofSetRoot: ProtocolHash;
+        readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly sourceShareMaterialRoots: readonly CollectivePublicKeySourceShareMaterialRoot[];
+        readonly aggregateCoefficientVectorsByLimb: readonly CollectivePublicKeyCoefficientVectorMaterial[];
+        readonly collectivePublicKeyRoot: ProtocolHash;
+    }
+>;
+
+export type CollectivePublicKeyInput = Readonly<{
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly qSharePrimes: readonly number[];
+    readonly participantCount: number;
+    readonly ringDegree: number;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly publicKeyCrpRoot: ProtocolHash;
+    readonly publicAPolynomialRoot: ProtocolHash;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs: SameSecretProofSet;
+    readonly publicKeyShares: PublicKeyShareSet;
+    readonly publicKeyShareProofs: PublicKeyShareProofSet;
+    readonly publicKeyShareMaterial: PublicKeyShareMaterialSet;
+    readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet;
+}>;
+
 export type PublicKeyShareSetInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly qSharePrimes: readonly number[];
@@ -453,6 +517,11 @@ const coefficientVectorBytes = (
 ): Uint8Array => {
     const bytes = new Uint8Array(coefficients.length * 8);
     coefficients.forEach((coefficient, coefficientIndex) => {
+        if (!Number.isSafeInteger(coefficient) || coefficient < 0) {
+            throw new TypeError(
+                'coefficient vector entries must be non-negative safe integers.',
+            );
+        }
         let value = BigInt(coefficient);
         for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
             bytes[coefficientIndex * 8 + byteIndex] = Number(value & 0xffn);
@@ -463,10 +532,17 @@ const coefficientVectorBytes = (
     return bytes;
 };
 
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
 const coefficientVectorHash512 = (coefficients: readonly number[]): string =>
     hash512Hex(publicKeyShareCoefficientVectorHashDomain, [
         coefficientVectorBytes(coefficients),
     ]);
+
+const coefficientVectorToLittleEndianHex = (
+    coefficients: readonly number[],
+): string => bytesToHex(coefficientVectorBytes(coefficients));
 
 const contextFields = (
     setupContext: CollectiveBgvSetupContext,
@@ -1118,6 +1194,226 @@ export const createPublicKeyShareMaterialSet = (
             materialSetWithoutRoot,
         ),
     } satisfies PublicKeyShareMaterialSet;
+};
+
+const assertCollectivePublicKeySourceBindings = (
+    input: CollectivePublicKeyInput,
+): void => {
+    validateCommonInput(input);
+    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
+    assertContextMatches(
+        input.setupContext,
+        input.sameSecretConsistency,
+        'sameSecretConsistency',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.sameSecretProofs,
+        'sameSecretProofs',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.publicKeyShares,
+        'publicKeyShares',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.publicKeyShareProofs,
+        'publicKeyShareProofs',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.publicKeyShareMaterial,
+        'publicKeyShareMaterial',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.publicKeyShareLnpProofs,
+        'publicKeyShareLnpProofs',
+    );
+    if (
+        input.sameSecretProofs.sameSecretConsistencyRoot !==
+            input.sameSecretConsistency.sameSecretConsistencyRoot ||
+        input.sameSecretProofs.sameSecretProofFamilyBindingRoot !==
+            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot ||
+        input.publicKeyShares.sameSecretConsistencyRoot !==
+            input.sameSecretConsistency.sameSecretConsistencyRoot ||
+        input.publicKeyShareProofs.publicKeyShareSetRoot !==
+            input.publicKeyShares.publicKeyShareSetRoot ||
+        input.publicKeyShareMaterial.publicKeyShareSetRoot !==
+            input.publicKeyShares.publicKeyShareSetRoot ||
+        input.publicKeyShareLnpProofs.sameSecretProofSetRoot !==
+            input.sameSecretProofs.sameSecretProofSetRoot ||
+        input.publicKeyShareLnpProofs.publicKeyShareSetRoot !==
+            input.publicKeyShares.publicKeyShareSetRoot ||
+        input.publicKeyShareLnpProofs.publicKeyShareProofSetRoot !==
+            input.publicKeyShareProofs.publicKeyShareProofSetRoot ||
+        input.publicKeyShareLnpProofs.publicKeyShareMaterialSetRoot !==
+            input.publicKeyShareMaterial.publicKeyShareMaterialSetRoot
+    ) {
+        throw new Error(
+            'collective public key sources must bind the accepted public-key proof chain.',
+        );
+    }
+    if (
+        input.publicKeyShareMaterial.participantCount !==
+            input.participantCount ||
+        input.publicKeyShareMaterial.rnsLimbCount !==
+            input.qSharePrimes.length ||
+        input.publicKeyShareMaterial.ringDegree !== input.ringDegree ||
+        input.publicKeyShareMaterial.publicMatrixSeedHash !==
+            input.publicMatrixSeedHash ||
+        input.publicKeyShareMaterial.publicKeyCrpRoot !==
+            input.publicKeyCrpRoot ||
+        input.publicKeyShareMaterial.publicAPolynomialRoot !==
+            input.publicAPolynomialRoot
+    ) {
+        throw new Error(
+            'publicKeyShareMaterial must bind the collective public-key profile and common randomness.',
+        );
+    }
+};
+
+export const createCollectivePublicKey = (
+    input: CollectivePublicKeyInput,
+): CollectivePublicKey => {
+    assertCollectivePublicKeySourceBindings(input);
+    const materialRecords = sortedByRosterPosition(
+        input.publicKeyShareMaterial.shareMaterialRecords,
+    );
+    if (materialRecords.length !== input.participantCount) {
+        throw new Error(
+            'publicKeyShareMaterial must contain one material record per participant.',
+        );
+    }
+    const aggregateCoefficientsByLimb = input.qSharePrimes.map(() =>
+        Array.from({ length: input.ringDegree }, () => 0),
+    );
+    const sourceShareMaterialRoots = materialRecords.map(
+        (materialRecord, expectedRosterPosition) => {
+            if (
+                materialRecord.trusteeRosterPosition !==
+                    expectedRosterPosition ||
+                materialRecord.rnsLimbCount !== input.qSharePrimes.length ||
+                materialRecord.ringDegree !== input.ringDegree ||
+                materialRecord.shareCoefficientVectorsByLimb.length !==
+                    input.qSharePrimes.length
+            ) {
+                throw new Error(
+                    'publicKeyShareMaterial records must match the collective public-key profile.',
+                );
+            }
+            materialRecord.shareCoefficientVectorsByLimb.forEach(
+                (coefficientVector, rnsLimbIndex) => {
+                    const rnsPrime = input.qSharePrimes[rnsLimbIndex];
+                    const aggregateCoefficients =
+                        aggregateCoefficientsByLimb[rnsLimbIndex];
+                    if (
+                        rnsPrime === undefined ||
+                        aggregateCoefficients === undefined ||
+                        coefficientVector.rnsLimbIndex !== rnsLimbIndex ||
+                        coefficientVector.rnsPrime !== rnsPrime ||
+                        coefficientVector.component !== 'b_i' ||
+                        coefficientVector.coefficientByteLength !==
+                            input.ringDegree * 8
+                    ) {
+                        throw new Error(
+                            'publicKeyShareMaterial coefficient vector metadata must match Q_share order.',
+                        );
+                    }
+                    const coefficients = coefficientVectorFromLittleEndianHex(
+                        coefficientVector.coefficientsLeHex,
+                        input.ringDegree,
+                        'publicKeyShareMaterial.shareCoefficientVectorsByLimb.coefficientsLeHex',
+                    );
+                    if (
+                        coefficients.some(
+                            (coefficient) => coefficient >= rnsPrime,
+                        ) ||
+                        coefficientVector.coefficientVectorHash512 !==
+                            coefficientVectorHash512(coefficients)
+                    ) {
+                        throw new Error(
+                            'publicKeyShareMaterial coefficient vectors must be canonical and hash-bound.',
+                        );
+                    }
+                    coefficients.forEach((coefficient, coefficientIndex) => {
+                        aggregateCoefficients[coefficientIndex] =
+                            (aggregateCoefficients[coefficientIndex] +
+                                coefficient) %
+                            rnsPrime;
+                    });
+                },
+            );
+
+            return {
+                trusteeIdentity: materialRecord.trusteeIdentity,
+                trusteeRosterPosition: materialRecord.trusteeRosterPosition,
+                publicKeyShareRoot: materialRecord.publicKeyShareRoot,
+                publicKeyShareMaterialRoot:
+                    materialRecord.publicKeyShareMaterialRoot,
+            };
+        },
+    );
+    const aggregateCoefficientVectorsByLimb = aggregateCoefficientsByLimb.map(
+        (coefficients, rnsLimbIndex) => {
+            const rnsPrime = input.qSharePrimes[rnsLimbIndex];
+            if (rnsPrime === undefined) {
+                throw new Error('Q_share prime is missing for aggregate limb.');
+            }
+
+            return {
+                rnsLimbIndex,
+                rnsPrime,
+                component: 'b',
+                coefficientByteLength: input.ringDegree * 8,
+                coefficientVectorHash512:
+                    coefficientVectorHash512(coefficients),
+                coefficientsLeHex:
+                    coefficientVectorToLittleEndianHex(coefficients),
+            } as const satisfies CollectivePublicKeyCoefficientVectorMaterial;
+        },
+    );
+    const collectivePublicKeyWithoutRoot = {
+        objectType: 'CollectivePublicKey',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        proofFamily: publicKeyShareProofFamily,
+        proofVerificationStatus: publicKeyShareLnpProofVerificationStatus,
+        proofModelStatus: publicKeyShareLnpProofModelStatus,
+        aggregationStatus: 'lnp-proof-aggregated-claim-accounting-pending',
+        materialEncoding: 'embedded-full-collective-public-key-coefficients',
+        ...contextFields(input.setupContext),
+        participantCount: input.participantCount,
+        rnsLimbCount: input.qSharePrimes.length,
+        ringDegree: input.ringDegree,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        publicKeyCrpRoot: input.publicKeyCrpRoot,
+        publicAPolynomialRoot: input.publicAPolynomialRoot,
+        sameSecretConsistencyRoot:
+            input.sameSecretConsistency.sameSecretConsistencyRoot,
+        sameSecretProofSetRoot: input.sameSecretProofs.sameSecretProofSetRoot,
+        sameSecretProofFamilyBindingRoot:
+            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+        publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
+        publicKeyShareProofSetRoot:
+            input.publicKeyShareProofs.publicKeyShareProofSetRoot,
+        publicKeyShareMaterialSetRoot:
+            input.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
+        publicKeyShareLnpProofSetRoot:
+            input.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+        sourceShareMaterialRoots,
+        aggregateCoefficientVectorsByLimb,
+    } as const satisfies Omit<CollectivePublicKey, 'collectivePublicKeyRoot'>;
+
+    return {
+        ...collectivePublicKeyWithoutRoot,
+        collectivePublicKeyRoot: deriveProtocolHash(
+            'CollectivePublicKeyRoot',
+            collectivePublicKeyWithoutRoot,
+        ),
+    } satisfies CollectivePublicKey;
 };
 
 const publicKeyShareProofRecordsByRosterPosition = (

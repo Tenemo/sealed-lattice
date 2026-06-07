@@ -84,9 +84,9 @@ pub(super) fn setup_commitment_profile_value() -> CanonicalResult<Value> {
         "assumptions": {
             "hiding": "Module-LWE over the selected commitment modulus limbs with short centered-ternary openings",
             "binding": "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix",
-            "fullWidthMessageStatus": "review-gated-recorded-by-setup-commitment-security-certificate",
-            "aggregateOpeningNormStatus": "review-gated-recorded-by-setup-commitment-security-certificate",
-            "parameterAcceptanceStatus": "review-gated-not-claim-bearing-until-external-certificate-and-proof-verifiers",
+            "fullWidthMessageStatus": "claim-accounting-recorded-by-setup-commitment-security-certificate",
+            "aggregateOpeningNormStatus": "claim-accounting-recorded-by-setup-commitment-security-certificate",
+            "parameterAcceptanceStatus": "not-claim-bearing-until-repo-owned-certificate-and-proof-accounting-close",
             "reviewStatus": "commitment-parameter-certificate-bound-proof-family-verifiers-still-pending",
             "requiredCertificates": [
                 "SetupCommitmentSecurityCertificate",

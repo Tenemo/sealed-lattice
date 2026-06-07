@@ -62,6 +62,8 @@ const fixtureHash = (label: string): string =>
         label,
     });
 
+const textEncoder = new TextEncoder();
+
 const qShare = {
     objectType: 'QSharePrimeList',
     objectVersion: 1,
@@ -113,6 +115,55 @@ const sameSecretTboxParameterProfileHash = fixtureHash('same-secret-tbox');
 const publicKeyShareTboxParameterProfileHash = fixtureHash(
     'public-key-share-tbox',
 );
+const privateVssShareTboxParameterProfileHash = fixtureHash(
+    'private-vss-share-tbox',
+);
+const relinearizationKeyShareTboxParameterProfileHash = fixtureHash(
+    'relinearization-key-share-tbox',
+);
+const galoisKeyShareTboxParameterProfileHash = fixtureHash(
+    'galois-key-share-tbox',
+);
+const setupProofFamilies = [
+    'vss-opening-carry',
+    'same-secret-consistency',
+    'public-key-share',
+    'relinearization-key-share',
+    'galois-key-share',
+] as const;
+const setupProofChallengeDifferenceInvertibilityStatus =
+    'repo-owned-lnp22-small-coefficient-challenge-differences-invertible';
+const setupProofChallengeSamplePositions = [0, 1, 63, 64, 65, 127] as const;
+const setupProofChallengeDifferenceInvertibilityAccounting = {
+    objectType: 'SetupProofChallengeDifferenceInvertibilityAccounting',
+    objectVersion: 1,
+    setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+    proofRing: 'Z_qproof[X]/(X^d+1)',
+    proofRingDegree: 128,
+    proofModulusDecimal:
+        '57896044618658097711785492504343953926634992332820282019728792003956564819949',
+    proofModulusBitCount: 255,
+    challengeCoefficientBound: 2,
+    challengeDifferenceCoefficientBound: '4',
+    condition: '4 * challengeCoefficientBound^2 < proofModulus',
+    conditionLeftDecimal: '16',
+    conditionRightDecimal:
+        '57896044618658097711785492504343953926634992332820282019728792003956564819949',
+    conditionSatisfied: true,
+    referenceRows: [
+        {
+            document:
+                'LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General',
+            localReferencePath:
+                'reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt',
+            sections: [
+                'Section 2.7 Challenge Space',
+                'Appendix A, Theorem A.2 knowledge soundness',
+            ],
+        },
+    ],
+    status: setupProofChallengeDifferenceInvertibilityStatus,
+} as const;
 
 const setupPhaseOrder = [
     ['rosterFreeze', 1],
@@ -241,11 +292,9 @@ const privateVssShareProofFactory: PrivateVssShareProofFactory = (input) => {
         setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
         proofFamily: 'vss-opening-carry',
         proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-        privateVssShareTboxParameterProfileHash: fixtureHash(
-            'private-vss-share-tbox',
-        ),
+        privateVssShareTboxParameterProfileHash,
         proofVerificationStatus:
-            'lnp-private-vss-share-relation-verified-review-gated',
+            'lnp-private-vss-share-relation-verified-claim-accounting-pending',
         proofModelStatus: 'fixture proof model for protocol transport',
         proofStatementRoot: deriveProtocolHash(
             'PrivateVssShareProofStatementRoot',
@@ -975,6 +1024,73 @@ const commonRandomnessFixture = (): SetupCommonRandomness => {
     };
 };
 
+const setupProofChallengeSampleValue = (
+    proofFamilyIndex: number,
+    sampleIndex: number,
+): number => ((proofFamilyIndex * 2 + sampleIndex * 3) % 5) - 2;
+
+const setupProofChallengeFamilySamples = (): Record<string, unknown>[] =>
+    setupProofFamilies.map((proofFamily, proofFamilyIndex) => ({
+        proofFamily,
+        statementHash: hash512Hex(
+            'sealed-lattice/collective-bgv-setup/challenge-audit-statement-v1',
+            [textEncoder.encode(proofFamily)],
+        ),
+        relationCommitmentHash: hash512Hex(
+            'sealed-lattice/collective-bgv-setup/challenge-audit-relation-commitment-v1',
+            [textEncoder.encode(proofFamily)],
+        ),
+        sampledCoefficients: setupProofChallengeSamplePositions.map(
+            (coefficientPosition, sampleIndex) => ({
+                coefficientPosition,
+                coefficientValue: setupProofChallengeSampleValue(
+                    proofFamilyIndex,
+                    sampleIndex,
+                ),
+            }),
+        ),
+    }));
+
+const setupProofSampledDifferenceChecks = (): Record<string, unknown>[] => {
+    const checks: Record<string, unknown>[] = [];
+    for (
+        let leftProofFamilyIndex = 0;
+        leftProofFamilyIndex < setupProofFamilies.length;
+        leftProofFamilyIndex += 1
+    ) {
+        for (
+            let rightProofFamilyIndex = leftProofFamilyIndex + 1;
+            rightProofFamilyIndex < setupProofFamilies.length;
+            rightProofFamilyIndex += 1
+        ) {
+            checks.push({
+                leftProofFamily: setupProofFamilies[leftProofFamilyIndex],
+                rightProofFamily: setupProofFamilies[rightProofFamilyIndex],
+                coefficientInfinityNorm: 4,
+                differenceCoefficientBound: 4,
+                sampledDifferenceCoefficients:
+                    setupProofChallengeSamplePositions.map(
+                        (coefficientPosition, sampleIndex) => ({
+                            coefficientPosition,
+                            coefficientValue:
+                                setupProofChallengeSampleValue(
+                                    leftProofFamilyIndex,
+                                    sampleIndex,
+                                ) -
+                                setupProofChallengeSampleValue(
+                                    rightProofFamilyIndex,
+                                    sampleIndex,
+                                ),
+                        }),
+                    ),
+                invertibleOverProofRing: true,
+            });
+        }
+    }
+
+    return checks;
+};
+
 const setupCertificateInputFixture = (
     participantCount: number,
 ): SetupPackageCertificateInput => {
@@ -988,7 +1104,83 @@ const setupCertificateInputFixture = (
     const setupProofProfile = {
         objectType: 'SetupProofProfile',
         objectVersion: 1,
-        proofProfileId: 'fixture-setup-proof-profile',
+        profileId: 'SealedLattice-LNP-SetupProof-v1',
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        proofSystem: 'fixed-lnp-linear-relation-subset',
+        relationModel: {
+            applicationRingDegree: ringDegree,
+        },
+        challengeBinding: {
+            transform: 'Fiat-Shamir',
+            challengeBits: 128,
+            challengeCount: 1,
+            challengeDomain:
+                'sealed-lattice/collective-bgv-setup/lnp-challenge-v1',
+            challengeDomainHash: fixtureHash('setup-proof-challenge-domain'),
+            challengeCoefficientBound: 2,
+            lnpTboxProofRingDegree: 128,
+            lnpTboxChallengeLog2Range: 3,
+            lnpTboxChallengeEncodedBits: 384,
+            lnpTboxChallengeSpaceBits: 147,
+            challengeSpace:
+                'fixed-lnp-small-coefficient-polynomial-challenge-set',
+            challengeSampler:
+                'sealed-lattice-shake256-lazer-autostable-rejection-v1',
+            challengeDifferenceInvertibilityStatus:
+                setupProofChallengeDifferenceInvertibilityStatus,
+            challengeDifferenceInvertibilityAccounting:
+                setupProofChallengeDifferenceInvertibilityAccounting,
+            qromStatus:
+                'repo-owned-qrom-accounting-required-before-claim-closure',
+            transcriptBinding: [
+                'setupProfileHash',
+                'manifestHash',
+                'rosterHash',
+                'setupEpoch',
+                'publicMatrixSeedHash',
+                'proofFamily',
+                'statementRoot',
+                'proofChunkRoot',
+            ],
+        },
+        challengeSpaceAudit: {
+            objectType: 'SetupProofChallengeSpaceAudit',
+            objectVersion: 1,
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamilies: setupProofFamilies,
+            applicationRingDegree: ringDegree,
+            lnpTboxProofRingDegree: 128,
+            challengeCoefficientBound: 2,
+            lnpTboxChallengeLog2Range: 3,
+            lnpTboxChallengeEncodedBits: 384,
+            lnpTboxChallengeSpaceBits: 147,
+            challengeSpace:
+                'fixed-lnp-small-coefficient-polynomial-challenge-set',
+            challengeSampler:
+                'sealed-lattice-shake256-lazer-autostable-rejection-v1',
+            challengeSeedDomain:
+                'sealed-lattice/collective-bgv-setup/lnp-challenge-seed-v1',
+            challengeStreamDomain:
+                'sealed-lattice/collective-bgv-setup/lnp-challenge-stream-v1',
+            challengeDifferenceInvertibilityStatus:
+                setupProofChallengeDifferenceInvertibilityStatus,
+            challengeDifferenceInvertibilityAccounting:
+                setupProofChallengeDifferenceInvertibilityAccounting,
+            familySamples: setupProofChallengeFamilySamples(),
+            sampledDifferenceChecks: setupProofSampledDifferenceChecks(),
+        },
+        proofFamilies: setupProofFamilies.map((proofFamily) => ({
+            proofFamily,
+        })),
+        privateVssShareTboxParameterProfileHash,
+        sameSecretTboxParameterProfileHash,
+        publicKeyShareTboxParameterProfileHash,
+        relinearizationKeyShareTboxParameterProfileHash,
+        galoisKeyShareTboxParameterProfileHash,
+        verificationPolicy: {
+            proofBytesAcceptedStatus:
+                'private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-claim-accounting-pending',
+        },
     };
     const setupTransportProfile = {
         objectType: 'SetupTransportProfile',
@@ -1295,6 +1487,9 @@ describe('setup ceremony assembly', () => {
             sameSecretProofs: assembly.sameSecretProofs,
             publicKeyShareMaterial: assembly.publicKeyShareMaterial,
             publicKeyShareLnpProofs: assembly.publicKeyShareLnpProofs,
+            collectivePublicKey: assembly.collectivePublicKey,
+            collectivePublicKeyRoot:
+                assembly.collectivePublicKey.collectivePublicKeyRoot,
             evaluationKeys: assembly.evaluationKeys,
             relinearizationKeyShareRounds:
                 assembly.relinearizationKeyShareRounds,
@@ -1302,6 +1497,111 @@ describe('setup ceremony assembly', () => {
         });
         expect(assembly.setupPackage.setupPackageHash).toMatch(
             /^[0-9a-f]{128}$/u,
+        );
+        expect(assembly.collectivePublicKey).toMatchObject({
+            objectType: 'CollectivePublicKey',
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            publicKeyShareSetRoot:
+                assembly.publicKeyShares.publicKeyShareSetRoot,
+            publicKeyShareMaterialSetRoot:
+                assembly.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
+            publicKeyShareLnpProofSetRoot:
+                assembly.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+        });
+        expect(
+            assembly.collectivePublicKey.sourceShareMaterialRoots,
+        ).toHaveLength(participantCount);
+        expect(
+            assembly.collectivePublicKey.aggregateCoefficientVectorsByLimb,
+        ).toHaveLength(qSharePrimes.length);
+        const {
+            collectivePublicKeyRoot: derivedCollectivePublicKeyRoot,
+            ...collectivePublicKeyHashInput
+        } = assembly.collectivePublicKey;
+        expect(assembly.collectivePublicKey.collectivePublicKeyRoot).toBe(
+            deriveProtocolHash(
+                'CollectivePublicKeyRoot',
+                collectivePublicKeyHashInput,
+            ),
+        );
+        expect(derivedCollectivePublicKeyRoot).toBe(
+            assembly.setupPackage.collectivePublicKeyRoot,
+        );
+        const setupProofAccountingCertificate = assembly.setupPackage
+            .setupProofAccountingCertificate as Record<string, unknown>;
+        const challengeAccounting =
+            setupProofAccountingCertificate.challengeAccounting as Record<
+                string,
+                unknown
+            >;
+        const challengeSpaceAudit =
+            challengeAccounting.challengeSpaceAudit as Record<string, unknown>;
+        expect(challengeSpaceAudit).toMatchObject({
+            objectType: 'SetupProofChallengeSpaceAudit',
+            proofFamilies: [...setupProofFamilies],
+            challengeDifferenceInvertibilityStatus:
+                setupProofChallengeDifferenceInvertibilityStatus,
+            challengeSampler:
+                'sealed-lattice-shake256-lazer-autostable-rejection-v1',
+        });
+        expect(challengeSpaceAudit.familySamples).toHaveLength(
+            setupProofFamilies.length,
+        );
+        expect(challengeSpaceAudit.sampledDifferenceChecks).toHaveLength(10);
+        expect(challengeAccounting.challengeSpaceAuditHash).toBe(
+            deriveProtocolHash(
+                'SetupProofChallengeSpaceAuditHash',
+                challengeSpaceAudit,
+            ),
+        );
+        expect(
+            assembly.setupPackage.setupKeyCorrectnessCertificate,
+        ).toMatchObject({
+            objectType: 'SetupKeyCorrectnessCertificate',
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            collectivePublicKey: {
+                status: 'collective-public-key-root-bound-to-public-key-share-material-and-LNP-proof-roots',
+                collectivePublicKeyRoot:
+                    assembly.collectivePublicKey.collectivePublicKeyRoot,
+                sourceRoots: {
+                    publicKeyShareSetRoot:
+                        assembly.publicKeyShares.publicKeyShareSetRoot,
+                    publicKeyShareProofSetRoot:
+                        assembly.publicKeyShareProofs
+                            .publicKeyShareProofSetRoot,
+                    publicKeyShareMaterialSetRoot:
+                        assembly.publicKeyShareMaterial
+                            .publicKeyShareMaterialSetRoot,
+                    publicKeyShareLnpProofSetRoot:
+                        assembly.publicKeyShareLnpProofs
+                            .publicKeyShareLnpProofSetRoot,
+                },
+            },
+            publicEvaluationKeys: {
+                evaluationKeySetHash:
+                    assembly.evaluationKeys.evaluationKeySetHash,
+                evaluatorKeyScheduleRoot:
+                    assembly.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                relinearizationKeyShareRoundsRoot:
+                    assembly.relinearizationKeyShareRounds
+                        .relinearizationKeyShareRoundsRoot,
+                requiredGaloisSetHash:
+                    assembly.evaluatorKeySchedule.requiredGaloisSetHash,
+            },
+            certificateDependencies: {
+                setupProofAccountingCertificateHash:
+                    assembly.setupPackage.setupProofAccountingCertificateHash,
+                heSecurityCertificateHash:
+                    assembly.setupPackage.heSecurityCertificateHash,
+            },
+        });
+        expect(
+            assembly.setupPackage.setupKeyCorrectnessCertificate
+                .publicEvaluationKeys.galoisKeyShareBatchRoots,
+        ).toHaveLength(assembly.galoisKeyShareBatches.length);
+        expect(assembly.setupPackage.setupKeyCorrectnessCertificateHash).toBe(
+            assembly.setupPackage.setupKeyCorrectnessCertificate
+                .setupKeyCorrectnessCertificateHash,
         );
         expect(assembly.setupPackage.thresholdShareCommitments).toEqual(
             assembly.thresholdShareCommitments,

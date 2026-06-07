@@ -29,11 +29,11 @@ use super::{
 };
 
 pub(super) const RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-relinearization-key-share-relation-verified-review-gated";
-pub(super) const RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, and verifier-side round-two source-square aggregate roots verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing relinearization acceptance";
+    "lnp-relinearization-key-share-relation-verified-claim-accounting-pending";
+pub(super) const RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, and verifier-side round-two source-square aggregate roots verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing relinearization acceptance";
 pub(super) const GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-galois-key-share-relation-verified-review-gated";
-pub(super) const GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, and fixed response bounds verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing Galois-key acceptance";
+    "lnp-galois-key-share-relation-verified-claim-accounting-pending";
+pub(super) const GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing Galois-key acceptance";
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1";
@@ -1232,8 +1232,8 @@ fn evaluation_key_share_lnp_statement_value(
         "relation": "for every digit j and limb l, b_j,l + a_j,l*s - p*e_j - source_j,l - q_l*v_j,l = 0 over lifted integers",
         "sourceRelation": source_relation,
         "nonClosure": match input.proof_family {
-            EvaluationKeyShareProofFamily::Relinearization => "linear key-switch relation, same-secret binding, round-one same-secret source response, public component material, tbox byte layout, response bounds, relinearization source record binding, and verifier-side round-two source-square aggregate roots are verified; external AB-DLOP/LNP soundness and zero-knowledge review remain pending",
-            EvaluationKeyShareProofFamily::Galois => "linear key-switch relation, same-secret binding, Galois automorphism source response, public component material, tbox byte layout, and response bounds are verified; external AB-DLOP/LNP soundness and zero-knowledge review remain pending",
+            EvaluationKeyShareProofFamily::Relinearization => "linear key-switch relation, same-secret binding, round-one same-secret source response, public component material, tbox byte layout, response bounds, relinearization source record binding, and verifier-side round-two source-square aggregate roots are verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain pending",
+            EvaluationKeyShareProofFamily::Galois => "linear key-switch relation, same-secret binding, Galois automorphism source response, public component material, tbox byte layout, and response bounds are verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain pending",
         },
     });
     statement[input.proof_family.tbox_parameter_profile_hash_field()] =

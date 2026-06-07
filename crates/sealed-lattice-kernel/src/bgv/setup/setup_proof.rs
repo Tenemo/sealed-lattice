@@ -33,7 +33,7 @@ pub(super) const SETUP_PROOF_CHALLENGE_DOMAIN_PURPOSE: &str = "setup-proof-chall
 pub(super) const SETUP_PROOF_CHALLENGE_SPACE: &str =
     "fixed-lnp-small-coefficient-polynomial-challenge-set";
 pub(super) const SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS: &str =
-    "review-required-before-claim-closure";
+    "repo-owned-lnp22-small-coefficient-challenge-differences-invertible";
 pub(super) const SETUP_PROOF_CHALLENGE_SAMPLER: &str =
     "sealed-lattice-shake256-lazer-autostable-rejection-v1";
 const SETUP_PROOF_CHALLENGE_SEED_DOMAIN: &str =
@@ -286,7 +286,7 @@ pub(crate) fn same_secret_lnp_tbox_parameter_profile_value() -> CanonicalResult<
             "supportRelationCountPerCoefficient": 2
         }),
         "SLSSLNP1",
-        "same-secret verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+        "same-secret verifier pins and checks this profile; full claim closure requires repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting",
     )
 }
 
@@ -307,7 +307,7 @@ pub(crate) fn private_vss_share_lnp_tbox_parameter_profile_value() -> CanonicalR
             "carryAwareLiftedRelationCount": 1
         }),
         "SLVSLNP1",
-        "private VSS share verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+        "private VSS share verifier pins and checks this profile; full claim closure requires repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting",
     )
 }
 
@@ -332,7 +332,7 @@ pub(crate) fn public_key_share_lnp_tbox_parameter_profile_value() -> CanonicalRe
             "secretSupportRelationCountPerCoefficient": 2
         }),
         "SLPKLNP1",
-        "public-key share verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+        "public-key share verifier pins and checks this profile; full claim closure requires repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting",
     )
 }
 
@@ -361,7 +361,7 @@ pub(crate) fn relinearization_key_share_lnp_tbox_parameter_profile_value() -> Ca
             "sourceSquareClosureStatus": "verifier-checked-round-two-source-square-aggregate-binding",
         }),
         "SLRKLNP1",
-        "relinearization key-share verifier pins and checks this linear key-switch profile with round-one same-secret source responses, generator-side round-two aggregate-source product validation, and verifier-side round-two source-square aggregate-root binding; external AB-DLOP/LNP soundness and zero-knowledge review remain required",
+        "relinearization key-share verifier pins and checks this linear key-switch profile with round-one same-secret source responses, generator-side round-two aggregate-source product validation, and verifier-side round-two source-square aggregate-root binding; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required",
     )
 }
 
@@ -387,7 +387,7 @@ pub(crate) fn galois_key_share_lnp_tbox_parameter_profile_value() -> CanonicalRe
             "keySwitchLiftedRelationCountPerCoefficientPerDigitAndLimb": 1,
         }),
         "SLGKLNP1",
-        "Galois key-share verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+        "Galois key-share verifier pins and checks this profile; full claim closure requires repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting",
     )
 }
 
@@ -579,8 +579,9 @@ pub(super) fn setup_proof_challenge_domain_value(setup_profile_id: &str) -> Valu
         "challengeSeedDomain": SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
         "challengeStreamDomain": SETUP_PROOF_CHALLENGE_STREAM_DOMAIN,
         "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
+        "challengeDifferenceInvertibilityAccounting": challenge_difference_invertibility_accounting_value().expect("fixed setup proof challenge accounting is valid"),
         "proofFamilies": SETUP_PROOF_FAMILIES,
-        "randomOracleModel": "QROM review required before claim-bearing proof acceptance",
+        "randomOracleModel": "repo-owned Fiat-Shamir/QROM accounting required before claim-bearing proof acceptance",
     })
 }
 
@@ -610,6 +611,7 @@ pub(super) fn setup_proof_record_binding_value(
         "challengeSeedDomain": SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
         "challengeStreamDomain": SETUP_PROOF_CHALLENGE_STREAM_DOMAIN,
         "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
+        "challengeDifferenceInvertibilityAccounting": challenge_difference_invertibility_accounting_value()?,
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER,
@@ -618,7 +620,7 @@ pub(super) fn setup_proof_record_binding_value(
         "publicKeyShareTboxParameterProfileHash": public_key_share_lnp_tbox_parameter_profile_hash()?,
         "relinearizationKeyShareTboxParameterProfileHash": relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
         "galoisKeyShareTboxParameterProfileHash": galois_key_share_lnp_tbox_parameter_profile_hash()?,
-        "proofBytesAcceptedStatus": "private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-review-gated",
+        "proofBytesAcceptedStatus": "private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-claim-accounting-pending",
     }))
 }
 
@@ -875,39 +877,316 @@ fn append_bytes_to_hasher(hasher: &mut Shake256, value: &[u8]) -> CanonicalResul
     Ok(())
 }
 
-pub(super) fn setup_proof_challenge_space_audit_value(
-    ring_degree: usize,
-) -> CanonicalResult<Value> {
-    let statement_hash = hash512_hex(
+pub(super) fn challenge_difference_invertibility_accounting_value() -> CanonicalResult<Value> {
+    let proof_modulus = setup_proof_lnp_tbox_proof_modulus();
+    let challenge_coefficient_bound = BigUint::from(SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND);
+    let difference_coefficient_bound = &challenge_coefficient_bound * BigUint::from(2_u32);
+    let lnp_bound_left =
+        BigUint::from(4_u32) * &challenge_coefficient_bound * &challenge_coefficient_bound;
+    if lnp_bound_left >= proof_modulus {
+        return Err(setup_proof_error(
+            "setup proof challenge coefficient bound does not satisfy the LNP22 invertibility condition",
+        ));
+    }
+
+    Ok(json!({
+        "objectType": "SetupProofChallengeDifferenceInvertibilityAccounting",
+        "objectVersion": 1,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofRing": "Z_qproof[X]/(X^d+1)",
+        "proofRingDegree": SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        "proofModulusDecimal": proof_modulus.to_string(),
+        "proofModulusBitCount": proof_modulus.bits(),
+        "challengeCoefficientBound": SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND,
+        "challengeDifferenceCoefficientBound": difference_coefficient_bound.to_string(),
+        "condition": "4 * challengeCoefficientBound^2 < proofModulus",
+        "conditionLeftDecimal": lnp_bound_left.to_string(),
+        "conditionRightDecimal": proof_modulus.to_string(),
+        "conditionSatisfied": true,
+        "referenceRows": [
+            {
+                "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
+                "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
+                "sections": [
+                    "Section 2.7 Challenge Space",
+                    "Appendix A, Theorem A.2 knowledge soundness"
+                ],
+            }
+        ],
+        "status": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
+    }))
+}
+
+fn challenge_audit_statement_hash(proof_family: &str) -> String {
+    hash512_hex(
         "sealed-lattice/collective-bgv-setup/challenge-audit-statement-v1",
-        &[b"same-secret-consistency"],
-    );
-    let relation_commitment_hash = hash512_hex(
+        &[proof_family.as_bytes()],
+    )
+}
+
+fn challenge_audit_relation_commitment_hash(proof_family: &str) -> String {
+    hash512_hex(
         "sealed-lattice/collective-bgv-setup/challenge-audit-relation-commitment-v1",
-        &[b"same-secret-consistency"],
-    );
-    let challenge_coefficients = derive_setup_proof_challenge_coefficients(
-        "same-secret-consistency",
-        &statement_hash,
-        &relation_commitment_hash,
-        ring_degree,
-    )?;
-    let sample_positions = challenge_sample_positions(ring_degree)?;
-    let samples = sample_positions
-        .into_iter()
+        &[proof_family.as_bytes()],
+    )
+}
+
+fn sampled_challenge_coefficients(coefficients: &[i64], sample_positions: &[usize]) -> Vec<Value> {
+    sample_positions
+        .iter()
         .map(|coefficient_position| {
             json!({
                 "coefficientPosition": coefficient_position,
-                "coefficientValue": challenge_coefficients[coefficient_position],
+                "coefficientValue": coefficients[*coefficient_position],
             })
         })
+        .collect()
+}
+
+fn subtract_centered_coefficients(left: &[i64], right: &[i64]) -> CanonicalResult<Vec<i64>> {
+    if left.len() != right.len() {
+        return Err(setup_proof_error(
+            "setup proof challenge difference requires equal-length coefficient vectors",
+        ));
+    }
+
+    left.iter()
+        .zip(right)
+        .map(|(left_coefficient, right_coefficient)| {
+            left_coefficient
+                .checked_sub(*right_coefficient)
+                .ok_or_else(|| setup_proof_error("setup proof challenge difference overflowed"))
+        })
+        .collect()
+}
+
+fn centered_coefficient_infinity_norm(coefficients: &[i64]) -> u64 {
+    coefficients
+        .iter()
+        .map(|coefficient| coefficient.unsigned_abs())
+        .max()
+        .unwrap_or(0)
+}
+
+fn centered_polynomial_is_invertible_mod_negacyclic(
+    coefficients: &[i64],
+    ring_degree: usize,
+    modulus: &BigUint,
+) -> CanonicalResult<bool> {
+    if coefficients.len() != ring_degree {
+        return Err(setup_proof_error(
+            "setup proof challenge polynomial length does not match the proof ring degree",
+        ));
+    }
+    let polynomial = centered_coefficients_to_modular_polynomial(coefficients, modulus);
+    if polynomial.is_empty() {
+        return Ok(false);
+    }
+
+    let ring_polynomial = negacyclic_modulus_polynomial(ring_degree);
+    let greatest_common_divisor =
+        modular_polynomial_greatest_common_divisor(polynomial, ring_polynomial, modulus)?;
+    Ok(greatest_common_divisor.len() == 1 && greatest_common_divisor[0].is_one())
+}
+
+fn centered_coefficients_to_modular_polynomial(
+    coefficients: &[i64],
+    modulus: &BigUint,
+) -> Vec<BigUint> {
+    let mut polynomial = coefficients
+        .iter()
+        .map(|coefficient| {
+            if *coefficient >= 0 {
+                BigUint::from(*coefficient as u64) % modulus
+            } else {
+                let magnitude = BigUint::from(coefficient.unsigned_abs()) % modulus;
+                if magnitude.is_zero() {
+                    BigUint::zero()
+                } else {
+                    modulus.clone() - magnitude
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    trim_modular_polynomial(&mut polynomial);
+
+    polynomial
+}
+
+fn negacyclic_modulus_polynomial(ring_degree: usize) -> Vec<BigUint> {
+    let mut polynomial = vec![BigUint::zero(); ring_degree + 1];
+    polynomial[0] = BigUint::one();
+    polynomial[ring_degree] = BigUint::one();
+    polynomial
+}
+
+fn modular_polynomial_greatest_common_divisor(
+    mut left: Vec<BigUint>,
+    mut right: Vec<BigUint>,
+    modulus: &BigUint,
+) -> CanonicalResult<Vec<BigUint>> {
+    trim_modular_polynomial(&mut left);
+    trim_modular_polynomial(&mut right);
+
+    while !right.is_empty() {
+        let remainder = modular_polynomial_remainder(left, &right, modulus)?;
+        left = right;
+        right = remainder;
+    }
+
+    if left.is_empty() {
+        return Ok(left);
+    }
+    let leading_inverse = modular_inverse(
+        left.last()
+            .expect("non-empty modular polynomial has a leading coefficient"),
+        modulus,
+    )?;
+    for coefficient in &mut left {
+        *coefficient = (coefficient.clone() * &leading_inverse) % modulus;
+    }
+    trim_modular_polynomial(&mut left);
+
+    Ok(left)
+}
+
+fn modular_polynomial_remainder(
+    mut numerator: Vec<BigUint>,
+    denominator: &[BigUint],
+    modulus: &BigUint,
+) -> CanonicalResult<Vec<BigUint>> {
+    let mut denominator = denominator.to_vec();
+    trim_modular_polynomial(&mut denominator);
+    if denominator.is_empty() {
+        return Err(setup_proof_error(
+            "setup proof modular polynomial division by zero",
+        ));
+    }
+
+    let denominator_degree = denominator.len() - 1;
+    let denominator_leading_inverse = modular_inverse(
+        denominator
+            .last()
+            .expect("non-empty denominator has a leading coefficient"),
+        modulus,
+    )?;
+
+    trim_modular_polynomial(&mut numerator);
+    while !numerator.is_empty() && numerator.len() >= denominator.len() {
+        let numerator_degree = numerator.len() - 1;
+        let shift = numerator_degree - denominator_degree;
+        let scale = (numerator[numerator_degree].clone() * &denominator_leading_inverse) % modulus;
+        if !scale.is_zero() {
+            for (denominator_index, denominator_coefficient) in denominator.iter().enumerate() {
+                let target_index = shift + denominator_index;
+                let product = (&scale * denominator_coefficient) % modulus;
+                let current = numerator[target_index].clone();
+                numerator[target_index] = if current >= product {
+                    current - product
+                } else {
+                    (current + modulus.clone()) - product
+                };
+                numerator[target_index] = numerator[target_index].clone() % modulus;
+            }
+        }
+        trim_modular_polynomial(&mut numerator);
+    }
+
+    Ok(numerator)
+}
+
+fn modular_inverse(value: &BigUint, modulus: &BigUint) -> CanonicalResult<BigUint> {
+    if value.is_zero() {
+        return Err(setup_proof_error(
+            "setup proof modular inverse of zero is undefined",
+        ));
+    }
+    let exponent = modulus - BigUint::from(2_u32);
+
+    Ok(value.modpow(&exponent, modulus))
+}
+
+fn trim_modular_polynomial(polynomial: &mut Vec<BigUint>) {
+    while polynomial.last().is_some_and(BigUint::is_zero) {
+        polynomial.pop();
+    }
+}
+
+pub(super) fn setup_proof_challenge_space_audit_value(
+    ring_degree: usize,
+) -> CanonicalResult<Value> {
+    let sample_positions = challenge_sample_positions(ring_degree)?;
+    let proof_modulus = setup_proof_lnp_tbox_proof_modulus();
+    let mut family_challenges = Vec::new();
+    for proof_family in SETUP_PROOF_FAMILIES {
+        let statement_hash = challenge_audit_statement_hash(proof_family);
+        let relation_commitment_hash = challenge_audit_relation_commitment_hash(proof_family);
+        let challenge_coefficients = derive_setup_proof_challenge_coefficients(
+            proof_family,
+            &statement_hash,
+            &relation_commitment_hash,
+            ring_degree,
+        )?;
+        let samples = sampled_challenge_coefficients(&challenge_coefficients, &sample_positions);
+        family_challenges.push((
+            *proof_family,
+            statement_hash,
+            relation_commitment_hash,
+            challenge_coefficients,
+            samples,
+        ));
+    }
+
+    let mut sampled_difference_checks = Vec::new();
+    for left_index in 0..family_challenges.len() {
+        for right_index in (left_index + 1)..family_challenges.len() {
+            let left = &family_challenges[left_index];
+            let right = &family_challenges[right_index];
+            let difference_coefficients = subtract_centered_coefficients(&left.3, &right.3)?;
+            let coefficient_infinity_norm =
+                centered_coefficient_infinity_norm(&difference_coefficients);
+            let difference_samples =
+                sampled_challenge_coefficients(&difference_coefficients, &sample_positions);
+            sampled_difference_checks.push(json!({
+                "leftProofFamily": left.0,
+                "rightProofFamily": right.0,
+                "coefficientInfinityNorm": coefficient_infinity_norm,
+                "differenceCoefficientBound": SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND * 2,
+                "sampledDifferenceCoefficients": difference_samples,
+                "invertibleOverProofRing": centered_polynomial_is_invertible_mod_negacyclic(
+                    &difference_coefficients,
+                    ring_degree,
+                    &proof_modulus,
+                )?,
+            }));
+        }
+    }
+
+    let family_samples = family_challenges
+        .iter()
+        .map(
+            |(
+                proof_family,
+                statement_hash,
+                relation_commitment_hash,
+                _challenge_coefficients,
+                samples,
+            )| {
+                json!({
+                    "proofFamily": proof_family,
+                    "statementHash": statement_hash,
+                    "relationCommitmentHash": relation_commitment_hash,
+                    "sampledCoefficients": samples,
+                })
+            },
+        )
         .collect::<Vec<_>>();
 
     Ok(json!({
         "objectType": "SetupProofChallengeSpaceAudit",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "proofFamily": "same-secret-consistency",
+        "proofFamilies": SETUP_PROOF_FAMILIES,
         "applicationRingDegree": POLYNOMIAL_DEGREE,
         "lnpTboxProofRingDegree": ring_degree,
         "challengeCoefficientBound": SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND,
@@ -921,10 +1200,21 @@ pub(super) fn setup_proof_challenge_space_audit_value(
         "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
         "challengeSeedDomain": SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
         "challengeStreamDomain": SETUP_PROOF_CHALLENGE_STREAM_DOMAIN,
-        "statementHash": statement_hash,
-        "relationCommitmentHash": relation_commitment_hash,
-        "sampledCoefficients": samples,
+        "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
+        "challengeDifferenceInvertibilityAccounting": challenge_difference_invertibility_accounting_value()?,
+        "familySamples": family_samples,
+        "sampledDifferenceChecks": sampled_difference_checks,
     }))
+}
+
+pub(super) fn setup_proof_challenge_space_audit_hash(
+    namespace: &str,
+    ring_degree: usize,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        namespace,
+        &setup_proof_challenge_space_audit_value(ring_degree)?,
+    )
 }
 
 pub(super) fn derive_setup_proof_challenge_coefficients(
@@ -1653,6 +1943,49 @@ mod tests {
             wrong_family_error.code,
             CanonicalErrorCode::ProfileComponentMismatch
         );
+    }
+
+    #[test]
+    fn setup_proof_challenge_space_audit_covers_all_families_and_invertible_differences() {
+        let accounting = challenge_difference_invertibility_accounting_value()
+            .expect("challenge difference accounting");
+        assert_eq!(
+            accounting["status"],
+            SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS
+        );
+        assert_eq!(accounting["conditionSatisfied"], true);
+
+        let audit = setup_proof_challenge_space_audit_value(SETUP_PROOF_LNP_PROOF_RING_DEGREE)
+            .expect("challenge audit");
+        let family_samples = audit["familySamples"].as_array().expect("family samples");
+        assert_eq!(family_samples.len(), SETUP_PROOF_FAMILIES.len());
+        for proof_family in SETUP_PROOF_FAMILIES {
+            assert!(
+                family_samples.iter().any(|sample| {
+                    sample["proofFamily"].as_str() == Some(proof_family)
+                        && sample["sampledCoefficients"]
+                            .as_array()
+                            .is_some_and(|coefficients| {
+                                coefficients.len()
+                                    == challenge_sample_positions(SETUP_PROOF_LNP_PROOF_RING_DEGREE)
+                                        .expect("sample positions")
+                                        .len()
+                            })
+                }),
+                "missing challenge audit family {proof_family}"
+            );
+        }
+
+        let sampled_difference_checks = audit["sampledDifferenceChecks"]
+            .as_array()
+            .expect("sampled difference checks");
+        assert_eq!(sampled_difference_checks.len(), 10);
+        assert!(sampled_difference_checks.iter().all(|check| {
+            check["invertibleOverProofRing"].as_bool() == Some(true)
+                && check["coefficientInfinityNorm"]
+                    .as_u64()
+                    .is_some_and(|norm| norm <= SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND * 2)
+        }));
     }
 
     #[test]

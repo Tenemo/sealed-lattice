@@ -67,6 +67,9 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
+const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
+    JSON.parse(JSON.stringify(value)) as JsonRecord;
+
 const textEncoder = new TextEncoder();
 const acceptedDevelopmentRingDegree = 8;
 const firstProfileParticipantCount = 10;
@@ -76,6 +79,32 @@ const setupTransportChunkSizeBytes = 1_048_576;
 const setupTransportTotalByteLength = 1_069_547_520;
 const setupTransportChunkCount =
     setupTransportTotalByteLength / setupTransportChunkSizeBytes;
+const setupProofFamilies = [
+    'vss-opening-carry',
+    'same-secret-consistency',
+    'public-key-share',
+    'relinearization-key-share',
+    'galois-key-share',
+] as const;
+const setupProofChallengeDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-challenge-v1';
+const setupProofChallengeSampler =
+    'sealed-lattice-shake256-lazer-autostable-rejection-v1';
+const setupProofChallengeSpace =
+    'fixed-lnp-small-coefficient-polynomial-challenge-set';
+const setupProofChallengeSeedDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-challenge-seed-v1';
+const setupProofChallengeStreamDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-challenge-stream-v1';
+const setupProofBytesDomain =
+    'sealed-lattice/collective-bgv-setup/lnp-proof-bytes-v1';
+const setupProofSerialization = 'binary';
+const setupProofByteDecoder =
+    'sealed-lattice-lnp-tbox-proof-byte-decoder-v1';
+const setupProofChallengeSpaceAuditHashNamespace =
+    'SetupProofChallengeSpaceAuditHash';
+const setupProofChallengeDifferenceInvertibilityStatus =
+    'claim-accounting-required-before-claim-closure';
 
 const hexToBytes = (hexValue: string): Uint8Array =>
     Uint8Array.from(
@@ -855,9 +884,9 @@ function acceptedSetupCommitmentSecurityCertificate(
             'same-secret trustee commitment roots',
         ],
         nonClosure: [
-            'same-secret proof still requires external AB-DLOP/LNP review and full tbox closure',
-            'public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure',
-            'relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
+            'same-secret proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure',
+            'public-key share proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure',
+            'relinearization and Galois proof bytes need repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting, full tbox closure, profile-scale streaming, and accepted assembly closure',
             'setup-proof Fiat-Shamir/QROM composition certificate remains separate',
         ],
         ringAndMatrixParameters: {
@@ -894,7 +923,7 @@ function acceptedSetupCommitmentSecurityCertificate(
                 commitmentModulusProduct.toString(),
             freshMessageNoWrap:
                 BigInt(maxSourceMessageModulus - 1) < commitmentModulusProduct,
-            status: 'review-gated-full-width-per-rns-message-bound-recorded',
+            status: 'claim-accounting-full-width-per-rns-message-bound-recorded',
         },
         aggregateOpeningBounds: {
             shamirCoefficientCount: firstProfileDecryptionThreshold,
@@ -913,7 +942,7 @@ function acceptedSetupCommitmentSecurityCertificate(
                 commitmentModulusProduct.toString(),
             recipientAndThresholdNoWrap: true,
             boundStatus:
-                'review-gated-first-profile-homomorphic-opening-bounds-recorded',
+                'claim-accounting-first-profile-homomorphic-opening-bounds-recorded',
         },
         multiOpeningLeakage: {
             recipientAggregateOpeningsArePublic: false,
@@ -925,7 +954,7 @@ function acceptedSetupCommitmentSecurityCertificate(
             perCoefficientRandomnessExported: false,
             thresholdBoundary:
                 'recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses',
-            status: 'review-gated-active-static-threshold-leakage-bound-recorded',
+            status: 'claim-accounting-active-static-threshold-leakage-bound-recorded',
         },
         bindingAssumption: {
             assumption: 'Module-SIS',
@@ -959,7 +988,7 @@ function acceptedSetupCommitmentSecurityCertificate(
                 },
             ],
             estimatorStatus:
-                'review-gated-external-module-sis-parameter-certificate-required',
+                'repo-owned-module-sis-parameter-accounting-required',
         },
         hidingAssumption: {
             assumption:
@@ -968,9 +997,9 @@ function acceptedSetupCommitmentSecurityCertificate(
             publicMatrixDistribution: 'hash-derived-uniform-residue-stream',
             lowEntropySecretHiding: true,
             statisticalLeakageStatus:
-                'review-gated-for-recipient-hidden-aggregate-opening-proof-witnesses',
+                'repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-required',
             estimatorStatus:
-                'review-gated-external-module-lwe-parameter-certificate-required',
+                'repo-owned-module-lwe-parameter-accounting-required',
         },
         estimatorRows: [
             {
@@ -981,7 +1010,7 @@ function acceptedSetupCommitmentSecurityCertificate(
                 moduleRank: 2,
                 modulusCeilBits: commitmentModulusProductBits,
                 shortVectorInfinityBoundDecimal: thresholdScalarSum.toString(),
-                status: 'review-gated',
+                status: 'claim-accounting-pending',
             },
             {
                 rowId: 'first-profile-module-lwe-hiding-row',
@@ -991,17 +1020,170 @@ function acceptedSetupCommitmentSecurityCertificate(
                 moduleRank: 2,
                 secretDistribution: 'centered-ternary-opening',
                 modulusCeilBits: commitmentModulusProductBits,
-                status: 'review-gated',
+                status: 'claim-accounting-pending',
             },
         ],
         certificateStatus:
-            'review-gated-not-claim-bearing-until-external-parameter-certificate-and-setup-proof-verifiers',
+            'not-claim-bearing-until-repo-owned-parameter-certificate-and-setup-proof-accounting-close',
     };
 
     return {
         ...certificate,
         setupCommitmentSecurityCertificateHash: kernel.deriveProtocolHash({
             namespace: 'SetupCommitmentSecurityCertificateHash',
+            value: certificate,
+        }),
+    };
+}
+
+function setupProofRecordBindingForCertificate(
+    profile: BgvCollectiveSetupProfileDescription,
+): JsonRecord {
+    const setupProofProfile = profile.setupProofProfile as JsonRecord;
+    const challengeBinding = setupProofProfile.challengeBinding as JsonRecord;
+    const relationModel = setupProofProfile.relationModel as JsonRecord;
+    const verificationPolicy = setupProofProfile.verificationPolicy as JsonRecord;
+
+    return {
+        objectType: 'SetupProofRecordBinding',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId: setupProofProfile.profileId,
+        setupProofProfileHash: profile.setupProofProfileHash,
+        proofSystem: setupProofProfile.proofSystem,
+        challengeDomain: challengeBinding.challengeDomain,
+        challengeDomainHash: challengeBinding.challengeDomainHash,
+        challengeBits: challengeBinding.challengeBits,
+        challengeCount: challengeBinding.challengeCount,
+        challengeCoefficientBound: challengeBinding.challengeCoefficientBound,
+        applicationRingDegree: relationModel.applicationRingDegree,
+        lnpTboxProofRingDegree: challengeBinding.lnpTboxProofRingDegree,
+        lnpTboxChallengeLog2Range:
+            challengeBinding.lnpTboxChallengeLog2Range,
+        lnpTboxChallengeEncodedBits:
+            challengeBinding.lnpTboxChallengeEncodedBits,
+        lnpTboxChallengeSpaceBits:
+            challengeBinding.lnpTboxChallengeSpaceBits,
+        challengeSpace: challengeBinding.challengeSpace,
+        challengeSampler: challengeBinding.challengeSampler,
+        challengeSeedDomain: setupProofChallengeSeedDomain,
+        challengeStreamDomain: setupProofChallengeStreamDomain,
+        challengeDifferenceInvertibilityStatus:
+            challengeBinding.challengeDifferenceInvertibilityStatus,
+        proofBytesDomain: setupProofBytesDomain,
+        proofSerialization: setupProofSerialization,
+        proofByteDecoder: setupProofByteDecoder,
+        privateVssShareTboxParameterProfileHash:
+            setupProofProfile.privateVssShareTboxParameterProfileHash,
+        sameSecretTboxParameterProfileHash:
+            setupProofProfile.sameSecretTboxParameterProfileHash,
+        publicKeyShareTboxParameterProfileHash:
+            setupProofProfile.publicKeyShareTboxParameterProfileHash,
+        relinearizationKeyShareTboxParameterProfileHash:
+            setupProofProfile.relinearizationKeyShareTboxParameterProfileHash,
+        galoisKeyShareTboxParameterProfileHash:
+            setupProofProfile.galoisKeyShareTboxParameterProfileHash,
+        proofBytesAcceptedStatus:
+            verificationPolicy.proofBytesAcceptedStatus,
+    };
+}
+
+function acceptedSetupProofAccountingCertificate(
+    kernel: TranscriptCoreKernel,
+    profile: BgvCollectiveSetupProfileDescription,
+): JsonRecord {
+    const setupProofRecordBinding =
+        setupProofRecordBindingForCertificate(profile);
+    const setupProofProfile = profile.setupProofProfile as JsonRecord;
+    const challengeBinding = setupProofProfile.challengeBinding as JsonRecord;
+    const challengeSpaceAudit =
+        setupProofProfile.challengeSpaceAudit as JsonRecord;
+    const certificate = {
+        objectType: 'SetupProofAccountingCertificate',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProfileHash: profile.setupProfileHash,
+        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        setupProofProfileHash: profile.setupProofProfileHash,
+        setupProofRecordBinding,
+        setupProofRecordBindingHash: kernel.deriveProtocolHash({
+            namespace: 'SetupProofRecordBindingHash',
+            value: setupProofRecordBinding,
+        }),
+        proofFamilies: setupProofFamilies,
+        proofFamilyAccounting: [
+            {
+                proofFamily: 'vss-opening-carry',
+                claimScope:
+                    'recipient-local private VSS share proof relation over accepted Q_share limbs',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'same-secret-consistency',
+                claimScope:
+                    'same trustee secret across accepted VSS constant commitments',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'public-key-share',
+                claimScope:
+                    'public-key share relation bound to the accepted same-secret proof and public-key material roots',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'relinearization-key-share',
+                claimScope:
+                    'relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+            {
+                proofFamily: 'galois-key-share',
+                claimScope:
+                    'Galois key-share relation bound to the required automorphism schedule and key-switch component roots',
+                accountingStatus:
+                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+            },
+        ],
+        challengeAccounting: {
+            transform: 'Fiat-Shamir',
+            challengeDomain: setupProofChallengeDomain,
+            challengeDomainHash: challengeBinding.challengeDomainHash,
+            challengeSampler: setupProofChallengeSampler,
+            challengeSpace: setupProofChallengeSpace,
+            challengeDifferenceInvertibilityStatus:
+                setupProofChallengeDifferenceInvertibilityStatus,
+            challengeSpaceAudit,
+            challengeSpaceAuditHash: kernel.deriveProtocolHash({
+                namespace: setupProofChallengeSpaceAuditHashNamespace,
+                value: challengeSpaceAudit,
+            }),
+            randomOracleModel:
+                'repo-owned Fiat-Shamir/QROM accounting required before claim-bearing proof acceptance',
+            qromStatus:
+                'repo-owned-qrom-accounting-required-before-claim-closure',
+            transcriptBinding: challengeBinding.transcriptBinding,
+        },
+        tboxAccounting: {
+            tboxProfileHashBinding:
+                'all-required-setup-proof-tbox-profile-hashes-bound',
+            requiredFamilies: setupProofFamilies,
+            status:
+                'full setup LNP tbox quadratic and range accounting required before claim-bearing proof acceptance',
+        },
+        completionBoundary:
+            'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
+        certificateStatus:
+            'not-claim-bearing-until-repo-owned-proof-accounting-and-theorem-closure',
+    };
+
+    return {
+        ...certificate,
+        setupProofAccountingCertificateHash: kernel.deriveProtocolHash({
+            namespace: 'SetupProofAccountingCertificateHash',
             value: certificate,
         }),
     };
@@ -1101,7 +1283,7 @@ function acceptedHeSecurityCertificate(
                 setupProfile.evaluatorKeyScheduleProfile
                     .requiredGaloisKeySchedule.length,
             evaluationKeyExposureStatus:
-                'root-bound-review-gated-relinearization-and-galois-key-material-exposed',
+                'root-bound-claim-accounting-pending-relinearization-and-galois-key-material-exposed',
             commitmentAndSetupProofPublicMatrices:
                 'covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples',
         },
@@ -1418,6 +1600,8 @@ async function acceptedShapedSetupPackage(
     );
     const setupCommitmentSecurityCertificate =
         acceptedSetupCommitmentSecurityCertificate(kernel, profile);
+    const setupProofAccountingCertificate =
+        acceptedSetupProofAccountingCertificate(kernel, profile);
     const heSecurityCertificate = acceptedHeSecurityCertificate(
         kernel,
         profile,
@@ -1455,6 +1639,9 @@ async function acceptedShapedSetupPackage(
         setupTransportCertificate,
         setupTransportCertificateHash:
             setupTransportCertificate.setupTransportCertificateHash,
+        setupProofAccountingCertificate,
+        setupProofAccountingCertificateHash:
+            setupProofAccountingCertificate.setupProofAccountingCertificateHash,
         heSecurityCertificate,
         heSecurityCertificateHash:
             heSecurityCertificate.heSecurityCertificateHash,
@@ -1494,7 +1681,7 @@ describe('collective BGV setup kernel commands', () => {
         expect(
             profile.commitmentProfile.assumptions.parameterAcceptanceStatus,
         ).toBe(
-            'review-gated-not-claim-bearing-until-external-certificate-and-proof-verifiers',
+            'not-claim-bearing-until-repo-owned-certificate-and-proof-accounting-close',
         );
         expect(profile.publicVssCommitmentMaterialSizeProfile).toMatchObject({
             objectType: 'PublicVssCommitmentMaterialSizeProfile',
@@ -1661,10 +1848,11 @@ describe('collective BGV setup kernel commands', () => {
     it('refuses undeclared generic key-switch material and non-binary transport', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeCollectiveBgvSetupProfile();
-        const genericKeySwitchPackage = await acceptedShapedSetupPackage(
+        const baseSetupPackage = await acceptedShapedSetupPackage(
             kernel,
             profile,
         );
+        const genericKeySwitchPackage = cloneJsonRecord(baseSetupPackage);
         genericKeySwitchPackage.genericKeySwitchKeys = {
             keyRoot: validHash('8'),
         };
@@ -1680,7 +1868,7 @@ describe('collective BGV setup kernel commands', () => {
         );
 
         const malformedCommitmentCertificatePackage =
-            await acceptedShapedSetupPackage(kernel, profile);
+            cloneJsonRecord(baseSetupPackage);
         const malformedCommitmentCertificate =
             malformedCommitmentCertificatePackage.setupCommitmentSecurityCertificate as JsonRecord;
         (
@@ -1703,10 +1891,7 @@ describe('collective BGV setup kernel commands', () => {
             malformedCommitmentCertificateResult.refusedObjects[0]?.reasonCode,
         ).toBe('commitmentSecurityCertificatePayloadMismatch');
 
-        const jsonTransportPackage = await acceptedShapedSetupPackage(
-            kernel,
-            profile,
-        );
+        const jsonTransportPackage = cloneJsonRecord(baseSetupPackage);
         (
             jsonTransportPackage.setupTransportCertificate as JsonRecord
         ).largeObjectEncoding = 'json';
@@ -1721,10 +1906,7 @@ describe('collective BGV setup kernel commands', () => {
             'transportEncodingMismatch',
         );
 
-        const malformedTransportPackage = await acceptedShapedSetupPackage(
-            kernel,
-            profile,
-        );
+        const malformedTransportPackage = cloneJsonRecord(baseSetupPackage);
         const malformedTransportCertificate =
             malformedTransportPackage.setupTransportCertificate as JsonRecord;
         (malformedTransportCertificate.chunkHashes as string[]).pop();

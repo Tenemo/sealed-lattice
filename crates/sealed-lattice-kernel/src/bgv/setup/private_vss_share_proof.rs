@@ -45,8 +45,8 @@ pub(super) const PRIVATE_VSS_SHARE_PROOF_PROFILE_ID: &str =
     "sealed-lattice-private-vss-share-proof-lnp-v1";
 pub(super) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 pub(super) const PRIVATE_VSS_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-private-vss-share-relation-verified-review-gated";
-pub(super) const PRIVATE_VSS_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, hidden coefficient opening responses, hidden carry responses, carry-aware VSS share algebra, and fixed response bounds verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing VSS acceptance";
+    "lnp-private-vss-share-relation-verified-claim-accounting-pending";
+pub(super) const PRIVATE_VSS_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, hidden coefficient opening responses, hidden carry responses, carry-aware VSS share algebra, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing VSS acceptance";
 
 pub(super) struct PrivateVssShareLnpProofVerificationInput<'a> {
     pub(super) setup_context: &'a Value,
@@ -903,7 +903,7 @@ fn private_vss_share_lnp_statement_value(
         )?,
         "relation": "for hidden Shamir coefficient polynomials F_k and hidden carry v, sum_k alpha^k F_k = sigma + q_l*v over lifted integers while every F_k opens the published setup commitment",
         "carryBound": carry_bound,
-        "nonClosure": "external AB-DLOP/LNP soundness and zero-knowledge review plus production proof generation and transported private proof material remain pending",
+        "nonClosure": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus profile-scale proof generation and transported private proof material remain pending",
     }))
 }
 

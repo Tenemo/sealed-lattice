@@ -349,7 +349,7 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly genericKeySwitchPolicy: 'refused-unless-explicitly-required';
         readonly genericKeySwitchProofStatus: 'not-required-for-first-profile';
-        readonly scheduleBindingStatus: 'relinearization-and-galois-proof-verifiers-pending';
+        readonly scheduleBindingStatus: 'relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending';
     };
     readonly evaluatorKeyScheduleProfileHash: ProtocolHash;
     readonly verifierStatuses: readonly [
