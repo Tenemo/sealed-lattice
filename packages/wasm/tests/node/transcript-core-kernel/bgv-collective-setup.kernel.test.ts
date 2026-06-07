@@ -856,8 +856,8 @@ function acceptedSetupCommitmentSecurityCertificate(
         ],
         nonClosure: [
             'same-secret proof still requires external AB-DLOP/LNP review and full tbox closure',
-            'public-key share proof bytes still require no-wrap LNP verification',
-            'relinearization and Galois proof bytes remain review-gated until round-two aggregate-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
+            'public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure',
+            'relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
             'setup-proof Fiat-Shamir/QROM composition certificate remains separate',
         ],
         ringAndMatrixParameters: {
@@ -1275,7 +1275,27 @@ function acceptedSetupTransportCertificate(
     };
 }
 
-let acceptedShapedSetupPackageCache: Promise<string> | undefined;
+const acceptedShapedSetupPackageCacheByProfileKey = new Map<
+    string,
+    Promise<string>
+>();
+
+function acceptedShapedSetupPackageCacheKey(
+    kernel: TranscriptCoreKernel,
+    profile: BgvCollectiveSetupProfileDescription,
+): string {
+    const bgvProfile = kernel.describeBgvRnsProfile();
+
+    return [
+        profile.setupProfileId,
+        profile.setupProfileHash,
+        profile.qShareHash,
+        profile.carryAwareVssShareRelationProfileHash,
+        profile.commitmentProfileHash,
+        bgvProfile.profileHash,
+        bgvProfile.backendProfileHash,
+    ].join('|');
+}
 
 async function buildAcceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
@@ -1470,13 +1490,22 @@ async function acceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): Promise<JsonRecord> {
-    acceptedShapedSetupPackageCache ??= buildAcceptedShapedSetupPackage(
-        kernel,
-        profile,
-    ).then((setupPackage) => JSON.stringify(setupPackage));
+    const cacheKey = acceptedShapedSetupPackageCacheKey(kernel, profile);
+    let acceptedShapedSetupPackageJson =
+        acceptedShapedSetupPackageCacheByProfileKey.get(cacheKey);
+    if (acceptedShapedSetupPackageJson === undefined) {
+        acceptedShapedSetupPackageJson = buildAcceptedShapedSetupPackage(
+            kernel,
+            profile,
+        ).then((setupPackage) => JSON.stringify(setupPackage));
+        acceptedShapedSetupPackageCacheByProfileKey.set(
+            cacheKey,
+            acceptedShapedSetupPackageJson,
+        );
+    }
 
     const setupPackage: unknown = JSON.parse(
-        await acceptedShapedSetupPackageCache,
+        await acceptedShapedSetupPackageJson,
     );
     if (
         typeof setupPackage !== 'object' ||

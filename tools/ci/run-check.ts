@@ -313,7 +313,14 @@ const buildRustKernelLane = (): ValidationLane => ({
         ),
         createCargoCommand(
             'cargo test (optimized test profile)',
-            ['test', '-p', 'sealed-lattice-kernel', '--quiet'],
+            [
+                'test',
+                '-p',
+                'sealed-lattice-kernel',
+                '--quiet',
+                '--',
+                '--show-output',
+            ],
             'cargo-test',
         ),
     ],

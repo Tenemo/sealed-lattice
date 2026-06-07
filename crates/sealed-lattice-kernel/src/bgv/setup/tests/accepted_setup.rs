@@ -1,4 +1,4 @@
-﻿use super::super::accepted_setup::{
+use super::super::accepted_setup::{
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
     PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING, accepted_hashes_from_package,
@@ -58,6 +58,7 @@ use crate::protocol_signatures::{
 use crate::transcript_core::decode_hex;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
@@ -70,6 +71,36 @@ static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<se
 static EVALUATION_KEY_PROOF_CONTAINER_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     serde_json::Value,
 > = OnceLock::new();
+
+struct AcceptedSetupTestTiming {
+    started_at: Instant,
+    test_name: &'static str,
+}
+
+impl Drop for AcceptedSetupTestTiming {
+    fn drop(&mut self) {
+        let duration = self.started_at.elapsed();
+        println!(
+            concat!(
+                "sealed-lattice-rust-test-timing ",
+                "{{\"suite\":\"bgv::setup::tests::accepted_setup\",",
+                "\"test\":\"{}\",",
+                "\"durationMilliseconds\":{},",
+                "\"durationMicroseconds\":{}}}"
+            ),
+            self.test_name,
+            duration.as_millis(),
+            duration.as_micros()
+        );
+    }
+}
+
+fn accepted_setup_test_timing(test_name: &'static str) -> AcceptedSetupTestTiming {
+    AcceptedSetupTestTiming {
+        started_at: Instant::now(),
+        test_name,
+    }
+}
 
 fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
     derive_protocol_hash(
@@ -96,6 +127,8 @@ fn private_vss_mailbox_public_key_bytes_hash(roster_position: u64) -> String {
 
 #[test]
 fn collective_setup_profile_exposes_first_profile_state_machine() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_profile_exposes_first_profile_state_machine");
     let profile = describe_collective_bgv_setup_profile().expect("profile");
 
     assert_eq!(profile["setupProfileId"], "CollectiveBgvSetup-v1");
@@ -238,6 +271,8 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
 
 #[test]
 fn collective_setup_verifier_refuses_passive_setup_packages() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_refuses_passive_setup_packages");
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": setup_package(),
     }))
@@ -253,6 +288,8 @@ fn collective_setup_verifier_refuses_passive_setup_packages() {
 
 #[test]
 fn collective_setup_verifier_reports_missing_phase_as_pending() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_reports_missing_phase_as_pending");
     let mut package = minimal_collective_setup_package();
     package
         .as_object_mut()
@@ -276,6 +313,8 @@ fn collective_setup_verifier_reports_missing_phase_as_pending() {
 
 #[test]
 fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_detects_phase_forks_and_wrong_order");
     let mut forked_package = minimal_collective_setup_package();
     let first_phase = forked_package["phaseTranscript"][0].clone();
     let mut forked_phase = first_phase.clone();
@@ -313,6 +352,9 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
 
 #[test]
 fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots",
+    );
     let mut stale_epoch_package = minimal_collective_setup_package();
     stale_epoch_package["phaseTranscript"][1]["setupEpoch"] = serde_json::json!("old-epoch");
     rebind_collective_setup_package_hash(&mut stale_epoch_package);
@@ -346,6 +388,9 @@ fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding",
+    );
     let mut package = minimal_collective_setup_package();
     let participant = &mut package["phaseTranscript"][0]["participantPhaseObjects"][0];
     let signature_envelope = participant
@@ -393,6 +438,8 @@ fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() 
 
 #[test]
 fn collective_setup_verifier_refuses_bad_common_randomness() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_refuses_bad_common_randomness");
     let mut missing_reveal_package = minimal_collective_setup_package();
     missing_reveal_package["commonRandomness"]["revealRecords"]
         .as_array_mut()
@@ -485,6 +532,9 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_vss_commitment_records() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_vss_commitment_records",
+    );
     let mut array_package = minimal_collective_setup_package();
     array_package["vssCoefficientCommitments"] = serde_json::json!([]);
     rebind_collective_setup_package_hash(&mut array_package);
@@ -520,6 +570,9 @@ fn collective_setup_verifier_refuses_malformed_vss_commitment_records() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_threshold_commitment_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_threshold_commitment_material",
+    );
     let mut array_package = minimal_collective_setup_package();
     array_package["vssCoefficientCommitmentMaterial"] = serde_json::json!([]);
     rebind_collective_setup_package_hash(&mut array_package);
@@ -556,6 +609,9 @@ fn collective_setup_verifier_refuses_malformed_threshold_commitment_material() {
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_threshold_share_commitments() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_threshold_share_commitments",
+    );
     let mut tampered_threshold_package = minimal_collective_setup_package();
     tampered_threshold_package["thresholdShareCommitments"]["recipientRecords"][0]["limbCommitments"]
         [0]["ringDegreeStatus"] = serde_json::json!("profile-ring");
@@ -577,6 +633,9 @@ fn collective_setup_verifier_refuses_tampered_threshold_share_commitments() {
 
 #[test]
 fn collective_setup_verifier_consumes_transported_threshold_material_when_supplied() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_consumes_transported_threshold_material_when_supplied",
+    );
     let mut package = minimal_collective_setup_package();
     let material_bytes = encode_transport_material_from_package(&package);
     let transported_material = transported_material_value(&material_bytes);
@@ -629,6 +688,9 @@ fn collective_setup_verifier_consumes_transported_threshold_material_when_suppli
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments",
+    );
     let mut array_package = minimal_collective_setup_package();
     array_package["privateVssEnvelopeCommitments"] = serde_json::json!([]);
     rebind_collective_setup_package_hash(&mut array_package);
@@ -799,6 +861,9 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_vss_share_acceptance_records",
+    );
     let mut array_package = minimal_collective_setup_package();
     array_package["vssShareAcceptances"] = serde_json::json!([]);
     rebind_collective_setup_package_hash(&mut array_package);
@@ -902,6 +967,9 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_same_secret_statements() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_same_secret_statements",
+    );
     let mut wrong_constant_package = minimal_collective_setup_package();
     wrong_constant_package["sameSecretConsistency"]["statementRecords"][0]["constantCoefficientCommitmentRoots"]
         [0]["commitmentRoot"] = serde_json::json!(valid_hash('4'));
@@ -959,6 +1027,9 @@ fn collective_setup_verifier_refuses_malformed_same_secret_statements() {
 
 #[test]
 fn collective_setup_verifier_checks_same_secret_lnp_proofs_before_public_key_acceptance() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_same_secret_lnp_proofs_before_public_key_acceptance",
+    );
     let package = same_secret_proof_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -976,6 +1047,9 @@ fn collective_setup_verifier_checks_same_secret_lnp_proofs_before_public_key_acc
 
 #[test]
 fn collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_material",
+    );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     let material_bytes = encode_transport_material_from_package(&package);
     let transported_material = transported_material_value(&material_bytes);
@@ -1019,6 +1093,9 @@ fn collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_mate
 
 #[test]
 fn collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_proof_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_proof_material",
+    );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     let transported_proof_material = move_same_secret_proof_bytes_to_transport(&mut package);
     rebind_collective_setup_package_hash(&mut package);
@@ -1039,6 +1116,9 @@ fn collective_setup_verifier_checks_same_secret_lnp_proofs_from_transported_proo
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_transported_same_secret_proof_chunk() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_transported_same_secret_proof_chunk",
+    );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     let mut transported_proof_material = move_same_secret_proof_bytes_to_transport(&mut package);
     transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
@@ -1060,6 +1140,9 @@ fn collective_setup_verifier_refuses_tampered_transported_same_secret_proof_chun
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_same_secret_lnp_proofs() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_same_secret_lnp_proofs",
+    );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     package["sameSecretProofs"]["proofRecords"][0]["proofBytesHash"] =
         serde_json::json!(valid_hash('6'));
@@ -1079,6 +1162,9 @@ fn collective_setup_verifier_refuses_tampered_same_secret_lnp_proofs() {
 
 #[test]
 fn collective_setup_verifier_refuses_same_secret_proof_family_root_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_same_secret_proof_family_root_drift",
+    );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     package["sameSecretProofs"]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('7'));
@@ -1099,6 +1185,9 @@ fn collective_setup_verifier_refuses_same_secret_proof_family_root_drift() {
 
 #[test]
 fn collective_setup_verifier_refuses_same_secret_proof_family_record_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_same_secret_proof_family_record_drift",
+    );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     package["sameSecretProofs"]["proofRecords"][0]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('8'));
@@ -1119,6 +1208,9 @@ fn collective_setup_verifier_refuses_same_secret_proof_family_record_drift() {
 
 #[test]
 fn collective_setup_verifier_refuses_same_secret_setup_proof_challenge_domain_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_same_secret_setup_proof_challenge_domain_drift",
+    );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     package["sameSecretProofs"]["proofRecords"][0]["setupProofBinding"]["challengeDomainHash"] =
         serde_json::json!(valid_hash('7'));
@@ -1139,6 +1231,9 @@ fn collective_setup_verifier_refuses_same_secret_setup_proof_challenge_domain_dr
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_public_key_share_statements",
+    );
     let mut wrong_public_a_package = minimal_collective_setup_package();
     wrong_public_a_package["publicKeyShares"]["shareRecords"][0]["publicAPolynomialRoot"] =
         serde_json::json!(valid_hash('8'));
@@ -1178,6 +1273,8 @@ fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
 
 #[test]
 fn collective_setup_verifier_checks_public_key_share_lnp_proofs() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_checks_public_key_share_lnp_proofs");
     let package = public_key_share_lnp_proof_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -1195,6 +1292,9 @@ fn collective_setup_verifier_checks_public_key_share_lnp_proofs() {
 
 #[test]
 fn collective_setup_verifier_checks_public_key_share_lnp_proofs_from_transported_proof_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_public_key_share_lnp_proofs_from_transported_proof_material",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     let transported_proof_material =
         move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
@@ -1216,6 +1316,9 @@ fn collective_setup_verifier_checks_public_key_share_lnp_proofs_from_transported
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_transported_public_key_share_lnp_proof_chunk() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_transported_public_key_share_lnp_proof_chunk",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     let mut transported_proof_material =
         move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
@@ -1238,6 +1341,9 @@ fn collective_setup_verifier_refuses_tampered_transported_public_key_share_lnp_p
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_public_key_share_lnp_material",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     let coefficients_hex = package["publicKeyShareMaterial"]["shareMaterialRecords"][0]
         ["shareCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
@@ -1267,6 +1373,9 @@ fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_material() {
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_proofs() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_public_key_share_lnp_proofs",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHash"] =
         serde_json::json!(valid_hash('a'));
@@ -1286,6 +1395,9 @@ fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_proofs() {
 
 #[test]
 fn collective_setup_verifier_requires_same_secret_proofs_before_public_key_lnp_proofs() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_requires_same_secret_proofs_before_public_key_lnp_proofs",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package
         .as_object_mut()
@@ -1308,6 +1420,9 @@ fn collective_setup_verifier_requires_same_secret_proofs_before_public_key_lnp_p
 
 #[test]
 fn collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_set_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_set_drift",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package["publicKeyShareLnpProofs"]["sameSecretProofSetRoot"] =
         serde_json::json!(valid_hash('b'));
@@ -1328,6 +1443,9 @@ fn collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_set_drift(
 
 #[test]
 fn collective_setup_verifier_refuses_public_key_lnp_same_secret_family_root_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_public_key_lnp_same_secret_family_root_drift",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package["publicKeyShareLnpProofs"]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('d'));
@@ -1348,6 +1466,9 @@ fn collective_setup_verifier_refuses_public_key_lnp_same_secret_family_root_drif
 
 #[test]
 fn collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_root_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_root_drift",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package["publicKeyShareLnpProofs"]["proofRecords"][0]["sameSecretProofRoot"] =
         serde_json::json!(valid_hash('c'));
@@ -1368,6 +1489,9 @@ fn collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_root_drift
 
 #[test]
 fn collective_setup_verifier_refuses_public_key_lnp_same_secret_family_record_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_public_key_lnp_same_secret_family_record_drift",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     package["publicKeyShareLnpProofs"]["proofRecords"][0]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('e'));
@@ -1388,6 +1512,9 @@ fn collective_setup_verifier_refuses_public_key_lnp_same_secret_family_record_dr
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_carry_response() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_public_key_share_lnp_carry_response",
+    );
     let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
     let proof_bytes_hex = package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHex"]
         .as_str()
@@ -1418,6 +1545,9 @@ fn collective_setup_verifier_refuses_tampered_public_key_share_lnp_carry_respons
 
 #[test]
 fn collective_setup_verifier_checks_collective_public_key_from_lnp_proof_bearing_shares() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_collective_public_key_from_lnp_proof_bearing_shares",
+    );
     let package = collective_public_key_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -1435,6 +1565,9 @@ fn collective_setup_verifier_checks_collective_public_key_from_lnp_proof_bearing
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_collective_public_key_aggregate() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_collective_public_key_aggregate",
+    );
     let mut package = collective_public_key_bearing_collective_setup_package();
     let coefficients_hex =
         package["collectivePublicKey"]["aggregateCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
@@ -1468,6 +1601,9 @@ fn collective_setup_verifier_refuses_tampered_collective_public_key_aggregate() 
 
 #[test]
 fn collective_setup_public_key_loader_refuses_reduced_ring_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_public_key_loader_refuses_reduced_ring_material",
+    );
     let package = collective_public_key_bearing_collective_setup_package();
 
     let error = match accepted_setup_collective_public_key_from_package(&package) {
@@ -1485,6 +1621,9 @@ fn collective_setup_public_key_loader_refuses_reduced_ring_material() {
 
 #[test]
 fn collective_setup_verifier_refuses_public_key_material_before_proof_verification() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_public_key_material_before_proof_verification",
+    );
     let mut package = minimal_collective_setup_package();
     package["collectivePublicKeyRoot"] = serde_json::json!(valid_hash('8'));
     rebind_collective_setup_package_hash(&mut package);
@@ -1503,6 +1642,8 @@ fn collective_setup_verifier_refuses_public_key_material_before_proof_verificati
 
 #[test]
 fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_aborts_on_valid_vss_complaint");
     let mut package = minimal_collective_setup_package();
     package["vssComplaints"] = vss_complaints_object(
         &package["setupContext"],
@@ -1536,6 +1677,9 @@ fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_vss_complaint_records() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_vss_complaint_records",
+    );
     let mut wrong_source_trustee_root_package = minimal_collective_setup_package();
     wrong_source_trustee_root_package["vssComplaints"] = vss_complaints_object(
         &wrong_source_trustee_root_package["setupContext"],
@@ -1619,6 +1763,9 @@ fn collective_setup_verifier_refuses_malformed_vss_complaint_records() {
 
 #[test]
 fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_forbidden_accepted_path_material",
+    );
     let mut seeded_package = minimal_collective_setup_package();
     seeded_package["setupSeed"] = serde_json::json!("externally-supplied-seed");
     rebind_collective_setup_package_hash(&mut seeded_package);
@@ -1685,6 +1832,9 @@ fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
 
 #[test]
 fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_generic_key_switch_material_by_default",
+    );
     let mut package = minimal_collective_setup_package();
     package["genericKeySwitchKeys"] = serde_json::json!({ "keyRoot": valid_hash('4') });
     rebind_collective_setup_package_hash(&mut package);
@@ -1703,6 +1853,8 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
 
 #[test]
 fn collective_setup_verifier_refuses_evaluator_schedule_drift() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_refuses_evaluator_schedule_drift");
     let mut package = minimal_collective_setup_package();
     package["evaluatorKeySchedule"]["requiredGaloisSetHash"] = serde_json::json!(valid_hash('8'));
     rebind_collective_setup_package_hash(&mut package);
@@ -1721,6 +1873,9 @@ fn collective_setup_verifier_refuses_evaluator_schedule_drift() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_evaluation_key_material",
+    );
     let mut relin_package = minimal_collective_setup_package();
     let evaluator_key_schedule_root =
         relin_package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"].clone();
@@ -1761,13 +1916,16 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
 
 #[test]
 fn collective_setup_verifier_checks_evaluation_key_proof_container_roots() {
-    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_evaluation_key_proof_container_roots",
+    );
+    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
     let relinearization_root =
         package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"].clone();
     let first_galois_batch_root =
         package["galoisKeyShareBatches"][0]["galoisKeyShareBatchRoot"].clone();
     let evaluation_key_set_hash = package["evaluationKeys"]["evaluationKeySetHash"].clone();
-    let accepted_hashes = accepted_hashes_from_package(&package);
+    let accepted_hashes = accepted_hashes_from_package(package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
@@ -1803,6 +1961,9 @@ fn collective_setup_verifier_checks_evaluation_key_proof_container_roots() {
 
 #[test]
 fn collective_setup_verifier_checks_transported_public_evaluation_key_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_transported_public_evaluation_key_material",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let transported_public_evaluation_key_material =
         add_public_evaluation_key_material_transport(&mut package);
@@ -1841,6 +2002,9 @@ fn collective_setup_verifier_checks_transported_public_evaluation_key_material()
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let mut transported_public_evaluation_key_material =
         add_public_evaluation_key_material_transport(&mut package);
@@ -1874,6 +2038,9 @@ fn collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chu
 
 #[test]
 fn collective_setup_verifier_uses_public_evaluation_key_material_component_chunks() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_uses_public_evaluation_key_material_component_chunks",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let component_material_set =
         move_first_galois_key_share_component_vectors_to_transport(&mut package);
@@ -1899,10 +2066,13 @@ fn collective_setup_verifier_uses_public_evaluation_key_material_component_chunk
 
 #[test]
 fn collective_setup_public_galois_key_loader_refuses_reduced_ring_material() {
-    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_public_galois_key_loader_refuses_reduced_ring_material",
+    );
+    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
 
     let error =
-        match accepted_setup_public_galois_keys_from_transport(&package, &serde_json::json!({})) {
+        match accepted_setup_public_galois_keys_from_transport(package, &serde_json::json!({})) {
             Ok(_) => panic!("reduced-ring material must not become runtime Galois keys"),
             Err(error) => error,
         };
@@ -1917,10 +2087,13 @@ fn collective_setup_public_galois_key_loader_refuses_reduced_ring_material() {
 
 #[test]
 fn collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material() {
-    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material",
+    );
+    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
 
     let error = match accepted_setup_public_relinearization_keys_from_transport(
-        &package,
+        package,
         &serde_json::json!({}),
     ) {
         Ok(_) => panic!("reduced-ring material must not become runtime relinearization keys"),
@@ -1937,7 +2110,10 @@ fn collective_setup_public_relinearization_key_loader_refuses_reduced_ring_mater
 
 #[test]
 fn relinearization_round_one_generation_refuses_independent_source_square() {
-    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "relinearization_round_one_generation_refuses_independent_source_square",
+    );
+    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
     let proof_record_snapshot =
         package["relinearizationKeyShareRounds"]["roundOneRecords"][0].clone();
     let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
@@ -1971,8 +2147,8 @@ fn relinearization_round_one_generation_refuses_independent_source_square() {
     let statement_record =
         &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
     let constant_commitments =
-        same_secret_constant_commitments_from_fixture_package(&package, trustee_roster_position);
-    let setup_proof_binding = setup_proof_binding_for_test_package(&package);
+        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
+    let setup_proof_binding = setup_proof_binding_for_test_package(package);
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -2035,7 +2211,10 @@ fn relinearization_round_one_generation_refuses_independent_source_square() {
 
 #[test]
 fn relinearization_round_two_generation_refuses_aggregate_source_product_mismatch() {
-    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "relinearization_round_two_generation_refuses_aggregate_source_product_mismatch",
+    );
+    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
     let proof_record = package["relinearizationKeyShareRounds"]["roundTwoRecords"][0].clone();
     let trustee_roster_position = proof_record["trusteeRosterPosition"]
         .as_u64()
@@ -2061,12 +2240,12 @@ fn relinearization_round_two_generation_refuses_aggregate_source_product_mismatc
     let statement_record =
         &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
     let constant_commitments =
-        same_secret_constant_commitments_from_fixture_package(&package, trustee_roster_position);
+        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
     let constant_commitment_values = constant_commitments
         .iter()
         .map(super::super::commitment::setup_commitment_full_value)
         .collect::<Vec<_>>();
-    let setup_proof_binding = setup_proof_binding_for_test_package(&package);
+    let setup_proof_binding = setup_proof_binding_for_test_package(package);
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -2127,7 +2306,10 @@ fn relinearization_round_two_generation_refuses_aggregate_source_product_mismatc
 
 #[test]
 fn generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof() {
-    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof",
+    );
+    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
     let proof_record = package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0].clone();
     let trustee_roster_position = proof_record["trusteeRosterPosition"]
         .as_u64()
@@ -2150,12 +2332,12 @@ fn generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof() 
     let statement_record =
         &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
     let constant_commitments =
-        same_secret_constant_commitments_from_fixture_package(&package, trustee_roster_position);
+        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
     let constant_commitment_values = constant_commitments
         .iter()
         .map(super::super::commitment::setup_commitment_full_value)
         .collect::<Vec<_>>();
-    let setup_proof_binding = setup_proof_binding_for_test_package(&package);
+    let setup_proof_binding = setup_proof_binding_for_test_package(package);
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -2266,6 +2448,9 @@ fn generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof() 
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_public_evaluation_key_component_chunk() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_public_evaluation_key_component_chunk",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let component_material_set =
         move_first_galois_key_share_component_vectors_to_transport(&mut package);
@@ -2293,6 +2478,9 @@ fn collective_setup_verifier_refuses_tampered_public_evaluation_key_component_ch
 
 #[test]
 fn collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_material",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let transported_proof_material =
         move_first_galois_key_share_lnp_proof_bytes_to_transport(&mut package);
@@ -2313,6 +2501,9 @@ fn collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_mat
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let mut transported_proof_material =
         move_first_galois_key_share_lnp_proof_bytes_to_transport(&mut package);
@@ -2340,6 +2531,9 @@ fn collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk
 
 #[test]
 fn collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component_material",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let transported_component_material =
         move_first_galois_key_share_component_vectors_to_transport(&mut package);
@@ -2360,6 +2554,9 @@ fn collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component
 
 #[test]
 fn collective_setup_verifier_refuses_tampered_transported_galois_component_material_chunk() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_transported_galois_component_material_chunk",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let mut transported_component_material =
         move_first_galois_key_share_component_vectors_to_transport(&mut package);
@@ -2387,6 +2584,9 @@ fn collective_setup_verifier_refuses_tampered_transported_galois_component_mater
 
 #[test]
 fn collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoAggregateRoot"] =
         serde_json::json!(valid_hash('b'));
@@ -2407,6 +2607,9 @@ fn collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift()
 
 #[test]
 fn collective_setup_verifier_refuses_relinearization_source_square_binding_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_relinearization_source_square_binding_drift",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["sourceSquareBindingRoot"] =
         serde_json::json!(valid_hash('d'));
@@ -2447,6 +2650,9 @@ fn collective_setup_verifier_refuses_relinearization_source_square_binding_drift
 
 #[test]
 fn collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["keySwitchSeedHex"] =
         serde_json::json!(valid_hash('8'));
@@ -2472,6 +2678,9 @@ fn collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch
 
 #[test]
 fn collective_setup_verifier_refuses_relinearization_round_one_source_square_aggregate_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_relinearization_round_one_source_square_aggregate_drift",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundOneAggregateRoots"][0]["roundOneSourceSquareAggregateRoot"] =
         serde_json::json!(valid_hash('e'));
@@ -2491,6 +2700,9 @@ fn collective_setup_verifier_refuses_relinearization_round_one_source_square_agg
 
 #[test]
 fn collective_setup_verifier_refuses_relinearization_round_two_source_square_linkage_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_relinearization_round_two_source_square_linkage_drift",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundTwoRecords"][0]["roundOneSourceSquareBindingRoot"] =
         serde_json::json!(valid_hash('f'));
@@ -2514,6 +2726,9 @@ fn collective_setup_verifier_refuses_relinearization_round_two_source_square_lin
 
 #[test]
 fn collective_setup_verifier_refuses_relinearization_round_two_source_square_aggregate_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_relinearization_round_two_source_square_aggregate_drift",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoSourceSquareAggregateRoot"] =
         serde_json::json!(valid_hash('a'));
@@ -2533,6 +2748,9 @@ fn collective_setup_verifier_refuses_relinearization_round_two_source_square_agg
 
 #[test]
 fn collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('e'));
@@ -2553,6 +2771,9 @@ fn collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drif
 
 #[test]
 fn collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0]["keySwitchSeedHex"] =
         serde_json::json!(valid_hash('9'));
@@ -2578,6 +2799,8 @@ fn collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed() {
 
 #[test]
 fn collective_setup_verifier_refuses_galois_batch_schedule_drift() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_refuses_galois_batch_schedule_drift");
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["galoisKeyShareBatches"][0]["requiredGaloisKeySchedule"][0]["rotation"] =
         serde_json::json!(999_u64);
@@ -2598,6 +2821,9 @@ fn collective_setup_verifier_refuses_galois_batch_schedule_drift() {
 
 #[test]
 fn collective_setup_verifier_refuses_evaluation_key_assembly_root_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_evaluation_key_assembly_root_drift",
+    );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["evaluationKeys"]["relinearizationKeyRoots"][0]["relinearizationKeyRoot"] =
         serde_json::json!(valid_hash('c'));
@@ -2618,6 +2844,9 @@ fn collective_setup_verifier_refuses_evaluation_key_assembly_root_drift() {
 
 #[test]
 fn collective_setup_verifier_refuses_missing_and_extra_evaluation_keys() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_missing_and_extra_evaluation_keys",
+    );
     let mut missing_galois_key = evaluation_key_proof_container_bearing_collective_setup_package();
     missing_galois_key["evaluationKeys"]["galoisKeyRoots"]
         .as_array_mut()
@@ -2657,6 +2886,8 @@ fn collective_setup_verifier_refuses_missing_and_extra_evaluation_keys() {
 
 #[test]
 fn collective_setup_verifier_refuses_wrong_q_share_prime_list() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_refuses_wrong_q_share_prime_list");
     let mut package = minimal_collective_setup_package();
     package["qShare"]["primes"][0] = serde_json::json!(65_537);
     rebind_collective_setup_package_hash(&mut package);
@@ -2672,6 +2903,9 @@ fn collective_setup_verifier_refuses_wrong_q_share_prime_list() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_commitment_security_certificate() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_commitment_security_certificate",
+    );
     let mut package = minimal_collective_setup_package();
     package["setupCommitmentSecurityCertificate"]["aggregateOpeningBounds"]["thresholdShareOpeningInfinityBound"] =
         serde_json::json!(11_109_u64);
@@ -2691,6 +2925,9 @@ fn collective_setup_verifier_refuses_malformed_commitment_security_certificate()
 
 #[test]
 fn collective_setup_verifier_refuses_commitment_security_certificate_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_commitment_security_certificate_hash_drift",
+    );
     let mut package = minimal_collective_setup_package();
     package["setupCommitmentSecurityCertificateHash"] = serde_json::json!(valid_hash('8'));
     rebind_collective_setup_package_hash(&mut package);
@@ -2709,6 +2946,8 @@ fn collective_setup_verifier_refuses_commitment_security_certificate_hash_drift(
 
 #[test]
 fn collective_setup_verifier_checks_he_security_certificate() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_checks_he_security_certificate");
     let mut package = minimal_collective_setup_package();
     package["heSecurityCertificate"]["assessedRing"]["largestExposedBasisClass"] =
         serde_json::json!("Q_extended");
@@ -2729,6 +2968,9 @@ fn collective_setup_verifier_checks_he_security_certificate() {
 
 #[test]
 fn collective_setup_verifier_refuses_he_security_certificate_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_he_security_certificate_hash_drift",
+    );
     let mut package = minimal_collective_setup_package();
     package["heSecurityCertificateHash"] = serde_json::json!(valid_hash('7'));
     rebind_collective_setup_package_hash(&mut package);
@@ -2747,6 +2989,8 @@ fn collective_setup_verifier_refuses_he_security_certificate_hash_drift() {
 
 #[test]
 fn collective_setup_verifier_refuses_non_binary_setup_transport() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_verifier_refuses_non_binary_setup_transport");
     let mut package = minimal_collective_setup_package();
     package["setupTransportCertificate"]["largeObjectEncoding"] = serde_json::json!("json");
     rebind_collective_setup_package_hash(&mut package);
@@ -2765,6 +3009,9 @@ fn collective_setup_verifier_refuses_non_binary_setup_transport() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_setup_transport_manifest",
+    );
     let mut missing_chunk_package = minimal_collective_setup_package();
     missing_chunk_package["setupTransportCertificate"]["chunkHashes"]
         .as_array_mut()
@@ -2801,6 +3048,9 @@ fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
 
 #[test]
 fn collective_setup_verifier_refuses_setup_transport_certificate_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_setup_transport_certificate_hash_drift",
+    );
     let mut package = minimal_collective_setup_package();
     package["setupTransportCertificateHash"] = serde_json::json!(valid_hash('9'));
     rebind_collective_setup_package_hash(&mut package);
@@ -2819,6 +3069,9 @@ fn collective_setup_verifier_refuses_setup_transport_certificate_hash_drift() {
 
 #[test]
 fn collective_setup_verifier_rejects_reduced_ring_material_outside_profile() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_rejects_reduced_ring_material_outside_profile",
+    );
     let package = minimal_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -4336,9 +4589,13 @@ fn build_collective_public_key_bearing_collective_setup_package() -> serde_json:
 }
 
 fn evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value {
+    evaluation_key_proof_container_bearing_collective_setup_package_ref().clone()
+}
+
+fn evaluation_key_proof_container_bearing_collective_setup_package_ref()
+-> &'static serde_json::Value {
     EVALUATION_KEY_PROOF_CONTAINER_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(build_evaluation_key_proof_container_bearing_collective_setup_package)
-        .clone()
 }
 
 fn build_evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value {
