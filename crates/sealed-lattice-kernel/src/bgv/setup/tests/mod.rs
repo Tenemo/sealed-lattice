@@ -15,7 +15,6 @@ use super::{
     derive_threshold_share_commitments_from_transport_request,
     describe_collective_bgv_setup_profile, development_evaluator_key_from_passive_setup_package,
     extended_basis_modulus_bits, generate_passive_setup_package_from_request,
-    generate_passive_setup_public_evaluation_key_material_from_request,
     read_public_evaluation_key_rotation_requests, sample_public_residues,
     selected_public_evaluation_key_rotation_requests,
     verify_collective_bgv_setup_package_from_request,

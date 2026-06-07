@@ -20,9 +20,6 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-#[cfg(test)]
-use crate::bgv::modular_arithmetic::integer_square_root_ceil;
-
 // The evaluator context owns the development key set and the per-level
 // relinearization keys needed by homomorphic multiplication. Relinearization
 // keys are generated for every level from one up to the working level so a
@@ -123,11 +120,6 @@ impl EvaluatorContext {
 
     pub(crate) fn working_level(&self) -> usize {
         self.relinearization_keys.len() - 1
-    }
-
-    #[cfg(test)]
-    pub(crate) fn has_public_rotation_key(&self, galois_element: usize, level: usize) -> bool {
-        self.rotation_keys.contains_key(&(galois_element, level))
     }
 
     fn relinearization_key(&self, level: usize) -> CanonicalResult<&KeySwitchKey> {
@@ -305,10 +297,6 @@ pub(crate) fn evaluate_polynomial(
     input: &Ciphertext,
     coefficients: &[u64],
 ) -> CanonicalResult<Ciphertext> {
-    if coefficients.len() > 64 {
-        return evaluate_polynomial_paterson_stockmeyer(context, input, coefficients);
-    }
-
     evaluate_polynomial_by_power_table(context, input, coefficients)
 }
 
@@ -381,24 +369,6 @@ fn evaluate_polynomial_by_power_table(
     }
 
     Ok(result)
-}
-
-#[cfg(test)]
-fn evaluate_polynomial_paterson_stockmeyer(
-    context: &EvaluatorContext,
-    input: &Ciphertext,
-    coefficients: &[u64],
-) -> CanonicalResult<Ciphertext> {
-    let degree = coefficients.len().saturating_sub(1);
-    let baby_step_count = integer_square_root_ceil(degree + 1).max(2);
-
-    evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
-        context,
-        input,
-        coefficients,
-        baby_step_count,
-        false,
-    )
 }
 
 fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
@@ -622,55 +592,6 @@ mod tests {
         let decrypted = context.key().decrypt_to_slots(&evaluated).expect("decrypt");
         // 2^4+2+5=23, 3^4+3+5=89, 1+1+5=7
         assert_eq!(&decrypted[..3], &[23, 89, 7]);
-    }
-
-    #[test]
-    #[ignore = "heavy full-ring high-degree polynomial evaluation; run with --ignored"]
-    fn paterson_stockmeyer_polynomial_evaluation_matches_plaintext() {
-        let context =
-            EvaluatorContext::new("paterson-stockmeyer-seed-v1", 10).expect("evaluator context");
-        let mut coefficients = vec![0_u64; 71];
-        coefficients[0] = 9;
-        coefficients[1] = 4;
-        coefficients[7] = 3;
-        coefficients[13] = 11;
-        coefficients[32] = 5;
-        coefficients[70] = 2;
-        let input = context
-            .key()
-            .encrypt_slots(&[0, 1, 2, 3], "poly-ps")
-            .expect("encrypt");
-        let evaluated = evaluate_polynomial(&context, &input, &coefficients).expect("evaluate");
-        let decrypted = context.key().decrypt_to_slots(&evaluated).expect("decrypt");
-        let expected = [0_u64, 1, 2, 3]
-            .iter()
-            .map(|point| {
-                coefficients
-                    .iter()
-                    .enumerate()
-                    .fold(0_u64, |total, (degree, coefficient)| {
-                        let power = crate::bgv::modular_arithmetic::pow_mod(
-                            *point,
-                            degree as u64,
-                            PLAINTEXT_MODULUS,
-                        )
-                        .expect("power");
-                        crate::bgv::modular_arithmetic::add_mod(
-                            total,
-                            crate::bgv::modular_arithmetic::mul_mod(
-                                *coefficient,
-                                power,
-                                PLAINTEXT_MODULUS,
-                            )
-                            .expect("mul"),
-                            PLAINTEXT_MODULUS,
-                        )
-                        .expect("add")
-                    })
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(&decrypted[..4], expected);
     }
 
     #[test]

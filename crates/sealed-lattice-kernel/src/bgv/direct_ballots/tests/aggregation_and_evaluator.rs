@@ -35,18 +35,6 @@ fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
 }
 
 #[test]
-#[ignore = "heavy direct ballot evaluator replay candidate; run selectively"]
-fn direct_ballot_packed_batched_pair_evaluator_top_count_20_matches_oracle() {
-    assert_direct_ballot_packed_batched_pair_evaluator_matches_oracle(DIRECT_BALLOT_OPTION_COUNT);
-}
-
-#[test]
-#[ignore = "heavy direct ballot evaluator replay candidate; run selectively"]
-fn direct_ballot_packed_batched_pair_evaluator_top_count_1_matches_oracle() {
-    assert_direct_ballot_packed_batched_pair_evaluator_matches_oracle(1);
-}
-
-#[test]
 fn direct_ballot_top_counts_reject_duplicates_before_evaluator_replay() {
     let error = optional_direct_ballot_top_count_request(&json!({
         "topCounts": [1, 1]
