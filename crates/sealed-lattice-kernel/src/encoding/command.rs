@@ -22,6 +22,9 @@ enum TranscriptCoreCommand {
     VerifyBgvPassiveSetup,
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
+    GeneratePrivateVssShareProof,
+    GenerateSameSecretLnpProof,
+    GeneratePublicKeyShareLnpProof,
     DeriveThresholdShareCommitments,
     DeriveThresholdShareCommitmentsFromTransport,
     VerifyLocalTrusteeSetupState,
@@ -202,6 +205,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
         | TranscriptCoreCommand::VerifyCollectiveBgvSetup
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
+        | TranscriptCoreCommand::GeneratePrivateVssShareProof
+        | TranscriptCoreCommand::GenerateSameSecretLnpProof
+        | TranscriptCoreCommand::GeneratePublicKeyShareLnpProof
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
         | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
@@ -252,6 +258,15 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
             crate::bgv::commands::verify_private_vss_share_envelope(request)
+        }
+        TranscriptCoreCommand::GeneratePrivateVssShareProof => {
+            crate::bgv::commands::generate_private_vss_share_proof(request)
+        }
+        TranscriptCoreCommand::GenerateSameSecretLnpProof => {
+            crate::bgv::commands::generate_same_secret_lnp_proof(request)
+        }
+        TranscriptCoreCommand::GeneratePublicKeyShareLnpProof => {
+            crate::bgv::commands::generate_public_key_share_lnp_proof(request)
         }
         TranscriptCoreCommand::DeriveThresholdShareCommitments => {
             crate::bgv::commands::derive_threshold_share_commitments(request)

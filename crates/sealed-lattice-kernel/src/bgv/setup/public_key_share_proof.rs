@@ -5,6 +5,7 @@ use crate::{
         coefficient_codec::coefficient_vector_hash512,
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{canonical_json, hash512, hash512_hex, to_hex},
@@ -14,8 +15,9 @@ use super::{
     commitment::{
         SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
-        linear_combination_setup_commitments, setup_commitment_modulus_product,
-        setup_commitment_root, verify_setup_lifted_commitment_opening,
+        compute_setup_commitment, linear_combination_setup_commitments,
+        parse_setup_commitment_full_value, setup_commitment_modulus_product, setup_commitment_root,
+        verify_setup_lifted_commitment_opening,
     },
     sampling::dense_public_residues,
     setup_proof::SETUP_PROOF_PROFILE_ID,
@@ -87,6 +89,97 @@ pub(super) fn public_key_share_coefficient_vector_hash(coefficients: &[u64]) -> 
         coefficients,
         PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN,
     )
+}
+
+pub(crate) fn generate_public_key_share_lnp_proof_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &[
+            "publicMatrixSeedHash",
+            "publicKeyShareRecord",
+            "publicKeyShareProofRecord",
+            "sameSecretStatementRecord",
+            "constantCommitments",
+            "publicShareCoefficientsByLimb",
+            "setupProofBinding",
+            "secretCoefficients",
+            "openingRandomnessByLimb",
+            "errorCoefficientsByLimb",
+            "proofRandomnessSource",
+            "proofRandomnessSeedHex",
+        ],
+        "generatePublicKeyShareLnpProof",
+    )?;
+
+    let public_matrix_seed_hash = string_field(request, "publicMatrixSeedHash")?;
+    validate_lowercase_hash(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let public_key_share_record = object_field(request, "publicKeyShareRecord")?;
+    let public_key_share_proof_record = object_field(request, "publicKeyShareProofRecord")?;
+    let same_secret_statement_record = object_field(request, "sameSecretStatementRecord")?;
+    let setup_proof_binding = object_field(request, "setupProofBinding")?;
+    let constant_commitments = setup_commitment_values_field(request, "constantCommitments")?;
+    let public_share_coefficients_by_limb =
+        u64_matrix_field(request, "publicShareCoefficientsByLimb")?;
+    let secret_coefficients = i64_vector_field(request, "secretCoefficients")?;
+    let opening_randomness_by_limb = i128_matrix3_field(request, "openingRandomnessByLimb")?;
+    let error_coefficients_by_limb = i64_matrix_field(request, "errorCoefficientsByLimb")?;
+    let proof_randomness_source = proof_randomness_source(request)?;
+    let proof_randomness_seed_hex = string_field(request, "proofRandomnessSeedHex")?;
+    validate_proof_randomness_seed(proof_randomness_seed_hex, "proofRandomnessSeedHex")?;
+
+    let witness = PublicKeyShareLnpProofWitness {
+        secret_coefficients,
+        opening_randomness_by_limb,
+        error_coefficients_by_limb,
+    };
+    let generation_input = PublicKeyShareLnpProofGenerationInput {
+        public_matrix_seed_hash,
+        public_key_share_record,
+        public_key_share_proof_record,
+        same_secret_statement_record,
+        constant_commitments: &constant_commitments,
+        public_share_coefficients_by_limb: &public_share_coefficients_by_limb,
+        setup_proof_binding,
+        witness: &witness,
+        proof_randomness_seed_hex,
+    };
+    let proof_bytes = generate_public_key_share_lnp_relation_proof(generation_input)?;
+    let verification =
+        verify_public_key_share_lnp_relation_proof(PublicKeyShareLnpProofVerificationInput {
+            public_matrix_seed_hash,
+            public_key_share_record,
+            public_key_share_proof_record,
+            same_secret_statement_record,
+            constant_commitments: &constant_commitments,
+            public_share_coefficients_by_limb: &public_share_coefficients_by_limb,
+            setup_proof_binding,
+            proof_bytes: &proof_bytes,
+        })?;
+    let proof_bytes_hash = public_key_share_lnp_relation_proof_bytes_hash(&proof_bytes);
+
+    Ok(json!({
+        "ok": true,
+        "operation": "generatePublicKeyShareLnpProof",
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofFamily": "public-key-share",
+        "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+        "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
+        "statementHash": verification.statement_hash_hex,
+        "relationCommitmentHash": verification.relation_commitment_hash_hex,
+        "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
+        "challenge": verification.challenge,
+        "proofSizeBytes": verification.proof_size_bytes,
+        "proofBytesHash": proof_bytes_hash,
+        "proofBytesHex": to_hex(&proof_bytes),
+        "proofRandomness": {
+            "source": proof_randomness_source,
+            "seedBytes": 64,
+            "retention": "proof randomness seed material is consumed for proof generation and is not returned"
+        }
+    }))
 }
 
 pub(super) fn verify_public_key_share_lnp_relation_proof(
@@ -929,7 +1022,6 @@ fn verify_error_support_responses(
     Ok(())
 }
 
-#[cfg(test)]
 fn error_support_expansion_coefficients(
     mask: u64,
     witness: u64,
@@ -1387,14 +1479,192 @@ fn invalid_public_key_share_proof(message: impl Into<String>) -> CanonicalError 
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
-#[cfg(test)]
+fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
+    value
+        .get(field_name)
+        .and_then(Value::as_str)
+        .filter(|field| !field.is_empty())
+        .ok_or_else(|| {
+            invalid_public_key_share_proof(format!("{field_name} must be a non-empty string"))
+        })
+}
+
+fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Value> {
+    value
+        .get(field_name)
+        .filter(|field| field.is_object())
+        .ok_or_else(|| invalid_public_key_share_proof(format!("{field_name} must be an object")))
+}
+
+fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_public_key_share_proof(format!("{field_name} must be an array")))
+}
+
+fn setup_commitment_values_field(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<SetupCommitmentValue>> {
+    array_field(value, field_name)?
+        .iter()
+        .map(parse_setup_commitment_full_value)
+        .collect()
+}
+
+fn u64_matrix_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<u64>>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            row.as_array()
+                .ok_or_else(|| {
+                    invalid_public_key_share_proof(format!(
+                        "{field_name}.{row_index} must be an array"
+                    ))
+                })?
+                .iter()
+                .enumerate()
+                .map(|(column_index, item)| {
+                    item.as_u64().ok_or_else(|| {
+                        invalid_public_key_share_proof(format!(
+                            "{field_name}.{row_index}.{column_index} must be an unsigned integer"
+                        ))
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn i64_vector_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<i64>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(item_index, item)| {
+            decimal_i128_value(item)
+                .and_then(|item| i64::try_from(item).ok())
+                .ok_or_else(|| {
+                    invalid_public_key_share_proof(format!(
+                        "{field_name}.{item_index} must be a signed 64-bit integer"
+                    ))
+                })
+        })
+        .collect()
+}
+
+fn i64_matrix_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<i64>>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            row.as_array()
+                .ok_or_else(|| {
+                    invalid_public_key_share_proof(format!("{field_name}.{row_index} must be an array"))
+                })?
+                .iter()
+                .enumerate()
+                .map(|(column_index, item)| {
+                    decimal_i128_value(item)
+                        .and_then(|item| i64::try_from(item).ok())
+                        .ok_or_else(|| {
+                            invalid_public_key_share_proof(format!(
+                                "{field_name}.{row_index}.{column_index} must be a signed 64-bit integer"
+                            ))
+                        })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn i128_matrix3_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<Vec<i128>>>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(outer_index, middle_value)| {
+            middle_value
+                .as_array()
+                .ok_or_else(|| {
+                    invalid_public_key_share_proof(format!(
+                        "{field_name}.{outer_index} must be an array"
+                    ))
+                })?
+                .iter()
+                .enumerate()
+                .map(|(middle_index, inner_value)| {
+                    inner_value
+                        .as_array()
+                        .ok_or_else(|| {
+                            invalid_public_key_share_proof(format!(
+                                "{field_name}.{outer_index}.{middle_index} must be an array"
+                            ))
+                        })?
+                        .iter()
+                        .enumerate()
+                        .map(|(inner_index, item)| {
+                            decimal_i128_value(item).ok_or_else(|| {
+                                invalid_public_key_share_proof(format!(
+                                    "{field_name}.{outer_index}.{middle_index}.{inner_index} must be a signed integer or decimal string"
+                                ))
+                            })
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn decimal_i128_value(value: &Value) -> Option<i128> {
+    if let Some(value) = value.as_i64() {
+        return Some(i128::from(value));
+    }
+    if let Some(value) = value.as_u64() {
+        return Some(i128::from(value));
+    }
+    value.as_str()?.parse::<i128>().ok()
+}
+
+fn proof_randomness_source(value: &Value) -> CanonicalResult<&'static str> {
+    match value
+        .get("proofRandomnessSource")
+        .and_then(Value::as_str)
+        .unwrap_or("fresh-csprng")
+    {
+        "fresh-csprng" => Ok("fresh-csprng"),
+        "development-deterministic-fixture" => Ok("development-deterministic-fixture"),
+        _ => Err(invalid_public_key_share_proof(
+            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
+        )),
+    }
+}
+
+fn validate_lowercase_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
+    if hash.len() == 128
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+
+    Err(invalid_public_key_share_proof(format!(
+        "{field_name} must be lowercase 512-bit hex"
+    )))
+}
+
+fn validate_proof_randomness_seed(seed_hex: &str, field_name: &str) -> CanonicalResult<()> {
+    validate_lowercase_hash(seed_hex, field_name)
+}
+
 pub(super) struct PublicKeyShareLnpProofWitness {
     pub(super) secret_coefficients: Vec<i64>,
     pub(super) opening_randomness_by_limb: Vec<Vec<Vec<i128>>>,
     pub(super) error_coefficients_by_limb: Vec<Vec<i64>>,
 }
 
-#[cfg(test)]
 pub(super) struct PublicKeyShareLnpProofGenerationInput<'a> {
     pub(super) public_matrix_seed_hash: &'a str,
     pub(super) public_key_share_record: &'a Value,
@@ -1407,12 +1677,9 @@ pub(super) struct PublicKeyShareLnpProofGenerationInput<'a> {
     pub(super) proof_randomness_seed_hex: &'a str,
 }
 
-#[cfg(test)]
-pub(super) fn generate_public_key_share_lnp_relation_proof_for_tests(
+pub(super) fn generate_public_key_share_lnp_relation_proof(
     input: PublicKeyShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<Vec<u8>> {
-    use super::commitment::compute_setup_commitment_for_tests;
-
     let PublicKeyShareLnpProofGenerationInput {
         public_matrix_seed_hash,
         public_key_share_record,
@@ -1459,10 +1726,9 @@ pub(super) fn generate_public_key_share_lnp_relation_proof_for_tests(
     let statement_hash_hex = to_hex(&statement_hash);
     let parameter_profile_hash =
         super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?;
-    let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes_for_test(&parameter_profile_hash)?;
+    let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes(&parameter_profile_hash)?;
     let layout = super::setup_proof::public_key_share_lnp_tbox_layout();
-    let tbox_prefix =
-        encode_public_key_share_lnp_tbox_prefix_for_tests(&layout, proof_randomness_seed_hex)?;
+    let tbox_prefix = encode_public_key_share_lnp_tbox_prefix(&layout, proof_randomness_seed_hex)?;
     let tbox_commitment_prefix_hash =
         super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
     let ring_degree = constant_commitments[0].ring_degree;
@@ -1557,7 +1823,7 @@ pub(super) fn generate_public_key_share_lnp_relation_proof_for_tests(
             let modulus = commitment.source_message_modulus;
             let public_a_coefficients =
                 public_a_coefficients_for_relation(public_matrix_seed_hash, modulus, ring_degree);
-            public_key_lifted_carry_witnesses_for_tests(
+            public_key_lifted_carry_witnesses(
                 &public_a_coefficients,
                 &witness.secret_coefficients,
                 &witness.error_coefficients_by_limb[rns_limb_index],
@@ -1652,7 +1918,7 @@ pub(super) fn generate_public_key_share_lnp_relation_proof_for_tests(
                     })
                 })
                 .collect::<CanonicalResult<Vec<_>>>()?;
-            compute_setup_commitment_for_tests(
+            compute_setup_commitment(
                 public_matrix_seed_hash,
                 commitment.source_rns_limb_index,
                 commitment.source_message_modulus,
@@ -1703,7 +1969,7 @@ pub(super) fn generate_public_key_share_lnp_relation_proof_for_tests(
         layout.proof_ring_degree,
     )?;
     let mut tbox_proof_bytes = tbox_prefix;
-    encode_public_key_share_lnp_tbox_suffix_for_tests(
+    encode_public_key_share_lnp_tbox_suffix(
         &mut tbox_proof_bytes,
         &layout,
         &challenge_coefficients,
@@ -1885,42 +2151,39 @@ pub(super) fn generate_public_key_share_lnp_relation_proof_for_tests(
     Ok(proof_bytes)
 }
 
-#[cfg(test)]
-fn hash_hex_to_fixed_bytes_for_test(hash_hex: &str) -> CanonicalResult<[u8; 64]> {
+fn hash_hex_to_fixed_bytes(hash_hex: &str) -> CanonicalResult<[u8; 64]> {
     if hash_hex.len() != 128 {
         return Err(invalid_public_key_share_proof(
-            "public-key test hash must be 64 bytes",
+            "public-key hash must be 64 bytes",
         ));
     }
     let mut output = [0_u8; 64];
     for (byte_index, chunk) in hash_hex.as_bytes().chunks_exact(2).enumerate() {
-        let high = hex_nibble_for_test(chunk[0])?;
-        let low = hex_nibble_for_test(chunk[1])?;
+        let high = hex_nibble(chunk[0])?;
+        let low = hex_nibble(chunk[1])?;
         output[byte_index] = (high << 4) | low;
     }
 
     Ok(output)
 }
 
-#[cfg(test)]
-fn hex_nibble_for_test(value: u8) -> CanonicalResult<u8> {
+fn hex_nibble(value: u8) -> CanonicalResult<u8> {
     match value {
         b'0'..=b'9' => Ok(value - b'0'),
         b'a'..=b'f' => Ok(value - b'a' + 10),
         b'A'..=b'F' => Ok(value - b'A' + 10),
         _ => Err(invalid_public_key_share_proof(
-            "public-key test hash contains a non-hex character",
+            "public-key hash contains a non-hex character",
         )),
     }
 }
 
-#[cfg(test)]
-fn encode_public_key_share_lnp_tbox_prefix_for_tests(
+fn encode_public_key_share_lnp_tbox_prefix(
     layout: &super::setup_proof::SetupProofLnpTboxLayout,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<Vec<u8>> {
-    let mut writer = PublicKeyShareLnpBitWriterForTest::new();
-    encode_public_key_share_lnp_uniform_polyvec_for_tests(
+    let mut writer = PublicKeyShareLnpBitWriter::new();
+    encode_public_key_share_lnp_uniform_polyvec(
         &mut writer,
         layout.t_b_polynomial_count,
         layout.proof_ring_degree,
@@ -1928,7 +2191,7 @@ fn encode_public_key_share_lnp_tbox_prefix_for_tests(
         proof_randomness_seed_hex,
         0,
     )?;
-    encode_public_key_share_lnp_uniform_polyvec_for_tests(
+    encode_public_key_share_lnp_uniform_polyvec(
         &mut writer,
         layout.h_polynomial_count,
         layout.proof_ring_degree,
@@ -1936,7 +2199,7 @@ fn encode_public_key_share_lnp_tbox_prefix_for_tests(
         proof_randomness_seed_hex,
         1,
     )?;
-    encode_public_key_share_lnp_uniform_polyvec_for_tests(
+    encode_public_key_share_lnp_uniform_polyvec(
         &mut writer,
         layout.t_a1_polynomial_count,
         layout.proof_ring_degree,
@@ -1953,13 +2216,12 @@ fn encode_public_key_share_lnp_tbox_prefix_for_tests(
     Ok(writer.into_bytes())
 }
 
-#[cfg(test)]
-fn encode_public_key_share_lnp_tbox_suffix_for_tests(
+fn encode_public_key_share_lnp_tbox_suffix(
     prefix_bytes: &mut Vec<u8>,
     layout: &super::setup_proof::SetupProofLnpTboxLayout,
     challenge_coefficients: &[i64],
 ) -> CanonicalResult<()> {
-    let mut writer = PublicKeyShareLnpBitWriterForTest::from_bytes(prefix_bytes);
+    let mut writer = PublicKeyShareLnpBitWriter::from_bytes(prefix_bytes);
     for coefficient in challenge_coefficients {
         let shifted = coefficient
             .checked_add(
@@ -1977,30 +2239,30 @@ fn encode_public_key_share_lnp_tbox_suffix_for_tests(
             super::setup_proof::SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
         )?;
     }
-    encode_public_key_share_lnp_zero_hint_polyvec_for_tests(
+    encode_public_key_share_lnp_zero_hint_polyvec(
         &mut writer,
         layout.hint_polynomial_count,
         layout.proof_ring_degree,
     )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec_for_tests(
+    encode_public_key_share_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z1_polynomial_count,
         layout.proof_ring_degree,
         layout.z1_log2_standard_deviation,
     )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec_for_tests(
+    encode_public_key_share_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z21_polynomial_count,
         layout.proof_ring_degree,
         layout.z21_log2_standard_deviation,
     )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec_for_tests(
+    encode_public_key_share_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z3_polynomial_count,
         layout.proof_ring_degree,
         layout.z3_log2_standard_deviation,
     )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec_for_tests(
+    encode_public_key_share_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z4_polynomial_count,
         layout.proof_ring_degree,
@@ -2011,9 +2273,8 @@ fn encode_public_key_share_lnp_tbox_suffix_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
-fn encode_public_key_share_lnp_uniform_polyvec_for_tests(
-    writer: &mut PublicKeyShareLnpBitWriterForTest<'_>,
+fn encode_public_key_share_lnp_uniform_polyvec(
+    writer: &mut PublicKeyShareLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
     bit_count: usize,
@@ -2033,7 +2294,7 @@ fn encode_public_key_share_lnp_uniform_polyvec_for_tests(
             .to_le_bytes();
         let field_index_bytes = field_index.to_le_bytes();
         let block = hash512(
-            "sealed-lattice/setup/public-key-share/lnp-test-tbox-uniform-v1",
+            "sealed-lattice/setup/public-key-share/lnp-tbox-uniform-v1",
             &[
                 proof_randomness_seed_hex.as_bytes(),
                 &field_index_bytes,
@@ -2049,9 +2310,8 @@ fn encode_public_key_share_lnp_uniform_polyvec_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
-fn encode_public_key_share_lnp_zero_hint_polyvec_for_tests(
-    writer: &mut PublicKeyShareLnpBitWriterForTest<'_>,
+fn encode_public_key_share_lnp_zero_hint_polyvec(
+    writer: &mut PublicKeyShareLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
 ) -> CanonicalResult<()> {
@@ -2066,9 +2326,8 @@ fn encode_public_key_share_lnp_zero_hint_polyvec_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
-fn encode_public_key_share_lnp_zero_gaussian_polyvec_for_tests(
-    writer: &mut PublicKeyShareLnpBitWriterForTest<'_>,
+fn encode_public_key_share_lnp_zero_gaussian_polyvec(
+    writer: &mut PublicKeyShareLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
     log2_standard_deviation: usize,
@@ -2089,20 +2348,17 @@ fn encode_public_key_share_lnp_zero_gaussian_polyvec_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
 enum PublicKeyShareLnpBitWriterStorage<'a> {
     Owned(Vec<u8>),
     Borrowed(&'a mut Vec<u8>),
 }
 
-#[cfg(test)]
-struct PublicKeyShareLnpBitWriterForTest<'a> {
+struct PublicKeyShareLnpBitWriter<'a> {
     storage: PublicKeyShareLnpBitWriterStorage<'a>,
     bit_offset: usize,
 }
 
-#[cfg(test)]
-impl<'a> PublicKeyShareLnpBitWriterForTest<'a> {
+impl<'a> PublicKeyShareLnpBitWriter<'a> {
     fn new() -> Self {
         Self {
             storage: PublicKeyShareLnpBitWriterStorage::Owned(Vec::new()),
@@ -2168,7 +2424,6 @@ impl<'a> PublicKeyShareLnpBitWriterForTest<'a> {
     }
 }
 
-#[cfg(test)]
 fn secret_support_commitment(
     secret_mask: i128,
     secret_coefficient: i128,
@@ -2206,8 +2461,7 @@ fn secret_support_commitment(
     ])
 }
 
-#[cfg(test)]
-fn public_key_lifted_carry_witnesses_for_tests(
+fn public_key_lifted_carry_witnesses(
     public_a_coefficients: &[u64],
     secret_coefficients: &[i64],
     error_coefficients: &[i64],
@@ -2277,7 +2531,6 @@ fn public_key_lifted_carry_witnesses_for_tests(
         .collect()
 }
 
-#[cfg(test)]
 fn sample_public_key_share_message_mask_i128(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -2299,7 +2552,6 @@ fn sample_public_key_share_message_mask_i128(
     Ok(mask.rem_euclid(bound))
 }
 
-#[cfg(test)]
 fn sample_public_key_share_carry_mask_i128(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -2319,7 +2571,6 @@ fn sample_public_key_share_carry_mask_i128(
     Ok(mask % bound)
 }
 
-#[cfg(test)]
 fn sample_public_key_share_error_mask_i128(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -2339,7 +2590,6 @@ fn sample_public_key_share_error_mask_i128(
     Ok(mask % bound)
 }
 
-#[cfg(test)]
 fn sample_public_key_share_mask_i128(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -2351,7 +2601,7 @@ fn sample_public_key_share_mask_i128(
     let column_bytes = (column_index as u64).to_le_bytes();
     let coefficient_bytes = (coefficient_index as u64).to_le_bytes();
     let block = hash512(
-        "sealed-lattice/setup/public-key-share/lnp-test-proof-mask-v1",
+        "sealed-lattice/setup/public-key-share/lnp-proof-mask-v1",
         &[
             statement_hash,
             proof_randomness_seed_hex.as_bytes(),
@@ -2370,7 +2620,6 @@ fn sample_public_key_share_mask_i128(
     Ok(sign * (value % bound))
 }
 
-#[cfg(test)]
 fn write_i128_vector(output: &mut Vec<u8>, values: &[i128]) {
     for value in values {
         output.extend_from_slice(&value.to_le_bytes());

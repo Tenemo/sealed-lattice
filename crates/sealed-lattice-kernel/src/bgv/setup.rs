@@ -7,12 +7,14 @@ mod accepted_setup;
 mod certificates;
 mod commitment;
 mod development_fixtures;
+mod evaluation_key_share_proof;
 mod input;
 mod key_material;
 mod local_trustee_state;
 mod package_builder;
 mod participant_material;
 mod private_vss;
+mod private_vss_share_proof;
 mod public_evaluation_key_material;
 mod public_key_share_proof;
 mod same_secret_proof;
@@ -31,7 +33,9 @@ pub(crate) use accepted_setup::{
     describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
-pub(crate) use private_vss::verify_private_vss_share_envelope_from_request;
+pub(crate) use private_vss::{
+    generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
+};
 pub(crate) use public_evaluation_key_material::generate_passive_setup_public_evaluation_key_material_from_request;
 #[cfg(test)]
 pub(crate) use public_evaluation_key_material::public_evaluation_keys_from_material;
@@ -39,6 +43,8 @@ pub(crate) use public_evaluation_key_material::public_evaluation_keys_from_mater
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
+pub(crate) use public_key_share_proof::generate_public_key_share_lnp_proof_from_request;
+pub(crate) use same_secret_proof::generate_same_secret_lnp_proof_from_request;
 pub(crate) use threshold_share_commitments::derive_threshold_share_commitments_from_request;
 pub(crate) use threshold_share_commitments::derive_threshold_share_commitments_from_transport_request;
 

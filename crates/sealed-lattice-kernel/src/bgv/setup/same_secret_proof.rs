@@ -4,6 +4,7 @@ use crate::{
     bgv::{
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{canonical_json, hash512, hash512_hex, to_hex},
@@ -12,7 +13,8 @@ use crate::{
 use super::commitment::{
     SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
     SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
-    linear_combination_setup_commitments, setup_commitment_modulus_product, setup_commitment_root,
+    compute_setup_commitment, linear_combination_setup_commitments,
+    parse_setup_commitment_full_value, setup_commitment_modulus_product, setup_commitment_root,
     verify_setup_lifted_commitment_opening,
 };
 use super::setup_proof::SETUP_PROOF_PROFILE_ID;
@@ -57,6 +59,79 @@ struct ParsedSameSecretLnpProof {
 
 pub(super) fn same_secret_lnp_relation_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(SAME_SECRET_LNP_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
+}
+
+pub(crate) fn generate_same_secret_lnp_proof_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &[
+            "publicMatrixSeedHash",
+            "statementRecord",
+            "constantCommitments",
+            "setupProofBinding",
+            "secretCoefficients",
+            "openingRandomnessByLimb",
+            "proofRandomnessSource",
+            "proofRandomnessSeedHex",
+        ],
+        "generateSameSecretLnpProof",
+    )?;
+
+    let public_matrix_seed_hash = string_field(request, "publicMatrixSeedHash")?;
+    validate_lowercase_hash(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let statement_record = object_field(request, "statementRecord")?;
+    let setup_proof_binding = object_field(request, "setupProofBinding")?;
+    let constant_commitments = setup_commitment_values_field(request, "constantCommitments")?;
+    let secret_coefficients = i64_vector_field(request, "secretCoefficients")?;
+    let opening_randomness_by_limb = i128_matrix3_field(request, "openingRandomnessByLimb")?;
+    let proof_randomness_source = proof_randomness_source(request)?;
+    let proof_randomness_seed_hex = string_field(request, "proofRandomnessSeedHex")?;
+    validate_proof_randomness_seed(proof_randomness_seed_hex, "proofRandomnessSeedHex")?;
+
+    let witness = SameSecretLnpProofWitness {
+        secret_coefficients,
+        opening_randomness_by_limb,
+    };
+    let proof_bytes = generate_same_secret_lnp_relation_proof(
+        public_matrix_seed_hash,
+        statement_record,
+        &constant_commitments,
+        setup_proof_binding,
+        &witness,
+        proof_randomness_seed_hex,
+    )?;
+    let verification = verify_same_secret_lnp_relation_proof(
+        public_matrix_seed_hash,
+        statement_record,
+        &constant_commitments,
+        setup_proof_binding,
+        &proof_bytes,
+    )?;
+    let proof_bytes_hash = same_secret_lnp_relation_proof_bytes_hash(&proof_bytes);
+
+    Ok(json!({
+        "ok": true,
+        "operation": "generateSameSecretLnpProof",
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofFamily": "same-secret-consistency",
+        "proofVerificationStatus": SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": SAME_SECRET_LNP_PROOF_MODEL_STATUS,
+        "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
+        "statementHash": verification.statement_hash_hex,
+        "relationCommitmentHash": verification.relation_commitment_hash_hex,
+        "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
+        "challenge": verification.challenge,
+        "proofSizeBytes": verification.proof_size_bytes,
+        "proofBytesHash": proof_bytes_hash,
+        "proofBytesHex": to_hex(&proof_bytes),
+        "proofRandomness": {
+            "source": proof_randomness_source,
+            "seedBytes": 64,
+            "retention": "proof randomness seed material is consumed for proof generation and is not returned"
+        }
+    }))
 }
 
 pub(super) fn verify_same_secret_lnp_relation_proof(
@@ -825,14 +900,140 @@ fn invalid_same_secret_proof(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
-#[cfg(test)]
+fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
+    value
+        .get(field_name)
+        .and_then(Value::as_str)
+        .filter(|field| !field.is_empty())
+        .ok_or_else(|| {
+            invalid_same_secret_proof(format!("{field_name} must be a non-empty string"))
+        })
+}
+
+fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Value> {
+    value
+        .get(field_name)
+        .filter(|field| field.is_object())
+        .ok_or_else(|| invalid_same_secret_proof(format!("{field_name} must be an object")))
+}
+
+fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_same_secret_proof(format!("{field_name} must be an array")))
+}
+
+fn setup_commitment_values_field(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<SetupCommitmentValue>> {
+    array_field(value, field_name)?
+        .iter()
+        .map(parse_setup_commitment_full_value)
+        .collect()
+}
+
+fn i64_vector_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<i64>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(item_index, item)| {
+            decimal_i128_value(item)
+                .and_then(|item| i64::try_from(item).ok())
+                .ok_or_else(|| {
+                    invalid_same_secret_proof(format!(
+                        "{field_name}.{item_index} must be a signed 64-bit integer"
+                    ))
+                })
+        })
+        .collect()
+}
+
+fn i128_matrix3_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<Vec<i128>>>> {
+    array_field(value, field_name)?
+        .iter()
+        .enumerate()
+        .map(|(outer_index, middle_value)| {
+            middle_value
+                .as_array()
+                .ok_or_else(|| {
+                    invalid_same_secret_proof(format!("{field_name}.{outer_index} must be an array"))
+                })?
+                .iter()
+                .enumerate()
+                .map(|(middle_index, inner_value)| {
+                    inner_value
+                        .as_array()
+                        .ok_or_else(|| {
+                            invalid_same_secret_proof(format!(
+                                "{field_name}.{outer_index}.{middle_index} must be an array"
+                            ))
+                        })?
+                        .iter()
+                        .enumerate()
+                        .map(|(inner_index, item)| {
+                            decimal_i128_value(item).ok_or_else(|| {
+                                invalid_same_secret_proof(format!(
+                                    "{field_name}.{outer_index}.{middle_index}.{inner_index} must be a signed integer or decimal string"
+                                ))
+                            })
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn decimal_i128_value(value: &Value) -> Option<i128> {
+    if let Some(value) = value.as_i64() {
+        return Some(i128::from(value));
+    }
+    if let Some(value) = value.as_u64() {
+        return Some(i128::from(value));
+    }
+    value.as_str()?.parse::<i128>().ok()
+}
+
+fn proof_randomness_source(value: &Value) -> CanonicalResult<&'static str> {
+    match value
+        .get("proofRandomnessSource")
+        .and_then(Value::as_str)
+        .unwrap_or("fresh-csprng")
+    {
+        "fresh-csprng" => Ok("fresh-csprng"),
+        "development-deterministic-fixture" => Ok("development-deterministic-fixture"),
+        _ => Err(invalid_same_secret_proof(
+            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
+        )),
+    }
+}
+
+fn validate_lowercase_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
+    if hash.len() == 128
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+
+    Err(invalid_same_secret_proof(format!(
+        "{field_name} must be lowercase 512-bit hex"
+    )))
+}
+
+fn validate_proof_randomness_seed(seed_hex: &str, field_name: &str) -> CanonicalResult<()> {
+    validate_lowercase_hash(seed_hex, field_name)
+}
+
 pub(super) struct SameSecretLnpProofWitness {
     pub(super) secret_coefficients: Vec<i64>,
     pub(super) opening_randomness_by_limb: Vec<Vec<Vec<i128>>>,
 }
 
-#[cfg(test)]
-pub(super) fn generate_same_secret_lnp_relation_proof_for_tests(
+pub(super) fn generate_same_secret_lnp_relation_proof(
     public_matrix_seed_hash: &str,
     statement_record: &Value,
     constant_commitments: &[SetupCommitmentValue],
@@ -840,8 +1041,6 @@ pub(super) fn generate_same_secret_lnp_relation_proof_for_tests(
     witness: &SameSecretLnpProofWitness,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<Vec<u8>> {
-    use super::commitment::compute_setup_commitment_for_tests;
-
     validate_same_secret_constant_commitments(constant_commitments)?;
     if witness.secret_coefficients.len() != constant_commitments[0].ring_degree
         || witness.opening_randomness_by_limb.len() != constant_commitments.len()
@@ -857,10 +1056,9 @@ pub(super) fn generate_same_secret_lnp_relation_proof_for_tests(
     )?;
     let statement_hash_hex = to_hex(&statement_hash);
     let parameter_profile_hash = super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
-    let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes_for_test(&parameter_profile_hash)?;
+    let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes(&parameter_profile_hash)?;
     let layout = super::setup_proof::same_secret_lnp_tbox_layout();
-    let tbox_prefix =
-        encode_same_secret_lnp_tbox_prefix_for_tests(&layout, proof_randomness_seed_hex)?;
+    let tbox_prefix = encode_same_secret_lnp_tbox_prefix(&layout, proof_randomness_seed_hex)?;
     let tbox_commitment_prefix_hash =
         super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
 
@@ -954,7 +1152,7 @@ pub(super) fn generate_same_secret_lnp_relation_proof_for_tests(
                     Ok(lifted_mask)
                 })
                 .collect::<CanonicalResult<Vec<_>>>()?;
-            compute_setup_commitment_for_tests(
+            compute_setup_commitment(
                 public_matrix_seed_hash,
                 commitment.source_rns_limb_index,
                 commitment.source_message_modulus,
@@ -999,11 +1197,7 @@ pub(super) fn generate_same_secret_lnp_relation_proof_for_tests(
         layout.proof_ring_degree,
     )?;
     let mut tbox_proof_bytes = tbox_prefix;
-    encode_same_secret_lnp_tbox_suffix_for_tests(
-        &mut tbox_proof_bytes,
-        &layout,
-        &challenge_coefficients,
-    )?;
+    encode_same_secret_lnp_tbox_suffix(&mut tbox_proof_bytes, &layout, &challenge_coefficients)?;
 
     let challenge_wide = i128::from(challenge);
     let secret_response_coefficients =
@@ -1106,42 +1300,39 @@ pub(super) fn generate_same_secret_lnp_relation_proof_for_tests(
     Ok(proof_bytes)
 }
 
-#[cfg(test)]
-fn hash_hex_to_fixed_bytes_for_test(hash_hex: &str) -> CanonicalResult<[u8; 64]> {
+fn hash_hex_to_fixed_bytes(hash_hex: &str) -> CanonicalResult<[u8; 64]> {
     if hash_hex.len() != 128 {
         return Err(invalid_same_secret_proof(
-            "same-secret test hash must be 64 bytes",
+            "same-secret hash must be 64 bytes",
         ));
     }
     let mut output = [0_u8; 64];
     for (byte_index, chunk) in hash_hex.as_bytes().chunks_exact(2).enumerate() {
-        let high = hex_nibble_for_test(chunk[0])?;
-        let low = hex_nibble_for_test(chunk[1])?;
+        let high = hex_nibble(chunk[0])?;
+        let low = hex_nibble(chunk[1])?;
         output[byte_index] = (high << 4) | low;
     }
 
     Ok(output)
 }
 
-#[cfg(test)]
-fn hex_nibble_for_test(value: u8) -> CanonicalResult<u8> {
+fn hex_nibble(value: u8) -> CanonicalResult<u8> {
     match value {
         b'0'..=b'9' => Ok(value - b'0'),
         b'a'..=b'f' => Ok(value - b'a' + 10),
         b'A'..=b'F' => Ok(value - b'A' + 10),
         _ => Err(invalid_same_secret_proof(
-            "same-secret test hash contains a non-hex character",
+            "same-secret hash contains a non-hex character",
         )),
     }
 }
 
-#[cfg(test)]
-fn encode_same_secret_lnp_tbox_prefix_for_tests(
+fn encode_same_secret_lnp_tbox_prefix(
     layout: &super::setup_proof::SetupProofLnpTboxLayout,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<Vec<u8>> {
-    let mut writer = SameSecretLnpBitWriterForTest::new();
-    encode_same_secret_lnp_uniform_polyvec_for_tests(
+    let mut writer = SameSecretLnpBitWriter::new();
+    encode_same_secret_lnp_uniform_polyvec(
         &mut writer,
         layout.t_b_polynomial_count,
         layout.proof_ring_degree,
@@ -1149,7 +1340,7 @@ fn encode_same_secret_lnp_tbox_prefix_for_tests(
         proof_randomness_seed_hex,
         0,
     )?;
-    encode_same_secret_lnp_uniform_polyvec_for_tests(
+    encode_same_secret_lnp_uniform_polyvec(
         &mut writer,
         layout.h_polynomial_count,
         layout.proof_ring_degree,
@@ -1157,7 +1348,7 @@ fn encode_same_secret_lnp_tbox_prefix_for_tests(
         proof_randomness_seed_hex,
         1,
     )?;
-    encode_same_secret_lnp_uniform_polyvec_for_tests(
+    encode_same_secret_lnp_uniform_polyvec(
         &mut writer,
         layout.t_a1_polynomial_count,
         layout.proof_ring_degree,
@@ -1172,13 +1363,12 @@ fn encode_same_secret_lnp_tbox_prefix_for_tests(
     Ok(writer.into_bytes())
 }
 
-#[cfg(test)]
-fn encode_same_secret_lnp_tbox_suffix_for_tests(
+fn encode_same_secret_lnp_tbox_suffix(
     prefix_bytes: &mut Vec<u8>,
     layout: &super::setup_proof::SetupProofLnpTboxLayout,
     challenge_coefficients: &[i64],
 ) -> CanonicalResult<()> {
-    let mut writer = SameSecretLnpBitWriterForTest::from_bytes(prefix_bytes);
+    let mut writer = SameSecretLnpBitWriter::from_bytes(prefix_bytes);
     for coefficient in challenge_coefficients {
         let shifted = coefficient
             .checked_add(
@@ -1196,30 +1386,30 @@ fn encode_same_secret_lnp_tbox_suffix_for_tests(
             super::setup_proof::SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
         )?;
     }
-    encode_same_secret_lnp_zero_hint_polyvec_for_tests(
+    encode_same_secret_lnp_zero_hint_polyvec(
         &mut writer,
         layout.hint_polynomial_count,
         layout.proof_ring_degree,
     )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+    encode_same_secret_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z1_polynomial_count,
         layout.proof_ring_degree,
         layout.z1_log2_standard_deviation,
     )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+    encode_same_secret_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z21_polynomial_count,
         layout.proof_ring_degree,
         layout.z21_log2_standard_deviation,
     )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+    encode_same_secret_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z3_polynomial_count,
         layout.proof_ring_degree,
         layout.z3_log2_standard_deviation,
     )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
+    encode_same_secret_lnp_zero_gaussian_polyvec(
         &mut writer,
         layout.z4_polynomial_count,
         layout.proof_ring_degree,
@@ -1230,9 +1420,8 @@ fn encode_same_secret_lnp_tbox_suffix_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
-fn encode_same_secret_lnp_uniform_polyvec_for_tests(
-    writer: &mut SameSecretLnpBitWriterForTest<'_>,
+fn encode_same_secret_lnp_uniform_polyvec(
+    writer: &mut SameSecretLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
     bit_count: usize,
@@ -1250,7 +1439,7 @@ fn encode_same_secret_lnp_uniform_polyvec_for_tests(
             .to_le_bytes();
         let field_index_bytes = field_index.to_le_bytes();
         let block = hash512(
-            "sealed-lattice/setup/same-secret/lnp-test-tbox-uniform-v1",
+            "sealed-lattice/setup/same-secret/lnp-tbox-uniform-v1",
             &[
                 proof_randomness_seed_hex.as_bytes(),
                 &field_index_bytes,
@@ -1266,9 +1455,8 @@ fn encode_same_secret_lnp_uniform_polyvec_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
-fn encode_same_secret_lnp_zero_hint_polyvec_for_tests(
-    writer: &mut SameSecretLnpBitWriterForTest<'_>,
+fn encode_same_secret_lnp_zero_hint_polyvec(
+    writer: &mut SameSecretLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
 ) -> CanonicalResult<()> {
@@ -1283,9 +1471,8 @@ fn encode_same_secret_lnp_zero_hint_polyvec_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
-fn encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
-    writer: &mut SameSecretLnpBitWriterForTest<'_>,
+fn encode_same_secret_lnp_zero_gaussian_polyvec(
+    writer: &mut SameSecretLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
     log2_standard_deviation: usize,
@@ -1304,20 +1491,17 @@ fn encode_same_secret_lnp_zero_gaussian_polyvec_for_tests(
     Ok(())
 }
 
-#[cfg(test)]
 enum SameSecretLnpBitWriterStorage<'a> {
     Owned(Vec<u8>),
     Borrowed(&'a mut Vec<u8>),
 }
 
-#[cfg(test)]
-struct SameSecretLnpBitWriterForTest<'a> {
+struct SameSecretLnpBitWriter<'a> {
     storage: SameSecretLnpBitWriterStorage<'a>,
     bit_offset: usize,
 }
 
-#[cfg(test)]
-impl<'a> SameSecretLnpBitWriterForTest<'a> {
+impl<'a> SameSecretLnpBitWriter<'a> {
     fn new() -> Self {
         Self {
             storage: SameSecretLnpBitWriterStorage::Owned(Vec::new()),
@@ -1383,7 +1567,6 @@ impl<'a> SameSecretLnpBitWriterForTest<'a> {
     }
 }
 
-#[cfg(test)]
 fn sample_same_secret_mask_i128(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -1401,7 +1584,7 @@ fn sample_same_secret_mask_i128(
         .map_err(|_| invalid_same_secret_proof("same-secret mask coefficient index overflowed"))?
         .to_le_bytes();
     let block = hash512(
-        "sealed-lattice/setup/same-secret/lnp-test-relation-mask-v1",
+        "sealed-lattice/setup/same-secret/lnp-relation-mask-v1",
         &[
             statement_hash,
             proof_randomness_seed_hex.as_bytes(),
@@ -1430,7 +1613,6 @@ fn sample_same_secret_mask_i128(
     }
 }
 
-#[cfg(test)]
 fn sample_same_secret_message_mask_i128(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -1444,7 +1626,7 @@ fn sample_same_secret_message_mask_i128(
         .map_err(|_| invalid_same_secret_proof("same-secret mask coefficient index overflowed"))?
         .to_le_bytes();
     let block = hash512(
-        "sealed-lattice/setup/same-secret/lnp-test-message-mask-v1",
+        "sealed-lattice/setup/same-secret/lnp-message-mask-v1",
         &[
             statement_hash,
             proof_randomness_seed_hex.as_bytes(),
@@ -1464,7 +1646,6 @@ fn sample_same_secret_message_mask_i128(
     Ok(i128::from_le_bytes(bytes))
 }
 
-#[cfg(test)]
 fn same_secret_support_expansion(
     secret_mask: i128,
     negative_indicator_mask: i128,
@@ -1502,7 +1683,6 @@ fn same_secret_support_expansion(
     ])
 }
 
-#[cfg(test)]
 fn boolean_support_expansion(mask: i128, witness: i64, modulus: u64) -> CanonicalResult<[u64; 2]> {
     if !matches!(witness, 0..=1) {
         return Err(invalid_same_secret_proof(

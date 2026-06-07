@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
     createGaloisKeyShareBatches,
+    createPublicEvaluationKeySet,
     createRelinearizationKeyShareRounds,
     type EvaluationKeyProofCommonInput,
     type GaloisKeyShareBatchContribution,
+    type GaloisKeyShareProofMaterial,
+    type RelinearizationKeyShareProofMaterial,
     type RelinearizationRoundOneContribution,
     type RelinearizationRoundTwoContribution,
     type SameSecretProofReference,
@@ -116,6 +119,70 @@ const sameSecretProofReferences = (): readonly SameSecretProofReference[] =>
         }),
     );
 
+const relinearizationProofMaterial = (
+    shareRoot: string,
+    label: string,
+): RelinearizationKeyShareProofMaterial => ({
+    proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
+    setupProofBinding: {
+        objectType: 'SetupProofBindingFixture',
+        label,
+    },
+    keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
+    keySwitchDomain: `relinearization-${label}`,
+    keySwitchSeedHex: 'ab'.repeat(32),
+    ringDegree: 8,
+    keySwitchComponentVectorRoot: shareRoot,
+    keySwitchComponentVectors: [
+        {
+            component: 'b',
+            digitIndex: 0,
+            vectorHash: fixtureHash(`component-vector-${label}`),
+        },
+    ],
+    relinearizationKeyShareTboxParameterProfileHash: fixtureHash(
+        `relinearization-tbox-${label}`,
+    ),
+    statementHash: fixtureHash(`statement-${label}`),
+    relationCommitmentHash: fixtureHash(`relation-commitment-${label}`),
+    tboxCommitmentPrefixHash: fixtureHash(`tbox-commitment-${label}`),
+    challenge: 17,
+    proofSizeBytes: 4,
+    proofBytesHash: fixtureHash(`proof-bytes-${label}`),
+    proofBytesHex: '00112233',
+});
+
+const galoisProofMaterial = (
+    shareRoot: string,
+    label: string,
+): GaloisKeyShareProofMaterial => ({
+    proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1',
+    setupProofBinding: {
+        objectType: 'SetupProofBindingFixture',
+        label,
+    },
+    keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
+    keySwitchDomain: `galois-${label}`,
+    keySwitchSeedHex: 'cd'.repeat(32),
+    ringDegree: 8,
+    keySwitchComponentVectorRoot: shareRoot,
+    keySwitchComponentVectors: [
+        {
+            component: 'b',
+            digitIndex: 0,
+            vectorHash: fixtureHash(`galois-component-vector-${label}`),
+        },
+    ],
+    galoisKeyShareTboxParameterProfileHash: fixtureHash(`galois-tbox-${label}`),
+    statementHash: fixtureHash(`galois-statement-${label}`),
+    relationCommitmentHash: fixtureHash(`galois-relation-commitment-${label}`),
+    tboxCommitmentPrefixHash: fixtureHash(`galois-tbox-commitment-${label}`),
+    challenge: 19,
+    proofSizeBytes: 4,
+    proofBytesHash: fixtureHash(`galois-proof-bytes-${label}`),
+    proofBytesHex: '44556677',
+});
+
 const roundOneContributions =
     (): readonly RelinearizationRoundOneContribution[] =>
         sameSecretProofReferences().map((reference) => ({
@@ -124,8 +191,11 @@ const roundOneContributions =
             roundOneShareRoot: fixtureHash(
                 `round-one-share-${String(reference.trusteeRosterPosition)}`,
             ),
-            roundOneProofRoot: fixtureHash(
-                `round-one-proof-${String(reference.trusteeRosterPosition)}`,
+            proofMaterial: relinearizationProofMaterial(
+                fixtureHash(
+                    `round-one-share-${String(reference.trusteeRosterPosition)}`,
+                ),
+                `round-one-${String(reference.trusteeRosterPosition)}`,
             ),
         }));
 
@@ -137,8 +207,11 @@ const roundTwoContributions =
             roundTwoShareRoot: fixtureHash(
                 `round-two-share-${String(reference.trusteeRosterPosition)}`,
             ),
-            roundTwoProofRoot: fixtureHash(
-                `round-two-proof-${String(reference.trusteeRosterPosition)}`,
+            proofMaterial: relinearizationProofMaterial(
+                fixtureHash(
+                    `round-two-share-${String(reference.trusteeRosterPosition)}`,
+                ),
+                `round-two-${String(reference.trusteeRosterPosition)}`,
             ),
         }));
 
@@ -146,19 +219,26 @@ const galoisBatchContributions =
     (): readonly GaloisKeyShareBatchContribution[] =>
         sameSecretProofReferences().map((reference) => ({
             trusteeRosterPosition: reference.trusteeRosterPosition,
-            galoisKeyShareRoots: requiredGaloisKeySchedule.map(
-                (scheduleEntry) => ({
-                    rotation: scheduleEntry.rotation,
-                    level: scheduleEntry.level,
-                    galoisKeyShareRoot: fixtureHash(
+            galoisKeyShareProofs: requiredGaloisKeySchedule.map(
+                (scheduleEntry) => {
+                    const galoisKeyShareRoot = fixtureHash(
                         `galois-share-${String(
                             reference.trusteeRosterPosition,
                         )}-${String(scheduleEntry.rotation)}`,
-                    ),
-                }),
-            ),
-            galoisKeyBatchProofRoot: fixtureHash(
-                `galois-proof-${String(reference.trusteeRosterPosition)}`,
+                    );
+
+                    return {
+                        rotation: scheduleEntry.rotation,
+                        level: scheduleEntry.level,
+                        galoisKeyShareRoot,
+                        proofMaterial: galoisProofMaterial(
+                            galoisKeyShareRoot,
+                            `${String(
+                                reference.trusteeRosterPosition,
+                            )}-${String(scheduleEntry.rotation)}`,
+                        ),
+                    };
+                },
             ),
         }));
 
@@ -190,7 +270,23 @@ describe('evaluation-key proof record builders', () => {
             rounds.roundOneRecords[0];
         const { roundTwoRecordRoot, ...roundTwoWithoutRoot } =
             rounds.roundTwoRecords[0];
+        const { roundOneProofRoot, ...roundOneWithoutProofRoot } =
+            roundOneWithoutRoot;
+        const { roundTwoProofRoot, ...roundTwoWithoutProofRoot } =
+            roundTwoWithoutRoot;
 
+        expect(roundOneProofRoot).toBe(
+            deriveProtocolHash(
+                'RelinearizationKeyShareProofRoot',
+                roundOneWithoutProofRoot,
+            ),
+        );
+        expect(roundTwoProofRoot).toBe(
+            deriveProtocolHash(
+                'RelinearizationKeyShareProofRoot',
+                roundTwoWithoutProofRoot,
+            ),
+        );
         expect(roundOneRecordRoot).toBe(
             deriveProtocolHash(
                 'RelinearizationRoundOneRecordRoot',
@@ -208,6 +304,14 @@ describe('evaluation-key proof record builders', () => {
         );
         expect(rounds.roundTwoRecords[0].roundOneAggregateRoot).toBe(
             rounds.roundOneAggregateRoots[0].roundOneAggregateRoot,
+        );
+        expect(rounds.roundTwoRecords[0].roundOneSourceSquareBindingRoot).toBe(
+            rounds.roundOneRecords[0].sourceSquareBindingRoot,
+        );
+        expect(
+            rounds.roundTwoRecords[0].roundOneSourceSquareAggregateRoot,
+        ).toBe(
+            rounds.roundOneAggregateRoots[0].roundOneSourceSquareAggregateRoot,
         );
         expect(relinearizationKeyShareRoundsRoot).toBe(
             deriveProtocolHash(
@@ -253,8 +357,34 @@ describe('evaluation-key proof record builders', () => {
             batchContributions: galoisBatchContributions(),
         });
         const { galoisKeyShareBatchRoot, ...batchWithoutRoot } = batches[0];
+        const { galoisKeyShareProofRoot, ...proofWithoutRoot } =
+            batches[0].galoisKeyShareProofs[0];
 
         expect(batches).toHaveLength(participantCount);
+        expect(galoisKeyShareProofRoot).toBe(
+            deriveProtocolHash('GaloisKeyShareProofRoot', proofWithoutRoot),
+        );
+        expect(batchWithoutRoot.galoisKeyBatchProofRoot).toBe(
+            deriveProtocolHash('GaloisKeyBatchProofRoot', {
+                objectType: 'GaloisKeyBatchProofAggregate',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId,
+                proofFamily: 'galois-key-share',
+                evaluatorKeyScheduleRoot:
+                    commonInput().evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                requiredGaloisSetHash:
+                    commonInput().evaluatorKeySchedule.requiredGaloisSetHash,
+                trusteeRosterPosition: 0,
+                proofRoots: batchWithoutRoot.galoisKeyShareProofs.map(
+                    (proof) => ({
+                        rotation: proof.rotation,
+                        level: proof.level,
+                        galoisKeyShareProofRoot: proof.galoisKeyShareProofRoot,
+                    }),
+                ),
+            }),
+        );
         expect(batches[0].sameSecretProofFamilyBindingRoot).toBe(
             commonInput().sameSecretProofFamilyBindingRoot,
         );
@@ -266,8 +396,8 @@ describe('evaluation-key proof record builders', () => {
     it('rejects Galois schedule drift and missing trustee batches', () => {
         const batchContributions = galoisBatchContributions();
         const [firstContribution, secondContribution] = batchContributions;
-        const [firstShareRoot, secondShareRoot] =
-            firstContribution.galoisKeyShareRoots;
+        const [firstShareProof, secondShareProof] =
+            firstContribution.galoisKeyShareProofs;
 
         expect(() =>
             createGaloisKeyShareBatches({
@@ -275,7 +405,10 @@ describe('evaluation-key proof record builders', () => {
                 batchContributions: [
                     {
                         ...firstContribution,
-                        galoisKeyShareRoots: [secondShareRoot, firstShareRoot],
+                        galoisKeyShareProofs: [
+                            secondShareProof,
+                            firstShareProof,
+                        ],
                     },
                     secondContribution,
                 ],
@@ -287,5 +420,141 @@ describe('evaluation-key proof record builders', () => {
                 batchContributions: [firstContribution],
             }),
         ).toThrow(/one batch per participant/u);
+    });
+
+    it('creates deterministic public evaluation-key assembly roots', () => {
+        const input = commonInput();
+        const relinearizationKeyShareRounds =
+            createRelinearizationKeyShareRounds({
+                ...input,
+                roundOneContributions: roundOneContributions(),
+                roundTwoContributions: roundTwoContributions(),
+            });
+        const galoisKeyShareBatches = createGaloisKeyShareBatches({
+            ...input,
+            batchContributions: galoisBatchContributions(),
+        });
+        const evaluationKeys = createPublicEvaluationKeySet({
+            ...input,
+            relinearizationKeyShareRounds,
+            galoisKeyShareBatches,
+        });
+        const { evaluationKeySetHash, ...evaluationKeysWithoutHash } =
+            evaluationKeys;
+
+        expect(evaluationKeys.objectType).toBe('PublicEvaluationKeySet');
+        expect(evaluationKeys.relinearizationKeyRoots).toHaveLength(
+            input.evaluatorKeySchedule.relinearizationLevelSchedule.length,
+        );
+        expect(evaluationKeys.galoisKeyRoots).toHaveLength(
+            input.evaluatorKeySchedule.requiredGaloisKeySchedule.length,
+        );
+        expect(evaluationKeys.genericKeySwitchKeyRoots).toEqual([]);
+        expect(evaluationKeys.rawKeyBytesEmbedded).toBe(false);
+        expect(evaluationKeys.verifierGeneratedKeyMaterial).toBe(false);
+        expect(
+            evaluationKeys.relinearizationKeyRoots[0].relinearizationKeyRoot,
+        ).toBe(
+            deriveProtocolHash('RelinearizationKeyRoot', {
+                objectType: 'RelinearizationKeyAggregate',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId,
+                assemblyStatus:
+                    'assembled-from-review-gated-proof-bearing-shares',
+                materialEncoding:
+                    'root-bound-public-key-switch-component-roots',
+                materialSource:
+                    'verified-relinearization-and-galois-proof-records',
+                evaluatorKeyScheduleRoot:
+                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                sameSecretProofFamilyBindingRoot:
+                    input.sameSecretProofFamilyBindingRoot,
+                publicKeyShareLnpProofSetRoot:
+                    input.publicKeyShareLnpProofSetRoot,
+                relinearizationKeyShareRoundsRoot:
+                    relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
+                level: 1,
+                decompositionDigitCount: 2,
+                rnsLimbCount: 2,
+                roundOneAggregateRoot:
+                    relinearizationKeyShareRounds.roundOneAggregateRoots[0]
+                        .roundOneAggregateRoot,
+                roundOneSourceSquareAggregateRoot:
+                    relinearizationKeyShareRounds.roundOneAggregateRoots[0]
+                        .roundOneSourceSquareAggregateRoot,
+                roundTwoAggregateRoot:
+                    relinearizationKeyShareRounds.roundTwoAggregateRoots[0]
+                        .roundTwoAggregateRoot,
+                roundTwoSourceSquareAggregateRoot:
+                    relinearizationKeyShareRounds.roundTwoAggregateRoots[0]
+                        .roundTwoSourceSquareAggregateRoot,
+            }),
+        );
+        expect(evaluationKeys.galoisKeyRoots[0].galoisKeyRoot).toBe(
+            deriveProtocolHash('RotationKeyRoot', {
+                objectType: 'GaloisKeyAggregate',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId,
+                assemblyStatus:
+                    'assembled-from-review-gated-proof-bearing-shares',
+                materialEncoding:
+                    'root-bound-public-key-switch-component-roots',
+                materialSource:
+                    'verified-relinearization-and-galois-proof-records',
+                evaluatorKeyScheduleRoot:
+                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                sameSecretProofFamilyBindingRoot:
+                    input.sameSecretProofFamilyBindingRoot,
+                publicKeyShareLnpProofSetRoot:
+                    input.publicKeyShareLnpProofSetRoot,
+                galoisKeyCrpRoot: input.evaluatorKeySchedule.galoisKeyCrpRoot,
+                requiredGaloisSetHash:
+                    input.evaluatorKeySchedule.requiredGaloisSetHash,
+                rotation: requiredGaloisKeySchedule[0].rotation,
+                level: requiredGaloisKeySchedule[0].level,
+                decompositionDigitCount: 2,
+                rnsLimbCount: 2,
+                contributingShareRoots:
+                    evaluationKeys.galoisKeyRoots[0].contributingShareRoots,
+            }),
+        );
+        expect(evaluationKeySetHash).toBe(
+            deriveProtocolHash(
+                'EvaluationKeySetHash',
+                evaluationKeysWithoutHash,
+            ),
+        );
+    });
+
+    it('rejects public evaluation-key assembly with missing scheduled Galois proof material', () => {
+        const input = commonInput();
+        const relinearizationKeyShareRounds =
+            createRelinearizationKeyShareRounds({
+                ...input,
+                roundOneContributions: roundOneContributions(),
+                roundTwoContributions: roundTwoContributions(),
+            });
+        const galoisKeyShareBatches = createGaloisKeyShareBatches({
+            ...input,
+            batchContributions: galoisBatchContributions(),
+        });
+        const mutatedGaloisKeyShareBatches = [
+            {
+                ...galoisKeyShareBatches[0],
+                galoisKeyShareProofs:
+                    galoisKeyShareBatches[0].galoisKeyShareProofs.slice(0, 1),
+            },
+            galoisKeyShareBatches[1],
+        ];
+
+        expect(() =>
+            createPublicEvaluationKeySet({
+                ...input,
+                relinearizationKeyShareRounds,
+                galoisKeyShareBatches: mutatedGaloisKeyShareBatches,
+            }),
+        ).toThrow(/missing a scheduled proof record/u);
     });
 });

@@ -619,6 +619,26 @@ fn compute_setup_commitment_for_degree(
     })
 }
 
+pub(super) fn compute_setup_commitment(
+    public_matrix_seed_hash: &str,
+    source_rns_limb_index: usize,
+    source_message_modulus: u64,
+    shamir_coefficient_index: u64,
+    message_coefficients: &[u128],
+    randomness_by_column: &[Vec<i128>],
+    ring_degree: usize,
+) -> CanonicalResult<SetupCommitmentValue> {
+    compute_setup_commitment_for_degree(
+        public_matrix_seed_hash,
+        source_rns_limb_index,
+        source_message_modulus,
+        shamir_coefficient_index,
+        message_coefficients,
+        randomness_by_column,
+        ring_degree,
+    )
+}
+
 #[cfg(test)]
 pub(super) fn compute_setup_commitment_for_tests(
     public_matrix_seed_hash: &str,

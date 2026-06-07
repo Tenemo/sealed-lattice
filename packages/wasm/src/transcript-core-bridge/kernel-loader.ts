@@ -19,9 +19,12 @@ import type {
     BgvPassiveSetupPackage,
     BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
+    BgvPrivateVssShareProofGeneration,
+    BgvPublicKeyShareLnpProofGeneration,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvSameSecretLnpProofGeneration,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
@@ -355,10 +358,74 @@ export const createTranscriptCoreKernelLoader = (
                         dealerCoefficientCommitmentMaterialRecords:
                             input.dealerCoefficientCommitmentMaterialRecords,
                         privateEnvelope: input.privateEnvelope,
+                        transportedPrivateVssShareProofMaterial:
+                            input.transportedPrivateVssShareProofMaterial,
                         expectedPrivateEnvelopeHash:
                             input.expectedPrivateEnvelopeHash,
                         expectedLocalVerificationRoot:
                             input.expectedLocalVerificationRoot,
+                    }),
+                generatePrivateVssShareProof: (
+                    input,
+                ): BgvPrivateVssShareProofGeneration =>
+                    executeCommand<BgvPrivateVssShareProofGeneration>({
+                        command: 'GeneratePrivateVssShareProof',
+                        setupContext: input.setupContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        privateEnvelopeAadHash: input.privateEnvelopeAadHash,
+                        dealerCoefficientCommitmentRecord:
+                            input.dealerCoefficientCommitmentRecord,
+                        dealerCoefficientCommitmentMaterialRecords:
+                            input.dealerCoefficientCommitmentMaterialRecords,
+                        recipientIdentity: input.recipientIdentity,
+                        recipientRosterPosition: input.recipientRosterPosition,
+                        rnsLimbIndex: input.rnsLimbIndex,
+                        rnsPrime: input.rnsPrime,
+                        ringDegree: input.ringDegree,
+                        shareValues: input.shareValues,
+                        coefficientCommitmentRoots:
+                            input.coefficientCommitmentRoots,
+                        coefficientMessagesByShamirIndex:
+                            input.coefficientMessagesByShamirIndex,
+                        openingRandomnessByShamirIndex:
+                            input.openingRandomnessByShamirIndex,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                    }),
+                generateSameSecretLnpProof: (
+                    input,
+                ): BgvSameSecretLnpProofGeneration =>
+                    executeCommand<BgvSameSecretLnpProofGeneration>({
+                        command: 'GenerateSameSecretLnpProof',
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        statementRecord: input.statementRecord,
+                        constantCommitments: input.constantCommitments,
+                        setupProofBinding: input.setupProofBinding,
+                        secretCoefficients: input.secretCoefficients,
+                        openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                    }),
+                generatePublicKeyShareLnpProof: (
+                    input,
+                ): BgvPublicKeyShareLnpProofGeneration =>
+                    executeCommand<BgvPublicKeyShareLnpProofGeneration>({
+                        command: 'GeneratePublicKeyShareLnpProof',
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        publicKeyShareRecord: input.publicKeyShareRecord,
+                        publicKeyShareProofRecord:
+                            input.publicKeyShareProofRecord,
+                        sameSecretStatementRecord:
+                            input.sameSecretStatementRecord,
+                        constantCommitments: input.constantCommitments,
+                        publicShareCoefficientsByLimb:
+                            input.publicShareCoefficientsByLimb,
+                        setupProofBinding: input.setupProofBinding,
+                        secretCoefficients: input.secretCoefficients,
+                        openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        errorCoefficientsByLimb: input.errorCoefficientsByLimb,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                     }),
                 deriveThresholdShareCommitments: (
                     input,

@@ -19,7 +19,7 @@ use rayon::prelude::*;
 use rotation::automorphism_residues;
 pub(crate) use rotation::{generate_galois_key, rotate};
 
-const PLAINTEXT_MODULUS_I64: i64 = 65_537;
+pub(crate) const PLAINTEXT_MODULUS_I64: i64 = 65_537;
 pub(crate) const KEY_SWITCH_ERROR_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-error-v1";
 pub(crate) const KEY_SWITCH_SAMPLE_DOMAIN: &str =
     "sealed-lattice-bgv-evaluator/key-switch-sample-v1";

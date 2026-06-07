@@ -14,6 +14,14 @@ use super::{
         setup_commitment_modulus_product, setup_commitment_profile_hash,
         setup_commitment_profile_value, setup_commitment_root,
     },
+    evaluation_key_share_proof::{
+        EvaluationKeyShareLnpProofVerificationInput, EvaluationKeyShareProofFamily,
+        GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS, GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+        RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        evaluation_key_share_lnp_relation_proof_bytes_hash,
+        verify_evaluation_key_share_lnp_relation_proof,
+    },
     public_key_share_proof::{
         PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS, PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
         PublicKeyShareLnpProofVerificationInput, public_key_share_coefficient_vector_hash,
@@ -68,6 +76,10 @@ const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedPublicKeyShareProofMaterialSet";
 const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedPublicKeyShareProofMaterial";
+const EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
+    "SetupTransportedEvaluationKeyShareProofMaterialSet";
+const EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedEvaluationKeyShareProofMaterial";
 const TRUSTEE_SECRET_COMMITMENT_OBJECT_TYPE: &str = "TrusteeSecretCommitment";
 const PUBLIC_KEY_SHARE_SET_OBJECT_TYPE: &str = "PublicKeyShareSet";
 const PUBLIC_KEY_SHARE_OBJECT_TYPE: &str = "PublicKeyShare";
@@ -84,11 +96,19 @@ const RELINEARIZATION_KEY_SHARE_ROUNDS_OBJECT_TYPE: &str = "RelinearizationKeySh
 const RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE: &str = "RelinearizationKeyShareRoundOne";
 const RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE: &str = "RelinearizationKeyShareRoundTwo";
 const GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE: &str = "GaloisKeyShareBatch";
+const GALOIS_KEY_SHARE_PROOF_OBJECT_TYPE: &str = "GaloisKeyShareProof";
+const PUBLIC_EVALUATION_KEY_SET_OBJECT_TYPE: &str = "PublicEvaluationKeySet";
+const PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS: &str =
+    "assembled-from-review-gated-proof-bearing-shares";
+const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
+    "root-bound-public-key-switch-component-roots";
+const PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE: &str =
+    "verified-relinearization-and-galois-proof-records";
 const RELINEARIZATION_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-relinearization-proof-records-bound-review-gated";
-const RELINEARIZATION_PROOF_MODEL_STATUS: &str = "round-one and round-two proof records are root-bound to the frozen evaluator schedule, accepted same-secret proof roots, same-secret proof-family root, public-key LNP proof-set root, relinearization CRP root, decomposition level, round-one aggregate root, and round-two share roots; algebraic LNP verifier and full tbox quadratic/range closure remain required before evaluation-key acceptance";
-const GALOIS_PROOF_VERIFICATION_STATUS: &str = "lnp-galois-proof-records-bound-review-gated";
-const GALOIS_PROOF_MODEL_STATUS: &str = "Galois proof batches are root-bound to the frozen evaluator schedule, RequiredGaloisSetHash, accepted same-secret proof roots, same-secret proof-family root, public-key LNP proof-set root, Galois CRP root, exact automorphism/level schedule, and per-trustee batch roots; algebraic LNP verifier and full tbox closure remain required before evaluation-key acceptance";
+    RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS;
+const RELINEARIZATION_PROOF_MODEL_STATUS: &str = RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS;
+const GALOIS_PROOF_VERIFICATION_STATUS: &str = GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS;
+const GALOIS_PROOF_MODEL_STATUS: &str = GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS;
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_SET_OBJECT_TYPE: &str =
     "VssCoefficientCommitmentMaterialSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
@@ -377,6 +397,7 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
             "expectedSetupPackageHash",
             "setupPackage",
             "transportedPublicKeyShareProofMaterial",
+            "transportedEvaluationKeyShareProofMaterial",
             "transportedSameSecretProofMaterial",
             "transportedVssCoefficientCommitmentMaterial",
         ],
@@ -576,7 +597,8 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_evaluator_key_schedule(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_pending_evaluation_key_material_boundary(setup_package)? {
+    if let Some(response) = verify_pending_evaluation_key_material_boundary(setup_package, request)?
+    {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
@@ -592,6 +614,9 @@ fn verify_collective_setup_package(
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_profile_ring_material(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_required_public_evaluation_key_set(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     Ok(VerificationFlow::Continue)
@@ -615,11 +640,7 @@ fn verify_setup_package_hash(
     };
     validate_hash_string(setup_package_hash, "setupPackage.setupPackageHash")?;
 
-    let mut hash_input = setup_package.clone();
-    hash_input
-        .as_object_mut()
-        .expect("setup package object was checked")
-        .remove("setupPackageHash");
+    let hash_input = setup_package_hash_input(setup_package);
     let expected_hash = derive_protocol_hash("SetupPackageHash", &hash_input)?;
     if setup_package_hash != expected_hash {
         return Ok(Some(verification_response(
@@ -655,6 +676,37 @@ fn verify_setup_package_hash(
     }
 
     Ok(None)
+}
+
+fn setup_package_hash_input(setup_package: &Value) -> Value {
+    let mut hash_input = setup_package.clone();
+    let hash_input_object = hash_input
+        .as_object_mut()
+        .expect("setup package object was checked");
+    hash_input_object.remove("setupPackageHash");
+    strip_private_vss_encrypted_envelopes_from_package_hash_input(&mut hash_input);
+
+    hash_input
+}
+
+fn strip_private_vss_encrypted_envelopes_from_package_hash_input(hash_input: &mut Value) {
+    let Some(private_vss_envelope_commitments) = hash_input
+        .get_mut("privateVssEnvelopeCommitments")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(envelope_references) = private_vss_envelope_commitments
+        .get_mut("envelopeReferences")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for envelope_reference in envelope_references {
+        if let Some(envelope_reference_object) = envelope_reference.as_object_mut() {
+            envelope_reference_object.remove("encryptedEnvelope");
+        }
+    }
 }
 
 fn verify_context(setup_package: &Value, request: &Value) -> CanonicalResult<Option<Value>> {
@@ -940,6 +992,7 @@ fn setup_profile_binding() -> CanonicalResult<Value> {
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
+        "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
         "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
         "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
         "setupTransportProfileHash": setup_transport_profile_hash()?,
@@ -947,7 +1000,7 @@ fn setup_profile_binding() -> CanonicalResult<Value> {
     }))
 }
 
-fn setup_proof_profile_hash() -> CanonicalResult<String> {
+pub(super) fn setup_proof_profile_hash() -> CanonicalResult<String> {
     derive_protocol_hash("SetupProofProfileHash", &setup_proof_profile_value()?)
 }
 
@@ -1204,6 +1257,8 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             }
         },
         "proofFamilies": setup_proof_family_profiles()?,
+        "privateVssShareTboxParameterProfile": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_value()?,
+        "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
         "sameSecretTboxParameterProfile": super::setup_proof::same_secret_lnp_tbox_parameter_profile_value()?,
         "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
         "publicKeyShareTboxParameterProfile": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_value()?,
@@ -1239,7 +1294,7 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
                 "modulo-only relation check",
                 "generic or undeclared proof family"
             ],
-            "proofBytesAcceptedStatus": "same-secret-and-public-key-share-verifiers-implemented-other-family-verifiers-pending"
+            "proofBytesAcceptedStatus": "private-vss-same-secret-and-public-key-share-verifiers-implemented-other-family-verifiers-pending"
         }
     }))
 }
@@ -4085,6 +4140,19 @@ fn verify_private_vss_envelope_commitments(
         .as_object_mut()
         .expect("private VSS envelope commitment set object was checked")
         .remove("privateVssEnvelopeCommitmentRoot");
+    let root_input_object = root_input
+        .as_object_mut()
+        .expect("private VSS envelope commitment set object was checked");
+    if let Some(envelope_references) = root_input_object
+        .get_mut("envelopeReferences")
+        .and_then(Value::as_array_mut)
+    {
+        for envelope_reference in envelope_references {
+            if let Some(envelope_reference_object) = envelope_reference.as_object_mut() {
+                envelope_reference_object.remove("encryptedEnvelope");
+            }
+        }
+    }
     let expected_root = derive_protocol_hash("PrivateVssEnvelopeCommitmentRoot", &root_input)?;
     if set_root != expected_root {
         return Ok(Some(private_vss_envelope_refusal(
@@ -4555,31 +4623,26 @@ fn private_vss_envelope_binding_from_reference(
         )));
     }
 
-    let Some(encrypted_envelope) = envelope_reference.get("encryptedEnvelope") else {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeMissing",
-            "private VSS envelope commitment must publish the encrypted envelope object it hashes",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope",
-        )));
-    };
-    if let Err(refusal) = verify_encrypted_private_vss_envelope(
-        encrypted_envelope,
-        setup_context,
-        &expected_aad,
-        &expected_aad_hash,
-        public_matrix_seed_hash,
-        vss_coefficient_commitment_root,
-        dealer_identity,
-        dealer_roster_position,
-        recipient_identity,
-        recipient_roster_position,
-        expected_recipient_mailbox_public_key_hash,
-        expected_recipient_mailbox_public_key_bytes_hash,
-        expected_dealer_commitment_root,
-        expected_sequence_number,
-        value_string(envelope_reference, "privateEnvelopeHash")?,
-        value_string(envelope_reference, "encryptedEnvelopeHash")?,
-    )? {
+    if let Some(encrypted_envelope) = envelope_reference.get("encryptedEnvelope")
+        && let Err(refusal) = verify_encrypted_private_vss_envelope(
+            encrypted_envelope,
+            setup_context,
+            &expected_aad,
+            &expected_aad_hash,
+            public_matrix_seed_hash,
+            vss_coefficient_commitment_root,
+            dealer_identity,
+            dealer_roster_position,
+            recipient_identity,
+            recipient_roster_position,
+            expected_recipient_mailbox_public_key_hash,
+            expected_recipient_mailbox_public_key_bytes_hash,
+            expected_dealer_commitment_root,
+            expected_sequence_number,
+            value_string(envelope_reference, "privateEnvelopeHash")?,
+            value_string(envelope_reference, "encryptedEnvelopeHash")?,
+        )?
+    {
         return Ok(Err(refusal));
     }
 
@@ -4602,6 +4665,14 @@ fn private_vss_envelope_binding_from_reference(
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")
         .remove("privateEnvelopeCommitmentRoot");
+    record_root_input
+        .as_object_mut()
+        .expect("private VSS envelope commitment reference object was checked")
+        .remove("encryptedEnvelope");
+    record_root_input
+        .as_object_mut()
+        .expect("private VSS envelope commitment reference object was checked")
+        .remove("transportedPrivateVssShareProofMaterial");
     let expected_record_root =
         derive_protocol_hash("PrivateVssEnvelopeCommitmentRoot", &record_root_input)?;
     if private_envelope_commitment_root != expected_record_root {
@@ -11592,32 +11663,278 @@ fn evaluator_key_schedule_refusal(
 
 fn verify_pending_evaluation_key_material_boundary(
     setup_package: &Value,
+    request: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    if let Some(response) = verify_relinearization_key_share_rounds(setup_package)? {
+    if let Some(response) = verify_relinearization_key_share_rounds(setup_package, request)? {
         return Ok(Some(response));
     }
-    if let Some(response) = verify_galois_key_share_batches(setup_package)? {
+    if let Some(response) = verify_galois_key_share_batches(setup_package, request)? {
         return Ok(Some(response));
     }
 
-    let evaluation_keys = setup_package.get("evaluationKeys").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluationKeys was required before evaluation-key material boundary verification",
-        )
-    })?;
-    let Some(evaluation_keys) = evaluation_keys.as_object() else {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysNotObject",
-            "evaluationKeys must be an object while proof verification is pending",
-            "setupPackage.evaluationKeys",
+    if let Some(response) = verify_public_evaluation_key_set(setup_package, false)? {
+        return Ok(Some(response));
+    }
+
+    Ok(None)
+}
+
+fn verify_required_public_evaluation_key_set(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    verify_public_evaluation_key_set(setup_package, true)
+}
+
+fn verify_public_evaluation_key_set(
+    setup_package: &Value,
+    require_material: bool,
+) -> CanonicalResult<Option<Value>> {
+    let Some(evaluation_keys) = setup_package.get("evaluationKeys") else {
+        if !require_material {
+            return Ok(None);
+        }
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageAssembly"),
+            vec!["evaluationKeys".to_string()],
+            Vec::new(),
+            Vec::new(),
         )?));
     };
-    if !evaluation_keys.is_empty() {
+    if !evaluation_keys.is_object() {
         return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysBeforeAcceptedAssembly",
-            "evaluation keys are refused until accepted relinearization and Galois proof records are consumed by the evaluation-key assembly verifier",
+            "evaluationKeysNotObject",
+            "evaluationKeys must be a root-bound PublicEvaluationKeySet object",
             "setupPackage.evaluationKeys",
+        )?));
+    }
+    if evaluation_keys
+        .as_object()
+        .is_some_and(serde_json::Map::is_empty)
+    {
+        if !require_material {
+            return Ok(None);
+        }
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageAssembly"),
+            vec!["evaluationKeys".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    }
+    if let Some(unexpected_field) = unexpected_public_evaluation_key_set_field(evaluation_keys) {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeysUnexpectedField",
+            format!("evaluationKeys contains unexpected field {unexpected_field}"),
+            format!("setupPackage.evaluationKeys.{unexpected_field}"),
+        )?));
+    }
+    if evaluation_keys.get("objectType").and_then(Value::as_str)
+        != Some(PUBLIC_EVALUATION_KEY_SET_OBJECT_TYPE)
+    {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeysTypeMismatch",
+            "evaluationKeys.objectType must be PublicEvaluationKeySet",
+            "setupPackage.evaluationKeys.objectType",
+        )?));
+    }
+    if evaluation_keys.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeysVersionMismatch",
+            "evaluationKeys.objectVersion must be 1",
+            "setupPackage.evaluationKeys.objectVersion",
+        )?));
+    }
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before evaluation-key assembly verification",
+        )
+    })?;
+    if let Err(error) =
+        verify_context_fields_match(evaluation_keys, setup_context, "evaluationKeys")
+    {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeysContextMismatch",
+            error.message,
+            "setupPackage.evaluationKeys",
+        )?));
+    }
+    for (field_name, expected_value) in [
+        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
+        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
+        ("assemblyStatus", PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS),
+        ("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING),
+        ("materialSource", PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE),
+    ] {
+        if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
+            return Ok(Some(evaluation_key_material_refusal(
+                "evaluationKeysProfileMismatch",
+                format!("evaluationKeys.{field_name} must be {expected_value}"),
+                format!("setupPackage.evaluationKeys.{field_name}"),
+            )?));
+        }
+    }
+    for (field_name, expected_value) in [
+        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("rnsLimbCount", DATA_PRIMES.len() as u64),
+    ] {
+        if evaluation_keys.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
+            return Ok(Some(evaluation_key_material_refusal(
+                "evaluationKeysCountMismatch",
+                format!("evaluationKeys.{field_name} must be {expected_value}"),
+                format!("setupPackage.evaluationKeys.{field_name}"),
+            )?));
+        }
+    }
+    for (field_name, expected_value) in [
+        ("rawKeyBytesEmbedded", false),
+        ("verifierGeneratedKeyMaterial", false),
+    ] {
+        if evaluation_keys.get(field_name).and_then(Value::as_bool) != Some(expected_value) {
+            return Ok(Some(evaluation_key_material_refusal(
+                "evaluationKeysMaterialBoundaryMismatch",
+                format!("evaluationKeys.{field_name} must be false"),
+                format!("setupPackage.evaluationKeys.{field_name}"),
+            )?));
+        }
+    }
+    let binding = evaluation_key_proof_common_binding(setup_package)?;
+    let relinearization_key_share_rounds_root = setup_package
+        .get("relinearizationKeyShareRounds")
+        .and_then(|rounds| rounds.get("relinearizationKeyShareRoundsRoot"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "relinearizationKeyShareRoundsRoot was required before evaluation-key assembly",
+            )
+        })?;
+    for (field_name, expected_value) in [
+        (
+            "evaluatorKeyScheduleRoot",
+            binding.evaluator_key_schedule_root.as_str(),
+        ),
+        (
+            "sameSecretProofFamilyBindingRoot",
+            binding.same_secret_proof_family_binding_root.as_str(),
+        ),
+        (
+            "publicKeyShareLnpProofSetRoot",
+            binding.public_key_share_lnp_proof_set_root.as_str(),
+        ),
+        (
+            "relinearizationKeyShareRoundsRoot",
+            relinearization_key_share_rounds_root,
+        ),
+        (
+            "requiredGaloisSetHash",
+            binding.required_galois_set_hash.as_str(),
+        ),
+    ] {
+        if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
+            return Ok(Some(evaluation_key_material_refusal(
+                "evaluationKeysBindingMismatch",
+                format!("evaluationKeys.{field_name} must match the verified setup binding"),
+                format!("setupPackage.evaluationKeys.{field_name}"),
+            )?));
+        }
+    }
+    if evaluation_keys.get("relinearizationLevelSchedule")
+        != Some(&expected_relinearization_level_schedule())
+    {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeysRelinearizationScheduleMismatch",
+            "evaluationKeys.relinearizationLevelSchedule must match the frozen evaluator schedule",
+            "setupPackage.evaluationKeys.relinearizationLevelSchedule",
+        )?));
+    }
+    if evaluation_keys.get("requiredGaloisKeySchedule")
+        != Some(&expected_required_galois_key_schedule()?)
+    {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeysGaloisScheduleMismatch",
+            "evaluationKeys.requiredGaloisKeySchedule must match the frozen evaluator schedule",
+            "setupPackage.evaluationKeys.requiredGaloisKeySchedule",
+        )?));
+    }
+    if evaluation_keys.get("genericKeySwitchKeyRoots") != Some(&Value::Array(Vec::new())) {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeysGenericKeySwitchOutsideProfile",
+            "evaluationKeys.genericKeySwitchKeyRoots must be empty for the first profile",
+            "setupPackage.evaluationKeys.genericKeySwitchKeyRoots",
+        )?));
+    }
+
+    let expected_relinearization_key_roots =
+        expected_relinearization_key_roots_for_evaluation_keys(setup_package, &binding)?;
+    let supplied_relinearization_key_roots =
+        array_value(evaluation_keys, "relinearizationKeyRoots")?;
+    if supplied_relinearization_key_roots.len() != expected_relinearization_key_roots.len() {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeyRelinearizationKeyCountMismatch",
+            "evaluationKeys.relinearizationKeyRoots must contain one key root per scheduled relinearization level",
+            "setupPackage.evaluationKeys.relinearizationKeyRoots",
+        )?));
+    }
+    if supplied_relinearization_key_roots != &expected_relinearization_key_roots {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeyRelinearizationKeyRootMismatch",
+            "evaluationKeys.relinearizationKeyRoots must be derived from verified relinearization proof aggregates",
+            "setupPackage.evaluationKeys.relinearizationKeyRoots",
+        )?));
+    }
+
+    let expected_galois_batch_roots =
+        expected_galois_batch_roots_for_evaluation_keys(setup_package)?;
+    let supplied_galois_batch_roots = array_value(evaluation_keys, "galoisKeyShareBatchRoots")?;
+    if supplied_galois_batch_roots.len() != expected_galois_batch_roots.len() {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeyGaloisBatchCountMismatch",
+            "evaluationKeys.galoisKeyShareBatchRoots must contain one batch root per trustee",
+            "setupPackage.evaluationKeys.galoisKeyShareBatchRoots",
+        )?));
+    }
+    if supplied_galois_batch_roots != &expected_galois_batch_roots {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeyGaloisBatchRootMismatch",
+            "evaluationKeys.galoisKeyShareBatchRoots must match verified Galois proof batches",
+            "setupPackage.evaluationKeys.galoisKeyShareBatchRoots",
+        )?));
+    }
+
+    let expected_galois_key_roots =
+        expected_galois_key_roots_for_evaluation_keys(setup_package, &binding)?;
+    let supplied_galois_key_roots = array_value(evaluation_keys, "galoisKeyRoots")?;
+    if supplied_galois_key_roots.len() != expected_galois_key_roots.len() {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeyGaloisKeyCountMismatch",
+            "evaluationKeys.galoisKeyRoots must contain one key root per required Galois key",
+            "setupPackage.evaluationKeys.galoisKeyRoots",
+        )?));
+    }
+    if supplied_galois_key_roots != &expected_galois_key_roots {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeyGaloisKeyRootMismatch",
+            "evaluationKeys.galoisKeyRoots must be derived from verified Galois proof batches",
+            "setupPackage.evaluationKeys.galoisKeyRoots",
+        )?));
+    }
+
+    let supplied_evaluation_key_set_hash = value_string(evaluation_keys, "evaluationKeySetHash")?;
+    let mut root_input = evaluation_keys.clone();
+    root_input
+        .as_object_mut()
+        .expect("evaluationKeys object was checked")
+        .remove("evaluationKeySetHash");
+    let expected_evaluation_key_set_hash =
+        derive_protocol_hash("EvaluationKeySetHash", &root_input)?;
+    if supplied_evaluation_key_set_hash != expected_evaluation_key_set_hash {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeySetHashMismatch",
+            "evaluationKeySetHash does not match the canonical public evaluation-key set",
+            "setupPackage.evaluationKeys.evaluationKeySetHash",
         )?));
     }
 
@@ -11626,6 +11943,7 @@ fn verify_pending_evaluation_key_material_boundary(
 
 fn verify_relinearization_key_share_rounds(
     setup_package: &Value,
+    request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") else {
         return Ok(Some(verification_response(
@@ -11765,6 +12083,16 @@ fn verify_relinearization_key_share_rounds(
     }
     let expected_levels = expected_relinearization_levels();
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
+    let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
+    let transported_constant_commitments =
+        same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    let proof_context = EvaluationKeyProofVerificationContext {
+        setup_package,
+        request,
+        same_secret_proof_bindings: &same_secret_proof_bindings,
+        same_secret_records: &same_secret_records,
+        transported_constant_commitments: &transported_constant_commitments,
+    };
     let round_one_records = array_value(rounds, "roundOneRecords")?;
     let round_two_records = array_value(rounds, "roundTwoRecords")?;
     let expected_record_count = expected_levels.len() * FIRST_PROFILE_PARTICIPANT_COUNT as usize;
@@ -11779,15 +12107,13 @@ fn verify_relinearization_key_share_rounds(
     }
 
     let mut round_one_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
+    let mut round_one_source_square_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
     let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
+    let mut round_one_source_square_binding_roots = BTreeMap::<(u64, u64), String>::new();
     for record in round_one_records {
-        let (level, trustee_roster_position, record_root, share_root) =
-            match verify_relinearization_round_one_record(
-                record,
-                &binding,
-                &same_secret_proof_bindings,
-            ) {
+        let (level, trustee_roster_position, record_root, share_root, source_square_binding_root) =
+            match verify_relinearization_round_one_record(record, &binding, &proof_context) {
                 Ok(verified_record) => verified_record,
                 Err(error) => {
                     return Ok(Some(evaluation_key_material_refusal(
@@ -11815,6 +12141,10 @@ fn verify_relinearization_key_share_rounds(
             )?));
         }
         round_one_share_roots.insert((level, trustee_roster_position), share_root);
+        round_one_source_square_binding_roots.insert(
+            (level, trustee_roster_position),
+            source_square_binding_root.clone(),
+        );
         let trustee_identity = same_secret_proof_bindings
             .get(&trustee_roster_position)
             .expect("same-secret proof binding exists after record verification")
@@ -11824,9 +12154,17 @@ fn verify_relinearization_key_share_rounds(
             .entry(level)
             .or_default()
             .push(json!({
-                "trusteeIdentity": trustee_identity,
+                "trusteeIdentity": trustee_identity.clone(),
                 "trusteeRosterPosition": trustee_roster_position,
                 "roundOneRecordRoot": record_root,
+            }));
+        round_one_source_square_roots_by_level
+            .entry(level)
+            .or_default()
+            .push(json!({
+                "trusteeIdentity": trustee_identity,
+                "trusteeRosterPosition": trustee_roster_position,
+                "sourceSquareBindingRoot": source_square_binding_root,
             }));
     }
 
@@ -11835,6 +12173,12 @@ fn verify_relinearization_key_share_rounds(
         "roundOneAggregateRoots",
         "roundOneAggregateRoot",
     )?;
+    let supplied_round_one_source_square_aggregate_roots =
+        relinearization_aggregate_roots_by_level(
+            rounds,
+            "roundOneAggregateRoots",
+            "roundOneSourceSquareAggregateRoot",
+        )?;
     for level in &expected_levels {
         let Some(record_roots) = round_one_roots_by_level.get(level) else {
             return Ok(Some(evaluation_key_material_refusal(
@@ -11843,6 +12187,31 @@ fn verify_relinearization_key_share_rounds(
                 "setupPackage.relinearizationKeyShareRounds.roundOneRecords",
             )?));
         };
+        let Some(source_square_roots) = round_one_source_square_roots_by_level.get(level) else {
+            return Ok(Some(evaluation_key_material_refusal(
+                "relinearizationRoundOneSourceSquareLevelMissing",
+                "relinearization round-one records must cover source-square roots for every scheduled level",
+                "setupPackage.relinearizationKeyShareRounds.roundOneRecords",
+            )?));
+        };
+        let expected_source_square_aggregate_root = relinearization_source_square_aggregate_root(
+            "round-one",
+            binding.evaluator_key_schedule_root.as_str(),
+            *level,
+            source_square_roots,
+            None,
+        )?;
+        if supplied_round_one_source_square_aggregate_roots
+            .get(level)
+            .map(String::as_str)
+            != Some(expected_source_square_aggregate_root.as_str())
+        {
+            return Ok(Some(evaluation_key_material_refusal(
+                "relinearizationRoundOneSourceSquareAggregateRootMismatch",
+                "relinearization round-one source-square aggregate root must be derived from the ordered round-one source-square bindings",
+                "setupPackage.relinearizationKeyShareRounds.roundOneAggregateRoots",
+            )?));
+        }
         let expected_root = derive_protocol_hash(
             "RelinearizationRoundOneAggregateRoot",
             &json!({
@@ -11852,6 +12221,7 @@ fn verify_relinearization_key_share_rounds(
                 "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                 "level": level,
+                "roundOneSourceSquareAggregateRoot": expected_source_square_aggregate_root,
                 "roundOneRecordRoots": record_roots,
             }),
         )?;
@@ -11869,16 +12239,22 @@ fn verify_relinearization_key_share_rounds(
     }
 
     let mut round_two_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
+    let mut round_two_source_square_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
     let mut seen_round_two_records = BTreeSet::new();
+    let round_one_state = RelinearizationRoundOneVerificationState {
+        record_roots: &round_one_record_roots,
+        share_roots: &round_one_share_roots,
+        source_square_binding_roots: &round_one_source_square_binding_roots,
+        aggregate_roots: &supplied_round_one_aggregate_roots,
+        source_square_aggregate_roots: &supplied_round_one_source_square_aggregate_roots,
+    };
     for record in round_two_records {
-        let (level, trustee_roster_position, record_root) =
+        let (level, trustee_roster_position, record_root, source_square_binding_root) =
             match verify_relinearization_round_two_record(
                 record,
                 &binding,
-                &same_secret_proof_bindings,
-                &round_one_record_roots,
-                &round_one_share_roots,
-                &supplied_round_one_aggregate_roots,
+                &proof_context,
+                &round_one_state,
             ) {
                 Ok(verified_record) => verified_record,
                 Err(error) => {
@@ -11912,9 +12288,17 @@ fn verify_relinearization_key_share_rounds(
             .entry(level)
             .or_default()
             .push(json!({
-                "trusteeIdentity": trustee_identity,
+                "trusteeIdentity": trustee_identity.clone(),
                 "trusteeRosterPosition": trustee_roster_position,
                 "roundTwoRecordRoot": record_root,
+            }));
+        round_two_source_square_roots_by_level
+            .entry(level)
+            .or_default()
+            .push(json!({
+                "trusteeIdentity": trustee_identity,
+                "trusteeRosterPosition": trustee_roster_position,
+                "sourceSquareBindingRoot": source_square_binding_root,
             }));
     }
     let supplied_round_two_aggregate_roots = relinearization_aggregate_roots_by_level(
@@ -11922,6 +12306,12 @@ fn verify_relinearization_key_share_rounds(
         "roundTwoAggregateRoots",
         "roundTwoAggregateRoot",
     )?;
+    let supplied_round_two_source_square_aggregate_roots =
+        relinearization_aggregate_roots_by_level(
+            rounds,
+            "roundTwoAggregateRoots",
+            "roundTwoSourceSquareAggregateRoot",
+        )?;
     for level in &expected_levels {
         let Some(record_roots) = round_two_roots_by_level.get(level) else {
             return Ok(Some(evaluation_key_material_refusal(
@@ -11930,6 +12320,39 @@ fn verify_relinearization_key_share_rounds(
                 "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
             )?));
         };
+        let Some(source_square_roots) = round_two_source_square_roots_by_level.get(level) else {
+            return Ok(Some(evaluation_key_material_refusal(
+                "relinearizationRoundTwoSourceSquareLevelMissing",
+                "relinearization round-two records must cover source-square roots for every scheduled level",
+                "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
+            )?));
+        };
+        let round_one_source_square_aggregate_root = supplied_round_one_source_square_aggregate_roots
+            .get(level)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "round-one source-square aggregate root was required before round-two verification",
+                )
+            })?;
+        let expected_source_square_aggregate_root = relinearization_source_square_aggregate_root(
+            "round-two",
+            binding.evaluator_key_schedule_root.as_str(),
+            *level,
+            source_square_roots,
+            Some(round_one_source_square_aggregate_root),
+        )?;
+        if supplied_round_two_source_square_aggregate_roots
+            .get(level)
+            .map(String::as_str)
+            != Some(expected_source_square_aggregate_root.as_str())
+        {
+            return Ok(Some(evaluation_key_material_refusal(
+                "relinearizationRoundTwoSourceSquareAggregateRootMismatch",
+                "relinearization round-two source-square aggregate root must bind the ordered round-two bindings and the round-one source-square aggregate root",
+                "setupPackage.relinearizationKeyShareRounds.roundTwoAggregateRoots",
+            )?));
+        }
         let expected_root = derive_protocol_hash(
             "RelinearizationRoundTwoAggregateRoot",
             &json!({
@@ -11942,6 +12365,8 @@ fn verify_relinearization_key_share_rounds(
                 "roundOneAggregateRoot": supplied_round_one_aggregate_roots
                     .get(level)
                     .expect("round-one aggregate root exists after verification"),
+                "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
+                "roundTwoSourceSquareAggregateRoot": expected_source_square_aggregate_root,
                 "roundTwoRecordRoots": record_roots,
             }),
         )?;
@@ -11976,7 +12401,10 @@ fn verify_relinearization_key_share_rounds(
     Ok(None)
 }
 
-fn verify_galois_key_share_batches(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+fn verify_galois_key_share_batches(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
     let Some(batches) = setup_package.get("galoisKeyShareBatches") else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
@@ -12005,13 +12433,23 @@ fn verify_galois_key_share_batches(setup_package: &Value) -> CanonicalResult<Opt
     }
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
+    let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
+    let transported_constant_commitments =
+        same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    let proof_context = EvaluationKeyProofVerificationContext {
+        setup_package,
+        request,
+        same_secret_proof_bindings: &same_secret_proof_bindings,
+        same_secret_records: &same_secret_records,
+        transported_constant_commitments: &transported_constant_commitments,
+    };
     let expected_schedule = expected_required_galois_key_schedule()?;
     let mut seen_roster_positions = BTreeSet::new();
     for batch in batches {
         if let Err(error) = verify_galois_key_share_batch(
             batch,
             &binding,
-            &same_secret_proof_bindings,
+            &proof_context,
             &expected_schedule,
             &mut seen_roster_positions,
         ) {
@@ -12026,6 +12464,273 @@ fn verify_galois_key_share_batches(setup_package: &Value) -> CanonicalResult<Opt
     Ok(None)
 }
 
+fn expected_relinearization_key_roots_for_evaluation_keys(
+    setup_package: &Value,
+    binding: &EvaluationKeyProofCommonBinding,
+) -> CanonicalResult<Vec<Value>> {
+    let rounds = setup_package
+        .get("relinearizationKeyShareRounds")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "relinearizationKeyShareRounds was required before evaluation-key assembly",
+            )
+        })?;
+    let relinearization_key_share_rounds_root =
+        value_string(rounds, "relinearizationKeyShareRoundsRoot")?;
+    let round_one_aggregate_roots = relinearization_aggregate_roots_by_level(
+        rounds,
+        "roundOneAggregateRoots",
+        "roundOneAggregateRoot",
+    )?;
+    let round_one_source_square_aggregate_roots = relinearization_aggregate_roots_by_level(
+        rounds,
+        "roundOneAggregateRoots",
+        "roundOneSourceSquareAggregateRoot",
+    )?;
+    let round_two_aggregate_roots = relinearization_aggregate_roots_by_level(
+        rounds,
+        "roundTwoAggregateRoots",
+        "roundTwoAggregateRoot",
+    )?;
+    let round_two_source_square_aggregate_roots = relinearization_aggregate_roots_by_level(
+        rounds,
+        "roundTwoAggregateRoots",
+        "roundTwoSourceSquareAggregateRoot",
+    )?;
+
+    expected_relinearization_levels()
+        .into_iter()
+        .map(|level| {
+            let round_one_aggregate_root =
+                round_one_aggregate_roots
+                    .get(&level)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "relinearization round-one aggregate root was required before evaluation-key assembly",
+                        )
+                    })?;
+            let round_two_aggregate_root =
+                round_two_aggregate_roots
+                    .get(&level)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "relinearization round-two aggregate root was required before evaluation-key assembly",
+                        )
+                    })?;
+            let round_one_source_square_aggregate_root =
+                round_one_source_square_aggregate_roots
+                    .get(&level)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "relinearization round-one source-square aggregate root was required before evaluation-key assembly",
+                        )
+                    })?;
+            let round_two_source_square_aggregate_root =
+                round_two_source_square_aggregate_roots
+                    .get(&level)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "relinearization round-two source-square aggregate root was required before evaluation-key assembly",
+                        )
+                    })?;
+            let decomposition_digit_count = level.checked_add(1).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "relinearization level overflowed while deriving evaluation-key assembly",
+                )
+            })?;
+            let key_root = derive_protocol_hash(
+                "RelinearizationKeyRoot",
+                &json!({
+                    "objectType": "RelinearizationKeyAggregate",
+                    "objectVersion": 1,
+                    "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+                    "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+                    "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
+                    "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
+                    "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
+                    "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+                    "sameSecretProofFamilyBindingRoot": binding
+                        .same_secret_proof_family_binding_root
+                        .as_str(),
+                    "publicKeyShareLnpProofSetRoot": binding
+                        .public_key_share_lnp_proof_set_root
+                        .as_str(),
+                    "relinearizationKeyShareRoundsRoot": relinearization_key_share_rounds_root,
+                    "level": level,
+                    "decompositionDigitCount": decomposition_digit_count,
+                    "rnsLimbCount": decomposition_digit_count,
+                    "roundOneAggregateRoot": round_one_aggregate_root,
+                    "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
+                    "roundTwoAggregateRoot": round_two_aggregate_root,
+                    "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
+                }),
+            )?;
+
+            Ok(json!({
+                "level": level,
+                "decompositionDigitCount": decomposition_digit_count,
+                "rnsLimbCount": decomposition_digit_count,
+                "roundOneAggregateRoot": round_one_aggregate_root,
+                "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
+                "roundTwoAggregateRoot": round_two_aggregate_root,
+                "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
+                "relinearizationKeyRoot": key_root,
+            }))
+        })
+        .collect()
+}
+
+fn expected_galois_batch_roots_for_evaluation_keys(
+    setup_package: &Value,
+) -> CanonicalResult<Vec<Value>> {
+    let batches = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "galoisKeyShareBatches was required before evaluation-key assembly",
+            )
+        })?;
+    let mut batch_roots = BTreeMap::<u64, Value>::new();
+    for batch in batches {
+        let trustee_roster_position = value_u64(batch, "trusteeRosterPosition")?;
+        let trustee_identity = value_string(batch, "trusteeIdentity")?;
+        let galois_key_share_batch_root = value_string(batch, "galoisKeyShareBatchRoot")?;
+        if batch_roots
+            .insert(
+                trustee_roster_position,
+                json!({
+                    "trusteeIdentity": trustee_identity,
+                    "trusteeRosterPosition": trustee_roster_position,
+                    "galoisKeyShareBatchRoot": galois_key_share_batch_root,
+                }),
+            )
+            .is_some()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "Galois key share batches must not repeat a trustee roster position",
+            ));
+        }
+    }
+
+    Ok(batch_roots.into_values().collect())
+}
+
+fn expected_galois_key_roots_for_evaluation_keys(
+    setup_package: &Value,
+    binding: &EvaluationKeyProofCommonBinding,
+) -> CanonicalResult<Vec<Value>> {
+    let batches = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "galoisKeyShareBatches was required before evaluation-key assembly",
+            )
+        })?;
+    let expected_schedule = expected_required_galois_key_schedule()?;
+    let expected_schedule = expected_schedule.as_array().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "required Galois key schedule must be an array",
+        )
+    })?;
+    let mut ordered_batches = batches
+        .iter()
+        .map(|batch| Ok((value_u64(batch, "trusteeRosterPosition")?, batch)))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    ordered_batches.sort_by_key(|(trustee_roster_position, _)| *trustee_roster_position);
+
+    expected_schedule
+        .iter()
+        .map(|schedule_entry| {
+            let rotation = value_u64(schedule_entry, "rotation")?;
+            let level = value_u64(schedule_entry, "level")?;
+            let decomposition_digit_count = level.checked_add(1).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "Galois key level overflowed while deriving evaluation-key assembly",
+                )
+            })?;
+            let mut contributing_share_roots = Vec::new();
+            for (_, batch) in &ordered_batches {
+                let trustee_identity = value_string(batch, "trusteeIdentity")?;
+                let trustee_roster_position = value_u64(batch, "trusteeRosterPosition")?;
+                let proof = galois_key_share_proof_for_schedule(batch, rotation, level)?;
+                contributing_share_roots.push(json!({
+                    "trusteeIdentity": trustee_identity,
+                    "trusteeRosterPosition": trustee_roster_position,
+                    "galoisKeyShareRoot": value_string(proof, "galoisKeyShareRoot")?,
+                    "galoisKeyShareProofRoot": value_string(proof, "galoisKeyShareProofRoot")?,
+                }));
+            }
+            let galois_key_root = derive_protocol_hash(
+                "RotationKeyRoot",
+                &json!({
+                    "objectType": "GaloisKeyAggregate",
+                    "objectVersion": 1,
+                    "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+                    "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+                    "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
+                    "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
+                    "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
+                    "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+                    "sameSecretProofFamilyBindingRoot": binding
+                        .same_secret_proof_family_binding_root
+                        .as_str(),
+                    "publicKeyShareLnpProofSetRoot": binding
+                        .public_key_share_lnp_proof_set_root
+                        .as_str(),
+                    "galoisKeyCrpRoot": binding.galois_key_crp_root.as_str(),
+                    "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
+                    "rotation": rotation,
+                    "level": level,
+                    "decompositionDigitCount": decomposition_digit_count,
+                    "rnsLimbCount": decomposition_digit_count,
+                    "contributingShareRoots": contributing_share_roots,
+                }),
+            )?;
+
+            Ok(json!({
+                "rotation": rotation,
+                "level": level,
+                "decompositionDigitCount": decomposition_digit_count,
+                "rnsLimbCount": decomposition_digit_count,
+                "galoisKeyRoot": galois_key_root,
+                "contributingShareRoots": contributing_share_roots,
+            }))
+        })
+        .collect()
+}
+
+fn galois_key_share_proof_for_schedule(
+    batch: &Value,
+    rotation: u64,
+    level: u64,
+) -> CanonicalResult<&Value> {
+    array_value(batch, "galoisKeyShareProofs")?
+        .iter()
+        .find(|proof| {
+            proof.get("rotation").and_then(Value::as_u64) == Some(rotation)
+                && proof.get("level").and_then(Value::as_u64) == Some(level)
+        })
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "Galois key share batch does not contain a required scheduled proof",
+            )
+        })
+}
+
 struct EvaluationKeyProofCommonBinding {
     evaluator_key_schedule_root: String,
     same_secret_consistency_root: String,
@@ -12036,6 +12741,23 @@ struct EvaluationKeyProofCommonBinding {
     relinearization_crp_root: String,
     galois_key_crp_root: String,
     required_galois_set_hash: String,
+}
+
+struct EvaluationKeyProofVerificationContext<'a> {
+    setup_package: &'a Value,
+    request: &'a Value,
+    same_secret_proof_bindings: &'a BTreeMap<u64, SameSecretProofBinding>,
+    same_secret_records: &'a BTreeMap<u64, Value>,
+    transported_constant_commitments:
+        &'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>,
+}
+
+struct RelinearizationRoundOneVerificationState<'a> {
+    record_roots: &'a BTreeMap<(u64, u64), String>,
+    share_roots: &'a BTreeMap<(u64, u64), String>,
+    source_square_binding_roots: &'a BTreeMap<(u64, u64), String>,
+    aggregate_roots: &'a BTreeMap<u64, String>,
+    source_square_aggregate_roots: &'a BTreeMap<u64, String>,
 }
 
 fn evaluation_key_proof_common_binding(
@@ -12105,6 +12827,70 @@ fn expected_relinearization_levels() -> Vec<u64> {
     (1..DATA_PRIMES.len()).map(|level| level as u64).collect()
 }
 
+fn expected_relinearization_key_switch_component_polynomial_count() -> CanonicalResult<u64> {
+    expected_relinearization_levels()
+        .into_iter()
+        .try_fold(0_u64, |total, level| {
+            let digit_count = level.checked_add(1).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "relinearization level overflowed while deriving HE certificate accounting",
+                )
+            })?;
+            let component_polynomial_count =
+                digit_count.checked_mul(digit_count).ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "relinearization component polynomial count overflowed",
+                    )
+                })?;
+            total
+                .checked_add(component_polynomial_count)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "relinearization key polynomial count overflowed",
+                    )
+                })
+        })
+}
+
+fn expected_galois_key_switch_component_polynomial_count() -> CanonicalResult<u64> {
+    expected_required_galois_key_schedule()?
+        .as_array()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "required Galois key schedule must be an array",
+            )
+        })?
+        .iter()
+        .try_fold(0_u64, |total, schedule_entry| {
+            let level = value_u64(schedule_entry, "level")?;
+            let digit_count = level.checked_add(1).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "Galois key level overflowed while deriving HE certificate accounting",
+                )
+            })?;
+            let component_polynomial_count =
+                digit_count.checked_mul(digit_count).ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "Galois component polynomial count overflowed",
+                    )
+                })?;
+            total
+                .checked_add(component_polynomial_count)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "Galois key polynomial count overflowed",
+                    )
+                })
+        })
+}
+
 fn array_value<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
     value
         .get(field_name)
@@ -12141,8 +12927,8 @@ fn relinearization_aggregate_roots_by_level(
 fn verify_relinearization_round_one_record(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
-) -> CanonicalResult<(u64, u64, String, String)> {
+    proof_context: &EvaluationKeyProofVerificationContext<'_>,
+) -> CanonicalResult<(u64, u64, String, String, String)> {
     verify_evaluation_key_record_object(
         record,
         RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE,
@@ -12163,15 +12949,31 @@ fn verify_relinearization_round_one_record(
     verify_evaluation_key_record_common_bindings(
         record,
         binding,
-        same_secret_proof_bindings,
+        proof_context.same_secret_proof_bindings,
         trustee_roster_position,
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
     )?;
     let round_one_share_root = value_string(record, "roundOneShareRoot")?;
     validate_hash_string(round_one_share_root, "roundOneShareRoot")?;
+    let source_square_binding_root = value_string(record, "sourceSquareBindingRoot")?;
+    validate_hash_string(source_square_binding_root, "sourceSquareBindingRoot")?;
     let round_one_proof_root = value_string(record, "roundOneProofRoot")?;
     validate_hash_string(round_one_proof_root, "roundOneProofRoot")?;
+    verify_relinearization_key_share_lnp_proof_record(
+        record,
+        proof_context,
+        "roundOneProofRoot",
+        round_one_proof_root,
+    )?;
+    let expected_source_square_binding_root =
+        relinearization_source_square_binding_root(record, "round-one", round_one_share_root)?;
+    if source_square_binding_root != expected_source_square_binding_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "sourceSquareBindingRoot does not match the canonical relinearization source-square binding",
+        ));
+    }
     let supplied_root = value_string(record, "roundOneRecordRoot")?;
     let mut root_input = record.clone();
     root_input
@@ -12191,17 +12993,16 @@ fn verify_relinearization_round_one_record(
         trustee_roster_position,
         supplied_root.to_string(),
         round_one_share_root.to_string(),
+        source_square_binding_root.to_string(),
     ))
 }
 
 fn verify_relinearization_round_two_record(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
-    round_one_record_roots: &BTreeMap<(u64, u64), String>,
-    round_one_share_roots: &BTreeMap<(u64, u64), String>,
-    round_one_aggregate_roots: &BTreeMap<u64, String>,
-) -> CanonicalResult<(u64, u64, String)> {
+    proof_context: &EvaluationKeyProofVerificationContext<'_>,
+    round_one_state: &RelinearizationRoundOneVerificationState<'_>,
+) -> CanonicalResult<(u64, u64, String, String)> {
     verify_evaluation_key_record_object(
         record,
         RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE,
@@ -12222,7 +13023,7 @@ fn verify_relinearization_round_two_record(
     verify_evaluation_key_record_common_bindings(
         record,
         binding,
-        same_secret_proof_bindings,
+        proof_context.same_secret_proof_bindings,
         trustee_roster_position,
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
@@ -12231,22 +13032,57 @@ fn verify_relinearization_round_two_record(
         "roundOneShareRoot",
         "roundOneRecordRoot",
         "roundOneAggregateRoot",
+        "roundOneSourceSquareBindingRoot",
+        "roundOneSourceSquareAggregateRoot",
         "roundTwoShareRoot",
+        "sourceSquareBindingRoot",
         "roundTwoProofRoot",
     ] {
         validate_hash_string(value_string(record, field_name)?, field_name)?;
     }
     let key = (level, trustee_roster_position);
-    if round_one_record_roots.get(&key).map(String::as_str)
+    if round_one_state.record_roots.get(&key).map(String::as_str)
         != Some(value_string(record, "roundOneRecordRoot")?)
-        || round_one_share_roots.get(&key).map(String::as_str)
+        || round_one_state.share_roots.get(&key).map(String::as_str)
             != Some(value_string(record, "roundOneShareRoot")?)
-        || round_one_aggregate_roots.get(&level).map(String::as_str)
+        || round_one_state
+            .aggregate_roots
+            .get(&level)
+            .map(String::as_str)
             != Some(value_string(record, "roundOneAggregateRoot")?)
+        || round_one_state
+            .source_square_binding_roots
+            .get(&key)
+            .map(String::as_str)
+            != Some(value_string(record, "roundOneSourceSquareBindingRoot")?)
+        || round_one_state
+            .source_square_aggregate_roots
+            .get(&level)
+            .map(String::as_str)
+            != Some(value_string(record, "roundOneSourceSquareAggregateRoot")?)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "relinearization round-two record must bind the accepted round-one record, share, and aggregate roots",
+            "relinearization round-two record must bind the accepted round-one record, share, aggregate, and source-square roots",
+        ));
+    }
+    let round_two_proof_root = value_string(record, "roundTwoProofRoot")?;
+    verify_relinearization_key_share_lnp_proof_record(
+        record,
+        proof_context,
+        "roundTwoProofRoot",
+        round_two_proof_root,
+    )?;
+    let source_square_binding_root = value_string(record, "sourceSquareBindingRoot")?;
+    let expected_source_square_binding_root = relinearization_source_square_binding_root(
+        record,
+        "round-two",
+        value_string(record, "roundTwoShareRoot")?,
+    )?;
+    if source_square_binding_root != expected_source_square_binding_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "sourceSquareBindingRoot does not match the canonical relinearization source-square binding",
         ));
     }
     let supplied_root = value_string(record, "roundTwoRecordRoot")?;
@@ -12263,13 +13099,18 @@ fn verify_relinearization_round_two_record(
         ));
     }
 
-    Ok((level, trustee_roster_position, supplied_root.to_string()))
+    Ok((
+        level,
+        trustee_roster_position,
+        supplied_root.to_string(),
+        source_square_binding_root.to_string(),
+    ))
 }
 
 fn verify_galois_key_share_batch(
     batch: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
+    proof_context: &EvaluationKeyProofVerificationContext<'_>,
     expected_schedule: &Value,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<()> {
@@ -12296,7 +13137,7 @@ fn verify_galois_key_share_batch(
     verify_evaluation_key_record_common_bindings(
         batch,
         binding,
-        same_secret_proof_bindings,
+        proof_context.same_secret_proof_bindings,
         trustee_roster_position,
         "galoisKeyCrpRoot",
         binding.galois_key_crp_root.as_str(),
@@ -12337,10 +13178,53 @@ fn verify_galois_key_share_batch(
             "galoisKeyShareRoot",
         )?;
     }
-    validate_hash_string(
-        value_string(batch, "galoisKeyBatchProofRoot")?,
-        "galoisKeyBatchProofRoot",
+    let proof_records = array_value(batch, "galoisKeyShareProofs")?;
+    if proof_records.len() != expected_entries.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "Galois key share batch must contain one proof record per required schedule entry",
+        ));
+    }
+    let mut proof_roots = Vec::new();
+    for ((proof_record, root_entry), expected_entry) in proof_records
+        .iter()
+        .zip(key_roots.iter())
+        .zip(expected_entries)
+    {
+        let proof_root = verify_galois_key_share_lnp_proof_record(
+            proof_record,
+            batch,
+            proof_context,
+            root_entry,
+            expected_entry,
+        )?;
+        proof_roots.push(json!({
+            "rotation": value_u64(proof_record, "rotation")?,
+            "level": value_u64(proof_record, "level")?,
+            "galoisKeyShareProofRoot": proof_root,
+        }));
+    }
+    let supplied_batch_proof_root = value_string(batch, "galoisKeyBatchProofRoot")?;
+    let expected_batch_proof_root = derive_protocol_hash(
+        "GaloisKeyBatchProofRoot",
+        &json!({
+            "objectType": "GaloisKeyBatchProofAggregate",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": "galois-key-share",
+            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+            "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
+            "trusteeRosterPosition": trustee_roster_position,
+            "proofRoots": proof_roots,
+        }),
     )?;
+    if supplied_batch_proof_root != expected_batch_proof_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "galoisKeyBatchProofRoot must be derived from the verified Galois proof records",
+        ));
+    }
     let supplied_root = value_string(batch, "galoisKeyShareBatchRoot")?;
     let mut root_input = batch.clone();
     root_input
@@ -12356,6 +13240,719 @@ fn verify_galois_key_share_batch(
     }
 
     Ok(())
+}
+
+fn verify_relinearization_key_share_lnp_proof_record(
+    record: &Value,
+    proof_context: &EvaluationKeyProofVerificationContext<'_>,
+    proof_root_field_name: &str,
+    supplied_proof_root: &str,
+) -> CanonicalResult<()> {
+    let trustee_roster_position = value_u64(record, "trusteeRosterPosition")?;
+    let same_secret_record = proof_context
+        .same_secret_records
+        .get(&trustee_roster_position)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "relinearization proof must reference an accepted same-secret statement",
+            )
+        })?;
+    verify_evaluation_key_lnp_proof_record_common_fields(
+        EvaluationKeyShareProofFamily::Relinearization,
+        record,
+    )?;
+    let share_root_field_name = match proof_root_field_name {
+        "roundOneProofRoot" => "roundOneShareRoot",
+        "roundTwoProofRoot" => "roundTwoShareRoot",
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "relinearization proof root field must identify round one or round two",
+            ));
+        }
+    };
+    if record
+        .get("keySwitchComponentVectorRoot")
+        .and_then(Value::as_str)
+        != Some(value_string(record, share_root_field_name)?)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "relinearization proof share root must match the verified key-switch component vector root",
+        ));
+    }
+    let proof_bytes = evaluation_key_share_lnp_proof_bytes_from_record(
+        EvaluationKeyShareProofFamily::Relinearization,
+        record,
+        proof_context.request,
+    )?;
+    verify_evaluation_key_lnp_proof_bytes_metadata(
+        EvaluationKeyShareProofFamily::Relinearization,
+        record,
+        &proof_bytes,
+    )?;
+    let constant_commitments = same_secret_constant_commitment_values_from_material(
+        proof_context.setup_package,
+        trustee_roster_position,
+        proof_context.transported_constant_commitments,
+    )?;
+    let setup_proof_binding = record.get("setupProofBinding").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "relinearization proof setupProofBinding is required",
+        )
+    })?;
+    let public_matrix_seed_hash = proof_context
+        .setup_package
+        .get("commonRandomness")
+        .and_then(|common_randomness| common_randomness.get("publicMatrixSeedHash"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "commonRandomness.publicMatrixSeedHash was required before relinearization proof verification",
+            )
+        })?;
+    let verification = verify_evaluation_key_share_lnp_relation_proof(
+        EvaluationKeyShareLnpProofVerificationInput {
+            proof_family: EvaluationKeyShareProofFamily::Relinearization,
+            public_matrix_seed_hash,
+            proof_record: record,
+            same_secret_statement_record: same_secret_record,
+            constant_commitments: &constant_commitments,
+            setup_proof_binding,
+            proof_bytes: &proof_bytes,
+        },
+    )?;
+    verify_evaluation_key_lnp_proof_transcript_metadata(record, &verification)?;
+    let expected_proof_root = relinearization_key_share_proof_root(record, proof_root_field_name)?;
+    if supplied_proof_root != expected_proof_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "relinearization proof root does not match the canonical proof record",
+        ));
+    }
+
+    Ok(())
+}
+
+fn verify_galois_key_share_lnp_proof_record(
+    proof_record: &Value,
+    batch: &Value,
+    proof_context: &EvaluationKeyProofVerificationContext<'_>,
+    root_entry: &Value,
+    expected_schedule_entry: &Value,
+) -> CanonicalResult<String> {
+    if !proof_record.is_object() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois key share proof record must be an object",
+        ));
+    }
+    if let Some(unexpected_field) = unexpected_galois_key_share_proof_field(proof_record) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("Galois key share proof contains unexpected field {unexpected_field}"),
+        ));
+    }
+    if proof_record.get("objectType").and_then(Value::as_str)
+        != Some(GALOIS_KEY_SHARE_PROOF_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois key share proof objectType must be GaloisKeyShareProof",
+        ));
+    }
+    if proof_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois key share proof objectVersion must be 1",
+        ));
+    }
+    for field_name in [
+        "setupProfileId",
+        "setupProofProfileId",
+        "proofFamily",
+        "proofVerificationStatus",
+        "proofModelStatus",
+        "ceremonyId",
+        "manifestHash",
+        "rosterHash",
+        "setupProfileHash",
+        "qShareHash",
+        "carryAwareVssShareRelationProfileHash",
+        "commitmentProfileHash",
+        "setupEpoch",
+        "trusteeIdentity",
+        "trusteeRosterPosition",
+        "evaluatorKeyScheduleRoot",
+        "sameSecretConsistencyRoot",
+        "sameSecretProofSetRoot",
+        "sameSecretProofFamilyBindingRoot",
+        "publicKeyShareLnpProofSetRoot",
+        "sameSecretStatementRoot",
+        "trusteeSecretCommitmentRoot",
+        "sameSecretProofRoot",
+        "galoisKeyCrpRoot",
+        "requiredGaloisSetHash",
+    ] {
+        if proof_record.get(field_name) != batch.get(field_name) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!("Galois key share proof {field_name} must match the parent batch"),
+            ));
+        }
+    }
+    if proof_record.get("rotation") != expected_schedule_entry.get("rotation")
+        || proof_record.get("level") != expected_schedule_entry.get("level")
+        || proof_record.get("rotation") != root_entry.get("rotation")
+        || proof_record.get("level") != root_entry.get("level")
+        || proof_record.get("galoisKeyShareRoot") != root_entry.get("galoisKeyShareRoot")
+        || proof_record.get("keySwitchComponentVectorRoot") != root_entry.get("galoisKeyShareRoot")
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "Galois key share proof must bind the scheduled rotation, level, and share root",
+        ));
+    }
+    verify_evaluation_key_lnp_proof_record_common_fields(
+        EvaluationKeyShareProofFamily::Galois,
+        proof_record,
+    )?;
+    let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
+    let same_secret_record = proof_context
+        .same_secret_records
+        .get(&trustee_roster_position)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "Galois key share proof must reference an accepted same-secret statement",
+            )
+        })?;
+    let proof_bytes = evaluation_key_share_lnp_proof_bytes_from_record(
+        EvaluationKeyShareProofFamily::Galois,
+        proof_record,
+        proof_context.request,
+    )?;
+    verify_evaluation_key_lnp_proof_bytes_metadata(
+        EvaluationKeyShareProofFamily::Galois,
+        proof_record,
+        &proof_bytes,
+    )?;
+    let constant_commitments = same_secret_constant_commitment_values_from_material(
+        proof_context.setup_package,
+        trustee_roster_position,
+        proof_context.transported_constant_commitments,
+    )?;
+    let setup_proof_binding = proof_record.get("setupProofBinding").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois key share proof setupProofBinding is required",
+        )
+    })?;
+    let public_matrix_seed_hash = proof_context
+        .setup_package
+        .get("commonRandomness")
+        .and_then(|common_randomness| common_randomness.get("publicMatrixSeedHash"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "commonRandomness.publicMatrixSeedHash was required before Galois proof verification",
+            )
+        })?;
+    let verification = verify_evaluation_key_share_lnp_relation_proof(
+        EvaluationKeyShareLnpProofVerificationInput {
+            proof_family: EvaluationKeyShareProofFamily::Galois,
+            public_matrix_seed_hash,
+            proof_record,
+            same_secret_statement_record: same_secret_record,
+            constant_commitments: &constant_commitments,
+            setup_proof_binding,
+            proof_bytes: &proof_bytes,
+        },
+    )?;
+    verify_evaluation_key_lnp_proof_transcript_metadata(proof_record, &verification)?;
+    let supplied_proof_root = value_string(proof_record, "galoisKeyShareProofRoot")?;
+    let expected_proof_root = galois_key_share_proof_root(proof_record)?;
+    if supplied_proof_root != expected_proof_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "galoisKeyShareProofRoot does not match the canonical Galois proof record",
+        ));
+    }
+
+    Ok(supplied_proof_root.to_string())
+}
+
+fn verify_evaluation_key_lnp_proof_record_common_fields(
+    proof_family: EvaluationKeyShareProofFamily,
+    proof_record: &Value,
+) -> CanonicalResult<()> {
+    let expected_setup_proof_binding = setup_proof_record_binding_value()?;
+    if proof_record.get("setupProofBinding") != Some(&expected_setup_proof_binding) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "evaluation-key proof setupProofBinding must match the accepted setup-proof profile",
+        ));
+    }
+    super::setup_proof::verify_setup_proof_record_binding(
+        &expected_setup_proof_binding,
+        COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        &setup_proof_profile_hash()?,
+    )?;
+    let (expected_profile_id, tbox_profile_field_name, expected_tbox_hash) = match proof_family {
+        EvaluationKeyShareProofFamily::Relinearization => (
+            "sealed-lattice-relinearization-key-share-proof-lnp-v1",
+            "relinearizationKeyShareTboxParameterProfileHash",
+            super::setup_proof::relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
+        ),
+        EvaluationKeyShareProofFamily::Galois => (
+            "sealed-lattice-galois-key-share-proof-lnp-v1",
+            "galoisKeyShareTboxParameterProfileHash",
+            super::setup_proof::galois_key_share_lnp_tbox_parameter_profile_hash()?,
+        ),
+    };
+    if proof_record.get("proofProfileId").and_then(Value::as_str) != Some(expected_profile_id)
+        || proof_record
+            .get(tbox_profile_field_name)
+            .and_then(Value::as_str)
+            != Some(expected_tbox_hash.as_str())
+        || proof_record
+            .get("keySwitchMaterialEncoding")
+            .and_then(Value::as_str)
+            != Some("embedded-full-key-switch-component-vectors")
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "evaluation-key proof profile and material encoding fields must match the accepted verifier",
+        ));
+    }
+    validate_hash_string(
+        value_string(proof_record, "keySwitchComponentVectorRoot")?,
+        "evaluationKeyShareProof.keySwitchComponentVectorRoot",
+    )?;
+
+    Ok(())
+}
+
+fn verify_evaluation_key_lnp_proof_bytes_metadata(
+    proof_family: EvaluationKeyShareProofFamily,
+    proof_record: &Value,
+    proof_bytes: &[u8],
+) -> CanonicalResult<()> {
+    let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key LNP proof byte length does not fit u64",
+        )
+    })?;
+    if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proofSizeBytes must match supplied proof bytes",
+        ));
+    }
+    if value_string(proof_record, "proofBytesHash")?
+        != evaluation_key_share_lnp_relation_proof_bytes_hash(proof_family, proof_bytes)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proofBytesHash must match supplied proof bytes",
+        ));
+    }
+
+    Ok(())
+}
+
+fn verify_evaluation_key_lnp_proof_transcript_metadata(
+    proof_record: &Value,
+    verification: &super::evaluation_key_share_proof::EvaluationKeyShareLnpProofVerification,
+) -> CanonicalResult<()> {
+    let verified_proof_size = u64::try_from(verification.proof_size_bytes).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key verified proof byte length does not fit u64",
+        )
+    })?;
+    if proof_record.get("statementHash").and_then(Value::as_str)
+        != Some(verification.statement_hash_hex.as_str())
+        || proof_record
+            .get("relationCommitmentHash")
+            .and_then(Value::as_str)
+            != Some(verification.relation_commitment_hash_hex.as_str())
+        || proof_record
+            .get("tboxCommitmentPrefixHash")
+            .and_then(Value::as_str)
+            != Some(verification.tbox_commitment_prefix_hash.as_str())
+        || proof_record.get("challenge").and_then(Value::as_u64) != Some(verification.challenge)
+        || proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(verified_proof_size)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proof transcript metadata must match verified proof bytes",
+        ));
+    }
+
+    Ok(())
+}
+
+fn relinearization_key_share_proof_root(
+    record: &Value,
+    proof_root_field_name: &str,
+) -> CanonicalResult<String> {
+    let mut root_input = record.clone();
+    let object = root_input
+        .as_object_mut()
+        .expect("relinearization proof record object was checked");
+    object.remove(proof_root_field_name);
+    match proof_root_field_name {
+        "roundOneProofRoot" => {
+            object.remove("roundOneRecordRoot");
+        }
+        "roundTwoProofRoot" => {
+            object.remove("roundTwoRecordRoot");
+        }
+        _ => {}
+    }
+    derive_protocol_hash("RelinearizationKeyShareProofRoot", &root_input)
+}
+
+fn relinearization_source_square_binding_root(
+    record: &Value,
+    round: &str,
+    share_root: &str,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "RelinearizationSourceSquareBindingRoot",
+        &json!({
+            "objectType": "RelinearizationSourceSquareBinding",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": "relinearization-key-share",
+            "sourceRelation": "same-secret-square-for-relinearization-source",
+            "sourceRelationStatus": "review-gated-quadratic-tbox-closure-required",
+            "round": round,
+            "evaluatorKeyScheduleRoot": value_string(record, "evaluatorKeyScheduleRoot")?,
+            "sameSecretProofSetRoot": value_string(record, "sameSecretProofSetRoot")?,
+            "sameSecretProofFamilyBindingRoot": value_string(record, "sameSecretProofFamilyBindingRoot")?,
+            "publicKeyShareLnpProofSetRoot": value_string(record, "publicKeyShareLnpProofSetRoot")?,
+            "relinearizationCrpRoot": value_string(record, "relinearizationCrpRoot")?,
+            "trusteeIdentity": value_string(record, "trusteeIdentity")?,
+            "trusteeRosterPosition": value_u64(record, "trusteeRosterPosition")?,
+            "level": value_u64(record, "level")?,
+            "sameSecretStatementRoot": value_string(record, "sameSecretStatementRoot")?,
+            "trusteeSecretCommitmentRoot": value_string(record, "trusteeSecretCommitmentRoot")?,
+            "sameSecretProofRoot": value_string(record, "sameSecretProofRoot")?,
+            "shareRoot": share_root,
+            "keySwitchComponentVectorRoot": value_string(record, "keySwitchComponentVectorRoot")?,
+            "statementHash": value_string(record, "statementHash")?,
+            "relationCommitmentHash": value_string(record, "relationCommitmentHash")?,
+            "proofBytesHash": value_string(record, "proofBytesHash")?,
+        }),
+    )
+}
+
+fn relinearization_source_square_aggregate_root(
+    round: &str,
+    evaluator_key_schedule_root: &str,
+    level: u64,
+    source_square_binding_roots: &[Value],
+    round_one_source_square_aggregate_root: Option<&str>,
+) -> CanonicalResult<String> {
+    let mut aggregate = json!({
+        "objectType": "RelinearizationSourceSquareAggregate",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofFamily": "relinearization-key-share",
+        "sourceRelation": "same-secret-square-for-relinearization-source",
+        "sourceRelationStatus": "review-gated-quadratic-tbox-closure-required",
+        "round": round,
+        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+        "level": level,
+        "sourceSquareBindingRoots": source_square_binding_roots,
+    });
+    if let Some(round_one_source_square_aggregate_root) = round_one_source_square_aggregate_root {
+        aggregate["roundOneSourceSquareAggregateRoot"] =
+            json!(round_one_source_square_aggregate_root);
+    }
+
+    derive_protocol_hash("RelinearizationSourceSquareAggregateRoot", &aggregate)
+}
+
+fn galois_key_share_proof_root(proof_record: &Value) -> CanonicalResult<String> {
+    let mut root_input = proof_record.clone();
+    root_input
+        .as_object_mut()
+        .expect("Galois proof record object was checked")
+        .remove("galoisKeyShareProofRoot");
+    derive_protocol_hash("GaloisKeyShareProofRoot", &root_input)
+}
+
+fn evaluation_key_share_lnp_proof_bytes_from_record(
+    proof_family: EvaluationKeyShareProofFamily,
+    proof_record: &Value,
+    request: &Value,
+) -> CanonicalResult<Vec<u8>> {
+    let has_embedded_proof_bytes = proof_record.get("proofBytesHex").is_some();
+    let has_transport_reference = [
+        "proofBytesEncoding",
+        "proofMaterialRoot",
+        "proofChunkSizeBytes",
+        "proofChunkCount",
+        "proofTotalByteLength",
+        "proofFullObjectHash",
+        "proofChunkRoot",
+        "proofChunkHashes",
+    ]
+    .iter()
+    .any(|field_name| proof_record.get(*field_name).is_some());
+
+    if has_embedded_proof_bytes && has_transport_reference {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proof must not mix embedded proofBytesHex with transported proof material",
+        ));
+    }
+    if has_embedded_proof_bytes {
+        return decode_hex(value_string(proof_record, "proofBytesHex")?);
+    }
+    if !has_transport_reference {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proof requires proofBytesHex or transported proof material",
+        ));
+    }
+    if value_string(proof_record, "proofBytesEncoding")? != SETUP_PROOF_MATERIAL_ENCODING {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proofBytesEncoding must be binary-chunked-proof-bytes",
+        ));
+    }
+    let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
+    validate_hash_string(
+        proof_material_root,
+        "evaluationKeyShareProof.proofMaterialRoot",
+    )?;
+    let chunks = transported_evaluation_key_share_proof_material_chunks(
+        request,
+        proof_material_root,
+        proof_family,
+    )?;
+    let transport_hashes = setup_proof_material_transport_hashes(
+        proof_family.proof_family(),
+        &chunks,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )?;
+    verify_evaluation_key_share_lnp_proof_transport_reference(proof_record, &transport_hashes)?;
+    let expected_material_root =
+        setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
+            setup_profile_id: COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            proof_family: proof_family.proof_family(),
+            trustee_identity: value_string(proof_record, "trusteeIdentity")?,
+            trustee_roster_position: value_u64(proof_record, "trusteeRosterPosition")?,
+            statement_hash_hex: value_string(proof_record, "statementHash")?,
+            relation_commitment_hash_hex: value_string(proof_record, "relationCommitmentHash")?,
+            tbox_commitment_prefix_hash: value_string(proof_record, "tboxCommitmentPrefixHash")?,
+            proof_size_bytes: value_u64(proof_record, "proofSizeBytes")?,
+            proof_bytes_hash: value_string(proof_record, "proofBytesHash")?,
+            transport_hashes: &transport_hashes,
+        })?;
+    if proof_material_root != expected_material_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proofMaterialRoot must match the canonical transported proof material reference",
+        ));
+    }
+    let mut proof_bytes = Vec::with_capacity(
+        usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "evaluation-key transported proof material length does not fit usize",
+            )
+        })?,
+    );
+    for chunk in chunks {
+        proof_bytes.extend_from_slice(&chunk);
+    }
+
+    Ok(proof_bytes)
+}
+
+fn verify_evaluation_key_share_lnp_proof_transport_reference(
+    proof_record: &Value,
+    transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
+        || value_u64(proof_record, "proofChunkCount")?
+            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "evaluation-key proof material chunk count does not fit u64",
+                )
+            })?
+        || value_u64(proof_record, "proofTotalByteLength")? != transport_hashes.total_byte_length
+        || value_u64(proof_record, "proofSizeBytes")? != transport_hashes.total_byte_length
+        || value_string(proof_record, "proofFullObjectHash")? != transport_hashes.full_object_hash
+        || value_string(proof_record, "proofChunkRoot")? != transport_hashes.chunk_root
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proof transport reference does not match transported chunks",
+        ));
+    }
+    let chunk_hash_values = proof_record
+        .get("proofChunkHashes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "evaluation-key LNP proofChunkHashes must list every transported proof chunk",
+            )
+        })?;
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluation-key LNP proofChunkHashes length must match transported proof chunks",
+        ));
+    }
+    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+    {
+        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "evaluation-key LNP proofChunkHashes must match transported proof chunks",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn transported_evaluation_key_share_proof_material_chunks(
+    request: &Value,
+    expected_proof_material_root: &str,
+    proof_family: EvaluationKeyShareProofFamily,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    let material_set = request
+        .get("transportedEvaluationKeyShareProofMaterial")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transportedEvaluationKeyShareProofMaterial was required by transported evaluation-key LNP proof records",
+            )
+        })?;
+    if material_set.get("objectType").and_then(Value::as_str)
+        != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
+        || material_set.get("setupProfileId").and_then(Value::as_str)
+            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+        || material_set
+            .get("setupProofProfileId")
+            .and_then(Value::as_str)
+            != Some(SETUP_PROOF_PROFILE_ID)
+        || material_set.get("proofFamily").and_then(Value::as_str)
+            != Some(proof_family.proof_family())
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedEvaluationKeyShareProofMaterial header does not match the evaluation-key proof family",
+        ));
+    }
+    let proof_materials = material_set
+        .get("proofMaterials")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transportedEvaluationKeyShareProofMaterial.proofMaterials must list proof material objects",
+            )
+        })?;
+    let mut matching_chunks = None;
+    for proof_material in proof_materials {
+        if proof_material.get("objectType").and_then(Value::as_str)
+            != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
+            || proof_material.get("setupProfileId").and_then(Value::as_str)
+                != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+            || proof_material
+                .get("setupProofProfileId")
+                .and_then(Value::as_str)
+                != Some(SETUP_PROOF_PROFILE_ID)
+            || proof_material.get("proofFamily").and_then(Value::as_str)
+                != Some(proof_family.proof_family())
+            || proof_material
+                .get("proofBytesEncoding")
+                .and_then(Value::as_str)
+                != Some(SETUP_PROOF_MATERIAL_ENCODING)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported evaluation-key proof material header is invalid",
+            ));
+        }
+        if value_string(proof_material, "proofMaterialRoot")? != expected_proof_material_root {
+            continue;
+        }
+        if matching_chunks.is_some() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transportedEvaluationKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
+            ));
+        }
+        let chunk_values = proof_material
+            .get("chunks")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "transported evaluation-key proof material chunks must be an array",
+                )
+            })?;
+        let chunks = chunk_values
+            .iter()
+            .map(|chunk| {
+                let bytes_hex = value_string(chunk, "bytesHex")?;
+                decode_hex(bytes_hex)
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let transport_hashes = setup_proof_material_transport_hashes(
+            proof_family.proof_family(),
+            &chunks,
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )?;
+        if value_u64(proof_material, "proofChunkSizeBytes")?
+            != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
+            || value_u64(proof_material, "proofChunkCount")?
+                != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "evaluation-key proof material chunk count does not fit u64",
+                    )
+                })?
+            || value_u64(proof_material, "proofTotalByteLength")?
+                != transport_hashes.total_byte_length
+            || value_string(proof_material, "proofFullObjectHash")?
+                != transport_hashes.full_object_hash
+            || value_string(proof_material, "proofChunkRoot")? != transport_hashes.chunk_root
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported evaluation-key proof material hashes do not match chunks",
+            ));
+        }
+        matching_chunks = Some(chunks);
+    }
+
+    matching_chunks.ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedEvaluationKeyShareProofMaterial is missing the requested proofMaterialRoot",
+        )
+    })
 }
 
 fn verify_evaluation_key_record_object(
@@ -12555,7 +14152,32 @@ fn unexpected_relinearization_round_one_record_field(value: &Value) -> Option<St
             "sameSecretProofRoot",
             "relinearizationCrpRoot",
             "roundOneShareRoot",
+            "sourceSquareBindingRoot",
             "roundOneProofRoot",
+            "proofProfileId",
+            "setupProofBinding",
+            "keySwitchMaterialEncoding",
+            "keySwitchDomain",
+            "keySwitchSeedHex",
+            "ringDegree",
+            "keySwitchComponentVectorRoot",
+            "keySwitchComponentVectors",
+            "relinearizationKeyShareTboxParameterProfileHash",
+            "statementHash",
+            "relationCommitmentHash",
+            "tboxCommitmentPrefixHash",
+            "challenge",
+            "proofSizeBytes",
+            "proofBytesHash",
+            "proofBytesHex",
+            "proofBytesEncoding",
+            "proofMaterialRoot",
+            "proofChunkSizeBytes",
+            "proofChunkCount",
+            "proofTotalByteLength",
+            "proofFullObjectHash",
+            "proofChunkRoot",
+            "proofChunkHashes",
             "roundOneRecordRoot",
         ],
     )
@@ -12595,8 +14217,35 @@ fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<St
             "roundOneShareRoot",
             "roundOneRecordRoot",
             "roundOneAggregateRoot",
+            "roundOneSourceSquareBindingRoot",
+            "roundOneSourceSquareAggregateRoot",
             "roundTwoShareRoot",
+            "sourceSquareBindingRoot",
             "roundTwoProofRoot",
+            "proofProfileId",
+            "setupProofBinding",
+            "keySwitchMaterialEncoding",
+            "keySwitchDomain",
+            "keySwitchSeedHex",
+            "ringDegree",
+            "keySwitchComponentVectorRoot",
+            "keySwitchComponentVectors",
+            "relinearizationKeyShareTboxParameterProfileHash",
+            "statementHash",
+            "relationCommitmentHash",
+            "tboxCommitmentPrefixHash",
+            "challenge",
+            "proofSizeBytes",
+            "proofBytesHash",
+            "proofBytesHex",
+            "proofBytesEncoding",
+            "proofMaterialRoot",
+            "proofChunkSizeBytes",
+            "proofChunkCount",
+            "proofTotalByteLength",
+            "proofFullObjectHash",
+            "proofChunkRoot",
+            "proofChunkHashes",
             "roundTwoRecordRoot",
         ],
     )
@@ -12635,8 +14284,111 @@ fn unexpected_galois_key_share_batch_field(value: &Value) -> Option<String> {
             "requiredGaloisSetHash",
             "requiredGaloisKeySchedule",
             "galoisKeyShareRoots",
+            "galoisKeyShareProofs",
             "galoisKeyBatchProofRoot",
             "galoisKeyShareBatchRoot",
+        ],
+    )
+}
+
+fn unexpected_galois_key_share_proof_field(value: &Value) -> Option<String> {
+    unexpected_field(
+        value,
+        &[
+            "objectType",
+            "objectVersion",
+            "setupProfileId",
+            "setupProofProfileId",
+            "proofFamily",
+            "proofVerificationStatus",
+            "proofModelStatus",
+            "proofProfileId",
+            "ceremonyId",
+            "manifestHash",
+            "rosterHash",
+            "setupProfileHash",
+            "qShareHash",
+            "carryAwareVssShareRelationProfileHash",
+            "commitmentProfileHash",
+            "setupEpoch",
+            "trusteeIdentity",
+            "trusteeRosterPosition",
+            "evaluatorKeyScheduleRoot",
+            "sameSecretConsistencyRoot",
+            "sameSecretProofSetRoot",
+            "sameSecretProofFamilyBindingRoot",
+            "publicKeyShareLnpProofSetRoot",
+            "sameSecretStatementRoot",
+            "trusteeSecretCommitmentRoot",
+            "sameSecretProofRoot",
+            "galoisKeyCrpRoot",
+            "requiredGaloisSetHash",
+            "rotation",
+            "level",
+            "galoisKeyShareRoot",
+            "setupProofBinding",
+            "keySwitchMaterialEncoding",
+            "keySwitchDomain",
+            "keySwitchSeedHex",
+            "ringDegree",
+            "keySwitchComponentVectorRoot",
+            "keySwitchComponentVectors",
+            "galoisKeyShareTboxParameterProfileHash",
+            "statementHash",
+            "relationCommitmentHash",
+            "tboxCommitmentPrefixHash",
+            "challenge",
+            "proofSizeBytes",
+            "proofBytesHash",
+            "proofBytesHex",
+            "proofBytesEncoding",
+            "proofMaterialRoot",
+            "proofChunkSizeBytes",
+            "proofChunkCount",
+            "proofTotalByteLength",
+            "proofFullObjectHash",
+            "proofChunkRoot",
+            "proofChunkHashes",
+            "galoisKeyShareProofRoot",
+        ],
+    )
+}
+
+fn unexpected_public_evaluation_key_set_field(value: &Value) -> Option<String> {
+    unexpected_field(
+        value,
+        &[
+            "objectType",
+            "objectVersion",
+            "setupProfileId",
+            "setupProofProfileId",
+            "assemblyStatus",
+            "materialEncoding",
+            "materialSource",
+            "ceremonyId",
+            "manifestHash",
+            "rosterHash",
+            "setupProfileHash",
+            "qShareHash",
+            "carryAwareVssShareRelationProfileHash",
+            "commitmentProfileHash",
+            "setupEpoch",
+            "participantCount",
+            "rnsLimbCount",
+            "evaluatorKeyScheduleRoot",
+            "sameSecretProofFamilyBindingRoot",
+            "publicKeyShareLnpProofSetRoot",
+            "relinearizationKeyShareRoundsRoot",
+            "relinearizationLevelSchedule",
+            "relinearizationKeyRoots",
+            "requiredGaloisSetHash",
+            "requiredGaloisKeySchedule",
+            "galoisKeyShareBatchRoots",
+            "galoisKeyRoots",
+            "genericKeySwitchKeyRoots",
+            "rawKeyBytesEmbedded",
+            "verifierGeneratedKeyMaterial",
+            "evaluationKeySetHash",
         ],
     )
 }
@@ -13284,14 +15036,14 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
         "certificateScope": "first-profile-BDLOP-LNP-commitment-parameters-and-opening-bounds",
         "acceptedUse": [
             "VSS coefficient commitment records",
-            "recipient-local aggregate VSS opening checks",
+            "recipient-local private VSS proof witness checks",
             "verifier-derived threshold-share commitment roots",
             "same-secret trustee commitment roots",
         ],
         "nonClosure": [
             "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
             "public-key share proof bytes still require no-wrap LNP verification",
-            "relinearization and Galois proof bytes still require linked LNP verification",
+            "relinearization and Galois proof bytes remain review-gated until quadratic source-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
         ],
         "ringAndMatrixParameters": {
@@ -13556,6 +15308,9 @@ pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value>
         .as_array()
         .map(Vec::len)
         .unwrap_or(0);
+    let accepted_relinearization_key_polynomials =
+        expected_relinearization_key_switch_component_polynomial_count()?;
+    let accepted_galois_key_polynomials = expected_galois_key_switch_component_polynomial_count()?;
 
     Ok(json!({
         "objectType": HE_SECURITY_CERTIFICATE_OBJECT_TYPE,
@@ -13610,11 +15365,11 @@ pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value>
         "publicSampleAccounting": {
             "publicKeyCrpPolynomials": 1,
             "publicKeyShareCount": FIRST_PROFILE_PARTICIPANT_COUNT,
-            "acceptedRelinearizationKeyPolynomials": 0,
-            "acceptedGaloisKeyPolynomials": 0,
+            "acceptedRelinearizationKeyPolynomials": accepted_relinearization_key_polynomials,
+            "acceptedGaloisKeyPolynomials": accepted_galois_key_polynomials,
             "scheduledRelinearizationLevelCount": scheduled_relinearization_level_count,
             "scheduledGaloisKeyCount": required_galois_key_count,
-            "evaluationKeyExposureStatus": "not-exposed-until-relinearization-and-galois-proof-verifiers-pass",
+            "evaluationKeyExposureStatus": "root-bound-review-gated-relinearization-and-galois-key-material-exposed",
             "commitmentAndSetupProofPublicMatrices": "covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples"
         },
         "standardRows": {
@@ -14503,6 +16258,13 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
                 accepted_hashes.push(hash.to_string());
             }
         }
+    }
+    if let Some(hash) = setup_package
+        .get("evaluationKeys")
+        .and_then(|evaluation_keys| evaluation_keys.get("evaluationKeySetHash"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
     }
 
     accepted_hashes

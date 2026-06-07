@@ -25,7 +25,12 @@ use super::{
 use super::{
     commitment::{
         SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-        compute_setup_commitment_for_tests, setup_commitment_full_value, setup_commitment_root,
+        compute_setup_commitment_for_tests, parse_setup_commitment_full_value,
+        setup_commitment_full_value, setup_commitment_root,
+    },
+    private_vss_share_proof::{
+        PrivateVssShareLnpProofGenerationInput, PrivateVssShareLnpProofWitness,
+        private_vss_share_lnp_proof_record,
     },
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };

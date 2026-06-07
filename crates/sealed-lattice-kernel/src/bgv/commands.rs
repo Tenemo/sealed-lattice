@@ -25,6 +25,9 @@ use crate::{
             describe_collective_bgv_setup_profile, describe_passive_setup_object_model,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
+            generate_private_vss_share_proof_from_request,
+            generate_public_key_share_lnp_proof_from_request,
+            generate_same_secret_lnp_proof_from_request,
             verify_collective_bgv_setup_package_from_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
@@ -145,6 +148,18 @@ pub(crate) fn verify_collective_bgv_setup_from_request(request: &Value) -> Canon
 
 pub(crate) fn verify_private_vss_share_envelope(request: &Value) -> CanonicalResult<Value> {
     verify_private_vss_share_envelope_from_request(request)
+}
+
+pub(crate) fn generate_private_vss_share_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_private_vss_share_proof_from_request(request)
+}
+
+pub(crate) fn generate_same_secret_lnp_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_same_secret_lnp_proof_from_request(request)
+}
+
+pub(crate) fn generate_public_key_share_lnp_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_public_key_share_lnp_proof_from_request(request)
 }
 
 pub(crate) fn derive_threshold_share_commitments(request: &Value) -> CanonicalResult<Value> {

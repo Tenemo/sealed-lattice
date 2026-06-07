@@ -52,6 +52,12 @@ pub(crate) const SAME_SECRET_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
     "SealedLattice-LNP-SameSecretConsistency-Tbox-v1";
 pub(crate) const PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
     "SealedLattice-LNP-PublicKeyShare-Tbox-v1";
+pub(crate) const PRIVATE_VSS_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
+    "SealedLattice-LNP-PrivateVssShare-Tbox-v1";
+pub(crate) const RELINEARIZATION_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
+    "SealedLattice-LNP-RelinearizationKeyShare-Tbox-v1";
+pub(crate) const GALOIS_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
+    "SealedLattice-LNP-GaloisKeyShare-Tbox-v1";
 pub(super) const SETUP_PROOF_FAMILIES: &[&str] = &[
     "vss-opening-carry",
     "same-secret-consistency",
@@ -156,6 +162,78 @@ pub(crate) fn public_key_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
     }
 }
 
+pub(crate) fn private_vss_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
+    SetupProofLnpTboxLayout {
+        proof_family: "vss-opening-carry",
+        tbox_parameter_profile_id: PRIVATE_VSS_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
+        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/private-vss-share/lnp-tbox-commitment-prefix-v1",
+        proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        proof_modulus: setup_proof_lnp_tbox_proof_modulus(),
+        proof_modulus_bit_count: 255,
+        compression_dropped_bits: 23,
+        t_b_polynomial_count: 16,
+        h_polynomial_count: 8,
+        t_a1_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH * 4 + 6,
+        hint_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH * 4 + 6,
+        z1_polynomial_count: 8,
+        z21_polynomial_count: 32,
+        z3_polynomial_count: 4,
+        z4_polynomial_count: 4,
+        z1_log2_standard_deviation: 24,
+        z21_log2_standard_deviation: 40,
+        z3_log2_standard_deviation: 16,
+        z4_log2_standard_deviation: 16,
+    }
+}
+
+pub(crate) fn relinearization_key_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
+    SetupProofLnpTboxLayout {
+        proof_family: "relinearization-key-share",
+        tbox_parameter_profile_id: RELINEARIZATION_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
+        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/relinearization-key-share/lnp-tbox-commitment-prefix-v1",
+        proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        proof_modulus: setup_proof_lnp_tbox_proof_modulus(),
+        proof_modulus_bit_count: 255,
+        compression_dropped_bits: 23,
+        t_b_polynomial_count: 8,
+        h_polynomial_count: 4,
+        t_a1_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 8,
+        hint_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 8,
+        z1_polynomial_count: 8,
+        z21_polynomial_count: 24,
+        z3_polynomial_count: 4,
+        z4_polynomial_count: 4,
+        z1_log2_standard_deviation: 24,
+        z21_log2_standard_deviation: 40,
+        z3_log2_standard_deviation: 16,
+        z4_log2_standard_deviation: 16,
+    }
+}
+
+pub(crate) fn galois_key_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
+    SetupProofLnpTboxLayout {
+        proof_family: "galois-key-share",
+        tbox_parameter_profile_id: GALOIS_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
+        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/galois-key-share/lnp-tbox-commitment-prefix-v1",
+        proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        proof_modulus: setup_proof_lnp_tbox_proof_modulus(),
+        proof_modulus_bit_count: 255,
+        compression_dropped_bits: 23,
+        t_b_polynomial_count: 8,
+        h_polynomial_count: 4,
+        t_a1_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 8,
+        hint_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 8,
+        z1_polynomial_count: 8,
+        z21_polynomial_count: 24,
+        z3_polynomial_count: 4,
+        z4_polynomial_count: 4,
+        z1_log2_standard_deviation: 24,
+        z21_log2_standard_deviation: 40,
+        z3_log2_standard_deviation: 16,
+        z4_log2_standard_deviation: 16,
+    }
+}
+
 pub(crate) fn same_secret_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "SetupProofLnpTboxParameterProfileHash",
@@ -167,6 +245,28 @@ pub(crate) fn public_key_share_lnp_tbox_parameter_profile_hash() -> CanonicalRes
     derive_protocol_hash(
         "SetupProofLnpTboxParameterProfileHash",
         &public_key_share_lnp_tbox_parameter_profile_value()?,
+    )
+}
+
+pub(crate) fn private_vss_share_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SetupProofLnpTboxParameterProfileHash",
+        &private_vss_share_lnp_tbox_parameter_profile_value()?,
+    )
+}
+
+pub(crate) fn relinearization_key_share_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String>
+{
+    derive_protocol_hash(
+        "SetupProofLnpTboxParameterProfileHash",
+        &relinearization_key_share_lnp_tbox_parameter_profile_value()?,
+    )
+}
+
+pub(crate) fn galois_key_share_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SetupProofLnpTboxParameterProfileHash",
+        &galois_key_share_lnp_tbox_parameter_profile_value()?,
     )
 }
 
@@ -187,6 +287,27 @@ pub(crate) fn same_secret_lnp_tbox_parameter_profile_value() -> CanonicalResult<
         }),
         "SLSSLNP1",
         "same-secret verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+    )
+}
+
+pub(crate) fn private_vss_share_lnp_tbox_parameter_profile_value() -> CanonicalResult<Value> {
+    let layout = private_vss_share_lnp_tbox_layout();
+    setup_proof_lnp_tbox_parameter_profile_value(
+        &layout,
+        "pinned sealed-lattice first-profile recipient-local private VSS share relation dimensions",
+        json!({
+            "rnsLimbCountPerProof": 1,
+            "commitmentModulusLimbCount": SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
+            "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
+            "openingRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+            "shamirCoefficientCommitmentCount": 4,
+            "recipientSharePolynomialCount": 1,
+            "carryPolynomialCount": 1,
+            "coefficientOpeningRelationCount": 4,
+            "carryAwareLiftedRelationCount": 1
+        }),
+        "SLVSLNP1",
+        "private VSS share verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
     )
 }
 
@@ -212,6 +333,60 @@ pub(crate) fn public_key_share_lnp_tbox_parameter_profile_value() -> CanonicalRe
         }),
         "SLPKLNP1",
         "public-key share verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
+    )
+}
+
+pub(crate) fn relinearization_key_share_lnp_tbox_parameter_profile_value() -> CanonicalResult<Value>
+{
+    let layout = relinearization_key_share_lnp_tbox_layout();
+    setup_proof_lnp_tbox_parameter_profile_value(
+        &layout,
+        "pinned sealed-lattice first-profile lifted relinearization key-share relation dimensions",
+        json!({
+            "rnsLimbCount": DATA_PRIMES.len(),
+            "activeDigitCountMaximum": DATA_PRIMES.len(),
+            "activeLimbPairCountMaximum": DATA_PRIMES.len() * DATA_PRIMES.len(),
+            "commitmentModulusLimbCount": SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
+            "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
+            "openingRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+            "sharedSecretPolynomialCount": 1,
+            "negativeIndicatorPolynomialCount": 1,
+            "sourceResponsePolynomialCountPerDigit": 1,
+            "errorPolynomialCountPerDigit": 1,
+            "carryPolynomialCountPerDigitAndLimb": 1,
+            "componentBPolynomialCountPerDigitAndLimb": 1,
+            "constantCommitmentCount": DATA_PRIMES.len(),
+            "keySwitchLiftedRelationCountPerCoefficientPerDigitAndLimb": 1,
+            "sourceSquareClosureStatus": "review-gated-quadratic-tbox-closure-required",
+        }),
+        "SLRKLNP1",
+        "relinearization key-share verifier pins and checks this linear key-switch profile; quadratic source-square proof closure plus external AB-DLOP/LNP soundness and zero-knowledge review remain required",
+    )
+}
+
+pub(crate) fn galois_key_share_lnp_tbox_parameter_profile_value() -> CanonicalResult<Value> {
+    let layout = galois_key_share_lnp_tbox_layout();
+    setup_proof_lnp_tbox_parameter_profile_value(
+        &layout,
+        "pinned sealed-lattice first-profile lifted Galois key-share relation dimensions",
+        json!({
+            "rnsLimbCount": DATA_PRIMES.len(),
+            "activeDigitCountMaximum": DATA_PRIMES.len(),
+            "activeLimbPairCountMaximum": DATA_PRIMES.len() * DATA_PRIMES.len(),
+            "commitmentModulusLimbCount": SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
+            "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
+            "openingRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+            "sharedSecretPolynomialCount": 1,
+            "negativeIndicatorPolynomialCount": 1,
+            "automorphismSourcePolynomialCountPerDigit": 1,
+            "errorPolynomialCountPerDigit": 1,
+            "carryPolynomialCountPerDigitAndLimb": 1,
+            "componentBPolynomialCountPerDigitAndLimb": 1,
+            "constantCommitmentCount": DATA_PRIMES.len(),
+            "keySwitchLiftedRelationCountPerCoefficientPerDigitAndLimb": 1,
+        }),
+        "SLGKLNP1",
+        "Galois key-share verifier pins and checks this profile; full claim closure still requires external AB-DLOP/LNP soundness and zero-knowledge review",
     )
 }
 
@@ -437,9 +612,12 @@ pub(super) fn setup_proof_record_binding_value(
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER,
+        "privateVssShareTboxParameterProfileHash": private_vss_share_lnp_tbox_parameter_profile_hash()?,
         "sameSecretTboxParameterProfileHash": same_secret_lnp_tbox_parameter_profile_hash()?,
         "publicKeyShareTboxParameterProfileHash": public_key_share_lnp_tbox_parameter_profile_hash()?,
-        "proofBytesAcceptedStatus": "same-secret-and-public-key-share-verifiers-implemented-other-family-verifiers-pending",
+        "relinearizationKeyShareTboxParameterProfileHash": relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
+        "galoisKeyShareTboxParameterProfileHash": galois_key_share_lnp_tbox_parameter_profile_hash()?,
+        "proofBytesAcceptedStatus": "private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-review-gated",
     }))
 }
 

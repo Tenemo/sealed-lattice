@@ -22,9 +22,12 @@ import type {
     BgvPassiveSetupParticipantInput,
     BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
+    BgvPrivateVssShareProofGeneration,
+    BgvPublicKeyShareLnpProofGeneration,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvSameSecretLnpProofGeneration,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
@@ -47,9 +50,12 @@ export type {
     BgvPassiveSetupParticipantInput,
     BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
+    BgvPrivateVssShareProofGeneration,
+    BgvPublicKeyShareLnpProofGeneration,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvSameSecretLnpProofGeneration,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
@@ -163,9 +169,64 @@ export type TranscriptCoreKernel = {
         readonly dealerCoefficientCommitmentRecord: unknown;
         readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly privateEnvelope: unknown;
+        readonly transportedPrivateVssShareProofMaterial?: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
         readonly expectedLocalVerificationRoot?: ProtocolHash;
     }): BgvPrivateVssShareEnvelopeVerification;
+    generatePrivateVssShareProof(input: {
+        readonly setupContext: unknown;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly privateEnvelopeAadHash: ProtocolHash;
+        readonly dealerCoefficientCommitmentRecord: unknown;
+        readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+        readonly recipientIdentity: string;
+        readonly recipientRosterPosition: number;
+        readonly rnsLimbIndex: number;
+        readonly rnsPrime: number;
+        readonly ringDegree: number;
+        readonly shareValues: readonly number[];
+        readonly coefficientCommitmentRoots: readonly ProtocolHash[];
+        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
+        readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
+        readonly proofRandomnessSource?:
+            | 'fresh-csprng'
+            | 'development-deterministic-fixture';
+        readonly proofRandomnessSeedHex: string;
+    }): BgvPrivateVssShareProofGeneration;
+    generateSameSecretLnpProof(input: {
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly statementRecord: unknown;
+        readonly constantCommitments: readonly unknown[];
+        readonly setupProofBinding: unknown;
+        readonly secretCoefficients: readonly number[];
+        readonly openingRandomnessByLimb: readonly (readonly (readonly (
+            | number
+            | string
+        )[])[])[];
+        readonly proofRandomnessSource?:
+            | 'fresh-csprng'
+            | 'development-deterministic-fixture';
+        readonly proofRandomnessSeedHex: string;
+    }): BgvSameSecretLnpProofGeneration;
+    generatePublicKeyShareLnpProof(input: {
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly publicKeyShareRecord: unknown;
+        readonly publicKeyShareProofRecord: unknown;
+        readonly sameSecretStatementRecord: unknown;
+        readonly constantCommitments: readonly unknown[];
+        readonly publicShareCoefficientsByLimb: readonly (readonly number[])[];
+        readonly setupProofBinding: unknown;
+        readonly secretCoefficients: readonly number[];
+        readonly openingRandomnessByLimb: readonly (readonly (readonly (
+            | number
+            | string
+        )[])[])[];
+        readonly errorCoefficientsByLimb: readonly (readonly number[])[];
+        readonly proofRandomnessSource?:
+            | 'fresh-csprng'
+            | 'development-deterministic-fixture';
+        readonly proofRandomnessSeedHex: string;
+    }): BgvPublicKeyShareLnpProofGeneration;
     deriveThresholdShareCommitments(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -343,8 +404,66 @@ type TranscriptCoreKernelCommand =
           readonly dealerCoefficientCommitmentRecord: unknown;
           readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
           readonly privateEnvelope: unknown;
+          readonly transportedPrivateVssShareProofMaterial?: unknown;
           readonly expectedPrivateEnvelopeHash?: ProtocolHash;
           readonly expectedLocalVerificationRoot?: ProtocolHash;
+      }
+    | {
+          readonly command: 'GeneratePrivateVssShareProof';
+          readonly setupContext: unknown;
+          readonly publicMatrixSeedHash: ProtocolHash;
+          readonly privateEnvelopeAadHash: ProtocolHash;
+          readonly dealerCoefficientCommitmentRecord: unknown;
+          readonly dealerCoefficientCommitmentMaterialRecords: readonly unknown[];
+          readonly recipientIdentity: string;
+          readonly recipientRosterPosition: number;
+          readonly rnsLimbIndex: number;
+          readonly rnsPrime: number;
+          readonly ringDegree: number;
+          readonly shareValues: readonly number[];
+          readonly coefficientCommitmentRoots: readonly ProtocolHash[];
+          readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
+          readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
+          readonly proofRandomnessSource?:
+              | 'fresh-csprng'
+              | 'development-deterministic-fixture';
+          readonly proofRandomnessSeedHex: string;
+      }
+    | {
+          readonly command: 'GenerateSameSecretLnpProof';
+          readonly publicMatrixSeedHash: ProtocolHash;
+          readonly statementRecord: unknown;
+          readonly constantCommitments: readonly unknown[];
+          readonly setupProofBinding: unknown;
+          readonly secretCoefficients: readonly number[];
+          readonly openingRandomnessByLimb: readonly (readonly (readonly (
+              | number
+              | string
+          )[])[])[];
+          readonly proofRandomnessSource?:
+              | 'fresh-csprng'
+              | 'development-deterministic-fixture';
+          readonly proofRandomnessSeedHex: string;
+      }
+    | {
+          readonly command: 'GeneratePublicKeyShareLnpProof';
+          readonly publicMatrixSeedHash: ProtocolHash;
+          readonly publicKeyShareRecord: unknown;
+          readonly publicKeyShareProofRecord: unknown;
+          readonly sameSecretStatementRecord: unknown;
+          readonly constantCommitments: readonly unknown[];
+          readonly publicShareCoefficientsByLimb: readonly (readonly number[])[];
+          readonly setupProofBinding: unknown;
+          readonly secretCoefficients: readonly number[];
+          readonly openingRandomnessByLimb: readonly (readonly (readonly (
+              | number
+              | string
+          )[])[])[];
+          readonly errorCoefficientsByLimb: readonly (readonly number[])[];
+          readonly proofRandomnessSource?:
+              | 'fresh-csprng'
+              | 'development-deterministic-fixture';
+          readonly proofRandomnessSeedHex: string;
       }
     | {
           readonly command: 'DeriveThresholdShareCommitments';

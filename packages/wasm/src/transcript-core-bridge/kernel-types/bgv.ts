@@ -504,6 +504,70 @@ export type BgvPrivateVssShareEnvelopeVerification = {
     }[];
 };
 
+export type BgvPrivateVssShareProofGeneration = {
+    readonly ok: true;
+    readonly operation: 'generatePrivateVssShareProof';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly dealerIdentity: string;
+    readonly dealerRosterPosition: number;
+    readonly recipientIdentity: string;
+    readonly recipientRosterPosition: number;
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly ringDegree: number;
+    readonly shareValuesHash: ProtocolHash;
+    readonly privateVssShareProof: Record<string, unknown>;
+    readonly proofRandomness: {
+        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
+        readonly seedBytes: 64;
+        readonly retention: string;
+    };
+};
+
+export type BgvSameSecretLnpProofGeneration = {
+    readonly ok: true;
+    readonly operation: 'generateSameSecretLnpProof';
+    readonly setupProofProfileId: string;
+    readonly proofFamily: 'same-secret-consistency';
+    readonly proofVerificationStatus: string;
+    readonly proofModelStatus: string;
+    readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+    readonly statementHash: ProtocolHash;
+    readonly relationCommitmentHash: ProtocolHash;
+    readonly tboxCommitmentPrefixHash: ProtocolHash;
+    readonly challenge: number;
+    readonly proofSizeBytes: number;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofBytesHex: string;
+    readonly proofRandomness: {
+        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
+        readonly seedBytes: 64;
+        readonly retention: string;
+    };
+};
+
+export type BgvPublicKeyShareLnpProofGeneration = {
+    readonly ok: true;
+    readonly operation: 'generatePublicKeyShareLnpProof';
+    readonly setupProofProfileId: string;
+    readonly proofFamily: 'public-key-share';
+    readonly proofVerificationStatus: string;
+    readonly proofModelStatus: string;
+    readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
+    readonly statementHash: ProtocolHash;
+    readonly relationCommitmentHash: ProtocolHash;
+    readonly tboxCommitmentPrefixHash: ProtocolHash;
+    readonly challenge: number;
+    readonly proofSizeBytes: number;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofBytesHex: string;
+    readonly proofRandomness: {
+        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
+        readonly seedBytes: 64;
+        readonly retention: string;
+    };
+};
+
 export type BgvThresholdShareCommitmentDerivation = {
     readonly ok: true;
     readonly operation: 'deriveThresholdShareCommitments';

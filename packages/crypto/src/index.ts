@@ -1,4 +1,8 @@
-export { canonicalJson, hash512Hex } from './canonical-json.js';
+export {
+    canonicalJson,
+    hash512Hex,
+    setupProofMaterialFullObjectHashHex,
+} from './canonical-json.js';
 export {
     deriveProtocolHash,
     protocolHashNamespaceValues,
