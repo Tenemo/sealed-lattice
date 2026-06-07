@@ -3,6 +3,7 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     setupCommitmentProfileId,
+    type VssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentRecord,
     type VssCoefficientCommitmentSet,
     type VssSourceTrusteeCoefficientCommitmentRecord,
@@ -15,6 +16,10 @@ export const setupProofProfileId = 'SealedLattice-LNP-SetupProof-v1';
 export const sameSecretProofFamily = 'same-secret-consistency';
 export const sameSecretProofVerificationStatus =
     'lnp-proof-verification-pending';
+export const sameSecretLnpProofVerificationStatus =
+    'lnp-same-secret-relation-verified-review-gated';
+export const sameSecretLnpProofModelStatus =
+    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, and same-secret BDLOP commitment relation algebra verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing setup acceptance';
 export const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
 export const sameSecretBoundProofFamilies = [
@@ -85,6 +90,100 @@ export type SameSecretConsistencyStatementSet = Readonly<
     }
 >;
 
+export type SameSecretEmbeddedProofBytes = Readonly<{
+    readonly proofBytesHex: string;
+}>;
+
+export type SameSecretTransportedProofBytes = Readonly<{
+    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly proofChunkSizeBytes: number;
+    readonly proofChunkCount: number;
+    readonly proofTotalByteLength: number;
+    readonly proofFullObjectHash: ProtocolHash;
+    readonly proofChunkRoot: ProtocolHash;
+    readonly proofChunkHashes: readonly ProtocolHash[];
+}>;
+
+export type SameSecretProofByteMaterial =
+    | SameSecretEmbeddedProofBytes
+    | SameSecretTransportedProofBytes;
+
+export type SameSecretProofMaterial = Readonly<
+    SameSecretProofByteMaterial & {
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof sameSecretProofFamily;
+        readonly proofVerificationStatus: typeof sameSecretLnpProofVerificationStatus;
+        readonly proofModelStatus: typeof sameSecretLnpProofModelStatus;
+        readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+        readonly trusteeIdentity: string;
+        readonly trusteeRosterPosition: number;
+        readonly statementHash: ProtocolHash;
+        readonly relationCommitmentHash: ProtocolHash;
+        readonly tboxCommitmentPrefixHash: ProtocolHash;
+        readonly challenge: number;
+        readonly proofSizeBytes: number;
+        readonly proofBytesHash: ProtocolHash;
+    }
+>;
+
+export type SameSecretProofRecord = Readonly<
+    JsonRecord &
+        SameSecretProofByteMaterial & {
+            readonly objectType: 'SameSecretProof';
+            readonly objectVersion: 1;
+            readonly setupProfileId: 'CollectiveBgvSetup-v1';
+            readonly commitmentProfileId: typeof setupCommitmentProfileId;
+            readonly setupProofProfileId: typeof setupProofProfileId;
+            readonly proofFamily: typeof sameSecretProofFamily;
+            readonly proofVerificationStatus: typeof sameSecretLnpProofVerificationStatus;
+            readonly proofModelStatus: typeof sameSecretLnpProofModelStatus;
+            readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+            readonly trusteeIdentity: string;
+            readonly trusteeRosterPosition: number;
+            readonly sameSecretStatementRoot: ProtocolHash;
+            readonly trusteeSecretCommitmentRoot: ProtocolHash;
+            readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+            readonly setupProofBinding: JsonRecord;
+            readonly statementHash: ProtocolHash;
+            readonly relationCommitmentHash: ProtocolHash;
+            readonly tboxCommitmentPrefixHash: ProtocolHash;
+            readonly challenge: number;
+            readonly proofSizeBytes: number;
+            readonly proofBytesHash: ProtocolHash;
+            readonly sameSecretProofRoot: ProtocolHash;
+        }
+>;
+
+export type SameSecretProofRootReference = Readonly<{
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly sameSecretProofRoot: ProtocolHash;
+}>;
+
+export type SameSecretProofSet = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SameSecretProofSet';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly commitmentProfileId: typeof setupCommitmentProfileId;
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof sameSecretProofFamily;
+        readonly proofVerificationStatus: typeof sameSecretLnpProofVerificationStatus;
+        readonly proofModelStatus: typeof sameSecretLnpProofModelStatus;
+        readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+        readonly participantCount: number;
+        readonly rnsLimbCount: number;
+        readonly sameSecretConsistencyRoot: ProtocolHash;
+        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+        readonly setupProofBinding: JsonRecord;
+        readonly sameSecretProofRoots: readonly SameSecretProofRootReference[];
+        readonly proofRecords: readonly SameSecretProofRecord[];
+        readonly sameSecretProofSetRoot: ProtocolHash;
+    }
+>;
+
 export type SameSecretConsistencyStatementSetInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly qSharePrimes: readonly number[];
@@ -93,7 +192,19 @@ export type SameSecretConsistencyStatementSetInput = {
     readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
 };
 
+export type SameSecretProofSetInput = {
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly qSharePrimes: readonly number[];
+    readonly participantCount: number;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialSet;
+    readonly setupProofBinding: JsonRecord;
+    readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+    readonly proofMaterials: readonly SameSecretProofMaterial[];
+};
+
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
+const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
 const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',
@@ -125,6 +236,12 @@ const assertNonNegativeSafeInteger = (
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
+    }
+};
+
+const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
+    if (!lowercaseHexPattern.test(value)) {
+        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
     }
 };
 
@@ -182,6 +299,200 @@ const validateInput = (input: SameSecretConsistencyStatementSetInput): void => {
     assertProtocolHash(
         input.vssCoefficientCommitments.vssCoefficientCommitmentRoot,
         'vssCoefficientCommitments.vssCoefficientCommitmentRoot',
+    );
+};
+
+const assertSetupProofBinding = (
+    setupProofBinding: JsonRecord,
+    fieldName: string,
+): void => {
+    if (
+        setupProofBinding === null ||
+        typeof setupProofBinding !== 'object' ||
+        Array.isArray(setupProofBinding)
+    ) {
+        throw new TypeError(`${fieldName} must be an object.`);
+    }
+};
+
+const validateSameSecretProofMaterial = (
+    material: SameSecretProofMaterial,
+    expectedTboxParameterProfileHash: ProtocolHash,
+    fieldName: string,
+): void => {
+    if (material.setupProofProfileId !== setupProofProfileId) {
+        throw new Error(
+            `${fieldName}.setupProofProfileId must match setup proof profile.`,
+        );
+    }
+    if (material.proofFamily !== sameSecretProofFamily) {
+        throw new Error(
+            `${fieldName}.proofFamily must be same-secret consistency.`,
+        );
+    }
+    if (
+        material.proofVerificationStatus !==
+        sameSecretLnpProofVerificationStatus
+    ) {
+        throw new Error(
+            `${fieldName}.proofVerificationStatus must be the same-secret LNP verification status.`,
+        );
+    }
+    if (material.proofModelStatus !== sameSecretLnpProofModelStatus) {
+        throw new Error(
+            `${fieldName}.proofModelStatus must match same-secret LNP proof model.`,
+        );
+    }
+    if (
+        material.sameSecretTboxParameterProfileHash !==
+        expectedTboxParameterProfileHash
+    ) {
+        throw new Error(
+            `${fieldName}.sameSecretTboxParameterProfileHash must match the setup proof profile.`,
+        );
+    }
+    assertProtocolHash(
+        material.sameSecretTboxParameterProfileHash,
+        `${fieldName}.sameSecretTboxParameterProfileHash`,
+    );
+    assertNonEmptyString(
+        material.trusteeIdentity,
+        `${fieldName}.trusteeIdentity`,
+    );
+    assertNonNegativeSafeInteger(
+        material.trusteeRosterPosition,
+        `${fieldName}.trusteeRosterPosition`,
+    );
+    assertProtocolHash(material.statementHash, `${fieldName}.statementHash`);
+    assertProtocolHash(
+        material.relationCommitmentHash,
+        `${fieldName}.relationCommitmentHash`,
+    );
+    assertProtocolHash(
+        material.tboxCommitmentPrefixHash,
+        `${fieldName}.tboxCommitmentPrefixHash`,
+    );
+    assertNonNegativeSafeInteger(material.challenge, `${fieldName}.challenge`);
+    assertPositiveSafeInteger(
+        material.proofSizeBytes,
+        `${fieldName}.proofSizeBytes`,
+    );
+    assertProtocolHash(material.proofBytesHash, `${fieldName}.proofBytesHash`);
+    const proofBytesHex = (material as JsonRecord).proofBytesHex;
+    if (proofBytesHex !== undefined) {
+        if (typeof proofBytesHex !== 'string') {
+            throw new TypeError(`${fieldName}.proofBytesHex must be a string.`);
+        }
+        assertLowercaseHexBytes(proofBytesHex, `${fieldName}.proofBytesHex`);
+        if (proofBytesHex.length / 2 !== material.proofSizeBytes) {
+            throw new Error(
+                `${fieldName}.proofBytesHex must match proofSizeBytes.`,
+            );
+        }
+    } else {
+        const transportedMaterial = material as SameSecretTransportedProofBytes;
+        if (
+            transportedMaterial.proofBytesEncoding !==
+            'binary-chunked-proof-bytes'
+        ) {
+            throw new TypeError(
+                `${fieldName}.proofBytesEncoding must be binary-chunked-proof-bytes.`,
+            );
+        }
+        assertProtocolHash(
+            transportedMaterial.proofMaterialRoot,
+            `${fieldName}.proofMaterialRoot`,
+        );
+        assertPositiveSafeInteger(
+            transportedMaterial.proofChunkSizeBytes,
+            `${fieldName}.proofChunkSizeBytes`,
+        );
+        assertPositiveSafeInteger(
+            transportedMaterial.proofChunkCount,
+            `${fieldName}.proofChunkCount`,
+        );
+        assertPositiveSafeInteger(
+            transportedMaterial.proofTotalByteLength,
+            `${fieldName}.proofTotalByteLength`,
+        );
+        if (
+            transportedMaterial.proofTotalByteLength !== material.proofSizeBytes
+        ) {
+            throw new Error(
+                `${fieldName}.proofTotalByteLength must match proofSizeBytes.`,
+            );
+        }
+        assertProtocolHash(
+            transportedMaterial.proofFullObjectHash,
+            `${fieldName}.proofFullObjectHash`,
+        );
+        assertProtocolHash(
+            transportedMaterial.proofChunkRoot,
+            `${fieldName}.proofChunkRoot`,
+        );
+        transportedMaterial.proofChunkHashes.forEach(
+            (proofChunkHash, chunkIndex) =>
+                assertProtocolHash(
+                    proofChunkHash,
+                    `${fieldName}.proofChunkHashes.${String(chunkIndex)}`,
+                ),
+        );
+        if (
+            transportedMaterial.proofChunkHashes.length !==
+            transportedMaterial.proofChunkCount
+        ) {
+            throw new Error(
+                `${fieldName}.proofChunkHashes must match proofChunkCount.`,
+            );
+        }
+    }
+};
+
+const validateProofSetInput = (input: SameSecretProofSetInput): void => {
+    assertPositiveSafeInteger(input.participantCount, 'participantCount');
+    if (input.qSharePrimes.length === 0) {
+        throw new Error('qSharePrimes must contain at least one RNS prime.');
+    }
+    input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
+        assertPositiveSafeInteger(
+            qSharePrime,
+            `qSharePrimes.${String(rnsLimbIndex)}`,
+        );
+    });
+    assertContextMatches(
+        input.setupContext,
+        input.sameSecretConsistency,
+        'sameSecretConsistency',
+    );
+    assertProtocolHash(
+        input.sameSecretConsistency.sameSecretConsistencyRoot,
+        'sameSecretConsistency.sameSecretConsistencyRoot',
+    );
+    assertProtocolHash(
+        input.sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+        'sameSecretConsistency.sameSecretProofFamilyBindingRoot',
+    );
+    assertProtocolHash(
+        input.vssCoefficientCommitmentMaterial
+            .vssCoefficientCommitmentMaterialRoot,
+        'vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot',
+    );
+    if (
+        input.vssCoefficientCommitmentMaterial.participantCount !==
+            input.participantCount ||
+        input.vssCoefficientCommitmentMaterial.rnsLimbCount !==
+            input.qSharePrimes.length ||
+        input.vssCoefficientCommitmentMaterial.vssCoefficientCommitmentRoot !==
+            input.sameSecretConsistency.vssCoefficientCommitmentRoot
+    ) {
+        throw new Error(
+            'vssCoefficientCommitmentMaterial must match the same-secret statement set.',
+        );
+    }
+    assertSetupProofBinding(input.setupProofBinding, 'setupProofBinding');
+    assertProtocolHash(
+        input.sameSecretTboxParameterProfileHash,
+        'sameSecretTboxParameterProfileHash',
     );
 };
 
@@ -410,4 +721,216 @@ export const createSameSecretConsistencyStatementSet = (
             statementSetWithoutRoot,
         ),
     } satisfies SameSecretConsistencyStatementSet;
+};
+
+const sortedStatementRecordsForProofs = (
+    input: Pick<
+        SameSecretProofSetInput,
+        'participantCount' | 'sameSecretConsistency'
+    >,
+): SameSecretConsistencyStatementRecord[] => {
+    const statementRecords = [
+        ...input.sameSecretConsistency.statementRecords,
+    ].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    if (statementRecords.length !== input.participantCount) {
+        throw new Error(
+            'sameSecretConsistency.statementRecords must contain one statement per participant.',
+        );
+    }
+    statementRecords.forEach((statementRecord, expectedRosterPosition) => {
+        assertNonEmptyString(
+            statementRecord.trusteeIdentity,
+            'sameSecretConsistency.statementRecords.trusteeIdentity',
+        );
+        if (statementRecord.trusteeRosterPosition !== expectedRosterPosition) {
+            throw new Error(
+                'sameSecretConsistency.statementRecords roster positions must be contiguous from zero.',
+            );
+        }
+        assertProtocolHash(
+            statementRecord.sameSecretStatementRoot,
+            'sameSecretConsistency.statementRecords.sameSecretStatementRoot',
+        );
+        assertProtocolHash(
+            statementRecord.trusteeSecretCommitmentRoot,
+            'sameSecretConsistency.statementRecords.trusteeSecretCommitmentRoot',
+        );
+        assertProtocolHash(
+            statementRecord.sameSecretProofFamilyBindingRoot,
+            'sameSecretConsistency.statementRecords.sameSecretProofFamilyBindingRoot',
+        );
+    });
+
+    return statementRecords;
+};
+
+const sortedSameSecretProofMaterials = (
+    input: Pick<
+        SameSecretProofSetInput,
+        | 'participantCount'
+        | 'proofMaterials'
+        | 'sameSecretTboxParameterProfileHash'
+    >,
+): SameSecretProofMaterial[] => {
+    const proofMaterials = [...input.proofMaterials].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    if (proofMaterials.length !== input.participantCount) {
+        throw new Error(
+            'sameSecretProofMaterials must contain one proof per participant.',
+        );
+    }
+    proofMaterials.forEach((proofMaterial, expectedRosterPosition) => {
+        validateSameSecretProofMaterial(
+            proofMaterial,
+            input.sameSecretTboxParameterProfileHash,
+            `sameSecretProofMaterials.${String(expectedRosterPosition)}`,
+        );
+        if (proofMaterial.trusteeRosterPosition !== expectedRosterPosition) {
+            throw new Error(
+                'sameSecretProofMaterials roster positions must be contiguous from zero.',
+            );
+        }
+    });
+
+    return proofMaterials;
+};
+
+const sameSecretProofByteMaterial = (
+    material: SameSecretProofMaterial,
+): SameSecretProofByteMaterial => {
+    const proofBytesHex = (material as JsonRecord).proofBytesHex;
+    if (proofBytesHex !== undefined) {
+        if (typeof proofBytesHex !== 'string') {
+            throw new TypeError(
+                'sameSecretProofMaterial.proofBytesHex must be a string.',
+            );
+        }
+        return {
+            proofBytesHex,
+        };
+    }
+
+    const transportedMaterial = material as SameSecretTransportedProofBytes;
+
+    return {
+        proofBytesEncoding: transportedMaterial.proofBytesEncoding,
+        proofMaterialRoot: transportedMaterial.proofMaterialRoot,
+        proofChunkSizeBytes: transportedMaterial.proofChunkSizeBytes,
+        proofChunkCount: transportedMaterial.proofChunkCount,
+        proofTotalByteLength: transportedMaterial.proofTotalByteLength,
+        proofFullObjectHash: transportedMaterial.proofFullObjectHash,
+        proofChunkRoot: transportedMaterial.proofChunkRoot,
+        proofChunkHashes: transportedMaterial.proofChunkHashes,
+    };
+};
+
+export const createSameSecretProofSet = (
+    input: SameSecretProofSetInput,
+): SameSecretProofSet => {
+    validateProofSetInput(input);
+    const statementRecords = sortedStatementRecordsForProofs(input);
+    const proofMaterials = sortedSameSecretProofMaterials(input);
+    const proofRecords = proofMaterials.map(
+        (proofMaterial, expectedRosterPosition) => {
+            const statementRecord = statementRecords[expectedRosterPosition];
+            if (statementRecord === undefined) {
+                throw new Error(
+                    'sameSecretProofMaterials must match same-secret statement order.',
+                );
+            }
+            if (
+                proofMaterial.trusteeIdentity !==
+                    statementRecord.trusteeIdentity ||
+                proofMaterial.trusteeRosterPosition !==
+                    statementRecord.trusteeRosterPosition
+            ) {
+                throw new Error(
+                    'sameSecretProofMaterials must bind the derived same-secret statements.',
+                );
+            }
+            const proofRecordWithoutRoot = {
+                objectType: 'SameSecretProof',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                commitmentProfileId: setupCommitmentProfileId,
+                setupProofProfileId,
+                proofFamily: sameSecretProofFamily,
+                proofVerificationStatus: sameSecretLnpProofVerificationStatus,
+                proofModelStatus: sameSecretLnpProofModelStatus,
+                sameSecretTboxParameterProfileHash:
+                    input.sameSecretTboxParameterProfileHash,
+                ...contextFields(input.setupContext),
+                trusteeIdentity: statementRecord.trusteeIdentity,
+                trusteeRosterPosition: statementRecord.trusteeRosterPosition,
+                sameSecretStatementRoot:
+                    statementRecord.sameSecretStatementRoot,
+                trusteeSecretCommitmentRoot:
+                    statementRecord.trusteeSecretCommitmentRoot,
+                sameSecretProofFamilyBindingRoot:
+                    statementRecord.sameSecretProofFamilyBindingRoot,
+                setupProofBinding: input.setupProofBinding,
+                statementHash: proofMaterial.statementHash,
+                relationCommitmentHash: proofMaterial.relationCommitmentHash,
+                tboxCommitmentPrefixHash:
+                    proofMaterial.tboxCommitmentPrefixHash,
+                challenge: proofMaterial.challenge,
+                proofSizeBytes: proofMaterial.proofSizeBytes,
+                proofBytesHash: proofMaterial.proofBytesHash,
+                ...sameSecretProofByteMaterial(proofMaterial),
+            } as const satisfies Omit<
+                SameSecretProofRecord,
+                'sameSecretProofRoot'
+            >;
+
+            return {
+                ...proofRecordWithoutRoot,
+                sameSecretProofRoot: deriveProtocolHash(
+                    'SameSecretProofRoot',
+                    proofRecordWithoutRoot,
+                ),
+            } satisfies SameSecretProofRecord;
+        },
+    );
+    const proofSetWithoutRoot = {
+        objectType: 'SameSecretProofSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        commitmentProfileId: setupCommitmentProfileId,
+        setupProofProfileId,
+        proofFamily: sameSecretProofFamily,
+        proofVerificationStatus: sameSecretLnpProofVerificationStatus,
+        proofModelStatus: sameSecretLnpProofModelStatus,
+        sameSecretTboxParameterProfileHash:
+            input.sameSecretTboxParameterProfileHash,
+        ...contextFields(input.setupContext),
+        participantCount: input.participantCount,
+        rnsLimbCount: input.qSharePrimes.length,
+        sameSecretConsistencyRoot:
+            input.sameSecretConsistency.sameSecretConsistencyRoot,
+        sameSecretProofFamilyBindingRoot:
+            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+        vssCoefficientCommitmentMaterialRoot:
+            input.vssCoefficientCommitmentMaterial
+                .vssCoefficientCommitmentMaterialRoot,
+        setupProofBinding: input.setupProofBinding,
+        sameSecretProofRoots: proofRecords.map((proofRecord) => ({
+            trusteeIdentity: proofRecord.trusteeIdentity,
+            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+            sameSecretProofRoot: proofRecord.sameSecretProofRoot,
+        })),
+        proofRecords,
+    } as const satisfies Omit<SameSecretProofSet, 'sameSecretProofSetRoot'>;
+
+    return {
+        ...proofSetWithoutRoot,
+        sameSecretProofSetRoot: deriveProtocolHash(
+            'SameSecretProofRoot',
+            proofSetWithoutRoot,
+        ),
+    } satisfies SameSecretProofSet;
 };

@@ -607,8 +607,8 @@ const setupCommitmentSecurityCertificateBody = (
         ],
         nonClosure: [
             'same-secret proof still requires external AB-DLOP/LNP review and full tbox closure',
-            'public-key share proof bytes still require no-wrap LNP verification',
-            'relinearization and Galois proof bytes remain review-gated until round-two aggregate-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
+            'public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure',
+            'relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close',
             'setup-proof Fiat-Shamir/QROM composition certificate remains separate',
         ],
         ringAndMatrixParameters: {

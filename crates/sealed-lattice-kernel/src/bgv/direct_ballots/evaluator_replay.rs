@@ -1,15 +1,30 @@
 use super::*;
 
+pub(super) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
+    pub(super) setup_package: &'a Value,
+    pub(super) evaluator_key: &'a DevelopmentBgvKey,
+    pub(super) aggregate_ciphertext: &'a Ciphertext,
+    pub(super) aggregate_scores: &'a [u64],
+    pub(super) ballot_count: usize,
+    pub(super) top_counts: &'a [usize],
+    pub(super) public_evaluation_key_material: Option<&'a Value>,
+    pub(super) target_finality_policy_hash: Option<&'a str>,
+}
+
 pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
-    setup_package: &Value,
-    evaluator_key: &DevelopmentBgvKey,
-    aggregate_ciphertext: &Ciphertext,
-    aggregate_scores: &[u64],
-    ballot_count: usize,
-    top_counts: &[usize],
-    public_evaluation_key_material: Option<&Value>,
-    target_finality_policy_hash: Option<&str>,
+    input: DirectBallotPackedBatchedPairEvaluatorInput<'_>,
 ) -> CanonicalResult<Vec<Value>> {
+    let DirectBallotPackedBatchedPairEvaluatorInput {
+        setup_package,
+        evaluator_key,
+        aggregate_ciphertext,
+        aggregate_scores,
+        ballot_count,
+        top_counts,
+        public_evaluation_key_material,
+        target_finality_policy_hash,
+    } = input;
+
     if top_counts.is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,

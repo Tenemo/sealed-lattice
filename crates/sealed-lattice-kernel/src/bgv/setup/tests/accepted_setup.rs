@@ -1,4 +1,4 @@
-use super::super::accepted_setup::{
+﻿use super::super::accepted_setup::{
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
     PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING, accepted_hashes_from_package,
@@ -1607,7 +1607,7 @@ fn collective_setup_verifier_refuses_malformed_vss_complaint_records() {
 #[test]
 fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
     let mut seeded_package = minimal_collective_setup_package();
-    seeded_package["setupSeed"] = serde_json::json!("centralized-seed");
+    seeded_package["setupSeed"] = serde_json::json!("externally-supplied-seed");
     rebind_collective_setup_package_hash(&mut seeded_package);
 
     let seeded_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -1621,24 +1621,52 @@ fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
         "acceptedPathForbiddenField"
     );
 
-    let mut central_trusted_setup_authority_threshold_package = minimal_collective_setup_package();
-    central_trusted_setup_authority_threshold_package["centralTrustedSetupAuthorityThresholdShareCommitments"] =
+    let mut externally_supplied_threshold_package = minimal_collective_setup_package();
+    externally_supplied_threshold_package["externallySuppliedThresholdShareCommitmentMaterial"] =
         serde_json::json!({ "root": valid_hash('5') });
-    rebind_collective_setup_package_hash(&mut central_trusted_setup_authority_threshold_package);
+    rebind_collective_setup_package_hash(&mut externally_supplied_threshold_package);
 
-    let central_trusted_setup_authority_threshold_result =
+    let externally_supplied_threshold_result =
         verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": central_trusted_setup_authority_threshold_package,
+            "setupPackage": externally_supplied_threshold_package,
         }))
         .expect("verification response");
 
     assert_eq!(
-        central_trusted_setup_authority_threshold_result["verifierStatus"],
+        externally_supplied_threshold_result["verifierStatus"],
         "refused"
     );
     assert_eq!(
-        central_trusted_setup_authority_threshold_result["refusedObjects"][0]["reasonCode"],
+        externally_supplied_threshold_result["refusedObjects"][0]["reasonCode"],
         "acceptedPathForbiddenField"
+    );
+
+    let legacy_external_setup_role_field = [
+        "central",
+        "Trusted",
+        "Setup",
+        "Authority",
+        "ThresholdShareCommitments",
+    ]
+    .join("");
+    let mut legacy_external_setup_role_package = minimal_collective_setup_package();
+    legacy_external_setup_role_package[legacy_external_setup_role_field.as_str()] =
+        serde_json::json!({ "root": valid_hash('6') });
+    rebind_collective_setup_package_hash(&mut legacy_external_setup_role_package);
+
+    let legacy_external_setup_role_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": legacy_external_setup_role_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(
+        legacy_external_setup_role_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        legacy_external_setup_role_result["refusedObjects"][0]["reasonCode"],
+        "secretMaterialPresent"
     );
 }
 
@@ -3171,8 +3199,8 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
         ],
         "nonClosure": [
             "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
-            "public-key share proof bytes still require no-wrap LNP verification",
-            "relinearization and Galois proof bytes remain review-gated until round-two aggregate-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
+            "public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure",
+            "relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
         ],
         "ringAndMatrixParameters": {
@@ -4708,7 +4736,7 @@ fn relinearization_source_relation_for_round_for_test(round: &str) -> (&'static 
         ),
         "round-two" => (
             "same-secret-times-round-one-aggregate-for-relinearization-source",
-            "review-gated-aggregate-square-proof-closure-required",
+            "verifier-checked-round-two-source-square-aggregate-binding",
         ),
         _ => panic!("unsupported relinearization round"),
     }

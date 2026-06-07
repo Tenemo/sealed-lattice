@@ -18,7 +18,7 @@ type ProofRandomnessSource =
 export const relinearizationProofVerificationStatus =
     'lnp-relinearization-key-share-relation-verified-review-gated';
 export const relinearizationProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, and root-bound relinearization source binding records verified; verifier-side round-two aggregate-square source proof closure plus external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing relinearization acceptance';
+    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, and verifier-side round-two source-square aggregate roots verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing relinearization acceptance';
 export const galoisProofVerificationStatus =
     'lnp-galois-key-share-relation-verified-review-gated';
 export const galoisProofModelStatus =
@@ -1582,7 +1582,7 @@ const relinearizationSourceRelationForRound = (
         : {
               relation:
                   'same-secret-times-round-one-aggregate-for-relinearization-source',
-              status: 'review-gated-aggregate-square-proof-closure-required',
+              status: 'verifier-checked-round-two-source-square-aggregate-binding',
           };
 
 const relinearizationSourceSquareBindingRoot = (

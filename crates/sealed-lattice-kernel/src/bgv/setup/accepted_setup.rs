@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+﻿use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigUint;
 use serde_json::{Value, json};
@@ -164,15 +164,15 @@ const ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES: &[&str] = &[
     "setupSeedHash",
     "privateSetupSeedHash",
     "setupPrivateWitness",
-    "centralTrustedSetupAuthorityBoundary",
-    "centralTrustedSetupAuthoritySetup",
+    "externallySuppliedSetupMaterialBoundary",
+    "externallySuppliedSetupMaterial",
     "lattigoSetupMaterial",
     "lattigoPublicKey",
     "lattigoRelinearizationKey",
     "lattigoGaloisKey",
-    "centralTrustedSetupAuthoritySuppliedThresholdShareCommitments",
-    "centralTrustedSetupAuthorityThresholdShareCommitments",
-    "trustedThresholdShareCommitments",
+    "externallySuppliedThresholdShareCommitments",
+    "externallySuppliedThresholdShareCommitmentMaterial",
+    "externallySuppliedUnverifiedThresholdShareCommitments",
 ];
 
 const REQUIRED_PHASES: &[(&str, u64)] = &[
@@ -10143,14 +10143,14 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
             "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
         )?));
     }
-    if ring_degree == POLYNOMIAL_DEGREE as u64 {
-        if let Err(error) = accepted_setup_collective_public_key_from_package(setup_package) {
-            return Ok(Some(public_key_share_proof_refusal(
-                "collectivePublicKeyRuntimeMaterialInvalid",
-                error.message,
-                "setupPackage.collectivePublicKey",
-            )?));
-        }
+    if ring_degree == POLYNOMIAL_DEGREE as u64
+        && let Err(error) = accepted_setup_collective_public_key_from_package(setup_package)
+    {
+        return Ok(Some(public_key_share_proof_refusal(
+            "collectivePublicKeyRuntimeMaterialInvalid",
+            error.message,
+            "setupPackage.collectivePublicKey",
+        )?));
     }
 
     Ok(None)
@@ -15381,7 +15381,7 @@ fn relinearization_source_relation_for_round(
         )),
         "round-two" => Ok((
             "same-secret-times-round-one-aggregate-for-relinearization-source",
-            "review-gated-aggregate-square-proof-closure-required",
+            "verifier-checked-round-two-source-square-aggregate-binding",
         )),
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -16778,8 +16778,8 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
         ],
         "nonClosure": [
             "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
-            "public-key share proof bytes still require no-wrap LNP verification",
-            "relinearization and Galois proof bytes remain review-gated until round-two aggregate-square proof closure, external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
+            "public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure",
+            "relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
         ],
         "ringAndMatrixParameters": {
@@ -18095,7 +18095,9 @@ fn reject_accepted_setup_forbidden_fields(value: &Value) -> CanonicalResult<()> 
         }
         Value::Object(fields) => {
             for (field_name, field_value) in fields {
-                if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
+                if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
+                    || field_name_suggests_legacy_external_setup_role(field_name)
+                {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
                         format!(
@@ -18120,7 +18122,9 @@ fn reject_accepted_setup_forbidden_request_fields(request: &Value) -> CanonicalR
         if field_name == "setupPackage" || field_name == "command" {
             continue;
         }
-        if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
+        if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
+            || field_name_suggests_legacy_external_setup_role(field_name)
+        {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!("{field_name} cannot appear in accepted collective BGV setup requests"),

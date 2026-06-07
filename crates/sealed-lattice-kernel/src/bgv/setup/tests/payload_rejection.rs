@@ -1,11 +1,11 @@
-use super::*;
+﻿use super::*;
 
 #[test]
-fn passive_setup_rejects_central_trusted_setup_authority_secret_fields() {
+fn passive_setup_rejects_externally_supplied_setup_material_secret_fields() {
     for field_name in [
         "globalSecretPolynomial",
-        "centralTrustedSetupAuthoritySecret",
-        "centralTrustedSetupAuthorityKeyMaterial",
+        "externallySuppliedSetupSecret",
+        "externallySuppliedSetupKeyMaterial",
         "fullSecretKey",
         "collectiveSecretKey",
         "fullSecretReconstruction",
@@ -15,13 +15,25 @@ fn passive_setup_rejects_central_trusted_setup_authority_secret_fields() {
         request["participants"][0][field_name] = serde_json::json!("forbidden");
 
         let error = generate_passive_setup_package_from_request(&request)
-            .expect_err("setup must reject centralized secret material");
+            .expect_err("setup must reject externally supplied secret material");
         assert!(
             error.message.contains(field_name),
             "{field_name}: {}",
             error.message
         );
     }
+
+    let legacy_external_setup_role_field =
+        ["central", "Trusted", "Setup", "Authority", "KeyMaterial"].join("");
+    let mut request = request();
+    request[legacy_external_setup_role_field.as_str()] = serde_json::json!("forbidden");
+    let error = generate_passive_setup_package_from_request(&request)
+        .expect_err("setup must reject legacy externally supplied setup material fields");
+    assert!(
+        error.message.contains(&legacy_external_setup_role_field),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
@@ -341,9 +353,9 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
                 "participantCount": invalid_participant_count,
             },
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-            "centralTrustedSetupAuthorityBoundary": {
+            "externallySuppliedSetupMaterialBoundary": {
                 "rawSecretSharesExported": false,
-                "transcriptValidCentralizedSecretReconstruction": false,
+                "transcriptAcceptsExternallySuppliedSecretReconstruction": false,
             },
         });
         assert!(
@@ -370,9 +382,9 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             "participantCount": 3,
         },
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "centralTrustedSetupAuthorityBoundary": {
+        "externallySuppliedSetupMaterialBoundary": {
             "rawSecretSharesExported": false,
-            "transcriptValidCentralizedSecretReconstruction": false,
+            "transcriptAcceptsExternallySuppliedSecretReconstruction": false,
         },
     });
     let stale_status_error = validate_setup_package_shape(&stale_security_status_package)

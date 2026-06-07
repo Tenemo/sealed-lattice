@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 use crate::bgv::coefficient_codec::{
     coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
 };
@@ -56,7 +56,7 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "publicKeyComponentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
         "publicKeyCoefficientMaterialBinding": "public-coefficients-bound-in-setup-package-with-private-share-derivation-unexported",
         "participantCount": public_key_share_roots.len(),
-        "centralizedSecretReconstruction": false,
+        "externallySuppliedSecretReconstruction": false,
         "rawSecretShareExported": false,
         "maliciousDkgProofIncluded": false,
     });
@@ -83,7 +83,7 @@ pub(in crate::bgv::setup) fn collective_public_key(
             "CollectivePublicKeyShareAggregationBound",
             "BgvPublicKeyCoefficientMaterialBound",
             "BgvAlgebraicPublicKeyProofMissing",
-            "NoCentralTrustedSetupAuthoritySecretReconstruction"
+            "NoExternallySuppliedSetupMaterialSecretReconstruction"
         ],
     }))
 }

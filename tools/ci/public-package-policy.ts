@@ -227,7 +227,16 @@ export const vendoredProtocolRuntimeEntryExports = [
     },
     {
         source: 'setup/public-key-share-records.js',
-        exports: ['createPublicKeyShareProofSet', 'createPublicKeyShareSet'],
+        exports: [
+            'createPublicKeyShareLnpProofSet',
+            'createPublicKeyShareMaterialSet',
+            'createPublicKeyShareProofSet',
+            'createPublicKeyShareSet',
+        ],
+    },
+    {
+        source: 'setup/same-secret-consistency-records.js',
+        exports: ['createSameSecretProofSet'],
     },
     {
         source: 'setup/evaluator-key-schedule.js',

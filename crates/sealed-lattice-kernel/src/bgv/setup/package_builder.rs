@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 use super::{
     certificates::{
         collective_secret_distribution_certificate, error_distribution_certificate,
@@ -176,9 +176,9 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "evaluationKeys": evaluation_keys,
         "developmentEncryptionFixture": development_encryption_fixture,
         "certificates": certificates,
-        "centralTrustedSetupAuthorityBoundary": {
-            "transcriptValidCentralizedSecretReconstruction": false,
-            "centralizedSecretFixtureMayProduceAcceptedRoots": false,
+        "externallySuppliedSetupMaterialBoundary": {
+            "transcriptAcceptsExternallySuppliedSecretReconstruction": false,
+            "externallySuppliedSecretFixtureMayProduceAcceptedRoots": false,
             "rawSecretSharesExported": false,
             "forbiddenRequestFields": forbidden_setup_field_names(),
         },
