@@ -1013,15 +1013,14 @@ fn validate_message_coefficients(
             "commitment message coefficient count must match the ring degree",
         ));
     }
-    if let Some(exclusive_bound) = exclusive_bound {
-        if message_coefficients
+    if let Some(exclusive_bound) = exclusive_bound
+        && message_coefficients
             .iter()
             .any(|coefficient| *coefficient >= exclusive_bound)
-        {
-            return Err(invalid_commitment_input(
-                "commitment message coefficient is outside the declared integer range",
-            ));
-        }
+    {
+        return Err(invalid_commitment_input(
+            "commitment message coefficient is outside the declared integer range",
+        ));
     }
     if !setup_coefficients_fit_commitment_modulus_product(message_coefficients) {
         return Err(invalid_commitment_input(

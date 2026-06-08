@@ -1006,7 +1006,8 @@ describe('evaluation-key proof record builders', () => {
                 assemblyStatus: evaluationKeys.assemblyStatus,
                 materialEncoding: evaluationKeys.materialEncoding,
                 materialSource: evaluationKeys.materialSource,
-                evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
+                evaluatorKeyScheduleRoot:
+                    evaluationKeys.evaluatorKeyScheduleRoot,
                 sameSecretProofFamilyBindingRoot:
                     evaluationKeys.sameSecretProofFamilyBindingRoot,
                 publicKeyShareLnpProofSetRoot:
@@ -1027,7 +1028,8 @@ describe('evaluation-key proof record builders', () => {
                 assemblyStatus: evaluationKeys.assemblyStatus,
                 materialEncoding: evaluationKeys.materialEncoding,
                 materialSource: evaluationKeys.materialSource,
-                evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
+                evaluatorKeyScheduleRoot:
+                    evaluationKeys.evaluatorKeyScheduleRoot,
                 sameSecretProofFamilyBindingRoot:
                     evaluationKeys.sameSecretProofFamilyBindingRoot,
                 publicKeyShareLnpProofSetRoot:

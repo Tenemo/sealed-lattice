@@ -63,6 +63,16 @@ const fixtureHash = (label: string): string =>
         label,
     });
 
+type JsonRecord = Record<string, unknown>;
+
+const jsonRecord = (value: unknown, label: string): JsonRecord => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${label} must be an object.`);
+    }
+
+    return value as JsonRecord;
+};
+
 const textEncoder = new TextEncoder();
 
 const qShare = {
@@ -1697,17 +1707,19 @@ describe('setup ceremony assembly', () => {
                     assembly.setupPackage.heSecurityCertificateHash,
             },
         });
-        const setupKeyCorrectnessPublicEvaluationKeys = assembly.setupPackage
-            .setupKeyCorrectnessCertificate.publicEvaluationKeys as Record<
-            string,
-            unknown
-        >;
+        const setupKeyCorrectnessCertificate = jsonRecord(
+            assembly.setupPackage.setupKeyCorrectnessCertificate,
+            'setupPackage.setupKeyCorrectnessCertificate',
+        );
+        const setupKeyCorrectnessPublicEvaluationKeys = jsonRecord(
+            setupKeyCorrectnessCertificate.publicEvaluationKeys,
+            'setupPackage.setupKeyCorrectnessCertificate.publicEvaluationKeys',
+        );
         expect(
             setupKeyCorrectnessPublicEvaluationKeys.galoisKeyShareBatchRoots,
         ).toHaveLength(assembly.galoisKeyShareBatches.length);
         expect(assembly.setupPackage.setupKeyCorrectnessCertificateHash).toBe(
-            assembly.setupPackage.setupKeyCorrectnessCertificate
-                .setupKeyCorrectnessCertificateHash,
+            setupKeyCorrectnessCertificate.setupKeyCorrectnessCertificateHash,
         );
         expect(assembly.setupPackage.thresholdShareCommitments).toEqual(
             assembly.thresholdShareCommitments,

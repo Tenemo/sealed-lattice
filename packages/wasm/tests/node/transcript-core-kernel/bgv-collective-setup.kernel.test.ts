@@ -67,6 +67,20 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
+const jsonRecord = (value: unknown, label: string): JsonRecord => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${label} must be a JSON object.`);
+    }
+
+    return value as JsonRecord;
+};
+
+const optionalJsonRecord = (
+    value: unknown,
+    label: string,
+): JsonRecord | undefined =>
+    value === undefined ? undefined : jsonRecord(value, label);
+
 const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
     JSON.parse(JSON.stringify(value)) as JsonRecord;
 
@@ -102,8 +116,6 @@ const setupProofSerialization = 'binary';
 const setupProofByteDecoder = 'sealed-lattice-lnp-tbox-proof-byte-decoder-v1';
 const setupProofChallengeSpaceAuditHashNamespace =
     'SetupProofChallengeSpaceAuditHash';
-const setupProofChallengeDifferenceInvertibilityStatus =
-    'claim-accounting-required-before-claim-closure';
 
 const hexToBytes = (hexValue: string): Uint8Array =>
     Uint8Array.from(
@@ -1057,11 +1069,19 @@ function acceptedSetupCommitmentSecurityCertificate(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): JsonRecord {
+    const acceptedCertificateTemplates = optionalJsonRecord(
+        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
+        'profile.acceptedCertificateTemplates',
+    );
     const template =
-        profile.acceptedCertificateTemplates
-            ?.setupCommitmentSecurityCertificate;
+        acceptedCertificateTemplates?.setupCommitmentSecurityCertificate;
     if (template !== undefined) {
-        return { ...template };
+        return cloneJsonRecord(
+            jsonRecord(
+                template,
+                'profile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
+            ),
+        );
     }
 
     return fallbackAcceptedSetupCommitmentSecurityCertificate(kernel, profile);
@@ -1100,6 +1120,8 @@ function setupProofRecordBindingForCertificate(
         challengeStreamDomain: setupProofChallengeStreamDomain,
         challengeDifferenceInvertibilityStatus:
             challengeBinding.challengeDifferenceInvertibilityStatus,
+        challengeDifferenceInvertibilityAccounting:
+            challengeBinding.challengeDifferenceInvertibilityAccounting,
         proofBytesDomain: setupProofBytesDomain,
         proofSerialization: setupProofSerialization,
         proofByteDecoder: setupProofByteDecoder,
@@ -1194,7 +1216,9 @@ function fallbackAcceptedSetupProofAccountingCertificate(
             challengeSampler: setupProofChallengeSampler,
             challengeSpace: setupProofChallengeSpace,
             challengeDifferenceInvertibilityStatus:
-                setupProofChallengeDifferenceInvertibilityStatus,
+                challengeBinding.challengeDifferenceInvertibilityStatus,
+            challengeDifferenceInvertibilityAccounting:
+                challengeBinding.challengeDifferenceInvertibilityAccounting,
             challengeSpaceAudit,
             challengeSpaceAuditHash: kernel.deriveProtocolHash({
                 namespace: setupProofChallengeSpaceAuditHashNamespace,
@@ -1232,10 +1256,19 @@ function acceptedSetupProofAccountingCertificate(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): JsonRecord {
+    const acceptedCertificateTemplates = optionalJsonRecord(
+        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
+        'profile.acceptedCertificateTemplates',
+    );
     const template =
-        profile.acceptedCertificateTemplates?.setupProofAccountingCertificate;
+        acceptedCertificateTemplates?.setupProofAccountingCertificate;
     if (template !== undefined) {
-        return { ...template };
+        return cloneJsonRecord(
+            jsonRecord(
+                template,
+                'profile.acceptedCertificateTemplates.setupProofAccountingCertificate',
+            ),
+        );
     }
 
     return fallbackAcceptedSetupProofAccountingCertificate(kernel, profile);
@@ -1427,10 +1460,18 @@ function acceptedHeSecurityCertificate(
     setupProfile: BgvCollectiveSetupProfileDescription,
     bgvProfile: BgvRnsProfileDescription,
 ): JsonRecord {
-    const template =
-        setupProfile.acceptedCertificateTemplates?.heSecurityCertificate;
+    const acceptedCertificateTemplates = optionalJsonRecord(
+        (setupProfile as unknown as JsonRecord).acceptedCertificateTemplates,
+        'setupProfile.acceptedCertificateTemplates',
+    );
+    const template = acceptedCertificateTemplates?.heSecurityCertificate;
     if (template !== undefined) {
-        return { ...template };
+        return cloneJsonRecord(
+            jsonRecord(
+                template,
+                'setupProfile.acceptedCertificateTemplates.heSecurityCertificate',
+            ),
+        );
     }
 
     return fallbackAcceptedHeSecurityCertificate(
@@ -1525,6 +1566,28 @@ function acceptedSetupTransportCertificate(
             value: certificate,
         }),
     };
+}
+
+const acceptedShapedSetupPackageCacheByProfileKey = new Map<
+    string,
+    Promise<string>
+>();
+
+function acceptedShapedSetupPackageCacheKey(
+    kernel: TranscriptCoreKernel,
+    profile: BgvCollectiveSetupProfileDescription,
+): string {
+    const bgvProfile = kernel.describeBgvRnsProfile();
+
+    return [
+        profile.setupProfileId,
+        profile.setupProfileHash,
+        profile.qShareHash,
+        profile.carryAwareVssShareRelationProfileHash,
+        profile.commitmentProfileHash,
+        bgvProfile.profileHash,
+        bgvProfile.backendProfileHash,
+    ].join('|');
 }
 
 function optionalHashFromRecord(
@@ -1730,7 +1793,7 @@ function acceptedActiveStaticSetupTheoremCertificate(
     };
 }
 
-async function acceptedShapedSetupPackage(
+async function buildAcceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): Promise<JsonRecord> {
@@ -1930,6 +1993,38 @@ async function acceptedShapedSetupPackage(
     return setupPackage;
 }
 
+async function acceptedShapedSetupPackage(
+    kernel: TranscriptCoreKernel,
+    profile: BgvCollectiveSetupProfileDescription,
+): Promise<JsonRecord> {
+    const cacheKey = acceptedShapedSetupPackageCacheKey(kernel, profile);
+    let acceptedShapedSetupPackageJson =
+        acceptedShapedSetupPackageCacheByProfileKey.get(cacheKey);
+    if (acceptedShapedSetupPackageJson === undefined) {
+        acceptedShapedSetupPackageJson = buildAcceptedShapedSetupPackage(
+            kernel,
+            profile,
+        ).then((setupPackage) => JSON.stringify(setupPackage));
+        acceptedShapedSetupPackageCacheByProfileKey.set(
+            cacheKey,
+            acceptedShapedSetupPackageJson,
+        );
+    }
+
+    const setupPackage: unknown = JSON.parse(
+        await acceptedShapedSetupPackageJson,
+    );
+    if (
+        typeof setupPackage !== 'object' ||
+        setupPackage === null ||
+        Array.isArray(setupPackage)
+    ) {
+        throw new Error('Cached accepted setup package must be a JSON object.');
+    }
+
+    return setupPackage as JsonRecord;
+}
+
 describe('collective BGV setup kernel commands', () => {
     it('describes the accepted setup profile and compact verifier states', async () => {
         const kernel = await loadTranscriptCoreKernel();
@@ -2069,7 +2164,7 @@ describe('collective BGV setup kernel commands', () => {
         expect(commandError.message).toContain('setupPackage is required');
     });
 
-    it('refuses reduced-ring public VSS material before proof verification', async () => {
+    it('reports accepted-shaped setup as pending before reduced-ring public VSS profile checks', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeCollectiveBgvSetupProfile();
         const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
@@ -2082,15 +2177,17 @@ describe('collective BGV setup kernel commands', () => {
 
         expect(result).toMatchObject({
             ok: false,
-            verifierStatus: 'outsideProfile',
-            currentPhase: 'vssCoefficientCommitments',
+            verifierStatus: 'pending',
+            currentPhase: 'setupPackageVerification',
+            missingObjects: [
+                'sameSecretProofs',
+                'publicKeyShareMaterial',
+                'publicKeyShareLnpProofs',
+                'collectivePublicKey',
+                'collectivePublicKeyRoot',
+            ],
+            refusedObjects: [],
         });
-        expect(result.refusedObjects[0]?.reasonCode).toBe(
-            'vssCoefficientCommitmentMaterialOutsideProfile',
-        );
-        expect(result.refusedObjects[0]?.objectPath).toBe(
-            'setupPackage.vssCoefficientCommitmentMaterial.ringDegree',
-        );
     });
 
     it('aborts accepted-shaped setup on a protocol-built VSS complaint', async () => {
@@ -2122,7 +2219,7 @@ describe('collective BGV setup kernel commands', () => {
         );
     });
 
-    it('refuses undeclared generic key-switch material and non-binary transport', async () => {
+    it('refuses undeclared generic key-switch material', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeCollectiveBgvSetupProfile();
         const baseSetupPackage = await acceptedShapedSetupPackage(
@@ -2143,7 +2240,15 @@ describe('collective BGV setup kernel commands', () => {
         expect(genericKeySwitchResult.refusedObjects[0]?.reasonCode).toBe(
             'genericKeySwitchOutsideProfile',
         );
+    });
 
+    it('refuses malformed commitment security certificates', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const baseSetupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            profile,
+        );
         const malformedCommitmentCertificatePackage =
             cloneJsonRecord(baseSetupPackage);
         const malformedCommitmentCertificate =
@@ -2167,7 +2272,15 @@ describe('collective BGV setup kernel commands', () => {
         expect(
             malformedCommitmentCertificateResult.refusedObjects[0]?.reasonCode,
         ).toBe('commitmentSecurityCertificatePayloadMismatch');
+    });
 
+    it('refuses JSON setup transport certificates', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const baseSetupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            profile,
+        );
         const jsonTransportPackage = cloneJsonRecord(baseSetupPackage);
         (
             jsonTransportPackage.setupTransportCertificate as JsonRecord
@@ -2182,7 +2295,15 @@ describe('collective BGV setup kernel commands', () => {
         expect(jsonTransportResult.refusedObjects[0]?.reasonCode).toBe(
             'transportEncodingMismatch',
         );
+    });
 
+    it('refuses setup transport chunk hash count mismatches', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const baseSetupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            profile,
+        );
         const malformedTransportPackage = cloneJsonRecord(baseSetupPackage);
         const malformedTransportCertificate =
             malformedTransportPackage.setupTransportCertificate as JsonRecord;

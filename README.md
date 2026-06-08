@@ -134,7 +134,7 @@ Run the main local validation gate:
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, Rust tests, and fast Node tests through the repository check runner.
+`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the non-heavy kernel Node tests through the repository check runner.
 
 For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
@@ -142,9 +142,11 @@ Run focused verification:
 
 ```bash
 pnpm run vectors
+pnpm run test:rust:kernel:heavy
 pnpm run test:node:fast
 pnpm run test:node:protocol
 pnpm run test:node:kernel
+pnpm run test:node:kernel:heavy
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
