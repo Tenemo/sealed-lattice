@@ -12,7 +12,7 @@ pub(super) const CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_ID: &str =
 use super::{
     commitment::{
         SetupCommitmentOpeningVerification, SetupCommitmentValue,
-        linear_combination_setup_commitments, setup_commitment_modulus_product,
+        linear_combination_setup_commitments, setup_coefficient_fits_commitment_modulus_product,
         verify_setup_lifted_commitment_opening,
     },
     sharing::{canonical_trustee_point, evaluate_shamir_polynomial},
@@ -238,7 +238,7 @@ pub(super) fn verify_carry_aware_vss_commitment_opening(
     }
     if lifted_message_coefficients
         .iter()
-        .any(|coefficient| *coefficient >= setup_commitment_modulus_product())
+        .any(|coefficient| !setup_coefficient_fits_commitment_modulus_product(*coefficient))
     {
         return Err(invalid_vss_input(
             "lifted VSS share coefficient wraps in the commitment modulus product",

@@ -9,7 +9,7 @@ import {
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
 
-const qSharePrimes = [65_537, 114_689] as const;
+const qSharePrimes = [65_537, 114_689, 147_457] as const;
 const ringDegree = 4;
 const participantCount = 2;
 const thresholdDegree = 2;

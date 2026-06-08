@@ -73,6 +73,23 @@ type SetupKeyCorrectnessCertificateBody = Readonly<
     }
 >;
 
+export type ActiveStaticSetupTheoremCertificate = Readonly<
+    JsonRecord & {
+        readonly objectType: 'ActiveStaticSetupTheoremCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
+    }
+>;
+
+type ActiveStaticSetupTheoremCertificateBody = Readonly<
+    JsonRecord & {
+        readonly objectType: 'ActiveStaticSetupTheoremCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    }
+>;
+
 export type SetupPackageInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly qShare: JsonRecord;
@@ -146,6 +163,8 @@ export type SetupPackage = Readonly<
         readonly setupProofAccountingCertificateHash: ProtocolHash;
         readonly setupKeyCorrectnessCertificate: SetupKeyCorrectnessCertificate;
         readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
+        readonly activeStaticSetupTheoremCertificate: ActiveStaticSetupTheoremCertificate;
+        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
         readonly heSecurityCertificate: JsonRecord;
         readonly heSecurityCertificateHash: ProtocolHash;
         readonly setupPackageHash: ProtocolHash;
@@ -161,6 +180,9 @@ type SetupPackageInputWithDerivedCollectivePublicKey = Omit<
     }>;
 
 const setupProfileId = 'CollectiveBgvSetup-v1';
+const firstProfileParticipantCount = 10;
+const firstProfileSetupCompletionQuorum = 10;
+const firstProfileDecryptionThreshold = 4;
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const contextFieldNames = [
     'ceremonyId',
@@ -355,6 +377,46 @@ const hashField = (
     assertProtocolHash(hashValue, `${objectPath}.${fieldName}`);
 
     return hashValue;
+};
+
+const optionalHashValue = (
+    value: unknown,
+    fieldPath: string,
+): ProtocolHash | null => {
+    if (value === undefined) {
+        return null;
+    }
+    if (typeof value !== 'string') {
+        throw new TypeError(`${fieldPath} must be a string when present.`);
+    }
+    assertProtocolHash(value, fieldPath);
+
+    return value;
+};
+
+const optionalTopLevelHashValue = (
+    value: Readonly<Record<string, unknown>>,
+    fieldName: string,
+): ProtocolHash | null => optionalHashValue(value[fieldName], fieldName);
+
+const optionalNestedHashValue = (
+    value: Readonly<Record<string, unknown>>,
+    objectFieldName: string,
+    hashFieldName: string,
+): ProtocolHash | null => {
+    const objectValue = value[objectFieldName];
+    if (objectValue === undefined) {
+        return null;
+    }
+    const record = assertObjectRecord(
+        objectValue,
+        `setupPackage.${objectFieldName}`,
+    );
+
+    return optionalHashValue(
+        record[hashFieldName],
+        `setupPackage.${objectFieldName}.${hashFieldName}`,
+    );
 };
 
 const cloneJsonLike = (value: unknown): unknown => {
@@ -955,8 +1017,23 @@ const setupKeyCorrectnessCertificateBody = (
             'fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate',
         keyCorrectnessScope:
             'collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records',
+        keyCorrectnessTheorem: {
+            theoremStatus:
+                'repo-owned-key-correctness-theorem-accepted-for-verifier-recomputed-roots',
+            claimDependency:
+                'terminal accepted setup verifies these roots before returning the accepted setup handoff',
+            checkedByVerifier: [
+                'collective public-key coefficients are recomputed from publicKeyShareMaterial records and verified source roots',
+                'collectivePublicKeyRoot is canonical and matches the top-level setup package root',
+                'evaluationKeySetHash is canonical and binds the frozen evaluator schedule, relinearization rounds, and Galois batch records',
+                'transported public evaluation-key runtime material is verified against evaluationKeys when supplied',
+                'generic key-switch material and unscheduled Galois keys are refused for the first profile',
+            ],
+            activeMaliciousPrototypeBoundary:
+                'malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading',
+        },
         collectivePublicKey: {
-            status: 'collective-public-key-root-bound-to-public-key-share-material-and-LNP-proof-roots',
+            status: 'collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots',
             collectivePublicKeyRoot,
             sourceRoots: {
                 publicKeyShareSetRoot: hashField(
@@ -974,7 +1051,7 @@ const setupKeyCorrectnessCertificateBody = (
             },
         },
         publicEvaluationKeys: {
-            status: 'public-evaluation-key-roots-bound-to-frozen-schedule-and-proof-bearing-relinearization-and-galois-records',
+            status: 'public-evaluation-key-roots-recomputed-from-frozen-schedule-and-proof-bearing-relinearization-and-galois-records',
             evaluationKeySetHash,
             evaluatorKeyScheduleRoot: hashField(
                 input.evaluatorKeySchedule,
@@ -1008,7 +1085,7 @@ const setupKeyCorrectnessCertificateBody = (
             ),
         },
         claimBoundary:
-            'claim-bearing key correctness still requires proof-accounting and theorem closure before accepted setup can close',
+            'key-correctness theorem is accepted for verified roots, loaded runtime material, and terminal accepted setup handoff construction',
     };
 };
 
@@ -1025,6 +1102,206 @@ const createSetupKeyCorrectnessCertificate = (
         ...certificateBody,
         setupKeyCorrectnessCertificateHash: deriveProtocolHash(
             'SetupKeyCorrectnessCertificateHash',
+            certificateBody,
+        ),
+    };
+};
+
+const packageDeclaresPublicRuntimeMaterial = (
+    setupPackage: Readonly<Record<string, unknown>>,
+): boolean => {
+    if (setupPackage.collectivePublicKey !== undefined) {
+        return true;
+    }
+    const evaluationKeys = setupPackage.evaluationKeys;
+
+    return (
+        typeof evaluationKeys === 'object' &&
+        evaluationKeys !== null &&
+        !Array.isArray(evaluationKeys) &&
+        Object.keys(evaluationKeys).length > 0
+    );
+};
+
+const activeStaticSetupTheoremCertificateBody = (
+    setupPackage: Readonly<Record<string, unknown>>,
+): ActiveStaticSetupTheoremCertificateBody => {
+    const setupContext = assertObjectRecord(
+        setupPackage.setupContext,
+        'setupPackage.setupContext',
+    );
+    const evaluationKeysDeclared =
+        packageDeclaresPublicRuntimeMaterial(setupPackage);
+
+    return {
+        objectType: 'ActiveStaticSetupTheoremCertificate',
+        objectVersion: 1,
+        setupProfileId,
+        ...contextFieldsForCertificate(
+            setupContext as unknown as CollectiveBgvSetupContext,
+        ),
+        adversaryModel: {
+            corruptionTiming: 'active-static',
+            maliciousBehavior:
+                'arbitrary-invalid-public-setup-artifacts-and-abort',
+            secretConfidentialityCorruptTrusteeBound:
+                firstProfileDecryptionThreshold - 1,
+            fullRosterSetupCompletionRequired: true,
+        },
+        livenessModel: {
+            model: 'secure-with-abort',
+            setupCompletionQuorum: firstProfileSetupCompletionQuorum,
+            participantCount: firstProfileParticipantCount,
+            acceptedAbortEvents: [
+                'missing required setup phase object',
+                'malformed public setup object',
+                'invalid private VSS acceptance state',
+                'invalid setup proof or proof material root',
+                'invalid collective public-key or evaluation-key root',
+                'unsupported target-decryption readiness claim',
+            ],
+            notClaimed: [
+                'guaranteed output delivery',
+                'identifiable abort',
+                'post-setup target decryption',
+                'production audit readiness',
+            ],
+        },
+        verifiedSetupGates: [
+            'setup context and package hash bind the ceremony, roster, manifest, profile, Q_share, commitment profile, and setup epoch',
+            'full-roster common randomness commit/reveal records derive public setup matrices before proof and key verification',
+            'public VSS coefficient commitments and recipient-local signed acceptances are checked before threshold-share commitment derivation',
+            'threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied',
+            'same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted',
+            'collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records',
+            'setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects',
+            'generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused',
+        ],
+        dependencyHashes: {
+            setupCommitmentSecurityCertificateHash: hashField(
+                setupPackage,
+                'setupCommitmentSecurityCertificateHash',
+                'setupPackage',
+            ),
+            setupTransportCertificateHash: hashField(
+                setupPackage,
+                'setupTransportCertificateHash',
+                'setupPackage',
+            ),
+            setupProofAccountingCertificateHash: hashField(
+                setupPackage,
+                'setupProofAccountingCertificateHash',
+                'setupPackage',
+            ),
+            heSecurityCertificateHash: hashField(
+                setupPackage,
+                'heSecurityCertificateHash',
+                'setupPackage',
+            ),
+            setupKeyCorrectnessCertificateHash: optionalTopLevelHashValue(
+                setupPackage,
+                'setupKeyCorrectnessCertificateHash',
+            ),
+        },
+        terminalRoots: {
+            thresholdShareCommitmentRoot: optionalTopLevelHashValue(
+                setupPackage,
+                'thresholdShareCommitmentRoot',
+            ),
+            sameSecretProofSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'sameSecretProofs',
+                'sameSecretProofSetRoot',
+            ),
+            publicKeyShareMaterialSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'publicKeyShareMaterial',
+                'publicKeyShareMaterialSetRoot',
+            ),
+            publicKeyShareLnpProofSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'publicKeyShareLnpProofs',
+                'publicKeyShareLnpProofSetRoot',
+            ),
+            collectivePublicKeyRoot: optionalNestedHashValue(
+                setupPackage,
+                'collectivePublicKey',
+                'collectivePublicKeyRoot',
+            ),
+            evaluatorKeyScheduleRoot: optionalNestedHashValue(
+                setupPackage,
+                'evaluatorKeySchedule',
+                'evaluatorKeyScheduleRoot',
+            ),
+            evaluationKeySetHash: optionalNestedHashValue(
+                setupPackage,
+                'evaluationKeys',
+                'evaluationKeySetHash',
+            ),
+            publicEvaluationKeyMaterialRoot: optionalNestedHashValue(
+                setupPackage,
+                'evaluationKeys',
+                'publicEvaluationKeyMaterialRoot',
+            ),
+        },
+        referenceRows: [
+            {
+                document: 'BCD25_Threshold (Fully) Homomorphic Encryption',
+                localReferencePath:
+                    'reference-documents/BCD25_Threshold (Fully) Homomorphic Encryption.txt',
+                sections: [
+                    'active-with-abort security model',
+                    'static malicious adversaries',
+                    'threshold FHE setup and abort boundaries',
+                ],
+            },
+            {
+                document:
+                    'LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General',
+                localReferencePath:
+                    'reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt',
+                sections: [
+                    'Fiat-Shamir with aborts',
+                    'commit-and-prove simulatability',
+                    'knowledge soundness',
+                ],
+            },
+            {
+                document:
+                    'BFM25_Threshold FHE with Efficient Asynchronous Decryption',
+                localReferencePath:
+                    'reference-documents/BFM25_Threshold FHE with Efficient Asynchronous Decryption.txt',
+                sections: [
+                    'malicious participant detection',
+                    'setup preprocessing',
+                    'abort behavior',
+                ],
+            },
+        ],
+        claimBoundary: {
+            certificateStatus:
+                'active-static-secure-with-abort-theorem-accepted',
+            evaluationKeyCorrectnessStatus: evaluationKeysDeclared
+                ? 'requires-setup-key-correctness-certificate'
+                : 'no-public-evaluation-key-runtime-material-declared',
+            remainingDependencies: [],
+            integrationDependencies: [],
+            completionBoundary:
+                'external validation, independent audit, and third-party proof review are not setup completion prerequisites',
+        },
+    };
+};
+
+const createActiveStaticSetupTheoremCertificate = (
+    setupPackage: Readonly<Record<string, unknown>>,
+): ActiveStaticSetupTheoremCertificate => {
+    const certificateBody =
+        activeStaticSetupTheoremCertificateBody(setupPackage);
+
+    return {
+        ...certificateBody,
+        activeStaticSetupTheoremCertificateHash: deriveProtocolHash(
+            'ActiveStaticSetupTheoremCertificateHash',
             certificateBody,
         ),
     };
@@ -1083,7 +1360,7 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         'collectivePublicKey',
     );
 
-    const packageWithoutHash = {
+    const packageWithoutActiveStaticCertificate = {
         objectType: 'SetupPackage',
         objectVersion: 1,
         setupProfileId,
@@ -1125,6 +1402,20 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         setupKeyCorrectnessCertificateHash,
         heSecurityCertificate: certificates.heSecurityCertificate,
         heSecurityCertificateHash,
+    } as const;
+    const activeStaticSetupTheoremCertificate =
+        createActiveStaticSetupTheoremCertificate(
+            packageWithoutActiveStaticCertificate,
+        );
+    const activeStaticSetupTheoremCertificateHash = hashField(
+        activeStaticSetupTheoremCertificate,
+        'activeStaticSetupTheoremCertificateHash',
+        'activeStaticSetupTheoremCertificate',
+    );
+    const packageWithoutHash = {
+        ...packageWithoutActiveStaticCertificate,
+        activeStaticSetupTheoremCertificate,
+        activeStaticSetupTheoremCertificateHash,
     } as const satisfies Omit<SetupPackage, 'setupPackageHash'>;
     const forbiddenFieldPaths =
         collectForbiddenSetupPackageAssemblyFieldPaths(packageWithoutHash);

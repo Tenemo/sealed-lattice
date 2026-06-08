@@ -66,6 +66,7 @@ reserved_root_namespaces! {
     SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE => "sealed-lattice-root/setup-proof-challenge-space-audit-hash-v1",
     SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/setup-proof-accounting-certificate-hash-v1",
     SETUP_KEY_CORRECTNESS_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/setup-key-correctness-certificate-hash-v1",
+    ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/active-static-setup-theorem-certificate-hash-v1",
     SETUP_COMMITMENT_ROOT_NAMESPACE => "sealed-lattice-root/setup-commitment-root-v1",
     VSS_COEFFICIENT_COMMITMENT_ROOT_NAMESPACE => "sealed-lattice-root/vss-coefficient-commitment-root-v1",
     VSS_COEFFICIENT_COMMITMENT_MATERIAL_ROOT_NAMESPACE => "sealed-lattice-root/vss-coefficient-commitment-material-root-v1",

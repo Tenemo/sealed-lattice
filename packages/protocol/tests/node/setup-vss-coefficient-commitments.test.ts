@@ -14,7 +14,9 @@ import {
     type VssOpeningRandomByteSource,
 } from '#packages/protocol/src/index';
 
-const qSharePrimes = [140_737_487_306_753, 140_737_486_716_929] as const;
+const qSharePrimes = [
+    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
+] as const;
 const ringDegree = 8;
 const participantCount = 2;
 const thresholdDegree = 2;

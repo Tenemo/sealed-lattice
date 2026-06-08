@@ -16,15 +16,15 @@ type ProofRandomnessSource =
     | 'development-deterministic-fixture';
 
 export const relinearizationProofVerificationStatus =
-    'lnp-relinearization-key-share-relation-verified-claim-accounting-pending';
+    'lnp-relinearization-key-share-relation-verified-with-accepted-setup-proof-accounting';
 export const relinearizationProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, and verifier-side round-two source-square aggregate roots verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing relinearization acceptance';
+    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, same-secret-bound secret opening response with centered signed 80-bit committed-secret masks and responses, fixed-width signed big-integer key-switch relation commitments, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, verifier-side round-two source-square aggregate roots, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing relinearization proof acceptance';
 export const galoisProofVerificationStatus =
-    'lnp-galois-key-share-relation-verified-claim-accounting-pending';
+    'lnp-galois-key-share-relation-verified-with-accepted-setup-proof-accounting';
 export const galoisProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing Galois-key acceptance';
+    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, same-secret-bound secret opening response with centered signed 80-bit committed-secret masks and responses, fixed-width signed big-integer key-switch relation commitments, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing Galois-key proof acceptance';
 const publicEvaluationKeyAssemblyStatus =
-    'assembled-from-proof-bearing-shares-claim-accounting-pending';
+    'assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate';
 const publicEvaluationKeyMaterialEncoding =
     'root-bound-public-key-switch-component-roots';
 const publicEvaluationKeyTransportMaterialEncoding =

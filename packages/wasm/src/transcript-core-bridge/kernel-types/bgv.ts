@@ -326,6 +326,15 @@ export type BgvCollectiveSetupProfileDescription = {
         >[];
     };
     readonly setupTransportProfileHash: ProtocolHash;
+    readonly acceptedCertificateTemplates: Readonly<{
+        readonly setupCommitmentSecurityCertificate: Readonly<
+            Record<string, unknown>
+        >;
+        readonly setupProofAccountingCertificate: Readonly<
+            Record<string, unknown>
+        >;
+        readonly heSecurityCertificate: Readonly<Record<string, unknown>>;
+    }>;
     readonly evaluatorKeyScheduleProfile: {
         readonly objectType: 'EvaluatorKeyScheduleProfile';
         readonly objectVersion: 1;
@@ -349,7 +358,7 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly genericKeySwitchPolicy: 'refused-unless-explicitly-required';
         readonly genericKeySwitchProofStatus: 'not-required-for-first-profile';
-        readonly scheduleBindingStatus: 'relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending';
+        readonly scheduleBindingStatus: 'relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting';
     };
     readonly evaluatorKeyScheduleProfileHash: ProtocolHash;
     readonly verifierStatuses: readonly [
@@ -469,6 +478,7 @@ export type BgvCollectiveSetupVerification = {
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
     readonly acceptedHashes: readonly ProtocolHash[];
+    readonly acceptedSetupHandoff?: Readonly<Record<string, unknown>>;
     readonly missingObjects: readonly string[];
     readonly refusedObjects: readonly {
         readonly reasonCode: string;

@@ -1,3 +1,4 @@
+use num_bigint::{BigInt, BigUint, Sign};
 use serde_json::{Value, json};
 
 use crate::{
@@ -15,9 +16,10 @@ use super::{
     commitment::{
         SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
-        compute_setup_commitment, linear_combination_setup_commitments,
-        parse_setup_commitment_full_value, setup_commitment_modulus_product, setup_commitment_root,
-        verify_setup_lifted_commitment_opening,
+        compute_setup_signed_lifted_commitment, linear_combination_setup_commitments,
+        parse_setup_commitment_full_value, setup_commitment_root,
+        setup_signed_coefficient_fits_centered_commitment_modulus_product,
+        verify_setup_signed_lifted_commitment_opening,
     },
     sampling::dense_public_residues,
     setup_proof::SETUP_PROOF_PROFILE_ID,
@@ -26,30 +28,42 @@ use super::{
 pub(super) const PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/public-key-share-coefficient-vector-v1";
 const PUBLIC_KEY_SHARE_LNP_PROOF_MAGIC: &[u8; 8] = b"SLPKLNP1";
-const PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
+pub(super) const PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
     "sealed-lattice/setup/public-key-share/lnp-scalar-challenge-v1";
 const PUBLIC_KEY_SHARE_LNP_COMMITMENT_HASH_DOMAIN: &str =
     "sealed-lattice/setup/public-key-share/lnp-relation-commitment-v1";
 const PUBLIC_KEY_SHARE_LNP_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/public-key-share/lnp-proof-bytes-v1";
-const PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS: usize = 32;
-const PUBLIC_KEY_SHARE_ERROR_MASK_BITS: usize = 32;
-const PUBLIC_KEY_SHARE_CARRY_MASK_BITS: usize = 64;
-const PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS: usize = 80;
-const PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS: usize = 32;
-const PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND: i128 = 1;
-const PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
-const PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND: i128 = 2;
+const PUBLIC_KEY_SHARE_RELATION_COMMITMENT_BYTE_COUNT: usize = 32;
+pub(super) const PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS: usize = 80;
+pub(super) const PUBLIC_KEY_SHARE_ERROR_MASK_BITS: usize = 80;
+pub(super) const PUBLIC_KEY_SHARE_CARRY_MASK_BITS: usize = 64;
+pub(super) const PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS: usize = 80;
+pub(super) const PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS: usize = 63;
+pub(super) const PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND: i128 = 1;
+pub(super) const PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
+pub(super) const PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND: i128 = 2;
 
 pub(super) const PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-public-key-share-relation-verified-claim-accounting-pending";
-pub(super) const PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, VSS-bound secret opening, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing public-key acceptance";
+    "lnp-public-key-share-relation-verified-with-accepted-setup-proof-accounting";
+pub(super) const PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, VSS-bound secret opening with centered signed 80-bit committed-secret masks and responses, fixed-width signed big-integer public-key relation commitments, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing public-key proof acceptance";
 
 pub(super) struct PublicKeyShareLnpProofVerification {
     pub(super) proof_size_bytes: usize,
     pub(super) statement_hash_hex: String,
     pub(super) relation_commitment_hash_hex: String,
     pub(super) tbox_commitment_prefix_hash: String,
+    pub(super) z34_seed_material_hash: String,
+    pub(super) z34_challenge_seed_hash: String,
+    pub(super) z34_challenge_tail_hash: String,
+    pub(super) z34_challenge_row_domain_hash: String,
+    pub(super) z34_challenge_z3_row_set_hash: String,
+    pub(super) z34_challenge_z4_row_set_hash: String,
+    pub(super) tbox_lower_protocol_challenge_hash: String,
+    pub(super) z34_z3_check_window_hash: String,
+    pub(super) z34_z4_check_window_hash: String,
+    pub(super) z34_z3_l2_squared_decimal: String,
+    pub(super) z34_z4_infinity_norm_decimal: String,
     pub(super) challenge: u64,
 }
 
@@ -66,7 +80,7 @@ pub(super) struct PublicKeyShareLnpProofVerificationInput<'a> {
 
 struct ParsedPublicKeyShareLnpProof {
     challenge: u64,
-    public_key_relation_commitments_by_limb: Vec<Vec<i128>>,
+    public_key_relation_commitments_by_limb: Vec<Vec<BigInt>>,
     error_support_commitments_by_limb: Vec<Vec<[u64; 5]>>,
     secret_commitment_relation_commitments: Vec<SetupCommitmentValue>,
     secret_support_commitments: Vec<[u64; 4]>,
@@ -170,7 +184,18 @@ pub(crate) fn generate_public_key_share_lnp_proof_from_request(
         "statementHash": verification.statement_hash_hex,
         "relationCommitmentHash": verification.relation_commitment_hash_hex,
         "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
-        "challenge": verification.challenge,
+        "z34SeedMaterialHash": verification.z34_seed_material_hash,
+        "z34ChallengeSeedHash": verification.z34_challenge_seed_hash,
+        "z34ChallengeTailHash": verification.z34_challenge_tail_hash,
+        "z34ChallengeRowDomainHash": verification.z34_challenge_row_domain_hash,
+        "z34ChallengeZ3RowSetHash": verification.z34_challenge_z3_row_set_hash,
+        "z34ChallengeZ4RowSetHash": verification.z34_challenge_z4_row_set_hash,
+        "tboxLowerProtocolChallengeHash": verification.tbox_lower_protocol_challenge_hash,
+        "z34Z3CheckWindowHash": verification.z34_z3_check_window_hash,
+        "z34Z4CheckWindowHash": verification.z34_z4_check_window_hash,
+        "z34Z3L2SquaredDecimal": verification.z34_z3_l2_squared_decimal,
+        "z34Z4InfinityNormDecimal": verification.z34_z4_infinity_norm_decimal,
+        "challenge": verification.challenge.to_string(),
         "proofSizeBytes": verification.proof_size_bytes,
         "proofBytesHash": proof_bytes_hash,
         "proofBytesHex": to_hex(&proof_bytes),
@@ -227,6 +252,26 @@ pub(super) fn verify_public_key_share_lnp_relation_proof(
         &parsed_proof.secret_support_commitments,
     )?;
     let statement_hash_hex = to_hex(&statement_hash);
+    let layout = super::setup_proof::public_key_share_lnp_tbox_layout();
+    let expected_tbox_prefix_binding_seed =
+        super::setup_proof::setup_proof_lnp_tbox_prefix_binding_seed(
+            &layout,
+            &statement_hash_hex,
+            &expected_parameter_profile_hash,
+            &encoded_commitments,
+        )?;
+    let expected_tbox_prefix =
+        encode_public_key_share_lnp_tbox_prefix(&layout, &expected_tbox_prefix_binding_seed)?;
+    let expected_tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(
+            &layout,
+            &expected_tbox_prefix,
+        )?;
+    if parsed_proof.tbox_commitment_prefix_hash != expected_tbox_commitment_prefix_hash {
+        return Err(invalid_public_key_share_proof(
+            "public-key share LNP tbox commitment prefix is not bound to the statement and relation commitments",
+        ));
+    }
     let relation_commitment_hash_hex = public_key_share_lnp_relation_commitment_hash(
         &statement_hash_hex,
         &expected_parameter_profile_hash,
@@ -242,8 +287,7 @@ pub(super) fn verify_public_key_share_lnp_relation_proof(
             "public-key share LNP proof scalar challenge does not match its setup-proof transcript",
         ));
     }
-    let layout = super::setup_proof::public_key_share_lnp_tbox_layout();
-    super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
+    let tbox_summary = super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
         &layout,
         &statement_hash_hex,
         &relation_commitment_hash_hex,
@@ -291,6 +335,17 @@ pub(super) fn verify_public_key_share_lnp_relation_proof(
         statement_hash_hex,
         relation_commitment_hash_hex,
         tbox_commitment_prefix_hash: parsed_proof.tbox_commitment_prefix_hash,
+        z34_seed_material_hash: tbox_summary.z34_seed_material_hash,
+        z34_challenge_seed_hash: tbox_summary.z34_challenge_seed_hash,
+        z34_challenge_tail_hash: tbox_summary.z34_challenge_tail_hash,
+        z34_challenge_row_domain_hash: tbox_summary.z34_challenge_row_domain_hash,
+        z34_challenge_z3_row_set_hash: tbox_summary.z34_challenge_z3_row_set_hash,
+        z34_challenge_z4_row_set_hash: tbox_summary.z34_challenge_z4_row_set_hash,
+        tbox_lower_protocol_challenge_hash: tbox_summary.tbox_lower_protocol_challenge_hash,
+        z34_z3_check_window_hash: tbox_summary.z34_z3_check_window_hash,
+        z34_z4_check_window_hash: tbox_summary.z34_z4_check_window_hash,
+        z34_z3_l2_squared_decimal: tbox_summary.z3_l2_squared.to_string(),
+        z34_z4_infinity_norm_decimal: tbox_summary.z4_infinity_norm.to_string(),
         challenge: parsed_proof.challenge,
     })
 }
@@ -428,7 +483,7 @@ fn public_key_share_lnp_statement_hash(
         "constantCoefficientCommitmentRoots": commitment_roots,
         "relation": "for each Q_share limb, public-key share coefficients satisfy b_i - p*e_i + a*s_i + q_l*v_i = 0 over lifted integers while s_i opens the accepted VSS constant commitments",
         "carryBound": public_key_lifted_carry_bound(constant_commitments[0].ring_degree)?,
-        "nonClosure": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure remain pending",
+        "claimClosure": "repo-owned setup proof soundness, zero-knowledge, and QROM accounting is accepted by the setup proof accounting certificate",
     }))?;
 
     Ok(hash512(
@@ -492,7 +547,11 @@ fn parse_public_key_share_lnp_relation_proof(
         .map(|_| {
             let mut relation_commitments = Vec::with_capacity(ring_degree);
             for _ in 0..ring_degree {
-                relation_commitments.push(read_i128(proof_bytes, &mut cursor)?);
+                relation_commitments.push(read_signed_big_int_le_fixed(
+                    proof_bytes,
+                    &mut cursor,
+                    PUBLIC_KEY_SHARE_RELATION_COMMITMENT_BYTE_COUNT,
+                )?);
             }
             Ok(relation_commitments)
         })
@@ -670,7 +729,7 @@ fn verify_secret_commitment_responses(
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         let response_randomness_bound = public_key_share_randomness_response_bound(challenge)?;
-        verify_setup_lifted_commitment_opening(
+        verify_setup_signed_lifted_commitment_opening(
             public_matrix_seed_hash,
             &expected_response_commitment,
             &response_message_coefficients,
@@ -764,7 +823,7 @@ fn verify_public_key_lifted_relation_responses(
     public_matrix_seed_hash: &str,
     public_share_coefficients_by_limb: &[Vec<u64>],
     challenge: u64,
-    relation_commitments_by_limb: &[Vec<i128>],
+    relation_commitments_by_limb: &[Vec<BigInt>],
     secret_response_coefficients: &[i128],
     error_response_by_limb: &[Vec<i128>],
     carry_response_by_limb: &[Vec<i128>],
@@ -782,8 +841,10 @@ fn verify_public_key_lifted_relation_responses(
     for (rns_limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         let public_a_coefficients =
             public_a_coefficients_for_relation(public_matrix_seed_hash, modulus, ring_degree);
-        let public_a_secret_product =
-            negacyclic_product_lifted_i128(&public_a_coefficients, secret_response_coefficients)?;
+        let public_a_secret_product = negacyclic_product_lifted_big_int(
+            &public_a_coefficients,
+            secret_response_coefficients,
+        )?;
         let public_share_coefficients = &public_share_coefficients_by_limb[rns_limb_index];
         let relation_commitments = &relation_commitments_by_limb[rns_limb_index];
         let error_responses = &error_response_by_limb[rns_limb_index];
@@ -810,31 +871,12 @@ fn verify_public_key_lifted_relation_responses(
                     "public-key lifted carry response is outside the no-wrap bound at Q_share limb {rns_limb_index}, coefficient {coefficient_index}"
                 )));
             }
-            let checked_relation = checked_i128_sum(&[
-                i128::from(challenge)
-                    .checked_mul(i128::from(public_share_coefficients[coefficient_index]))
-                    .ok_or_else(|| {
-                        invalid_public_key_share_proof(
-                            "public-key lifted share response overflowed",
-                        )
-                    })?,
-                i128::from(PLAINTEXT_MODULUS)
-                    .checked_mul(error_responses[coefficient_index])
-                    .and_then(i128::checked_neg)
-                    .ok_or_else(|| {
-                        invalid_public_key_share_proof(
-                            "public-key lifted error response overflowed",
-                        )
-                    })?,
-                public_a_secret_product[coefficient_index],
-                i128::from(modulus)
-                    .checked_mul(carry_response)
-                    .ok_or_else(|| {
-                        invalid_public_key_share_proof(
-                            "public-key lifted carry response overflowed",
-                        )
-                    })?,
-            ])?;
+            let mut checked_relation = BigInt::from(challenge)
+                * BigInt::from(public_share_coefficients[coefficient_index]);
+            checked_relation -=
+                BigInt::from(PLAINTEXT_MODULUS) * BigInt::from(error_responses[coefficient_index]);
+            checked_relation += public_a_secret_product[coefficient_index].clone();
+            checked_relation += BigInt::from(modulus) * BigInt::from(carry_response);
             if checked_relation != relation_commitments[coefficient_index] {
                 return Err(invalid_public_key_share_proof(format!(
                     "public-key lifted no-wrap relation failed at Q_share limb {rns_limb_index}, coefficient {coefficient_index}"
@@ -886,6 +928,36 @@ fn negacyclic_product_lifted_i128(left: &[u64], right: &[i128]) -> CanonicalResu
             .ok_or_else(|| {
                 invalid_public_key_share_proof("public-key lifted relation accumulation overflowed")
             })?;
+        }
+    }
+
+    Ok(output)
+}
+
+fn negacyclic_product_lifted_big_int(left: &[u64], right: &[i128]) -> CanonicalResult<Vec<BigInt>> {
+    if left.len() != right.len() {
+        return Err(invalid_public_key_share_proof(
+            "public-key lifted big-integer product inputs must have the same width",
+        ));
+    }
+    let ring_degree = left.len();
+    let mut output = vec![BigInt::from(0_i8); ring_degree];
+    for (left_index, left_value) in left.iter().enumerate() {
+        for (right_index, right_value) in right.iter().enumerate() {
+            let product = BigInt::from(*left_value) * BigInt::from(*right_value);
+            let raw_index = left_index.checked_add(right_index).ok_or_else(|| {
+                invalid_public_key_share_proof("public-key lifted product index overflowed")
+            })?;
+            let output_index = if raw_index < ring_degree {
+                raw_index
+            } else {
+                raw_index - ring_degree
+            };
+            if raw_index < ring_degree {
+                output[output_index] += product;
+            } else {
+                output[output_index] -= product;
+            }
         }
     }
 
@@ -1114,7 +1186,7 @@ fn powers(value: u64, highest_power: usize, modulus: u64) -> CanonicalResult<Vec
 }
 
 fn encode_public_key_share_relation_commitments(
-    public_key_relation_commitments_by_limb: &[Vec<i128>],
+    public_key_relation_commitments_by_limb: &[Vec<BigInt>],
     error_support_commitments_by_limb: &[Vec<[u64; 5]>],
     secret_commitment_relation_commitments: &[SetupCommitmentValue],
     secret_support_commitments: &[[u64; 4]],
@@ -1123,9 +1195,16 @@ fn encode_public_key_share_relation_commitments(
         .iter()
         .try_fold(0_usize, |accumulator, coefficients| {
             accumulator
-                .checked_add(coefficients.len().checked_mul(16).ok_or_else(|| {
-                    invalid_public_key_share_proof("public-key relation commitment size overflowed")
-                })?)
+                .checked_add(
+                    coefficients
+                        .len()
+                        .checked_mul(PUBLIC_KEY_SHARE_RELATION_COMMITMENT_BYTE_COUNT)
+                        .ok_or_else(|| {
+                            invalid_public_key_share_proof(
+                                "public-key relation commitment size overflowed",
+                            )
+                        })?,
+                )
                 .ok_or_else(|| {
                     invalid_public_key_share_proof("public-key relation commitment size overflowed")
                 })
@@ -1183,7 +1262,11 @@ fn encode_public_key_share_relation_commitments(
     let mut encoded = Vec::with_capacity(byte_count);
     for relation_commitments in public_key_relation_commitments_by_limb {
         for coefficient in relation_commitments {
-            encoded.extend_from_slice(&coefficient.to_le_bytes());
+            write_signed_big_int_le_fixed(
+                &mut encoded,
+                coefficient,
+                PUBLIC_KEY_SHARE_RELATION_COMMITMENT_BYTE_COUNT,
+            )?;
         }
     }
     for support_commitments in error_support_commitments_by_limb {
@@ -1232,38 +1315,13 @@ fn public_key_share_lnp_relation_challenge(
     statement_hash_hex: &str,
     relation_commitment_hash_hex: &str,
 ) -> CanonicalResult<u64> {
-    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
+    super::setup_proof::derive_setup_proof_scalar_challenge(
         "public-key-share",
+        PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
         statement_hash_hex,
         relation_commitment_hash_hex,
-        super::setup_proof::SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-    )?;
-    let mut encoded_challenge = Vec::with_capacity(challenge_coefficients.len() * 8);
-    for coefficient in challenge_coefficients {
-        encoded_challenge.extend_from_slice(&coefficient.to_le_bytes());
-    }
-    let mut block_index = 0_u64;
-    loop {
-        let block_index_bytes = block_index.to_le_bytes();
-        let block = hash512(
-            PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-            &[
-                statement_hash_hex.as_bytes(),
-                relation_commitment_hash_hex.as_bytes(),
-                &encoded_challenge,
-                &block_index_bytes,
-            ],
-        );
-        let mut challenge_bytes = [0_u8; 8];
-        challenge_bytes[..4].copy_from_slice(&block[..4]);
-        let challenge = u64::from_le_bytes(challenge_bytes);
-        if challenge != 0 {
-            return Ok(challenge);
-        }
-        block_index = block_index.checked_add(1).ok_or_else(|| {
-            invalid_public_key_share_proof("public-key LNP challenge block index overflowed")
-        })?;
-    }
+        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+    )
 }
 
 fn public_key_share_scalar_challenge_maximum() -> CanonicalResult<u64> {
@@ -1393,7 +1451,7 @@ fn lifted_secret_message_response(
     secret_response: i128,
     negative_indicator_response: i128,
     source_message_modulus: u64,
-) -> CanonicalResult<u128> {
+) -> CanonicalResult<i128> {
     let lifted = secret_response
         .checked_add(
             i128::from(source_message_modulus)
@@ -1407,21 +1465,67 @@ fn lifted_secret_message_response(
         .ok_or_else(|| {
             invalid_public_key_share_proof("public-key lifted secret response overflowed")
         })?;
-    if lifted < 0 {
+    if !setup_signed_coefficient_fits_centered_commitment_modulus_product(lifted) {
         return Err(invalid_public_key_share_proof(
-            "public-key lifted secret response became negative",
-        ));
-    }
-    let lifted = u128::try_from(lifted).map_err(|_| {
-        invalid_public_key_share_proof("public-key lifted secret response does not fit u128")
-    })?;
-    if lifted >= setup_commitment_modulus_product() {
-        return Err(invalid_public_key_share_proof(
-            "public-key lifted secret response wraps in the setup commitment modulus product",
+            "public-key lifted secret response wraps in the centered setup commitment modulus product",
         ));
     }
 
     Ok(lifted)
+}
+
+fn read_signed_big_int_le_fixed(
+    proof_bytes: &[u8],
+    cursor: &mut usize,
+    byte_count: usize,
+) -> CanonicalResult<BigInt> {
+    let end = cursor.checked_add(byte_count).ok_or_else(|| {
+        invalid_public_key_share_proof("public-key signed big-integer read offset overflowed")
+    })?;
+    let slice = proof_bytes.get(*cursor..end).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key proof ended before a signed big-integer relation commitment",
+        )
+    })?;
+    *cursor = end;
+
+    Ok(BigInt::from_signed_bytes_le(slice))
+}
+
+fn write_signed_big_int_le_fixed(
+    output: &mut Vec<u8>,
+    value: &BigInt,
+    byte_count: usize,
+) -> CanonicalResult<()> {
+    let bit_count = byte_count
+        .checked_mul(8)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            invalid_public_key_share_proof("public-key signed big-integer width is invalid")
+        })?;
+    let range_limit = BigInt::from(1_u8) << bit_count;
+    if value < &(-&range_limit) || value >= &range_limit {
+        return Err(invalid_public_key_share_proof(
+            "public-key relation commitment exceeds the fixed signed big-integer encoding width",
+        ));
+    }
+    let extension_byte = if value.sign() == Sign::Minus {
+        0xff
+    } else {
+        0x00
+    };
+    let encoded = value.to_signed_bytes_le();
+    if encoded.len() > byte_count {
+        return Err(invalid_public_key_share_proof(
+            "public-key relation commitment is not canonical for the fixed-width signed encoding",
+        ));
+    }
+    let mut fixed = vec![extension_byte; byte_count];
+    fixed[..encoded.len()].copy_from_slice(&encoded);
+    output.extend_from_slice(&fixed);
+
+    Ok(())
 }
 
 fn read_i128_vector(
@@ -1435,11 +1539,6 @@ fn read_i128_vector(
             Ok(i128::from_le_bytes(bytes))
         })
         .collect()
-}
-
-fn read_i128(proof_bytes: &[u8], cursor: &mut usize) -> CanonicalResult<i128> {
-    let bytes = read_fixed::<16>(proof_bytes, cursor)?;
-    Ok(i128::from_le_bytes(bytes))
 }
 
 fn read_u64(proof_bytes: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
@@ -1728,9 +1827,6 @@ pub(super) fn generate_public_key_share_lnp_relation_proof(
         super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?;
     let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes(&parameter_profile_hash)?;
     let layout = super::setup_proof::public_key_share_lnp_tbox_layout();
-    let tbox_prefix = encode_public_key_share_lnp_tbox_prefix(&layout, proof_randomness_seed_hex)?;
-    let tbox_commitment_prefix_hash =
-        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
     let ring_degree = constant_commitments[0].ring_degree;
     let secret_masks = (0..ring_degree)
         .map(|coefficient_index| {
@@ -1841,30 +1937,17 @@ pub(super) fn generate_public_key_share_lnp_relation_proof(
             let public_a_coefficients =
                 public_a_coefficients_for_relation(public_matrix_seed_hash, modulus, ring_degree);
             let public_a_secret_mask_product =
-                negacyclic_product_lifted_i128(&public_a_coefficients, &secret_masks)?;
+                negacyclic_product_lifted_big_int(&public_a_coefficients, &secret_masks)?;
             error_masks_by_limb[rns_limb_index]
                 .iter()
                 .zip(public_a_secret_mask_product.iter())
                 .zip(carry_masks_by_limb[rns_limb_index].iter())
                 .map(|((error_mask, product_coefficient), carry_mask)| {
-                    checked_i128_sum(&[
-                        *product_coefficient,
-                        i128::from(PLAINTEXT_MODULUS)
-                            .checked_mul(*error_mask)
-                            .and_then(i128::checked_neg)
-                            .ok_or_else(|| {
-                                invalid_public_key_share_proof(
-                                    "public-key lifted error mask overflowed",
-                                )
-                            })?,
-                        i128::from(modulus)
-                            .checked_mul(*carry_mask)
-                            .ok_or_else(|| {
-                                invalid_public_key_share_proof(
-                                    "public-key lifted carry mask overflowed",
-                                )
-                            })?,
-                    ])
+                    let mut relation_commitment = product_coefficient.clone();
+                    relation_commitment -=
+                        BigInt::from(PLAINTEXT_MODULUS) * BigInt::from(*error_mask);
+                    relation_commitment += BigInt::from(modulus) * BigInt::from(*carry_mask);
+                    Ok(relation_commitment)
                 })
                 .collect::<CanonicalResult<Vec<_>>>()
         })
@@ -1895,30 +1978,14 @@ pub(super) fn generate_public_key_share_lnp_relation_proof(
                 .iter()
                 .zip(negative_indicator_masks.iter())
                 .map(|(secret_mask, negative_mask)| {
-                    let lifted_mask = secret_mask
-                        .checked_add(
-                            i128::from(commitment.source_message_modulus)
-                                .checked_mul(*negative_mask)
-                                .ok_or_else(|| {
-                                    invalid_public_key_share_proof(
-                                        "public-key mask multiplication overflowed",
-                                    )
-                                })?,
-                        )
-                        .ok_or_else(|| {
-                            invalid_public_key_share_proof("public-key lifted mask overflowed")
-                        })?;
-                    if lifted_mask < 0 {
-                        return Err(invalid_public_key_share_proof(
-                            "public-key lifted mask became negative",
-                        ));
-                    }
-                    u128::try_from(lifted_mask).map_err(|_| {
-                        invalid_public_key_share_proof("public-key lifted mask does not fit u128")
-                    })
+                    lifted_secret_message_response(
+                        *secret_mask,
+                        *negative_mask,
+                        commitment.source_message_modulus,
+                    )
                 })
                 .collect::<CanonicalResult<Vec<_>>>()?;
-            compute_setup_commitment(
+            compute_setup_signed_lifted_commitment(
                 public_matrix_seed_hash,
                 commitment.source_rns_limb_index,
                 commitment.source_message_modulus,
@@ -1954,6 +2021,15 @@ pub(super) fn generate_public_key_share_lnp_relation_proof(
         &secret_commitment_relation_commitments,
         &secret_support_commitments,
     )?;
+    let tbox_prefix_binding_seed = super::setup_proof::setup_proof_lnp_tbox_prefix_binding_seed(
+        &layout,
+        &statement_hash_hex,
+        &parameter_profile_hash,
+        &encoded_commitments,
+    )?;
+    let tbox_prefix = encode_public_key_share_lnp_tbox_prefix(&layout, &tbox_prefix_binding_seed)?;
+    let tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
     let relation_commitment_hash = public_key_share_lnp_relation_commitment_hash(
         &statement_hash_hex,
         &parameter_profile_hash,
@@ -1962,17 +2038,12 @@ pub(super) fn generate_public_key_share_lnp_relation_proof(
     );
     let challenge =
         public_key_share_lnp_relation_challenge(&statement_hash_hex, &relation_commitment_hash)?;
-    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
-        "public-key-share",
-        &statement_hash_hex,
-        &relation_commitment_hash,
-        layout.proof_ring_degree,
-    )?;
     let mut tbox_proof_bytes = tbox_prefix;
-    encode_public_key_share_lnp_tbox_suffix(
+    super::setup_proof::append_setup_proof_lnp_tbox_generated_suffix(
         &mut tbox_proof_bytes,
         &layout,
-        &challenge_coefficients,
+        &statement_hash_hex,
+        &relation_commitment_hash,
     )?;
     let secret_response_coefficients = secret_masks
         .iter()
@@ -2110,7 +2181,11 @@ pub(super) fn generate_public_key_share_lnp_relation_proof(
     proof_bytes.extend_from_slice(&tbox_proof_bytes);
     for relation_commitments in &public_key_relation_commitments_by_limb {
         for coefficient in relation_commitments {
-            proof_bytes.extend_from_slice(&coefficient.to_le_bytes());
+            write_signed_big_int_le_fixed(
+                &mut proof_bytes,
+                coefficient,
+                PUBLIC_KEY_SHARE_RELATION_COMMITMENT_BYTE_COUNT,
+            )?;
         }
     }
     for support_commitments in &error_support_commitments_by_limb {
@@ -2188,6 +2263,7 @@ fn encode_public_key_share_lnp_tbox_prefix(
         layout.t_b_polynomial_count,
         layout.proof_ring_degree,
         layout.proof_modulus_bit_count,
+        Some(&layout.proof_modulus),
         proof_randomness_seed_hex,
         0,
     )?;
@@ -2196,6 +2272,7 @@ fn encode_public_key_share_lnp_tbox_prefix(
         layout.h_polynomial_count,
         layout.proof_ring_degree,
         layout.proof_modulus_bit_count,
+        Some(&layout.proof_modulus),
         proof_randomness_seed_hex,
         1,
     )?;
@@ -2209,6 +2286,7 @@ fn encode_public_key_share_lnp_tbox_prefix(
             .ok_or_else(|| {
                 invalid_public_key_share_proof("public-key LNP compression underflowed")
             })?,
+        None,
         proof_randomness_seed_hex,
         2,
     )?;
@@ -2216,68 +2294,12 @@ fn encode_public_key_share_lnp_tbox_prefix(
     Ok(writer.into_bytes())
 }
 
-fn encode_public_key_share_lnp_tbox_suffix(
-    prefix_bytes: &mut Vec<u8>,
-    layout: &super::setup_proof::SetupProofLnpTboxLayout,
-    challenge_coefficients: &[i64],
-) -> CanonicalResult<()> {
-    let mut writer = PublicKeyShareLnpBitWriter::from_bytes(prefix_bytes);
-    for coefficient in challenge_coefficients {
-        let shifted = coefficient
-            .checked_add(
-                i64::try_from(super::setup_proof::SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND)
-                    .expect("fixed challenge coefficient bound fits i64"),
-            )
-            .ok_or_else(|| {
-                invalid_public_key_share_proof("public-key LNP challenge shift overflowed")
-            })?;
-        let shifted = u64::try_from(shifted).map_err(|_| {
-            invalid_public_key_share_proof("public-key LNP challenge coefficient is negative")
-        })?;
-        writer.write_u64_le_bits(
-            shifted,
-            super::setup_proof::SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
-        )?;
-    }
-    encode_public_key_share_lnp_zero_hint_polyvec(
-        &mut writer,
-        layout.hint_polynomial_count,
-        layout.proof_ring_degree,
-    )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z1_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z1_log2_standard_deviation,
-    )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z21_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z21_log2_standard_deviation,
-    )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z3_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z3_log2_standard_deviation,
-    )?;
-    encode_public_key_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z4_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z4_log2_standard_deviation,
-    )?;
-    writer.finish_with_lazer_padding();
-
-    Ok(())
-}
-
 fn encode_public_key_share_lnp_uniform_polyvec(
     writer: &mut PublicKeyShareLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
     bit_count: usize,
+    modulus: Option<&BigUint>,
     proof_randomness_seed_hex: &str,
     field_index: u64,
 ) -> CanonicalResult<()> {
@@ -2287,67 +2309,39 @@ fn encode_public_key_share_lnp_uniform_polyvec(
             invalid_public_key_share_proof("public-key LNP tbox coefficient count overflowed")
         })?;
     for coefficient_index in 0..coefficient_count {
-        let coefficient_index_bytes = u64::try_from(coefficient_index)
-            .map_err(|_| {
-                invalid_public_key_share_proof("public-key LNP coefficient index overflowed")
-            })?
-            .to_le_bytes();
-        let field_index_bytes = field_index.to_le_bytes();
-        let block = hash512(
+        if field_index == 1
+            && super::setup_proof::setup_proof_lnp_tbox_h_coefficient_must_be_zero(
+                coefficient_index,
+                proof_ring_degree,
+            )
+        {
+            let zero_residue_bytes = vec![
+                0_u8;
+                bit_count.checked_add(7).ok_or_else(|| {
+                    invalid_public_key_share_proof("public-key LNP tbox bit count overflowed")
+                })? / 8
+            ];
+            writer.write_little_endian_bytes_bits(&zero_residue_bytes, bit_count)?;
+            continue;
+        }
+        let residue_bytes = super::setup_proof::sample_setup_proof_lnp_tbox_uniform_residue_bytes(
             "sealed-lattice/setup/public-key-share/lnp-tbox-uniform-v1",
-            &[
-                proof_randomness_seed_hex.as_bytes(),
-                &field_index_bytes,
-                &coefficient_index_bytes,
-            ],
-        );
-        let mut word = [0_u8; 8];
-        word.copy_from_slice(&block[..8]);
-        let value = u64::from_le_bytes(word) & ((1_u64 << bit_count.min(32)) - 1);
-        writer.write_u64_le_bits(value, bit_count)?;
+            proof_randomness_seed_hex,
+            field_index,
+            coefficient_index,
+            bit_count,
+            modulus,
+        )?;
+        writer.write_little_endian_bytes_bits(&residue_bytes, bit_count)?;
     }
 
     Ok(())
 }
 
-fn encode_public_key_share_lnp_zero_hint_polyvec(
-    writer: &mut PublicKeyShareLnpBitWriter<'_>,
-    polynomial_count: usize,
-    proof_ring_degree: usize,
-) -> CanonicalResult<()> {
-    let coefficient_count = polynomial_count
-        .checked_mul(proof_ring_degree)
-        .ok_or_else(|| invalid_public_key_share_proof("public-key LNP hint count overflowed"))?;
-    for _ in 0..coefficient_count {
-        writer.write_bit(false);
-        writer.write_bit(false);
-    }
-
-    Ok(())
-}
-
-fn encode_public_key_share_lnp_zero_gaussian_polyvec(
-    writer: &mut PublicKeyShareLnpBitWriter<'_>,
-    polynomial_count: usize,
-    proof_ring_degree: usize,
-    log2_standard_deviation: usize,
-) -> CanonicalResult<()> {
-    let coefficient_count = polynomial_count
-        .checked_mul(proof_ring_degree)
-        .ok_or_else(|| {
-            invalid_public_key_share_proof("public-key LNP Gaussian count overflowed")
-        })?;
-    let low_bit_count = log2_standard_deviation.checked_add(1).ok_or_else(|| {
-        invalid_public_key_share_proof("public-key LNP Gaussian low-bit count overflowed")
-    })?;
-    for _ in 0..coefficient_count {
-        writer.write_bit(false);
-        writer.write_u64_le_bits(0, low_bit_count)?;
-    }
-
-    Ok(())
-}
-
+#[allow(
+    dead_code,
+    reason = "borrowed mode is retained for local LNP bit-writer parity"
+)]
 enum PublicKeyShareLnpBitWriterStorage<'a> {
     Owned(Vec<u8>),
     Borrowed(&'a mut Vec<u8>),
@@ -2366,6 +2360,10 @@ impl<'a> PublicKeyShareLnpBitWriter<'a> {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "borrowed mode is retained for local LNP bit-writer parity"
+    )]
     fn from_bytes(bytes: &'a mut Vec<u8>) -> Self {
         let bit_offset = bytes.len() * 8;
         Self {
@@ -2383,6 +2381,10 @@ impl<'a> PublicKeyShareLnpBitWriter<'a> {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "suffix encoding moved to setup_proof shared writer"
+    )]
     fn write_u64_le_bits(&mut self, value: u64, bit_count: usize) -> CanonicalResult<()> {
         for bit_index in 0..bit_count {
             let bit = if bit_index < u64::BITS as usize {
@@ -2391,6 +2393,28 @@ impl<'a> PublicKeyShareLnpBitWriter<'a> {
                 false
             };
             self.write_bit(bit);
+        }
+
+        Ok(())
+    }
+
+    fn write_little_endian_bytes_bits(
+        &mut self,
+        bytes: &[u8],
+        bit_count: usize,
+    ) -> CanonicalResult<()> {
+        if bytes
+            .len()
+            .checked_mul(8)
+            .is_none_or(|available_bits| available_bits < bit_count)
+        {
+            return Err(invalid_public_key_share_proof(
+                "public-key LNP byte residue is shorter than its declared bit count",
+            ));
+        }
+        for bit_index in 0..bit_count {
+            let byte = bytes[bit_index / 8];
+            self.write_bit(((byte >> (bit_index % 8)) & 1) == 1);
         }
 
         Ok(())
@@ -2409,6 +2433,10 @@ impl<'a> PublicKeyShareLnpBitWriter<'a> {
         self.bit_offset += 1;
     }
 
+    #[allow(
+        dead_code,
+        reason = "suffix encoding moved to setup_proof shared writer"
+    )]
     fn finish_with_lazer_padding(&mut self) {
         self.write_bit(true);
         while !self.bit_offset.is_multiple_of(8) {
@@ -2549,7 +2577,7 @@ fn sample_public_key_share_message_mask_i128(
         .ok_or_else(|| {
             invalid_public_key_share_proof("public-key message mask bound overflowed")
         })?;
-    Ok(mask.rem_euclid(bound))
+    Ok(mask % bound)
 }
 
 fn sample_public_key_share_carry_mask_i128(

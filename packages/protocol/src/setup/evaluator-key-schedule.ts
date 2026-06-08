@@ -18,7 +18,7 @@ export const evaluatorKeyGenericSwitchPolicy =
 export const evaluatorKeyGenericSwitchProofStatus =
     'not-required-for-first-profile';
 export const evaluatorKeyScheduleBindingStatus =
-    'relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending';
+    'relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting';
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
     readonly level: number;

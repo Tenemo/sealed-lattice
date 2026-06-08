@@ -23,13 +23,15 @@ use super::{
 };
 use super::{
     commitment::{
-        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+        SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
         compute_setup_commitment_for_tests, parse_setup_commitment_full_value,
         setup_commitment_full_value, setup_commitment_root,
     },
     private_vss_share_proof::{
-        PrivateVssShareLnpProofGenerationInput, PrivateVssShareLnpProofWitness,
-        private_vss_share_lnp_proof_record,
+        PrivateVssShareLnpProofGenerationInput, PrivateVssShareLnpProofVerificationInput,
+        PrivateVssShareLnpProofWitness, private_vss_share_lnp_proof_record,
+        verify_private_vss_share_lnp_relation_proof,
     },
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };

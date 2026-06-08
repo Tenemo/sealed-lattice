@@ -1,3 +1,4 @@
+use num_bigint::BigUint;
 use serde_json::{Value, json};
 
 use crate::{
@@ -13,28 +14,29 @@ use crate::{
 use super::commitment::{
     SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
     SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
-    compute_setup_commitment, linear_combination_setup_commitments,
-    parse_setup_commitment_full_value, setup_commitment_modulus_product, setup_commitment_root,
-    verify_setup_lifted_commitment_opening,
+    compute_setup_signed_lifted_commitment, linear_combination_setup_commitments,
+    parse_setup_commitment_full_value, setup_commitment_root,
+    setup_signed_coefficient_fits_centered_commitment_modulus_product,
+    verify_setup_signed_lifted_commitment_opening,
 };
 use super::setup_proof::SETUP_PROOF_PROFILE_ID;
 
 const SAME_SECRET_LNP_PROOF_MAGIC: &[u8; 8] = b"SLSSLNP1";
-const SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
+pub(super) const SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
     "sealed-lattice/setup/same-secret/lnp-scalar-challenge-v1";
 const SAME_SECRET_LNP_COMMITMENT_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret/lnp-relation-commitment-v1";
 const SAME_SECRET_LNP_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret/lnp-proof-bytes-v1";
-const SAME_SECRET_MESSAGE_MASK_BITS: usize = 32;
-const SAME_SECRET_RANDOMNESS_MASK_BITS: usize = 80;
-const SAME_SECRET_SCALAR_CHALLENGE_BITS: usize = 32;
-const SAME_SECRET_TERNARY_INFINITY_BOUND: i128 = 1;
-const SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
+pub(super) const SAME_SECRET_MESSAGE_MASK_BITS: usize = 80;
+pub(super) const SAME_SECRET_RANDOMNESS_MASK_BITS: usize = 80;
+pub(super) const SAME_SECRET_SCALAR_CHALLENGE_BITS: usize = 63;
+pub(super) const SAME_SECRET_TERNARY_INFINITY_BOUND: i128 = 1;
+pub(super) const SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
 
 pub(super) const SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-same-secret-relation-verified-claim-accounting-pending";
-pub(super) const SAME_SECRET_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, and same-secret BDLOP commitment relation algebra verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing setup acceptance";
+    "lnp-same-secret-relation-verified-with-accepted-setup-proof-accounting";
+pub(super) const SAME_SECRET_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, centered signed 80-bit same-secret masks and responses, same-secret BDLOP commitment relation algebra, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing setup proof acceptance";
 
 #[derive(Debug)]
 pub(super) struct SameSecretLnpProofVerification {
@@ -42,6 +44,17 @@ pub(super) struct SameSecretLnpProofVerification {
     pub(super) statement_hash_hex: String,
     pub(super) relation_commitment_hash_hex: String,
     pub(super) tbox_commitment_prefix_hash: String,
+    pub(super) z34_seed_material_hash: String,
+    pub(super) z34_challenge_seed_hash: String,
+    pub(super) z34_challenge_tail_hash: String,
+    pub(super) z34_challenge_row_domain_hash: String,
+    pub(super) z34_challenge_z3_row_set_hash: String,
+    pub(super) z34_challenge_z4_row_set_hash: String,
+    pub(super) tbox_lower_protocol_challenge_hash: String,
+    pub(super) z34_z3_check_window_hash: String,
+    pub(super) z34_z4_check_window_hash: String,
+    pub(super) z34_z3_l2_squared_decimal: String,
+    pub(super) z34_z4_infinity_norm_decimal: String,
     pub(super) challenge: u64,
 }
 
@@ -122,7 +135,18 @@ pub(crate) fn generate_same_secret_lnp_proof_from_request(
         "statementHash": verification.statement_hash_hex,
         "relationCommitmentHash": verification.relation_commitment_hash_hex,
         "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
-        "challenge": verification.challenge,
+        "z34SeedMaterialHash": verification.z34_seed_material_hash,
+        "z34ChallengeSeedHash": verification.z34_challenge_seed_hash,
+        "z34ChallengeTailHash": verification.z34_challenge_tail_hash,
+        "z34ChallengeRowDomainHash": verification.z34_challenge_row_domain_hash,
+        "z34ChallengeZ3RowSetHash": verification.z34_challenge_z3_row_set_hash,
+        "z34ChallengeZ4RowSetHash": verification.z34_challenge_z4_row_set_hash,
+        "tboxLowerProtocolChallengeHash": verification.tbox_lower_protocol_challenge_hash,
+        "z34Z3CheckWindowHash": verification.z34_z3_check_window_hash,
+        "z34Z4CheckWindowHash": verification.z34_z4_check_window_hash,
+        "z34Z3L2SquaredDecimal": verification.z34_z3_l2_squared_decimal,
+        "z34Z4InfinityNormDecimal": verification.z34_z4_infinity_norm_decimal,
+        "challenge": verification.challenge.to_string(),
         "proofSizeBytes": verification.proof_size_bytes,
         "proofBytesHash": proof_bytes_hash,
         "proofBytesHex": to_hex(&proof_bytes),
@@ -161,6 +185,26 @@ pub(super) fn verify_same_secret_lnp_relation_proof(
         &parsed_proof.support_commitments,
     )?;
     let statement_hash_hex = to_hex(&statement_hash);
+    let layout = super::setup_proof::same_secret_lnp_tbox_layout();
+    let expected_tbox_prefix_binding_seed =
+        super::setup_proof::setup_proof_lnp_tbox_prefix_binding_seed(
+            &layout,
+            &statement_hash_hex,
+            &expected_parameter_profile_hash,
+            &encoded_commitments,
+        )?;
+    let expected_tbox_prefix =
+        encode_same_secret_lnp_tbox_prefix(&layout, &expected_tbox_prefix_binding_seed)?;
+    let expected_tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(
+            &layout,
+            &expected_tbox_prefix,
+        )?;
+    if parsed_proof.tbox_commitment_prefix_hash != expected_tbox_commitment_prefix_hash {
+        return Err(invalid_same_secret_proof(
+            "same-secret LNP tbox commitment prefix is not bound to the statement and relation commitments",
+        ));
+    }
     let relation_commitment_hash_hex = same_secret_lnp_relation_commitment_hash(
         &statement_hash_hex,
         &parsed_proof.parameter_profile_hash_hex,
@@ -174,8 +218,7 @@ pub(super) fn verify_same_secret_lnp_relation_proof(
             "same-secret LNP scalar challenge does not match its relation transcript",
         ));
     }
-    let layout = super::setup_proof::same_secret_lnp_tbox_layout();
-    super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
+    let tbox_summary = super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
         &layout,
         &statement_hash_hex,
         &relation_commitment_hash_hex,
@@ -209,6 +252,17 @@ pub(super) fn verify_same_secret_lnp_relation_proof(
         statement_hash_hex,
         relation_commitment_hash_hex,
         tbox_commitment_prefix_hash: parsed_proof.tbox_commitment_prefix_hash,
+        z34_seed_material_hash: tbox_summary.z34_seed_material_hash,
+        z34_challenge_seed_hash: tbox_summary.z34_challenge_seed_hash,
+        z34_challenge_tail_hash: tbox_summary.z34_challenge_tail_hash,
+        z34_challenge_row_domain_hash: tbox_summary.z34_challenge_row_domain_hash,
+        z34_challenge_z3_row_set_hash: tbox_summary.z34_challenge_z3_row_set_hash,
+        z34_challenge_z4_row_set_hash: tbox_summary.z34_challenge_z4_row_set_hash,
+        tbox_lower_protocol_challenge_hash: tbox_summary.tbox_lower_protocol_challenge_hash,
+        z34_z3_check_window_hash: tbox_summary.z34_z3_check_window_hash,
+        z34_z4_check_window_hash: tbox_summary.z34_z4_check_window_hash,
+        z34_z3_l2_squared_decimal: tbox_summary.z3_l2_squared.to_string(),
+        z34_z4_infinity_norm_decimal: tbox_summary.z4_infinity_norm.to_string(),
         challenge: parsed_proof.challenge,
     })
 }
@@ -483,7 +537,7 @@ fn verify_same_secret_commitment_responses(
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         let response_randomness_bound = same_secret_randomness_response_bound(challenge)?;
-        verify_setup_lifted_commitment_opening(
+        verify_setup_signed_lifted_commitment_opening(
             public_matrix_seed_hash,
             &expected_response_commitment,
             &response_message_coefficients,
@@ -699,38 +753,13 @@ fn same_secret_lnp_relation_challenge(
     statement_hash_hex: &str,
     relation_commitment_hash_hex: &str,
 ) -> CanonicalResult<u64> {
-    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
+    super::setup_proof::derive_setup_proof_scalar_challenge(
         "same-secret-consistency",
+        SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN,
         statement_hash_hex,
         relation_commitment_hash_hex,
-        super::setup_proof::SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-    )?;
-    let mut encoded_challenge = Vec::with_capacity(challenge_coefficients.len() * 8);
-    for coefficient in challenge_coefficients {
-        encoded_challenge.extend_from_slice(&coefficient.to_le_bytes());
-    }
-    let mut block_index = 0_u64;
-    loop {
-        let block_index_bytes = block_index.to_le_bytes();
-        let block = hash512(
-            SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN,
-            &[
-                statement_hash_hex.as_bytes(),
-                relation_commitment_hash_hex.as_bytes(),
-                &encoded_challenge,
-                &block_index_bytes,
-            ],
-        );
-        let mut challenge_bytes = [0_u8; 8];
-        challenge_bytes[..4].copy_from_slice(&block[..4]);
-        let challenge = u64::from_le_bytes(challenge_bytes);
-        if challenge != 0 {
-            return Ok(challenge);
-        }
-        block_index = block_index.checked_add(1).ok_or_else(|| {
-            invalid_same_secret_proof("same-secret LNP challenge block index overflowed")
-        })?;
-    }
+        SAME_SECRET_SCALAR_CHALLENGE_BITS,
+    )
 }
 
 fn same_secret_scalar_challenge_maximum() -> CanonicalResult<u64> {
@@ -822,7 +851,7 @@ fn same_secret_lifted_message_response(
     secret_response: i128,
     negative_indicator_response: i128,
     source_message_modulus: u64,
-) -> CanonicalResult<u128> {
+) -> CanonicalResult<i128> {
     let lifted = secret_response
         .checked_add(
             i128::from(source_message_modulus)
@@ -834,16 +863,9 @@ fn same_secret_lifted_message_response(
                 })?,
         )
         .ok_or_else(|| invalid_same_secret_proof("same-secret lifted response overflowed"))?;
-    if lifted < 0 {
+    if !setup_signed_coefficient_fits_centered_commitment_modulus_product(lifted) {
         return Err(invalid_same_secret_proof(
-            "same-secret lifted response became negative",
-        ));
-    }
-    let lifted = u128::try_from(lifted)
-        .map_err(|_| invalid_same_secret_proof("same-secret lifted response does not fit u128"))?;
-    if lifted >= setup_commitment_modulus_product() {
-        return Err(invalid_same_secret_proof(
-            "same-secret lifted response wraps in the setup commitment modulus product",
+            "same-secret lifted response wraps in the centered setup commitment modulus product",
         ));
     }
 
@@ -1058,9 +1080,6 @@ pub(super) fn generate_same_secret_lnp_relation_proof(
     let parameter_profile_hash = super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
     let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes(&parameter_profile_hash)?;
     let layout = super::setup_proof::same_secret_lnp_tbox_layout();
-    let tbox_prefix = encode_same_secret_lnp_tbox_prefix(&layout, proof_randomness_seed_hex)?;
-    let tbox_commitment_prefix_hash =
-        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
 
     let secret_masks = (0..constant_commitments[0].ring_degree)
         .map(|coefficient_index| {
@@ -1136,23 +1155,17 @@ pub(super) fn generate_same_secret_lnp_relation_proof(
                         .ok_or_else(|| {
                             invalid_same_secret_proof("same-secret message mask overflowed")
                         })?;
-                    if lifted_mask < 0 {
+                    if !setup_signed_coefficient_fits_centered_commitment_modulus_product(
+                        lifted_mask,
+                    ) {
                         return Err(invalid_same_secret_proof(
-                            "same-secret message mask must be non-negative",
-                        ));
-                    }
-                    let lifted_mask = u128::try_from(lifted_mask).map_err(|_| {
-                        invalid_same_secret_proof("same-secret message mask does not fit u128")
-                    })?;
-                    if lifted_mask >= setup_commitment_modulus_product() {
-                        return Err(invalid_same_secret_proof(
-                            "same-secret message mask wraps in the commitment modulus product",
+                            "same-secret message mask wraps in the centered commitment modulus product",
                         ));
                     }
                     Ok(lifted_mask)
                 })
                 .collect::<CanonicalResult<Vec<_>>>()?;
-            compute_setup_commitment(
+            compute_setup_signed_lifted_commitment(
                 public_matrix_seed_hash,
                 commitment.source_rns_limb_index,
                 commitment.source_message_modulus,
@@ -1182,6 +1195,15 @@ pub(super) fn generate_same_secret_lnp_relation_proof(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let encoded_commitments =
         encode_same_secret_relation_commitments(&relation_commitments, &support_commitments)?;
+    let tbox_prefix_binding_seed = super::setup_proof::setup_proof_lnp_tbox_prefix_binding_seed(
+        &layout,
+        &statement_hash_hex,
+        &parameter_profile_hash,
+        &encoded_commitments,
+    )?;
+    let tbox_prefix = encode_same_secret_lnp_tbox_prefix(&layout, &tbox_prefix_binding_seed)?;
+    let tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
     let relation_commitment_hash = same_secret_lnp_relation_commitment_hash(
         &statement_hash_hex,
         &parameter_profile_hash,
@@ -1190,14 +1212,13 @@ pub(super) fn generate_same_secret_lnp_relation_proof(
     );
     let challenge =
         same_secret_lnp_relation_challenge(&statement_hash_hex, &relation_commitment_hash)?;
-    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
-        "same-secret-consistency",
+    let mut tbox_proof_bytes = tbox_prefix;
+    super::setup_proof::append_setup_proof_lnp_tbox_generated_suffix(
+        &mut tbox_proof_bytes,
+        &layout,
         &statement_hash_hex,
         &relation_commitment_hash,
-        layout.proof_ring_degree,
     )?;
-    let mut tbox_proof_bytes = tbox_prefix;
-    encode_same_secret_lnp_tbox_suffix(&mut tbox_proof_bytes, &layout, &challenge_coefficients)?;
 
     let challenge_wide = i128::from(challenge);
     let secret_response_coefficients =
@@ -1337,6 +1358,7 @@ fn encode_same_secret_lnp_tbox_prefix(
         layout.t_b_polynomial_count,
         layout.proof_ring_degree,
         layout.proof_modulus_bit_count,
+        Some(&layout.proof_modulus),
         proof_randomness_seed_hex,
         0,
     )?;
@@ -1345,6 +1367,7 @@ fn encode_same_secret_lnp_tbox_prefix(
         layout.h_polynomial_count,
         layout.proof_ring_degree,
         layout.proof_modulus_bit_count,
+        Some(&layout.proof_modulus),
         proof_randomness_seed_hex,
         1,
     )?;
@@ -1356,6 +1379,7 @@ fn encode_same_secret_lnp_tbox_prefix(
             .proof_modulus_bit_count
             .checked_sub(layout.compression_dropped_bits)
             .ok_or_else(|| invalid_same_secret_proof("same-secret LNP compression underflowed"))?,
+        None,
         proof_randomness_seed_hex,
         2,
     )?;
@@ -1363,68 +1387,12 @@ fn encode_same_secret_lnp_tbox_prefix(
     Ok(writer.into_bytes())
 }
 
-fn encode_same_secret_lnp_tbox_suffix(
-    prefix_bytes: &mut Vec<u8>,
-    layout: &super::setup_proof::SetupProofLnpTboxLayout,
-    challenge_coefficients: &[i64],
-) -> CanonicalResult<()> {
-    let mut writer = SameSecretLnpBitWriter::from_bytes(prefix_bytes);
-    for coefficient in challenge_coefficients {
-        let shifted = coefficient
-            .checked_add(
-                i64::try_from(super::setup_proof::SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND)
-                    .expect("fixed challenge coefficient bound fits i64"),
-            )
-            .ok_or_else(|| {
-                invalid_same_secret_proof("same-secret LNP challenge shift overflowed")
-            })?;
-        let shifted = u64::try_from(shifted).map_err(|_| {
-            invalid_same_secret_proof("same-secret LNP challenge coefficient is negative")
-        })?;
-        writer.write_u64_le_bits(
-            shifted,
-            super::setup_proof::SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
-        )?;
-    }
-    encode_same_secret_lnp_zero_hint_polyvec(
-        &mut writer,
-        layout.hint_polynomial_count,
-        layout.proof_ring_degree,
-    )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z1_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z1_log2_standard_deviation,
-    )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z21_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z21_log2_standard_deviation,
-    )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z3_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z3_log2_standard_deviation,
-    )?;
-    encode_same_secret_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z4_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z4_log2_standard_deviation,
-    )?;
-    writer.finish_with_lazer_padding();
-
-    Ok(())
-}
-
 fn encode_same_secret_lnp_uniform_polyvec(
     writer: &mut SameSecretLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
     bit_count: usize,
+    modulus: Option<&BigUint>,
     proof_randomness_seed_hex: &str,
     field_index: u64,
 ) -> CanonicalResult<()> {
@@ -1434,63 +1402,39 @@ fn encode_same_secret_lnp_uniform_polyvec(
             invalid_same_secret_proof("same-secret LNP tbox coefficient count overflowed")
         })?;
     for coefficient_index in 0..coefficient_count {
-        let coefficient_index_bytes = u64::try_from(coefficient_index)
-            .map_err(|_| invalid_same_secret_proof("same-secret LNP coefficient index overflowed"))?
-            .to_le_bytes();
-        let field_index_bytes = field_index.to_le_bytes();
-        let block = hash512(
+        if field_index == 1
+            && super::setup_proof::setup_proof_lnp_tbox_h_coefficient_must_be_zero(
+                coefficient_index,
+                proof_ring_degree,
+            )
+        {
+            let zero_residue_bytes = vec![
+                0_u8;
+                bit_count.checked_add(7).ok_or_else(|| {
+                    invalid_same_secret_proof("same-secret LNP tbox bit count overflowed")
+                })? / 8
+            ];
+            writer.write_little_endian_bytes_bits(&zero_residue_bytes, bit_count)?;
+            continue;
+        }
+        let residue_bytes = super::setup_proof::sample_setup_proof_lnp_tbox_uniform_residue_bytes(
             "sealed-lattice/setup/same-secret/lnp-tbox-uniform-v1",
-            &[
-                proof_randomness_seed_hex.as_bytes(),
-                &field_index_bytes,
-                &coefficient_index_bytes,
-            ],
-        );
-        let mut word = [0_u8; 8];
-        word.copy_from_slice(&block[..8]);
-        let value = u64::from_le_bytes(word) & ((1_u64 << bit_count.min(32)) - 1);
-        writer.write_u64_le_bits(value, bit_count)?;
+            proof_randomness_seed_hex,
+            field_index,
+            coefficient_index,
+            bit_count,
+            modulus,
+        )?;
+        writer.write_little_endian_bytes_bits(&residue_bytes, bit_count)?;
     }
 
     Ok(())
 }
 
-fn encode_same_secret_lnp_zero_hint_polyvec(
-    writer: &mut SameSecretLnpBitWriter<'_>,
-    polynomial_count: usize,
-    proof_ring_degree: usize,
-) -> CanonicalResult<()> {
-    let coefficient_count = polynomial_count
-        .checked_mul(proof_ring_degree)
-        .ok_or_else(|| invalid_same_secret_proof("same-secret LNP hint count overflowed"))?;
-    for _ in 0..coefficient_count {
-        writer.write_bit(false);
-        writer.write_bit(false);
-    }
-
-    Ok(())
-}
-
-fn encode_same_secret_lnp_zero_gaussian_polyvec(
-    writer: &mut SameSecretLnpBitWriter<'_>,
-    polynomial_count: usize,
-    proof_ring_degree: usize,
-    log2_standard_deviation: usize,
-) -> CanonicalResult<()> {
-    let coefficient_count = polynomial_count
-        .checked_mul(proof_ring_degree)
-        .ok_or_else(|| invalid_same_secret_proof("same-secret LNP Gaussian count overflowed"))?;
-    let low_bit_count = log2_standard_deviation.checked_add(1).ok_or_else(|| {
-        invalid_same_secret_proof("same-secret LNP Gaussian low-bit count overflowed")
-    })?;
-    for _ in 0..coefficient_count {
-        writer.write_bit(false);
-        writer.write_u64_le_bits(0, low_bit_count)?;
-    }
-
-    Ok(())
-}
-
+#[allow(
+    dead_code,
+    reason = "borrowed mode is retained for local LNP bit-writer parity"
+)]
 enum SameSecretLnpBitWriterStorage<'a> {
     Owned(Vec<u8>),
     Borrowed(&'a mut Vec<u8>),
@@ -1509,6 +1453,10 @@ impl<'a> SameSecretLnpBitWriter<'a> {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "borrowed mode is retained for local LNP bit-writer parity"
+    )]
     fn from_bytes(bytes: &'a mut Vec<u8>) -> Self {
         let bit_offset = bytes.len() * 8;
         Self {
@@ -1526,6 +1474,10 @@ impl<'a> SameSecretLnpBitWriter<'a> {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "suffix encoding moved to setup_proof shared writer"
+    )]
     fn write_u64_le_bits(&mut self, value: u64, bit_count: usize) -> CanonicalResult<()> {
         for bit_index in 0..bit_count {
             let bit = if bit_index < u64::BITS as usize {
@@ -1534,6 +1486,28 @@ impl<'a> SameSecretLnpBitWriter<'a> {
                 false
             };
             self.write_bit(bit);
+        }
+
+        Ok(())
+    }
+
+    fn write_little_endian_bytes_bits(
+        &mut self,
+        bytes: &[u8],
+        bit_count: usize,
+    ) -> CanonicalResult<()> {
+        if bytes
+            .len()
+            .checked_mul(8)
+            .is_none_or(|available_bits| available_bits < bit_count)
+        {
+            return Err(invalid_same_secret_proof(
+                "same-secret LNP byte residue is shorter than its declared bit count",
+            ));
+        }
+        for bit_index in 0..bit_count {
+            let byte = bytes[bit_index / 8];
+            self.write_bit(((byte >> (bit_index % 8)) & 1) == 1);
         }
 
         Ok(())
@@ -1552,6 +1526,10 @@ impl<'a> SameSecretLnpBitWriter<'a> {
         self.bit_offset += 1;
     }
 
+    #[allow(
+        dead_code,
+        reason = "suffix encoding moved to setup_proof shared writer"
+    )]
     fn finish_with_lazer_padding(&mut self) {
         self.write_bit(true);
         while !self.bit_offset.is_multiple_of(8) {
@@ -1643,7 +1621,12 @@ fn sample_same_secret_message_mask_i128(
         let mask = (1_u16 << kept_bits) - 1;
         bytes[magnitude_byte_count - 1] &= u8::try_from(mask).expect("mask fits u8");
     }
-    Ok(i128::from_le_bytes(bytes))
+    let magnitude = i128::from_le_bytes(bytes);
+    if block[magnitude_byte_count] & 1 == 1 {
+        Ok(-magnitude)
+    } else {
+        Ok(magnitude)
+    }
 }
 
 fn same_secret_support_expansion(
