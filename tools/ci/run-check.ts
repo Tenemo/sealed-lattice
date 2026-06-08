@@ -34,10 +34,7 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 type LaneStatus = 'failed' | 'passed' | 'stopped';
 
 // A validation lane is a named group of commands that run in series with one
-// another. Lanes may run concurrently during the independent-check phase, and
-// the isolated Rust lane keeps `cargo fmt`, `cargo clippy`, and `cargo test`
-// sequential so they share one native `target/` build lock and reuse each
-// other's dependency artifacts.
+// another. Lanes may run concurrently during the independent-check phase.
 type ValidationLane = {
     readonly commands: readonly CommandInvocation[];
     readonly name: string;
@@ -58,8 +55,51 @@ export type ParsedCheckArguments = {
 
 const checkUsage =
     'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
-const rustKernelLaneName = 'Rust kernel (fmt, clippy, optimized test)';
-const legacyRustKernelLaneName = 'Rust kernel (fmt, clippy, test)';
+const rustKernelLaneName = 'Rust kernel (fmt, clippy, non-heavy test)';
+const rustKernelHeavyTestNames = [
+    'collective_setup_verifier_refuses_missing_and_extra_evaluation_keys',
+    'collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component_material',
+    'collective_setup_verifier_checks_setup_key_correctness_certificate',
+    'collective_setup_verifier_refuses_evaluation_key_assembly_root_drift',
+    'collective_setup_verifier_checks_setup_proof_accounting_certificate',
+    'collective_setup_verifier_checks_transported_public_evaluation_key_material',
+    'collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk',
+    'collective_setup_verifier_refuses_setup_key_correctness_package_hash_drift',
+    'collective_setup_verifier_refuses_setup_proof_accounting_certificate_hash_drift',
+    'collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_material',
+    'collective_setup_verifier_uses_public_evaluation_key_material_component_chunks',
+    'collective_setup_verifier_refuses_setup_proof_challenge_audit_hash_drift',
+    'collective_setup_verifier_refuses_setup_key_correctness_certificate_hash_drift',
+    'collective_setup_verifier_requires_setup_key_correctness_certificate_for_evaluation_keys',
+    'collective_setup_verifier_checks_evaluation_key_proof_container_roots',
+    'collective_setup_verifier_refuses_tampered_public_evaluation_key_component_chunk',
+    'collective_setup_verifier_refuses_galois_batch_schedule_drift',
+    'collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed',
+    'collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk',
+    'collective_setup_verifier_refuses_tampered_transported_galois_component_material_chunk',
+    'collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift',
+    'collective_setup_verifier_refuses_relinearization_round_two_source_square_aggregate_drift',
+    'collective_setup_verifier_refuses_relinearization_round_one_source_square_aggregate_drift',
+    'collective_setup_verifier_refuses_relinearization_round_two_source_square_linkage_drift',
+    'collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift',
+    'collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed',
+    'collective_setup_verifier_refuses_relinearization_source_square_binding_drift',
+    'collective_setup_verifier_refuses_same_secret_setup_proof_challenge_domain_drift',
+    'collective_setup_public_galois_key_loader_refuses_reduced_ring_material',
+    'collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material',
+    'generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof',
+    'relinearization_round_one_generation_refuses_independent_source_square',
+] as const;
+
+const rustKernelNonHeavyTestArguments = [
+    'test',
+    '-p',
+    'sealed-lattice-kernel',
+    '--quiet',
+    '--',
+    ...rustKernelHeavyTestNames.flatMap((testName) => ['--skip', testName]),
+    '--show-output',
+] as const;
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -167,17 +207,44 @@ const buildGatingLanes = (
     ),
 ];
 
+const buildRustKernelLane = (): ValidationLane => ({
+    commands: [
+        createCargoCommand(
+            'cargo fmt --check',
+            ['fmt', '--check', '-p', 'sealed-lattice-kernel'],
+            'cargo-fmt',
+        ),
+        createCargoCommand(
+            'cargo clippy',
+            [
+                'clippy',
+                '--workspace',
+                '--all-targets',
+                '--all-features',
+                '--',
+                '-D',
+                'warnings',
+            ],
+            'cargo-clippy',
+        ),
+        createCargoCommand(
+            'cargo test (optimized test profile, non-heavy)',
+            rustKernelNonHeavyTestArguments,
+            'cargo-test',
+        ),
+    ],
+    name: rustKernelLaneName,
+});
+
 // Independent checks run concurrently against the built output. The docs lane
 // runs the post-build docs commands directly instead of `pnpm run docs:build`,
 // because the standalone docs script rebuilds the workspace and would write
 // `dist/` during the parallel phase. The pack smoke lane still calls its
 // underlying tool directly because its package script rebuilds for standalone
-// use. The Rust lane runs after this phase: the tests are memory-heavy on
-// Windows and should not compete with docs rendering, linting, package smoke
-// verification, and Node tests. The commit gate runs only the fast Node test
-// project; the heavier protocol and kernel Node projects and the Playwright
-// browser projects stay in `pnpm run test:node` and `pnpm run test:browser` for
-// pre-push verification.
+// use. The commit gate runs the fast Node test project, the non-heavy kernel
+// Node project, and the non-heavy Rust kernel tests. The heavier protocol,
+// kernel-heavy Node project, full Rust package test run, and the Playwright
+// browser projects stay in their standalone lanes for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -195,6 +262,7 @@ const buildParallelLanes = (
 
     return [
         lane('Lint', 'lint', ['run', 'lint']),
+        buildRustKernelLane(),
         {
             commands: [
                 createPackageManagerCommand(
@@ -292,48 +360,19 @@ const buildParallelLanes = (
             '--reporter',
             './tools/ci/vitest-progress-reporter.ts',
         ]),
+        lane('Node tests (kernel)', 'vitest-node-kernel', [
+            'exec',
+            'vitest',
+            '--project',
+            'node-kernel',
+            '--run',
+            '--reporter',
+            'default',
+            '--reporter',
+            './tools/ci/vitest-progress-reporter.ts',
+        ]),
     ];
 };
-
-const buildRustKernelLane = (): ValidationLane => ({
-    commands: [
-        createCargoCommand(
-            'cargo fmt --check',
-            ['fmt', '--check', '-p', 'sealed-lattice-kernel'],
-            'cargo-fmt',
-        ),
-        createCargoCommand(
-            'cargo clippy',
-            [
-                'clippy',
-                '--workspace',
-                '--all-targets',
-                '--all-features',
-                '--',
-                '-D',
-                'warnings',
-            ],
-            'cargo-clippy',
-        ),
-        createCargoCommand(
-            'cargo test (optimized test profile)',
-            [
-                'test',
-                '-p',
-                'sealed-lattice-kernel',
-                '--quiet',
-                '--',
-                '--show-output',
-            ],
-            'cargo-test',
-        ),
-    ],
-    name: rustKernelLaneName,
-});
-
-const buildIsolatedLanes = (): readonly ValidationLane[] => [
-    buildRustKernelLane(),
-];
 
 const buildProgressLanePlans = (
     lanes: readonly ValidationLane[],
@@ -344,8 +383,7 @@ const buildProgressLanePlans = (
     ): CheckProgressLanePlan['progress'] => {
         const previousProgress =
             lane.name === rustKernelLaneName
-                ? (timingHistory.laneProgress.get(rustKernelLaneName) ??
-                  timingHistory.laneProgress.get(legacyRustKernelLaneName))
+                ? timingHistory.laneProgress.get(rustKernelLaneName)
                 : timingHistory.laneProgress.get(lane.name);
         if (lane.name === 'Build workspace packages') {
             return {
@@ -360,16 +398,11 @@ const buildProgressLanePlans = (
                 source: 'turbo',
             };
         }
-        if (lane.name === 'Node tests (fast)') {
+        if (
+            lane.name === 'Node tests (fast)' ||
+            lane.name === 'Node tests (kernel)'
+        ) {
             return {
-                primary:
-                    previousProgress?.primary === undefined
-                        ? undefined
-                        : {
-                              completed: 0,
-                              total: previousProgress.primary.total,
-                              unit: 'test file',
-                          },
                 secondary:
                     previousProgress?.secondary === undefined
                         ? undefined
@@ -585,12 +618,7 @@ const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildGatingLanes(packageManagerRunner);
     const parallelLanes = buildParallelLanes(packageManagerRunner);
-    const isolatedLanes = buildIsolatedLanes();
-    const validationLanes = [
-        ...gatingLanes,
-        ...parallelLanes,
-        ...isolatedLanes,
-    ];
+    const validationLanes = [...gatingLanes, ...parallelLanes];
     const timingHistory = await readPreviousCheckTimingHistory();
     const reporter = new CheckProgressReporter({
         history: timingHistory,
@@ -654,14 +682,6 @@ const main = async (): Promise<void> => {
             process.exitCode = overallExitCode(results);
 
             return;
-        }
-
-        for (const lane of isolatedLanes) {
-            const result = await runGatingLane(lane, runLog, reporter);
-            results.push(result);
-            if (result.exitCode !== 0) {
-                break;
-            }
         }
 
         reporter.stop();

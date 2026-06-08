@@ -25,6 +25,7 @@
         "test:node:fast": "tsx ./tools/ci/run-node-tests.ts --only fast",
         "test:node:protocol": "tsx ./tools/ci/run-node-tests.ts --only protocol",
         "test:node:kernel": "tsx ./tools/ci/run-node-tests.ts --only kernel",
+        "test:node:kernel:heavy": "tsx ./tools/ci/run-node-tests.ts --only kernel-heavy",
         "test:node": "tsx ./tools/ci/run-node-tests.ts",
         "test:browser": "tsx ./tools/ci/run-browser-tests.ts",
         "test": "pnpm run test:node && pnpm run test:browser",

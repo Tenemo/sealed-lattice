@@ -74,7 +74,9 @@ export const buildNodeTestCommands = (
 };
 
 const nodeTestScriptName = (lanes: readonly NodeTestLane[]): string =>
-    lanes.length === 1 ? `test:node:${lanes[0]}` : 'test:node';
+    lanes.length === 1
+        ? `test:node:${lanes[0].replace('-', ':')}`
+        : 'test:node';
 
 const nodeTestRunShouldLog = (
     lanes: readonly NodeTestLane[],
