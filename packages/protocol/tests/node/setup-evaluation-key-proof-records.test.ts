@@ -105,7 +105,7 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
         genericKeySwitchPolicy: 'refused-unless-explicitly-required',
         genericKeySwitchProofStatus: 'not-required-for-first-profile',
         scheduleBindingStatus:
-            'relinearization-and-galois-proof-verifiers-pending',
+            'relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending',
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {
@@ -1000,7 +1000,7 @@ describe('evaluation-key proof record builders', () => {
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 setupProofProfileId,
                 assemblyStatus:
-                    'assembled-from-review-gated-proof-bearing-shares',
+                    'assembled-from-proof-bearing-shares-claim-accounting-pending',
                 materialEncoding:
                     'root-bound-public-key-switch-component-roots',
                 materialSource:
@@ -1037,7 +1037,7 @@ describe('evaluation-key proof record builders', () => {
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 setupProofProfileId,
                 assemblyStatus:
-                    'assembled-from-review-gated-proof-bearing-shares',
+                    'assembled-from-proof-bearing-shares-claim-accounting-pending',
                 materialEncoding:
                     'root-bound-public-key-switch-component-roots',
                 materialSource:

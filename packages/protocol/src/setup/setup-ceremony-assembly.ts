@@ -38,6 +38,7 @@ import {
     createPublicKeyShareMaterialSet,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
+    type CollectivePublicKey,
     type PublicKeyShareLnpProofMaterial,
     type PublicKeyShareLnpProofSet,
     type PublicKeyShareContributionInput,
@@ -126,7 +127,6 @@ export type SetupCeremonyAssemblyInput = Readonly<{
     readonly publicKeyShareMaterialContributions: readonly PublicKeyShareMaterialContributionInput[];
     readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
     readonly publicKeyShareLnpProofMaterials: readonly PublicKeyShareLnpProofMaterial[];
-    readonly collectivePublicKey?: JsonRecord;
     readonly relinearizationCrpRoot: ProtocolHash;
     readonly galoisKeyCrpRoot: ProtocolHash;
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
@@ -172,6 +172,7 @@ export type SetupCeremonyAssembly = Readonly<{
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial: PublicKeyShareMaterialSet;
     readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet;
+    readonly collectivePublicKey: CollectivePublicKey;
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
     readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
@@ -1064,15 +1065,20 @@ export const createSetupCeremonyAssembly = async (
         publicKeyShareProofs,
         publicKeyShareMaterial,
         publicKeyShareLnpProofs,
-        ...(input.collectivePublicKey === undefined
-            ? {}
-            : { collectivePublicKey: input.collectivePublicKey }),
         evaluatorKeySchedule,
         relinearizationKeyShareRounds,
         galoisKeyShareBatches,
         evaluationKeys,
         setupCertificateInput: input.setupCertificateInput,
     });
+    const collectivePublicKey = setupPackage.collectivePublicKey as
+        | CollectivePublicKey
+        | undefined;
+    if (collectivePublicKey === undefined) {
+        throw new Error(
+            'setup package assembly must derive a collective public key from accepted public-key material.',
+        );
+    }
 
     return {
         objectType: 'SetupCeremonyAssembly',
@@ -1091,6 +1097,7 @@ export const createSetupCeremonyAssembly = async (
         publicKeyShareProofs,
         publicKeyShareMaterial,
         publicKeyShareLnpProofs,
+        collectivePublicKey,
         evaluatorKeySchedule,
         relinearizationKeyShareRounds,
         galoisKeyShareBatches,

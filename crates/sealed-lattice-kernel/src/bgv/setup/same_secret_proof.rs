@@ -33,8 +33,8 @@ const SAME_SECRET_TERNARY_INFINITY_BOUND: i128 = 1;
 const SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
 
 pub(super) const SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-same-secret-relation-verified-review-gated";
-pub(super) const SAME_SECRET_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, and same-secret BDLOP commitment relation algebra verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing setup acceptance";
+    "lnp-same-secret-relation-verified-claim-accounting-pending";
+pub(super) const SAME_SECRET_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, and same-secret BDLOP commitment relation algebra verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing setup acceptance";
 
 #[derive(Debug)]
 pub(super) struct SameSecretLnpProofVerification {

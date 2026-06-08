@@ -8,6 +8,8 @@ use super::super::accepted_setup::{
     accepted_setup_public_relinearization_keys_from_transport,
     encode_public_evaluation_key_material_manifest, public_evaluation_key_material_manifest,
     public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
+    setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
+    setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
 };
 use super::super::evaluation_key_share_proof::{
     EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -162,7 +164,7 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["commitmentProfile"]["assumptions"]["parameterAcceptanceStatus"],
-        "review-gated-not-claim-bearing-until-external-certificate-and-proof-verifiers"
+        "not-claim-bearing-until-repo-owned-certificate-and-proof-accounting-close"
     );
     assert!(profile["commitmentProfileHash"].as_str().is_some());
     assert_eq!(
@@ -428,7 +430,6 @@ fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() 
         "setupPackage": package,
     }))
     .expect("verification response");
-
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -1152,7 +1153,6 @@ fn collective_setup_verifier_refuses_tampered_same_secret_lnp_proofs() {
         "setupPackage": package,
     }))
     .expect("verification response");
-
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -1211,7 +1211,7 @@ fn collective_setup_verifier_refuses_same_secret_setup_proof_challenge_domain_dr
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_same_secret_setup_proof_challenge_domain_drift",
     );
-    let mut package = same_secret_proof_bearing_collective_setup_package();
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["sameSecretProofs"]["proofRecords"][0]["setupProofBinding"]["challengeDomainHash"] =
         serde_json::json!(valid_hash('7'));
     rebind_collective_same_secret_proof_set_root(&mut package);
@@ -1637,6 +1637,60 @@ fn collective_setup_verifier_refuses_public_key_material_before_proof_verificati
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyMaterialBeforeProofVerification"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_requires_collective_public_key_and_package_root() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_requires_collective_public_key_and_package_root",
+    );
+    let base_package = collective_public_key_bearing_collective_setup_package();
+
+    let mut missing_object_package = base_package.clone();
+    missing_object_package
+        .as_object_mut()
+        .expect("setup package")
+        .remove("collectivePublicKey");
+    rebind_collective_setup_package_hash(&mut missing_object_package);
+
+    let missing_object_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": missing_object_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(missing_object_result["verifierStatus"], "refused");
+    assert_eq!(
+        missing_object_result["refusedObjects"][0]["reasonCode"],
+        "publicKeyMaterialBeforeProofVerification"
+    );
+    assert_eq!(
+        missing_object_result["refusedObjects"][0]["objectPath"],
+        "setupPackage.collectivePublicKey"
+    );
+
+    let mut missing_root_package = base_package;
+    missing_root_package
+        .as_object_mut()
+        .expect("setup package")
+        .remove("collectivePublicKeyRoot");
+    rebind_collective_setup_package_hash(&mut missing_root_package);
+
+    let missing_root_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": missing_root_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(missing_root_result["verifierStatus"], "refused");
+    assert_eq!(
+        missing_root_result["refusedObjects"][0]["reasonCode"],
+        "publicKeyMaterialBeforeProofVerification"
+    );
+    assert_eq!(
+        missing_root_result["refusedObjects"][0]["objectPath"],
+        "setupPackage.collectivePublicKeyRoot"
     );
 }
 
@@ -2591,6 +2645,7 @@ fn collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift()
     package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoAggregateRoot"] =
         serde_json::json!(valid_hash('b'));
     rebind_relinearization_key_share_rounds_root(&mut package);
+    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -2755,6 +2810,7 @@ fn collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drif
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('e'));
     rebind_relinearization_key_share_rounds_root(&mut package);
+    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -2805,6 +2861,7 @@ fn collective_setup_verifier_refuses_galois_batch_schedule_drift() {
     package["galoisKeyShareBatches"][0]["requiredGaloisKeySchedule"][0]["rotation"] =
         serde_json::json!(999_u64);
     rebind_galois_key_share_batch_root(&mut package, 0);
+    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -2828,6 +2885,7 @@ fn collective_setup_verifier_refuses_evaluation_key_assembly_root_drift() {
     package["evaluationKeys"]["relinearizationKeyRoots"][0]["relinearizationKeyRoot"] =
         serde_json::json!(valid_hash('c'));
     rebind_public_evaluation_key_set_hash(&mut package);
+    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -2945,6 +3003,71 @@ fn collective_setup_verifier_refuses_commitment_security_certificate_hash_drift(
 }
 
 #[test]
+fn collective_setup_verifier_checks_setup_proof_accounting_certificate() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_setup_proof_accounting_certificate",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["setupProofAccountingCertificate"]["challengeAccounting"]["qromStatus"] =
+        serde_json::json!("externally-reviewed");
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupProofAccountingCertificatePayloadMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_setup_proof_challenge_audit_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_setup_proof_challenge_audit_hash_drift",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["setupProofAccountingCertificate"]["challengeAccounting"]["challengeSpaceAuditHash"] =
+        serde_json::json!(valid_hash('5'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupProofAccountingCertificatePayloadMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_setup_proof_accounting_certificate_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_setup_proof_accounting_certificate_hash_drift",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["setupProofAccountingCertificateHash"] = serde_json::json!(valid_hash('6'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupProofAccountingPackageCertificateHashMismatch"
+    );
+}
+
+#[test]
 fn collective_setup_verifier_checks_he_security_certificate() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("collective_setup_verifier_checks_he_security_certificate");
@@ -2984,6 +3107,103 @@ fn collective_setup_verifier_refuses_he_security_certificate_hash_drift() {
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "packageHeSecurityCertificateHashMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_requires_setup_key_correctness_certificate_for_evaluation_keys() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_requires_setup_key_correctness_certificate_for_evaluation_keys",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package
+        .as_object_mut()
+        .expect("setup package")
+        .remove("setupKeyCorrectnessCertificate");
+    package
+        .as_object_mut()
+        .expect("setup package")
+        .remove("setupKeyCorrectnessCertificateHash");
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "pending");
+    assert!(
+        result["missingObjects"]
+            .as_array()
+            .expect("pending objects")
+            .iter()
+            .any(|object| object == "setupKeyCorrectnessCertificate")
+    );
+}
+
+#[test]
+fn collective_setup_verifier_checks_setup_key_correctness_certificate() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_checks_setup_key_correctness_certificate",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["setupKeyCorrectnessCertificate"]["claimBoundary"] =
+        serde_json::json!("weakened-key-correctness-claim");
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupKeyCorrectnessCertificatePayloadMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_setup_key_correctness_certificate_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_setup_key_correctness_certificate_hash_drift",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["setupKeyCorrectnessCertificate"]["setupKeyCorrectnessCertificateHash"] =
+        serde_json::json!(valid_hash('8'));
+    package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(valid_hash('8'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupKeyCorrectnessCertificateHashMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_setup_key_correctness_package_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_setup_key_correctness_package_hash_drift",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(valid_hash('9'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupKeyCorrectnessPackageCertificateHashMismatch"
     );
 }
 
@@ -3402,6 +3622,12 @@ fn build_minimal_collective_setup_package() -> serde_json::Value {
         .and_then(serde_json::Value::as_str)
         .expect("setup transport certificate hash")
         .to_string();
+    let setup_proof_accounting_certificate_hash_value =
+        setup_proof_accounting_certificate_hash().expect("setup proof accounting certificate hash");
+    let mut setup_proof_accounting_certificate =
+        setup_proof_accounting_certificate_value().expect("setup proof accounting certificate");
+    setup_proof_accounting_certificate["setupProofAccountingCertificateHash"] =
+        serde_json::json!(setup_proof_accounting_certificate_hash_value.clone());
     let he_security_certificate_hash =
         accepted_he_security_certificate_hash().expect("HE security certificate hash");
     let mut he_security_certificate =
@@ -3433,6 +3659,8 @@ fn build_minimal_collective_setup_package() -> serde_json::Value {
         "setupCommitmentSecurityCertificateHash": setup_commitment_security_certificate_hash,
         "setupTransportCertificate": setup_transport_certificate,
         "setupTransportCertificateHash": setup_transport_certificate_hash,
+        "setupProofAccountingCertificate": setup_proof_accounting_certificate,
+        "setupProofAccountingCertificateHash": setup_proof_accounting_certificate_hash_value,
         "heSecurityCertificate": he_security_certificate,
         "heSecurityCertificateHash": he_security_certificate_hash,
     });
@@ -3470,9 +3698,9 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
             "same-secret trustee commitment roots",
         ],
         "nonClosure": [
-            "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
-            "public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure",
-            "relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
+            "same-secret proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure",
+            "public-key share proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure",
+            "relinearization and Galois proof bytes need repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting, full tbox closure, profile-scale streaming, and accepted assembly closure",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
         ],
         "ringAndMatrixParameters": {
@@ -3504,7 +3732,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "freshMessageNoWrap": u128::from(max_source_message_modulus - 1)
                 < commitment_modulus_product,
-            "status": "review-gated-full-width-per-rns-message-bound-recorded",
+            "status": "claim-accounting-full-width-per-rns-message-bound-recorded",
         },
         "aggregateOpeningBounds": {
             "shamirCoefficientCount": 4,
@@ -3518,7 +3746,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "recipientAndThresholdNoWrap": true,
-            "boundStatus": "review-gated-first-profile-homomorphic-opening-bounds-recorded",
+            "boundStatus": "claim-accounting-first-profile-homomorphic-opening-bounds-recorded",
         },
         "multiOpeningLeakage": {
             "recipientAggregateOpeningsArePublic": false,
@@ -3528,7 +3756,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
             "rawCoefficientOpeningsExported": false,
             "perCoefficientRandomnessExported": false,
             "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
-            "status": "review-gated-active-static-threshold-leakage-bound-recorded",
+            "status": "claim-accounting-active-static-threshold-leakage-bound-recorded",
         },
         "bindingAssumption": {
             "assumption": "Module-SIS",
@@ -3556,15 +3784,15 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
                     ]
                 }
             ],
-            "estimatorStatus": "review-gated-external-module-sis-parameter-certificate-required",
+            "estimatorStatus": "repo-owned-module-sis-parameter-accounting-required",
         },
         "hidingAssumption": {
             "assumption": "Module-LWE with recipient-hidden proof-witness opening leakage boundary",
             "openingDistribution": "coefficientwise-centered-ternary",
             "publicMatrixDistribution": "hash-derived-uniform-residue-stream",
             "lowEntropySecretHiding": true,
-            "statisticalLeakageStatus": "review-gated-for-recipient-hidden-aggregate-opening-proof-witnesses",
-            "estimatorStatus": "review-gated-external-module-lwe-parameter-certificate-required",
+            "statisticalLeakageStatus": "repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-required",
+            "estimatorStatus": "repo-owned-module-lwe-parameter-accounting-required",
         },
         "estimatorRows": [
             {
@@ -3575,7 +3803,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
                 "moduleRank": 2,
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
-                "status": "review-gated"
+                "status": "claim-accounting-pending"
             },
             {
                 "rowId": "first-profile-module-lwe-hiding-row",
@@ -3585,10 +3813,10 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
                 "moduleRank": 2,
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
-                "status": "review-gated"
+                "status": "claim-accounting-pending"
             }
         ],
-        "certificateStatus": "review-gated-not-claim-bearing-until-external-parameter-certificate-and-setup-proof-verifiers",
+        "certificateStatus": "not-claim-bearing-until-repo-owned-parameter-certificate-and-setup-proof-accounting-close",
     });
 
     let certificate_hash =
@@ -4603,6 +4831,7 @@ fn build_evaluation_key_proof_container_bearing_collective_setup_package() -> se
     package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds_object(&package);
     package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);
     package["evaluationKeys"] = public_evaluation_key_set_object(&package);
+    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package
@@ -5764,7 +5993,7 @@ fn public_evaluation_key_set_object(package: &serde_json::Value) -> serde_json::
                     "objectVersion": 1,
                     "setupProfileId": "CollectiveBgvSetup-v1",
                     "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-                    "assemblyStatus": "assembled-from-review-gated-proof-bearing-shares",
+                    "assemblyStatus": "assembled-from-proof-bearing-shares-claim-accounting-pending",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
                     "materialSource": "verified-relinearization-and-galois-proof-records",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
@@ -5849,7 +6078,7 @@ fn public_evaluation_key_set_object(package: &serde_json::Value) -> serde_json::
                     "objectVersion": 1,
                     "setupProfileId": "CollectiveBgvSetup-v1",
                     "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-                    "assemblyStatus": "assembled-from-review-gated-proof-bearing-shares",
+                    "assemblyStatus": "assembled-from-proof-bearing-shares-claim-accounting-pending",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
                     "materialSource": "verified-relinearization-and-galois-proof-records",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
@@ -5881,7 +6110,7 @@ fn public_evaluation_key_set_object(package: &serde_json::Value) -> serde_json::
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "assemblyStatus": "assembled-from-review-gated-proof-bearing-shares",
+        "assemblyStatus": "assembled-from-proof-bearing-shares-claim-accounting-pending",
         "materialEncoding": "root-bound-public-key-switch-component-roots",
         "materialSource": "verified-relinearization-and-galois-proof-records",
         "ceremonyId": setup_context["ceremonyId"],
@@ -5955,6 +6184,7 @@ fn add_public_evaluation_key_material_transport(
         derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
             .expect("evaluation key set hash")
     );
+    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     serde_json::json!({
@@ -6052,6 +6282,7 @@ fn rebind_public_evaluation_key_material_transport(
         derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
             .expect("evaluation key set hash")
     );
+    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     let material_entry =
@@ -6099,6 +6330,7 @@ fn move_first_galois_key_share_lnp_proof_bytes_to_transport(
     rebind_galois_key_batch_proof_root(package, 0);
     rebind_galois_key_share_batch_root(package, 0);
     package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     serde_json::json!({
@@ -6183,6 +6415,7 @@ fn move_first_galois_key_share_component_vectors_to_transport(
     rebind_galois_key_batch_proof_root(package, 0);
     rebind_galois_key_share_batch_root(package, 0);
     package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     transported_component_material_set
@@ -6448,7 +6681,7 @@ fn collective_public_key_object(package: &serde_json::Value) -> serde_json::Valu
         "proofFamily": "public-key-share",
         "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
         "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        "aggregationStatus": "lnp-proof-aggregated-review-gated",
+        "aggregationStatus": "lnp-proof-aggregated-claim-accounting-pending",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -7255,7 +7488,7 @@ fn evaluator_key_schedule_object(
         "requiredGaloisSetHash": schedule_profile["requiredGaloisSetHash"],
         "genericKeySwitchPolicy": "refused-unless-explicitly-required",
         "genericKeySwitchProofStatus": "not-required-for-first-profile",
-        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-pending",
+        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending",
     });
     schedule["evaluatorKeyScheduleRoot"] = serde_json::json!(
         derive_protocol_hash("EvaluatorKeyScheduleRoot", &schedule)
@@ -8410,6 +8643,16 @@ fn rebind_collective_he_security_certificate_hash(package: &mut serde_json::Valu
     package["heSecurityCertificate"]["heSecurityCertificateHash"] =
         serde_json::json!(he_security_certificate_hash.clone());
     package["heSecurityCertificateHash"] = serde_json::json!(he_security_certificate_hash);
+}
+
+fn rebind_setup_key_correctness_certificate(package: &mut serde_json::Value) {
+    let mut certificate = setup_key_correctness_certificate_value(package)
+        .expect("setup key correctness certificate");
+    let certificate_hash = setup_key_correctness_certificate_hash(package)
+        .expect("setup key correctness certificate hash");
+    certificate["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash.clone());
+    package["setupKeyCorrectnessCertificate"] = certificate;
+    package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash);
 }
 
 fn encode_transport_material_from_package(package: &serde_json::Value) -> Vec<u8> {

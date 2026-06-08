@@ -16,15 +16,15 @@ type ProofRandomnessSource =
     | 'development-deterministic-fixture';
 
 export const relinearizationProofVerificationStatus =
-    'lnp-relinearization-key-share-relation-verified-review-gated';
+    'lnp-relinearization-key-share-relation-verified-claim-accounting-pending';
 export const relinearizationProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, and verifier-side round-two source-square aggregate roots verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing relinearization acceptance';
+    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, and verifier-side round-two source-square aggregate roots verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing relinearization acceptance';
 export const galoisProofVerificationStatus =
-    'lnp-galois-key-share-relation-verified-review-gated';
+    'lnp-galois-key-share-relation-verified-claim-accounting-pending';
 export const galoisProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, and fixed response bounds verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing Galois-key acceptance';
+    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, same-secret-bound secret opening response, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing Galois-key acceptance';
 const publicEvaluationKeyAssemblyStatus =
-    'assembled-from-review-gated-proof-bearing-shares';
+    'assembled-from-proof-bearing-shares-claim-accounting-pending';
 const publicEvaluationKeyMaterialEncoding =
     'root-bound-public-key-switch-component-roots';
 const publicEvaluationKeyTransportMaterialEncoding =

@@ -42,8 +42,8 @@ const PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND: i128 = 1;
 const PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND: i128 = 2;
 
 pub(super) const PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-public-key-share-relation-verified-review-gated";
-pub(super) const PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, VSS-bound secret opening, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, and fixed response bounds verified; external AB-DLOP/LNP soundness and zero-knowledge review remain required before claim-bearing public-key acceptance";
+    "lnp-public-key-share-relation-verified-claim-accounting-pending";
+pub(super) const PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, VSS-bound secret opening, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing public-key acceptance";
 
 pub(super) struct PublicKeyShareLnpProofVerification {
     pub(super) proof_size_bytes: usize,
@@ -428,7 +428,7 @@ fn public_key_share_lnp_statement_hash(
         "constantCoefficientCommitmentRoots": commitment_roots,
         "relation": "for each Q_share limb, public-key share coefficients satisfy b_i - p*e_i + a*s_i + q_l*v_i = 0 over lifted integers while s_i opens the accepted VSS constant commitments",
         "carryBound": public_key_lifted_carry_bound(constant_commitments[0].ring_degree)?,
-        "nonClosure": "external AB-DLOP/LNP soundness and zero-knowledge review plus full tbox closure remain pending",
+        "nonClosure": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure remain pending",
     }))?;
 
     Ok(hash512(

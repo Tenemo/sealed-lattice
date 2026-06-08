@@ -143,7 +143,7 @@ describe('private VSS mailbox delivery', () => {
                 privateVssShareTboxParameterProfileHash:
                     fixtureHash('private-vss-tbox'),
                 proofVerificationStatus:
-                    'lnp-private-vss-share-relation-verified-review-gated',
+                    'lnp-private-vss-share-relation-verified-claim-accounting-pending',
                 proofModelStatus: 'fixture proof model for protocol transport',
                 proofStatementRoot: fixtureHash('statement-root'),
                 statementHash: fixtureHash('statement-hash'),

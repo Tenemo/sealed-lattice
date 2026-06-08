@@ -122,6 +122,10 @@ const createCargoCommand = (
     args: commandArguments,
     command: 'cargo',
     description,
+    env: {
+        ...process.env,
+        CARGO_INCREMENTAL: '0',
+    },
     logFileSlug,
 });
 

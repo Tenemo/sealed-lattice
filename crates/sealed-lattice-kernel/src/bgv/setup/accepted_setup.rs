@@ -1,4 +1,4 @@
-﻿use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigUint;
 use serde_json::{Value, json};
@@ -105,7 +105,7 @@ pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str 
 pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedPublicEvaluationKeyMaterial";
 const PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS: &str =
-    "assembled-from-review-gated-proof-bearing-shares";
+    "assembled-from-proof-bearing-shares-claim-accounting-pending";
 const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
     "root-bound-public-key-switch-component-roots";
 pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
@@ -135,6 +135,14 @@ const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkMan
 const SETUP_TRANSPORTED_OBJECT_TYPE: &str = "SetupTransportedObject";
 const SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE: &str =
     "SetupCommitmentSecurityCertificate";
+const SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE: &str = "SetupProofAccountingCertificate";
+const SETUP_PROOF_RECORD_BINDING_HASH_NAMESPACE: &str = "SetupProofRecordBindingHash";
+const SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE: &str = "SetupProofChallengeSpaceAuditHash";
+const SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE: &str =
+    "SetupProofAccountingCertificateHash";
+const SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE: &str = "SetupKeyCorrectnessCertificate";
+const SETUP_KEY_CORRECTNESS_CERTIFICATE_HASH_NAMESPACE: &str = "SetupKeyCorrectnessCertificateHash";
+const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-claim-accounting-pending";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
 const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
@@ -202,8 +210,13 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "vssShareAcceptances",
     "thresholdShareCommitments",
     "sameSecretConsistency",
+    "sameSecretProofs",
     "publicKeyShares",
     "publicKeyShareProofs",
+    "publicKeyShareMaterial",
+    "publicKeyShareLnpProofs",
+    "collectivePublicKey",
+    "collectivePublicKeyRoot",
     "evaluatorKeySchedule",
     "relinearizationKeyShareRounds",
     "galoisKeyShareBatches",
@@ -212,6 +225,10 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "setupCommitmentSecurityCertificateHash",
     "setupTransportCertificate",
     "setupTransportCertificateHash",
+    "setupProofAccountingCertificate",
+    "setupProofAccountingCertificateHash",
+    "setupKeyCorrectnessCertificate",
+    "setupKeyCorrectnessCertificateHash",
     "heSecurityCertificate",
     "heSecurityCertificateHash",
 ];
@@ -439,14 +456,15 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
     match verify_collective_setup_package(setup_package, request)? {
         VerificationFlow::Continue => Ok(verification_response(
             VerifierStatus::Pending,
-            Some("proofVerification"),
+            Some("claimAccounting"),
             vec![
-                "carry-aware VSS commitment opening checks".to_string(),
-                "same-secret LNP proof verification".to_string(),
-                "public-key share proof checks".to_string(),
-                "relinearization round proof checks".to_string(),
-                "Galois key batch proof checks".to_string(),
-                "full-profile setup material streaming certificate".to_string(),
+                "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting for private VSS, same-secret, public-key, relinearization, and Galois proof families".to_string(),
+                "full setup LNP tbox quadratic and range closure".to_string(),
+                "repo-owned Fiat-Shamir/QROM accounting certificate for setup proof challenge domains".to_string(),
+                "claim-bearing setup commitment parameter certificate for Module-SIS and Module-LWE rows".to_string(),
+                "claim-bearing collective public-key and evaluation-key correctness certificates".to_string(),
+                "profile-scale binary streaming evidence for setup proof, key, and local-state material".to_string(),
+                "active-static secure-with-abort theorem certificate".to_string(),
             ],
             Vec::new(),
             accepted_hashes_from_package(setup_package),
@@ -575,7 +593,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_vss_complaints(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_required_final_objects(setup_package)? {
+    if let Some(response) = verify_collective_public_key_pair_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_vss_share_acceptances(setup_package)? {
@@ -618,16 +636,25 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_commitment_security_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    if let Some(response) = verify_setup_proof_accounting_certificate(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
     if let Some(response) = verify_transport_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_he_security_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    if let Some(response) = verify_setup_key_correctness_certificate(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
     if let Some(response) = verify_profile_ring_material(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_required_public_evaluation_key_set(setup_package, request)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_required_final_objects(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     Ok(VerificationFlow::Continue)
@@ -1120,7 +1147,7 @@ fn evaluator_key_schedule_profile_value() -> CanonicalResult<Value> {
         "requiredGaloisSetHash": required_galois_set_hash,
         "genericKeySwitchPolicy": "refused-unless-explicitly-required",
         "genericKeySwitchProofStatus": "not-required-for-first-profile",
-        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-pending",
+        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending",
     }))
 }
 
@@ -1231,7 +1258,8 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
             "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
             "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
-            "qromStatus": "review-required-before-claim-closure",
+            "challengeDifferenceInvertibilityAccounting": super::setup_proof::challenge_difference_invertibility_accounting_value()?,
+            "qromStatus": "repo-owned-qrom-accounting-required-before-claim-closure",
             "transcriptBinding": [
                 "setupProfileHash",
                 "manifestHash",
@@ -1274,6 +1302,8 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
         "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
         "publicKeyShareTboxParameterProfile": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_value()?,
         "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
+        "relinearizationKeyShareTboxParameterProfileHash": super::setup_proof::relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
+        "galoisKeyShareTboxParameterProfileHash": super::setup_proof::galois_key_share_lnp_tbox_parameter_profile_hash()?,
         "proofSerialization": {
             "encoding": SETUP_PROOF_SERIALIZATION,
             "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
@@ -1305,7 +1335,7 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
                 "modulo-only relation check",
                 "generic or undeclared proof family"
             ],
-            "proofBytesAcceptedStatus": "private-vss-same-secret-and-public-key-share-verifiers-implemented-other-family-verifiers-pending"
+            "proofBytesAcceptedStatus": SETUP_PROOF_BYTES_ACCEPTED_STATUS
         }
     }))
 }
@@ -2902,9 +2932,39 @@ fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Option<Value>>
     Ok(None)
 }
 
+fn verify_collective_public_key_pair_consistency(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let has_collective_public_key = setup_package.get("collectivePublicKey").is_some();
+    let has_collective_public_key_root = setup_package.get("collectivePublicKeyRoot").is_some();
+    if has_collective_public_key != has_collective_public_key_root {
+        let object_path = if has_collective_public_key_root {
+            "setupPackage.collectivePublicKey"
+        } else {
+            "setupPackage.collectivePublicKeyRoot"
+        };
+        return Ok(Some(public_key_share_proof_refusal(
+            "publicKeyMaterialBeforeProofVerification",
+            "collective public-key material is not accepted unless the aggregate object and package root are both present and root-bound",
+            object_path,
+        )?));
+    }
+
+    Ok(None)
+}
+
 fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+    let setup_key_correctness_certificate_required =
+        setup_package_requires_setup_key_correctness_certificate(setup_package);
     let missing_objects = REQUIRED_FINAL_OBJECTS
         .iter()
+        .filter(|field_name| {
+            setup_key_correctness_certificate_required
+                || !matches!(
+                    **field_name,
+                    "setupKeyCorrectnessCertificate" | "setupKeyCorrectnessCertificateHash"
+                )
+        })
         .filter(|field_name| setup_package.get(**field_name).is_none())
         .map(|field_name| (*field_name).to_string())
         .collect::<Vec<_>>();
@@ -9968,7 +10028,10 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
             PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
         ),
         ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
-        ("aggregationStatus", "lnp-proof-aggregated-review-gated"),
+        (
+            "aggregationStatus",
+            "lnp-proof-aggregated-claim-accounting-pending",
+        ),
         (
             "materialEncoding",
             "embedded-full-collective-public-key-coefficients",
@@ -11591,7 +11654,7 @@ fn verify_evaluator_key_schedule(setup_package: &Value) -> CanonicalResult<Optio
         ),
         (
             "scheduleBindingStatus",
-            "relinearization-and-galois-proof-verifiers-pending",
+            "relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending",
         ),
     ] {
         if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -16777,9 +16840,9 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "same-secret trustee commitment roots",
         ],
         "nonClosure": [
-            "same-secret proof still requires external AB-DLOP/LNP review and full tbox closure",
-            "public-key share proof remains review-gated until external AB-DLOP/LNP review and full tbox closure",
-            "relinearization and Galois proof bytes remain review-gated until external AB-DLOP/LNP review, full tbox closure, production streaming, and accepted assembly close",
+            "same-secret proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure",
+            "public-key share proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure",
+            "relinearization and Galois proof bytes need repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting, full tbox closure, profile-scale streaming, and accepted assembly closure",
             "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
         ],
         "ringAndMatrixParameters": {
@@ -16811,7 +16874,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "freshMessageNoWrap": u128::from(max_source_message_modulus - 1)
                 < commitment_modulus_product,
-            "status": "review-gated-full-width-per-rns-message-bound-recorded",
+            "status": "claim-accounting-full-width-per-rns-message-bound-recorded",
         },
         "aggregateOpeningBounds": {
             "shamirCoefficientCount": FIRST_PROFILE_DECRYPTION_THRESHOLD,
@@ -16825,7 +16888,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "recipientAndThresholdNoWrap": true,
-            "boundStatus": "review-gated-first-profile-homomorphic-opening-bounds-recorded",
+            "boundStatus": "claim-accounting-first-profile-homomorphic-opening-bounds-recorded",
         },
         "multiOpeningLeakage": {
             "recipientAggregateOpeningsArePublic": false,
@@ -16835,7 +16898,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "rawCoefficientOpeningsExported": false,
             "perCoefficientRandomnessExported": false,
             "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
-            "status": "review-gated-active-static-threshold-leakage-bound-recorded",
+            "status": "claim-accounting-active-static-threshold-leakage-bound-recorded",
         },
         "bindingAssumption": {
             "assumption": "Module-SIS",
@@ -16863,15 +16926,15 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                     ]
                 }
             ],
-            "estimatorStatus": "review-gated-external-module-sis-parameter-certificate-required",
+            "estimatorStatus": "repo-owned-module-sis-parameter-accounting-required",
         },
         "hidingAssumption": {
             "assumption": "Module-LWE with recipient-hidden proof-witness opening leakage boundary",
             "openingDistribution": "coefficientwise-centered-ternary",
             "publicMatrixDistribution": "hash-derived-uniform-residue-stream",
             "lowEntropySecretHiding": true,
-            "statisticalLeakageStatus": "review-gated-for-recipient-hidden-aggregate-opening-proof-witnesses",
-            "estimatorStatus": "review-gated-external-module-lwe-parameter-certificate-required",
+            "statisticalLeakageStatus": "repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-required",
+            "estimatorStatus": "repo-owned-module-lwe-parameter-accounting-required",
         },
         "estimatorRows": [
             {
@@ -16882,7 +16945,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
-                "status": "review-gated"
+                "status": "claim-accounting-pending"
             },
             {
                 "rowId": "first-profile-module-lwe-hiding-row",
@@ -16892,10 +16955,10 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
-                "status": "review-gated"
+                "status": "claim-accounting-pending"
             }
         ],
-        "certificateStatus": "review-gated-not-claim-bearing-until-external-parameter-certificate-and-setup-proof-verifiers",
+        "certificateStatus": "not-claim-bearing-until-repo-owned-parameter-certificate-and-setup-proof-accounting-close",
     }))
 }
 
@@ -16934,6 +16997,409 @@ fn ceil_log2_u128(value: u128) -> u32 {
 }
 
 fn setup_commitment_certificate_refusal(
+    reason_code: &'static str,
+    message: impl Into<String>,
+    object_path: impl Into<String>,
+) -> CanonicalResult<Value> {
+    verification_response(
+        VerifierStatus::Refused,
+        Some("setupPackageVerification"),
+        Vec::new(),
+        vec![Refusal::new(reason_code, message, object_path)],
+        Vec::new(),
+    )
+}
+
+fn verify_setup_proof_accounting_certificate(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let Some(certificate) = setup_package.get("setupProofAccountingCertificate") else {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageVerification"),
+            vec!["setupProofAccountingCertificate".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    if !certificate.is_object() {
+        return Ok(Some(setup_proof_accounting_certificate_refusal(
+            "setupProofAccountingCertificateNotObject",
+            "setupProofAccountingCertificate must be a root-bound object",
+            "setupPackage.setupProofAccountingCertificate",
+        )?));
+    }
+
+    let certificate_hash = certificate
+        .get("setupProofAccountingCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupProofAccountingCertificate.setupProofAccountingCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        certificate_hash,
+        "setupProofAccountingCertificate.setupProofAccountingCertificateHash",
+    )?;
+
+    let mut certificate_body = certificate.clone();
+    certificate_body
+        .as_object_mut()
+        .expect("setup proof accounting certificate object was checked")
+        .remove("setupProofAccountingCertificateHash");
+    let expected_body = setup_proof_accounting_certificate_value()?;
+    if certificate_body != expected_body {
+        return Ok(Some(setup_proof_accounting_certificate_refusal(
+            "setupProofAccountingCertificatePayloadMismatch",
+            "setupProofAccountingCertificate does not match the accepted setup proof accounting certificate",
+            "setupPackage.setupProofAccountingCertificate",
+        )?));
+    }
+
+    let expected_certificate_hash = setup_proof_accounting_certificate_hash()?;
+    if certificate_hash != expected_certificate_hash {
+        return Ok(Some(setup_proof_accounting_certificate_refusal(
+            "setupProofAccountingCertificateHashMismatch",
+            "setupProofAccountingCertificateHash does not match the canonical setup proof accounting certificate",
+            "setupPackage.setupProofAccountingCertificate.setupProofAccountingCertificateHash",
+        )?));
+    }
+    let package_certificate_hash = setup_package
+        .get("setupProofAccountingCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupPackage.setupProofAccountingCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        package_certificate_hash,
+        "setupPackage.setupProofAccountingCertificateHash",
+    )?;
+    if package_certificate_hash != certificate_hash {
+        return Ok(Some(setup_proof_accounting_certificate_refusal(
+            "setupProofAccountingPackageCertificateHashMismatch",
+            "setupPackage.setupProofAccountingCertificateHash must match setupProofAccountingCertificate.setupProofAccountingCertificateHash",
+            "setupPackage.setupProofAccountingCertificateHash",
+        )?));
+    }
+
+    Ok(None)
+}
+
+pub(super) fn setup_proof_accounting_certificate_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE,
+        &setup_proof_accounting_certificate_value()?,
+    )
+}
+
+pub(super) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Value> {
+    let setup_proof_record_binding = setup_proof_record_binding_value()?;
+
+    Ok(json!({
+        "objectType": SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "setupProfileHash": setup_profile_hash()?,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "setupProofProfileHash": setup_proof_profile_hash()?,
+        "setupProofRecordBinding": setup_proof_record_binding,
+        "setupProofRecordBindingHash": setup_proof_record_binding_hash()?,
+        "proofFamilies": SETUP_PROOF_FAMILIES,
+        "proofFamilyAccounting": [
+            {
+                "proofFamily": "vss-opening-carry",
+                "claimScope": "recipient-local private VSS share proof relation over accepted Q_share limbs",
+                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
+            },
+            {
+                "proofFamily": "same-secret-consistency",
+                "claimScope": "same trustee secret across accepted VSS constant commitments",
+                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
+            },
+            {
+                "proofFamily": "public-key-share",
+                "claimScope": "public-key share relation bound to the accepted same-secret proof and public-key material roots",
+                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
+            },
+            {
+                "proofFamily": "relinearization-key-share",
+                "claimScope": "relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots",
+                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
+            },
+            {
+                "proofFamily": "galois-key-share",
+                "claimScope": "Galois key-share relation bound to the required automorphism schedule and key-switch component roots",
+                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
+            },
+        ],
+        "challengeAccounting": {
+            "transform": "Fiat-Shamir",
+            "challengeDomain": SETUP_PROOF_CHALLENGE_DOMAIN,
+            "challengeDomainHash": setup_proof_challenge_domain_hash()?,
+            "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
+            "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
+            "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
+            "challengeDifferenceInvertibilityAccounting": super::setup_proof::challenge_difference_invertibility_accounting_value()?,
+            "challengeSpaceAudit": super::setup_proof::setup_proof_challenge_space_audit_value(SETUP_PROOF_LNP_PROOF_RING_DEGREE)?,
+            "challengeSpaceAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
+                SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
+                SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+            )?,
+            "randomOracleModel": "repo-owned Fiat-Shamir/QROM accounting required before claim-bearing proof acceptance",
+            "qromStatus": "repo-owned-qrom-accounting-required-before-claim-closure",
+            "transcriptBinding": [
+                "setupProfileHash",
+                "manifestHash",
+                "rosterHash",
+                "setupEpoch",
+                "publicMatrixSeedHash",
+                "proofFamily",
+                "statementRoot",
+                "proofChunkRoot"
+            ],
+        },
+        "tboxAccounting": {
+            "tboxProfileHashBinding": "all-required-setup-proof-tbox-profile-hashes-bound",
+            "requiredFamilies": SETUP_PROOF_FAMILIES,
+            "status": "full setup LNP tbox quadratic and range accounting required before claim-bearing proof acceptance",
+        },
+        "completionBoundary": "claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate",
+        "certificateStatus": "not-claim-bearing-until-repo-owned-proof-accounting-and-theorem-closure",
+    }))
+}
+
+fn setup_proof_record_binding_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        SETUP_PROOF_RECORD_BINDING_HASH_NAMESPACE,
+        &setup_proof_record_binding_value()?,
+    )
+}
+
+fn setup_proof_accounting_certificate_refusal(
+    reason_code: &'static str,
+    message: impl Into<String>,
+    object_path: impl Into<String>,
+) -> CanonicalResult<Value> {
+    verification_response(
+        VerifierStatus::Refused,
+        Some("setupPackageVerification"),
+        Vec::new(),
+        vec![Refusal::new(reason_code, message, object_path)],
+        Vec::new(),
+    )
+}
+
+fn verify_setup_key_correctness_certificate(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    if !setup_package_requires_setup_key_correctness_certificate(setup_package) {
+        return Ok(None);
+    }
+
+    let Some(certificate) = setup_package.get("setupKeyCorrectnessCertificate") else {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageVerification"),
+            vec!["setupKeyCorrectnessCertificate".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    if !certificate.is_object() {
+        return Ok(Some(setup_key_correctness_certificate_refusal(
+            "setupKeyCorrectnessCertificateNotObject",
+            "setupKeyCorrectnessCertificate must be a root-bound object",
+            "setupPackage.setupKeyCorrectnessCertificate",
+        )?));
+    }
+
+    let certificate_hash = certificate
+        .get("setupKeyCorrectnessCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupKeyCorrectnessCertificate.setupKeyCorrectnessCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        certificate_hash,
+        "setupKeyCorrectnessCertificate.setupKeyCorrectnessCertificateHash",
+    )?;
+
+    let mut certificate_body = certificate.clone();
+    certificate_body
+        .as_object_mut()
+        .expect("setup key correctness certificate object was checked")
+        .remove("setupKeyCorrectnessCertificateHash");
+    let expected_body = setup_key_correctness_certificate_value(setup_package)?;
+    if certificate_body != expected_body {
+        return Ok(Some(setup_key_correctness_certificate_refusal(
+            "setupKeyCorrectnessCertificatePayloadMismatch",
+            "setupKeyCorrectnessCertificate does not match the accepted setup key correctness certificate",
+            "setupPackage.setupKeyCorrectnessCertificate",
+        )?));
+    }
+
+    let expected_certificate_hash = setup_key_correctness_certificate_hash(setup_package)?;
+    if certificate_hash != expected_certificate_hash {
+        return Ok(Some(setup_key_correctness_certificate_refusal(
+            "setupKeyCorrectnessCertificateHashMismatch",
+            "setupKeyCorrectnessCertificateHash does not match the canonical setup key correctness certificate",
+            "setupPackage.setupKeyCorrectnessCertificate.setupKeyCorrectnessCertificateHash",
+        )?));
+    }
+    let package_certificate_hash = setup_package
+        .get("setupKeyCorrectnessCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupPackage.setupKeyCorrectnessCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        package_certificate_hash,
+        "setupPackage.setupKeyCorrectnessCertificateHash",
+    )?;
+    if package_certificate_hash != certificate_hash {
+        return Ok(Some(setup_key_correctness_certificate_refusal(
+            "setupKeyCorrectnessPackageCertificateHashMismatch",
+            "setupPackage.setupKeyCorrectnessCertificateHash must match setupKeyCorrectnessCertificate.setupKeyCorrectnessCertificateHash",
+            "setupPackage.setupKeyCorrectnessCertificateHash",
+        )?));
+    }
+
+    Ok(None)
+}
+
+fn setup_package_requires_setup_key_correctness_certificate(setup_package: &Value) -> bool {
+    setup_package
+        .get("evaluationKeys")
+        .and_then(Value::as_object)
+        .is_some_and(|evaluation_keys| !evaluation_keys.is_empty())
+}
+
+pub(super) fn setup_key_correctness_certificate_hash(
+    setup_package: &Value,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        SETUP_KEY_CORRECTNESS_CERTIFICATE_HASH_NAMESPACE,
+        &setup_key_correctness_certificate_value(setup_package)?,
+    )
+}
+
+pub(super) fn setup_key_correctness_certificate_value(
+    setup_package: &Value,
+) -> CanonicalResult<Value> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before setup key correctness certificate verification",
+        )
+    })?;
+    let collective_public_key_root = package_nested_hash(
+        setup_package,
+        "collectivePublicKey",
+        "collectivePublicKeyRoot",
+    )?;
+    let public_key_share_material_set_root = package_nested_hash(
+        setup_package,
+        "publicKeyShareMaterial",
+        "publicKeyShareMaterialSetRoot",
+    )?;
+    let public_key_share_lnp_proof_set_root = package_nested_hash(
+        setup_package,
+        "publicKeyShareLnpProofs",
+        "publicKeyShareLnpProofSetRoot",
+    )?;
+
+    Ok(json!({
+        "objectType": SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "ceremonyId": value_string(setup_context, "ceremonyId")?,
+        "manifestHash": value_string(setup_context, "manifestHash")?,
+        "rosterHash": value_string(setup_context, "rosterHash")?,
+        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
+        "qShareHash": value_string(setup_context, "qShareHash")?,
+        "carryAwareVssShareRelationProfileHash": value_string(setup_context, "carryAwareVssShareRelationProfileHash")?,
+        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupEpoch": value_string(setup_context, "setupEpoch")?,
+        "setupProofProfileBinding": "fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate",
+        "keyCorrectnessScope": "collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records",
+        "collectivePublicKey": {
+            "status": "collective-public-key-root-bound-to-public-key-share-material-and-LNP-proof-roots",
+            "collectivePublicKeyRoot": collective_public_key_root,
+            "sourceRoots": {
+                "publicKeyShareSetRoot": package_nested_hash(setup_package, "publicKeyShares", "publicKeyShareSetRoot")?,
+                "publicKeyShareProofSetRoot": package_nested_hash(setup_package, "publicKeyShareProofs", "publicKeyShareProofSetRoot")?,
+                "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
+                "publicKeyShareLnpProofSetRoot": public_key_share_lnp_proof_set_root,
+            }
+        },
+        "publicEvaluationKeys": {
+            "status": "public-evaluation-key-roots-bound-to-frozen-schedule-and-proof-bearing-relinearization-and-galois-records",
+            "evaluationKeySetHash": package_nested_hash(setup_package, "evaluationKeys", "evaluationKeySetHash")?,
+            "evaluatorKeyScheduleRoot": package_nested_hash(setup_package, "evaluatorKeySchedule", "evaluatorKeyScheduleRoot")?,
+            "relinearizationKeyShareRoundsRoot": package_nested_hash(setup_package, "relinearizationKeyShareRounds", "relinearizationKeyShareRoundsRoot")?,
+            "galoisKeyShareBatchRoots": setup_key_correctness_galois_batch_roots(setup_package)?,
+            "requiredGaloisSetHash": package_nested_hash(setup_package, "evaluatorKeySchedule", "requiredGaloisSetHash")?,
+        },
+        "certificateDependencies": {
+            "setupProofAccountingCertificateHash": value_string(setup_package, "setupProofAccountingCertificateHash")?,
+            "heSecurityCertificateHash": value_string(setup_package, "heSecurityCertificateHash")?,
+        },
+        "claimBoundary": "claim-bearing key correctness still requires proof-accounting and theorem closure before accepted setup can close",
+    }))
+}
+
+fn package_nested_hash(
+    setup_package: &Value,
+    object_field_name: &str,
+    hash_field_name: &str,
+) -> CanonicalResult<String> {
+    setup_package
+        .get(object_field_name)
+        .and_then(|object| object.get(hash_field_name))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("setupPackage.{object_field_name}.{hash_field_name} is required"),
+            )
+        })
+}
+
+fn setup_key_correctness_galois_batch_roots(setup_package: &Value) -> CanonicalResult<Vec<Value>> {
+    let batches = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "galoisKeyShareBatches were required before setup key correctness certificate verification",
+            )
+        })?;
+    batches
+        .iter()
+        .map(|batch| {
+            Ok(json!({
+                "trusteeIdentity": value_string(batch, "trusteeIdentity")?,
+                "trusteeRosterPosition": value_u64(batch, "trusteeRosterPosition")?,
+                "galoisKeyShareBatchRoot": value_string(batch, "galoisKeyShareBatchRoot")?,
+            }))
+        })
+        .collect()
+}
+
+fn setup_key_correctness_certificate_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
@@ -17105,7 +17571,7 @@ pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value>
             "acceptedGaloisKeyPolynomials": accepted_galois_key_polynomials,
             "scheduledRelinearizationLevelCount": scheduled_relinearization_level_count,
             "scheduledGaloisKeyCount": required_galois_key_count,
-            "evaluationKeyExposureStatus": "root-bound-review-gated-relinearization-and-galois-key-material-exposed",
+            "evaluationKeyExposureStatus": "root-bound-claim-accounting-pending-relinearization-and-galois-key-material-exposed",
             "commitmentAndSetupProofPublicMatrices": "covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples"
         },
         "standardRows": {
@@ -17923,6 +18389,8 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
         "publicKeyShareProofSetRoot",
         "setupCommitmentSecurityCertificateHash",
         "setupTransportCertificateHash",
+        "setupProofAccountingCertificateHash",
+        "setupKeyCorrectnessCertificateHash",
         "heSecurityCertificateHash",
     ] {
         if let Some(hash) = setup_package.get(field_name).and_then(Value::as_str) {
