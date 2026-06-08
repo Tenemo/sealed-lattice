@@ -34,10 +34,7 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 type LaneStatus = 'failed' | 'passed' | 'stopped';
 
 // A validation lane is a named group of commands that run in series with one
-// another. Lanes may run concurrently during the independent-check phase, and
-// the isolated Rust lane keeps `cargo fmt`, `cargo clippy`, and `cargo test`
-// sequential so they share one native `target/` build lock and reuse each
-// other's dependency artifacts.
+// another. Lanes may run concurrently during the independent-check phase.
 type ValidationLane = {
     readonly commands: readonly CommandInvocation[];
     readonly name: string;
@@ -58,8 +55,19 @@ export type ParsedCheckArguments = {
 
 const checkUsage =
     'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
-const rustKernelLaneName = 'Rust kernel (fmt, clippy, optimized test)';
-const legacyRustKernelLaneName = 'Rust kernel (fmt, clippy, test)';
+const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
+const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
+
+const rustKernelFastTestArguments = [
+    'test',
+    '-p',
+    'sealed-lattice-kernel',
+    '--quiet',
+    '--',
+    '--skip',
+    rustKernelHeavyTestPattern,
+    '--show-output',
+] as const;
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -122,6 +130,10 @@ const createCargoCommand = (
     args: commandArguments,
     command: 'cargo',
     description,
+    env: {
+        ...process.env,
+        CARGO_INCREMENTAL: '0',
+    },
     logFileSlug,
 });
 
@@ -163,17 +175,45 @@ const buildGatingLanes = (
     ),
 ];
 
+const buildRustKernelLane = (): ValidationLane => ({
+    commands: [
+        createCargoCommand(
+            'cargo fmt --check',
+            ['fmt', '--check', '-p', 'sealed-lattice-kernel'],
+            'cargo-fmt',
+        ),
+        createCargoCommand(
+            'cargo clippy',
+            [
+                'clippy',
+                '--workspace',
+                '--all-targets',
+                '--all-features',
+                '--',
+                '-D',
+                'warnings',
+            ],
+            'cargo-clippy',
+        ),
+        createCargoCommand(
+            'cargo test (optimized test profile, fast)',
+            rustKernelFastTestArguments,
+            'cargo-test',
+        ),
+    ],
+    name: rustKernelLaneName,
+});
+
 // Independent checks run concurrently against the built output. The docs lane
 // runs the post-build docs commands directly instead of `pnpm run docs:build`,
 // because the standalone docs script rebuilds the workspace and would write
 // `dist/` during the parallel phase. The pack smoke lane still calls its
 // underlying tool directly because its package script rebuilds for standalone
-// use. The Rust lane runs after this phase: the tests are memory-heavy on
-// Windows and should not compete with docs rendering, linting, package smoke
-// verification, and Node tests. The commit gate runs only the fast Node test
-// project; the heavier protocol and kernel Node projects and the Playwright
-// browser projects stay in `pnpm run test:node` and `pnpm run test:browser` for
-// pre-push verification.
+// use. The commit gate runs the fast Node test project, the non-heavy kernel
+// Node project, and the fast Rust kernel tests. The heavier protocol,
+// kernel-heavy Node project, ignored Rust kernel heavy tests, and the
+// Playwright browser projects stay in their standalone lanes for pre-push
+// verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -191,6 +231,7 @@ const buildParallelLanes = (
 
     return [
         lane('Lint', 'lint', ['run', 'lint']),
+        buildRustKernelLane(),
         {
             commands: [
                 createPackageManagerCommand(
@@ -288,41 +329,19 @@ const buildParallelLanes = (
             '--reporter',
             './tools/ci/vitest-progress-reporter.ts',
         ]),
+        lane('Node tests (kernel)', 'vitest-node-kernel', [
+            'exec',
+            'vitest',
+            '--project',
+            'node-kernel',
+            '--run',
+            '--reporter',
+            'default',
+            '--reporter',
+            './tools/ci/vitest-progress-reporter.ts',
+        ]),
     ];
 };
-
-const buildRustKernelLane = (): ValidationLane => ({
-    commands: [
-        createCargoCommand(
-            'cargo fmt --check',
-            ['fmt', '--check', '-p', 'sealed-lattice-kernel'],
-            'cargo-fmt',
-        ),
-        createCargoCommand(
-            'cargo clippy',
-            [
-                'clippy',
-                '--workspace',
-                '--all-targets',
-                '--all-features',
-                '--',
-                '-D',
-                'warnings',
-            ],
-            'cargo-clippy',
-        ),
-        createCargoCommand(
-            'cargo test (optimized test profile)',
-            ['test', '-p', 'sealed-lattice-kernel', '--quiet'],
-            'cargo-test',
-        ),
-    ],
-    name: rustKernelLaneName,
-});
-
-const buildIsolatedLanes = (): readonly ValidationLane[] => [
-    buildRustKernelLane(),
-];
 
 const buildProgressLanePlans = (
     lanes: readonly ValidationLane[],
@@ -333,8 +352,7 @@ const buildProgressLanePlans = (
     ): CheckProgressLanePlan['progress'] => {
         const previousProgress =
             lane.name === rustKernelLaneName
-                ? (timingHistory.laneProgress.get(rustKernelLaneName) ??
-                  timingHistory.laneProgress.get(legacyRustKernelLaneName))
+                ? timingHistory.laneProgress.get(rustKernelLaneName)
                 : timingHistory.laneProgress.get(lane.name);
         if (lane.name === 'Build workspace packages') {
             return {
@@ -349,16 +367,11 @@ const buildProgressLanePlans = (
                 source: 'turbo',
             };
         }
-        if (lane.name === 'Node tests (fast)') {
+        if (
+            lane.name === 'Node tests (fast)' ||
+            lane.name === 'Node tests (kernel)'
+        ) {
             return {
-                primary:
-                    previousProgress?.primary === undefined
-                        ? undefined
-                        : {
-                              completed: 0,
-                              total: previousProgress.primary.total,
-                              unit: 'test file',
-                          },
                 secondary:
                     previousProgress?.secondary === undefined
                         ? undefined
@@ -574,12 +587,7 @@ const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildGatingLanes(packageManagerRunner);
     const parallelLanes = buildParallelLanes(packageManagerRunner);
-    const isolatedLanes = buildIsolatedLanes();
-    const validationLanes = [
-        ...gatingLanes,
-        ...parallelLanes,
-        ...isolatedLanes,
-    ];
+    const validationLanes = [...gatingLanes, ...parallelLanes];
     const timingHistory = await readPreviousCheckTimingHistory();
     const reporter = new CheckProgressReporter({
         history: timingHistory,
@@ -643,14 +651,6 @@ const main = async (): Promise<void> => {
             process.exitCode = overallExitCode(results);
 
             return;
-        }
-
-        for (const lane of isolatedLanes) {
-            const result = await runGatingLane(lane, runLog, reporter);
-            results.push(result);
-            if (result.exitCode !== 0) {
-                break;
-            }
         }
 
         reporter.stop();

@@ -611,6 +611,9 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_vss_complaints(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    if let Some(response) = verify_collective_public_key_pair_consistency(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
     if let Some(response) = verify_vss_share_acceptances(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -682,6 +685,9 @@ fn verify_collective_setup_package(
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_required_public_evaluation_key_set(setup_package, request)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_required_final_objects(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     Ok(VerificationFlow::Continue)
@@ -2959,14 +2965,16 @@ fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Option<Value>>
     Ok(None)
 }
 
-fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+fn verify_collective_public_key_pair_consistency(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
     let has_collective_public_key = setup_package.get("collectivePublicKey").is_some();
     let has_collective_public_key_root = setup_package.get("collectivePublicKeyRoot").is_some();
     if has_collective_public_key != has_collective_public_key_root {
         let object_path = if has_collective_public_key_root {
-            "setupPackage.collectivePublicKeyRoot"
-        } else {
             "setupPackage.collectivePublicKey"
+        } else {
+            "setupPackage.collectivePublicKeyRoot"
         };
         return Ok(Some(public_key_share_proof_refusal(
             "publicKeyMaterialBeforeProofVerification",
@@ -2975,8 +2983,21 @@ fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Optio
         )?));
     }
 
+    Ok(None)
+}
+
+fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+    let setup_key_correctness_certificate_required =
+        setup_package_requires_setup_key_correctness_certificate(setup_package);
     let missing_objects = REQUIRED_FINAL_OBJECTS
         .iter()
+        .filter(|field_name| {
+            setup_key_correctness_certificate_required
+                || !matches!(
+                    **field_name,
+                    "setupKeyCorrectnessCertificate" | "setupKeyCorrectnessCertificateHash"
+                )
+        })
         .filter(|field_name| setup_package.get(**field_name).is_none())
         .map(|field_name| (*field_name).to_string())
         .collect::<Vec<_>>();
@@ -7762,20 +7783,20 @@ fn verify_same_secret_lnp_proof_record(
     }
     verify_lnp_tbox_z34_metadata_fields(
         proof_record,
-        LnpTboxZ34MetadataFields {
-            seed_material_hash: &verification.z34_seed_material_hash,
-            challenge_seed_hash: &verification.z34_challenge_seed_hash,
-            challenge_tail_hash: &verification.z34_challenge_tail_hash,
-            challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
-            challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
-            challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
-            lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
-            z3_check_window_hash: &verification.z34_z3_check_window_hash,
-            z4_check_window_hash: &verification.z34_z4_check_window_hash,
-            z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
-            z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+        LnpTboxZ34MetadataExpectation {
+            z34_seed_material_hash: &verification.z34_seed_material_hash,
+            z34_challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            z34_challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            z34_challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z34_z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z34_z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z34_z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z34_z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+            proof_label: "same-secret proof",
         },
-        "same-secret proof",
     )?;
     let proof_root = value_string(proof_record, "sameSecretProofRoot")?;
     let mut root_input = proof_record.clone();
@@ -11224,20 +11245,20 @@ fn verify_public_key_share_lnp_proof_record(
     }
     verify_lnp_tbox_z34_metadata_fields(
         proof_record,
-        LnpTboxZ34MetadataFields {
-            seed_material_hash: &verification.z34_seed_material_hash,
-            challenge_seed_hash: &verification.z34_challenge_seed_hash,
-            challenge_tail_hash: &verification.z34_challenge_tail_hash,
-            challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
-            challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
-            challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
-            lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
-            z3_check_window_hash: &verification.z34_z3_check_window_hash,
-            z4_check_window_hash: &verification.z34_z4_check_window_hash,
-            z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
-            z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+        LnpTboxZ34MetadataExpectation {
+            z34_seed_material_hash: &verification.z34_seed_material_hash,
+            z34_challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            z34_challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            z34_challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z34_z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z34_z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z34_z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z34_z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+            proof_label: "public-key LNP proof",
         },
-        "public-key LNP proof",
     )?;
     let proof_root = value_string(proof_record, "publicKeyShareLnpProofRoot")?;
     let mut root_input = proof_record.clone();
@@ -15504,85 +15525,94 @@ fn verify_evaluation_key_lnp_proof_transcript_metadata(
     }
     verify_lnp_tbox_z34_metadata_fields(
         proof_record,
-        LnpTboxZ34MetadataFields {
-            seed_material_hash: &verification.z34_seed_material_hash,
-            challenge_seed_hash: &verification.z34_challenge_seed_hash,
-            challenge_tail_hash: &verification.z34_challenge_tail_hash,
-            challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
-            challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
-            challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
-            lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
-            z3_check_window_hash: &verification.z34_z3_check_window_hash,
-            z4_check_window_hash: &verification.z34_z4_check_window_hash,
-            z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
-            z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+        LnpTboxZ34MetadataExpectation {
+            z34_seed_material_hash: &verification.z34_seed_material_hash,
+            z34_challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            z34_challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            z34_challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z34_z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z34_z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z34_z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z34_z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+            proof_label: "evaluation-key LNP proof",
         },
-        "evaluation-key LNP proof",
     )?;
 
     Ok(())
 }
 
-struct LnpTboxZ34MetadataFields<'a> {
-    seed_material_hash: &'a str,
-    challenge_seed_hash: &'a str,
-    challenge_tail_hash: &'a str,
-    challenge_row_domain_hash: &'a str,
-    challenge_z3_row_set_hash: &'a str,
-    challenge_z4_row_set_hash: &'a str,
-    lower_protocol_challenge_hash: &'a str,
-    z3_check_window_hash: &'a str,
-    z4_check_window_hash: &'a str,
-    z3_l2_squared_decimal: &'a str,
-    z4_infinity_norm_decimal: &'a str,
+struct LnpTboxZ34MetadataExpectation<'a> {
+    z34_seed_material_hash: &'a str,
+    z34_challenge_seed_hash: &'a str,
+    z34_challenge_tail_hash: &'a str,
+    z34_challenge_row_domain_hash: &'a str,
+    z34_challenge_z3_row_set_hash: &'a str,
+    z34_challenge_z4_row_set_hash: &'a str,
+    tbox_lower_protocol_challenge_hash: &'a str,
+    z34_z3_check_window_hash: &'a str,
+    z34_z4_check_window_hash: &'a str,
+    z34_z3_l2_squared_decimal: &'a str,
+    z34_z4_infinity_norm_decimal: &'a str,
+    proof_label: &'a str,
 }
 
 fn verify_lnp_tbox_z34_metadata_fields(
     proof_record: &Value,
-    metadata: LnpTboxZ34MetadataFields<'_>,
-    proof_label: &str,
+    expectation: LnpTboxZ34MetadataExpectation<'_>,
 ) -> CanonicalResult<()> {
     for (field_name, expected_hash) in [
-        ("z34SeedMaterialHash", metadata.seed_material_hash),
-        ("z34ChallengeSeedHash", metadata.challenge_seed_hash),
-        ("z34ChallengeTailHash", metadata.challenge_tail_hash),
+        ("z34SeedMaterialHash", expectation.z34_seed_material_hash),
+        ("z34ChallengeSeedHash", expectation.z34_challenge_seed_hash),
+        ("z34ChallengeTailHash", expectation.z34_challenge_tail_hash),
         (
             "z34ChallengeRowDomainHash",
-            metadata.challenge_row_domain_hash,
+            expectation.z34_challenge_row_domain_hash,
         ),
         (
             "z34ChallengeZ3RowSetHash",
-            metadata.challenge_z3_row_set_hash,
+            expectation.z34_challenge_z3_row_set_hash,
         ),
         (
             "z34ChallengeZ4RowSetHash",
-            metadata.challenge_z4_row_set_hash,
+            expectation.z34_challenge_z4_row_set_hash,
         ),
         (
             "tboxLowerProtocolChallengeHash",
-            metadata.lower_protocol_challenge_hash,
+            expectation.tbox_lower_protocol_challenge_hash,
         ),
-        ("z34Z3CheckWindowHash", metadata.z3_check_window_hash),
-        ("z34Z4CheckWindowHash", metadata.z4_check_window_hash),
+        ("z34Z3CheckWindowHash", expectation.z34_z3_check_window_hash),
+        ("z34Z4CheckWindowHash", expectation.z34_z4_check_window_hash),
     ] {
         if value_string(proof_record, field_name)? != expected_hash {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                format!("{proof_label} {field_name} must match verified tbox proof bytes"),
+                format!(
+                    "{} {field_name} must match verified tbox proof bytes",
+                    expectation.proof_label
+                ),
             ));
         }
     }
     for (field_name, expected_decimal) in [
-        ("z34Z3L2SquaredDecimal", metadata.z3_l2_squared_decimal),
+        (
+            "z34Z3L2SquaredDecimal",
+            expectation.z34_z3_l2_squared_decimal,
+        ),
         (
             "z34Z4InfinityNormDecimal",
-            metadata.z4_infinity_norm_decimal,
+            expectation.z34_z4_infinity_norm_decimal,
         ),
     ] {
         if value_string(proof_record, field_name)? != expected_decimal {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                format!("{proof_label} {field_name} must match verified tbox proof bytes"),
+                format!(
+                    "{} {field_name} must match verified tbox proof bytes",
+                    expectation.proof_label
+                ),
             ));
         }
     }
@@ -18329,13 +18359,7 @@ fn setup_proof_accounting_certificate_refusal(
 fn verify_setup_key_correctness_certificate(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    let Some(evaluation_keys) = setup_package.get("evaluationKeys") else {
-        return Ok(None);
-    };
-    if evaluation_keys
-        .as_object()
-        .is_some_and(serde_json::Map::is_empty)
-    {
+    if !setup_package_requires_setup_key_correctness_certificate(setup_package) {
         return Ok(None);
     }
 
@@ -18414,6 +18438,13 @@ fn verify_setup_key_correctness_certificate(
     }
 
     Ok(None)
+}
+
+fn setup_package_requires_setup_key_correctness_certificate(setup_package: &Value) -> bool {
+    setup_package
+        .get("evaluationKeys")
+        .and_then(Value::as_object)
+        .is_some_and(|evaluation_keys| !evaluation_keys.is_empty())
 }
 
 pub(super) fn setup_key_correctness_certificate_hash(

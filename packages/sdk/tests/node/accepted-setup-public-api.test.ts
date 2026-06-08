@@ -1352,48 +1352,53 @@ describe('accepted setup public package API in Node', () => {
                 publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
             sameSecretProofReferences,
         };
-        const roundOneContributions = relinearizationLevelSchedule.flatMap(
-            (scheduleEntry) =>
-                sameSecretProofReferences.map((reference) => {
+        const relinearizationLevels = relinearizationLevelSchedule.map(
+            (scheduleEntry) => scheduleEntry.level,
+        );
+        const roundOneContributions = sameSecretProofReferences.flatMap(
+            (reference) =>
+                relinearizationLevels.map((level) => {
+                    const contributionLabel = `${String(reference.trusteeRosterPosition)}-${String(level)}`;
                     const roundOneShareRoot = hashFromKernel(
                         kernel,
-                        `round-one-share-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                        `round-one-share-${contributionLabel}`,
                     );
 
                     return {
                         trusteeRosterPosition: reference.trusteeRosterPosition,
-                        level: scheduleEntry.level,
+                        level,
                         roundOneShareRoot,
                         proofMaterial: relinearizationProofMaterial(
                             kernel,
                             evaluatorKeySchedule,
                             roundOneShareRoot,
-                            `round-one-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                            `round-one-${contributionLabel}`,
                             'round-one',
-                            scheduleEntry.level,
+                            level,
                         ),
                     };
                 }),
         );
-        const roundTwoContributions = relinearizationLevelSchedule.flatMap(
-            (scheduleEntry) =>
-                sameSecretProofReferences.map((reference) => {
+        const roundTwoContributions = sameSecretProofReferences.flatMap(
+            (reference) =>
+                relinearizationLevels.map((level) => {
+                    const contributionLabel = `${String(reference.trusteeRosterPosition)}-${String(level)}`;
                     const roundTwoShareRoot = hashFromKernel(
                         kernel,
-                        `round-two-share-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                        `round-two-share-${contributionLabel}`,
                     );
 
                     return {
                         trusteeRosterPosition: reference.trusteeRosterPosition,
-                        level: scheduleEntry.level,
+                        level,
                         roundTwoShareRoot,
                         proofMaterial: relinearizationProofMaterial(
                             kernel,
                             evaluatorKeySchedule,
                             roundTwoShareRoot,
-                            `round-two-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                            `round-two-${contributionLabel}`,
                             'round-two',
-                            scheduleEntry.level,
+                            level,
                         ),
                     };
                 }),

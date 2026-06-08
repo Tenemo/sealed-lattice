@@ -3339,7 +3339,7 @@ fn encode_evaluation_key_share_lnp_tbox_prefix(
     encode_evaluation_key_share_lnp_uniform_polyvec(
         proof_family,
         &mut writer,
-        EvaluationKeyShareLnpUniformPolyvecInput {
+        EvaluationKeyShareLnpUniformPolyvecEncoding {
             polynomial_count: layout.t_b_polynomial_count,
             proof_ring_degree: layout.proof_ring_degree,
             bit_count: layout.proof_modulus_bit_count,
@@ -3351,7 +3351,7 @@ fn encode_evaluation_key_share_lnp_tbox_prefix(
     encode_evaluation_key_share_lnp_uniform_polyvec(
         proof_family,
         &mut writer,
-        EvaluationKeyShareLnpUniformPolyvecInput {
+        EvaluationKeyShareLnpUniformPolyvecEncoding {
             polynomial_count: layout.h_polynomial_count,
             proof_ring_degree: layout.proof_ring_degree,
             bit_count: layout.proof_modulus_bit_count,
@@ -3363,7 +3363,7 @@ fn encode_evaluation_key_share_lnp_tbox_prefix(
     encode_evaluation_key_share_lnp_uniform_polyvec(
         proof_family,
         &mut writer,
-        EvaluationKeyShareLnpUniformPolyvecInput {
+        EvaluationKeyShareLnpUniformPolyvecEncoding {
             polynomial_count: layout.t_a1_polynomial_count,
             proof_ring_degree: layout.proof_ring_degree,
             bit_count: layout
@@ -3381,7 +3381,7 @@ fn encode_evaluation_key_share_lnp_tbox_prefix(
     Ok(writer.into_bytes())
 }
 
-struct EvaluationKeyShareLnpUniformPolyvecInput<'a> {
+struct EvaluationKeyShareLnpUniformPolyvecEncoding<'a> {
     polynomial_count: usize,
     proof_ring_degree: usize,
     bit_count: usize,
@@ -3393,7 +3393,7 @@ struct EvaluationKeyShareLnpUniformPolyvecInput<'a> {
 fn encode_evaluation_key_share_lnp_uniform_polyvec(
     proof_family: EvaluationKeyShareProofFamily,
     writer: &mut EvaluationKeyShareLnpBitWriter<'_>,
-    input: EvaluationKeyShareLnpUniformPolyvecInput<'_>,
+    input: EvaluationKeyShareLnpUniformPolyvecEncoding<'_>,
 ) -> CanonicalResult<()> {
     let coefficient_count = input
         .polynomial_count

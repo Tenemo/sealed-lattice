@@ -1,8 +1,14 @@
 export const nodeTestTimeoutMs = 60_000;
 export const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
+export const nodeKernelVeryHeavyTestTimeoutMs = 30 * 60_000;
 export const nodeHookTimeoutMs = 240_000;
 
-export const nodeTestLaneValues = ['fast', 'protocol', 'kernel'] as const;
+export const nodeTestLaneValues = [
+    'fast',
+    'protocol',
+    'kernel',
+    'kernel-heavy',
+] as const;
 
 export type NodeTestLane = (typeof nodeTestLaneValues)[number];
 
@@ -24,6 +30,10 @@ const kernelNodeTestGlobs = [
     'tests/node/**/*.kernel.test.ts',
 ] as const;
 
+const heavyKernelNodeTestGlobs = [
+    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup.kernel.test.ts',
+] as const;
+
 export const nodeTestLaneDefinitions = {
     fast: {
         commandDescription: 'Run fast Node tests',
@@ -43,10 +53,18 @@ export const nodeTestLaneDefinitions = {
     },
     kernel: {
         commandDescription: 'Run kernel Node tests',
+        exclude: heavyKernelNodeTestGlobs,
         fileParallelism: false,
         include: kernelNodeTestGlobs,
         projectName: 'node-kernel',
         testTimeout: nodeKernelHeavyTestTimeoutMs,
+    },
+    'kernel-heavy': {
+        commandDescription: 'Run heavy kernel Node tests',
+        fileParallelism: false,
+        include: heavyKernelNodeTestGlobs,
+        projectName: 'node-kernel-heavy',
+        testTimeout: nodeKernelVeryHeavyTestTimeoutMs,
     },
 } as const satisfies Record<NodeTestLane, NodeTestProjectDefinition>;
 
@@ -54,12 +72,14 @@ export const nodeTestProjectDefinitions = [
     nodeTestLaneDefinitions.fast,
     nodeTestLaneDefinitions.protocol,
     nodeTestLaneDefinitions.kernel,
+    nodeTestLaneDefinitions['kernel-heavy'],
 ] as const;
 
 export const defaultNodeTestLanes = [
     'fast',
     'protocol',
     'kernel',
+    'kernel-heavy',
 ] as const satisfies readonly NodeTestLane[];
 
 export const browserTestLaneValues = ['desktop', 'mobile'] as const;
