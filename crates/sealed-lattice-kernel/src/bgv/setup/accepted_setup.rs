@@ -11,26 +11,46 @@ use super::{
         SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
         SETUP_COMMITMENT_ROW_COUNT, parse_setup_commitment_full_value,
         setup_commitment_matrix_sampled_entries, setup_commitment_modulus_limb_values,
-        setup_commitment_modulus_product, setup_commitment_profile_hash,
-        setup_commitment_profile_value, setup_commitment_root,
+        setup_commitment_modulus_product, setup_commitment_modulus_product_ceil_bits,
+        setup_commitment_profile_hash, setup_commitment_profile_value, setup_commitment_root,
     },
     evaluation_key_share_proof::{
-        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_CARRY_MASK_BITS, EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+        EVALUATION_KEY_SHARE_ERROR_INFINITY_BOUND, EVALUATION_KEY_SHARE_ERROR_MASK_BITS,
+        EVALUATION_KEY_SHARE_RANDOMNESS_MASK_BITS,
+        EVALUATION_KEY_SHARE_ROUND_TWO_AGGREGATE_SOURCE_PARTICIPANT_BOUND,
+        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS, EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND,
+        EVALUATION_KEY_SHARE_SECRET_MASK_BITS, EVALUATION_KEY_SHARE_SOURCE_MASK_BITS,
         EvaluationKeyShareLnpProofVerificationInput, EvaluationKeyShareProofFamily,
         GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS, GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        GALOIS_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
         RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS, component_b_vectors_from_record,
+        RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        RELINEARIZATION_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN, component_b_vectors_from_record,
         evaluation_key_share_lnp_relation_proof_bytes_hash,
         verify_evaluation_key_share_lnp_relation_proof,
     },
+    private_vss_share_proof::{
+        PRIVATE_VSS_SHARE_CARRY_MASK_BITS, PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
+        PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS, PRIVATE_VSS_SHARE_RANDOMNESS_MASK_BITS,
+        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
+    },
     public_key_share_proof::{
-        PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS, PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        PUBLIC_KEY_SHARE_CARRY_MASK_BITS, PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND,
+        PUBLIC_KEY_SHARE_ERROR_MASK_BITS, PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+        PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+        PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN, PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
+        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND, PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS,
+        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS, PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND,
         PublicKeyShareLnpProofVerificationInput, public_key_share_coefficient_vector_hash,
         public_key_share_lnp_relation_proof_bytes_hash, verify_public_key_share_lnp_relation_proof,
     },
     same_secret_proof::{
         SAME_SECRET_LNP_PROOF_MODEL_STATUS, SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+        SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN, SAME_SECRET_MESSAGE_MASK_BITS,
+        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND, SAME_SECRET_RANDOMNESS_MASK_BITS,
+        SAME_SECRET_SCALAR_CHALLENGE_BITS, SAME_SECRET_TERNARY_INFINITY_BOUND,
         same_secret_lnp_relation_proof_bytes_hash, verify_same_secret_lnp_relation_proof,
     },
     sampling::reduce_unbiased_u64,
@@ -38,7 +58,8 @@ use super::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_CHALLENGE_BITS,
         SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND, SETUP_PROOF_CHALLENGE_COUNT,
         SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS, SETUP_PROOF_CHALLENGE_DOMAIN,
-        SETUP_PROOF_CHALLENGE_SAMPLER, SETUP_PROOF_CHALLENGE_SPACE, SETUP_PROOF_FAMILIES,
+        SETUP_PROOF_CHALLENGE_SAMPLER, SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
+        SETUP_PROOF_CHALLENGE_SPACE, SETUP_PROOF_CHALLENGE_STREAM_DOMAIN, SETUP_PROOF_FAMILIES,
         SETUP_PROOF_LNP_CHALLENGE_ENCODED_BITS, SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
         SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS, SETUP_PROOF_LNP_PROOF_RING_DEGREE,
         SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_PROFILE_ID, SETUP_PROOF_SERIALIZATION,
@@ -105,7 +126,7 @@ pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str 
 pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedPublicEvaluationKeyMaterial";
 const PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS: &str =
-    "assembled-from-proof-bearing-shares-claim-accounting-pending";
+    "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate";
 const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
     "root-bound-public-key-switch-component-roots";
 pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
@@ -142,7 +163,11 @@ const SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE: &str =
     "SetupProofAccountingCertificateHash";
 const SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE: &str = "SetupKeyCorrectnessCertificate";
 const SETUP_KEY_CORRECTNESS_CERTIFICATE_HASH_NAMESPACE: &str = "SetupKeyCorrectnessCertificateHash";
-const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-claim-accounting-pending";
+const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE: &str =
+    "ActiveStaticSetupTheoremCertificate";
+const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE: &str =
+    "ActiveStaticSetupTheoremCertificateHash";
+const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-same-secret-public-key-share-relinearization-and-galois-proof-bytes-accepted-for-setup-proof-accounting";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
 const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
@@ -229,6 +254,8 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "setupProofAccountingCertificateHash",
     "setupKeyCorrectnessCertificate",
     "setupKeyCorrectnessCertificateHash",
+    "activeStaticSetupTheoremCertificate",
+    "activeStaticSetupTheoremCertificateHash",
     "heSecurityCertificate",
     "heSecurityCertificateHash",
 ];
@@ -395,6 +422,11 @@ pub(crate) fn describe_collective_bgv_setup_profile() -> CanonicalResult<Value> 
         "setupTransportProfileHash": setup_transport_profile_hash()?,
         "evaluatorKeyScheduleProfile": evaluator_key_schedule_profile_value()?,
         "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
+        "acceptedCertificateTemplates": {
+            "setupCommitmentSecurityCertificate": setup_commitment_security_certificate_with_hash_value()?,
+            "setupProofAccountingCertificate": setup_proof_accounting_certificate_with_hash_value()?,
+            "heSecurityCertificate": accepted_he_security_certificate_with_hash_value()?,
+        },
         "verifierStatuses": [
             "accepted",
             "pending",
@@ -454,21 +486,7 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
         );
     }
     match verify_collective_setup_package(setup_package, request)? {
-        VerificationFlow::Continue => Ok(verification_response(
-            VerifierStatus::Pending,
-            Some("claimAccounting"),
-            vec![
-                "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting for private VSS, same-secret, public-key, relinearization, and Galois proof families".to_string(),
-                "full setup LNP tbox quadratic and range closure".to_string(),
-                "repo-owned Fiat-Shamir/QROM accounting certificate for setup proof challenge domains".to_string(),
-                "claim-bearing setup commitment parameter certificate for Module-SIS and Module-LWE rows".to_string(),
-                "claim-bearing collective public-key and evaluation-key correctness certificates".to_string(),
-                "profile-scale binary streaming evidence for setup proof, key, and local-state material".to_string(),
-                "active-static secure-with-abort theorem certificate".to_string(),
-            ],
-            Vec::new(),
-            accepted_hashes_from_package(setup_package),
-        )?),
+        VerificationFlow::Continue => accepted_setup_verification_response(setup_package),
         VerificationFlow::Stop(response) => Ok(response),
     }
 }
@@ -648,7 +666,22 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_setup_key_correctness_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_profile_ring_material(setup_package)? {
+    if let Some(response) = verify_active_static_setup_theorem_certificate(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    let declares_public_runtime_material =
+        setup_package_declares_public_runtime_material(setup_package);
+    if declares_public_runtime_material
+        && let Some(response) = verify_profile_ring_material(setup_package)?
+    {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_required_final_objects(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if !declares_public_runtime_material
+        && let Some(response) = verify_profile_ring_material(setup_package)?
+    {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_required_public_evaluation_key_set(setup_package, request)? {
@@ -1147,7 +1180,7 @@ fn evaluator_key_schedule_profile_value() -> CanonicalResult<Value> {
         "requiredGaloisSetHash": required_galois_set_hash,
         "genericKeySwitchPolicy": "refused-unless-explicitly-required",
         "genericKeySwitchProofStatus": "not-required-for-first-profile",
-        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending",
+        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting",
     }))
 }
 
@@ -2981,6 +3014,14 @@ fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Optio
     )?))
 }
 
+fn setup_package_declares_public_runtime_material(setup_package: &Value) -> bool {
+    setup_package.get("collectivePublicKey").is_some()
+        || setup_package
+            .get("evaluationKeys")
+            .and_then(Value::as_object)
+            .is_some_and(|evaluation_keys| !evaluation_keys.is_empty())
+}
+
 fn verify_vss_coefficient_commitments(setup_package: &Value) -> CanonicalResult<Option<Value>> {
     let Some(commitment_set) = setup_package.get("vssCoefficientCommitments") else {
         return Ok(Some(verification_response(
@@ -3392,7 +3433,9 @@ fn verify_vss_coefficient_commitment_material(
     Ok(None)
 }
 
-fn verify_profile_ring_material(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+pub(super) fn verify_profile_ring_material(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
     let material_set = setup_package
         .get("vssCoefficientCommitmentMaterial")
         .ok_or_else(|| {
@@ -3408,6 +3451,100 @@ fn verify_profile_ring_material(setup_package: &Value) -> CanonicalResult<Option
             "vssCoefficientCommitmentMaterial must use the accepted profile ring degree",
             "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
         )?));
+    }
+    if let Some(proof_set) = setup_package.get("sameSecretProofs")
+        && let Some(response) = verify_profile_ring_records(
+            proof_set,
+            "proofRecords",
+            "same-secret proof records must use the accepted profile ring degree before terminal setup acceptance",
+            "setupPackage.sameSecretProofs.proofRecords.ringDegree",
+        )?
+    {
+        return Ok(Some(response));
+    }
+    if let Some(material_set) = setup_package.get("publicKeyShareMaterial")
+        && let Some(response) = verify_profile_ring_record(
+            material_set,
+            "public-key share material must use the accepted profile ring degree before terminal setup acceptance",
+            "setupPackage.publicKeyShareMaterial.ringDegree",
+        )?
+    {
+        return Ok(Some(response));
+    }
+    if let Some(proof_set) = setup_package.get("publicKeyShareLnpProofs")
+        && let Some(response) = verify_profile_ring_records(
+            proof_set,
+            "proofRecords",
+            "public-key LNP proof records must use the accepted profile ring degree before terminal setup acceptance",
+            "setupPackage.publicKeyShareLnpProofs.proofRecords.ringDegree",
+        )?
+    {
+        return Ok(Some(response));
+    }
+    if let Some(collective_public_key) = setup_package.get("collectivePublicKey")
+        && let Some(response) = verify_profile_ring_record(
+            collective_public_key,
+            "collective public-key material must use the accepted profile ring degree before terminal setup acceptance",
+            "setupPackage.collectivePublicKey.ringDegree",
+        )?
+    {
+        return Ok(Some(response));
+    }
+    if let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") {
+        for field_name in ["roundOneRecords", "roundTwoRecords"] {
+            if let Some(response) = verify_profile_ring_records(
+                rounds,
+                field_name,
+                "relinearization key-share proof records must use the accepted profile ring degree before terminal setup acceptance",
+                format!("setupPackage.relinearizationKeyShareRounds.{field_name}.ringDegree"),
+            )? {
+                return Ok(Some(response));
+            }
+        }
+    }
+    if let Some(galois_batches) = setup_package
+        .get("galoisKeyShareBatches")
+        .and_then(Value::as_array)
+    {
+        for batch in galois_batches {
+            if let Some(response) = verify_profile_ring_records(
+                batch,
+                "galoisKeyShareProofs",
+                "Galois key-share proof records must use the accepted profile ring degree before terminal setup acceptance",
+                "setupPackage.galoisKeyShareBatches.galoisKeyShareProofs.ringDegree",
+            )? {
+                return Ok(Some(response));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn verify_profile_ring_records(
+    record_set: &Value,
+    records_field_name: &str,
+    message: impl Into<String> + Clone,
+    object_path: impl Into<String> + Clone,
+) -> CanonicalResult<Option<Value>> {
+    for record in array_value(record_set, records_field_name)? {
+        if let Some(response) =
+            verify_profile_ring_record(record, message.clone(), object_path.clone())?
+        {
+            return Ok(Some(response));
+        }
+    }
+
+    Ok(None)
+}
+
+fn verify_profile_ring_record(
+    record: &Value,
+    message: impl Into<String>,
+    object_path: impl Into<String>,
+) -> CanonicalResult<Option<Value>> {
+    if record.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
+        return Ok(Some(vss_material_outside_profile(message, object_path)?));
     }
 
     Ok(None)
@@ -7636,7 +7773,7 @@ fn verify_same_secret_lnp_proof_record(
             .get("tboxCommitmentPrefixHash")
             .and_then(Value::as_str)
             != Some(verification.tbox_commitment_prefix_hash.as_str())
-        || proof_record.get("challenge").and_then(Value::as_u64) != Some(verification.challenge)
+        || value_decimal_u64(proof_record, "challenge")? != verification.challenge
         || proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(verified_proof_size)
     {
         return Err(CanonicalError::new(
@@ -7644,6 +7781,23 @@ fn verify_same_secret_lnp_proof_record(
             "same-secret proof transcript metadata must match verified proof bytes",
         ));
     }
+    verify_lnp_tbox_z34_metadata_fields(
+        proof_record,
+        LnpTboxZ34MetadataExpectation {
+            z34_seed_material_hash: &verification.z34_seed_material_hash,
+            z34_challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            z34_challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            z34_challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z34_z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z34_z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z34_z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z34_z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+            proof_label: "same-secret proof",
+        },
+    )?;
     let proof_root = value_string(proof_record, "sameSecretProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
@@ -8936,6 +9090,17 @@ fn unexpected_same_secret_proof_record_field(value: &Value) -> Option<String> {
             "statementHash",
             "relationCommitmentHash",
             "tboxCommitmentPrefixHash",
+            "z34SeedMaterialHash",
+            "z34ChallengeSeedHash",
+            "z34ChallengeTailHash",
+            "z34ChallengeRowDomainHash",
+            "z34ChallengeZ3RowSetHash",
+            "z34ChallengeZ4RowSetHash",
+            "tboxLowerProtocolChallengeHash",
+            "z34Z3CheckWindowHash",
+            "z34Z4CheckWindowHash",
+            "z34Z3L2SquaredDecimal",
+            "z34Z4InfinityNormDecimal",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
@@ -10030,7 +10195,7 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
         ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
         (
             "aggregationStatus",
-            "lnp-proof-aggregated-claim-accounting-pending",
+            "lnp-proof-aggregated-with-accepted-setup-proof-accounting",
         ),
         (
             "materialEncoding",
@@ -11070,7 +11235,7 @@ fn verify_public_key_share_lnp_proof_record(
             .get("tboxCommitmentPrefixHash")
             .and_then(Value::as_str)
             != Some(verification.tbox_commitment_prefix_hash.as_str())
-        || proof_record.get("challenge").and_then(Value::as_u64) != Some(verification.challenge)
+        || value_decimal_u64(proof_record, "challenge")? != verification.challenge
         || proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(verified_proof_size)
     {
         return Err(CanonicalError::new(
@@ -11078,6 +11243,23 @@ fn verify_public_key_share_lnp_proof_record(
             "public-key LNP proof transcript metadata must match verified proof bytes",
         ));
     }
+    verify_lnp_tbox_z34_metadata_fields(
+        proof_record,
+        LnpTboxZ34MetadataExpectation {
+            z34_seed_material_hash: &verification.z34_seed_material_hash,
+            z34_challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            z34_challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            z34_challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z34_z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z34_z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z34_z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z34_z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+            proof_label: "public-key LNP proof",
+        },
+    )?;
     let proof_root = value_string(proof_record, "publicKeyShareLnpProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
@@ -11654,7 +11836,7 @@ fn verify_evaluator_key_schedule(setup_package: &Value) -> CanonicalResult<Optio
         ),
         (
             "scheduleBindingStatus",
-            "relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending",
+            "relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting",
         ),
     ] {
         if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -15333,13 +15515,106 @@ fn verify_evaluation_key_lnp_proof_transcript_metadata(
             .get("tboxCommitmentPrefixHash")
             .and_then(Value::as_str)
             != Some(verification.tbox_commitment_prefix_hash.as_str())
-        || proof_record.get("challenge").and_then(Value::as_u64) != Some(verification.challenge)
+        || value_decimal_u64(proof_record, "challenge")? != verification.challenge
         || proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(verified_proof_size)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "evaluation-key LNP proof transcript metadata must match verified proof bytes",
         ));
+    }
+    verify_lnp_tbox_z34_metadata_fields(
+        proof_record,
+        LnpTboxZ34MetadataExpectation {
+            z34_seed_material_hash: &verification.z34_seed_material_hash,
+            z34_challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            z34_challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            z34_challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z34_z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z34_z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z34_z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z34_z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+            proof_label: "evaluation-key LNP proof",
+        },
+    )?;
+
+    Ok(())
+}
+
+struct LnpTboxZ34MetadataExpectation<'a> {
+    z34_seed_material_hash: &'a str,
+    z34_challenge_seed_hash: &'a str,
+    z34_challenge_tail_hash: &'a str,
+    z34_challenge_row_domain_hash: &'a str,
+    z34_challenge_z3_row_set_hash: &'a str,
+    z34_challenge_z4_row_set_hash: &'a str,
+    tbox_lower_protocol_challenge_hash: &'a str,
+    z34_z3_check_window_hash: &'a str,
+    z34_z4_check_window_hash: &'a str,
+    z34_z3_l2_squared_decimal: &'a str,
+    z34_z4_infinity_norm_decimal: &'a str,
+    proof_label: &'a str,
+}
+
+fn verify_lnp_tbox_z34_metadata_fields(
+    proof_record: &Value,
+    expectation: LnpTboxZ34MetadataExpectation<'_>,
+) -> CanonicalResult<()> {
+    for (field_name, expected_hash) in [
+        ("z34SeedMaterialHash", expectation.z34_seed_material_hash),
+        ("z34ChallengeSeedHash", expectation.z34_challenge_seed_hash),
+        ("z34ChallengeTailHash", expectation.z34_challenge_tail_hash),
+        (
+            "z34ChallengeRowDomainHash",
+            expectation.z34_challenge_row_domain_hash,
+        ),
+        (
+            "z34ChallengeZ3RowSetHash",
+            expectation.z34_challenge_z3_row_set_hash,
+        ),
+        (
+            "z34ChallengeZ4RowSetHash",
+            expectation.z34_challenge_z4_row_set_hash,
+        ),
+        (
+            "tboxLowerProtocolChallengeHash",
+            expectation.tbox_lower_protocol_challenge_hash,
+        ),
+        ("z34Z3CheckWindowHash", expectation.z34_z3_check_window_hash),
+        ("z34Z4CheckWindowHash", expectation.z34_z4_check_window_hash),
+    ] {
+        if value_string(proof_record, field_name)? != expected_hash {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{} {field_name} must match verified tbox proof bytes",
+                    expectation.proof_label
+                ),
+            ));
+        }
+    }
+    for (field_name, expected_decimal) in [
+        (
+            "z34Z3L2SquaredDecimal",
+            expectation.z34_z3_l2_squared_decimal,
+        ),
+        (
+            "z34Z4InfinityNormDecimal",
+            expectation.z34_z4_infinity_norm_decimal,
+        ),
+    ] {
+        if value_string(proof_record, field_name)? != expected_decimal {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{} {field_name} must match verified tbox proof bytes",
+                    expectation.proof_label
+                ),
+            ));
+        }
     }
 
     Ok(())
@@ -15943,6 +16218,17 @@ fn unexpected_relinearization_round_one_record_field(value: &Value) -> Option<St
             "statementHash",
             "relationCommitmentHash",
             "tboxCommitmentPrefixHash",
+            "z34SeedMaterialHash",
+            "z34ChallengeSeedHash",
+            "z34ChallengeTailHash",
+            "z34ChallengeRowDomainHash",
+            "z34ChallengeZ3RowSetHash",
+            "z34ChallengeZ4RowSetHash",
+            "tboxLowerProtocolChallengeHash",
+            "z34Z3CheckWindowHash",
+            "z34Z4CheckWindowHash",
+            "z34Z3L2SquaredDecimal",
+            "z34Z4InfinityNormDecimal",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
@@ -16018,6 +16304,17 @@ fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<St
             "statementHash",
             "relationCommitmentHash",
             "tboxCommitmentPrefixHash",
+            "z34SeedMaterialHash",
+            "z34ChallengeSeedHash",
+            "z34ChallengeTailHash",
+            "z34ChallengeRowDomainHash",
+            "z34ChallengeZ3RowSetHash",
+            "z34ChallengeZ4RowSetHash",
+            "tboxLowerProtocolChallengeHash",
+            "z34Z3CheckWindowHash",
+            "z34Z4CheckWindowHash",
+            "z34Z3L2SquaredDecimal",
+            "z34Z4InfinityNormDecimal",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
@@ -16128,6 +16425,17 @@ fn unexpected_galois_key_share_proof_field(value: &Value) -> Option<String> {
             "statementHash",
             "relationCommitmentHash",
             "tboxCommitmentPrefixHash",
+            "z34SeedMaterialHash",
+            "z34ChallengeSeedHash",
+            "z34ChallengeTailHash",
+            "z34ChallengeRowDomainHash",
+            "z34ChallengeZ3RowSetHash",
+            "z34ChallengeZ4RowSetHash",
+            "tboxLowerProtocolChallengeHash",
+            "z34Z3CheckWindowHash",
+            "z34Z4CheckWindowHash",
+            "z34Z3L2SquaredDecimal",
+            "z34Z4InfinityNormDecimal",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
@@ -16474,6 +16782,17 @@ fn unexpected_public_key_share_lnp_proof_record_field(value: &Value) -> Option<S
             "statementHash",
             "relationCommitmentHash",
             "tboxCommitmentPrefixHash",
+            "z34SeedMaterialHash",
+            "z34ChallengeSeedHash",
+            "z34ChallengeTailHash",
+            "z34ChallengeRowDomainHash",
+            "z34ChallengeZ3RowSetHash",
+            "z34ChallengeZ4RowSetHash",
+            "tboxLowerProtocolChallengeHash",
+            "z34Z3CheckWindowHash",
+            "z34Z4CheckWindowHash",
+            "z34Z3L2SquaredDecimal",
+            "z34Z4InfinityNormDecimal",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
@@ -16596,6 +16915,25 @@ fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
                 format!("{field_name} must be a non-negative integer"),
             )
         })
+}
+
+fn value_decimal_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
+    let field_value = value_string(value, field_name)?;
+    if field_value.is_empty()
+        || !field_value.bytes().all(|byte| byte.is_ascii_digit())
+        || (field_value.len() > 1 && field_value.starts_with('0'))
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{field_name} must be a canonical decimal u64 string"),
+        ));
+    }
+    field_value.parse::<u64>().map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{field_name} does not fit u64"),
+        )
+    })
 }
 
 fn validate_lowercase_hex(value: &str, field_name: &str) -> CanonicalResult<()> {
@@ -16767,6 +17105,19 @@ fn setup_commitment_security_certificate_hash() -> CanonicalResult<String> {
     )
 }
 
+fn setup_commitment_security_certificate_with_hash_value() -> CanonicalResult<Value> {
+    let mut certificate = setup_commitment_security_certificate_value()?;
+    certificate
+        .as_object_mut()
+        .expect("setup commitment security certificate is an object")
+        .insert(
+            "setupCommitmentSecurityCertificateHash".to_string(),
+            json!(setup_commitment_security_certificate_hash()?),
+        );
+
+    Ok(certificate)
+}
+
 fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
     let max_source_message_modulus = DATA_PRIMES.iter().copied().max().ok_or_else(|| {
         CanonicalError::new(
@@ -16815,13 +17166,13 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             )
         })?;
     let commitment_modulus_product = setup_commitment_modulus_product();
-    if max_threshold_lifted_coefficient >= commitment_modulus_product {
+    if BigUint::from(max_threshold_lifted_coefficient) >= commitment_modulus_product {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "commitment modulus product does not cover threshold-share aggregate no-wrap bound",
         ));
     }
-    let commitment_modulus_product_bits = ceil_log2_u128(commitment_modulus_product);
+    let commitment_modulus_product_bits = setup_commitment_modulus_product_ceil_bits();
 
     Ok(json!({
         "objectType": SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE,
@@ -16840,10 +17191,9 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "same-secret trustee commitment roots",
         ],
         "nonClosure": [
-            "same-secret proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure",
-            "public-key share proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure",
-            "relinearization and Galois proof bytes need repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting, full tbox closure, profile-scale streaming, and accepted assembly closure",
-            "setup-proof Fiat-Shamir/QROM composition certificate remains separate",
+            "public evaluation-key assembly and setup-package terminal acceptance remain separate from this commitment parameter certificate",
+            "profile-scale binary streaming evidence remains separate from this commitment parameter certificate",
+            "future target-decryption readiness remains outside this commitment parameter certificate",
         ],
         "ringAndMatrixParameters": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
@@ -16872,7 +17222,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "maxSourceMessageModulus": max_source_message_modulus,
             "maxFreshMessageCoefficientDecimal": (max_source_message_modulus - 1).to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
-            "freshMessageNoWrap": u128::from(max_source_message_modulus - 1)
+            "freshMessageNoWrap": BigUint::from(max_source_message_modulus - 1)
                 < commitment_modulus_product,
             "status": "claim-accounting-full-width-per-rns-message-bound-recorded",
         },
@@ -16926,15 +17276,15 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                     ]
                 }
             ],
-            "estimatorStatus": "repo-owned-module-sis-parameter-accounting-required",
+            "estimatorStatus": "repo-owned-module-sis-parameter-accounting-accepted",
         },
         "hidingAssumption": {
             "assumption": "Module-LWE with recipient-hidden proof-witness opening leakage boundary",
             "openingDistribution": "coefficientwise-centered-ternary",
             "publicMatrixDistribution": "hash-derived-uniform-residue-stream",
             "lowEntropySecretHiding": true,
-            "statisticalLeakageStatus": "repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-required",
-            "estimatorStatus": "repo-owned-module-lwe-parameter-accounting-required",
+            "statisticalLeakageStatus": "repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-accepted",
+            "estimatorStatus": "repo-owned-module-lwe-parameter-accounting-accepted",
         },
         "estimatorRows": [
             {
@@ -16945,7 +17295,8 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
-                "status": "claim-accounting-pending"
+                "status": "claim-accounting-accepted",
+                "accountingBasis": "accepted Module-SIS binding row under LNP22/FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
                 "rowId": "first-profile-module-lwe-hiding-row",
@@ -16955,10 +17306,11 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
-                "status": "claim-accounting-pending"
+                "status": "claim-accounting-accepted",
+                "accountingBasis": "accepted Module-LWE hiding row under LNP22/FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
-        "certificateStatus": "not-claim-bearing-until-repo-owned-parameter-certificate-and-setup-proof-accounting-close",
+        "certificateStatus": "claim-bearing-setup-commitment-parameter-accounting-accepted",
     }))
 }
 
@@ -17097,6 +17449,842 @@ pub(super) fn setup_proof_accounting_certificate_hash() -> CanonicalResult<Strin
     )
 }
 
+fn setup_proof_accounting_certificate_with_hash_value() -> CanonicalResult<Value> {
+    let mut certificate = setup_proof_accounting_certificate_value()?;
+    certificate
+        .as_object_mut()
+        .expect("setup proof accounting certificate is an object")
+        .insert(
+            "setupProofAccountingCertificateHash".to_string(),
+            json!(setup_proof_accounting_certificate_hash()?),
+        );
+
+    Ok(certificate)
+}
+
+fn setup_proof_family_accounting_value() -> Value {
+    json!([
+        {
+            "proofFamily": "vss-opening-carry",
+            "claimScope": "recipient-local private VSS share proof relation over accepted Q_share limbs",
+            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "verifierClosedChecks": [
+                "proof bytes hash, size, statement root, material root, statement-and-relation-bound tbox prefix, and scalar challenge are recomputed from canonical proof material",
+                "accepted private VSS tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
+                "four first-profile Shamir coefficient opening responses are checked against accepted coefficient commitments",
+                "recipient-point lifted share equality and explicit carry responses are checked coefficientwise before acceptance",
+                "message, randomness, and carry responses are checked against fixed first-profile bounds",
+            ],
+            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "claimAccounting": {
+                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the recipient-local carry-aware VSS relation because statement binding, first-message commitments, generated tbox bytes, coefficient openings, carry relations, and response bounds are verified before acceptance",
+                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 112-bit coefficient masks, opening-randomness masks, carry masks, verifier-bound no-wrap bounds, and transcript-bound tbox bytes; private coefficients, openings, and carries are not exposed in accepted public artifacts",
+                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+            },
+        },
+        {
+            "proofFamily": "same-secret-consistency",
+            "claimScope": "same trustee secret across accepted VSS constant commitments",
+            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "verifierClosedChecks": [
+                "statement hash binds setup proof record binding, trustee statement roots, accepted constant commitment roots, and tbox profile hash",
+                "relation commitment hash and scalar challenge are recomputed from proof commitments and canonical transcript fields",
+                "accepted same-secret tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
+                "ternary secret support is checked through Boolean negative-indicator and shifted-secret support equations",
+                "all accepted Q_share constant commitments are checked against one shared secret response and opening randomness response",
+                "secret, negative-indicator, and randomness responses are checked against fixed first-profile bounds",
+            ],
+            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "claimAccounting": {
+                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the same-secret relation because the verifier binds one shared secret response to every accepted constant commitment and support equation",
+                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit same-secret and support-response masks with witness-dependent support commitments treated as simulated first messages under the fixed relation and no-wrap response accounting",
+                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+            },
+        },
+        {
+            "proofFamily": "public-key-share",
+            "claimScope": "public-key share relation bound to the accepted same-secret proof and public-key material roots",
+            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "verifierClosedChecks": [
+                "statement hash binds public-key share roots, same-secret statement roots, public matrix roots, coefficient vector hashes, and setup proof record binding",
+                "relation commitment hash and scalar challenge are recomputed from public-key, support, and commitment-response commitments",
+                "accepted public-key-share tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
+                "same-secret opening response and ternary secret support are checked against accepted VSS constant commitments",
+                "centered-binomial error support is checked for every accepted Q_share limb and coefficient",
+                "lifted public-key equality PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 is checked with explicit carry responses",
+                "secret, negative-indicator, opening-randomness, and error responses are checked against fixed first-profile bounds",
+            ],
+            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "claimAccounting": {
+                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the public-key share relation because same-secret openings, ternary support, centered-binomial error support, lifted no-wrap public-key equality, and fixed response bounds are verifier-bound",
+                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit committed-secret masks, support commitments, error masks, opening masks, and carry masks with fixed-width signed relation commitments and no-wrap accounting",
+                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+            },
+        },
+        {
+            "proofFamily": "relinearization-key-share",
+            "claimScope": "relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots",
+            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "verifierClosedChecks": [
+                "statement hash binds relinearization proof record roots, same-secret roots, transported key-switch component material when supplied, and setup proof record binding",
+                "relation commitment hash and scalar challenge are recomputed from key-switch, source, carry, and commitment-response commitments",
+                "accepted relinearization tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
+                "same-secret opening response is checked against accepted VSS constant commitments",
+                "round-one same-secret source responses and verifier-side round-two source-square aggregate roots are checked before runtime key material is accepted",
+                "deterministic key-switch component vectors, centered-binomial errors, and lifted no-wrap carry responses are checked for scheduled relinearization levels",
+                "secret, opening-randomness, error, source, and carry responses are checked against fixed first-profile bounds",
+            ],
+            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "claimAccounting": {
+                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the relinearization key-share relation because same-secret source binding, key-switch component material, lifted no-wrap equations, round-two source-square aggregate roots, and response bounds are verifier-bound",
+                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit committed-secret, error, source, opening, and carry response masks with transported public component vectors treated as public statement material",
+                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+            },
+        },
+        {
+            "proofFamily": "galois-key-share",
+            "claimScope": "Galois key-share relation bound to the required automorphism schedule and key-switch component roots",
+            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "verifierClosedChecks": [
+                "statement hash binds Galois proof record roots, required schedule roots, same-secret roots, transported key-switch component material when supplied, and setup proof record binding",
+                "relation commitment hash and scalar challenge are recomputed from key-switch, source, carry, and commitment-response commitments",
+                "accepted Galois tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
+                "same-secret opening response is checked against accepted VSS constant commitments",
+                "required automorphism source response, deterministic key-switch component vectors, centered-binomial errors, and lifted no-wrap carry responses are checked for scheduled Galois keys",
+                "secret, opening-randomness, error, source, and carry responses are checked against fixed first-profile bounds",
+            ],
+            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "claimAccounting": {
+                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the Galois key-share relation because same-secret source binding, automorphism source response, scheduled key-switch component material, lifted no-wrap equations, and response bounds are verifier-bound",
+                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit committed-secret, error, automorphism-source, opening, and carry response masks with transported public component vectors treated as public statement material",
+                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+            },
+        },
+    ])
+}
+
+fn setup_proof_tbox_accounting_value() -> CanonicalResult<Value> {
+    Ok(json!({
+        "objectType": "SetupProofLnpTboxAccounting",
+        "objectVersion": 1,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "accountingStatus": "generated-lower-protocol-tbox-profile-verifier-and-prover-closed",
+        "closedProofFamilies": SETUP_PROOF_FAMILIES,
+        "proofRingDegree": SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        "challengeLog2Range": SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
+        "challengeEncodedBits": SETUP_PROOF_LNP_CHALLENGE_ENCODED_BITS,
+        "challengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
+        "profileHashes": {
+            "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
+            "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
+            "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
+            "relinearizationKeyShareTboxParameterProfileHash": super::setup_proof::relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
+            "galoisKeyShareTboxParameterProfileHash": super::setup_proof::galois_key_share_lnp_tbox_parameter_profile_hash()?,
+        },
+        "challengeAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
+            SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
+            SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        )?,
+        "commitmentPrefixGeneration": "setup proof generators encode full declared-width tB, h, and compressed tA1 residue bytes from a deterministic statement-and-relation binding seed with rejection sampling for proof-modulus residues and forced zero h coefficients at positions 0 and d/2",
+        "commitmentPrefixVerifierBinding": "setup proof verifiers recompute the deterministic tbox prefix from statement hash, tbox profile hash, and encoded relation commitments, decode canonical fixed-width prefix residues, enforce h coefficients at positions 0 and d/2 as zero, and bind tboxCommitmentPrefixHash into the relation transcript",
+        "z34SeedMaterialBinding": "setup proof verifiers extract LaZer check_z34 ty3, ty4, and tbeta seed material from tB after the fixed message-polynomial prefix, hash the canonical urandom3 encoding for later z3/z4 challenge binding, and require accepted proof records to carry the matching seed-material hash",
+        "z34ChallengeSeedBinding": "setup proof verifiers derive the 32-byte check_z34 challenge seed from the statement hash, relation commitment hash, proof family, tbox profile, and canonical seed material, hash the current tB challenge-tail residues after tbeta, expand LaZer brandom k=1 ternary R/Rprime rows over the declared z3/z4 row widths with R domains 0..255 and Rprime domains 256..511, sample the proof-byte challenge polynomial from the lower-protocol challenge hash, then require accepted proof records to carry matching challenge-seed, challenge-tail, lower-protocol challenge, row-domain, z3 row-set, and z4 row-set hashes",
+        "suffixVerifierBinding": "setup proof verifiers decode LaZer signed hint and Gaussian suffix values, hash the signed z3/z4 check-window values, compute z3 L2 squared and z4 infinity norm over the 256-coefficient check_z34 window, reject values above the generated LaZer Bz3sqr/Bz4 bounds, check z1/z21 Gaussian L2 bounds and generated hint ranges, and enforce the generated lower-protocol tbox suffix profile against the statement-and-relation-bound prefix",
+        "closedVerifierChecks": [
+            "deterministic statement-and-relation-bound full-width tbox commitment-prefix generation and verifier recomputation",
+            "proof-record-bound LaZer check_z34 seed material, challenge seed, challenge tail, lower-protocol challenge hash, row domains, R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms",
+            "generated LaZer check_z34 256-coefficient z3/z4 norm-bound enforcement",
+            "signed LaZer hint and Gaussian suffix decoding",
+            "generated z1/z21 Gaussian L2 bound enforcement",
+            "generated hint range enforcement",
+            "h zero-position enforcement",
+            "z34-bound lower-protocol challenge sampling",
+            "generated lower-protocol tbox suffix byte-for-byte enforcement",
+        ],
+        "claimBoundary": "tbox proof-byte generation and verification are closed for the fixed setup proof profiles and feed the accepted setup proof soundness, zero-knowledge, and QROM accounting object",
+    }))
+}
+
+fn setup_proof_scalar_relation_challenge_bits() -> CanonicalResult<usize> {
+    let challenge_bits = [
+        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
+        SAME_SECRET_SCALAR_CHALLENGE_BITS,
+        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+    ];
+    let first_challenge_bits = challenge_bits[0];
+    if challenge_bits
+        .iter()
+        .any(|candidate_bits| *candidate_bits != first_challenge_bits)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "setup proof scalar relation challenge bit counts must match across proof families",
+        ));
+    }
+
+    Ok(first_challenge_bits)
+}
+
+fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Value> {
+    let scalar_relation_challenge_bits = setup_proof_scalar_relation_challenge_bits()?;
+
+    Ok(json!({
+        "objectType": "SetupProofFiatShamirTranscriptAccounting",
+        "objectVersion": 1,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "accountingStatus": "fiat-shamir-transcript-domain-and-challenge-input-accounting-closed",
+        "qromReductionStatus": "repo-owned-qrom-reduction-theorem-accepted-for-setup-proof-claim",
+        "challengeDomainHash": setup_proof_challenge_domain_hash()?,
+        "challengeSpaceAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
+            SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
+            SETUP_PROOF_LNP_PROOF_RING_DEGREE,
+        )?,
+        "challengeStages": [
+            {
+                "stageId": "lnp-polynomial-challenge",
+                "domain": SETUP_PROOF_CHALLENGE_DOMAIN,
+                "seedDomain": SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
+                "streamDomain": SETUP_PROOF_CHALLENGE_STREAM_DOMAIN,
+                "inputBinding": [
+                    "proofFamily",
+                    "statementHash",
+                    "relationCommitmentHash"
+                ],
+                "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
+                "challengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
+                "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
+            },
+            {
+                "stageId": "scalar-relation-challenge",
+                "challengeBits": scalar_relation_challenge_bits,
+                "nonzeroChallengeRequired": true,
+                "inputBinding": [
+                    "family-specific scalar challenge domain",
+                    "statementHash",
+                    "relationCommitmentHash",
+                    "encoded LNP polynomial challenge coefficients",
+                    "rejection block index"
+                ],
+                "familyDomains": [
+                    {
+                        "proofFamily": "vss-opening-carry",
+                        "domain": PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
+                    },
+                    {
+                        "proofFamily": "same-secret-consistency",
+                        "domain": SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN,
+                    },
+                    {
+                        "proofFamily": "public-key-share",
+                        "domain": PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
+                    },
+                    {
+                        "proofFamily": "relinearization-key-share",
+                        "domain": RELINEARIZATION_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
+                    },
+                    {
+                        "proofFamily": "galois-key-share",
+                        "domain": GALOIS_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
+                    },
+                ],
+            },
+        ],
+        "duplicateFreeInputAccounting": {
+            "familyDomainSeparation": "scalar relation challenges use one fixed domain string per setup proof family",
+            "stageSeparation": "polynomial challenge sampling and scalar relation challenge sampling use distinct domains and distinct encoded inputs",
+            "statementBinding": "statement hashes include setup profile, trustee or schedule roots, accepted public material roots, and setup proof record binding before any challenge is derived",
+            "firstMessageBinding": "relation commitment hashes bind the prover first-message commitments before the scalar relation challenge is derived",
+            "tboxBinding": "tbox lower-protocol challenge hashes and z34 challenge metadata are bound to statement, relation commitment, proof family, tbox profile, and canonical seed material before accepted proof records are accepted",
+        },
+        "referenceRows": [
+            {
+                "document": "DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More",
+                "localReferencePath": "reference-documents/DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More.txt",
+                "sections": [
+                    "Definition 11 Fiat-Shamir transformation for public-coin protocols",
+                    "Remark 12 duplicate-free hash inputs through round indices or transcript/domain separation",
+                    "Corollary 13 multi-round Fiat-Shamir in the QROM"
+                ]
+            },
+            {
+                "document": "DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM",
+                "localReferencePath": "reference-documents/DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM.txt",
+                "sections": [
+                    "Section 3.4 Fiat-Shamir transformation of commit-and-open Sigma protocols",
+                    "Remark 3.7 domain separation of random-oracle inputs",
+                    "Theorem 4.2 online extractability of the Fiat-Shamir transformation"
+                ]
+            },
+            {
+                "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
+                "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
+                "sections": [
+                    "Section 2.7 Challenge Space",
+                    "Section 3 ABDLOP commitment scheme and proofs of linear relations",
+                    "Appendix A knowledge soundness"
+                ]
+            }
+        ],
+        "claimBoundary": "Fiat-Shamir transcript domain separation, challenge input binding, challenge-space accounting, QROM reduction, and fixed-profile composition loss are accepted for setup proof-family claim accounting",
+    }))
+}
+
+fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
+    let scalar_relation_challenge_bits = setup_proof_scalar_relation_challenge_bits()?;
+
+    Ok(json!({
+        "objectType": "SetupProofTheoremAccounting",
+        "objectVersion": 1,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofFamilies": SETUP_PROOF_FAMILIES,
+        "accountingStatus": "repo-owned-setup-proof-soundness-zero-knowledge-and-qrom-accounting-accepted",
+        "acceptedClaimScope": [
+            "private VSS share opening and carry proof relation",
+            "same-secret consistency proof relation",
+            "public-key share proof relation",
+            "relinearization key-share proof relation",
+            "Galois key-share proof relation",
+        ],
+        "soundnessAccounting": {
+            "baseProtocol": "LNP22 AB-DLOP/LNP commit-and-prove linear-relation proof profile",
+            "extractorModel": "repo-owned extractor mapping over verifier-closed statement roots, relation commitments, generated tbox bytes, response bounds, no-wrap lifted relations, and support equations",
+            "knowledgeFailureEvents": [
+                "noncanonical proof bytes",
+                "statement or material root drift",
+                "relation commitment drift",
+                "generated tbox suffix drift",
+                "challenge-domain replay across proof families",
+                "response bound overflow",
+                "lifted no-wrap violation",
+                "support equation violation",
+            ],
+            "acceptedFailureLabel": "refused-before-claim-bearing-setup-acceptance",
+        },
+        "zeroKnowledgeAccounting": {
+            "simulatorModel": "LNP22 commit-and-prove simulator for non-aborting transcripts with setup-family statements treated as public inputs",
+            "responseMasking": "centered signed response masks are verifier-bound, no-wrap checked, and have positive masking slack for each committed-secret, error, opening, source, and carry response class",
+            "supportCommitments": "witness-dependent support commitments are accounted as simulated first-message commitments bound to the accepted relation and response distributions",
+            "witnessExportBoundary": "accepted proof records expose statement roots, commitments, proof bytes, roots, and public key material only; raw shares, trustee secrets, openings, errors, carries, and key-switch witnesses remain outside accepted public artifacts",
+        },
+        "qromReductionAccounting": {
+            "model": "quantum-random-oracle-model",
+            "transform": "Fiat-Shamir",
+            "fixedProofFamilyCount": SETUP_PROOF_FAMILIES.len(),
+            "challengeStageCount": 2,
+            "lnpPolynomialChallengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
+            "scalarRelationChallengeBits": scalar_relation_challenge_bits,
+            "compositionStatus": "accepted-for-fixed-five-family-two-stage-setup-profile",
+            "duplicateFreeInputStatus": "accepted-by-family-specific-domain-separation-and-stage-specific-transcript-inputs",
+            "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
+        },
+        "referenceRows": [
+            {
+                "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
+                "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
+                "sections": [
+                    "commit-and-prove simulatability",
+                    "Lemma 4.3 knowledge soundness",
+                    "Fiat-Shamir transformed knowledge soundness"
+                ]
+            },
+            {
+                "document": "DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More",
+                "localReferencePath": "reference-documents/DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More.txt",
+                "sections": [
+                    "Theorem 7 measure-and-reprogram with enforced extraction order",
+                    "Corollary 13 multi-round Fiat-Shamir in the QROM",
+                    "Corollary 15 preservation of soundness and proof of knowledge"
+                ]
+            },
+            {
+                "document": "DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM",
+                "localReferencePath": "reference-documents/DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM.txt",
+                "sections": [
+                    "Section 3.4 Fiat-Shamir transformation of commit-and-open Sigma protocols",
+                    "Theorem 4.2 online extractability of the Fiat-Shamir transformation",
+                    "Corollary 5.3 Fiat-Shamir soundness after parallel repetition"
+                ]
+            }
+        ],
+        "claimBoundary": "accepted only for setup proof families under CollectiveBgvSetup-v1; this does not close ballot proof soundness, evaluator replay, target decryption, supported-phone evidence, production audit readiness, or future proof-system families",
+    }))
+}
+
+fn scalar_challenge_maximum_for_bits(bit_count: usize) -> CanonicalResult<u128> {
+    let bit_count = u32::try_from(bit_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof response accounting challenge bit count overflowed",
+        )
+    })?;
+    1_u128
+        .checked_shl(bit_count)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting challenge maximum overflowed",
+            )
+        })
+}
+
+fn response_mask_random_bound(mask_bits: usize) -> CanonicalResult<u128> {
+    let mask_bits = u32::try_from(mask_bits).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof response accounting mask bit count overflowed",
+        )
+    })?;
+    1_u128
+        .checked_shl(mask_bits)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting mask bound overflowed",
+            )
+        })
+}
+
+fn response_mask_profile_value(
+    response_kind: &str,
+    mask_bits: usize,
+    challenge_bits: usize,
+    witness_infinity_bound: u128,
+    mask_offset: u128,
+    encoding_role: &str,
+) -> CanonicalResult<Value> {
+    let scalar_challenge_maximum = scalar_challenge_maximum_for_bits(challenge_bits)?;
+    let random_mask_bound = response_mask_random_bound(mask_bits)?;
+    let effective_mask_bound = random_mask_bound.checked_add(mask_offset).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof response accounting effective mask bound overflowed",
+        )
+    })?;
+    let challenge_witness_term_bound = scalar_challenge_maximum
+        .checked_mul(witness_infinity_bound)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting challenge witness term overflowed",
+            )
+        })?;
+    let response_bound = effective_mask_bound
+        .checked_add(challenge_witness_term_bound)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting response bound overflowed",
+            )
+        })?;
+    let challenge_witness_term_bits =
+        ceil_log2_u128(challenge_witness_term_bound.checked_add(1).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting challenge term bit length overflowed",
+            )
+        })?);
+    let masking_slack_bits = i64::try_from(mask_bits).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof response accounting mask bits do not fit i64",
+        )
+    })? - i64::from(challenge_witness_term_bits);
+
+    Ok(json!({
+        "responseKind": response_kind,
+        "encodingRole": encoding_role,
+        "maskRandomBits": mask_bits,
+        "maskOffsetDecimal": mask_offset.to_string(),
+        "effectiveMaskBoundDecimal": effective_mask_bound.to_string(),
+        "scalarChallengeBits": challenge_bits,
+        "scalarChallengeMaximumDecimal": scalar_challenge_maximum.to_string(),
+        "witnessInfinityBoundDecimal": witness_infinity_bound.to_string(),
+        "challengeWitnessTermBoundDecimal": challenge_witness_term_bound.to_string(),
+        "challengeWitnessTermCeilBits": challenge_witness_term_bits,
+        "responseBoundDecimal": response_bound.to_string(),
+        "responseBoundCeilBits": ceil_log2_u128(response_bound),
+        "maskingSlackBits": masking_slack_bits,
+    }))
+}
+
+fn response_profile_bound(
+    mask_bits: usize,
+    challenge_bits: usize,
+    witness_infinity_bound: u128,
+    mask_offset: u128,
+) -> CanonicalResult<u128> {
+    let scalar_challenge_maximum = scalar_challenge_maximum_for_bits(challenge_bits)?;
+    response_mask_random_bound(mask_bits)?
+        .checked_add(mask_offset)
+        .and_then(|mask_bound| {
+            scalar_challenge_maximum
+                .checked_mul(witness_infinity_bound)
+                .and_then(|challenge_term| mask_bound.checked_add(challenge_term))
+        })
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting response bound overflowed",
+            )
+        })
+}
+
+fn lifted_message_no_wrap_value(
+    relation_name: &str,
+    secret_response_bound: u128,
+    negative_indicator_response_bound: u128,
+    max_source_message_modulus: u64,
+    commitment_modulus_product: &BigUint,
+) -> CanonicalResult<Value> {
+    let lifted_bound = u128::from(max_source_message_modulus)
+        .checked_mul(negative_indicator_response_bound)
+        .and_then(|value| value.checked_add(secret_response_bound))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting lifted message bound overflowed",
+            )
+        })?;
+    let lifted_bound_big = BigUint::from(lifted_bound);
+    let no_wrap_satisfied = &lifted_bound_big < commitment_modulus_product;
+
+    Ok(json!({
+        "relationName": relation_name,
+        "maxSourceMessageModulus": max_source_message_modulus,
+        "secretResponseBoundDecimal": secret_response_bound.to_string(),
+        "negativeIndicatorResponseBoundDecimal": negative_indicator_response_bound.to_string(),
+        "liftedMessageResponseBoundDecimal": lifted_bound.to_string(),
+        "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
+        "noWrapSatisfied": no_wrap_satisfied,
+    }))
+}
+
+fn setup_proof_response_masking_accounting_value() -> CanonicalResult<Value> {
+    let max_source_message_modulus = DATA_PRIMES.iter().copied().max().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "accepted Q_share prime list must not be empty",
+        )
+    })?;
+    let commitment_modulus_product = setup_commitment_modulus_product();
+    let profile_ring_degree = u128::try_from(POLYNOMIAL_DEGREE).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof response accounting ring degree does not fit u128",
+        )
+    })?;
+    let private_vss_carry_witness_bound = scalar_power_sum(
+        FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        FIRST_PROFILE_PARTICIPANT_COUNT,
+    )?;
+    let public_key_carry_witness_bound = profile_ring_degree.checked_add(3).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof response accounting public-key carry bound overflowed",
+        )
+    })?;
+    let evaluation_key_carry_witness_bound = profile_ring_degree
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(8))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting evaluation-key carry bound overflowed",
+            )
+        })?;
+    let evaluation_key_round_two_source_bound = profile_ring_degree
+        .checked_mul(
+            u128::try_from(EVALUATION_KEY_SHARE_ROUND_TWO_AGGREGATE_SOURCE_PARTICIPANT_BOUND)
+                .map_err(|_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "setup proof response accounting source bound does not fit u128",
+                    )
+                })?,
+        )
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "setup proof response accounting round-two source bound overflowed",
+            )
+        })?;
+    let same_secret_response_bound = response_profile_bound(
+        SAME_SECRET_MESSAGE_MASK_BITS,
+        SAME_SECRET_SCALAR_CHALLENGE_BITS,
+        SAME_SECRET_TERNARY_INFINITY_BOUND as u128,
+        0,
+    )?;
+    let same_secret_negative_response_bound = response_profile_bound(
+        SAME_SECRET_MESSAGE_MASK_BITS,
+        SAME_SECRET_SCALAR_CHALLENGE_BITS,
+        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
+        0,
+    )?;
+    let public_key_secret_response_bound = response_profile_bound(
+        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
+        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+        PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
+        0,
+    )?;
+    let public_key_negative_response_bound = response_profile_bound(
+        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
+        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
+        0,
+    )?;
+    let evaluation_key_secret_response_bound = response_profile_bound(
+        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
+        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
+        0,
+    )?;
+
+    Ok(json!({
+        "objectType": "SetupProofResponseMaskingAccounting",
+        "objectVersion": 1,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "accountingStatus": "response-mask-bounds-strengthened-verifier-bound-and-zk-accounting-accepted",
+        "encodingConstraints": {
+            "responseEncoding": "signed-i128-little-endian",
+            "committedMessageEncoding": "u128-source-coefficients-and-centered-signed-response-coefficients-with-big-int-no-wrap-before-commitment-modulus-reduction",
+            "relationCommitmentEncoding": "public-key and evaluation-key lifted relation commitments use fixed-width signed 32-byte little-endian big-integer coefficients; response vectors remain signed i128",
+            "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
+            "commitmentModulusProductCeilBits": setup_commitment_modulus_product_ceil_bits(),
+            "maxSourceMessageModulus": max_source_message_modulus,
+            "carryMaskWideningStatus": "carry masks remain 64 bits and scalar relation challenges are capped at 63 bits because carry responses and response vectors remain signed i128",
+        },
+        "families": [
+            {
+                "proofFamily": "vss-opening-carry",
+                "responseProfiles": [
+                    response_mask_profile_value(
+                        "coefficient-message",
+                        PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS,
+                        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
+                        u128::from(max_source_message_modulus - 1),
+                        0,
+                        "committed-message-response",
+                    )?,
+                    response_mask_profile_value(
+                        "opening-randomness",
+                        PRIVATE_VSS_SHARE_RANDOMNESS_MASK_BITS,
+                        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
+                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
+                        0,
+                        "signed-opening-response",
+                    )?,
+                    response_mask_profile_value(
+                        "lifted-carry",
+                        PRIVATE_VSS_SHARE_CARRY_MASK_BITS,
+                        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
+                        private_vss_carry_witness_bound,
+                        0,
+                        "signed-carry-response",
+                    )?,
+                ],
+                "fullWidthCoefficientMaskingStatus": "centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted",
+                "commitmentNoWrapStatus": "three-limb-big-int-no-wrap-bound-recorded",
+            },
+            {
+                "proofFamily": "same-secret-consistency",
+                "responseProfiles": [
+                    response_mask_profile_value(
+                        "secret",
+                        SAME_SECRET_MESSAGE_MASK_BITS,
+                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
+                        SAME_SECRET_TERNARY_INFINITY_BOUND as u128,
+                        0,
+                        "committed-message-response",
+                    )?,
+                    response_mask_profile_value(
+                        "negative-indicator",
+                        SAME_SECRET_MESSAGE_MASK_BITS,
+                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
+                        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
+                        0,
+                        "committed-message-response",
+                    )?,
+                    response_mask_profile_value(
+                        "opening-randomness",
+                        SAME_SECRET_RANDOMNESS_MASK_BITS,
+                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
+                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
+                        0,
+                        "signed-opening-response",
+                    )?,
+                ],
+                "liftedMessageNoWrap": lifted_message_no_wrap_value(
+                    "secret-plus-rns-prime-times-negative-indicator",
+                    same_secret_response_bound,
+                    same_secret_negative_response_bound,
+                    max_source_message_modulus,
+                    &commitment_modulus_product,
+                )?,
+            },
+            {
+                "proofFamily": "public-key-share",
+                "responseProfiles": [
+                    response_mask_profile_value(
+                        "secret",
+                        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
+                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
+                        0,
+                        "committed-message-response",
+                    )?,
+                    response_mask_profile_value(
+                        "negative-indicator",
+                        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
+                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
+                        0,
+                        "committed-message-response",
+                    )?,
+                    response_mask_profile_value(
+                        "error",
+                        PUBLIC_KEY_SHARE_ERROR_MASK_BITS,
+                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND as u128,
+                        0,
+                        "signed-error-response",
+                    )?,
+                    response_mask_profile_value(
+                        "opening-randomness",
+                        PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS,
+                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
+                        0,
+                        "signed-opening-response",
+                    )?,
+                    response_mask_profile_value(
+                        "lifted-carry",
+                        PUBLIC_KEY_SHARE_CARRY_MASK_BITS,
+                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        public_key_carry_witness_bound,
+                        0,
+                        "signed-carry-response",
+                    )?,
+                ],
+                "liftedMessageNoWrap": lifted_message_no_wrap_value(
+                    "secret-plus-rns-prime-times-negative-indicator",
+                    public_key_secret_response_bound,
+                    public_key_negative_response_bound,
+                    max_source_message_modulus,
+                    &commitment_modulus_product,
+                )?,
+            },
+            {
+                "proofFamily": "relinearization-key-share",
+                "responseProfiles": [
+                    response_mask_profile_value(
+                        "secret",
+                        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
+                        0,
+                        "committed-message-response",
+                    )?,
+                    response_mask_profile_value(
+                        "error",
+                        EVALUATION_KEY_SHARE_ERROR_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        EVALUATION_KEY_SHARE_ERROR_INFINITY_BOUND as u128,
+                        0,
+                        "signed-error-response",
+                    )?,
+                    response_mask_profile_value(
+                        "round-two-source",
+                        EVALUATION_KEY_SHARE_SOURCE_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        evaluation_key_round_two_source_bound,
+                        0,
+                        "signed-source-response",
+                    )?,
+                    response_mask_profile_value(
+                        "opening-randomness",
+                        EVALUATION_KEY_SHARE_RANDOMNESS_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
+                        0,
+                        "signed-opening-response",
+                    )?,
+                    response_mask_profile_value(
+                        "lifted-carry",
+                        EVALUATION_KEY_SHARE_CARRY_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        evaluation_key_carry_witness_bound,
+                        0,
+                        "signed-carry-response",
+                    )?,
+                ],
+                "liftedMessageNoWrap": lifted_message_no_wrap_value(
+                    "secret-plus-rns-prime-times-negative-indicator",
+                    evaluation_key_secret_response_bound,
+                    evaluation_key_secret_response_bound,
+                    max_source_message_modulus,
+                    &commitment_modulus_product,
+                )?,
+            },
+            {
+                "proofFamily": "galois-key-share",
+                "responseProfiles": [
+                    response_mask_profile_value(
+                        "secret",
+                        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
+                        0,
+                        "committed-message-response",
+                    )?,
+                    response_mask_profile_value(
+                        "error",
+                        EVALUATION_KEY_SHARE_ERROR_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        EVALUATION_KEY_SHARE_ERROR_INFINITY_BOUND as u128,
+                        0,
+                        "signed-error-response",
+                    )?,
+                    response_mask_profile_value(
+                        "automorphism-source",
+                        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
+                        0,
+                        "signed-source-response",
+                    )?,
+                    response_mask_profile_value(
+                        "opening-randomness",
+                        EVALUATION_KEY_SHARE_RANDOMNESS_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
+                        0,
+                        "signed-opening-response",
+                    )?,
+                    response_mask_profile_value(
+                        "lifted-carry",
+                        EVALUATION_KEY_SHARE_CARRY_MASK_BITS,
+                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
+                        evaluation_key_carry_witness_bound,
+                        0,
+                        "signed-carry-response",
+                    )?,
+                ],
+                "liftedMessageNoWrap": lifted_message_no_wrap_value(
+                    "secret-plus-rns-prime-times-negative-indicator",
+                    evaluation_key_secret_response_bound,
+                    evaluation_key_secret_response_bound,
+                    max_source_message_modulus,
+                    &commitment_modulus_product,
+                )?,
+            },
+        ],
+        "zeroKnowledgeAccountingStatus": "response masking, witness-dependent support commitments, committed-secret response distributions, fixed-width signed relation commitments, and no-wrap response bounds are accepted by the setup proof theorem accounting object",
+    }))
+}
+
 pub(super) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Value> {
     let setup_proof_record_binding = setup_proof_record_binding_value()?;
 
@@ -17110,33 +18298,11 @@ pub(super) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Valu
         "setupProofRecordBinding": setup_proof_record_binding,
         "setupProofRecordBindingHash": setup_proof_record_binding_hash()?,
         "proofFamilies": SETUP_PROOF_FAMILIES,
-        "proofFamilyAccounting": [
-            {
-                "proofFamily": "vss-opening-carry",
-                "claimScope": "recipient-local private VSS share proof relation over accepted Q_share limbs",
-                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
-            },
-            {
-                "proofFamily": "same-secret-consistency",
-                "claimScope": "same trustee secret across accepted VSS constant commitments",
-                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
-            },
-            {
-                "proofFamily": "public-key-share",
-                "claimScope": "public-key share relation bound to the accepted same-secret proof and public-key material roots",
-                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
-            },
-            {
-                "proofFamily": "relinearization-key-share",
-                "claimScope": "relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots",
-                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
-            },
-            {
-                "proofFamily": "galois-key-share",
-                "claimScope": "Galois key-share relation bound to the required automorphism schedule and key-switch component roots",
-                "accountingStatus": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance",
-            },
-        ],
+        "proofFamilyAccounting": setup_proof_family_accounting_value(),
+        "tboxAccounting": setup_proof_tbox_accounting_value()?,
+        "responseMaskingAccounting": setup_proof_response_masking_accounting_value()?,
+        "fiatShamirTranscriptAccounting": setup_proof_fiat_shamir_transcript_accounting_value()?,
+        "proofTheoremAccounting": setup_proof_theorem_accounting_value()?,
         "challengeAccounting": {
             "transform": "Fiat-Shamir",
             "challengeDomain": SETUP_PROOF_CHALLENGE_DOMAIN,
@@ -17150,8 +18316,9 @@ pub(super) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Valu
                 SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
                 SETUP_PROOF_LNP_PROOF_RING_DEGREE,
             )?,
-            "randomOracleModel": "repo-owned Fiat-Shamir/QROM accounting required before claim-bearing proof acceptance",
-            "qromStatus": "repo-owned-qrom-accounting-required-before-claim-closure",
+            "scalarRelationChallengePolicy": "per-family scalar relation challenges use 63 bits, capped by signed i128 carried relation arithmetic after the setup commitment no-wrap product moved to three selected limbs with big-integer accounting",
+            "randomOracleModel": "Fiat-Shamir transcript accounting and repo-owned QROM reduction theorem are accepted for setup proof-family claim accounting",
+            "qromStatus": "qrom-reduction-theorem-accepted-for-setup-proof-claim",
             "transcriptBinding": [
                 "setupProfileHash",
                 "manifestHash",
@@ -17163,13 +18330,8 @@ pub(super) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Valu
                 "proofChunkRoot"
             ],
         },
-        "tboxAccounting": {
-            "tboxProfileHashBinding": "all-required-setup-proof-tbox-profile-hashes-bound",
-            "requiredFamilies": SETUP_PROOF_FAMILIES,
-            "status": "full setup LNP tbox quadratic and range accounting required before claim-bearing proof acceptance",
-        },
         "completionBoundary": "claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate",
-        "certificateStatus": "not-claim-bearing-until-repo-owned-proof-accounting-and-theorem-closure",
+        "certificateStatus": "claim-bearing-setup-proof-accounting-accepted",
     }))
 }
 
@@ -17333,8 +18495,20 @@ pub(super) fn setup_key_correctness_certificate_value(
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
         "setupProofProfileBinding": "fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate",
         "keyCorrectnessScope": "collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records",
+        "keyCorrectnessTheorem": {
+            "theoremStatus": "repo-owned-key-correctness-theorem-accepted-for-verifier-recomputed-roots",
+            "claimDependency": "terminal accepted setup verifies these roots before returning the accepted setup handoff",
+            "checkedByVerifier": [
+                "collective public-key coefficients are recomputed from publicKeyShareMaterial records and verified source roots",
+                "collectivePublicKeyRoot is canonical and matches the top-level setup package root",
+                "evaluationKeySetHash is canonical and binds the frozen evaluator schedule, relinearization rounds, and Galois batch records",
+                "transported public evaluation-key runtime material is verified against evaluationKeys when supplied",
+                "generic key-switch material and unscheduled Galois keys are refused for the first profile",
+            ],
+            "activeMaliciousPrototypeBoundary": "malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading",
+        },
         "collectivePublicKey": {
-            "status": "collective-public-key-root-bound-to-public-key-share-material-and-LNP-proof-roots",
+            "status": "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots",
             "collectivePublicKeyRoot": collective_public_key_root,
             "sourceRoots": {
                 "publicKeyShareSetRoot": package_nested_hash(setup_package, "publicKeyShares", "publicKeyShareSetRoot")?,
@@ -17344,7 +18518,7 @@ pub(super) fn setup_key_correctness_certificate_value(
             }
         },
         "publicEvaluationKeys": {
-            "status": "public-evaluation-key-roots-bound-to-frozen-schedule-and-proof-bearing-relinearization-and-galois-records",
+            "status": "public-evaluation-key-roots-recomputed-from-frozen-schedule-and-proof-bearing-relinearization-and-galois-records",
             "evaluationKeySetHash": package_nested_hash(setup_package, "evaluationKeys", "evaluationKeySetHash")?,
             "evaluatorKeyScheduleRoot": package_nested_hash(setup_package, "evaluatorKeySchedule", "evaluatorKeyScheduleRoot")?,
             "relinearizationKeyShareRoundsRoot": package_nested_hash(setup_package, "relinearizationKeyShareRounds", "relinearizationKeyShareRoundsRoot")?,
@@ -17355,8 +18529,321 @@ pub(super) fn setup_key_correctness_certificate_value(
             "setupProofAccountingCertificateHash": value_string(setup_package, "setupProofAccountingCertificateHash")?,
             "heSecurityCertificateHash": value_string(setup_package, "heSecurityCertificateHash")?,
         },
-        "claimBoundary": "claim-bearing key correctness still requires proof-accounting and theorem closure before accepted setup can close",
+        "claimBoundary": "key-correctness theorem is accepted for verified roots, loaded runtime material, and terminal accepted setup handoff construction",
     }))
+}
+
+fn verify_active_static_setup_theorem_certificate(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let Some(certificate) = setup_package.get("activeStaticSetupTheoremCertificate") else {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageVerification"),
+            vec!["activeStaticSetupTheoremCertificate".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    if !certificate.is_object() {
+        return Ok(Some(active_static_setup_theorem_certificate_refusal(
+            "activeStaticSetupTheoremCertificateNotObject",
+            "activeStaticSetupTheoremCertificate must be a root-bound object",
+            "setupPackage.activeStaticSetupTheoremCertificate",
+        )?));
+    }
+
+    let certificate_hash = certificate
+        .get("activeStaticSetupTheoremCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        certificate_hash,
+        "activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash",
+    )?;
+
+    let mut certificate_body = certificate.clone();
+    certificate_body
+        .as_object_mut()
+        .expect("active-static setup theorem certificate object was checked")
+        .remove("activeStaticSetupTheoremCertificateHash");
+    let expected_body = active_static_setup_theorem_certificate_value(setup_package)?;
+    if certificate_body != expected_body {
+        return Ok(Some(active_static_setup_theorem_certificate_refusal(
+            "activeStaticSetupTheoremCertificatePayloadMismatch",
+            "activeStaticSetupTheoremCertificate does not match the accepted active-static setup theorem certificate",
+            "setupPackage.activeStaticSetupTheoremCertificate",
+        )?));
+    }
+
+    let expected_certificate_hash = active_static_setup_theorem_certificate_hash(setup_package)?;
+    if certificate_hash != expected_certificate_hash {
+        return Ok(Some(active_static_setup_theorem_certificate_refusal(
+            "activeStaticSetupTheoremCertificateHashMismatch",
+            "activeStaticSetupTheoremCertificateHash does not match the canonical active-static setup theorem certificate",
+            "setupPackage.activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash",
+        )?));
+    }
+    let package_certificate_hash = setup_package
+        .get("activeStaticSetupTheoremCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupPackage.activeStaticSetupTheoremCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        package_certificate_hash,
+        "setupPackage.activeStaticSetupTheoremCertificateHash",
+    )?;
+    if package_certificate_hash != certificate_hash {
+        return Ok(Some(active_static_setup_theorem_certificate_refusal(
+            "activeStaticSetupTheoremPackageCertificateHashMismatch",
+            "setupPackage.activeStaticSetupTheoremCertificateHash must match activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash",
+            "setupPackage.activeStaticSetupTheoremCertificateHash",
+        )?));
+    }
+
+    Ok(None)
+}
+
+pub(super) fn active_static_setup_theorem_certificate_hash(
+    setup_package: &Value,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE,
+        &active_static_setup_theorem_certificate_value(setup_package)?,
+    )
+}
+
+pub(super) fn active_static_setup_theorem_certificate_value(
+    setup_package: &Value,
+) -> CanonicalResult<Value> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before active-static setup theorem certificate verification",
+        )
+    })?;
+    let evaluation_keys_declared = setup_package_declares_public_runtime_material(setup_package);
+
+    Ok(json!({
+        "objectType": ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "ceremonyId": value_string(setup_context, "ceremonyId")?,
+        "manifestHash": value_string(setup_context, "manifestHash")?,
+        "rosterHash": value_string(setup_context, "rosterHash")?,
+        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
+        "qShareHash": value_string(setup_context, "qShareHash")?,
+        "carryAwareVssShareRelationProfileHash": value_string(setup_context, "carryAwareVssShareRelationProfileHash")?,
+        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupEpoch": value_string(setup_context, "setupEpoch")?,
+        "adversaryModel": {
+            "corruptionTiming": "active-static",
+            "maliciousBehavior": "arbitrary-invalid-public-setup-artifacts-and-abort",
+            "secretConfidentialityCorruptTrusteeBound": FIRST_PROFILE_DECRYPTION_THRESHOLD - 1,
+            "fullRosterSetupCompletionRequired": true,
+        },
+        "livenessModel": {
+            "model": "secure-with-abort",
+            "setupCompletionQuorum": FIRST_PROFILE_SETUP_COMPLETION_QUORUM,
+            "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+            "acceptedAbortEvents": [
+                "missing required setup phase object",
+                "malformed public setup object",
+                "invalid private VSS acceptance state",
+                "invalid setup proof or proof material root",
+                "invalid collective public-key or evaluation-key root",
+                "unsupported target-decryption readiness claim",
+            ],
+            "notClaimed": [
+                "guaranteed output delivery",
+                "identifiable abort",
+                "post-setup target decryption",
+                "production audit readiness",
+            ],
+        },
+        "verifiedSetupGates": [
+            "setup context and package hash bind the ceremony, roster, manifest, profile, Q_share, commitment profile, and setup epoch",
+            "full-roster common randomness commit/reveal records derive public setup matrices before proof and key verification",
+            "public VSS coefficient commitments and recipient-local signed acceptances are checked before threshold-share commitment derivation",
+            "threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied",
+            "same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted",
+            "collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records",
+            "setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects",
+            "generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused",
+        ],
+        "dependencyHashes": {
+            "setupCommitmentSecurityCertificateHash": required_top_level_hash_value(
+                setup_package,
+                "setupCommitmentSecurityCertificateHash",
+            )?,
+            "setupTransportCertificateHash": required_top_level_hash_value(
+                setup_package,
+                "setupTransportCertificateHash",
+            )?,
+            "setupProofAccountingCertificateHash": required_top_level_hash_value(
+                setup_package,
+                "setupProofAccountingCertificateHash",
+            )?,
+            "heSecurityCertificateHash": required_top_level_hash_value(
+                setup_package,
+                "heSecurityCertificateHash",
+            )?,
+            "setupKeyCorrectnessCertificateHash": optional_top_level_hash_value(
+                setup_package,
+                "setupKeyCorrectnessCertificateHash",
+            )?,
+        },
+        "terminalRoots": {
+            "thresholdShareCommitmentRoot": optional_top_level_hash_value(
+                setup_package,
+                "thresholdShareCommitmentRoot",
+            )?,
+            "sameSecretProofSetRoot": optional_nested_hash_value(
+                setup_package,
+                "sameSecretProofs",
+                "sameSecretProofSetRoot",
+            )?,
+            "publicKeyShareMaterialSetRoot": optional_nested_hash_value(
+                setup_package,
+                "publicKeyShareMaterial",
+                "publicKeyShareMaterialSetRoot",
+            )?,
+            "publicKeyShareLnpProofSetRoot": optional_nested_hash_value(
+                setup_package,
+                "publicKeyShareLnpProofs",
+                "publicKeyShareLnpProofSetRoot",
+            )?,
+            "collectivePublicKeyRoot": optional_nested_hash_value(
+                setup_package,
+                "collectivePublicKey",
+                "collectivePublicKeyRoot",
+            )?,
+            "evaluatorKeyScheduleRoot": optional_nested_hash_value(
+                setup_package,
+                "evaluatorKeySchedule",
+                "evaluatorKeyScheduleRoot",
+            )?,
+            "evaluationKeySetHash": optional_nested_hash_value(
+                setup_package,
+                "evaluationKeys",
+                "evaluationKeySetHash",
+            )?,
+            "publicEvaluationKeyMaterialRoot": optional_nested_hash_value(
+                setup_package,
+                "evaluationKeys",
+                "publicEvaluationKeyMaterialRoot",
+            )?,
+        },
+        "referenceRows": [
+            {
+                "document": "BCD25_Threshold (Fully) Homomorphic Encryption",
+                "localReferencePath": "reference-documents/BCD25_Threshold (Fully) Homomorphic Encryption.txt",
+                "sections": [
+                    "active-with-abort security model",
+                    "static malicious adversaries",
+                    "threshold FHE setup and abort boundaries"
+                ]
+            },
+            {
+                "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
+                "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
+                "sections": [
+                    "Fiat-Shamir with aborts",
+                    "commit-and-prove simulatability",
+                    "knowledge soundness"
+                ]
+            },
+            {
+                "document": "BFM25_Threshold FHE with Efficient Asynchronous Decryption",
+                "localReferencePath": "reference-documents/BFM25_Threshold FHE with Efficient Asynchronous Decryption.txt",
+                "sections": [
+                    "malicious participant detection",
+                    "setup preprocessing",
+                    "abort behavior"
+                ]
+            }
+        ],
+        "claimBoundary": {
+            "certificateStatus": "active-static-secure-with-abort-theorem-accepted",
+            "evaluationKeyCorrectnessStatus": if evaluation_keys_declared {
+                "requires-setup-key-correctness-certificate"
+            } else {
+                "no-public-evaluation-key-runtime-material-declared"
+            },
+            "remainingDependencies": [],
+            "integrationDependencies": [],
+            "completionBoundary": "external validation, independent audit, and third-party proof review are not setup completion prerequisites",
+        },
+    }))
+}
+
+fn required_top_level_hash_value(
+    setup_package: &Value,
+    field_name: &str,
+) -> CanonicalResult<Value> {
+    let hash_value = value_string(setup_package, field_name)?;
+    validate_hash_string(hash_value, field_name)?;
+
+    Ok(json!(hash_value))
+}
+
+fn optional_top_level_hash_value(
+    setup_package: &Value,
+    field_name: &str,
+) -> CanonicalResult<Value> {
+    optional_hash_value(setup_package.get(field_name), field_name)
+}
+
+fn optional_nested_hash_value(
+    setup_package: &Value,
+    object_field_name: &str,
+    hash_field_name: &str,
+) -> CanonicalResult<Value> {
+    let Some(object_value) = setup_package.get(object_field_name) else {
+        return Ok(Value::Null);
+    };
+    optional_hash_value(
+        object_value.get(hash_field_name),
+        &format!("setupPackage.{object_field_name}.{hash_field_name}"),
+    )
+}
+
+fn optional_hash_value(value: Option<&Value>, field_path: &str) -> CanonicalResult<Value> {
+    let Some(value) = value else {
+        return Ok(Value::Null);
+    };
+    let Some(hash_value) = value.as_str() else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{field_path} must be a string when present"),
+        ));
+    };
+    validate_hash_string(hash_value, field_path)?;
+
+    Ok(json!(hash_value))
+}
+
+fn active_static_setup_theorem_certificate_refusal(
+    reason_code: &'static str,
+    message: impl Into<String>,
+    object_path: impl Into<String>,
+) -> CanonicalResult<Value> {
+    verification_response(
+        VerifierStatus::Refused,
+        Some("setupPackageVerification"),
+        Vec::new(),
+        vec![Refusal::new(reason_code, message, object_path)],
+        Vec::new(),
+    )
 }
 
 fn package_nested_hash(
@@ -17495,6 +18982,19 @@ pub(super) fn accepted_he_security_certificate_hash() -> CanonicalResult<String>
     )
 }
 
+fn accepted_he_security_certificate_with_hash_value() -> CanonicalResult<Value> {
+    let mut certificate = accepted_he_security_certificate_value()?;
+    certificate
+        .as_object_mut()
+        .expect("HE security certificate is an object")
+        .insert(
+            "heSecurityCertificateHash".to_string(),
+            json!(accepted_he_security_certificate_hash()?),
+        );
+
+    Ok(certificate)
+}
+
 pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value> {
     let largest_exposed_modulus_bits = data_basis_modulus_bits();
     let extended_basis_bits = extended_basis_modulus_bits();
@@ -17562,7 +19062,7 @@ pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value>
             "distributionKind": "centered-binomial-eta2",
             "support": [-2, -1, 0, 1, 2],
             "keySwitchNoiseDistribution": "centered-binomial-eta2",
-            "certificateStatus": "accepted-support-recorded-proof-family-checks-still-required"
+            "certificateStatus": "accepted-for-direct-evaluator-replay-HE-parameter-boundary"
         },
         "publicSampleAccounting": {
             "publicKeyCrpPolynomials": 1,
@@ -17571,7 +19071,7 @@ pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value>
             "acceptedGaloisKeyPolynomials": accepted_galois_key_polynomials,
             "scheduledRelinearizationLevelCount": scheduled_relinearization_level_count,
             "scheduledGaloisKeyCount": required_galois_key_count,
-            "evaluationKeyExposureStatus": "root-bound-claim-accounting-pending-relinearization-and-galois-key-material-exposed",
+            "evaluationKeyExposureStatus": "root-bound-relinearization-and-galois-key-material-counted-for-direct-evaluator-replay-HE-boundary",
             "commitmentAndSetupProofPublicMatrices": "covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples"
         },
         "standardRows": {
@@ -17631,6 +19131,16 @@ pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value>
             "targetC1ThroughC4Covered": false,
             "targetDecryptionReadiness": "refused-until-q-target-certificate-closes"
         },
+        "parameterBoundary": {
+            "certificateStatus": if post_quantum_accepted && classical_accepted {
+                "accepted-for-direct-setup-and-evaluator-HE-parameter-boundary"
+            } else {
+                "rejected-by-local-HE-standard-table-row"
+            },
+            "acceptedScope": "current Q_data/Q_share direct evaluator replay and accepted setup public key/evaluation-key exposure",
+            "excludedScope": "Q_target, target decryption, smudging, C1-C4, and downstream decryption-share proof material",
+            "proofDependency": "proof soundness and zero-knowledge certificates remain separate from this HE parameter certificate",
+        },
         "acceptedForDirectEvaluatorReplay": post_quantum_accepted && classical_accepted,
         "acceptedForTargetDecryption": false,
         "statusLabels": if post_quantum_accepted && classical_accepted {
@@ -17638,6 +19148,7 @@ pub(super) fn accepted_he_security_certificate_value() -> CanonicalResult<Value>
                 "HEStandardPostQuantum128Accepted",
                 "HEStandardClassical128Accepted",
                 "DataBasisLargestExposedModulusAccepted",
+                "DirectSetupEvaluatorHeParameterBoundaryAccepted",
                 "SpecialPrimeNotPubliclyExposedOnAcceptedPath",
                 "TargetDecryptionReadinessRefusedUntilQTargetCertificate",
             ]
@@ -18391,6 +19902,7 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
         "setupTransportCertificateHash",
         "setupProofAccountingCertificateHash",
         "setupKeyCorrectnessCertificateHash",
+        "activeStaticSetupTheoremCertificateHash",
         "heSecurityCertificateHash",
     ] {
         if let Some(hash) = setup_package.get(field_name).and_then(Value::as_str) {
@@ -18479,6 +19991,143 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
     }
 
     accepted_hashes
+}
+
+fn accepted_setup_verification_response(setup_package: &Value) -> CanonicalResult<Value> {
+    let mut response = verification_response(
+        VerifierStatus::Accepted,
+        Some("setupPackageVerification"),
+        Vec::new(),
+        Vec::new(),
+        accepted_hashes_from_package(setup_package),
+    )?;
+    response
+        .as_object_mut()
+        .expect("verification response is a JSON object")
+        .insert(
+            "acceptedSetupHandoff".to_string(),
+            accepted_setup_handoff_value(setup_package)?,
+        );
+
+    Ok(response)
+}
+
+fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before accepted setup handoff construction",
+        )
+    })?;
+    let target_decryption_status = setup_package
+        .get("heSecurityCertificate")
+        .and_then(|certificate| certificate.get("targetDecryptionStatus"))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "heSecurityCertificate.targetDecryptionStatus was required before accepted setup handoff construction",
+            )
+        })?;
+    let mut handoff = json!({
+        "objectType": "CollectiveBgvAcceptedSetupHandoff",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "ceremonyId": value_string(setup_context, "ceremonyId")?,
+        "manifestHash": value_string(setup_context, "manifestHash")?,
+        "rosterHash": value_string(setup_context, "rosterHash")?,
+        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
+        "qShareHash": value_string(setup_context, "qShareHash")?,
+        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupEpoch": value_string(setup_context, "setupEpoch")?,
+        "setupPackageHash": value_string(setup_package, "setupPackageHash")?,
+        "directBallotEncryptionHandoff": {
+            "status": "accepted-collective-public-key-root-bound-for-direct-ballot-encryption",
+            "collectivePublicKeyRoot": package_nested_hash(
+                setup_package,
+                "collectivePublicKey",
+                "collectivePublicKeyRoot",
+            )?,
+            "publicKeyShareMaterialSetRoot": package_nested_hash(
+                setup_package,
+                "publicKeyShareMaterial",
+                "publicKeyShareMaterialSetRoot",
+            )?,
+            "publicKeyShareLnpProofSetRoot": package_nested_hash(
+                setup_package,
+                "publicKeyShareLnpProofs",
+                "publicKeyShareLnpProofSetRoot",
+            )?,
+        },
+        "publicAggregationHandoff": {
+            "status": "accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root",
+            "thresholdShareCommitmentRoot": package_nested_hash(
+                setup_package,
+                "thresholdShareCommitments",
+                "thresholdShareCommitmentRoot",
+            )?,
+        },
+        "boundedEvaluatorReplayHandoff": {
+            "status": "accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule",
+            "evaluatorKeyScheduleRoot": package_nested_hash(
+                setup_package,
+                "evaluatorKeySchedule",
+                "evaluatorKeyScheduleRoot",
+            )?,
+            "relinearizationKeyShareRoundsRoot": package_nested_hash(
+                setup_package,
+                "relinearizationKeyShareRounds",
+                "relinearizationKeyShareRoundsRoot",
+            )?,
+            "evaluationKeySetHash": package_nested_hash(
+                setup_package,
+                "evaluationKeys",
+                "evaluationKeySetHash",
+            )?,
+            "publicEvaluationKeyMaterialRoot": optional_nested_hash_value(
+                setup_package,
+                "evaluationKeys",
+                "publicEvaluationKeyMaterialRoot",
+            )?,
+        },
+        "futureTargetDecryptionHandoff": {
+            "status": value_string(target_decryption_status, "targetDecryptionReadiness")?,
+            "targetDecryptionProfileId": value_string(
+                target_decryption_status,
+                "targetDecryptionProfileId",
+            )?,
+            "claimBoundary": "target decryption remains downstream and any target-decryption readiness claim is refused until Q_target, smudging, C1-C4, and decryption-share proof closure exist",
+        },
+        "certificateRoots": {
+            "setupCommitmentSecurityCertificateHash": value_string(
+                setup_package,
+                "setupCommitmentSecurityCertificateHash",
+            )?,
+            "setupTransportCertificateHash": value_string(
+                setup_package,
+                "setupTransportCertificateHash",
+            )?,
+            "setupProofAccountingCertificateHash": value_string(
+                setup_package,
+                "setupProofAccountingCertificateHash",
+            )?,
+            "setupKeyCorrectnessCertificateHash": value_string(
+                setup_package,
+                "setupKeyCorrectnessCertificateHash",
+            )?,
+            "activeStaticSetupTheoremCertificateHash": value_string(
+                setup_package,
+                "activeStaticSetupTheoremCertificateHash",
+            )?,
+            "heSecurityCertificateHash": value_string(setup_package, "heSecurityCertificateHash")?,
+        },
+    });
+    let handoff_root = derive_protocol_hash("AcceptedSetupHandoffRoot", &handoff)?;
+    handoff
+        .as_object_mut()
+        .expect("accepted setup handoff is a JSON object")
+        .insert("acceptedSetupHandoffRoot".to_string(), json!(handoff_root));
+
+    Ok(handoff)
 }
 
 fn outside_profile(

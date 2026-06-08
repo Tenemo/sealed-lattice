@@ -15,9 +15,9 @@ export const publicKeyShareProofFamily = 'public-key-share';
 export const publicKeyShareProofVerificationStatus =
     'lnp-proof-verification-pending';
 export const publicKeyShareLnpProofVerificationStatus =
-    'lnp-public-key-share-relation-verified-claim-accounting-pending';
+    'lnp-public-key-share-relation-verified-with-accepted-setup-proof-accounting';
 export const publicKeyShareLnpProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, VSS-bound secret opening, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing public-key acceptance';
+    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, VSS-bound secret opening with centered signed 80-bit committed-secret masks and responses, fixed-width signed big-integer public-key relation commitments, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing public-key proof acceptance';
 export const publicKeyShareProofBindingStatus =
     'public-key-share-proof-required';
 export const publicKeyShareMaterialEncoding =
@@ -328,7 +328,7 @@ export type CollectivePublicKey = Readonly<
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly proofVerificationStatus: typeof publicKeyShareLnpProofVerificationStatus;
         readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
-        readonly aggregationStatus: 'lnp-proof-aggregated-claim-accounting-pending';
+        readonly aggregationStatus: 'lnp-proof-aggregated-with-accepted-setup-proof-accounting';
         readonly materialEncoding: 'embedded-full-collective-public-key-coefficients';
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -1382,7 +1382,8 @@ export const createCollectivePublicKey = (
         proofFamily: publicKeyShareProofFamily,
         proofVerificationStatus: publicKeyShareLnpProofVerificationStatus,
         proofModelStatus: publicKeyShareLnpProofModelStatus,
-        aggregationStatus: 'lnp-proof-aggregated-claim-accounting-pending',
+        aggregationStatus:
+            'lnp-proof-aggregated-with-accepted-setup-proof-accounting',
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

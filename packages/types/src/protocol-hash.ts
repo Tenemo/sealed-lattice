@@ -63,6 +63,8 @@ export const protocolHashNamespaceValues = [
     'SetupProofChallengeSpaceAuditHash',
     'SetupProofAccountingCertificateHash',
     'SetupKeyCorrectnessCertificateHash',
+    'ActiveStaticSetupTheoremCertificateHash',
+    'AcceptedSetupHandoffRoot',
     'SetupCommitmentRoot',
     'VssCoefficientCommitmentRoot',
     'VssCoefficientCommitmentMaterialRoot',

@@ -22,6 +22,7 @@
         "vectors": "tsx ./tools/ci/verify-test-vectors.ts",
         "vectors:generate": "tsx ./tools/ci/verify-test-vectors.ts --generate",
         "test:lattigo-oracle": "tsx ./tools/lattigo-oracle/verify-lattigo-oracle.ts",
+        "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",
         "test:node:fast": "tsx ./tools/ci/run-node-tests.ts --only fast",
         "test:node:protocol": "tsx ./tools/ci/run-node-tests.ts --only protocol",
         "test:node:kernel": "tsx ./tools/ci/run-node-tests.ts --only kernel",

@@ -4,6 +4,7 @@ use crate::bgv::setup::setup_proof::{
     SetupProofMaterialReferenceInput, setup_proof_material_reference_root,
     setup_proof_material_transport_hashes,
 };
+use crate::transcript_core::decode_hex;
 
 #[test]
 fn private_vss_share_envelope_verifier_refuses_plaintext_aggregate_openings() {
@@ -81,6 +82,129 @@ fn private_vss_share_envelope_verifier_accepts_lnp_private_share_proofs() {
                 == 128
         );
     }
+}
+
+#[test]
+fn private_vss_lnp_proof_verifier_accepts_centered_message_responses() {
+    let ring_degree = 8;
+    let request = private_vss_share_envelope_request(ring_degree);
+    let setup_context = request["setupContext"].clone();
+    let public_matrix_seed_hash = request["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let private_envelope = &request["privateEnvelope"];
+    let private_envelope_aad_hash = private_envelope["privateEnvelopeAadHash"]
+        .as_str()
+        .expect("private envelope AAD hash");
+    let source_trustee_commitment_root = private_envelope["sourceTrusteeCommitmentRoot"]
+        .as_str()
+        .expect("source trustee commitment root");
+    let limb_opening = &private_envelope["rnsShareOpenings"][0];
+    let rns_prime = limb_opening["rnsPrime"].as_u64().expect("RNS prime");
+    let coefficient_messages_by_shamir_index = vec![vec![0_u64; ring_degree]; 4];
+    let opening_randomness_by_shamir_index = (0..4_u64)
+        .map(|shamir_coefficient_index| {
+            randomness_fixture(0, shamir_coefficient_index, ring_degree)
+        })
+        .collect::<Vec<_>>();
+    let coefficient_commitments = opening_randomness_by_shamir_index
+        .iter()
+        .enumerate()
+        .map(|(shamir_coefficient_index, opening_randomness)| {
+            compute_setup_commitment_for_tests(
+                public_matrix_seed_hash,
+                0,
+                rns_prime,
+                shamir_coefficient_index as u64,
+                &vec![0_u128; ring_degree],
+                opening_randomness,
+                ring_degree,
+            )
+            .expect("zero coefficient commitment")
+        })
+        .collect::<Vec<_>>();
+    let coefficient_commitment_roots = coefficient_commitments
+        .iter()
+        .map(|commitment| setup_commitment_root(commitment).expect("commitment root"))
+        .collect::<Vec<_>>();
+    let share_values = vec![0_u64; ring_degree];
+    let share_values_hash = derive_protocol_hash(
+        "PrivateVssLocalVerificationRoot",
+        &serde_json::json!({
+            "objectType": "PrivateVssShareValueVector",
+            "objectVersion": 1,
+            "rnsLimbIndex": 0,
+            "rnsPrime": rns_prime,
+            "shareValues": share_values,
+        }),
+    )
+    .expect("share values hash");
+    let proof_randomness_seed_hex = derive_protocol_hash(
+        "PrivateVssLocalVerificationRoot",
+        &serde_json::json!({
+            "fixture": "private-vss-centered-message-response",
+            "rnsLimbIndex": 0,
+        }),
+    )
+    .expect("private VSS proof randomness seed");
+    let proof_record = private_vss_share_lnp_proof_record(PrivateVssShareLnpProofGenerationInput {
+        setup_context: &setup_context,
+        public_matrix_seed_hash,
+        private_envelope_aad_hash,
+        source_trustee_identity: "trustee-0",
+        source_trustee_roster_position: 0,
+        recipient_identity: "trustee-2",
+        recipient_roster_position: 2,
+        source_trustee_commitment_root,
+        rns_limb_index: 0,
+        rns_prime,
+        ring_degree,
+        coefficient_commitment_roots: &coefficient_commitment_roots,
+        share_values: &share_values,
+        share_values_hash: &share_values_hash,
+        coefficient_commitments: &coefficient_commitments,
+        witness: &PrivateVssShareLnpProofWitness {
+            coefficient_messages_by_shamir_index,
+            opening_randomness_by_shamir_index,
+            carry_witnesses: vec![0_i128; ring_degree],
+        },
+        proof_randomness_seed_hex: &proof_randomness_seed_hex,
+    })
+    .expect("private VSS proof record");
+    let message_responses = embedded_private_vss_message_responses(&proof_record, ring_degree, 4);
+    assert!(
+        message_responses.iter().any(|response| *response < 0),
+        "zero-message private VSS proof should expose centered negative response representatives"
+    );
+
+    let verification =
+        verify_private_vss_share_lnp_relation_proof(PrivateVssShareLnpProofVerificationInput {
+            setup_context: &setup_context,
+            public_matrix_seed_hash,
+            private_envelope_aad_hash,
+            source_trustee_identity: "trustee-0",
+            source_trustee_roster_position: 0,
+            recipient_identity: "trustee-2",
+            recipient_roster_position: 2,
+            source_trustee_commitment_root,
+            rns_limb_index: 0,
+            rns_prime,
+            ring_degree,
+            coefficient_commitment_roots: &coefficient_commitment_roots,
+            share_values: &share_values,
+            share_values_hash: &share_values_hash,
+            coefficient_commitments: &coefficient_commitments,
+            proof_record: &proof_record,
+            transported_proof_material: None,
+        })
+        .expect("centered private VSS proof verifies");
+
+    assert_eq!(
+        verification.proof_bytes_hash,
+        proof_record["proofBytesHash"]
+            .as_str()
+            .expect("proof bytes hash")
+    );
 }
 
 #[test]
@@ -799,6 +923,73 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
         output.push(HEX[(byte >> 4) as usize] as char);
         output.push(HEX[(byte & 0x0f) as usize] as char);
     }
+    output
+}
+
+fn embedded_private_vss_message_responses(
+    proof_record: &serde_json::Value,
+    ring_degree: usize,
+    coefficient_count: usize,
+) -> Vec<i128> {
+    let proof_bytes_hex = proof_record["proofBytesHex"]
+        .as_str()
+        .expect("embedded proof bytes hex");
+    let proof_bytes = decode_hex(proof_bytes_hex).expect("embedded proof bytes");
+    let mut cursor = 0_usize;
+
+    assert_eq!(
+        read_private_vss_proof_fixed::<8>(&proof_bytes, &mut cursor),
+        *b"SLVSLNP1"
+    );
+    cursor += 64;
+    cursor += 64;
+    cursor += 8;
+    let tbox_proof_byte_count =
+        usize::try_from(read_private_vss_proof_u64(&proof_bytes, &mut cursor))
+            .expect("tbox proof byte count");
+    cursor += tbox_proof_byte_count;
+
+    cursor += ring_degree * 16;
+    cursor += coefficient_count
+        * SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+        * SETUP_COMMITMENT_ROW_COUNT
+        * ring_degree
+        * 8;
+
+    (0..coefficient_count)
+        .flat_map(|_| read_private_vss_proof_i128_vector(&proof_bytes, &mut cursor, ring_degree))
+        .collect()
+}
+
+fn read_private_vss_proof_i128_vector(
+    proof_bytes: &[u8],
+    cursor: &mut usize,
+    count: usize,
+) -> Vec<i128> {
+    (0..count)
+        .map(|_| {
+            let bytes = read_private_vss_proof_fixed::<16>(proof_bytes, cursor);
+            i128::from_le_bytes(bytes)
+        })
+        .collect()
+}
+
+fn read_private_vss_proof_u64(proof_bytes: &[u8], cursor: &mut usize) -> u64 {
+    let bytes = read_private_vss_proof_fixed::<8>(proof_bytes, cursor);
+    u64::from_le_bytes(bytes)
+}
+
+fn read_private_vss_proof_fixed<const LENGTH: usize>(
+    proof_bytes: &[u8],
+    cursor: &mut usize,
+) -> [u8; LENGTH] {
+    let end = cursor.checked_add(LENGTH).expect("proof cursor overflow");
+    let slice = proof_bytes
+        .get(*cursor..end)
+        .expect("proof bytes ended early");
+    let mut output = [0_u8; LENGTH];
+    output.copy_from_slice(slice);
+    *cursor = end;
     output
 }
 

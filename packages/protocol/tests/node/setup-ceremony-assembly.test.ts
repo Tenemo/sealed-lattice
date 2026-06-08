@@ -52,7 +52,8 @@ import {
     createProtocolSignatureFixture,
 } from '#tests/support/protocol-signature-fixtures';
 
-const qSharePrimes = [65_537, 114_689] as const;
+const qSharePrimes = [65_537, 114_689, 147_457] as const;
+const setupCommitmentModulusLimbs = qSharePrimes;
 const ringDegree = 2;
 const thresholdDegree = 2;
 
@@ -143,6 +144,11 @@ const setupProofFamilies = [
 ] as const;
 const setupProofChallengeDifferenceInvertibilityStatus =
     'repo-owned-lnp22-small-coefficient-challenge-differences-invertible';
+const setupProofLnpTboxProofRingDegree = 128;
+const setupProofLnpTboxChallengeLog2Range = 3;
+const setupProofLnpTboxChallengeEncodedBits =
+    setupProofLnpTboxProofRingDegree * setupProofLnpTboxChallengeLog2Range;
+const setupProofLnpTboxChallengeSpaceBits = 147;
 const setupProofChallengeSamplePositions = [0, 1, 63, 64, 65, 127] as const;
 const setupProofChallengeDifferenceInvertibilityAccounting = {
     objectType: 'SetupProofChallengeDifferenceInvertibilityAccounting',
@@ -1108,7 +1114,7 @@ const setupCertificateInputFixture = (
         objectType: 'SetupCommitmentProfile',
         objectVersion: 1,
         messageEncoding: {
-            commitmentModulusLimbs: qSharePrimes,
+            commitmentModulusLimbs: setupCommitmentModulusLimbs,
         },
     };
     const setupProofProfile = {
@@ -1189,7 +1195,7 @@ const setupCertificateInputFixture = (
         galoisKeyShareTboxParameterProfileHash,
         verificationPolicy: {
             proofBytesAcceptedStatus:
-                'private-vss-same-secret-public-key-share-relinearization-and-galois-verifiers-implemented-claim-accounting-pending',
+                'private-vss-same-secret-public-key-share-relinearization-and-galois-proof-bytes-accepted-for-setup-proof-accounting',
         },
     };
     const setupTransportProfile = {
@@ -1460,10 +1466,16 @@ describe('setup ceremony assembly', () => {
         ).toBe(assembly.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot);
         expect(
             assembly.relinearizationKeyShareRounds.roundOneRecords,
-        ).toHaveLength(participantCount);
+        ).toHaveLength(
+            assembly.evaluatorKeySchedule.relinearizationLevelSchedule.length *
+                participantCount,
+        );
         expect(
             assembly.relinearizationKeyShareRounds.roundTwoRecords,
-        ).toHaveLength(participantCount);
+        ).toHaveLength(
+            assembly.evaluatorKeySchedule.relinearizationLevelSchedule.length *
+                participantCount,
+        );
         expect(assembly.galoisKeyShareBatches).toHaveLength(participantCount);
         expect(
             assembly.galoisKeyShareBatches.every(
@@ -1544,6 +1556,91 @@ describe('setup ceremony assembly', () => {
                 string,
                 unknown
             >;
+        const proofFamilyAccounting =
+            setupProofAccountingCertificate.proofFamilyAccounting as readonly Record<
+                string,
+                unknown
+            >[];
+        expect(proofFamilyAccounting).toHaveLength(setupProofFamilies.length);
+        expect(proofFamilyAccounting[0]).toMatchObject({
+            proofFamily: 'vss-opening-carry',
+            verifierClosedStatus:
+                'relation-transcript-and-bound-checks-verifier-closed',
+            accountingStatus:
+                'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
+            claimAccounting: {
+                soundness:
+                    'LNP22 commit-and-prove extractor accounting is accepted for the recipient-local carry-aware VSS relation because statement binding, first-message commitments, generated tbox bytes, coefficient openings, carry relations, and response bounds are verified before acceptance',
+                zeroKnowledge:
+                    'LNP22 simulator accounting is accepted for centered 112-bit coefficient masks, opening-randomness masks, carry masks, verifier-bound no-wrap bounds, and transcript-bound tbox bytes; private coefficients, openings, and carries are not exposed in accepted public artifacts',
+            },
+        });
+        expect(JSON.stringify(proofFamilyAccounting)).not.toContain(
+            'full LNP tbox proof closure',
+        );
+        expect(
+            proofFamilyAccounting.map((entry) => entry.proofFamily),
+        ).toStrictEqual([...setupProofFamilies]);
+        const responseMaskingAccounting =
+            setupProofAccountingCertificate.responseMaskingAccounting as Record<
+                string,
+                unknown
+            >;
+        expect(responseMaskingAccounting).toMatchObject({
+            objectType: 'SetupProofResponseMaskingAccounting',
+            accountingStatus:
+                'response-mask-bounds-strengthened-verifier-bound-and-zk-accounting-accepted',
+            zeroKnowledgeAccountingStatus:
+                'response masking, witness-dependent support commitments, committed-secret response distributions, fixed-width signed relation commitments, and no-wrap response bounds are accepted by the setup proof theorem accounting object',
+        });
+        expect(JSON.stringify(responseMaskingAccounting)).not.toContain(
+            'full LNP tbox proof closure',
+        );
+        const responseMaskingFamilies =
+            responseMaskingAccounting.families as readonly Record<
+                string,
+                unknown
+            >[];
+        expect(responseMaskingFamilies).toHaveLength(setupProofFamilies.length);
+        expect(responseMaskingFamilies[0]).toMatchObject({
+            proofFamily: 'vss-opening-carry',
+            fullWidthCoefficientMaskingStatus:
+                'centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted',
+            commitmentNoWrapStatus: 'three-limb-big-int-no-wrap-bound-recorded',
+        });
+        const privateVssResponseProfiles = responseMaskingFamilies[0]
+            .responseProfiles as readonly Record<string, unknown>[];
+        expect(privateVssResponseProfiles[0]).toMatchObject({
+            responseKind: 'coefficient-message',
+            maskRandomBits: 112,
+            scalarChallengeBits: 63,
+        });
+        expect(
+            privateVssResponseProfiles[0].maskingSlackBits as number,
+        ).toBeGreaterThan(0);
+        const relinearizationResponseProfiles = responseMaskingFamilies[3]
+            .responseProfiles as readonly Record<string, unknown>[];
+        expect(relinearizationResponseProfiles[2]).toMatchObject({
+            responseKind: 'round-two-source',
+            maskRandomBits: 80,
+        });
+        const tboxAccounting =
+            setupProofAccountingCertificate.tboxAccounting as Record<
+                string,
+                unknown
+            >;
+        expect(tboxAccounting).toMatchObject({
+            accountingStatus:
+                'generated-lower-protocol-tbox-profile-verifier-and-prover-closed',
+            closedProofFamilies: [...setupProofFamilies],
+            proofRingDegree: setupProofLnpTboxProofRingDegree,
+            challengeLog2Range: setupProofLnpTboxChallengeLog2Range,
+            challengeEncodedBits: setupProofLnpTboxChallengeEncodedBits,
+            challengeSpaceBits: setupProofLnpTboxChallengeSpaceBits,
+        });
+        expect(tboxAccounting.closedVerifierChecks).toContain(
+            'generated lower-protocol tbox suffix byte-for-byte enforcement',
+        );
         const challengeSpaceAudit =
             challengeAccounting.challengeSpaceAudit as Record<string, unknown>;
         expect(challengeSpaceAudit).toMatchObject({
@@ -1569,8 +1666,12 @@ describe('setup ceremony assembly', () => {
         ).toMatchObject({
             objectType: 'SetupKeyCorrectnessCertificate',
             setupProfileId: 'CollectiveBgvSetup-v1',
+            keyCorrectnessTheorem: {
+                theoremStatus:
+                    'repo-owned-key-correctness-theorem-accepted-for-verifier-recomputed-roots',
+            },
             collectivePublicKey: {
-                status: 'collective-public-key-root-bound-to-public-key-share-material-and-LNP-proof-roots',
+                status: 'collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots',
                 collectivePublicKeyRoot:
                     assembly.collectivePublicKey.collectivePublicKeyRoot,
                 sourceRoots: {
@@ -1588,6 +1689,7 @@ describe('setup ceremony assembly', () => {
                 },
             },
             publicEvaluationKeys: {
+                status: 'public-evaluation-key-roots-recomputed-from-frozen-schedule-and-proof-bearing-relinearization-and-galois-records',
                 evaluationKeySetHash:
                     assembly.evaluationKeys.evaluationKeySetHash,
                 evaluatorKeyScheduleRoot:

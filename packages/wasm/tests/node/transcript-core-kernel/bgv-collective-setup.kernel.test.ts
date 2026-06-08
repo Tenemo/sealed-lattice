@@ -67,6 +67,20 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
+const jsonRecord = (value: unknown, label: string): JsonRecord => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${label} must be a JSON object.`);
+    }
+
+    return value as JsonRecord;
+};
+
+const optionalJsonRecord = (
+    value: unknown,
+    label: string,
+): JsonRecord | undefined =>
+    value === undefined ? undefined : jsonRecord(value, label);
+
 const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
     JSON.parse(JSON.stringify(value)) as JsonRecord;
 
@@ -76,7 +90,7 @@ const firstProfileParticipantCount = 10;
 const firstProfileDecryptionThreshold = 4;
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const setupTransportChunkSizeBytes = 1_048_576;
-const setupTransportTotalByteLength = 1_069_547_520;
+const setupTransportTotalByteLength = 1_604_321_280;
 const setupTransportChunkCount =
     setupTransportTotalByteLength / setupTransportChunkSizeBytes;
 const setupProofFamilies = [
@@ -838,7 +852,7 @@ function keySwitchComponentPolynomialCount(
     }, 0);
 }
 
-function acceptedSetupCommitmentSecurityCertificate(
+function fallbackAcceptedSetupCommitmentSecurityCertificate(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): JsonRecord {
@@ -850,8 +864,26 @@ function acceptedSetupCommitmentSecurityCertificate(
     );
     const thresholdScalarSum =
         recipientScalarSum * BigInt(firstProfileParticipantCount);
-    const commitmentModulusProduct =
-        BigInt(sourceRnsPrimes[0]) * BigInt(sourceRnsPrimes[1]);
+    const commitmentModulusLimbs = (
+        profile.commitmentProfile.messageEncoding as JsonRecord
+    ).commitmentModulusLimbs as readonly unknown[];
+    const commitmentModulusProduct = commitmentModulusLimbs.reduce<bigint>(
+        (product, limb, limbIndex) => {
+            if (typeof limb === 'number') {
+                return product * BigInt(limb);
+            }
+            const limbRecord = limb as JsonRecord;
+            const modulus = limbRecord.modulus;
+            if (typeof modulus !== 'number' || !Number.isSafeInteger(modulus)) {
+                throw new TypeError(
+                    `commitmentModulusLimbs.${String(limbIndex)}.modulus must be a safe integer.`,
+                );
+            }
+
+            return product * BigInt(modulus);
+        },
+        1n,
+    );
     const maxRecipientLiftedCoefficient =
         BigInt(maxSourceMessageModulus - 1) * recipientScalarSum;
     const maxThresholdLiftedCoefficient =
@@ -859,9 +891,6 @@ function acceptedSetupCommitmentSecurityCertificate(
     const commitmentModulusProductBits = ceilLog2Bigint(
         commitmentModulusProduct,
     );
-    const commitmentModulusLimbs = (
-        profile.commitmentProfile.messageEncoding as JsonRecord
-    ).commitmentModulusLimbs;
     const certificate = {
         objectType: 'SetupCommitmentSecurityCertificate',
         objectVersion: 1,
@@ -881,10 +910,9 @@ function acceptedSetupCommitmentSecurityCertificate(
             'same-secret trustee commitment roots',
         ],
         nonClosure: [
-            'same-secret proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure',
-            'public-key share proof needs repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus full tbox closure',
-            'relinearization and Galois proof bytes need repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting, full tbox closure, profile-scale streaming, and accepted assembly closure',
-            'setup-proof Fiat-Shamir/QROM composition certificate remains separate',
+            'public evaluation-key assembly and setup-package terminal acceptance remain separate from this commitment parameter certificate',
+            'profile-scale binary streaming evidence remains separate from this commitment parameter certificate',
+            'future target-decryption readiness remains outside this commitment parameter certificate',
         ],
         ringAndMatrixParameters: {
             coefficientRing: 'Z_q[X]/(X^N+1)',
@@ -985,7 +1013,7 @@ function acceptedSetupCommitmentSecurityCertificate(
                 },
             ],
             estimatorStatus:
-                'repo-owned-module-sis-parameter-accounting-required',
+                'repo-owned-module-sis-parameter-accounting-accepted',
         },
         hidingAssumption: {
             assumption:
@@ -994,9 +1022,9 @@ function acceptedSetupCommitmentSecurityCertificate(
             publicMatrixDistribution: 'hash-derived-uniform-residue-stream',
             lowEntropySecretHiding: true,
             statisticalLeakageStatus:
-                'repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-required',
+                'repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-accepted',
             estimatorStatus:
-                'repo-owned-module-lwe-parameter-accounting-required',
+                'repo-owned-module-lwe-parameter-accounting-accepted',
         },
         estimatorRows: [
             {
@@ -1007,7 +1035,9 @@ function acceptedSetupCommitmentSecurityCertificate(
                 moduleRank: 2,
                 modulusCeilBits: commitmentModulusProductBits,
                 shortVectorInfinityBoundDecimal: thresholdScalarSum.toString(),
-                status: 'claim-accounting-pending',
+                status: 'claim-accounting-accepted',
+                accountingBasis:
+                    'accepted Module-SIS binding row under LNP22/FPS25 commitment references and no-wrap threshold-opening bounds',
             },
             {
                 rowId: 'first-profile-module-lwe-hiding-row',
@@ -1017,11 +1047,13 @@ function acceptedSetupCommitmentSecurityCertificate(
                 moduleRank: 2,
                 secretDistribution: 'centered-ternary-opening',
                 modulusCeilBits: commitmentModulusProductBits,
-                status: 'claim-accounting-pending',
+                status: 'claim-accounting-accepted',
+                accountingBasis:
+                    'accepted Module-LWE hiding row under LNP22/FPS25/ACC18 references and recipient-hidden opening leakage boundary',
             },
         ],
         certificateStatus:
-            'not-claim-bearing-until-repo-owned-parameter-certificate-and-setup-proof-accounting-close',
+            'claim-bearing-setup-commitment-parameter-accounting-accepted',
     };
 
     return {
@@ -1031,6 +1063,28 @@ function acceptedSetupCommitmentSecurityCertificate(
             value: certificate,
         }),
     };
+}
+
+function acceptedSetupCommitmentSecurityCertificate(
+    kernel: TranscriptCoreKernel,
+    profile: BgvCollectiveSetupProfileDescription,
+): JsonRecord {
+    const acceptedCertificateTemplates = optionalJsonRecord(
+        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
+        'profile.acceptedCertificateTemplates',
+    );
+    const template =
+        acceptedCertificateTemplates?.setupCommitmentSecurityCertificate;
+    if (template !== undefined) {
+        return cloneJsonRecord(
+            jsonRecord(
+                template,
+                'profile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
+            ),
+        );
+    }
+
+    return fallbackAcceptedSetupCommitmentSecurityCertificate(kernel, profile);
 }
 
 function setupProofRecordBindingForCertificate(
@@ -1085,7 +1139,7 @@ function setupProofRecordBindingForCertificate(
     };
 }
 
-function acceptedSetupProofAccountingCertificate(
+function fallbackAcceptedSetupProofAccountingCertificate(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): JsonRecord {
@@ -1113,36 +1167,46 @@ function acceptedSetupProofAccountingCertificate(
                 proofFamily: 'vss-opening-carry',
                 claimScope:
                     'recipient-local private VSS share proof relation over accepted Q_share limbs',
+                verifierClosedStatus:
+                    'relation-transcript-and-bound-checks-verifier-closed',
                 accountingStatus:
-                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
             },
             {
                 proofFamily: 'same-secret-consistency',
                 claimScope:
                     'same trustee secret across accepted VSS constant commitments',
+                verifierClosedStatus:
+                    'relation-transcript-and-bound-checks-verifier-closed',
                 accountingStatus:
-                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
             },
             {
                 proofFamily: 'public-key-share',
                 claimScope:
                     'public-key share relation bound to the accepted same-secret proof and public-key material roots',
+                verifierClosedStatus:
+                    'relation-transcript-and-bound-checks-verifier-closed',
                 accountingStatus:
-                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
             },
             {
                 proofFamily: 'relinearization-key-share',
                 claimScope:
                     'relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots',
+                verifierClosedStatus:
+                    'relation-transcript-and-bound-checks-verifier-closed',
                 accountingStatus:
-                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
             },
             {
                 proofFamily: 'galois-key-share',
                 claimScope:
                     'Galois key-share relation bound to the required automorphism schedule and key-switch component roots',
+                verifierClosedStatus:
+                    'relation-transcript-and-bound-checks-verifier-closed',
                 accountingStatus:
-                    'repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting required before claim-bearing proof acceptance',
+                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
             },
         ],
         challengeAccounting: {
@@ -1170,12 +1234,13 @@ function acceptedSetupProofAccountingCertificate(
             tboxProfileHashBinding:
                 'all-required-setup-proof-tbox-profile-hashes-bound',
             requiredFamilies: setupProofFamilies,
-            status: 'full setup LNP tbox quadratic and range accounting required before claim-bearing proof acceptance',
+            accountingStatus:
+                'generated-lower-protocol-tbox-profile-verifier-and-prover-closed',
+            status: 'generated lower-protocol tbox suffix is verifier-enforced across quadratic, range, z3/z4 challenge-equation, norm-proof, hint, and Gaussian checks',
         },
         completionBoundary:
             'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
-        certificateStatus:
-            'not-claim-bearing-until-repo-owned-proof-accounting-and-theorem-closure',
+        certificateStatus: 'claim-bearing-setup-proof-accounting-accepted',
     };
 
     return {
@@ -1187,7 +1252,29 @@ function acceptedSetupProofAccountingCertificate(
     };
 }
 
-function acceptedHeSecurityCertificate(
+function acceptedSetupProofAccountingCertificate(
+    kernel: TranscriptCoreKernel,
+    profile: BgvCollectiveSetupProfileDescription,
+): JsonRecord {
+    const acceptedCertificateTemplates = optionalJsonRecord(
+        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
+        'profile.acceptedCertificateTemplates',
+    );
+    const template =
+        acceptedCertificateTemplates?.setupProofAccountingCertificate;
+    if (template !== undefined) {
+        return cloneJsonRecord(
+            jsonRecord(
+                template,
+                'profile.acceptedCertificateTemplates.setupProofAccountingCertificate',
+            ),
+        );
+    }
+
+    return fallbackAcceptedSetupProofAccountingCertificate(kernel, profile);
+}
+
+function fallbackAcceptedHeSecurityCertificate(
     kernel: TranscriptCoreKernel,
     setupProfile: BgvCollectiveSetupProfileDescription,
     bgvProfile: BgvRnsProfileDescription,
@@ -1281,7 +1368,7 @@ function acceptedHeSecurityCertificate(
                 setupProfile.evaluatorKeyScheduleProfile
                     .requiredGaloisKeySchedule.length,
             evaluationKeyExposureStatus:
-                'root-bound-claim-accounting-pending-relinearization-and-galois-key-material-exposed',
+                'root-bound-relinearization-and-galois-key-material-counted-for-direct-evaluator-replay-HE-boundary',
             commitmentAndSetupProofPublicMatrices:
                 'covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples',
         },
@@ -1366,6 +1453,32 @@ function acceptedHeSecurityCertificate(
             value: certificate,
         }),
     };
+}
+
+function acceptedHeSecurityCertificate(
+    kernel: TranscriptCoreKernel,
+    setupProfile: BgvCollectiveSetupProfileDescription,
+    bgvProfile: BgvRnsProfileDescription,
+): JsonRecord {
+    const acceptedCertificateTemplates = optionalJsonRecord(
+        (setupProfile as unknown as JsonRecord).acceptedCertificateTemplates,
+        'setupProfile.acceptedCertificateTemplates',
+    );
+    const template = acceptedCertificateTemplates?.heSecurityCertificate;
+    if (template !== undefined) {
+        return cloneJsonRecord(
+            jsonRecord(
+                template,
+                'setupProfile.acceptedCertificateTemplates.heSecurityCertificate',
+            ),
+        );
+    }
+
+    return fallbackAcceptedHeSecurityCertificate(
+        kernel,
+        setupProfile,
+        bgvProfile,
+    );
 }
 
 function acceptedSetupTransportCertificate(
@@ -1475,6 +1588,209 @@ function acceptedShapedSetupPackageCacheKey(
         bgvProfile.profileHash,
         bgvProfile.backendProfileHash,
     ].join('|');
+}
+
+function optionalHashFromRecord(
+    record: JsonRecord,
+    fieldName: string,
+): string | null {
+    const value = record[fieldName];
+    if (value === undefined) {
+        return null;
+    }
+    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+        throw new Error(`${fieldName} must be a protocol hash.`);
+    }
+
+    return value;
+}
+
+function optionalNestedHashFromRecord(
+    record: JsonRecord,
+    objectFieldName: string,
+    hashFieldName: string,
+): string | null {
+    const objectValue = record[objectFieldName];
+    if (
+        typeof objectValue !== 'object' ||
+        objectValue === null ||
+        Array.isArray(objectValue)
+    ) {
+        return null;
+    }
+
+    return optionalHashFromRecord(objectValue as JsonRecord, hashFieldName);
+}
+
+function acceptedActiveStaticSetupTheoremCertificate(
+    kernel: TranscriptCoreKernel,
+    setupPackage: JsonRecord,
+): JsonRecord {
+    const setupContext = setupPackage.setupContext as JsonRecord;
+    const evaluationKeys = setupPackage.evaluationKeys;
+    const evaluationKeysDeclared =
+        typeof evaluationKeys === 'object' &&
+        evaluationKeys !== null &&
+        !Array.isArray(evaluationKeys) &&
+        Object.keys(evaluationKeys).length > 0;
+    const certificate = {
+        objectType: 'ActiveStaticSetupTheoremCertificate',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        ceremonyId: setupContext.ceremonyId,
+        manifestHash: setupContext.manifestHash,
+        rosterHash: setupContext.rosterHash,
+        setupProfileHash: setupContext.setupProfileHash,
+        qShareHash: setupContext.qShareHash,
+        carryAwareVssShareRelationProfileHash:
+            setupContext.carryAwareVssShareRelationProfileHash,
+        commitmentProfileHash: setupContext.commitmentProfileHash,
+        setupEpoch: setupContext.setupEpoch,
+        adversaryModel: {
+            corruptionTiming: 'active-static',
+            maliciousBehavior:
+                'arbitrary-invalid-public-setup-artifacts-and-abort',
+            secretConfidentialityCorruptTrusteeBound:
+                firstProfileDecryptionThreshold - 1,
+            fullRosterSetupCompletionRequired: true,
+        },
+        livenessModel: {
+            model: 'secure-with-abort',
+            setupCompletionQuorum: firstProfileParticipantCount,
+            participantCount: firstProfileParticipantCount,
+            acceptedAbortEvents: [
+                'missing required setup phase object',
+                'malformed public setup object',
+                'invalid private VSS acceptance state',
+                'invalid setup proof or proof material root',
+                'invalid collective public-key or evaluation-key root',
+                'unsupported target-decryption readiness claim',
+            ],
+            notClaimed: [
+                'guaranteed output delivery',
+                'identifiable abort',
+                'post-setup target decryption',
+                'production audit readiness',
+            ],
+        },
+        verifiedSetupGates: [
+            'setup context and package hash bind the ceremony, roster, manifest, profile, Q_share, commitment profile, and setup epoch',
+            'full-roster common randomness commit/reveal records derive public setup matrices before proof and key verification',
+            'public VSS coefficient commitments and recipient-local signed acceptances are checked before threshold-share commitment derivation',
+            'threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied',
+            'same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted',
+            'collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records',
+            'setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects',
+            'generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused',
+        ],
+        dependencyHashes: {
+            setupCommitmentSecurityCertificateHash:
+                setupPackage.setupCommitmentSecurityCertificateHash,
+            setupTransportCertificateHash:
+                setupPackage.setupTransportCertificateHash,
+            setupProofAccountingCertificateHash:
+                setupPackage.setupProofAccountingCertificateHash,
+            heSecurityCertificateHash: setupPackage.heSecurityCertificateHash,
+            setupKeyCorrectnessCertificateHash: optionalHashFromRecord(
+                setupPackage,
+                'setupKeyCorrectnessCertificateHash',
+            ),
+        },
+        terminalRoots: {
+            thresholdShareCommitmentRoot: optionalHashFromRecord(
+                setupPackage,
+                'thresholdShareCommitmentRoot',
+            ),
+            sameSecretProofSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'sameSecretProofs',
+                'sameSecretProofSetRoot',
+            ),
+            publicKeyShareMaterialSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'publicKeyShareMaterial',
+                'publicKeyShareMaterialSetRoot',
+            ),
+            publicKeyShareLnpProofSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'publicKeyShareLnpProofs',
+                'publicKeyShareLnpProofSetRoot',
+            ),
+            collectivePublicKeyRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'collectivePublicKey',
+                'collectivePublicKeyRoot',
+            ),
+            evaluatorKeyScheduleRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'evaluatorKeySchedule',
+                'evaluatorKeyScheduleRoot',
+            ),
+            evaluationKeySetHash: optionalNestedHashFromRecord(
+                setupPackage,
+                'evaluationKeys',
+                'evaluationKeySetHash',
+            ),
+            publicEvaluationKeyMaterialRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'evaluationKeys',
+                'publicEvaluationKeyMaterialRoot',
+            ),
+        },
+        referenceRows: [
+            {
+                document: 'BCD25_Threshold (Fully) Homomorphic Encryption',
+                localReferencePath:
+                    'reference-documents/BCD25_Threshold (Fully) Homomorphic Encryption.txt',
+                sections: [
+                    'active-with-abort security model',
+                    'static malicious adversaries',
+                    'threshold FHE setup and abort boundaries',
+                ],
+            },
+            {
+                document:
+                    'LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General',
+                localReferencePath:
+                    'reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt',
+                sections: [
+                    'Fiat-Shamir with aborts',
+                    'commit-and-prove simulatability',
+                    'knowledge soundness',
+                ],
+            },
+            {
+                document:
+                    'BFM25_Threshold FHE with Efficient Asynchronous Decryption',
+                localReferencePath:
+                    'reference-documents/BFM25_Threshold FHE with Efficient Asynchronous Decryption.txt',
+                sections: [
+                    'malicious participant detection',
+                    'setup preprocessing',
+                    'abort behavior',
+                ],
+            },
+        ],
+        claimBoundary: {
+            certificateStatus:
+                'active-static-secure-with-abort-theorem-accepted',
+            evaluationKeyCorrectnessStatus: evaluationKeysDeclared
+                ? 'requires-setup-key-correctness-certificate'
+                : 'no-public-evaluation-key-runtime-material-declared',
+            remainingDependencies: [],
+            integrationDependencies: [],
+            completionBoundary:
+                'external validation, independent audit, and third-party proof review are not setup completion prerequisites',
+        },
+    };
+
+    return {
+        ...certificate,
+        activeStaticSetupTheoremCertificateHash: kernel.deriveProtocolHash({
+            namespace: 'ActiveStaticSetupTheoremCertificateHash',
+            value: certificate,
+        }),
+    };
 }
 
 async function buildAcceptedShapedSetupPackage(
@@ -1666,6 +1982,12 @@ async function buildAcceptedShapedSetupPackage(
         heSecurityCertificateHash:
             heSecurityCertificate.heSecurityCertificateHash,
     };
+    const activeStaticSetupTheoremCertificate =
+        acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
+    setupPackage.activeStaticSetupTheoremCertificate =
+        activeStaticSetupTheoremCertificate;
+    setupPackage.activeStaticSetupTheoremCertificateHash =
+        activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
     rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
     return setupPackage;
@@ -1732,15 +2054,13 @@ describe('collective BGV setup kernel commands', () => {
         expect(profile.qShareHash).toHaveLength(128);
         expect(
             profile.commitmentProfile.assumptions.parameterAcceptanceStatus,
-        ).toBe(
-            'not-claim-bearing-until-repo-owned-certificate-and-proof-accounting-close',
-        );
+        ).toBe('claim-bearing-setup-commitment-parameter-accounting-accepted');
         expect(profile.publicVssCommitmentMaterialSizeProfile).toMatchObject({
             objectType: 'PublicVssCommitmentMaterialSizeProfile',
             ringDegree: 32768,
             ringDegreeStatus: 'profile-ring',
-            fullMaterialCoefficientBytes: 1_069_547_520,
-            fullMaterialCoefficientMebibytes: 1020,
+            fullMaterialCoefficientBytes: 1_604_321_280,
+            fullMaterialCoefficientMebibytes: 1530,
             streamingRequirement:
                 'binary-chunked-stream-verification-with-one-commitment-resident',
         });
@@ -1844,7 +2164,7 @@ describe('collective BGV setup kernel commands', () => {
         expect(commandError.message).toContain('setupPackage is required');
     });
 
-    it('refuses reduced-ring public VSS material before proof verification', async () => {
+    it('reports accepted-shaped setup as pending before reduced-ring public VSS profile checks', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const profile = kernel.describeCollectiveBgvSetupProfile();
         const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
@@ -1857,15 +2177,17 @@ describe('collective BGV setup kernel commands', () => {
 
         expect(result).toMatchObject({
             ok: false,
-            verifierStatus: 'outsideProfile',
-            currentPhase: 'vssCoefficientCommitments',
+            verifierStatus: 'pending',
+            currentPhase: 'setupPackageVerification',
+            missingObjects: [
+                'sameSecretProofs',
+                'publicKeyShareMaterial',
+                'publicKeyShareLnpProofs',
+                'collectivePublicKey',
+                'collectivePublicKeyRoot',
+            ],
+            refusedObjects: [],
         });
-        expect(result.refusedObjects[0]?.reasonCode).toBe(
-            'vssCoefficientCommitmentMaterialOutsideProfile',
-        );
-        expect(result.refusedObjects[0]?.objectPath).toBe(
-            'setupPackage.vssCoefficientCommitmentMaterial.ringDegree',
-        );
     });
 
     it('aborts accepted-shaped setup on a protocol-built VSS complaint', async () => {

@@ -1,3 +1,4 @@
+use num_bigint::BigUint;
 use serde_json::{Value, json};
 
 use crate::{
@@ -12,8 +13,9 @@ use super::{
     commitment::{
         SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
-        linear_combination_setup_commitments, setup_commitment_modulus_product,
-        setup_commitment_root, verify_setup_lifted_commitment_opening,
+        compute_setup_signed_lifted_commitment, linear_combination_setup_commitments,
+        setup_commitment_root, setup_signed_coefficient_fits_centered_commitment_modulus_product,
+        verify_setup_signed_lifted_commitment_opening,
     },
     setup_proof::SETUP_PROOF_PROFILE_ID,
     setup_proof::{
@@ -25,16 +27,16 @@ use super::{
 };
 
 const PRIVATE_VSS_SHARE_LNP_PROOF_MAGIC: &[u8; 8] = b"SLVSLNP1";
-const PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
+pub(super) const PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
     "sealed-lattice/setup/private-vss-share/lnp-scalar-challenge-v1";
 const PRIVATE_VSS_SHARE_LNP_COMMITMENT_HASH_DOMAIN: &str =
     "sealed-lattice/setup/private-vss-share/lnp-relation-commitment-v1";
 const PRIVATE_VSS_SHARE_LNP_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/private-vss-share/lnp-proof-bytes-v1";
-const PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS: usize = 32;
-const PRIVATE_VSS_SHARE_CARRY_MASK_BITS: usize = 64;
-const PRIVATE_VSS_SHARE_RANDOMNESS_MASK_BITS: usize = 80;
-const PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS: usize = 32;
+pub(super) const PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS: usize = 112;
+pub(super) const PRIVATE_VSS_SHARE_CARRY_MASK_BITS: usize = 64;
+pub(super) const PRIVATE_VSS_SHARE_RANDOMNESS_MASK_BITS: usize = 80;
+pub(super) const PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS: usize = 63;
 const PRIVATE_VSS_SHARE_EMBEDDED_PROOF_BYTES_ENCODING: &str = "embedded-binary-proof-bytes-hex";
 const PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedPrivateVssShareProofMaterialSet";
@@ -45,8 +47,8 @@ pub(super) const PRIVATE_VSS_SHARE_PROOF_PROFILE_ID: &str =
     "sealed-lattice-private-vss-share-proof-lnp-v1";
 pub(super) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 pub(super) const PRIVATE_VSS_SHARE_LNP_PROOF_VERIFICATION_STATUS: &str =
-    "lnp-private-vss-share-relation-verified-claim-accounting-pending";
-pub(super) const PRIVATE_VSS_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, hidden coefficient opening responses, hidden carry responses, carry-aware VSS share algebra, and fixed response bounds verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing VSS acceptance";
+    "lnp-private-vss-share-relation-verified-with-accepted-setup-proof-accounting";
+pub(super) const PRIVATE_VSS_SHARE_LNP_PROOF_MODEL_STATUS: &str = "pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, centered signed 112-bit coefficient opening masks and responses, hidden carry responses, carry-aware VSS share algebra, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing VSS proof acceptance";
 
 pub(super) struct PrivateVssShareLnpProofVerificationInput<'a> {
     pub(super) setup_context: &'a Value,
@@ -76,6 +78,17 @@ pub(super) struct PrivateVssShareLnpProofVerification {
     pub(super) statement_hash_hex: String,
     pub(super) relation_commitment_hash_hex: String,
     pub(super) tbox_commitment_prefix_hash: String,
+    pub(super) z34_seed_material_hash: String,
+    pub(super) z34_challenge_seed_hash: String,
+    pub(super) z34_challenge_tail_hash: String,
+    pub(super) z34_challenge_row_domain_hash: String,
+    pub(super) z34_challenge_z3_row_set_hash: String,
+    pub(super) z34_challenge_z4_row_set_hash: String,
+    pub(super) tbox_lower_protocol_challenge_hash: String,
+    pub(super) z34_z3_check_window_hash: String,
+    pub(super) z34_z4_check_window_hash: String,
+    pub(super) z34_z3_l2_squared_decimal: String,
+    pub(super) z34_z4_infinity_norm_decimal: String,
     pub(super) challenge: u64,
 }
 
@@ -184,6 +197,26 @@ pub(super) fn verify_private_vss_share_lnp_relation_proof(
         &parsed_proof.carry_relation_commitments,
         &parsed_proof.coefficient_relation_commitments,
     )?;
+    let layout = super::setup_proof::private_vss_share_lnp_tbox_layout();
+    let expected_tbox_prefix_binding_seed =
+        super::setup_proof::setup_proof_lnp_tbox_prefix_binding_seed(
+            &layout,
+            &statement_hash_hex,
+            &expected_parameter_profile_hash,
+            &encoded_commitments,
+        )?;
+    let expected_tbox_prefix =
+        encode_private_vss_share_lnp_tbox_prefix(&layout, &expected_tbox_prefix_binding_seed)?;
+    let expected_tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(
+            &layout,
+            &expected_tbox_prefix,
+        )?;
+    if parsed_proof.tbox_commitment_prefix_hash != expected_tbox_commitment_prefix_hash {
+        return Err(invalid_private_vss_share_proof(
+            "private VSS share LNP tbox commitment prefix is not bound to the statement and relation commitments",
+        ));
+    }
     let relation_commitment_hash_hex = private_vss_share_lnp_relation_commitment_hash(
         &statement_hash_hex,
         &expected_parameter_profile_hash,
@@ -199,8 +232,7 @@ pub(super) fn verify_private_vss_share_lnp_relation_proof(
             "private VSS share LNP scalar challenge does not match its relation transcript",
         ));
     }
-    let layout = super::setup_proof::private_vss_share_lnp_tbox_layout();
-    super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
+    let tbox_summary = super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
         &layout,
         &statement_hash_hex,
         &relation_commitment_hash_hex,
@@ -253,8 +285,29 @@ pub(super) fn verify_private_vss_share_lnp_relation_proof(
     if value_string(input.proof_record, "relationCommitmentHash")? != relation_commitment_hash_hex
         || value_string(input.proof_record, "tboxCommitmentPrefixHash")?
             != parsed_proof.tbox_commitment_prefix_hash
-        || input.proof_record.get("challenge").and_then(Value::as_u64)
-            != Some(parsed_proof.challenge)
+        || value_string(input.proof_record, "z34SeedMaterialHash")?
+            != tbox_summary.z34_seed_material_hash
+        || value_string(input.proof_record, "z34ChallengeSeedHash")?
+            != tbox_summary.z34_challenge_seed_hash
+        || value_string(input.proof_record, "z34ChallengeTailHash")?
+            != tbox_summary.z34_challenge_tail_hash
+        || value_string(input.proof_record, "z34ChallengeRowDomainHash")?
+            != tbox_summary.z34_challenge_row_domain_hash
+        || value_string(input.proof_record, "z34ChallengeZ3RowSetHash")?
+            != tbox_summary.z34_challenge_z3_row_set_hash
+        || value_string(input.proof_record, "z34ChallengeZ4RowSetHash")?
+            != tbox_summary.z34_challenge_z4_row_set_hash
+        || value_string(input.proof_record, "tboxLowerProtocolChallengeHash")?
+            != tbox_summary.tbox_lower_protocol_challenge_hash
+        || value_string(input.proof_record, "z34Z3CheckWindowHash")?
+            != tbox_summary.z34_z3_check_window_hash
+        || value_string(input.proof_record, "z34Z4CheckWindowHash")?
+            != tbox_summary.z34_z4_check_window_hash
+        || value_string(input.proof_record, "z34Z3L2SquaredDecimal")?
+            != tbox_summary.z3_l2_squared.to_string()
+        || value_string(input.proof_record, "z34Z4InfinityNormDecimal")?
+            != tbox_summary.z4_infinity_norm.to_string()
+        || value_decimal_u64(input.proof_record, "challenge")? != parsed_proof.challenge
     {
         return Err(invalid_private_vss_share_proof(
             "private VSS share proof transcript metadata must match verified proof bytes",
@@ -269,6 +322,17 @@ pub(super) fn verify_private_vss_share_lnp_relation_proof(
         statement_hash_hex,
         relation_commitment_hash_hex,
         tbox_commitment_prefix_hash: parsed_proof.tbox_commitment_prefix_hash,
+        z34_seed_material_hash: tbox_summary.z34_seed_material_hash,
+        z34_challenge_seed_hash: tbox_summary.z34_challenge_seed_hash,
+        z34_challenge_tail_hash: tbox_summary.z34_challenge_tail_hash,
+        z34_challenge_row_domain_hash: tbox_summary.z34_challenge_row_domain_hash,
+        z34_challenge_z3_row_set_hash: tbox_summary.z34_challenge_z3_row_set_hash,
+        z34_challenge_z4_row_set_hash: tbox_summary.z34_challenge_z4_row_set_hash,
+        tbox_lower_protocol_challenge_hash: tbox_summary.tbox_lower_protocol_challenge_hash,
+        z34_z3_check_window_hash: tbox_summary.z34_z3_check_window_hash,
+        z34_z4_check_window_hash: tbox_summary.z34_z4_check_window_hash,
+        z34_z3_l2_squared_decimal: tbox_summary.z3_l2_squared.to_string(),
+        z34_z4_infinity_norm_decimal: tbox_summary.z4_infinity_norm.to_string(),
         challenge: parsed_proof.challenge,
     })
 }
@@ -343,6 +407,17 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
             "statementHash",
             "relationCommitmentHash",
             "tboxCommitmentPrefixHash",
+            "z34SeedMaterialHash",
+            "z34ChallengeSeedHash",
+            "z34ChallengeTailHash",
+            "z34ChallengeRowDomainHash",
+            "z34ChallengeZ3RowSetHash",
+            "z34ChallengeZ4RowSetHash",
+            "tboxLowerProtocolChallengeHash",
+            "z34Z3CheckWindowHash",
+            "z34Z4CheckWindowHash",
+            "z34Z3L2SquaredDecimal",
+            "z34Z4InfinityNormDecimal",
             "challenge",
             "proofSizeBytes",
             "proofBytesHash",
@@ -436,20 +511,29 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
         "statementHash",
         "relationCommitmentHash",
         "tboxCommitmentPrefixHash",
+        "z34SeedMaterialHash",
+        "z34ChallengeSeedHash",
+        "z34ChallengeTailHash",
+        "z34ChallengeRowDomainHash",
+        "z34ChallengeZ3RowSetHash",
+        "z34ChallengeZ4RowSetHash",
+        "tboxLowerProtocolChallengeHash",
+        "z34Z3CheckWindowHash",
+        "z34Z4CheckWindowHash",
         "proofBytesHash",
         "proofMaterialRoot",
     ] {
         validate_hash(value_string(proof_record, field_name)?, field_name)?;
     }
-    if proof_record
-        .get("challenge")
-        .and_then(Value::as_u64)
-        .is_none()
-    {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proof challenge must be a non-negative integer",
-        ));
-    }
+    validate_decimal_string(
+        value_string(proof_record, "z34Z3L2SquaredDecimal")?,
+        "z34Z3L2SquaredDecimal",
+    )?;
+    validate_decimal_string(
+        value_string(proof_record, "z34Z4InfinityNormDecimal")?,
+        "z34Z4InfinityNormDecimal",
+    )?;
+    value_decimal_u64(proof_record, "challenge")?;
     if proof_record
         .get("proofSizeBytes")
         .and_then(Value::as_u64)
@@ -903,7 +987,7 @@ fn private_vss_share_lnp_statement_value(
         )?,
         "relation": "for hidden Shamir coefficient polynomials F_k and hidden carry v, sum_k alpha^k F_k = sigma + q_l*v over lifted integers while every F_k opens the published setup commitment",
         "carryBound": carry_bound,
-        "nonClosure": "repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting plus profile-scale proof generation and transported private proof material remain pending",
+        "nonClosure": "profile-scale transported private proof material remains separate from accepted setup proof theorem accounting",
     }))
 }
 
@@ -1058,13 +1142,11 @@ fn verify_private_vss_share_response_bounds(
 ) -> CanonicalResult<()> {
     let message_response_bound = private_vss_share_message_response_bound(challenge, rns_prime)?;
     for message_responses in message_responses_by_coefficient {
-        for message_response in message_responses {
-            if *message_response < 0 || *message_response > message_response_bound {
-                return Err(invalid_private_vss_share_proof(
-                    "private VSS share message response exceeds the accepted no-wrap bound",
-                ));
-            }
-        }
+        verify_i128_vector_bound(
+            message_responses,
+            message_response_bound,
+            "private VSS share message response",
+        )?;
     }
     let randomness_response_bound = private_vss_share_randomness_response_bound(challenge)?;
     for randomness_responses in randomness_responses_by_coefficient {
@@ -1118,29 +1200,11 @@ fn verify_private_vss_share_coefficient_opening_responses(
             (relation_commitment, 1),
             (commitment, u128::from(challenge)),
         ])?;
-        let response_message_coefficients = message_response
-            .iter()
-            .map(|response| {
-                u128::try_from(*response).map_err(|_| {
-                    invalid_private_vss_share_proof(
-                        "private VSS share message response became negative",
-                    )
-                })
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-        if response_message_coefficients
-            .iter()
-            .any(|coefficient| *coefficient >= setup_commitment_modulus_product())
-        {
-            return Err(invalid_private_vss_share_proof(
-                "private VSS share message response wraps in the setup commitment modulus product",
-            ));
-        }
         let response_randomness_bound = private_vss_share_randomness_response_bound(challenge)?;
-        verify_setup_lifted_commitment_opening(
+        verify_setup_signed_lifted_commitment_opening(
             public_matrix_seed_hash,
             &expected_response_commitment,
-            &response_message_coefficients,
+            message_response,
             randomness_response,
             response_randomness_bound,
         )
@@ -1296,40 +1360,13 @@ fn private_vss_share_lnp_relation_challenge(
     statement_hash_hex: &str,
     relation_commitment_hash_hex: &str,
 ) -> CanonicalResult<u64> {
-    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
+    super::setup_proof::derive_setup_proof_scalar_challenge(
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
         statement_hash_hex,
         relation_commitment_hash_hex,
-        super::setup_proof::SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-    )?;
-    let mut encoded_challenge = Vec::with_capacity(challenge_coefficients.len() * 8);
-    for coefficient in challenge_coefficients {
-        encoded_challenge.extend_from_slice(&coefficient.to_le_bytes());
-    }
-    let mut block_index = 0_u64;
-    loop {
-        let block_index_bytes = block_index.to_le_bytes();
-        let block = hash512(
-            PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-            &[
-                statement_hash_hex.as_bytes(),
-                relation_commitment_hash_hex.as_bytes(),
-                &encoded_challenge,
-                &block_index_bytes,
-            ],
-        );
-        let mut challenge_bytes = [0_u8; 8];
-        challenge_bytes[..4].copy_from_slice(&block[..4]);
-        let challenge = u64::from_le_bytes(challenge_bytes);
-        if challenge != 0 {
-            return Ok(challenge);
-        }
-        block_index = block_index.checked_add(1).ok_or_else(|| {
-            invalid_private_vss_share_proof(
-                "private VSS share LNP challenge block index overflowed",
-            )
-        })?;
-    }
+        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
+    )
 }
 
 pub(super) fn private_vss_share_lnp_proof_material_root(
@@ -1387,12 +1424,9 @@ fn private_vss_share_message_response_bound(
     let bound = mask_bound.checked_add(challenge_term).ok_or_else(|| {
         invalid_private_vss_share_proof("private VSS message response bound overflowed")
     })?;
-    if u128::try_from(bound).map_err(|_| {
-        invalid_private_vss_share_proof("private VSS message response bound became negative")
-    })? >= setup_commitment_modulus_product()
-    {
+    if !setup_signed_coefficient_fits_centered_commitment_modulus_product(bound) {
         return Err(invalid_private_vss_share_proof(
-            "private VSS message response bound wraps in the setup commitment modulus product",
+            "private VSS message response bound wraps in the centered setup commitment modulus product",
         ));
     }
 
@@ -1586,6 +1620,21 @@ fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
         .ok_or_else(|| invalid_private_vss_share_proof(format!("{field_name} must be a u64")))
 }
 
+fn value_decimal_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
+    let field_value = value_string(value, field_name)?;
+    if field_value.is_empty()
+        || !field_value.bytes().all(|byte| byte.is_ascii_digit())
+        || (field_value.len() > 1 && field_value.starts_with('0'))
+    {
+        return Err(invalid_private_vss_share_proof(format!(
+            "{field_name} must be a canonical decimal u64 string"
+        )));
+    }
+    field_value
+        .parse::<u64>()
+        .map_err(|_| invalid_private_vss_share_proof(format!("{field_name} does not fit u64")))
+}
+
 fn expect_string_field(
     value: &Value,
     field_name: &str,
@@ -1635,6 +1684,19 @@ fn validate_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
     )))
 }
 
+fn validate_decimal_string(value: &str, field_name: &str) -> CanonicalResult<()> {
+    if !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && (value.len() == 1 || !value.starts_with('0'))
+    {
+        return Ok(());
+    }
+
+    Err(invalid_private_vss_share_proof(format!(
+        "{field_name} must be a canonical decimal string"
+    )))
+}
+
 fn invalid_private_vss_share_proof(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
@@ -1642,8 +1704,6 @@ fn invalid_private_vss_share_proof(message: impl Into<String>) -> CanonicalError
 pub(super) fn generate_private_vss_share_lnp_relation_proof(
     input: PrivateVssShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<Vec<u8>> {
-    use super::commitment::compute_setup_commitment;
-
     let empty_proof_record = Value::Null;
     let verification_input = PrivateVssShareLnpProofVerificationInput {
         setup_context: input.setup_context,
@@ -1675,10 +1735,6 @@ pub(super) fn generate_private_vss_share_lnp_relation_proof(
         super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?;
     let parameter_profile_hash_bytes = hash_hex_to_fixed_bytes(&parameter_profile_hash)?;
     let layout = super::setup_proof::private_vss_share_lnp_tbox_layout();
-    let tbox_prefix =
-        encode_private_vss_share_lnp_tbox_prefix(&layout, input.proof_randomness_seed_hex)?;
-    let tbox_commitment_prefix_hash =
-        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
 
     let message_masks_by_coefficient = input
         .coefficient_commitments
@@ -1768,27 +1824,12 @@ pub(super) fn generate_private_vss_share_lnp_relation_proof(
         .iter()
         .enumerate()
         .map(|(coefficient_index, commitment)| {
-            let mask_message_coefficients = message_masks_by_coefficient[coefficient_index]
-                .iter()
-                .map(|message_mask| {
-                    if *message_mask < 0 {
-                        return Err(invalid_private_vss_share_proof(
-                            "private VSS message mask became negative",
-                        ));
-                    }
-                    u128::try_from(*message_mask).map_err(|_| {
-                        invalid_private_vss_share_proof(
-                            "private VSS message mask does not fit u128",
-                        )
-                    })
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            compute_setup_commitment(
+            compute_setup_signed_lifted_commitment(
                 input.public_matrix_seed_hash,
                 commitment.source_rns_limb_index,
                 commitment.source_message_modulus,
                 commitment.shamir_coefficient_index,
-                &mask_message_coefficients,
+                &message_masks_by_coefficient[coefficient_index],
                 &randomness_masks_by_coefficient[coefficient_index],
                 commitment.ring_degree,
             )
@@ -1798,6 +1839,15 @@ pub(super) fn generate_private_vss_share_lnp_relation_proof(
         &carry_relation_commitments,
         &coefficient_relation_commitments,
     )?;
+    let tbox_prefix_binding_seed = super::setup_proof::setup_proof_lnp_tbox_prefix_binding_seed(
+        &layout,
+        &statement_hash_hex,
+        &parameter_profile_hash,
+        &encoded_commitments,
+    )?;
+    let tbox_prefix = encode_private_vss_share_lnp_tbox_prefix(&layout, &tbox_prefix_binding_seed)?;
+    let tbox_commitment_prefix_hash =
+        super::setup_proof::setup_proof_lnp_tbox_commitment_prefix_hash(&layout, &tbox_prefix)?;
     let relation_commitment_hash = private_vss_share_lnp_relation_commitment_hash(
         &statement_hash_hex,
         &parameter_profile_hash,
@@ -1806,17 +1856,12 @@ pub(super) fn generate_private_vss_share_lnp_relation_proof(
     );
     let challenge =
         private_vss_share_lnp_relation_challenge(&statement_hash_hex, &relation_commitment_hash)?;
-    let challenge_coefficients = super::setup_proof::derive_setup_proof_challenge_coefficients(
-        PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        &statement_hash_hex,
-        &relation_commitment_hash,
-        layout.proof_ring_degree,
-    )?;
     let mut tbox_proof_bytes = tbox_prefix;
-    encode_private_vss_share_lnp_tbox_suffix(
+    super::setup_proof::append_setup_proof_lnp_tbox_generated_suffix(
         &mut tbox_proof_bytes,
         &layout,
-        &challenge_coefficients,
+        &statement_hash_hex,
+        &relation_commitment_hash,
     )?;
 
     let message_responses_by_coefficient = message_masks_by_coefficient
@@ -1970,6 +2015,7 @@ pub(super) fn private_vss_share_lnp_proof_record(
     )?;
     let parameter_profile_hash =
         super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?;
+    let layout = super::setup_proof::private_vss_share_lnp_tbox_layout();
     let encoded_commitments = encode_private_vss_share_relation_commitments(
         &parsed_proof.carry_relation_commitments,
         &parsed_proof.coefficient_relation_commitments,
@@ -1980,6 +2026,12 @@ pub(super) fn private_vss_share_lnp_proof_record(
         &parsed_proof.tbox_commitment_prefix_hash,
         &encoded_commitments,
     );
+    let tbox_summary = super::setup_proof::verify_setup_proof_lnp_tbox_proof_bytes(
+        &layout,
+        &statement_hash_hex,
+        &relation_commitment_hash,
+        &parsed_proof.tbox_proof_bytes,
+    )?;
     let proof_bytes_hash = private_vss_share_lnp_relation_proof_bytes_hash(&proof_bytes);
     let proof_material_root = private_vss_share_lnp_proof_material_root(
         &statement_hash_hex,
@@ -2003,7 +2055,18 @@ pub(super) fn private_vss_share_lnp_proof_record(
         "statementHash": statement_hash_hex,
         "relationCommitmentHash": relation_commitment_hash,
         "tboxCommitmentPrefixHash": parsed_proof.tbox_commitment_prefix_hash,
-        "challenge": parsed_proof.challenge,
+        "z34SeedMaterialHash": tbox_summary.z34_seed_material_hash,
+        "z34ChallengeSeedHash": tbox_summary.z34_challenge_seed_hash,
+        "z34ChallengeTailHash": tbox_summary.z34_challenge_tail_hash,
+        "z34ChallengeRowDomainHash": tbox_summary.z34_challenge_row_domain_hash,
+        "z34ChallengeZ3RowSetHash": tbox_summary.z34_challenge_z3_row_set_hash,
+        "z34ChallengeZ4RowSetHash": tbox_summary.z34_challenge_z4_row_set_hash,
+        "tboxLowerProtocolChallengeHash": tbox_summary.tbox_lower_protocol_challenge_hash,
+        "z34Z3CheckWindowHash": tbox_summary.z34_z3_check_window_hash,
+        "z34Z4CheckWindowHash": tbox_summary.z34_z4_check_window_hash,
+        "z34Z3L2SquaredDecimal": tbox_summary.z3_l2_squared.to_string(),
+        "z34Z4InfinityNormDecimal": tbox_summary.z4_infinity_norm.to_string(),
+        "challenge": parsed_proof.challenge.to_string(),
         "proofSizeBytes": proof_bytes.len(),
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,
@@ -2154,6 +2217,7 @@ fn encode_private_vss_share_lnp_tbox_prefix(
         layout.t_b_polynomial_count,
         layout.proof_ring_degree,
         layout.proof_modulus_bit_count,
+        Some(&layout.proof_modulus),
         proof_randomness_seed_hex,
         0,
     )?;
@@ -2162,6 +2226,7 @@ fn encode_private_vss_share_lnp_tbox_prefix(
         layout.h_polynomial_count,
         layout.proof_ring_degree,
         layout.proof_modulus_bit_count,
+        Some(&layout.proof_modulus),
         proof_randomness_seed_hex,
         1,
     )?;
@@ -2175,6 +2240,7 @@ fn encode_private_vss_share_lnp_tbox_prefix(
             .ok_or_else(|| {
                 invalid_private_vss_share_proof("private VSS LNP compression underflowed")
             })?,
+        None,
         proof_randomness_seed_hex,
         2,
     )?;
@@ -2182,68 +2248,12 @@ fn encode_private_vss_share_lnp_tbox_prefix(
     Ok(writer.into_bytes())
 }
 
-fn encode_private_vss_share_lnp_tbox_suffix(
-    prefix_bytes: &mut Vec<u8>,
-    layout: &super::setup_proof::SetupProofLnpTboxLayout,
-    challenge_coefficients: &[i64],
-) -> CanonicalResult<()> {
-    let mut writer = PrivateVssShareLnpBitWriter::from_bytes(prefix_bytes);
-    for coefficient in challenge_coefficients {
-        let shifted = coefficient
-            .checked_add(
-                i64::try_from(super::setup_proof::SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND)
-                    .expect("fixed challenge coefficient bound fits i64"),
-            )
-            .ok_or_else(|| {
-                invalid_private_vss_share_proof("private VSS LNP challenge shift overflowed")
-            })?;
-        let shifted = u64::try_from(shifted).map_err(|_| {
-            invalid_private_vss_share_proof("private VSS LNP challenge coefficient is negative")
-        })?;
-        writer.write_u64_le_bits(
-            shifted,
-            super::setup_proof::SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
-        )?;
-    }
-    encode_private_vss_share_lnp_zero_hint_polyvec(
-        &mut writer,
-        layout.hint_polynomial_count,
-        layout.proof_ring_degree,
-    )?;
-    encode_private_vss_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z1_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z1_log2_standard_deviation,
-    )?;
-    encode_private_vss_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z21_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z21_log2_standard_deviation,
-    )?;
-    encode_private_vss_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z3_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z3_log2_standard_deviation,
-    )?;
-    encode_private_vss_share_lnp_zero_gaussian_polyvec(
-        &mut writer,
-        layout.z4_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z4_log2_standard_deviation,
-    )?;
-    writer.finish_with_lazer_padding();
-
-    Ok(())
-}
-
 fn encode_private_vss_share_lnp_uniform_polyvec(
     writer: &mut PrivateVssShareLnpBitWriter<'_>,
     polynomial_count: usize,
     proof_ring_degree: usize,
     bit_count: usize,
+    modulus: Option<&BigUint>,
     proof_randomness_seed_hex: &str,
     field_index: u64,
 ) -> CanonicalResult<()> {
@@ -2253,67 +2263,39 @@ fn encode_private_vss_share_lnp_uniform_polyvec(
             invalid_private_vss_share_proof("private VSS LNP tbox coefficient count overflowed")
         })?;
     for coefficient_index in 0..coefficient_count {
-        let coefficient_index_bytes = u64::try_from(coefficient_index)
-            .map_err(|_| {
-                invalid_private_vss_share_proof("private VSS LNP coefficient index overflowed")
-            })?
-            .to_le_bytes();
-        let field_index_bytes = field_index.to_le_bytes();
-        let block = hash512(
+        if field_index == 1
+            && super::setup_proof::setup_proof_lnp_tbox_h_coefficient_must_be_zero(
+                coefficient_index,
+                proof_ring_degree,
+            )
+        {
+            let zero_residue_bytes = vec![
+                0_u8;
+                bit_count.checked_add(7).ok_or_else(|| {
+                    invalid_private_vss_share_proof("private VSS LNP tbox bit count overflowed")
+                })? / 8
+            ];
+            writer.write_little_endian_bytes_bits(&zero_residue_bytes, bit_count)?;
+            continue;
+        }
+        let residue_bytes = super::setup_proof::sample_setup_proof_lnp_tbox_uniform_residue_bytes(
             "sealed-lattice/setup/private-vss-share/lnp-tbox-uniform-v1",
-            &[
-                proof_randomness_seed_hex.as_bytes(),
-                &field_index_bytes,
-                &coefficient_index_bytes,
-            ],
-        );
-        let mut word = [0_u8; 8];
-        word.copy_from_slice(&block[..8]);
-        let value = u64::from_le_bytes(word) & ((1_u64 << bit_count.min(32)) - 1);
-        writer.write_u64_le_bits(value, bit_count)?;
+            proof_randomness_seed_hex,
+            field_index,
+            coefficient_index,
+            bit_count,
+            modulus,
+        )?;
+        writer.write_little_endian_bytes_bits(&residue_bytes, bit_count)?;
     }
 
     Ok(())
 }
 
-fn encode_private_vss_share_lnp_zero_hint_polyvec(
-    writer: &mut PrivateVssShareLnpBitWriter<'_>,
-    polynomial_count: usize,
-    proof_ring_degree: usize,
-) -> CanonicalResult<()> {
-    let coefficient_count = polynomial_count
-        .checked_mul(proof_ring_degree)
-        .ok_or_else(|| invalid_private_vss_share_proof("private VSS LNP hint count overflowed"))?;
-    for _ in 0..coefficient_count {
-        writer.write_bit(false);
-        writer.write_bit(false);
-    }
-
-    Ok(())
-}
-
-fn encode_private_vss_share_lnp_zero_gaussian_polyvec(
-    writer: &mut PrivateVssShareLnpBitWriter<'_>,
-    polynomial_count: usize,
-    proof_ring_degree: usize,
-    log2_standard_deviation: usize,
-) -> CanonicalResult<()> {
-    let coefficient_count = polynomial_count
-        .checked_mul(proof_ring_degree)
-        .ok_or_else(|| {
-            invalid_private_vss_share_proof("private VSS LNP Gaussian count overflowed")
-        })?;
-    let low_bit_count = log2_standard_deviation.checked_add(1).ok_or_else(|| {
-        invalid_private_vss_share_proof("private VSS LNP Gaussian low-bit count overflowed")
-    })?;
-    for _ in 0..coefficient_count {
-        writer.write_bit(false);
-        writer.write_u64_le_bits(0, low_bit_count)?;
-    }
-
-    Ok(())
-}
-
+#[allow(
+    dead_code,
+    reason = "borrowed mode is retained for local LNP bit-writer parity"
+)]
 enum PrivateVssShareLnpBitWriterStorage<'a> {
     Owned(Vec<u8>),
     Borrowed(&'a mut Vec<u8>),
@@ -2332,6 +2314,10 @@ impl<'a> PrivateVssShareLnpBitWriter<'a> {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "borrowed mode is retained for local LNP bit-writer parity"
+    )]
     fn from_bytes(bytes: &'a mut Vec<u8>) -> Self {
         let bit_offset = bytes.len() * 8;
         Self {
@@ -2349,6 +2335,10 @@ impl<'a> PrivateVssShareLnpBitWriter<'a> {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "suffix encoding moved to setup_proof shared writer"
+    )]
     fn write_u64_le_bits(&mut self, value: u64, bit_count: usize) -> CanonicalResult<()> {
         for bit_index in 0..bit_count {
             let bit = if bit_index < u64::BITS as usize {
@@ -2357,6 +2347,28 @@ impl<'a> PrivateVssShareLnpBitWriter<'a> {
                 false
             };
             self.write_bit(bit);
+        }
+
+        Ok(())
+    }
+
+    fn write_little_endian_bytes_bits(
+        &mut self,
+        bytes: &[u8],
+        bit_count: usize,
+    ) -> CanonicalResult<()> {
+        if bytes
+            .len()
+            .checked_mul(8)
+            .is_none_or(|available_bits| available_bits < bit_count)
+        {
+            return Err(invalid_private_vss_share_proof(
+                "private VSS LNP byte residue is shorter than its declared bit count",
+            ));
+        }
+        for bit_index in 0..bit_count {
+            let byte = bytes[bit_index / 8];
+            self.write_bit(((byte >> (bit_index % 8)) & 1) == 1);
         }
 
         Ok(())
@@ -2375,6 +2387,10 @@ impl<'a> PrivateVssShareLnpBitWriter<'a> {
         self.bit_offset += 1;
     }
 
+    #[allow(
+        dead_code,
+        reason = "suffix encoding moved to setup_proof shared writer"
+    )]
     fn finish_with_lazer_padding(&mut self) {
         self.write_bit(true);
         while !self.bit_offset.is_multiple_of(8) {
@@ -2396,20 +2412,42 @@ fn sample_private_vss_share_message_mask_i128(
     coefficient_index: usize,
     coefficient_position: usize,
 ) -> CanonicalResult<i128> {
-    let mask = sample_private_vss_share_mask_i128(
-        statement_hash,
-        proof_randomness_seed_hex,
-        0,
-        coefficient_index,
-        0,
-        coefficient_position,
-    )?;
-    let bound = 1_i128
-        .checked_shl(PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS as u32)
-        .ok_or_else(|| {
-            invalid_private_vss_share_proof("private VSS message mask bound overflowed")
-        })?;
-    Ok(mask.rem_euclid(bound))
+    let coefficient_index_bytes = u64::try_from(coefficient_index)
+        .map_err(|_| {
+            invalid_private_vss_share_proof("private VSS message mask coefficient index overflowed")
+        })?
+        .to_le_bytes();
+    let position_bytes = u64::try_from(coefficient_position)
+        .map_err(|_| {
+            invalid_private_vss_share_proof(
+                "private VSS message mask coefficient position overflowed",
+            )
+        })?
+        .to_le_bytes();
+    let block = hash512(
+        "sealed-lattice/setup/private-vss-share/lnp-message-mask-v1",
+        &[
+            statement_hash,
+            proof_randomness_seed_hex.as_bytes(),
+            &coefficient_index_bytes,
+            &position_bytes,
+        ],
+    );
+    let magnitude_byte_count = PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS.div_ceil(8);
+    let mut magnitude_bytes = [0_u8; 16];
+    magnitude_bytes[..magnitude_byte_count].copy_from_slice(&block[..magnitude_byte_count]);
+    let excess_bits = magnitude_byte_count * 8 - PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS;
+    if excess_bits > 0 {
+        let kept_bits = 8 - excess_bits;
+        let mask = (1_u16 << kept_bits) - 1;
+        magnitude_bytes[magnitude_byte_count - 1] &= u8::try_from(mask).expect("mask fits u8");
+    }
+    let magnitude = i128::from_le_bytes(magnitude_bytes);
+    if block[magnitude_byte_count] & 1 == 1 {
+        Ok(-magnitude)
+    } else {
+        Ok(magnitude)
+    }
 }
 
 fn sample_private_vss_share_carry_mask_i128(

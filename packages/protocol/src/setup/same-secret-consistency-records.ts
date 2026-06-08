@@ -17,9 +17,9 @@ export const sameSecretProofFamily = 'same-secret-consistency';
 export const sameSecretProofVerificationStatus =
     'lnp-proof-verification-pending';
 export const sameSecretLnpProofVerificationStatus =
-    'lnp-same-secret-relation-verified-claim-accounting-pending';
+    'lnp-same-secret-relation-verified-with-accepted-setup-proof-accounting';
 export const sameSecretLnpProofModelStatus =
-    'pinned LNP tbox proof bytes, setup-proof challenge domain, binary proof-material schema, and same-secret BDLOP commitment relation algebra verified; repo-owned AB-DLOP/LNP soundness and zero-knowledge accounting remain required before claim-bearing setup acceptance';
+    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, centered signed 80-bit same-secret masks and responses, same-secret BDLOP commitment relation algebra, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing setup proof acceptance';
 export const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
 export const sameSecretBoundProofFamilies = [

@@ -1,3 +1,4 @@
+use num_bigint::BigUint;
 use serde_json::{Value, json};
 
 use crate::{
@@ -18,7 +19,7 @@ pub(super) const SETUP_COMMITMENT_MODULE_RANK: usize = 2;
 pub(super) const SETUP_COMMITMENT_RANDOMNESS_WIDTH: usize = (2 * SETUP_COMMITMENT_MODULE_RANK) + 1;
 pub(super) const SETUP_COMMITMENT_ROW_COUNT: usize = SETUP_COMMITMENT_MODULE_RANK + 1;
 pub(super) const SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 1;
-pub(super) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 2] = [0, 1];
+pub(super) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupCommitmentLimb {
@@ -41,7 +42,8 @@ pub(super) struct SetupCommitmentOpeningVerification {
     pub(super) commitment_root: String,
     pub(super) randomness_infinity_bound: i128,
     pub(super) message_coefficient_bound: u128,
-    pub(super) commitment_modulus_product: u128,
+    pub(super) commitment_modulus_product_decimal: String,
+    pub(super) commitment_modulus_product_ceil_bits: u32,
 }
 
 pub(super) fn setup_commitment_profile_value() -> CanonicalResult<Value> {
@@ -68,7 +70,8 @@ pub(super) fn setup_commitment_profile_value() -> CanonicalResult<Value> {
             "coefficientRange": "0 <= messageCoefficient < sourceRnsPrime",
             "integerEncoding": "crt-lifted-integer-coefficients",
             "commitmentModulusLimbs": setup_commitment_modulus_limb_values(),
-            "commitmentModulusProductDecimal": setup_commitment_modulus_product().to_string(),
+            "commitmentModulusProductDecimal": setup_commitment_modulus_product_decimal(),
+            "commitmentModulusProductCeilBits": setup_commitment_modulus_product_ceil_bits(),
             "homomorphicNoWrapRule": "linear integer combinations must be strictly below the commitment modulus product before reduction to each commitment limb"
         },
         "openingDistribution": {
@@ -86,11 +89,11 @@ pub(super) fn setup_commitment_profile_value() -> CanonicalResult<Value> {
             "binding": "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix",
             "fullWidthMessageStatus": "claim-accounting-recorded-by-setup-commitment-security-certificate",
             "aggregateOpeningNormStatus": "claim-accounting-recorded-by-setup-commitment-security-certificate",
-            "parameterAcceptanceStatus": "not-claim-bearing-until-repo-owned-certificate-and-proof-accounting-close",
-            "reviewStatus": "commitment-parameter-certificate-bound-proof-family-verifiers-still-pending",
+            "parameterAcceptanceStatus": "claim-bearing-setup-commitment-parameter-accounting-accepted",
+            "reviewStatus": "commitment-parameter-certificate-accepted-and-bound-to-accepted-proof-family-verifiers",
             "requiredCertificates": [
                 "SetupCommitmentSecurityCertificate",
-                "setup-proof QROM composition certificate"
+                "SetupProofAccountingCertificate"
             ]
         },
         "serialization": {
@@ -120,11 +123,44 @@ pub(super) fn setup_commitment_modulus_limb_values() -> Vec<Value> {
         .collect()
 }
 
-pub(super) fn setup_commitment_modulus_product() -> u128 {
+pub(super) fn setup_commitment_modulus_product() -> BigUint {
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES
         .iter()
-        .map(|commitment_modulus_index| u128::from(DATA_PRIMES[*commitment_modulus_index]))
+        .map(|commitment_modulus_index| BigUint::from(DATA_PRIMES[*commitment_modulus_index]))
         .product()
+}
+
+pub(super) fn setup_commitment_modulus_product_decimal() -> String {
+    setup_commitment_modulus_product().to_string()
+}
+
+pub(super) fn setup_commitment_modulus_product_ceil_bits() -> u32 {
+    ceil_log2_big_uint(&setup_commitment_modulus_product())
+}
+
+#[cfg(test)]
+pub(super) fn setup_coefficient_fits_commitment_modulus_product(coefficient: u128) -> bool {
+    BigUint::from(coefficient) < setup_commitment_modulus_product()
+}
+
+#[cfg(test)]
+pub(super) fn setup_coefficients_fit_commitment_modulus_product(coefficients: &[u128]) -> bool {
+    let commitment_modulus_product = setup_commitment_modulus_product();
+    coefficients
+        .iter()
+        .all(|coefficient| BigUint::from(*coefficient) < commitment_modulus_product)
+}
+
+pub(super) fn setup_signed_coefficient_fits_centered_commitment_modulus_product(
+    coefficient: i128,
+) -> bool {
+    let Some(coefficient_magnitude) = coefficient.checked_abs() else {
+        return false;
+    };
+    let Ok(coefficient_magnitude) = u128::try_from(coefficient_magnitude) else {
+        return false;
+    };
+    BigUint::from(coefficient_magnitude) * BigUint::from(2_u8) < setup_commitment_modulus_product()
 }
 
 pub(super) fn setup_commitment_matrix_sampled_entries(
@@ -190,10 +226,11 @@ pub(super) fn verify_setup_commitment_opening(
         message_coefficients,
         randomness_by_column,
         randomness_infinity_bound,
-        u128::from(expected_commitment.source_message_modulus),
+        Some(u128::from(expected_commitment.source_message_modulus)),
     )
 }
 
+#[cfg(test)]
 pub(super) fn verify_setup_lifted_commitment_opening(
     public_matrix_seed_hash: &str,
     expected_commitment: &SetupCommitmentValue,
@@ -207,8 +244,61 @@ pub(super) fn verify_setup_lifted_commitment_opening(
         message_coefficients,
         randomness_by_column,
         randomness_infinity_bound,
-        setup_commitment_modulus_product(),
+        None,
     )
+}
+
+pub(super) fn verify_setup_signed_lifted_commitment_opening(
+    public_matrix_seed_hash: &str,
+    expected_commitment: &SetupCommitmentValue,
+    message_coefficients: &[i128],
+    randomness_by_column: &[Vec<i128>],
+    randomness_infinity_bound: i128,
+) -> CanonicalResult<SetupCommitmentOpeningVerification> {
+    validate_signed_message_coefficients(message_coefficients, expected_commitment.ring_degree)?;
+    validate_randomness_by_column(
+        randomness_by_column,
+        randomness_infinity_bound,
+        expected_commitment.ring_degree,
+    )?;
+    let message_coefficient_bound =
+        signed_message_coefficient_magnitude_bound(message_coefficients)?;
+    let signed_message_coefficient_bound =
+        i128::try_from(message_coefficient_bound).map_err(|_| {
+            invalid_commitment_input(
+                "signed commitment message coefficient magnitude does not fit i128",
+            )
+        })?;
+    if !setup_signed_coefficient_fits_centered_commitment_modulus_product(
+        signed_message_coefficient_bound,
+    ) {
+        return Err(invalid_commitment_input(
+            "signed commitment message coefficient would wrap in the centered CRT commitment modulus",
+        ));
+    }
+
+    let computed_commitment = compute_setup_signed_lifted_commitment_for_degree(
+        public_matrix_seed_hash,
+        expected_commitment.source_rns_limb_index,
+        expected_commitment.source_message_modulus,
+        expected_commitment.shamir_coefficient_index,
+        message_coefficients,
+        randomness_by_column,
+        expected_commitment.ring_degree,
+    )?;
+    if &computed_commitment != expected_commitment {
+        return Err(invalid_commitment_input(
+            "signed commitment opening does not reproduce the published commitment",
+        ));
+    }
+
+    Ok(SetupCommitmentOpeningVerification {
+        commitment_root: setup_commitment_root(&computed_commitment)?,
+        randomness_infinity_bound,
+        message_coefficient_bound,
+        commitment_modulus_product_decimal: setup_commitment_modulus_product_decimal(),
+        commitment_modulus_product_ceil_bits: setup_commitment_modulus_product_ceil_bits(),
+    })
 }
 
 pub(super) fn linear_combination_setup_commitments(
@@ -282,13 +372,14 @@ pub(super) fn add_scaled_setup_commitment_in_place(
     Ok(())
 }
 
+#[cfg(test)]
 fn verify_setup_commitment_opening_with_message_bound(
     public_matrix_seed_hash: &str,
     expected_commitment: &SetupCommitmentValue,
     message_coefficients: &[u128],
     randomness_by_column: &[Vec<i128>],
     randomness_infinity_bound: i128,
-    message_exclusive_bound: u128,
+    message_exclusive_bound: Option<u128>,
 ) -> CanonicalResult<SetupCommitmentOpeningVerification> {
     validate_message_coefficients(
         message_coefficients,
@@ -300,9 +391,8 @@ fn verify_setup_commitment_opening_with_message_bound(
         randomness_infinity_bound,
         expected_commitment.ring_degree,
     )?;
-    let commitment_modulus_product = setup_commitment_modulus_product();
     let message_coefficient_bound = message_coefficients.iter().copied().max().unwrap_or(0);
-    if message_coefficient_bound >= commitment_modulus_product {
+    if !setup_coefficient_fits_commitment_modulus_product(message_coefficient_bound) {
         return Err(invalid_commitment_input(
             "commitment message coefficient would wrap in the CRT commitment modulus",
         ));
@@ -327,7 +417,8 @@ fn verify_setup_commitment_opening_with_message_bound(
         commitment_root: setup_commitment_root(&computed_commitment)?,
         randomness_infinity_bound,
         message_coefficient_bound,
-        commitment_modulus_product,
+        commitment_modulus_product_decimal: setup_commitment_modulus_product_decimal(),
+        commitment_modulus_product_ceil_bits: setup_commitment_modulus_product_ceil_bits(),
     })
 }
 
@@ -533,6 +624,7 @@ fn read_residue_row(value: &Value, ring_degree: usize, modulus: u64) -> Canonica
         .collect()
 }
 
+#[cfg(test)]
 fn compute_setup_commitment_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -545,11 +637,7 @@ fn compute_setup_commitment_for_degree(
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
     validate_source_rns_limb(source_rns_limb_index, source_message_modulus)?;
     validate_ring_degree(ring_degree)?;
-    validate_message_coefficients(
-        message_coefficients,
-        setup_commitment_modulus_product(),
-        ring_degree,
-    )?;
+    validate_message_coefficients(message_coefficients, None, ring_degree)?;
     validate_randomness_shape(randomness_by_column, ring_degree)?;
 
     let mut limbs = Vec::with_capacity(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
@@ -619,16 +707,95 @@ fn compute_setup_commitment_for_degree(
     })
 }
 
-pub(super) fn compute_setup_commitment(
+fn compute_setup_signed_lifted_commitment_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
     source_message_modulus: u64,
     shamir_coefficient_index: u64,
-    message_coefficients: &[u128],
+    message_coefficients: &[i128],
     randomness_by_column: &[Vec<i128>],
     ring_degree: usize,
 ) -> CanonicalResult<SetupCommitmentValue> {
-    compute_setup_commitment_for_degree(
+    validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    validate_source_rns_limb(source_rns_limb_index, source_message_modulus)?;
+    validate_ring_degree(ring_degree)?;
+    validate_signed_message_coefficients(message_coefficients, ring_degree)?;
+    validate_randomness_shape(randomness_by_column, ring_degree)?;
+
+    let mut limbs = Vec::with_capacity(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
+    for commitment_modulus_index in SETUP_COMMITMENT_MODULUS_LIMB_INDICES {
+        let modulus = DATA_PRIMES[commitment_modulus_index];
+        let message_residues = message_coefficients
+            .iter()
+            .map(|coefficient| centered_integer_to_residue(*coefficient, modulus))
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let randomness_residues = randomness_by_column
+            .iter()
+            .map(|column| {
+                column
+                    .iter()
+                    .map(|coefficient| centered_integer_to_residue(*coefficient, modulus))
+                    .collect::<CanonicalResult<Vec<_>>>()
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        let mut rows = Vec::with_capacity(SETUP_COMMITMENT_ROW_COUNT);
+        for matrix_row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
+            let mut row_accumulator = vec![0_u64; ring_degree];
+            for (randomness_column_index, randomness_column) in
+                randomness_residues.iter().enumerate()
+            {
+                let matrix_polynomial = setup_commitment_matrix_polynomial(
+                    public_matrix_seed_hash,
+                    source_rns_limb_index,
+                    commitment_modulus_index,
+                    matrix_row_index,
+                    randomness_column_index,
+                    ring_degree,
+                    modulus,
+                )?;
+                let product = negacyclic_product(&matrix_polynomial, randomness_column, modulus)?;
+                for (accumulated_value, product_value) in
+                    row_accumulator.iter_mut().zip(product.iter())
+                {
+                    *accumulated_value = add_mod_fast(*accumulated_value, *product_value, modulus);
+                }
+            }
+            if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK {
+                for (accumulated_value, message_value) in
+                    row_accumulator.iter_mut().zip(message_residues.iter())
+                {
+                    *accumulated_value = add_mod_fast(*accumulated_value, *message_value, modulus);
+                }
+            }
+            rows.push(row_accumulator);
+        }
+        limbs.push(SetupCommitmentLimb {
+            commitment_modulus_index,
+            modulus,
+            rows,
+        });
+    }
+
+    Ok(SetupCommitmentValue {
+        source_rns_limb_index,
+        source_message_modulus,
+        shamir_coefficient_index,
+        ring_degree,
+        limbs,
+    })
+}
+
+pub(super) fn compute_setup_signed_lifted_commitment(
+    public_matrix_seed_hash: &str,
+    source_rns_limb_index: usize,
+    source_message_modulus: u64,
+    shamir_coefficient_index: u64,
+    message_coefficients: &[i128],
+    randomness_by_column: &[Vec<i128>],
+    ring_degree: usize,
+) -> CanonicalResult<SetupCommitmentValue> {
+    compute_setup_signed_lifted_commitment_for_degree(
         public_matrix_seed_hash,
         source_rns_limb_index,
         source_message_modulus,
@@ -834,9 +1001,10 @@ fn centered_integer_to_residue(value: i128, modulus: u64) -> CanonicalResult<u64
         .map_err(|_| invalid_commitment_input("centered residue does not fit u64"))
 }
 
+#[cfg(test)]
 fn validate_message_coefficients(
     message_coefficients: &[u128],
-    exclusive_bound: u128,
+    exclusive_bound: Option<u128>,
     ring_degree: usize,
 ) -> CanonicalResult<()> {
     if message_coefficients.len() != ring_degree {
@@ -845,16 +1013,73 @@ fn validate_message_coefficients(
             "commitment message coefficient count must match the ring degree",
         ));
     }
-    if message_coefficients
-        .iter()
-        .any(|coefficient| *coefficient >= exclusive_bound)
+    if let Some(exclusive_bound) = exclusive_bound
+        && message_coefficients
+            .iter()
+            .any(|coefficient| *coefficient >= exclusive_bound)
     {
         return Err(invalid_commitment_input(
             "commitment message coefficient is outside the declared integer range",
         ));
     }
+    if !setup_coefficients_fit_commitment_modulus_product(message_coefficients) {
+        return Err(invalid_commitment_input(
+            "commitment message coefficient would wrap in the CRT commitment modulus",
+        ));
+    }
 
     Ok(())
+}
+
+fn validate_signed_message_coefficients(
+    message_coefficients: &[i128],
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    if message_coefficients.len() != ring_degree {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "signed commitment message coefficient count must match the ring degree",
+        ));
+    }
+    if !message_coefficients.iter().all(|coefficient| {
+        setup_signed_coefficient_fits_centered_commitment_modulus_product(*coefficient)
+    }) {
+        return Err(invalid_commitment_input(
+            "signed commitment message coefficient would wrap in the centered CRT commitment modulus",
+        ));
+    }
+
+    Ok(())
+}
+
+fn signed_message_coefficient_magnitude_bound(
+    message_coefficients: &[i128],
+) -> CanonicalResult<u128> {
+    message_coefficients
+        .iter()
+        .map(|coefficient| {
+            let magnitude = coefficient.checked_abs().ok_or_else(|| {
+                invalid_commitment_input(
+                    "signed commitment message coefficient absolute value overflowed",
+                )
+            })?;
+            u128::try_from(magnitude).map_err(|_| {
+                invalid_commitment_input(
+                    "signed commitment message coefficient magnitude does not fit u128",
+                )
+            })
+        })
+        .try_fold(0_u128, |bound, magnitude| {
+            magnitude.map(|magnitude| bound.max(magnitude))
+        })
+}
+
+fn ceil_log2_big_uint(value: &BigUint) -> u32 {
+    if value <= &BigUint::from(1_u8) {
+        return 0;
+    }
+    let previous = value - BigUint::from(1_u8);
+    u32::try_from(previous.bits()).expect("setup commitment modulus bit length fits u32")
 }
 
 fn validate_randomness_by_column(
@@ -994,11 +1219,15 @@ fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
+    use num_bigint::BigUint;
+
     use super::{
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
-        setup_commitment_modulus_product, setup_commitment_profile_hash,
+        compute_setup_signed_lifted_commitment_for_degree,
+        setup_coefficient_fits_commitment_modulus_product, setup_commitment_profile_hash,
         setup_commitment_profile_value, setup_commitment_root, verify_setup_commitment_opening,
+        verify_setup_lifted_commitment_opening, verify_setup_signed_lifted_commitment_opening,
     };
     use crate::{
         bgv::{
@@ -1027,9 +1256,9 @@ mod tests {
             profile["messageEncoding"]["commitmentModulusProductDecimal"]
                 .as_str()
                 .expect("product decimal")
-                .parse::<u128>()
+                .parse::<BigUint>()
                 .expect("product should parse")
-                > u128::from(DATA_PRIMES[0]) * 1000
+                > BigUint::from(DATA_PRIMES[0]) * BigUint::from(1000_u16)
         );
         assert_eq!(setup_commitment_profile_hash().expect("hash").len(), 128);
     }
@@ -1094,6 +1323,53 @@ mod tests {
     }
 
     #[test]
+    fn signed_lifted_commitment_opening_accepts_centered_messages() -> CanonicalResult<()> {
+        let public_matrix_seed_hash = valid_hash('d');
+        let signed_message = vec![-21, -13, -8, -5, 0, 5, 8, 13];
+        let randomness = shifted_randomness_columns();
+        let commitment = compute_setup_signed_lifted_commitment_for_degree(
+            &public_matrix_seed_hash,
+            0,
+            DATA_PRIMES[0],
+            4,
+            &signed_message,
+            &randomness,
+            TEST_RING_DEGREE,
+        )?;
+
+        let verification = verify_setup_signed_lifted_commitment_opening(
+            &public_matrix_seed_hash,
+            &commitment,
+            &signed_message,
+            &randomness,
+            1,
+        )?;
+
+        assert_eq!(verification.message_coefficient_bound, 21);
+        assert_eq!(
+            verification.commitment_root,
+            setup_commitment_root(&commitment)?
+        );
+        let unsigned_message = signed_message
+            .iter()
+            .map(|coefficient| u128::try_from(*coefficient).unwrap_or(0))
+            .collect::<Vec<_>>();
+        assert!(
+            verify_setup_lifted_commitment_opening(
+                &public_matrix_seed_hash,
+                &commitment,
+                &unsigned_message,
+                &randomness,
+                1,
+            )
+            .is_err(),
+            "unsigned lifted opening must not reinterpret centered negative responses as zero"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn commitment_homomorphism_preserves_lifted_integer_combination() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('b');
         let first_message = message_coefficients();
@@ -1152,7 +1428,7 @@ mod tests {
         assert!(
             combined_message
                 .iter()
-                .all(|coefficient| *coefficient < setup_commitment_modulus_product())
+                .all(|coefficient| setup_coefficient_fits_commitment_modulus_product(*coefficient))
         );
         assert!(
             combined_message

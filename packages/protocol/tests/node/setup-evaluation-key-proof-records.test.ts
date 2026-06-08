@@ -37,7 +37,9 @@ type TransportedRelinearizationKeyShareProofMaterial = Extract<
 type EvaluationKeyShareProofGeneratorInput =
     Parameters<EvaluationKeyShareProofGenerator>[0];
 
-const qSharePrimes = [140_737_487_306_753, 140_737_486_716_929] as const;
+const qSharePrimes = [
+    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
+] as const;
 const participantCount = 2;
 
 const fixtureHash = (label: string): string =>
@@ -105,7 +107,7 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
         genericKeySwitchPolicy: 'refused-unless-explicitly-required',
         genericKeySwitchProofStatus: 'not-required-for-first-profile',
         scheduleBindingStatus:
-            'relinearization-and-galois-proof-verifiers-implemented-claim-accounting-pending',
+            'relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting',
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {
@@ -991,72 +993,50 @@ describe('evaluation-key proof record builders', () => {
         expect(evaluationKeys.genericKeySwitchKeyRoots).toEqual([]);
         expect(evaluationKeys.rawKeyBytesEmbedded).toBe(false);
         expect(evaluationKeys.verifierGeneratedKeyMaterial).toBe(false);
-        expect(
-            evaluationKeys.relinearizationKeyRoots[0].relinearizationKeyRoot,
-        ).toBe(
+        const {
+            relinearizationKeyRoot,
+            ...firstRelinearizationKeyRootPayload
+        } = evaluationKeys.relinearizationKeyRoots[0];
+        expect(relinearizationKeyRoot).toBe(
             deriveProtocolHash('RelinearizationKeyRoot', {
                 objectType: 'RelinearizationKeyAggregate',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                assemblyStatus:
-                    'assembled-from-proof-bearing-shares-claim-accounting-pending',
-                materialEncoding:
-                    'root-bound-public-key-switch-component-roots',
-                materialSource:
-                    'verified-relinearization-and-galois-proof-records',
+                setupProfileId: evaluationKeys.setupProfileId,
+                setupProofProfileId: evaluationKeys.setupProofProfileId,
+                assemblyStatus: evaluationKeys.assemblyStatus,
+                materialEncoding: evaluationKeys.materialEncoding,
+                materialSource: evaluationKeys.materialSource,
                 evaluatorKeyScheduleRoot:
-                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                    evaluationKeys.evaluatorKeyScheduleRoot,
                 sameSecretProofFamilyBindingRoot:
-                    input.sameSecretProofFamilyBindingRoot,
+                    evaluationKeys.sameSecretProofFamilyBindingRoot,
                 publicKeyShareLnpProofSetRoot:
-                    input.publicKeyShareLnpProofSetRoot,
+                    evaluationKeys.publicKeyShareLnpProofSetRoot,
                 relinearizationKeyShareRoundsRoot:
-                    relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
-                level: 1,
-                decompositionDigitCount: 2,
-                rnsLimbCount: 2,
-                roundOneAggregateRoot:
-                    relinearizationKeyShareRounds.roundOneAggregateRoots[0]
-                        .roundOneAggregateRoot,
-                roundOneSourceSquareAggregateRoot:
-                    relinearizationKeyShareRounds.roundOneAggregateRoots[0]
-                        .roundOneSourceSquareAggregateRoot,
-                roundTwoAggregateRoot:
-                    relinearizationKeyShareRounds.roundTwoAggregateRoots[0]
-                        .roundTwoAggregateRoot,
-                roundTwoSourceSquareAggregateRoot:
-                    relinearizationKeyShareRounds.roundTwoAggregateRoots[0]
-                        .roundTwoSourceSquareAggregateRoot,
+                    evaluationKeys.relinearizationKeyShareRoundsRoot,
+                ...firstRelinearizationKeyRootPayload,
             }),
         );
-        expect(evaluationKeys.galoisKeyRoots[0].galoisKeyRoot).toBe(
+        const { galoisKeyRoot, ...firstGaloisKeyRootPayload } =
+            evaluationKeys.galoisKeyRoots[0];
+        expect(galoisKeyRoot).toBe(
             deriveProtocolHash('RotationKeyRoot', {
                 objectType: 'GaloisKeyAggregate',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                assemblyStatus:
-                    'assembled-from-proof-bearing-shares-claim-accounting-pending',
-                materialEncoding:
-                    'root-bound-public-key-switch-component-roots',
-                materialSource:
-                    'verified-relinearization-and-galois-proof-records',
+                setupProfileId: evaluationKeys.setupProfileId,
+                setupProofProfileId: evaluationKeys.setupProofProfileId,
+                assemblyStatus: evaluationKeys.assemblyStatus,
+                materialEncoding: evaluationKeys.materialEncoding,
+                materialSource: evaluationKeys.materialSource,
                 evaluatorKeyScheduleRoot:
-                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                    evaluationKeys.evaluatorKeyScheduleRoot,
                 sameSecretProofFamilyBindingRoot:
-                    input.sameSecretProofFamilyBindingRoot,
+                    evaluationKeys.sameSecretProofFamilyBindingRoot,
                 publicKeyShareLnpProofSetRoot:
-                    input.publicKeyShareLnpProofSetRoot,
+                    evaluationKeys.publicKeyShareLnpProofSetRoot,
                 galoisKeyCrpRoot: input.evaluatorKeySchedule.galoisKeyCrpRoot,
-                requiredGaloisSetHash:
-                    input.evaluatorKeySchedule.requiredGaloisSetHash,
-                rotation: requiredGaloisKeySchedule[0].rotation,
-                level: requiredGaloisKeySchedule[0].level,
-                decompositionDigitCount: 2,
-                rnsLimbCount: 2,
-                contributingShareRoots:
-                    evaluationKeys.galoisKeyRoots[0].contributingShareRoots,
+                requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
+                ...firstGaloisKeyRootPayload,
             }),
         );
         expect(evaluationKeySetHash).toBe(

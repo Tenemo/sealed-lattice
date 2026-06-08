@@ -160,7 +160,7 @@ const protocolHashFromKernel = (
         value,
     });
 
-const qSharePrimes = [65_537, 114_689] as const;
+const qSharePrimes = [65_537, 114_689, 147_457] as const;
 const participantCount = 2;
 const vssFixtureRingDegree = 8;
 const vssFixtureThresholdDegree = 2;
@@ -456,6 +456,7 @@ const relinearizationProofMaterial = (
     shareRoot: string,
     label: string,
     round: 'round-one' | 'round-two',
+    level: number,
 ): Record<string, unknown> => ({
     proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
     setupProofBinding: {
@@ -468,7 +469,7 @@ const relinearizationProofMaterial = (
         kernel,
         evaluatorKeySchedule,
         round,
-        1,
+        level,
     ),
     ringDegree: 8,
     keySwitchComponentVectorRoot: shareRoot,
@@ -1347,47 +1348,58 @@ describe('accepted setup public package API in Node', () => {
                 publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
             sameSecretProofReferences,
         };
-        const roundOneContributions = sameSecretProofReferences.map(
-            (reference) => {
-                const roundOneShareRoot = hashFromKernel(
-                    kernel,
-                    `round-one-share-${String(reference.trusteeRosterPosition)}`,
-                );
-
-                return {
-                    trusteeRosterPosition: reference.trusteeRosterPosition,
-                    level: 1,
-                    roundOneShareRoot,
-                    proofMaterial: relinearizationProofMaterial(
+        const relinearizationLevels = (
+            evaluatorKeySchedule.relinearizationLevelSchedule as readonly {
+                readonly level: number;
+            }[]
+        ).map((scheduleEntry) => scheduleEntry.level);
+        const roundOneContributions = sameSecretProofReferences.flatMap(
+            (reference) =>
+                relinearizationLevels.map((level) => {
+                    const contributionLabel = `${String(reference.trusteeRosterPosition)}-${String(level)}`;
+                    const roundOneShareRoot = hashFromKernel(
                         kernel,
-                        evaluatorKeySchedule,
+                        `round-one-share-${contributionLabel}`,
+                    );
+
+                    return {
+                        trusteeRosterPosition: reference.trusteeRosterPosition,
+                        level,
                         roundOneShareRoot,
-                        `round-one-${String(reference.trusteeRosterPosition)}`,
-                        'round-one',
-                    ),
-                };
-            },
+                        proofMaterial: relinearizationProofMaterial(
+                            kernel,
+                            evaluatorKeySchedule,
+                            roundOneShareRoot,
+                            `round-one-${contributionLabel}`,
+                            'round-one',
+                            level,
+                        ),
+                    };
+                }),
         );
-        const roundTwoContributions = sameSecretProofReferences.map(
-            (reference) => {
-                const roundTwoShareRoot = hashFromKernel(
-                    kernel,
-                    `round-two-share-${String(reference.trusteeRosterPosition)}`,
-                );
-
-                return {
-                    trusteeRosterPosition: reference.trusteeRosterPosition,
-                    level: 1,
-                    roundTwoShareRoot,
-                    proofMaterial: relinearizationProofMaterial(
+        const roundTwoContributions = sameSecretProofReferences.flatMap(
+            (reference) =>
+                relinearizationLevels.map((level) => {
+                    const contributionLabel = `${String(reference.trusteeRosterPosition)}-${String(level)}`;
+                    const roundTwoShareRoot = hashFromKernel(
                         kernel,
-                        evaluatorKeySchedule,
+                        `round-two-share-${contributionLabel}`,
+                    );
+
+                    return {
+                        trusteeRosterPosition: reference.trusteeRosterPosition,
+                        level,
                         roundTwoShareRoot,
-                        `round-two-${String(reference.trusteeRosterPosition)}`,
-                        'round-two',
-                    ),
-                };
-            },
+                        proofMaterial: relinearizationProofMaterial(
+                            kernel,
+                            evaluatorKeySchedule,
+                            roundTwoShareRoot,
+                            `round-two-${contributionLabel}`,
+                            'round-two',
+                            level,
+                        ),
+                    };
+                }),
         );
         const relinearizationKeyShareRounds =
             publicSetupApi.createRelinearizationKeyShareRounds({

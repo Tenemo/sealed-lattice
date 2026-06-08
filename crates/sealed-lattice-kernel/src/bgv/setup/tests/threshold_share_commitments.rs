@@ -352,13 +352,19 @@ fn encode_transport_material_from_request(request: &serde_json::Value) -> Vec<u8
     let ring_degree = request["coefficientCommitments"][0]["commitment"]["ringDegree"]
         .as_u64()
         .expect("ring degree");
-    crate::encoding::append_varuint(&mut output, ring_degree);
-    crate::encoding::append_varuint(&mut output, 2);
-    crate::encoding::append_varuint(&mut output, 3);
-
     let material_records = request["coefficientCommitments"]
         .as_array()
         .expect("coefficient material records");
+    let first_commitment_limbs = material_records[0]["commitment"]["commitmentLimbs"]
+        .as_array()
+        .expect("commitment limbs");
+    let commitment_row_count = first_commitment_limbs[0]["rows"]
+        .as_array()
+        .expect("commitment rows")
+        .len();
+    crate::encoding::append_varuint(&mut output, ring_degree);
+    crate::encoding::append_varuint(&mut output, first_commitment_limbs.len() as u64);
+    crate::encoding::append_varuint(&mut output, commitment_row_count as u64);
     for source_trustee_roster_position in 0..10_u64 {
         for rns_limb_index in 0..DATA_PRIMES.len() {
             for shamir_coefficient_index in 0..4_u64 {

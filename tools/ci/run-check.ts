@@ -55,49 +55,17 @@ export type ParsedCheckArguments = {
 
 const checkUsage =
     'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
-const rustKernelLaneName = 'Rust kernel (fmt, clippy, non-heavy test)';
-const rustKernelHeavyTestNames = [
-    'collective_setup_verifier_refuses_missing_and_extra_evaluation_keys',
-    'collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component_material',
-    'collective_setup_verifier_checks_setup_key_correctness_certificate',
-    'collective_setup_verifier_refuses_evaluation_key_assembly_root_drift',
-    'collective_setup_verifier_checks_setup_proof_accounting_certificate',
-    'collective_setup_verifier_checks_transported_public_evaluation_key_material',
-    'collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk',
-    'collective_setup_verifier_refuses_setup_key_correctness_package_hash_drift',
-    'collective_setup_verifier_refuses_setup_proof_accounting_certificate_hash_drift',
-    'collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_material',
-    'collective_setup_verifier_uses_public_evaluation_key_material_component_chunks',
-    'collective_setup_verifier_refuses_setup_proof_challenge_audit_hash_drift',
-    'collective_setup_verifier_refuses_setup_key_correctness_certificate_hash_drift',
-    'collective_setup_verifier_requires_setup_key_correctness_certificate_for_evaluation_keys',
-    'collective_setup_verifier_checks_evaluation_key_proof_container_roots',
-    'collective_setup_verifier_refuses_tampered_public_evaluation_key_component_chunk',
-    'collective_setup_verifier_refuses_galois_batch_schedule_drift',
-    'collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed',
-    'collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk',
-    'collective_setup_verifier_refuses_tampered_transported_galois_component_material_chunk',
-    'collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift',
-    'collective_setup_verifier_refuses_relinearization_round_two_source_square_aggregate_drift',
-    'collective_setup_verifier_refuses_relinearization_round_one_source_square_aggregate_drift',
-    'collective_setup_verifier_refuses_relinearization_round_two_source_square_linkage_drift',
-    'collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift',
-    'collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed',
-    'collective_setup_verifier_refuses_relinearization_source_square_binding_drift',
-    'collective_setup_verifier_refuses_same_secret_setup_proof_challenge_domain_drift',
-    'collective_setup_public_galois_key_loader_refuses_reduced_ring_material',
-    'collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material',
-    'generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof',
-    'relinearization_round_one_generation_refuses_independent_source_square',
-] as const;
+const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
+const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
 
-const rustKernelNonHeavyTestArguments = [
+const rustKernelFastTestArguments = [
     'test',
     '-p',
     'sealed-lattice-kernel',
     '--quiet',
     '--',
-    ...rustKernelHeavyTestNames.flatMap((testName) => ['--skip', testName]),
+    '--skip',
+    rustKernelHeavyTestPattern,
     '--show-output',
 ] as const;
 
@@ -228,8 +196,8 @@ const buildRustKernelLane = (): ValidationLane => ({
             'cargo-clippy',
         ),
         createCargoCommand(
-            'cargo test (optimized test profile, non-heavy)',
-            rustKernelNonHeavyTestArguments,
+            'cargo test (optimized test profile, fast)',
+            rustKernelFastTestArguments,
             'cargo-test',
         ),
     ],
@@ -242,9 +210,10 @@ const buildRustKernelLane = (): ValidationLane => ({
 // `dist/` during the parallel phase. The pack smoke lane still calls its
 // underlying tool directly because its package script rebuilds for standalone
 // use. The commit gate runs the fast Node test project, the non-heavy kernel
-// Node project, and the non-heavy Rust kernel tests. The heavier protocol,
-// kernel-heavy Node project, full Rust package test run, and the Playwright
-// browser projects stay in their standalone lanes for pre-push verification.
+// Node project, and the fast Rust kernel tests. The heavier protocol,
+// kernel-heavy Node project, ignored Rust kernel heavy tests, and the
+// Playwright browser projects stay in their standalone lanes for pre-push
+// verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {

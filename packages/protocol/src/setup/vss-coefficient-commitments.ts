@@ -9,7 +9,7 @@ export const setupCommitmentProfileId = 'SealedLattice-BDLOP-LNP-Commitment-v1';
 export const setupCommitmentModuleRank = 2;
 export const setupCommitmentRandomnessWidth = 2 * setupCommitmentModuleRank + 1;
 export const setupCommitmentRowCount = setupCommitmentModuleRank + 1;
-export const setupCommitmentModulusLimbIndices = [0, 1] as const;
+export const setupCommitmentModulusLimbIndices = [0, 1, 2] as const;
 export const acceptedBgvProfileRingDegree = 32_768;
 
 export type SetupCommitmentLimbValue = {
