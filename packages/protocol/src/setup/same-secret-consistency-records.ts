@@ -3,7 +3,7 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     setupCommitmentProfileId,
-    type VssCoefficientCommitmentMaterialSet,
+    type SetupPackageVssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentRecord,
     type VssCoefficientCommitmentSet,
     type VssSourceTrusteeCoefficientCommitmentRecord,
@@ -197,7 +197,7 @@ export type SameSecretProofSetInput = {
     readonly qSharePrimes: readonly number[];
     readonly participantCount: number;
     readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
-    readonly vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialSet;
+    readonly vssCoefficientCommitmentMaterial: SetupPackageVssCoefficientCommitmentMaterialSet;
     readonly setupProofBinding: JsonRecord;
     readonly sameSecretTboxParameterProfileHash: ProtocolHash;
     readonly proofMaterials: readonly SameSecretProofMaterial[];

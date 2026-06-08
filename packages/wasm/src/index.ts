@@ -2,6 +2,7 @@ import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
+    type BgvAcceptedSetupHandoff,
     type BgvBaseConversionFixture,
     type BgvBatchPlaintextEncoding,
     type BgvCiphertextConventionFixture,
@@ -30,6 +31,7 @@ export {
     TranscriptCoreKernelCommandError,
 };
 export type {
+    BgvAcceptedSetupHandoff,
     TranscriptCoreKernel,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,

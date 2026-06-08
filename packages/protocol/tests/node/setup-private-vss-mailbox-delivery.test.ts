@@ -6,6 +6,10 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
+import {
+    privateVssShareLnpProofModelStatus,
+    privateVssShareLnpProofVerificationStatus,
+} from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
 
 const fixtureHash = (label: string): string =>
     deriveProtocolHash('ActionContextHash', {
@@ -143,8 +147,8 @@ describe('private VSS mailbox delivery', () => {
                 privateVssShareTboxParameterProfileHash:
                     fixtureHash('private-vss-tbox'),
                 proofVerificationStatus:
-                    'lnp-private-vss-share-relation-verified-claim-accounting-pending',
-                proofModelStatus: 'fixture proof model for protocol transport',
+                    privateVssShareLnpProofVerificationStatus,
+                proofModelStatus: privateVssShareLnpProofModelStatus,
                 proofStatementRoot: fixtureHash('statement-root'),
                 statementHash: fixtureHash('statement-hash'),
                 relationCommitmentHash: fixtureHash('relation-commitment'),

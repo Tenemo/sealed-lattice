@@ -4,6 +4,9 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 import {
     setupCommitmentProfileId,
     setupCommitmentRootPayload,
+    materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
+    type SetupPackageVssCoefficientCommitmentMaterialSet,
+    type SetupTransportedVssCoefficientCommitmentMaterial,
     type SetupCommitmentValue,
     type VssCoefficientCommitmentMaterialRecord,
     type VssCoefficientCommitmentMaterialSet,
@@ -107,7 +110,10 @@ export type ThresholdShareCommitmentsInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
     readonly vssCoefficientCommitmentMaterial:
-        | VssCoefficientCommitmentMaterialSet
+        | SetupPackageVssCoefficientCommitmentMaterialSet
+        | JsonRecord;
+    readonly transportedVssCoefficientCommitmentMaterial?:
+        | SetupTransportedVssCoefficientCommitmentMaterial
         | JsonRecord;
 }>;
 
@@ -430,9 +436,9 @@ const parseCommitmentValue = (
 const parseMaterialSet = (
     setupContext: CollectiveBgvSetupContext,
     vssCoefficientCommitmentMaterial:
-        | VssCoefficientCommitmentMaterialSet
+        | SetupPackageVssCoefficientCommitmentMaterialSet
         | JsonRecord,
-): VssCoefficientCommitmentMaterialSet => {
+): SetupPackageVssCoefficientCommitmentMaterialSet => {
     const materialSet = assertJsonRecord(
         vssCoefficientCommitmentMaterial,
         'vssCoefficientCommitmentMaterial',
@@ -488,17 +494,38 @@ const parseMaterialSet = (
             'vssCoefficientCommitmentMaterial.ringDegreeStatus must be profile-ring or development-reduced-ring.',
         );
     }
-    const coefficientCommitments = assertJsonRecordArray(
-        materialSet.coefficientCommitments,
-        'vssCoefficientCommitmentMaterial.coefficientCommitments',
-    );
-    if (materialSet.materialRecordCount !== coefficientCommitments.length) {
+    if (
+        materialSet.materialEncoding === 'full-public-setup-commitment-values'
+    ) {
+        const coefficientCommitments = assertJsonRecordArray(
+            materialSet.coefficientCommitments,
+            'vssCoefficientCommitmentMaterial.coefficientCommitments',
+        );
+        if (materialSet.materialRecordCount !== coefficientCommitments.length) {
+            throw new Error(
+                'vssCoefficientCommitmentMaterial.materialRecordCount must match coefficientCommitments length.',
+            );
+        }
+    } else if (
+        materialSet.materialEncoding ===
+        'binary-chunked-full-public-setup-commitment-values'
+    ) {
+        if (materialSet.coefficientCommitments !== undefined) {
+            throw new Error(
+                'binary-chunked VSS material must not embed coefficientCommitments.',
+            );
+        }
+        assertJsonRecord(
+            materialSet.transport,
+            'vssCoefficientCommitmentMaterial.transport',
+        );
+    } else {
         throw new Error(
-            'vssCoefficientCommitmentMaterial.materialRecordCount must match coefficientCommitments length.',
+            'vssCoefficientCommitmentMaterial.materialEncoding must be embedded full public values or binary-chunked full public values.',
         );
     }
 
-    return materialSet as unknown as VssCoefficientCommitmentMaterialSet;
+    return materialSet as unknown as SetupPackageVssCoefficientCommitmentMaterialSet;
 };
 
 const parseMaterialRecordsByCoordinate = (
@@ -967,8 +994,28 @@ export const deriveThresholdShareCommitments = (
             'vssCoefficientCommitmentMaterial.participantCount must match the source trustee record count.',
         );
     }
+    const coefficientCommitments =
+        materialSet.materialEncoding ===
+        'binary-chunked-full-public-setup-commitment-values'
+            ? materialRecordsFromTransportedVssCoefficientCommitmentMaterial({
+                  setupContext: input.setupContext,
+                  vssCoefficientCommitments: input.vssCoefficientCommitments,
+                  materialSet: materialSet,
+                  transportedVssCoefficientCommitmentMaterial:
+                      input.transportedVssCoefficientCommitmentMaterial ??
+                      (() => {
+                          throw new Error(
+                              'transportedVssCoefficientCommitmentMaterial is required for binary-chunked VSS material.',
+                          );
+                      })(),
+              })
+            : materialSet.coefficientCommitments;
+    const materialSetWithRecords = {
+        ...materialSet,
+        coefficientCommitments,
+    } as VssCoefficientCommitmentMaterialSet;
     const materialByCoordinate = parseMaterialRecordsByCoordinate(
-        materialSet,
+        materialSetWithRecords,
         sourceTrusteeByPosition,
         publicRecordByCoordinate,
     );

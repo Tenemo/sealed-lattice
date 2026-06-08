@@ -2042,6 +2042,7 @@ describe('collective BGV setup kernel commands', () => {
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'outsideCollectiveBgvSetupProfile',
         );
+        expect(result.acceptedSetupHandoff).toBeUndefined();
     });
 
     it('maps malformed accepted setup command errors to neutral protocol errors', async () => {
@@ -2091,6 +2092,7 @@ describe('collective BGV setup kernel commands', () => {
         expect(result.refusedObjects[0]?.objectPath).toBe(
             'setupPackage.vssCoefficientCommitmentMaterial.ringDegree',
         );
+        expect(result.acceptedSetupHandoff).toBeUndefined();
     });
 
     it('aborts accepted-shaped setup on a protocol-built VSS complaint', async () => {

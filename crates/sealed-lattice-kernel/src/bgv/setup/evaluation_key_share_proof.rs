@@ -3339,86 +3339,97 @@ fn encode_evaluation_key_share_lnp_tbox_prefix(
     encode_evaluation_key_share_lnp_uniform_polyvec(
         proof_family,
         &mut writer,
-        layout.t_b_polynomial_count,
-        layout.proof_ring_degree,
-        layout.proof_modulus_bit_count,
-        Some(&layout.proof_modulus),
-        proof_randomness_seed_hex,
-        0,
+        EvaluationKeyShareLnpUniformPolyvecInput {
+            polynomial_count: layout.t_b_polynomial_count,
+            proof_ring_degree: layout.proof_ring_degree,
+            bit_count: layout.proof_modulus_bit_count,
+            modulus: Some(&layout.proof_modulus),
+            proof_randomness_seed_hex,
+            field_index: 0,
+        },
     )?;
     encode_evaluation_key_share_lnp_uniform_polyvec(
         proof_family,
         &mut writer,
-        layout.h_polynomial_count,
-        layout.proof_ring_degree,
-        layout.proof_modulus_bit_count,
-        Some(&layout.proof_modulus),
-        proof_randomness_seed_hex,
-        1,
+        EvaluationKeyShareLnpUniformPolyvecInput {
+            polynomial_count: layout.h_polynomial_count,
+            proof_ring_degree: layout.proof_ring_degree,
+            bit_count: layout.proof_modulus_bit_count,
+            modulus: Some(&layout.proof_modulus),
+            proof_randomness_seed_hex,
+            field_index: 1,
+        },
     )?;
     encode_evaluation_key_share_lnp_uniform_polyvec(
         proof_family,
         &mut writer,
-        layout.t_a1_polynomial_count,
-        layout.proof_ring_degree,
-        layout
-            .proof_modulus_bit_count
-            .checked_sub(layout.compression_dropped_bits)
-            .ok_or_else(|| {
-                invalid_evaluation_key_share_proof("evaluation-key LNP compression underflowed")
-            })?,
-        None,
-        proof_randomness_seed_hex,
-        2,
+        EvaluationKeyShareLnpUniformPolyvecInput {
+            polynomial_count: layout.t_a1_polynomial_count,
+            proof_ring_degree: layout.proof_ring_degree,
+            bit_count: layout
+                .proof_modulus_bit_count
+                .checked_sub(layout.compression_dropped_bits)
+                .ok_or_else(|| {
+                    invalid_evaluation_key_share_proof("evaluation-key LNP compression underflowed")
+                })?,
+            modulus: None,
+            proof_randomness_seed_hex,
+            field_index: 2,
+        },
     )?;
 
     Ok(writer.into_bytes())
 }
 
-fn encode_evaluation_key_share_lnp_uniform_polyvec(
-    proof_family: EvaluationKeyShareProofFamily,
-    writer: &mut EvaluationKeyShareLnpBitWriter<'_>,
+struct EvaluationKeyShareLnpUniformPolyvecInput<'a> {
     polynomial_count: usize,
     proof_ring_degree: usize,
     bit_count: usize,
-    modulus: Option<&BigUint>,
-    proof_randomness_seed_hex: &str,
+    modulus: Option<&'a BigUint>,
+    proof_randomness_seed_hex: &'a str,
     field_index: u64,
+}
+
+fn encode_evaluation_key_share_lnp_uniform_polyvec(
+    proof_family: EvaluationKeyShareProofFamily,
+    writer: &mut EvaluationKeyShareLnpBitWriter<'_>,
+    input: EvaluationKeyShareLnpUniformPolyvecInput<'_>,
 ) -> CanonicalResult<()> {
-    let coefficient_count = polynomial_count
-        .checked_mul(proof_ring_degree)
+    let coefficient_count = input
+        .polynomial_count
+        .checked_mul(input.proof_ring_degree)
         .ok_or_else(|| {
             invalid_evaluation_key_share_proof(
                 "evaluation-key LNP tbox coefficient count overflowed",
             )
         })?;
     for coefficient_index in 0..coefficient_count {
-        if field_index == 1
+        if input.field_index == 1
             && super::setup_proof::setup_proof_lnp_tbox_h_coefficient_must_be_zero(
                 coefficient_index,
-                proof_ring_degree,
+                input.proof_ring_degree,
             )
         {
             let zero_residue_bytes = vec![
                 0_u8;
-                bit_count.checked_add(7).ok_or_else(|| {
+                input.bit_count.checked_add(7).ok_or_else(|| {
                     invalid_evaluation_key_share_proof(
                         "evaluation-key LNP tbox bit count overflowed",
                     )
                 })? / 8
             ];
-            writer.write_little_endian_bytes_bits(&zero_residue_bytes, bit_count)?;
+            writer.write_little_endian_bytes_bits(&zero_residue_bytes, input.bit_count)?;
             continue;
         }
         let residue_bytes = super::setup_proof::sample_setup_proof_lnp_tbox_uniform_residue_bytes(
             proof_family.tbox_uniform_domain(),
-            proof_randomness_seed_hex,
-            field_index,
+            input.proof_randomness_seed_hex,
+            input.field_index,
             coefficient_index,
-            bit_count,
-            modulus,
+            input.bit_count,
+            input.modulus,
         )?;
-        writer.write_little_endian_bytes_bits(&residue_bytes, bit_count)?;
+        writer.write_little_endian_bytes_bits(&residue_bytes, input.bit_count)?;
     }
 
     Ok(())

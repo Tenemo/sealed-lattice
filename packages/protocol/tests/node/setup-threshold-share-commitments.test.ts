@@ -2,6 +2,7 @@ import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+    createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssCoefficientCommitmentBundle,
     deriveThresholdShareCommitments,
     type CollectiveBgvSetupContext,
@@ -284,5 +285,49 @@ describe('threshold-share commitment derivation', () => {
                 },
             }),
         ).toThrow(/materialRecordCount/u);
+    });
+
+    it('derives the same recipient commitments from binary-chunked VSS material', () => {
+        const commitmentBundle = createVssCoefficientCommitmentBundle({
+            setupContext,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStates: [0, 1].map((rosterPosition) =>
+                sourceTrusteeOpeningState(rosterPosition),
+            ),
+        });
+        const embeddedThresholdShareCommitments =
+            deriveThresholdShareCommitments({
+                setupContext,
+                vssCoefficientCommitments: commitmentBundle.commitmentSet,
+                vssCoefficientCommitmentMaterial: commitmentBundle.materialSet,
+            });
+        const transport =
+            createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+                commitmentBundle.materialSet,
+            );
+        const binaryThresholdShareCommitments = deriveThresholdShareCommitments(
+            {
+                setupContext,
+                vssCoefficientCommitments: commitmentBundle.commitmentSet,
+                vssCoefficientCommitmentMaterial: transport.materialSet,
+                transportedVssCoefficientCommitmentMaterial:
+                    transport.transportedVssCoefficientCommitmentMaterial,
+            },
+        );
+
+        expect(binaryThresholdShareCommitments).toEqual(
+            embeddedThresholdShareCommitments,
+        );
+        expect(() =>
+            deriveThresholdShareCommitments({
+                setupContext,
+                vssCoefficientCommitments: commitmentBundle.commitmentSet,
+                vssCoefficientCommitmentMaterial: transport.materialSet,
+            }),
+        ).toThrow(/transportedVssCoefficientCommitmentMaterial is required/u);
     });
 });

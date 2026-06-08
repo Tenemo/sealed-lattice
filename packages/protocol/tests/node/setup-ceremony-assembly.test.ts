@@ -15,6 +15,7 @@ import {
     createSameSecretConsistencyStatementSet,
     createSetupCeremonyAssembly,
     createSetupPhaseRecord,
+    createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssCoefficientCommitmentBundle,
     type CollectiveBgvSetupContext,
     type EvaluatorKeySchedule,
@@ -46,6 +47,10 @@ import {
     sameSecretLnpProofModelStatus,
     sameSecretLnpProofVerificationStatus,
 } from '#packages/protocol/src/index';
+import {
+    privateVssShareLnpProofModelStatus,
+    privateVssShareLnpProofVerificationStatus,
+} from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
@@ -299,9 +304,8 @@ const privateVssShareProofFactory: PrivateVssShareProofFactory = (input) => {
         proofFamily: 'vss-opening-carry',
         proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
         privateVssShareTboxParameterProfileHash,
-        proofVerificationStatus:
-            'lnp-private-vss-share-relation-verified-claim-accounting-pending',
-        proofModelStatus: 'fixture proof model for protocol transport',
+        proofVerificationStatus: privateVssShareLnpProofVerificationStatus,
+        proofModelStatus: privateVssShareLnpProofModelStatus,
         proofStatementRoot: deriveProtocolHash(
             'PrivateVssShareProofStatementRoot',
             {
@@ -1099,6 +1103,7 @@ const setupProofSampledDifferenceChecks = (): Record<string, unknown>[] => {
 
 const setupCertificateInputFixture = (
     participantCount: number,
+    fullMaterialCoefficientBytes = 1,
 ): SetupPackageCertificateInput => {
     const commitmentProfile = {
         objectType: 'SetupCommitmentProfile',
@@ -1218,7 +1223,7 @@ const setupCertificateInputFixture = (
         publicVssCommitmentMaterialSizeProfile: {
             objectType: 'PublicVssCommitmentMaterialSizeProfile',
             objectVersion: 1,
-            fullMaterialCoefficientBytes: 1,
+            fullMaterialCoefficientBytes,
         },
         setupProofProfile,
         setupProofProfileHash: deriveProtocolHash(
@@ -1381,6 +1386,27 @@ const createAssemblyInput = (
         verificationPhaseNumber: 7,
         privateVssShareProofFactory,
     };
+};
+
+const binaryVssMaterialByteLengthForInput = (
+    input: SetupCeremonyAssemblyInput,
+): number => {
+    const commitmentBundle = createVssCoefficientCommitmentBundle({
+        setupContext: input.setupContext,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        qSharePrimes: input.qSharePrimes,
+        ringDegree: input.ringDegree,
+        participantCount: input.trustees.length,
+        thresholdDegree: input.thresholdDegree,
+        sourceTrusteeOpeningStates: input.sourceTrusteeOpeningStates,
+    });
+    const transport =
+        createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+            commitmentBundle.materialSet,
+        );
+
+    return transport.transportedVssCoefficientCommitmentMaterial
+        .totalByteLength;
 };
 
 describe('setup ceremony assembly', () => {
@@ -1788,6 +1814,70 @@ describe('setup ceremony assembly', () => {
         expect(contributionJson).not.toContain('"shareValues":');
         expect(contributionJson).not.toContain('"privateEnvelope":');
         expect(contributionJson).not.toContain('"coefficientOpenings":');
+    });
+
+    it('assembles a setup package bound to binary-chunked VSS material', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const fullMaterialCoefficientBytes =
+            binaryVssMaterialByteLengthForInput(input);
+        const assembly = await createSetupCeremonyAssembly({
+            ...input,
+            setupCertificateInput: setupCertificateInputFixture(
+                participantCount,
+                fullMaterialCoefficientBytes,
+            ),
+            vssCoefficientCommitmentMaterialEncoding:
+                'binary-chunked-full-public-setup-commitment-values',
+        });
+
+        expect(assembly.vssCoefficientCommitmentMaterial).toMatchObject({
+            objectType: 'VssCoefficientCommitmentMaterialSet',
+            materialEncoding:
+                'binary-chunked-full-public-setup-commitment-values',
+            transport: {
+                totalByteLength: fullMaterialCoefficientBytes,
+                fullObjectHash:
+                    assembly.transportedVssCoefficientCommitmentMaterial
+                        ?.fullObjectHash,
+                chunkRoot:
+                    assembly.transportedVssCoefficientCommitmentMaterial
+                        ?.chunkRoot,
+            },
+        });
+        expect(assembly.vssCoefficientCommitmentMaterial).not.toHaveProperty(
+            'coefficientCommitments',
+        );
+        expect(
+            assembly.transportedVssCoefficientCommitmentMaterial,
+        ).toMatchObject({
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            totalByteLength: fullMaterialCoefficientBytes,
+        });
+        expect(assembly.setupPackage.vssCoefficientCommitmentMaterial).toEqual(
+            assembly.vssCoefficientCommitmentMaterial,
+        );
+        expect(assembly.setupPackage.setupTransportCertificate).toMatchObject({
+            fullObjectHash:
+                assembly.transportedVssCoefficientCommitmentMaterial
+                    ?.fullObjectHash,
+            chunkRoot:
+                assembly.transportedVssCoefficientCommitmentMaterial?.chunkRoot,
+            totalByteLength: fullMaterialCoefficientBytes,
+        });
+        expect(
+            assembly.sameSecretProofs.vssCoefficientCommitmentMaterialRoot,
+        ).toBe(
+            assembly.vssCoefficientCommitmentMaterial
+                .vssCoefficientCommitmentMaterialRoot,
+        );
+        expect(assembly.setupPackage.thresholdShareCommitments).toEqual(
+            assembly.thresholdShareCommitments,
+        );
     });
 
     it('rejects opening states rebound to another trustee identity', async () => {

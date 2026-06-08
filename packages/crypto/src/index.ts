@@ -2,6 +2,7 @@ export {
     canonicalJson,
     hash512Hex,
     setupProofMaterialFullObjectHashHex,
+    setupVssMaterialFullObjectHashHex,
 } from './canonical-json.js';
 export {
     deriveProtocolHash,

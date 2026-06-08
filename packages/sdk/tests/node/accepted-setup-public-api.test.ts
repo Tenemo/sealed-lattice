@@ -20,6 +20,7 @@ import {
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
+import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 
 type PublicSetupApi = {
     readonly createCommonRandomnessCommit: (
@@ -92,6 +93,8 @@ type PublicSetupApi = {
 };
 
 const publicSetupApi = publicApiRuntime as unknown as PublicSetupApi;
+const loadPublicTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
+    loadTranscriptCoreKernel;
 const trusteeIdentity = 'trustee-0';
 const trusteeRosterPosition = 0;
 
@@ -106,10 +109,7 @@ type SetupContextFixture = Readonly<{
     readonly setupEpoch: string;
 }>;
 
-const hashFromKernel = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
-    label: string,
-): string =>
+const hashFromKernel = (kernel: TranscriptCoreKernel, label: string): string =>
     kernel.deriveProtocolHash({
         namespace: 'ActionContextHash',
         value: {
@@ -119,7 +119,7 @@ const hashFromKernel = (
     });
 
 const setupContextFromKernel = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
 ): SetupContextFixture => {
     const profile = kernel.describeCollectiveBgvSetupProfile();
 
@@ -151,7 +151,7 @@ const contextFields = (
 });
 
 const protocolHashFromKernel = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     namespace: string,
     value: Record<string, unknown>,
 ): string =>
@@ -160,7 +160,7 @@ const protocolHashFromKernel = (
         value,
     });
 
-const qSharePrimes = [65_537, 114_689] as const;
+const qSharePrimes = [65_537, 114_689, 147_457] as const;
 const participantCount = 2;
 const vssFixtureRingDegree = 8;
 const vssFixtureThresholdDegree = 2;
@@ -322,7 +322,7 @@ const vssSourceTrusteeOpeningState = (
 });
 
 const sameSecretProofMaterial = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     statementRecord: Record<string, unknown>,
     sameSecretTboxParameterProfileHash: string,
 ): Record<string, unknown> => {
@@ -374,7 +374,7 @@ const sameSecretProofReferencesFromSet = (
     );
 
 const publicKeyShareLnpProofMaterial = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     proofRecord: Record<string, unknown>,
     publicKeyShareTboxParameterProfileHash: string,
 ): Record<string, unknown> => {
@@ -412,7 +412,7 @@ const publicKeyShareLnpProofMaterial = (
 };
 
 const relinearizationKeySwitchSeed = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     round: 'round-one' | 'round-two',
     level: number,
@@ -431,7 +431,7 @@ const relinearizationKeySwitchSeed = (
     });
 
 const galoisKeySwitchSeed = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     rotation: number,
     level: number,
@@ -451,11 +451,12 @@ const galoisKeySwitchSeed = (
     });
 
 const relinearizationProofMaterial = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     shareRoot: string,
     label: string,
     round: 'round-one' | 'round-two',
+    level: number,
 ): Record<string, unknown> => ({
     proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
     setupProofBinding: {
@@ -468,14 +469,14 @@ const relinearizationProofMaterial = (
         kernel,
         evaluatorKeySchedule,
         round,
-        1,
+        level,
     ),
     ringDegree: 8,
     keySwitchComponentVectorRoot: shareRoot,
     keySwitchComponentVectors: [
         {
             component: 'b',
-            digitIndex: 0,
+            digitIndex: level,
             vectorHash: hashFromKernel(kernel, `component-vector-${label}`),
         },
     ],
@@ -499,7 +500,7 @@ const relinearizationProofMaterial = (
 });
 
 const galoisProofMaterial = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     shareRoot: string,
     label: string,
@@ -573,7 +574,7 @@ const setupIntentSigner = (seedLabel: string): SetupIntentSignerFixture => {
 };
 
 const phaseObject = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     setupContext: SetupContextFixture,
     phaseNumber: number,
     phaseId = `phase-${String(phaseNumber)}`,
@@ -613,7 +614,7 @@ const phaseObject = (
 });
 
 const phaseTranscriptFixture = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     setupContext: SetupContextFixture,
 ): readonly Record<string, unknown>[] => {
     const profile = kernel.describeCollectiveBgvSetupProfile();
@@ -641,7 +642,7 @@ const phaseTranscriptFixture = (
 };
 
 const localStateInput = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     setupContext: SetupContextFixture,
 ): Record<string, unknown> => {
     const commonFields = contextFields(setupContext);
@@ -762,7 +763,7 @@ const localStateInput = (
 };
 
 const privateVssEnvelopeReference = (
-    kernel: Awaited<ReturnType<typeof loadTranscriptCoreKernel>>,
+    kernel: TranscriptCoreKernel,
     setupContext: SetupContextFixture,
 ): Record<string, unknown> => ({
     objectType: 'PrivateVssEnvelopeCommitment',
@@ -787,7 +788,7 @@ const privateVssEnvelopeReference = (
 
 describe('accepted setup public package API in Node', () => {
     it('creates signed setup intent objects and deterministic setup phase records', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadPublicTranscriptCoreKernel();
         const setupContext = setupContextFromKernel(kernel);
         const { keyFixture, signRoot } = setupIntentSigner(
             'accepted-setup-public-api-intent',
@@ -844,7 +845,7 @@ describe('accepted setup public package API in Node', () => {
     });
 
     it('assembles full-roster common randomness and refuses stale commit bindings', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadPublicTranscriptCoreKernel();
         const setupContext = setupContextFromKernel(kernel);
         const revealRecords: Record<string, unknown>[] = [];
         const commitRecords: Record<string, unknown>[] = [];
@@ -940,7 +941,7 @@ describe('accepted setup public package API in Node', () => {
     });
 
     it('verifies private VSS shares and signs acceptance or complaint from local verification', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadPublicTranscriptCoreKernel();
         const setupContext = setupContextFromKernel(kernel);
         const envelopeReference = privateVssEnvelopeReference(
             kernel,
@@ -1099,7 +1100,7 @@ describe('accepted setup public package API in Node', () => {
     });
 
     it('creates a roots-only setup contribution and refuses raw fields in the public record', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadPublicTranscriptCoreKernel();
         const setupContext = setupContextFromKernel(kernel);
         const commonFields = contextFields(setupContext);
         const sourceTrusteeRecord = {
@@ -1156,7 +1157,7 @@ describe('accepted setup public package API in Node', () => {
     });
 
     it('assembles public key and evaluation-key records from proof material only', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadPublicTranscriptCoreKernel();
         const setupProfile = kernel.describeCollectiveBgvSetupProfile();
         const bgvProfile = kernel.describeBgvRnsProfile();
         const setupContext = setupContextFromKernel(kernel);
@@ -1333,6 +1334,10 @@ describe('accepted setup public package API in Node', () => {
             publicKeyShareProofs,
             requiredGaloisKeySchedule,
         });
+        const relinearizationLevelSchedule =
+            evaluatorKeySchedule.relinearizationLevelSchedule as readonly {
+                readonly level: number;
+            }[];
         const sameSecretProofReferences =
             sameSecretProofReferencesFromSet(sameSecretProofs);
         const commonEvaluationKeyInput = {
@@ -1347,47 +1352,51 @@ describe('accepted setup public package API in Node', () => {
                 publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
             sameSecretProofReferences,
         };
-        const roundOneContributions = sameSecretProofReferences.map(
-            (reference) => {
-                const roundOneShareRoot = hashFromKernel(
-                    kernel,
-                    `round-one-share-${String(reference.trusteeRosterPosition)}`,
-                );
-
-                return {
-                    trusteeRosterPosition: reference.trusteeRosterPosition,
-                    level: 1,
-                    roundOneShareRoot,
-                    proofMaterial: relinearizationProofMaterial(
+        const roundOneContributions = relinearizationLevelSchedule.flatMap(
+            (scheduleEntry) =>
+                sameSecretProofReferences.map((reference) => {
+                    const roundOneShareRoot = hashFromKernel(
                         kernel,
-                        evaluatorKeySchedule,
+                        `round-one-share-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                    );
+
+                    return {
+                        trusteeRosterPosition: reference.trusteeRosterPosition,
+                        level: scheduleEntry.level,
                         roundOneShareRoot,
-                        `round-one-${String(reference.trusteeRosterPosition)}`,
-                        'round-one',
-                    ),
-                };
-            },
+                        proofMaterial: relinearizationProofMaterial(
+                            kernel,
+                            evaluatorKeySchedule,
+                            roundOneShareRoot,
+                            `round-one-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                            'round-one',
+                            scheduleEntry.level,
+                        ),
+                    };
+                }),
         );
-        const roundTwoContributions = sameSecretProofReferences.map(
-            (reference) => {
-                const roundTwoShareRoot = hashFromKernel(
-                    kernel,
-                    `round-two-share-${String(reference.trusteeRosterPosition)}`,
-                );
-
-                return {
-                    trusteeRosterPosition: reference.trusteeRosterPosition,
-                    level: 1,
-                    roundTwoShareRoot,
-                    proofMaterial: relinearizationProofMaterial(
+        const roundTwoContributions = relinearizationLevelSchedule.flatMap(
+            (scheduleEntry) =>
+                sameSecretProofReferences.map((reference) => {
+                    const roundTwoShareRoot = hashFromKernel(
                         kernel,
-                        evaluatorKeySchedule,
+                        `round-two-share-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                    );
+
+                    return {
+                        trusteeRosterPosition: reference.trusteeRosterPosition,
+                        level: scheduleEntry.level,
                         roundTwoShareRoot,
-                        `round-two-${String(reference.trusteeRosterPosition)}`,
-                        'round-two',
-                    ),
-                };
-            },
+                        proofMaterial: relinearizationProofMaterial(
+                            kernel,
+                            evaluatorKeySchedule,
+                            roundTwoShareRoot,
+                            `round-two-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.level)}`,
+                            'round-two',
+                            scheduleEntry.level,
+                        ),
+                    };
+                }),
         );
         const relinearizationKeyShareRounds =
             publicSetupApi.createRelinearizationKeyShareRounds({
@@ -1717,7 +1726,7 @@ describe('accepted setup public package API in Node', () => {
     });
 
     it('exports encrypted local trustee state and restores only a sealed payload', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadPublicTranscriptCoreKernel();
         const setupContext = setupContextFromKernel(kernel);
         const exportedState =
             await publicSetupApi.exportEncryptedLocalTrusteeSetupState(
@@ -1786,7 +1795,7 @@ describe('accepted setup public package API in Node', () => {
     });
 
     it('rejects incomplete export input and stale restored device state', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel = await loadPublicTranscriptCoreKernel();
         const setupContext = setupContextFromKernel(kernel);
         const exportInput = localStateInput(kernel, setupContext);
 
@@ -1828,5 +1837,6 @@ describe('accepted setup public package API in Node', () => {
             operation: 'verifyCollectiveBgvSetupPackage',
             verifierStatus: 'outsideProfile',
         });
+        expect(verification.acceptedSetupHandoff).toBeUndefined();
     });
 });

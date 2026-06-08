@@ -3,11 +3,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
     computeSetupCommitmentFromOpening,
+    createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
+    materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
+    setupTransportChunkSizeBytes,
     setupCommitmentRandomnessWidth,
     setupCommitmentRootPayload,
+    vssCoefficientCommitmentMaterialBinaryFormat,
     type CollectiveBgvSetupContext,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
@@ -370,6 +374,128 @@ describe('VSS coefficient commitment builders', () => {
             bundle.commitmentSet.sourceTrusteeRecords[0]
                 ?.coefficientCommitments[0]?.coefficientVectorHash512,
         ).toMatch(/^[0-9a-f]{128}$/u);
+    });
+
+    it('builds binary-chunked transport for public coefficient material', () => {
+        const bundle = createVssCoefficientCommitmentBundle({
+            setupContext,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStates: [0, 1].map((rosterPosition) =>
+                sourceTrusteeOpeningState(rosterPosition),
+            ),
+        });
+        const transport =
+            createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+                bundle.materialSet,
+            );
+        const {
+            vssCoefficientCommitmentMaterialRoot,
+            ...materialSetWithoutRoot
+        } = transport.materialSet;
+        const reconstructedMaterialRecords =
+            materialRecordsFromTransportedVssCoefficientCommitmentMaterial({
+                setupContext,
+                vssCoefficientCommitments: bundle.commitmentSet,
+                materialSet: transport.materialSet,
+                transportedVssCoefficientCommitmentMaterial:
+                    transport.transportedVssCoefficientCommitmentMaterial,
+            });
+
+        expect(transport.materialSet).toMatchObject({
+            objectType: 'VssCoefficientCommitmentMaterialSet',
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            materialEncoding:
+                'binary-chunked-full-public-setup-commitment-values',
+            binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+            materialRecordCount: bundle.materialSet.materialRecordCount,
+            transport: {
+                transportProfileId:
+                    'sealed-lattice-setup-binary-chunked-transport-v1',
+                chunkSizeBytes: setupTransportChunkSizeBytes,
+                chunkCount:
+                    transport.transportedVssCoefficientCommitmentMaterial
+                        .chunkCount,
+                fullObjectHash:
+                    transport.transportedVssCoefficientCommitmentMaterial
+                        .fullObjectHash,
+                chunkRoot:
+                    transport.transportedVssCoefficientCommitmentMaterial
+                        .chunkRoot,
+            },
+        });
+        expect(transport.materialSet).not.toHaveProperty(
+            'coefficientCommitments',
+        );
+        expect(vssCoefficientCommitmentMaterialRoot).toBe(
+            deriveProtocolHash(
+                'VssCoefficientCommitmentMaterialRoot',
+                materialSetWithoutRoot,
+            ),
+        );
+        expect(
+            transport.transportedVssCoefficientCommitmentMaterial,
+        ).toMatchObject({
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+        });
+        expect(
+            transport.transportedVssCoefficientCommitmentMaterial.chunks,
+        ).toHaveLength(
+            transport.transportedVssCoefficientCommitmentMaterial.chunkCount,
+        );
+        expect(reconstructedMaterialRecords).toEqual(
+            bundle.materialSet.coefficientCommitments,
+        );
+    });
+
+    it('rejects tampered binary coefficient material before reconstruction', () => {
+        const bundle = createVssCoefficientCommitmentBundle({
+            setupContext,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStates: [0, 1].map((rosterPosition) =>
+                sourceTrusteeOpeningState(rosterPosition),
+            ),
+        });
+        const transport =
+            createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+                bundle.materialSet,
+            );
+        const firstChunk =
+            transport.transportedVssCoefficientCommitmentMaterial.chunks[0];
+        if (firstChunk === undefined) {
+            throw new Error('transport fixture did not create a chunk');
+        }
+        const tamperedTransportedMaterial = {
+            ...transport.transportedVssCoefficientCommitmentMaterial,
+            chunks: [
+                {
+                    ...firstChunk,
+                    bytesHex: `00${firstChunk.bytesHex.slice(2)}`,
+                },
+                ...transport.transportedVssCoefficientCommitmentMaterial.chunks.slice(
+                    1,
+                ),
+            ],
+        };
+
+        expect(() =>
+            materialRecordsFromTransportedVssCoefficientCommitmentMaterial({
+                setupContext,
+                vssCoefficientCommitments: bundle.commitmentSet,
+                materialSet: transport.materialSet,
+                transportedVssCoefficientCommitmentMaterial:
+                    tamperedTransportedMaterial,
+            }),
+        ).toThrow(/fullObjectHash|chunkHashes|chunkRoot/u);
     });
 
     it('rejects malformed local opening state before root publication', () => {

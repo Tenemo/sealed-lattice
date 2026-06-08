@@ -33,7 +33,8 @@ import {
     type ThresholdShareCommitmentSet,
 } from './threshold-share-commitments.js';
 import type {
-    VssCoefficientCommitmentMaterialSet,
+    SetupPackageVssCoefficientCommitmentMaterialSet,
+    SetupTransportedVssCoefficientCommitmentMaterial,
     VssCoefficientCommitmentSet,
 } from './vss-coefficient-commitments.js';
 import type {
@@ -97,7 +98,10 @@ export type SetupPackageInput = Readonly<{
     readonly commonRandomness: SetupCommonRandomness;
     readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
     readonly vssCoefficientCommitmentMaterial:
-        | VssCoefficientCommitmentMaterialSet
+        | SetupPackageVssCoefficientCommitmentMaterialSet
+        | JsonRecord;
+    readonly transportedVssCoefficientCommitmentMaterial?:
+        | SetupTransportedVssCoefficientCommitmentMaterial
         | JsonRecord;
     readonly privateVssEnvelopeCommitments: JsonRecord;
     readonly vssShareAcceptances: VssShareAcceptanceSet;
@@ -134,7 +138,7 @@ export type SetupPackage = Readonly<
         readonly commonRandomness: SetupCommonRandomness;
         readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
         readonly vssCoefficientCommitmentMaterial:
-            | VssCoefficientCommitmentMaterialSet
+            | SetupPackageVssCoefficientCommitmentMaterialSet
             | JsonRecord;
         readonly privateVssEnvelopeCommitments: JsonRecord;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
@@ -747,6 +751,12 @@ const resolveThresholdShareCommitments = (
         vssCoefficientCommitments: input.vssCoefficientCommitments,
         vssCoefficientCommitmentMaterial:
             input.vssCoefficientCommitmentMaterial,
+        ...(input.transportedVssCoefficientCommitmentMaterial === undefined
+            ? {}
+            : {
+                  transportedVssCoefficientCommitmentMaterial:
+                      input.transportedVssCoefficientCommitmentMaterial,
+              }),
     });
     if (input.thresholdShareCommitments === undefined) {
         return derivedThresholdShareCommitments;

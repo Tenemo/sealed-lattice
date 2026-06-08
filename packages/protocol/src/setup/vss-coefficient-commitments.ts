@@ -1,4 +1,8 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import {
+    deriveProtocolHash,
+    hash512Hex,
+    setupVssMaterialFullObjectHashHex,
+} from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
@@ -11,6 +15,11 @@ export const setupCommitmentRandomnessWidth = 2 * setupCommitmentModuleRank + 1;
 export const setupCommitmentRowCount = setupCommitmentModuleRank + 1;
 export const setupCommitmentModulusLimbIndices = [0, 1, 2] as const;
 export const acceptedBgvProfileRingDegree = 32_768;
+export const setupTransportProfileId =
+    'sealed-lattice-setup-binary-chunked-transport-v1';
+export const setupTransportChunkSizeBytes = 1_048_576;
+export const vssCoefficientCommitmentMaterialBinaryFormat =
+    'sealed-lattice-vss-coefficient-commitment-material-binary-v1';
 
 export type SetupCommitmentLimbValue = {
     readonly commitmentModulusIndex: number;
@@ -130,6 +139,68 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
     }
 >;
+
+export type SetupTransportChunk = Readonly<
+    JsonRecord & {
+        readonly chunkIndex: number;
+        readonly bytesHex: string;
+    }
+>;
+
+export type SetupTransportedVssCoefficientCommitmentMaterial = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupTransportedVssCoefficientCommitmentMaterial';
+        readonly objectVersion: 1;
+        readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
+        readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
+        readonly chunkCount: number;
+        readonly totalByteLength: number;
+        readonly fullObjectHash: ProtocolHash;
+        readonly chunkHashes: readonly ProtocolHash[];
+        readonly chunkRoot: ProtocolHash;
+        readonly chunks: readonly SetupTransportChunk[];
+    }
+>;
+
+export type BinaryChunkedVssCoefficientCommitmentMaterialSet = Readonly<
+    JsonRecord & {
+        readonly objectType: 'VssCoefficientCommitmentMaterialSet';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly commitmentProfileId: typeof setupCommitmentProfileId;
+        readonly commitmentProfileHash: ProtocolHash;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly materialEncoding: 'binary-chunked-full-public-setup-commitment-values';
+        readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
+        readonly participantCount: number;
+        readonly thresholdDegree: number;
+        readonly rnsLimbCount: number;
+        readonly ringDegree: number;
+        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
+        readonly materialRecordCount: number;
+        readonly transport: Readonly<
+            JsonRecord & {
+                readonly transportProfileId: typeof setupTransportProfileId;
+                readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
+                readonly chunkCount: number;
+                readonly totalByteLength: number;
+                readonly fullObjectHash: ProtocolHash;
+                readonly chunkRoot: ProtocolHash;
+            }
+        >;
+        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+    }
+>;
+
+export type SetupPackageVssCoefficientCommitmentMaterialSet =
+    | VssCoefficientCommitmentMaterialSet
+    | BinaryChunkedVssCoefficientCommitmentMaterialSet;
+
+export type BinaryChunkedVssCoefficientCommitmentMaterialTransport = Readonly<{
+    readonly materialSet: BinaryChunkedVssCoefficientCommitmentMaterialSet;
+    readonly transportedVssCoefficientCommitmentMaterial: SetupTransportedVssCoefficientCommitmentMaterial;
+}>;
 
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeIdentity: string;
@@ -954,6 +1025,1124 @@ const commitmentChunkRoot = (
             ),
         })),
     });
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const hexToBytesStrict = (hex: string, fieldName: string): Uint8Array => {
+    if (!/^(?:[0-9a-f]{2})*$/u.test(hex)) {
+        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
+    }
+
+    return hexToBytes(hex);
+};
+
+const assertJsonRecord = (value: unknown, fieldName: string): JsonRecord => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new TypeError(`${fieldName} must be an object.`);
+    }
+
+    return value as JsonRecord;
+};
+
+const assertJsonRecordArray = (
+    value: unknown,
+    fieldName: string,
+): readonly JsonRecord[] => {
+    if (!Array.isArray(value)) {
+        throw new TypeError(`${fieldName} must be an array.`);
+    }
+
+    return value.map((entry, entryIndex) =>
+        assertJsonRecord(entry, `${fieldName}.${String(entryIndex)}`),
+    );
+};
+
+const appendVaruint = (outputBytes: number[], value: number): void => {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new TypeError(
+            'varuint values must be non-negative safe integers.',
+        );
+    }
+    let remainingValue = value;
+    for (;;) {
+        let byte = remainingValue & 0x7f;
+        remainingValue = Math.floor(remainingValue / 128);
+        if (remainingValue !== 0) {
+            byte |= 0x80;
+        }
+        outputBytes.push(byte);
+        if (remainingValue === 0) {
+            break;
+        }
+    }
+};
+
+const varuintBytes = (value: number): Uint8Array => {
+    const outputBytes: number[] = [];
+    appendVaruint(outputBytes, value);
+
+    return Uint8Array.from(outputBytes);
+};
+
+const assertSafeU64 = (value: number, fieldName: string): void => {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new TypeError(
+            `${fieldName} must be a non-negative safe integer.`,
+        );
+    }
+};
+
+const positiveSafeIntegerField = (
+    value: unknown,
+    fieldName: string,
+): number => {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value <= 0
+    ) {
+        throw new TypeError(`${fieldName} must be a positive safe integer.`);
+    }
+
+    return value;
+};
+
+const nonNegativeSafeIntegerField = (
+    value: unknown,
+    fieldName: string,
+): number => {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0
+    ) {
+        throw new TypeError(
+            `${fieldName} must be a non-negative safe integer.`,
+        );
+    }
+
+    return value;
+};
+
+class BinaryChunkWriter {
+    private readonly chunks: Uint8Array[] = [];
+
+    private currentChunk = new Uint8Array(setupTransportChunkSizeBytes);
+
+    private currentChunkOffset = 0;
+
+    public writeByte(value: number): void {
+        if (this.currentChunkOffset === this.currentChunk.byteLength) {
+            this.flushCurrentChunk();
+        }
+        this.currentChunk[this.currentChunkOffset] = value;
+        this.currentChunkOffset += 1;
+    }
+
+    public writeBytes(bytes: Uint8Array): void {
+        let sourceOffset = 0;
+        while (sourceOffset < bytes.byteLength) {
+            if (this.currentChunkOffset === this.currentChunk.byteLength) {
+                this.flushCurrentChunk();
+            }
+            const writableLength = Math.min(
+                bytes.byteLength - sourceOffset,
+                this.currentChunk.byteLength - this.currentChunkOffset,
+            );
+            this.currentChunk.set(
+                bytes.subarray(sourceOffset, sourceOffset + writableLength),
+                this.currentChunkOffset,
+            );
+            sourceOffset += writableLength;
+            this.currentChunkOffset += writableLength;
+        }
+    }
+
+    public writeVaruint(value: number): void {
+        this.writeBytes(varuintBytes(value));
+    }
+
+    public writeU64(value: number, fieldName: string): void {
+        assertSafeU64(value, fieldName);
+        let remainingValue = BigInt(value);
+        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
+            this.writeByte(Number(remainingValue & 0xffn));
+            remainingValue >>= 8n;
+        }
+    }
+
+    public finish(): readonly Uint8Array[] {
+        if (this.currentChunkOffset > 0) {
+            this.flushCurrentChunk();
+        }
+        if (this.chunks.length === 0) {
+            throw new Error(
+                'binary VSS material transport requires at least one chunk.',
+            );
+        }
+
+        return this.chunks;
+    }
+
+    private flushCurrentChunk(): void {
+        this.chunks.push(this.currentChunk.slice(0, this.currentChunkOffset));
+        this.currentChunk = new Uint8Array(setupTransportChunkSizeBytes);
+        this.currentChunkOffset = 0;
+    }
+}
+
+class BinaryChunkReader {
+    private chunkIndex = 0;
+
+    private chunkOffset = 0;
+
+    private bytesRead = 0;
+
+    private readonly totalByteLength: number;
+
+    public constructor(private readonly chunks: readonly Uint8Array[]) {
+        if (chunks.length === 0) {
+            throw new Error(
+                'transported VSS material requires at least one chunk.',
+            );
+        }
+        this.totalByteLength = chunks.reduce(
+            (accumulatedLength, chunk) => accumulatedLength + chunk.byteLength,
+            0,
+        );
+    }
+
+    public isFinished(): boolean {
+        return this.bytesRead === this.totalByteLength;
+    }
+
+    public readBytes(byteLength: number, fieldName: string): Uint8Array {
+        const outputBytes = new Uint8Array(byteLength);
+        let outputOffset = 0;
+        while (outputOffset < byteLength) {
+            const chunk = this.chunks[this.chunkIndex];
+            if (chunk === undefined) {
+                throw new Error(
+                    `${fieldName} ended before the binary object was complete.`,
+                );
+            }
+            const availableLength = chunk.byteLength - this.chunkOffset;
+            if (availableLength === 0) {
+                this.chunkIndex += 1;
+                this.chunkOffset = 0;
+                continue;
+            }
+            const copyLength = Math.min(
+                byteLength - outputOffset,
+                availableLength,
+            );
+            outputBytes.set(
+                chunk.subarray(this.chunkOffset, this.chunkOffset + copyLength),
+                outputOffset,
+            );
+            this.chunkOffset += copyLength;
+            this.bytesRead += copyLength;
+            outputOffset += copyLength;
+        }
+
+        return outputBytes;
+    }
+
+    public readVaruint(fieldName: string): number {
+        let shift = 0;
+        let value = 0n;
+        const consumedBytes: number[] = [];
+        for (let byteIndex = 0; byteIndex < 10; byteIndex += 1) {
+            const byte = this.readBytes(1, fieldName)[0];
+            if (byte === undefined) {
+                throw new Error(`${fieldName} varuint is malformed.`);
+            }
+            consumedBytes.push(byte);
+            const payload = BigInt(byte & 0x7f);
+            if (byteIndex === 9 && payload > 1n) {
+                throw new Error(`${fieldName} varuint exceeds u64.`);
+            }
+            value |= payload << BigInt(shift);
+            if ((byte & 0x80) === 0) {
+                if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+                    throw new Error(
+                        `${fieldName} varuint exceeds safe integer.`,
+                    );
+                }
+                const numberValue = Number(value);
+                const canonicalBytes = Array.from(varuintBytes(numberValue));
+                if (
+                    canonicalBytes.length !== consumedBytes.length ||
+                    canonicalBytes.some(
+                        (canonicalByte, index) =>
+                            canonicalByte !== consumedBytes[index],
+                    )
+                ) {
+                    throw new Error(
+                        `${fieldName} varuint is not minimally encoded.`,
+                    );
+                }
+
+                return numberValue;
+            }
+            shift += 7;
+        }
+
+        throw new Error(`${fieldName} varuint is too long.`);
+    }
+
+    public readU64(fieldName: string): number {
+        const bytes = this.readBytes(8, fieldName);
+        let value = 0n;
+        for (let byteIndex = 7; byteIndex >= 0; byteIndex -= 1) {
+            value = (value << 8n) | BigInt(bytes[byteIndex] ?? 0);
+        }
+        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error(`${fieldName} exceeds safe integer.`);
+        }
+
+        return Number(value);
+    }
+}
+
+const setupVssMaterialChunkHash = (
+    fullObjectHash: ProtocolHash,
+    chunkIndex: number,
+    chunk: Uint8Array,
+): ProtocolHash =>
+    hash512Hex(
+        'sealed-lattice/setup/vss-coefficient-commitment-material/chunk-v1',
+        [textEncoder.encode(fullObjectHash), varuintBytes(chunkIndex), chunk],
+    );
+
+const setupTransportChunkManifestRoot = (input: {
+    readonly chunkSizeBytes: number;
+    readonly chunkCount: number;
+    readonly totalByteLength: number;
+    readonly chunkHashes: readonly ProtocolHash[];
+    readonly fullObjectHash: ProtocolHash;
+}): ProtocolHash =>
+    deriveProtocolHash('SetupTransportChunkManifestRoot', {
+        objectType: 'SetupTransportChunkManifest',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        transportProfileId: setupTransportProfileId,
+        chunkSizeBytes: input.chunkSizeBytes,
+        chunkCount: input.chunkCount,
+        totalByteLength: input.totalByteLength,
+        chunkHashes: input.chunkHashes,
+        fullObjectHash: input.fullObjectHash,
+    });
+
+const transportHashesForChunks = (
+    chunks: readonly Uint8Array[],
+): Readonly<{
+    readonly fullObjectHash: ProtocolHash;
+    readonly chunkHashes: readonly ProtocolHash[];
+    readonly chunkRoot: ProtocolHash;
+    readonly totalByteLength: number;
+}> => {
+    if (chunks.length === 0) {
+        throw new Error(
+            'setup transport requires at least one material chunk.',
+        );
+    }
+    const totalByteLength = chunks.reduce(
+        (accumulatedLength, chunk, chunkIndex) => {
+            if (chunk.byteLength === 0) {
+                throw new Error('setup transport chunks must be non-empty.');
+            }
+            if (chunk.byteLength > setupTransportChunkSizeBytes) {
+                throw new Error(
+                    'setup transport chunk exceeds the accepted chunk size.',
+                );
+            }
+            if (
+                chunkIndex + 1 < chunks.length &&
+                chunk.byteLength !== setupTransportChunkSizeBytes
+            ) {
+                throw new Error(
+                    'setup transport contains a short non-final chunk.',
+                );
+            }
+
+            return accumulatedLength + chunk.byteLength;
+        },
+        0,
+    );
+    const fullObjectHash = setupVssMaterialFullObjectHashHex(
+        totalByteLength,
+        chunks,
+    );
+    const chunkHashes = chunks.map((chunk, chunkIndex) =>
+        setupVssMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
+    );
+    const chunkRoot = setupTransportChunkManifestRoot({
+        chunkSizeBytes: setupTransportChunkSizeBytes,
+        chunkCount: chunks.length,
+        totalByteLength,
+        chunkHashes,
+        fullObjectHash,
+    });
+
+    return {
+        fullObjectHash,
+        chunkHashes,
+        chunkRoot,
+        totalByteLength,
+    };
+};
+
+const parseSetupCommitmentValue = (
+    value: unknown,
+    objectPath: string,
+): SetupCommitmentValue => {
+    const commitment = assertJsonRecord(value, objectPath);
+    if (commitment.objectType !== 'SetupCommitment') {
+        throw new Error(`${objectPath}.objectType must be SetupCommitment.`);
+    }
+    if (commitment.objectVersion !== 1) {
+        throw new Error(`${objectPath}.objectVersion must be 1.`);
+    }
+    if (commitment.profileId !== setupCommitmentProfileId) {
+        throw new Error(
+            `${objectPath}.profileId must be ${setupCommitmentProfileId}.`,
+        );
+    }
+    const sourceRnsLimbIndex = nonNegativeSafeIntegerField(
+        commitment.sourceRnsLimbIndex,
+        `${objectPath}.sourceRnsLimbIndex`,
+    );
+    const sourceMessageModulus = positiveSafeIntegerField(
+        commitment.sourceMessageModulus,
+        `${objectPath}.sourceMessageModulus`,
+    );
+    const shamirCoefficientIndex = nonNegativeSafeIntegerField(
+        commitment.shamirCoefficientIndex,
+        `${objectPath}.shamirCoefficientIndex`,
+    );
+    const ringDegree = positiveSafeIntegerField(
+        commitment.ringDegree,
+        `${objectPath}.ringDegree`,
+    );
+    const commitmentLimbs = assertJsonRecordArray(
+        commitment.commitmentLimbs,
+        `${objectPath}.commitmentLimbs`,
+    ).map((commitmentLimb, commitmentLimbIndex) => {
+        const limbPath = `${objectPath}.commitmentLimbs.${String(commitmentLimbIndex)}`;
+        const commitmentModulusIndex = nonNegativeSafeIntegerField(
+            commitmentLimb.commitmentModulusIndex,
+            `${limbPath}.commitmentModulusIndex`,
+        );
+        const modulus = positiveSafeIntegerField(
+            commitmentLimb.modulus,
+            `${limbPath}.modulus`,
+        );
+        if (!Array.isArray(commitmentLimb.rows)) {
+            throw new TypeError(`${limbPath}.rows must be an array.`);
+        }
+        const rows = commitmentLimb.rows.map((rowValue, rowIndex) => {
+            if (!Array.isArray(rowValue)) {
+                throw new TypeError(
+                    `${limbPath}.rows.${String(rowIndex)} must be an array.`,
+                );
+            }
+            const row = rowValue.map((coefficient, coefficientIndex) => {
+                if (typeof coefficient !== 'number') {
+                    throw new TypeError(
+                        `${limbPath}.rows.${String(rowIndex)}.${String(coefficientIndex)} must be a number.`,
+                    );
+                }
+
+                return coefficient;
+            });
+            assertResidueVector(
+                row,
+                modulus,
+                ringDegree,
+                `${limbPath}.rows.${String(rowIndex)}`,
+            );
+
+            return row;
+        });
+
+        return {
+            commitmentModulusIndex,
+            modulus,
+            rows,
+        };
+    });
+
+    return {
+        sourceRnsLimbIndex,
+        sourceMessageModulus,
+        shamirCoefficientIndex,
+        ringDegree,
+        commitmentLimbs,
+    };
+};
+
+const sortedCoefficientCommitmentMaterialRecords = (
+    materialSet: VssCoefficientCommitmentMaterialSet,
+): readonly VssCoefficientCommitmentMaterialRecord[] => {
+    const recordsByCoordinate = new Map<
+        string,
+        VssCoefficientCommitmentMaterialRecord
+    >();
+    materialSet.coefficientCommitments.forEach((materialRecord) => {
+        const coordinateKey = [
+            materialRecord.sourceTrusteeRosterPosition,
+            materialRecord.rnsLimbIndex,
+            materialRecord.shamirCoefficientIndex,
+        ].join(':');
+        if (recordsByCoordinate.has(coordinateKey)) {
+            throw new Error(
+                'vssCoefficientCommitmentMaterial must not contain duplicate coordinate records.',
+            );
+        }
+        recordsByCoordinate.set(coordinateKey, materialRecord);
+    });
+
+    const sortedRecords: VssCoefficientCommitmentMaterialRecord[] = [];
+    for (
+        let sourceTrusteeRosterPosition = 0;
+        sourceTrusteeRosterPosition < materialSet.participantCount;
+        sourceTrusteeRosterPosition += 1
+    ) {
+        for (
+            let rnsLimbIndex = 0;
+            rnsLimbIndex < materialSet.rnsLimbCount;
+            rnsLimbIndex += 1
+        ) {
+            for (
+                let shamirCoefficientIndex = 0;
+                shamirCoefficientIndex < materialSet.thresholdDegree;
+                shamirCoefficientIndex += 1
+            ) {
+                const materialRecord = recordsByCoordinate.get(
+                    [
+                        sourceTrusteeRosterPosition,
+                        rnsLimbIndex,
+                        shamirCoefficientIndex,
+                    ].join(':'),
+                );
+                if (materialRecord === undefined) {
+                    throw new Error(
+                        'vssCoefficientCommitmentMaterial must cover every source trustee, RNS limb, and Shamir coefficient.',
+                    );
+                }
+                sortedRecords.push(materialRecord);
+            }
+        }
+    }
+    if (sortedRecords.length !== materialSet.materialRecordCount) {
+        throw new Error(
+            'vssCoefficientCommitmentMaterial.materialRecordCount must match the encoded records.',
+        );
+    }
+
+    return sortedRecords;
+};
+
+const writeSetupCommitment = (
+    writer: BinaryChunkWriter,
+    materialRecord: VssCoefficientCommitmentMaterialRecord,
+): void => {
+    const commitment = parseSetupCommitmentValue(
+        materialRecord.commitment,
+        'vssCoefficientCommitmentMaterial.coefficientCommitments.commitment',
+    );
+    const commitmentRoot = deriveProtocolHash(
+        'SetupCommitmentRoot',
+        setupCommitmentRootPayload(commitment),
+    );
+    if (commitmentRoot !== materialRecord.commitmentRoot) {
+        throw new Error(
+            'VSS coefficient commitment material record root must match the encoded setup commitment.',
+        );
+    }
+    if (
+        commitment.sourceRnsLimbIndex !== materialRecord.rnsLimbIndex ||
+        commitment.sourceMessageModulus !== materialRecord.rnsPrime ||
+        commitment.shamirCoefficientIndex !==
+            materialRecord.shamirCoefficientIndex
+    ) {
+        throw new Error(
+            'VSS coefficient commitment material coordinate must match the encoded setup commitment.',
+        );
+    }
+    writer.writeVaruint(materialRecord.sourceTrusteeRosterPosition);
+    writer.writeVaruint(materialRecord.rnsLimbIndex);
+    writer.writeVaruint(materialRecord.shamirCoefficientIndex);
+    for (const commitmentModulusIndex of setupCommitmentModulusLimbIndices) {
+        const commitmentLimb = commitment.commitmentLimbs.find(
+            (candidateLimb) =>
+                candidateLimb.commitmentModulusIndex === commitmentModulusIndex,
+        );
+        if (commitmentLimb === undefined) {
+            throw new Error(
+                'setup commitment must include every commitment modulus limb.',
+            );
+        }
+        writer.writeVaruint(commitmentModulusIndex);
+        writer.writeU64(
+            commitmentLimb.modulus,
+            'setup commitment modulus limb',
+        );
+        if (commitmentLimb.rows.length !== setupCommitmentRowCount) {
+            throw new Error(
+                'setup commitment must include the accepted row count.',
+            );
+        }
+        commitmentLimb.rows.forEach((row, rowIndex) => {
+            if (row.length !== commitment.ringDegree) {
+                throw new Error(
+                    `setup commitment row ${String(rowIndex)} length must match ringDegree.`,
+                );
+            }
+            row.forEach((coefficient) =>
+                writer.writeU64(coefficient, 'setup commitment coefficient'),
+            );
+        });
+    }
+};
+
+const encodeVssCoefficientCommitmentMaterial = (
+    materialSet: VssCoefficientCommitmentMaterialSet,
+): readonly Uint8Array[] => {
+    const writer = new BinaryChunkWriter();
+    writer.writeBytes(textEncoder.encode('SLVSSMAT'));
+    writer.writeVaruint(1);
+    writer.writeVaruint(materialSet.participantCount);
+    writer.writeVaruint(materialSet.thresholdDegree);
+    writer.writeVaruint(materialSet.rnsLimbCount);
+    writer.writeVaruint(materialSet.ringDegree);
+    writer.writeVaruint(setupCommitmentModulusLimbIndices.length);
+    writer.writeVaruint(setupCommitmentRowCount);
+    sortedCoefficientCommitmentMaterialRecords(materialSet).forEach(
+        (materialRecord) => writeSetupCommitment(writer, materialRecord),
+    );
+
+    return writer.finish();
+};
+
+export const createBinaryChunkedVssCoefficientCommitmentMaterialTransport = (
+    materialSet: VssCoefficientCommitmentMaterialSet,
+): BinaryChunkedVssCoefficientCommitmentMaterialTransport => {
+    if (
+        materialSet.materialEncoding !== 'full-public-setup-commitment-values'
+    ) {
+        throw new Error(
+            'binary VSS material transport must be built from embedded full public values.',
+        );
+    }
+    const chunks = encodeVssCoefficientCommitmentMaterial(materialSet);
+    const transportHashes = transportHashesForChunks(chunks);
+    const commitmentProfileHash = materialSet.commitmentProfileHash;
+    if (typeof commitmentProfileHash !== 'string') {
+        throw new TypeError(
+            'vssCoefficientCommitmentMaterial.commitmentProfileHash must be a string.',
+        );
+    }
+    assertHashLike(
+        commitmentProfileHash,
+        'vssCoefficientCommitmentMaterial.commitmentProfileHash',
+    );
+    const materialSetWithoutRoot = {
+        objectType: 'VssCoefficientCommitmentMaterialSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        ...contextFields(materialSet as unknown as CollectiveBgvSetupContext),
+        commitmentProfileId: setupCommitmentProfileId,
+        commitmentProfileHash,
+        materialEncoding: 'binary-chunked-full-public-setup-commitment-values',
+        binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+        publicMatrixSeedHash: materialSet.publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot: materialSet.vssCoefficientCommitmentRoot,
+        participantCount: materialSet.participantCount,
+        thresholdDegree: materialSet.thresholdDegree,
+        rnsLimbCount: materialSet.rnsLimbCount,
+        ringDegree: materialSet.ringDegree,
+        ringDegreeStatus: materialSet.ringDegreeStatus,
+        materialRecordCount: materialSet.materialRecordCount,
+        transport: {
+            transportProfileId: setupTransportProfileId,
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+            chunkCount: chunks.length,
+            totalByteLength: transportHashes.totalByteLength,
+            fullObjectHash: transportHashes.fullObjectHash,
+            chunkRoot: transportHashes.chunkRoot,
+        },
+    } as const satisfies Omit<
+        BinaryChunkedVssCoefficientCommitmentMaterialSet,
+        'vssCoefficientCommitmentMaterialRoot'
+    >;
+    const binaryMaterialSet = {
+        ...materialSetWithoutRoot,
+        vssCoefficientCommitmentMaterialRoot: deriveProtocolHash(
+            'VssCoefficientCommitmentMaterialRoot',
+            materialSetWithoutRoot,
+        ),
+    } satisfies BinaryChunkedVssCoefficientCommitmentMaterialSet;
+
+    return {
+        materialSet: binaryMaterialSet,
+        transportedVssCoefficientCommitmentMaterial: {
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+            chunkCount: chunks.length,
+            totalByteLength: transportHashes.totalByteLength,
+            fullObjectHash: transportHashes.fullObjectHash,
+            chunkHashes: transportHashes.chunkHashes,
+            chunkRoot: transportHashes.chunkRoot,
+            chunks: chunks.map((chunk, chunkIndex) => ({
+                chunkIndex,
+                bytesHex: bytesToHex(chunk),
+            })),
+        },
+    };
+};
+
+const transportChunksFromObject = (
+    transportedMaterial:
+        | SetupTransportedVssCoefficientCommitmentMaterial
+        | JsonRecord,
+): readonly Uint8Array[] => {
+    const materialObject = assertJsonRecord(
+        transportedMaterial,
+        'transportedVssCoefficientCommitmentMaterial',
+    );
+    if (
+        materialObject.objectType !==
+        'SetupTransportedVssCoefficientCommitmentMaterial'
+    ) {
+        throw new Error(
+            'transportedVssCoefficientCommitmentMaterial.objectType must be SetupTransportedVssCoefficientCommitmentMaterial.',
+        );
+    }
+    if (materialObject.objectVersion !== 1) {
+        throw new Error(
+            'transportedVssCoefficientCommitmentMaterial.objectVersion must be 1.',
+        );
+    }
+    if (
+        materialObject.binaryFormat !==
+        vssCoefficientCommitmentMaterialBinaryFormat
+    ) {
+        throw new Error(
+            'transported VSS coefficient material must use the accepted binary format.',
+        );
+    }
+    if (materialObject.chunkSizeBytes !== setupTransportChunkSizeBytes) {
+        throw new Error(
+            'transported VSS coefficient material must use the accepted 1 MiB setup chunk size.',
+        );
+    }
+    const chunkCount = positiveSafeIntegerField(
+        materialObject.chunkCount,
+        'transportedVssCoefficientCommitmentMaterial.chunkCount',
+    );
+    const chunkHashes = assertJsonRecordArray(
+        (materialObject as SetupTransportedVssCoefficientCommitmentMaterial)
+            .chunks,
+        'transportedVssCoefficientCommitmentMaterial.chunks',
+    );
+    if (chunkHashes.length !== chunkCount) {
+        throw new Error('transport chunks length must match chunkCount.');
+    }
+
+    return chunkHashes.map((chunk, expectedChunkIndex) => {
+        if (chunk.chunkIndex !== expectedChunkIndex) {
+            throw new Error(
+                'transport chunks must be supplied in ascending chunk-index order.',
+            );
+        }
+
+        return hexToBytesStrict(
+            String(chunk.bytesHex),
+            `transportedVssCoefficientCommitmentMaterial.chunks.${String(expectedChunkIndex)}.bytesHex`,
+        );
+    });
+};
+
+const verifyTransportObjectHashes = (
+    transportedMaterial:
+        | SetupTransportedVssCoefficientCommitmentMaterial
+        | JsonRecord,
+    chunks: readonly Uint8Array[],
+): void => {
+    const materialObject = assertJsonRecord(
+        transportedMaterial,
+        'transportedVssCoefficientCommitmentMaterial',
+    );
+    const hashes = transportHashesForChunks(chunks);
+    if (materialObject.totalByteLength !== hashes.totalByteLength) {
+        throw new Error(
+            'transport totalByteLength must match supplied chunk bytes.',
+        );
+    }
+    if (materialObject.fullObjectHash !== hashes.fullObjectHash) {
+        throw new Error(
+            'transport fullObjectHash does not match supplied chunk bytes.',
+        );
+    }
+    if (materialObject.chunkRoot !== hashes.chunkRoot) {
+        throw new Error(
+            'transport chunkRoot does not match the canonical chunk manifest.',
+        );
+    }
+    const observedChunkHashes = materialObject.chunkHashes;
+    if (!Array.isArray(observedChunkHashes)) {
+        throw new TypeError('transport chunkHashes must be an array.');
+    }
+    if (observedChunkHashes.length !== hashes.chunkHashes.length) {
+        throw new Error('transport chunkHashes length must match chunkCount.');
+    }
+    hashes.chunkHashes.forEach((chunkHash, chunkIndex) => {
+        if (observedChunkHashes[chunkIndex] !== chunkHash) {
+            throw new Error(
+                'transport chunkHashes do not match supplied chunk bytes.',
+            );
+        }
+    });
+};
+
+const readTransportedSetupCommitment = (
+    reader: BinaryChunkReader,
+    expectedSourceTrusteeRosterPosition: number,
+    expectedRnsLimbIndex: number,
+    expectedRnsPrime: number,
+    expectedShamirCoefficientIndex: number,
+    expectedRingDegree: number,
+    expectedCommitmentModuli: readonly number[],
+): SetupCommitmentValue => {
+    if (
+        reader.readVaruint('sourceTrusteeRosterPosition') !==
+        expectedSourceTrusteeRosterPosition
+    ) {
+        throw new Error(
+            'transported VSS material source trustee order is not canonical.',
+        );
+    }
+    if (reader.readVaruint('rnsLimbIndex') !== expectedRnsLimbIndex) {
+        throw new Error(
+            'transported VSS material RNS limb order is not canonical.',
+        );
+    }
+    if (
+        reader.readVaruint('shamirCoefficientIndex') !==
+        expectedShamirCoefficientIndex
+    ) {
+        throw new Error(
+            'transported VSS material Shamir coefficient order is not canonical.',
+        );
+    }
+    const commitmentLimbs = setupCommitmentModulusLimbIndices.map(
+        (expectedCommitmentModulusIndex) => {
+            if (
+                reader.readVaruint('commitmentModulusIndex') !==
+                expectedCommitmentModulusIndex
+            ) {
+                throw new Error(
+                    'transported commitment modulus limb order is not canonical.',
+                );
+            }
+            const modulus = reader.readU64('commitment modulus');
+            if (
+                expectedCommitmentModuli[expectedCommitmentModulusIndex] !==
+                modulus
+            ) {
+                throw new Error(
+                    'transported commitment modulus does not match the commitment profile.',
+                );
+            }
+            const rows = Array.from({ length: setupCommitmentRowCount }, () =>
+                Array.from({ length: expectedRingDegree }, () => {
+                    const coefficient = reader.readU64(
+                        'commitment coefficient',
+                    );
+                    if (coefficient >= modulus) {
+                        throw new Error(
+                            'transported commitment coefficient is not canonical modulo its limb.',
+                        );
+                    }
+
+                    return coefficient;
+                }),
+            );
+
+            return {
+                commitmentModulusIndex: expectedCommitmentModulusIndex,
+                modulus,
+                rows,
+            };
+        },
+    );
+
+    return {
+        sourceRnsLimbIndex: expectedRnsLimbIndex,
+        sourceMessageModulus: expectedRnsPrime,
+        shamirCoefficientIndex: expectedShamirCoefficientIndex,
+        ringDegree: expectedRingDegree,
+        commitmentLimbs,
+    };
+};
+
+const sortedSourceTrusteeCommitmentRecords = (
+    vssCoefficientCommitments: VssCoefficientCommitmentSet,
+): readonly VssSourceTrusteeCoefficientCommitmentRecord[] => {
+    const sourceTrusteeRecords = [
+        ...vssCoefficientCommitments.sourceTrusteeRecords,
+    ].sort(
+        (left, right) =>
+            left.sourceTrusteeRosterPosition -
+            right.sourceTrusteeRosterPosition,
+    );
+    sourceTrusteeRecords.forEach((sourceTrusteeRecord, expectedPosition) => {
+        if (
+            sourceTrusteeRecord.sourceTrusteeRosterPosition !== expectedPosition
+        ) {
+            throw new Error(
+                'vssCoefficientCommitments source trustee records must be in contiguous roster order.',
+            );
+        }
+    });
+
+    return sourceTrusteeRecords;
+};
+
+export const materialRecordsFromTransportedVssCoefficientCommitmentMaterial = (
+    input: Readonly<{
+        readonly setupContext: CollectiveBgvSetupContext;
+        readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
+        readonly materialSet: BinaryChunkedVssCoefficientCommitmentMaterialSet;
+        readonly transportedVssCoefficientCommitmentMaterial:
+            | SetupTransportedVssCoefficientCommitmentMaterial
+            | JsonRecord;
+    }>,
+): readonly VssCoefficientCommitmentMaterialRecord[] => {
+    const chunks = transportChunksFromObject(
+        input.transportedVssCoefficientCommitmentMaterial,
+    );
+    verifyTransportObjectHashes(
+        input.transportedVssCoefficientCommitmentMaterial,
+        chunks,
+    );
+    const materialTransport = input.materialSet.transport;
+    const transportedMaterial = assertJsonRecord(
+        input.transportedVssCoefficientCommitmentMaterial,
+        'transportedVssCoefficientCommitmentMaterial',
+    );
+    if (
+        materialTransport.fullObjectHash !==
+            transportedMaterial.fullObjectHash ||
+        materialTransport.chunkRoot !== transportedMaterial.chunkRoot ||
+        materialTransport.chunkCount !== transportedMaterial.chunkCount ||
+        materialTransport.totalByteLength !==
+            transportedMaterial.totalByteLength
+    ) {
+        throw new Error(
+            'binary VSS material set transport metadata must match the transported material object.',
+        );
+    }
+    if (
+        input.materialSet.vssCoefficientCommitmentRoot !==
+        input.vssCoefficientCommitments.vssCoefficientCommitmentRoot
+    ) {
+        throw new Error(
+            'binary VSS material set root binding must match VSS coefficient commitments.',
+        );
+    }
+    const materialRootWithoutRoot = { ...input.materialSet };
+    delete (materialRootWithoutRoot as JsonRecord)
+        .vssCoefficientCommitmentMaterialRoot;
+    if (
+        deriveProtocolHash(
+            'VssCoefficientCommitmentMaterialRoot',
+            materialRootWithoutRoot,
+        ) !== input.materialSet.vssCoefficientCommitmentMaterialRoot
+    ) {
+        throw new Error(
+            'binary VSS material set root must match the canonical material set.',
+        );
+    }
+
+    const sourceTrusteeRecords = sortedSourceTrusteeCommitmentRecords(
+        input.vssCoefficientCommitments,
+    );
+    if (sourceTrusteeRecords.length !== input.materialSet.participantCount) {
+        throw new Error(
+            'binary VSS material participant count must match VSS coefficient commitments.',
+        );
+    }
+    const reader = new BinaryChunkReader(chunks);
+    const expectedCommitmentModuli = setupCommitmentModulusLimbIndices.map(
+        (commitmentModulusIndex) => {
+            const firstSourceTrusteeRecord = sourceTrusteeRecords[0];
+            const coefficientRecord =
+                firstSourceTrusteeRecord?.coefficientCommitments.find(
+                    (candidateRecord) =>
+                        candidateRecord.rnsLimbIndex === commitmentModulusIndex,
+                );
+            if (coefficientRecord === undefined) {
+                throw new Error(
+                    'VSS coefficient commitments must expose every commitment modulus limb.',
+                );
+            }
+
+            return coefficientRecord.rnsPrime;
+        },
+    );
+    const magic = reader.readBytes(8, 'transported VSS material magic');
+    if (new TextDecoder().decode(magic) !== 'SLVSSMAT') {
+        throw new Error(
+            'transported VSS material binary magic does not match.',
+        );
+    }
+    if (reader.readVaruint('binary version') !== 1) {
+        throw new Error(
+            'transported VSS material binary version is unsupported.',
+        );
+    }
+    if (
+        reader.readVaruint('participantCount') !==
+        input.materialSet.participantCount
+    ) {
+        throw new Error(
+            'transported VSS material participant count does not match the material set.',
+        );
+    }
+    if (
+        reader.readVaruint('thresholdDegree') !==
+        input.materialSet.thresholdDegree
+    ) {
+        throw new Error(
+            'transported VSS material threshold degree does not match the material set.',
+        );
+    }
+    if (reader.readVaruint('rnsLimbCount') !== input.materialSet.rnsLimbCount) {
+        throw new Error(
+            'transported VSS material RNS limb count does not match the material set.',
+        );
+    }
+    if (reader.readVaruint('ringDegree') !== input.materialSet.ringDegree) {
+        throw new Error(
+            'transported VSS material ring degree does not match the material set.',
+        );
+    }
+    if (
+        reader.readVaruint('commitmentLimbCount') !==
+        setupCommitmentModulusLimbIndices.length
+    ) {
+        throw new Error(
+            'transported VSS material commitment limb count does not match the commitment profile.',
+        );
+    }
+    if (reader.readVaruint('rowCount') !== setupCommitmentRowCount) {
+        throw new Error(
+            'transported VSS material row count does not match the commitment profile.',
+        );
+    }
+
+    const materialRecords: VssCoefficientCommitmentMaterialRecord[] = [];
+    for (
+        let sourceTrusteeRosterPosition = 0;
+        sourceTrusteeRosterPosition < input.materialSet.participantCount;
+        sourceTrusteeRosterPosition += 1
+    ) {
+        const sourceTrusteeRecord =
+            sourceTrusteeRecords[sourceTrusteeRosterPosition];
+        if (sourceTrusteeRecord === undefined) {
+            throw new Error(
+                'transport material is missing a source trustee binding.',
+            );
+        }
+        for (
+            let rnsLimbIndex = 0;
+            rnsLimbIndex < input.materialSet.rnsLimbCount;
+            rnsLimbIndex += 1
+        ) {
+            const coefficientRecordForLimb =
+                sourceTrusteeRecord.coefficientCommitments.find(
+                    (candidateRecord) =>
+                        candidateRecord.rnsLimbIndex === rnsLimbIndex,
+                );
+            if (coefficientRecordForLimb === undefined) {
+                throw new Error(
+                    'source trustee record is missing an RNS limb commitment.',
+                );
+            }
+            for (
+                let shamirCoefficientIndex = 0;
+                shamirCoefficientIndex < input.materialSet.thresholdDegree;
+                shamirCoefficientIndex += 1
+            ) {
+                const commitment = readTransportedSetupCommitment(
+                    reader,
+                    sourceTrusteeRosterPosition,
+                    rnsLimbIndex,
+                    coefficientRecordForLimb.rnsPrime,
+                    shamirCoefficientIndex,
+                    input.materialSet.ringDegree,
+                    expectedCommitmentModuli,
+                );
+                const commitmentRoot = deriveProtocolHash(
+                    'SetupCommitmentRoot',
+                    setupCommitmentRootPayload(commitment),
+                );
+                const expectedCommitmentRecord =
+                    sourceTrusteeRecord.coefficientCommitments.find(
+                        (candidateRecord) =>
+                            candidateRecord.rnsLimbIndex === rnsLimbIndex &&
+                            candidateRecord.shamirCoefficientIndex ===
+                                shamirCoefficientIndex,
+                    );
+                if (expectedCommitmentRecord === undefined) {
+                    throw new Error(
+                        'transport material coordinate is absent from the source trustee record.',
+                    );
+                }
+                if (
+                    expectedCommitmentRecord.commitmentRoot !== commitmentRoot
+                ) {
+                    throw new Error(
+                        'transported setup commitment material does not match the source trustee commitment root.',
+                    );
+                }
+                materialRecords.push({
+                    objectType: 'VssCoefficientCommitmentMaterial',
+                    objectVersion: 1,
+                    ...contextFields(input.setupContext),
+                    sourceTrusteeIdentity:
+                        sourceTrusteeRecord.sourceTrusteeIdentity,
+                    sourceTrusteeRosterPosition,
+                    publicMatrixSeedHash:
+                        input.materialSet.publicMatrixSeedHash,
+                    rnsLimbIndex,
+                    rnsPrime: expectedCommitmentRecord.rnsPrime,
+                    shamirCoefficientIndex,
+                    commitmentRoot,
+                    commitment: setupCommitmentFullValue(commitment),
+                });
+            }
+        }
+    }
+    if (!reader.isFinished()) {
+        throw new Error(
+            'transported VSS material has trailing bytes after the final commitment record.',
+        );
+    }
+    if (materialRecords.length !== input.materialSet.materialRecordCount) {
+        throw new Error(
+            'transported VSS material record count must match the material set.',
+        );
+    }
+
+    return materialRecords;
+};
 
 const validateCommitmentCommonInput = (
     input: Omit<

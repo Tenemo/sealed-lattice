@@ -37,6 +37,7 @@ import type {
 } from './kernel-types/bgv.js';
 
 export type {
+    BgvAcceptedSetupHandoff,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,

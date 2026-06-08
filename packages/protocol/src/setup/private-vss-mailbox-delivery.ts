@@ -248,6 +248,10 @@ const recipientVerificationRequirement =
     'recipient-verifies-private-vss-opening-before-acceptance';
 const setupProfileId = 'CollectiveBgvSetup-v1';
 const privateVssShareProofFamily = 'vss-opening-carry';
+export const privateVssShareLnpProofVerificationStatus =
+    'lnp-private-vss-share-relation-verified-with-accepted-setup-proof-accounting';
+export const privateVssShareLnpProofModelStatus =
+    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, centered signed 112-bit coefficient opening masks and responses, hidden carry responses, carry-aware VSS share algebra, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing VSS proof acceptance';
 const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
@@ -545,6 +549,24 @@ const transportPrivateVssShareProofMaterial = (
     readonly proofRecord: JsonRecord;
     readonly proofMaterial: TransportedPrivateVssShareProofMaterial;
 } => {
+    const proofVerificationStatus = assertString(
+        proofRecord.proofVerificationStatus,
+        'privateVssShareProof.proofVerificationStatus',
+    );
+    if (proofVerificationStatus !== privateVssShareLnpProofVerificationStatus) {
+        throw new Error(
+            'privateVssShareProof.proofVerificationStatus must match the accepted private VSS share verifier status.',
+        );
+    }
+    const proofModelStatus = assertString(
+        proofRecord.proofModelStatus,
+        'privateVssShareProof.proofModelStatus',
+    );
+    if (proofModelStatus !== privateVssShareLnpProofModelStatus) {
+        throw new Error(
+            'privateVssShareProof.proofModelStatus must match the accepted private VSS share proof model.',
+        );
+    }
     const proofBytesHex = assertString(
         proofRecord.proofBytesHex,
         'privateVssShareProof.proofBytesHex',

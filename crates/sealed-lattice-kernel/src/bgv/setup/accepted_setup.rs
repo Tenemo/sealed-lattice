@@ -3431,15 +3431,15 @@ pub(super) fn verify_profile_ring_material(
             "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
         )?));
     }
-    if let Some(proof_set) = setup_package.get("sameSecretProofs") {
-        if let Some(response) = verify_profile_ring_records(
+    if let Some(proof_set) = setup_package.get("sameSecretProofs")
+        && let Some(response) = verify_profile_ring_records(
             proof_set,
             "proofRecords",
             "same-secret proof records must use the accepted profile ring degree before terminal setup acceptance",
             "setupPackage.sameSecretProofs.proofRecords.ringDegree",
-        )? {
-            return Ok(Some(response));
-        }
+        )?
+    {
+        return Ok(Some(response));
     }
     if let Some(material_set) = setup_package.get("publicKeyShareMaterial")
         && let Some(response) = verify_profile_ring_record(
@@ -3450,15 +3450,15 @@ pub(super) fn verify_profile_ring_material(
     {
         return Ok(Some(response));
     }
-    if let Some(proof_set) = setup_package.get("publicKeyShareLnpProofs") {
-        if let Some(response) = verify_profile_ring_records(
+    if let Some(proof_set) = setup_package.get("publicKeyShareLnpProofs")
+        && let Some(response) = verify_profile_ring_records(
             proof_set,
             "proofRecords",
             "public-key LNP proof records must use the accepted profile ring degree before terminal setup acceptance",
             "setupPackage.publicKeyShareLnpProofs.proofRecords.ringDegree",
-        )? {
-            return Ok(Some(response));
-        }
+        )?
+    {
+        return Ok(Some(response));
     }
     if let Some(collective_public_key) = setup_package.get("collectivePublicKey")
         && let Some(response) = verify_profile_ring_record(
@@ -7762,17 +7762,19 @@ fn verify_same_secret_lnp_proof_record(
     }
     verify_lnp_tbox_z34_metadata_fields(
         proof_record,
-        &verification.z34_seed_material_hash,
-        &verification.z34_challenge_seed_hash,
-        &verification.z34_challenge_tail_hash,
-        &verification.z34_challenge_row_domain_hash,
-        &verification.z34_challenge_z3_row_set_hash,
-        &verification.z34_challenge_z4_row_set_hash,
-        &verification.tbox_lower_protocol_challenge_hash,
-        &verification.z34_z3_check_window_hash,
-        &verification.z34_z4_check_window_hash,
-        &verification.z34_z3_l2_squared_decimal,
-        &verification.z34_z4_infinity_norm_decimal,
+        LnpTboxZ34MetadataFields {
+            seed_material_hash: &verification.z34_seed_material_hash,
+            challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+        },
         "same-secret proof",
     )?;
     let proof_root = value_string(proof_record, "sameSecretProofRoot")?;
@@ -11222,17 +11224,19 @@ fn verify_public_key_share_lnp_proof_record(
     }
     verify_lnp_tbox_z34_metadata_fields(
         proof_record,
-        &verification.z34_seed_material_hash,
-        &verification.z34_challenge_seed_hash,
-        &verification.z34_challenge_tail_hash,
-        &verification.z34_challenge_row_domain_hash,
-        &verification.z34_challenge_z3_row_set_hash,
-        &verification.z34_challenge_z4_row_set_hash,
-        &verification.tbox_lower_protocol_challenge_hash,
-        &verification.z34_z3_check_window_hash,
-        &verification.z34_z4_check_window_hash,
-        &verification.z34_z3_l2_squared_decimal,
-        &verification.z34_z4_infinity_norm_decimal,
+        LnpTboxZ34MetadataFields {
+            seed_material_hash: &verification.z34_seed_material_hash,
+            challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+        },
         "public-key LNP proof",
     )?;
     let proof_root = value_string(proof_record, "publicKeyShareLnpProofRoot")?;
@@ -15500,51 +15504,66 @@ fn verify_evaluation_key_lnp_proof_transcript_metadata(
     }
     verify_lnp_tbox_z34_metadata_fields(
         proof_record,
-        &verification.z34_seed_material_hash,
-        &verification.z34_challenge_seed_hash,
-        &verification.z34_challenge_tail_hash,
-        &verification.z34_challenge_row_domain_hash,
-        &verification.z34_challenge_z3_row_set_hash,
-        &verification.z34_challenge_z4_row_set_hash,
-        &verification.tbox_lower_protocol_challenge_hash,
-        &verification.z34_z3_check_window_hash,
-        &verification.z34_z4_check_window_hash,
-        &verification.z34_z3_l2_squared_decimal,
-        &verification.z34_z4_infinity_norm_decimal,
+        LnpTboxZ34MetadataFields {
+            seed_material_hash: &verification.z34_seed_material_hash,
+            challenge_seed_hash: &verification.z34_challenge_seed_hash,
+            challenge_tail_hash: &verification.z34_challenge_tail_hash,
+            challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
+            challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
+            challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
+            lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
+            z3_check_window_hash: &verification.z34_z3_check_window_hash,
+            z4_check_window_hash: &verification.z34_z4_check_window_hash,
+            z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
+            z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
+        },
         "evaluation-key LNP proof",
     )?;
 
     Ok(())
 }
 
+struct LnpTboxZ34MetadataFields<'a> {
+    seed_material_hash: &'a str,
+    challenge_seed_hash: &'a str,
+    challenge_tail_hash: &'a str,
+    challenge_row_domain_hash: &'a str,
+    challenge_z3_row_set_hash: &'a str,
+    challenge_z4_row_set_hash: &'a str,
+    lower_protocol_challenge_hash: &'a str,
+    z3_check_window_hash: &'a str,
+    z4_check_window_hash: &'a str,
+    z3_l2_squared_decimal: &'a str,
+    z4_infinity_norm_decimal: &'a str,
+}
+
 fn verify_lnp_tbox_z34_metadata_fields(
     proof_record: &Value,
-    z34_seed_material_hash: &str,
-    z34_challenge_seed_hash: &str,
-    z34_challenge_tail_hash: &str,
-    z34_challenge_row_domain_hash: &str,
-    z34_challenge_z3_row_set_hash: &str,
-    z34_challenge_z4_row_set_hash: &str,
-    tbox_lower_protocol_challenge_hash: &str,
-    z34_z3_check_window_hash: &str,
-    z34_z4_check_window_hash: &str,
-    z34_z3_l2_squared_decimal: &str,
-    z34_z4_infinity_norm_decimal: &str,
+    metadata: LnpTboxZ34MetadataFields<'_>,
     proof_label: &str,
 ) -> CanonicalResult<()> {
     for (field_name, expected_hash) in [
-        ("z34SeedMaterialHash", z34_seed_material_hash),
-        ("z34ChallengeSeedHash", z34_challenge_seed_hash),
-        ("z34ChallengeTailHash", z34_challenge_tail_hash),
-        ("z34ChallengeRowDomainHash", z34_challenge_row_domain_hash),
-        ("z34ChallengeZ3RowSetHash", z34_challenge_z3_row_set_hash),
-        ("z34ChallengeZ4RowSetHash", z34_challenge_z4_row_set_hash),
+        ("z34SeedMaterialHash", metadata.seed_material_hash),
+        ("z34ChallengeSeedHash", metadata.challenge_seed_hash),
+        ("z34ChallengeTailHash", metadata.challenge_tail_hash),
+        (
+            "z34ChallengeRowDomainHash",
+            metadata.challenge_row_domain_hash,
+        ),
+        (
+            "z34ChallengeZ3RowSetHash",
+            metadata.challenge_z3_row_set_hash,
+        ),
+        (
+            "z34ChallengeZ4RowSetHash",
+            metadata.challenge_z4_row_set_hash,
+        ),
         (
             "tboxLowerProtocolChallengeHash",
-            tbox_lower_protocol_challenge_hash,
+            metadata.lower_protocol_challenge_hash,
         ),
-        ("z34Z3CheckWindowHash", z34_z3_check_window_hash),
-        ("z34Z4CheckWindowHash", z34_z4_check_window_hash),
+        ("z34Z3CheckWindowHash", metadata.z3_check_window_hash),
+        ("z34Z4CheckWindowHash", metadata.z4_check_window_hash),
     ] {
         if value_string(proof_record, field_name)? != expected_hash {
             return Err(CanonicalError::new(
@@ -15554,8 +15573,11 @@ fn verify_lnp_tbox_z34_metadata_fields(
         }
     }
     for (field_name, expected_decimal) in [
-        ("z34Z3L2SquaredDecimal", z34_z3_l2_squared_decimal),
-        ("z34Z4InfinityNormDecimal", z34_z4_infinity_norm_decimal),
+        ("z34Z3L2SquaredDecimal", metadata.z3_l2_squared_decimal),
+        (
+            "z34Z4InfinityNormDecimal",
+            metadata.z4_infinity_norm_decimal,
+        ),
     ] {
         if value_string(proof_record, field_name)? != expected_decimal {
             return Err(CanonicalError::new(

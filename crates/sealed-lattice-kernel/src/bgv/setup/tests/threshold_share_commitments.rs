@@ -353,8 +353,11 @@ fn encode_transport_material_from_request(request: &serde_json::Value) -> Vec<u8
         .as_u64()
         .expect("ring degree");
     crate::encoding::append_varuint(&mut output, ring_degree);
-    crate::encoding::append_varuint(&mut output, 2);
-    crate::encoding::append_varuint(&mut output, 3);
+    crate::encoding::append_varuint(
+        &mut output,
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64,
+    );
+    crate::encoding::append_varuint(&mut output, SETUP_COMMITMENT_ROW_COUNT as u64);
 
     let material_records = request["coefficientCommitments"]
         .as_array()

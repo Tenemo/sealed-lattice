@@ -56,9 +56,11 @@ export {
 export {
     acceptedBgvProfileRingDegree,
     computeSetupCommitmentFromOpening,
+    createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
+    materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
     setupCommitmentFullValue,
     setupCommitmentModuleRank,
     setupCommitmentModulusLimbIndices,
@@ -66,6 +68,9 @@ export {
     setupCommitmentRandomnessWidth,
     setupCommitmentRootPayload,
     setupCommitmentRowCount,
+    setupTransportChunkSizeBytes,
+    setupTransportProfileId,
+    vssCoefficientCommitmentMaterialBinaryFormat,
 } from './setup/vss-coefficient-commitments.js';
 export {
     collectForbiddenLocalTrusteeSetupStateFieldPaths,
@@ -202,8 +207,13 @@ export type {
     PublicKeyShareSetInput,
 } from './setup/public-key-share-records.js';
 export type {
+    BinaryChunkedVssCoefficientCommitmentMaterialSet,
+    BinaryChunkedVssCoefficientCommitmentMaterialTransport,
+    SetupPackageVssCoefficientCommitmentMaterialSet,
     SetupCommitmentLimbValue,
     SetupCommitmentValue,
+    SetupTransportChunk,
+    SetupTransportedVssCoefficientCommitmentMaterial,
     VssCoefficientCommitmentBundle,
     VssCoefficientCommitmentBundleInput,
     VssCoefficientCommitmentMaterialRecord,

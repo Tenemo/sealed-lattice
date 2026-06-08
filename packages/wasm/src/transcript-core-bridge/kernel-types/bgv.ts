@@ -464,6 +464,51 @@ export type BgvCollectiveSetupPublicMatrix = {
     readonly matrixRoot: ProtocolHash;
 };
 
+export type BgvAcceptedSetupHandoff = {
+    readonly objectType: 'CollectiveBgvAcceptedSetupHandoff';
+    readonly objectVersion: 1;
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly setupProfileHash: ProtocolHash;
+    readonly qShareHash: ProtocolHash;
+    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupEpoch: string;
+    readonly setupPackageHash: ProtocolHash;
+    readonly directBallotEncryptionHandoff: {
+        readonly status: 'accepted-collective-public-key-root-bound-for-direct-ballot-encryption';
+        readonly collectivePublicKeyRoot: ProtocolHash;
+        readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+    };
+    readonly publicAggregationHandoff: {
+        readonly status: 'accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root';
+        readonly thresholdShareCommitmentRoot: ProtocolHash;
+    };
+    readonly boundedEvaluatorReplayHandoff: {
+        readonly status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule';
+        readonly evaluatorKeyScheduleRoot: ProtocolHash;
+        readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
+        readonly evaluationKeySetHash: ProtocolHash;
+        readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
+    };
+    readonly futureTargetDecryptionHandoff: {
+        readonly status: string;
+        readonly targetDecryptionProfileId: string;
+        readonly claimBoundary: string;
+    };
+    readonly certificateRoots: {
+        readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
+        readonly setupTransportCertificateHash: ProtocolHash;
+        readonly setupProofAccountingCertificateHash: ProtocolHash;
+        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
+        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
+        readonly heSecurityCertificateHash: ProtocolHash;
+    };
+    readonly acceptedSetupHandoffRoot: ProtocolHash;
+};
+
 export type BgvCollectiveSetupVerification = {
     readonly ok: boolean;
     readonly operation: 'verifyCollectiveBgvSetupPackage';
@@ -478,7 +523,7 @@ export type BgvCollectiveSetupVerification = {
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
     readonly acceptedHashes: readonly ProtocolHash[];
-    readonly acceptedSetupHandoff?: Readonly<Record<string, unknown>>;
+    readonly acceptedSetupHandoff?: BgvAcceptedSetupHandoff;
     readonly missingObjects: readonly string[];
     readonly refusedObjects: readonly {
         readonly reasonCode: string;

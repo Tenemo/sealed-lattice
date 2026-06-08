@@ -1527,7 +1527,7 @@ fn collective_setup_verifier_requires_same_secret_proofs_before_public_key_lnp_p
     .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "pending");
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
+    assert_eq!(result["currentPhase"], "proofVerification");
     assert_eq!(
         result["missingObjects"][0],
         serde_json::json!("sameSecretProofs")
@@ -1730,7 +1730,7 @@ fn collective_setup_verifier_refuses_public_key_material_before_proof_verificati
 }
 
 #[test]
-fn collective_setup_verifier_requires_collective_public_key_and_package_root() {
+fn collective_setup_verifier_refuses_stale_certificate_after_collective_public_key_removal() {
     let mut package = collective_public_key_bearing_collective_setup_package();
     package
         .as_object_mut()
@@ -1747,21 +1747,10 @@ fn collective_setup_verifier_requires_collective_public_key_and_package_root() {
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "pending");
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
-    assert!(
-        result["missingObjects"]
-            .as_array()
-            .expect("pending objects")
-            .iter()
-            .any(|object| object == "collectivePublicKey")
-    );
-    assert!(
-        result["missingObjects"]
-            .as_array()
-            .expect("pending objects")
-            .iter()
-            .any(|object| object == "collectivePublicKeyRoot")
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "activeStaticSetupTheoremCertificatePayloadMismatch"
     );
 }
 

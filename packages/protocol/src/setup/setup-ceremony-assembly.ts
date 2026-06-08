@@ -72,7 +72,10 @@ import {
     type ThresholdShareCommitmentSet,
 } from './threshold-share-commitments.js';
 import {
+    createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssCoefficientCommitmentBundle,
+    type SetupPackageVssCoefficientCommitmentMaterialSet,
+    type SetupTransportedVssCoefficientCommitmentMaterial,
     type VssCoefficientCommitmentMaterialRecord,
     type VssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentSet,
@@ -143,6 +146,9 @@ export type SetupCeremonyAssemblyInput = Readonly<{
     readonly privateVssShareProofMaterialEncoding?:
         | 'embedded-binary-proof-bytes-hex'
         | 'binary-chunked-proof-bytes';
+    readonly vssCoefficientCommitmentMaterialEncoding?:
+        | 'full-public-setup-commitment-values'
+        | 'binary-chunked-full-public-setup-commitment-values';
     readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
     readonly privateVssShareProofRandomnessFactory?: PrivateVssShareProofRandomnessFactory;
 }>;
@@ -162,7 +168,8 @@ export type SetupCeremonyAssembly = Readonly<{
     readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly setupContext: CollectiveBgvSetupContext;
     readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
-    readonly vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialSet;
+    readonly vssCoefficientCommitmentMaterial: SetupPackageVssCoefficientCommitmentMaterialSet;
+    readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterial;
     readonly privateVssEnvelopeCommitments: PrivateVssMailboxDeliverySet;
     readonly vssShareAcceptances: VssShareAcceptanceSet;
     readonly thresholdShareCommitments: ThresholdShareCommitmentSet;
@@ -211,6 +218,40 @@ const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
+};
+
+const assertJsonRecord = (value: unknown, fieldName: string): JsonRecord => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new TypeError(`${fieldName} must be an object.`);
+    }
+
+    return value as JsonRecord;
+};
+
+const setupCertificatePublicVssMaterialByteLength = (
+    setupCertificateInput: SetupPackageCertificateInput,
+): number => {
+    const setupProfile = assertJsonRecord(
+        setupCertificateInput.setupProfile,
+        'setupCertificateInput.setupProfile',
+    );
+    const sizeProfile = assertJsonRecord(
+        setupProfile.publicVssCommitmentMaterialSizeProfile,
+        'setupCertificateInput.setupProfile.publicVssCommitmentMaterialSizeProfile',
+    );
+    const fullMaterialCoefficientBytes =
+        sizeProfile.fullMaterialCoefficientBytes;
+    if (
+        typeof fullMaterialCoefficientBytes !== 'number' ||
+        !Number.isSafeInteger(fullMaterialCoefficientBytes) ||
+        fullMaterialCoefficientBytes <= 0
+    ) {
+        throw new TypeError(
+            'setupCertificateInput.setupProfile.publicVssCommitmentMaterialSizeProfile.fullMaterialCoefficientBytes must be a positive safe integer.',
+        );
+    }
+
+    return fullMaterialCoefficientBytes;
 };
 
 const stringField = (
@@ -844,6 +885,46 @@ export const createSetupCeremonyAssembly = async (
             sourceTrusteeOpeningStates: input.sourceTrusteeOpeningStates,
         },
     );
+    const binaryVssMaterialTransport =
+        input.vssCoefficientCommitmentMaterialEncoding ===
+        'binary-chunked-full-public-setup-commitment-values'
+            ? createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+                  vssCoefficientCommitmentBundle.materialSet,
+              )
+            : undefined;
+    const setupPackageVssCoefficientCommitmentMaterial =
+        binaryVssMaterialTransport?.materialSet ??
+        vssCoefficientCommitmentBundle.materialSet;
+    if (binaryVssMaterialTransport !== undefined) {
+        const declaredByteLength = setupCertificatePublicVssMaterialByteLength(
+            input.setupCertificateInput,
+        );
+        if (
+            declaredByteLength !==
+            binaryVssMaterialTransport
+                .transportedVssCoefficientCommitmentMaterial.totalByteLength
+        ) {
+            throw new Error(
+                'setup certificate public VSS material byte length must match the binary transported material.',
+            );
+        }
+    }
+    const setupCertificateInput =
+        binaryVssMaterialTransport === undefined
+            ? input.setupCertificateInput
+            : {
+                  ...input.setupCertificateInput,
+                  transport: {
+                      fullObjectHash:
+                          binaryVssMaterialTransport
+                              .transportedVssCoefficientCommitmentMaterial
+                              .fullObjectHash,
+                      chunkHashes:
+                          binaryVssMaterialTransport
+                              .transportedVssCoefficientCommitmentMaterial
+                              .chunkHashes,
+                  },
+              };
     const sameSecretConsistency = createSameSecretConsistencyStatementSet({
         setupContext: input.setupContext,
         qSharePrimes: input.qSharePrimes,
@@ -857,7 +938,7 @@ export const createSetupCeremonyAssembly = async (
         participantCount: trustees.length,
         sameSecretConsistency,
         vssCoefficientCommitmentMaterial:
-            vssCoefficientCommitmentBundle.materialSet,
+            setupPackageVssCoefficientCommitmentMaterial,
         setupProofBinding: input.setupProofBinding,
         sameSecretTboxParameterProfileHash:
             input.sameSecretTboxParameterProfileHash,
@@ -1028,7 +1109,13 @@ export const createSetupCeremonyAssembly = async (
         setupContext: input.setupContext,
         vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
         vssCoefficientCommitmentMaterial:
-            vssCoefficientCommitmentBundle.materialSet,
+            setupPackageVssCoefficientCommitmentMaterial,
+        ...(binaryVssMaterialTransport === undefined
+            ? {}
+            : {
+                  transportedVssCoefficientCommitmentMaterial:
+                      binaryVssMaterialTransport.transportedVssCoefficientCommitmentMaterial,
+              }),
     });
     const localTrusteeSetupStates = await createLocalTrusteeSetupStates({
         setupContext: input.setupContext,
@@ -1055,7 +1142,13 @@ export const createSetupCeremonyAssembly = async (
         commonRandomness: input.commonRandomness,
         vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
         vssCoefficientCommitmentMaterial:
-            vssCoefficientCommitmentBundle.materialSet,
+            setupPackageVssCoefficientCommitmentMaterial,
+        ...(binaryVssMaterialTransport === undefined
+            ? {}
+            : {
+                  transportedVssCoefficientCommitmentMaterial:
+                      binaryVssMaterialTransport.transportedVssCoefficientCommitmentMaterial,
+              }),
         privateVssEnvelopeCommitments,
         vssShareAcceptances,
         thresholdShareCommitments,
@@ -1069,7 +1162,7 @@ export const createSetupCeremonyAssembly = async (
         relinearizationKeyShareRounds,
         galoisKeyShareBatches,
         evaluationKeys,
-        setupCertificateInput: input.setupCertificateInput,
+        setupCertificateInput,
     });
     const collectivePublicKey = setupPackage.collectivePublicKey as
         | CollectivePublicKey
@@ -1087,7 +1180,13 @@ export const createSetupCeremonyAssembly = async (
         setupContext: input.setupContext,
         vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
         vssCoefficientCommitmentMaterial:
-            vssCoefficientCommitmentBundle.materialSet,
+            setupPackageVssCoefficientCommitmentMaterial,
+        ...(binaryVssMaterialTransport === undefined
+            ? {}
+            : {
+                  transportedVssCoefficientCommitmentMaterial:
+                      binaryVssMaterialTransport.transportedVssCoefficientCommitmentMaterial,
+              }),
         privateVssEnvelopeCommitments,
         vssShareAcceptances,
         thresholdShareCommitments,

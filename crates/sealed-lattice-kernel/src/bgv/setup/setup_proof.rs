@@ -2494,12 +2494,12 @@ fn setup_proof_lnp_tbox_z34_row_column_count(
     Ok(row_column_count)
 }
 
-fn t_b_polynomial_slice<'a>(
-    coefficients: &'a [BigUint],
+fn t_b_polynomial_slice(
+    coefficients: &[BigUint],
     proof_ring_degree: usize,
     polynomial_start: usize,
     polynomial_count: usize,
-) -> CanonicalResult<&'a [BigUint]> {
+) -> CanonicalResult<&[BigUint]> {
     let coefficient_start = polynomial_start
         .checked_mul(proof_ring_degree)
         .ok_or_else(|| setup_proof_error("setup proof LNP tB slice start overflowed"))?;
