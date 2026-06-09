@@ -29,9 +29,13 @@ import {
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssCoefficientCommitmentBundle,
     deriveThresholdShareCommitments,
+    galoisProofModelStatus,
+    galoisProofVerificationStatus,
     type CollectiveBgvSetupContext,
     type EvaluatorKeySchedule,
+    type EvaluationKeyShareProofGenerator,
     type GaloisKeyShareBatchContribution,
+    type GaloisKeyShareProofGeneration,
     type GaloisKeyShareProofMaterial,
     type PrivateVssMailboxDeliveryKernel,
     type PrivateVssMailboxDeliverySet,
@@ -40,6 +44,7 @@ import {
     type PublicKeyShareContributionInput,
     type PublicKeyShareLnpProofMaterial,
     type PublicKeyShareMaterialContributionInput,
+    type RelinearizationKeyShareProofGeneration,
     type RelinearizationKeyShareProofMaterial,
     type RelinearizationRoundOneContribution,
     type RelinearizationRoundTwoContribution,
@@ -53,6 +58,8 @@ import {
     type SetupPhaseRecord,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
+    relinearizationProofModelStatus,
+    relinearizationProofVerificationStatus,
     publicKeyShareCoefficientVectorHashDomain,
     publicKeyShareLnpProofModelStatus,
     publicKeyShareLnpProofVerificationStatus,
@@ -64,6 +71,7 @@ import {
     privateVssShareLnpProofModelStatus,
     privateVssShareLnpProofVerificationStatus,
 } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
+import type { SetupProofTboxZ34Metadata } from '#packages/protocol/src/setup/setup-proof-material-transport';
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
@@ -377,6 +385,24 @@ const evaluationKeyComponentVectorRoot = (
         componentVectors,
     });
 
+const setupProofTboxZ34Metadata = (
+    label: string,
+): SetupProofTboxZ34Metadata => ({
+    z34SeedMaterialHash: fixtureHash(`${label}-z34-seed-material`),
+    z34ChallengeSeedHash: fixtureHash(`${label}-z34-challenge-seed`),
+    z34ChallengeTailHash: fixtureHash(`${label}-z34-challenge-tail`),
+    z34ChallengeRowDomainHash: fixtureHash(`${label}-z34-row-domain`),
+    z34ChallengeZ3RowSetHash: fixtureHash(`${label}-z34-z3-row-set`),
+    z34ChallengeZ4RowSetHash: fixtureHash(`${label}-z34-z4-row-set`),
+    tboxLowerProtocolChallengeHash: fixtureHash(
+        `${label}-tbox-lower-protocol-challenge`,
+    ),
+    z34Z3CheckWindowHash: fixtureHash(`${label}-z34-z3-check-window`),
+    z34Z4CheckWindowHash: fixtureHash(`${label}-z34-z4-check-window`),
+    z34Z3L2SquaredDecimal: '64',
+    z34Z4InfinityNormDecimal: '1',
+});
+
 const sameSecretProofMaterial = (
     trusteeRosterPosition: number,
 ): SameSecretProofMaterial => {
@@ -399,7 +425,10 @@ const sameSecretProofMaterial = (
         tboxCommitmentPrefixHash: fixtureHash(
             `same-secret-tbox-prefix-${String(trusteeRosterPosition)}`,
         ),
-        challenge: 17 + trusteeRosterPosition,
+        ...setupProofTboxZ34Metadata(
+            `same-secret-${String(trusteeRosterPosition)}`,
+        ),
+        challenge: String(17 + trusteeRosterPosition),
         proofSizeBytes: proofMaterialBytesHex.length / 2,
         proofBytesHash: fixtureHash(
             `same-secret-proof-bytes-${String(trusteeRosterPosition)}`,
@@ -430,7 +459,10 @@ const publicKeyShareLnpProofMaterial = (
         tboxCommitmentPrefixHash: fixtureHash(
             `public-key-lnp-tbox-prefix-${String(trusteeRosterPosition)}`,
         ),
-        challenge: 29 + trusteeRosterPosition,
+        ...setupProofTboxZ34Metadata(
+            `public-key-lnp-${String(trusteeRosterPosition)}`,
+        ),
+        challenge: String(29 + trusteeRosterPosition),
         proofSizeBytes: proofMaterialBytesHex.length / 2,
         proofBytesHash: fixtureHash(
             `public-key-lnp-proof-bytes-${String(trusteeRosterPosition)}`,
@@ -1016,6 +1048,284 @@ const galoisProofMaterial = (
         proofBytesHex: proofMaterialBytesHex,
     };
 };
+
+const relinearizationProofGenerationFromMaterial = (
+    proofMaterial: RelinearizationKeyShareProofMaterial,
+    label: string,
+    round: 'round-one' | 'round-two',
+): RelinearizationKeyShareProofGeneration => {
+    if (
+        proofMaterial.keySwitchMaterialEncoding !==
+        'embedded-full-key-switch-component-vectors'
+    ) {
+        throw new Error(
+            'relinearization proof-generation fixture requires embedded component vectors.',
+        );
+    }
+
+    return {
+        proofProfileId: proofMaterial.proofProfileId,
+        setupProofBinding: proofMaterial.setupProofBinding,
+        keySwitchMaterialEncoding: proofMaterial.keySwitchMaterialEncoding,
+        keySwitchDomain: proofMaterial.keySwitchDomain,
+        keySwitchSeedHex: proofMaterial.keySwitchSeedHex,
+        ringDegree: proofMaterial.ringDegree,
+        keySwitchComponentVectorRoot:
+            proofMaterial.keySwitchComponentVectorRoot,
+        keySwitchComponentVectors: proofMaterial.keySwitchComponentVectors,
+        constantCommitments: [
+            {
+                objectType: 'EvaluationKeyConstantCommitmentFixture',
+                label,
+            },
+        ],
+        secretCoefficients: Array.from(
+            { length: proofMaterial.ringDegree },
+            (_unused, coefficientIndex) => (coefficientIndex % 3) - 1,
+        ),
+        openingRandomnessByLimb: [
+            [
+                Array.from(
+                    { length: proofMaterial.ringDegree },
+                    (_unused, coefficientIndex) =>
+                        coefficientIndex % 2 === 0 ? 1 : -1,
+                ),
+            ],
+        ],
+        errorCoefficientsByDigit: [
+            Array.from(
+                { length: proofMaterial.ringDegree },
+                (_unused, coefficientIndex) =>
+                    coefficientIndex % 2 === 0 ? 0 : 1,
+            ),
+        ],
+        relinearizationKeyShareTboxParameterProfileHash:
+            proofMaterial.relinearizationKeyShareTboxParameterProfileHash,
+        relinearizationSourceCoefficientsByDigit: [
+            Array.from(
+                { length: proofMaterial.ringDegree },
+                (_unused, coefficientIndex) => coefficientIndex % 5,
+            ),
+        ],
+        ...(round === 'round-one'
+            ? {}
+            : {
+                  roundOneAggregateSourceCoefficientsByDigit: [
+                      Array.from(
+                          { length: proofMaterial.ringDegree },
+                          (_unused, coefficientIndex) =>
+                              coefficientIndex % 2 === 0 ? 1 : 0,
+                      ),
+                  ],
+              }),
+        proofRandomnessSource: 'development-deterministic-fixture',
+        proofRandomnessSeedHex: fixtureHash(
+            `relinearization-proof-randomness-${label}`,
+        ),
+    };
+};
+
+const galoisProofGenerationFromMaterial = (
+    proofMaterial: GaloisKeyShareProofMaterial,
+    label: string,
+): GaloisKeyShareProofGeneration => {
+    if (
+        proofMaterial.keySwitchMaterialEncoding !==
+        'embedded-full-key-switch-component-vectors'
+    ) {
+        throw new Error(
+            'Galois proof-generation fixture requires embedded component vectors.',
+        );
+    }
+
+    return {
+        proofProfileId: proofMaterial.proofProfileId,
+        setupProofBinding: proofMaterial.setupProofBinding,
+        keySwitchMaterialEncoding: proofMaterial.keySwitchMaterialEncoding,
+        keySwitchDomain: proofMaterial.keySwitchDomain,
+        keySwitchSeedHex: proofMaterial.keySwitchSeedHex,
+        ringDegree: proofMaterial.ringDegree,
+        keySwitchComponentVectorRoot:
+            proofMaterial.keySwitchComponentVectorRoot,
+        keySwitchComponentVectors: proofMaterial.keySwitchComponentVectors,
+        constantCommitments: [
+            {
+                objectType: 'EvaluationKeyConstantCommitmentFixture',
+                label,
+            },
+        ],
+        secretCoefficients: Array.from(
+            { length: proofMaterial.ringDegree },
+            (_unused, coefficientIndex) => (coefficientIndex % 3) - 1,
+        ),
+        openingRandomnessByLimb: [
+            [
+                Array.from(
+                    { length: proofMaterial.ringDegree },
+                    (_unused, coefficientIndex) =>
+                        coefficientIndex % 2 === 0 ? -1 : 1,
+                ),
+            ],
+        ],
+        errorCoefficientsByDigit: [
+            Array.from(
+                { length: proofMaterial.ringDegree },
+                (_unused, coefficientIndex) =>
+                    coefficientIndex % 2 === 0 ? 1 : 0,
+            ),
+        ],
+        galoisKeyShareTboxParameterProfileHash:
+            proofMaterial.galoisKeyShareTboxParameterProfileHash,
+        proofRandomnessSource: 'development-deterministic-fixture',
+        proofRandomnessSeedHex: fixtureHash(`galois-proof-randomness-${label}`),
+    };
+};
+
+const generatedEvaluationKeyContributions = (
+    input: SetupCeremonyAssemblyInput,
+): Pick<
+    SetupCeremonyAssemblyInput,
+    | 'relinearizationRoundOneContributions'
+    | 'relinearizationRoundTwoContributions'
+    | 'galoisKeyShareBatchContributions'
+> => ({
+    relinearizationRoundOneContributions:
+        input.relinearizationRoundOneContributions.map((contribution) => {
+            if (contribution.proofMaterial === undefined) {
+                throw new Error(
+                    'round-one fixture contribution must include proof material.',
+                );
+            }
+
+            return {
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                roundOneShareRoot: contribution.roundOneShareRoot,
+                proofGeneration: relinearizationProofGenerationFromMaterial(
+                    contribution.proofMaterial,
+                    `round-one-${String(contribution.trusteeRosterPosition)}-${String(contribution.level)}`,
+                    'round-one',
+                ),
+            };
+        }),
+    relinearizationRoundTwoContributions:
+        input.relinearizationRoundTwoContributions.map((contribution) => {
+            if (contribution.proofMaterial === undefined) {
+                throw new Error(
+                    'round-two fixture contribution must include proof material.',
+                );
+            }
+
+            return {
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                roundTwoShareRoot: contribution.roundTwoShareRoot,
+                proofGeneration: relinearizationProofGenerationFromMaterial(
+                    contribution.proofMaterial,
+                    `round-two-${String(contribution.trusteeRosterPosition)}-${String(contribution.level)}`,
+                    'round-two',
+                ),
+            };
+        }),
+    galoisKeyShareBatchContributions:
+        input.galoisKeyShareBatchContributions.map((batchContribution) => ({
+            trusteeRosterPosition: batchContribution.trusteeRosterPosition,
+            galoisKeyShareProofs: batchContribution.galoisKeyShareProofs.map(
+                (proofContribution) => {
+                    if (proofContribution.proofMaterial === undefined) {
+                        throw new Error(
+                            'Galois fixture contribution must include proof material.',
+                        );
+                    }
+
+                    return {
+                        rotation: proofContribution.rotation,
+                        level: proofContribution.level,
+                        galoisKeyShareRoot:
+                            proofContribution.galoisKeyShareRoot,
+                        proofGeneration: galoisProofGenerationFromMaterial(
+                            proofContribution.proofMaterial,
+                            `${String(batchContribution.trusteeRosterPosition)}-${String(proofContribution.rotation)}-${String(proofContribution.level)}`,
+                        ),
+                    };
+                },
+            ),
+        })),
+});
+
+const generatedEvaluationKeyProofGenerator =
+    (): EvaluationKeyShareProofGenerator => {
+        let proofCallCount = 0;
+
+        return (input) => {
+            const proofCallIndex = proofCallCount;
+            proofCallCount += 1;
+            const generatedProofBytesHex = proofCallIndex
+                .toString(16)
+                .padStart(8, '0');
+            const proofBytesHash =
+                input.proofFamily === 'relinearization-key-share'
+                    ? hash512Hex(
+                          'sealed-lattice/setup/relinearization-key-share/lnp-proof-bytes-v1',
+                          [proofBytes(generatedProofBytesHex)],
+                      )
+                    : hash512Hex(
+                          'sealed-lattice/setup/galois-key-share/lnp-proof-bytes-v1',
+                          [proofBytes(generatedProofBytesHex)],
+                      );
+            const proofRecord = jsonRecord(
+                input.proofRecord,
+                'evaluation-key proof generator record',
+            );
+
+            return {
+                ok: true,
+                operation: 'generateEvaluationKeyShareLnpProof',
+                setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                proofFamily: input.proofFamily,
+                proofVerificationStatus:
+                    input.proofFamily === 'relinearization-key-share'
+                        ? relinearizationProofVerificationStatus
+                        : galoisProofVerificationStatus,
+                proofModelStatus:
+                    input.proofFamily === 'relinearization-key-share'
+                        ? relinearizationProofModelStatus
+                        : galoisProofModelStatus,
+                ...(input.proofFamily === 'relinearization-key-share'
+                    ? {
+                          relinearizationKeyShareTboxParameterProfileHash:
+                              proofRecord.relinearizationKeyShareTboxParameterProfileHash as string,
+                      }
+                    : {
+                          galoisKeyShareTboxParameterProfileHash:
+                              proofRecord.galoisKeyShareTboxParameterProfileHash as string,
+                      }),
+                statementHash: fixtureHash(
+                    `generated-evaluation-key-statement-${String(proofCallIndex)}`,
+                ),
+                relationCommitmentHash: fixtureHash(
+                    `generated-evaluation-key-relation-${String(proofCallIndex)}`,
+                ),
+                tboxCommitmentPrefixHash: fixtureHash(
+                    `generated-evaluation-key-tbox-${String(proofCallIndex)}`,
+                ),
+                ...setupProofTboxZ34Metadata(
+                    `generated-evaluation-key-${String(proofCallIndex)}`,
+                ),
+                challenge: String(41 + proofCallIndex),
+                proofSizeBytes: generatedProofBytesHex.length / 2,
+                proofBytesHash,
+                proofBytesHex: generatedProofBytesHex,
+                proofRandomness: {
+                    source:
+                        input.proofRandomnessSource ??
+                        'development-deterministic-fixture',
+                    seedBytes: 64,
+                    retention: 'test-only fixture',
+                },
+            };
+        };
+    };
 
 const evaluationKeyFixture = (
     participantCount: number,
@@ -2147,6 +2457,120 @@ describe('setup ceremony assembly', () => {
         ).toBe(true);
     });
 
+    it('generates evaluation-key proofs then transports material during setup assembly', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+
+        const assembly = await createSetupCeremonyAssembly({
+            ...input,
+            ...generatedEvaluationKeyContributions(input),
+            evaluationKeyShareProofGenerator:
+                generatedEvaluationKeyProofGenerator(),
+        });
+        const transportedProofMaterial =
+            assembly.transportedEvaluationKeyShareProofMaterial;
+        const transportedComponentMaterial =
+            assembly.transportedEvaluationKeyShareComponentMaterial;
+
+        if (
+            transportedProofMaterial === undefined ||
+            transportedComponentMaterial === undefined
+        ) {
+            throw new Error(
+                'generated evaluation-key assembly must return transported sidecars.',
+            );
+        }
+
+        const expectedProofMaterialCount =
+            input.relinearizationRoundOneContributions.length +
+            input.relinearizationRoundTwoContributions.length +
+            input.galoisKeyShareBatchContributions.reduce(
+                (proofCount, batchContribution) =>
+                    proofCount + batchContribution.galoisKeyShareProofs.length,
+                0,
+            );
+        expect(transportedProofMaterial.proofMaterials).toHaveLength(
+            expectedProofMaterialCount,
+        );
+        expect(transportedComponentMaterial.componentMaterials).toHaveLength(
+            expectedProofMaterialCount,
+        );
+        expect(
+            assembly.relinearizationKeyShareRounds.roundOneRecords.every(
+                (record) =>
+                    !('proofBytesHex' in record) &&
+                    !('keySwitchComponentVectors' in record) &&
+                    record.proofBytesEncoding ===
+                        'binary-chunked-proof-bytes' &&
+                    record.keySwitchMaterialEncoding ===
+                        'binary-chunked-key-switch-component-vectors',
+            ),
+        ).toBe(true);
+        expect(
+            assembly.relinearizationKeyShareRounds.roundTwoRecords.every(
+                (record) =>
+                    !('proofBytesHex' in record) &&
+                    !('keySwitchComponentVectors' in record) &&
+                    record.proofBytesEncoding ===
+                        'binary-chunked-proof-bytes' &&
+                    record.keySwitchMaterialEncoding ===
+                        'binary-chunked-key-switch-component-vectors',
+            ),
+        ).toBe(true);
+        expect(
+            assembly.galoisKeyShareBatches.every((batch) =>
+                batch.galoisKeyShareProofs.every(
+                    (proofRecord) =>
+                        !('proofBytesHex' in proofRecord) &&
+                        !('keySwitchComponentVectors' in proofRecord) &&
+                        proofRecord.proofBytesEncoding ===
+                            'binary-chunked-proof-bytes' &&
+                        proofRecord.keySwitchMaterialEncoding ===
+                            'binary-chunked-key-switch-component-vectors',
+                ),
+            ),
+        ).toBe(true);
+        expect(
+            setupTransportCertificateTransportedObjects(assembly.setupPackage),
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    objectName: 'evaluationKeyShareProofMaterial',
+                    objectRole: 'evaluation-key-share-proof-material',
+                }),
+                expect.objectContaining({
+                    objectName: 'evaluationKeyShareComponentMaterial',
+                    objectRole: 'evaluation-key-share-component-material',
+                }),
+            ]),
+        );
+
+        const verificationInput = createSetupPackageVerificationInput(assembly);
+
+        expect(
+            verificationInput.transportedEvaluationKeyShareProofMaterial,
+        ).toBe(transportedProofMaterial);
+        expect(
+            verificationInput.transportedEvaluationKeyShareComponentMaterial,
+        ).toBe(transportedComponentMaterial);
+        expect(
+            JSON.stringify({
+                relinearizationKeyShareRounds:
+                    assembly.relinearizationKeyShareRounds,
+                galoisKeyShareBatches: assembly.galoisKeyShareBatches,
+            }),
+        ).not.toMatch(
+            /proofGeneration|secretCoefficients|proofBytesHex|keySwitchComponentVectors/u,
+        );
+        expect(JSON.stringify(verificationInput)).not.toMatch(
+            /proofGeneration|secretCoefficients/u,
+        );
+    });
+
     it('assembles root-referenced setup proof records with transported proof material companions', async () => {
         const participantCount = 3;
         const kernelFixture = createKernelFixture();
@@ -2662,6 +3086,52 @@ describe('setup ceremony assembly', () => {
         );
     });
 
+    it('accepts generated profile-ring evaluation-key material before provider-backed loading checks', async () => {
+        const participantCount = 10;
+        const kernelFixture = createKernelFixture();
+        const input = createAcceptedQShareAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+        const sameSecretTransport =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundSameSecretProofMaterial(position),
+                ),
+            );
+        const publicKeyShareTransport =
+            createBinaryChunkedPublicKeyShareProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundPublicKeyShareProofMaterial(position),
+                ),
+            );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                ...generatedEvaluationKeyContributions(input),
+                ringDegree: acceptedBgvProfileRingDegree,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+                sameSecretProofMaterials: sameSecretTransport.proofMaterials,
+                transportedSameSecretProofMaterial:
+                    sameSecretTransport.transportedSameSecretProofMaterial,
+                publicKeyShareLnpProofMaterials:
+                    publicKeyShareTransport.proofMaterials,
+                transportedPublicKeyShareProofMaterial:
+                    publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+                evaluationKeyShareProofGenerator:
+                    generatedEvaluationKeyProofGenerator(),
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires provider-backed source trustee opening state loading.',
+        );
+    });
+
     it('refuses profile-ring assembly outside the first setup profile roster and threshold', async () => {
         const kernelFixture = createKernelFixture();
         const wrongRosterInput = createAssemblyInput(
@@ -2852,19 +3322,14 @@ describe('setup ceremony assembly', () => {
                     input.qSharePrimes,
                 ),
         };
-        const commonRandomnessPublicDerivations = jsonRecord(
-            input.commonRandomness.publicDerivations,
-            'commonRandomness.publicDerivations',
-        );
+        const commonRandomnessPublicDerivations =
+            input.commonRandomness.publicDerivations;
         const mismatchedCommonRandomness = {
             ...input.commonRandomness,
             publicDerivations: {
                 ...commonRandomnessPublicDerivations,
                 crpRoots: {
-                    ...jsonRecord(
-                        commonRandomnessPublicDerivations.crpRoots,
-                        'commonRandomness.publicDerivations.crpRoots',
-                    ),
+                    ...commonRandomnessPublicDerivations.crpRoots,
                     publicKeyCrpRoot: fixtureHash('mutated-public-key-crp'),
                 },
             },
@@ -3037,6 +3502,12 @@ describe('setup ceremony assembly', () => {
         expect(assembly.sameSecretProofs.proofRecords).toHaveLength(
             participantCount,
         );
+        expect(assembly.sameSecretProofs.proofRecords[0]).toMatchObject({
+            challenge: '17',
+            z34SeedMaterialHash: fixtureHash('same-secret-0-z34-seed-material'),
+            z34Z3L2SquaredDecimal: '64',
+            z34Z4InfinityNormDecimal: '1',
+        });
         expect(assembly.publicKeyShares.shareRecords).toHaveLength(
             participantCount,
         );
@@ -3062,6 +3533,14 @@ describe('setup ceremony assembly', () => {
         expect(assembly.publicKeyShareLnpProofs.proofRecords).toHaveLength(
             participantCount,
         );
+        expect(assembly.publicKeyShareLnpProofs.proofRecords[0]).toMatchObject({
+            challenge: '29',
+            z34SeedMaterialHash: fixtureHash(
+                'public-key-lnp-0-z34-seed-material',
+            ),
+            z34Z3L2SquaredDecimal: '64',
+            z34Z4InfinityNormDecimal: '1',
+        });
         expect(assembly.evaluatorKeySchedule.requiredGaloisKeySchedule).toEqual(
             requiredGaloisKeySchedule,
         );

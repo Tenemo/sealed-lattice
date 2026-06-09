@@ -1,10 +1,11 @@
 use num_bigint::{BigInt, BigUint, Sign};
+use num_traits::ToPrimitive;
 use serde_json::{Value, json};
 
 use crate::{
     bgv::{
         coefficient_codec::coefficient_vector_hash512,
-        modular_arithmetic::{add_mod, mul_mod, sub_mod},
+        modular_arithmetic::{add_mod, inverse_mod, mul_mod, sub_mod},
         profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         validation::reject_unexpected_bgv_request_fields,
     },
@@ -21,7 +22,7 @@ use super::{
         setup_signed_coefficient_fits_centered_commitment_modulus_product,
         verify_setup_signed_lifted_commitment_opening,
     },
-    sampling::dense_public_residues,
+    sampling::{dense_public_residues, negacyclic_product_mod},
     setup_proof::SETUP_PROOF_PROFILE_ID,
 };
 
@@ -35,6 +36,7 @@ const PUBLIC_KEY_SHARE_LNP_COMMITMENT_HASH_DOMAIN: &str =
 const PUBLIC_KEY_SHARE_LNP_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/public-key-share/lnp-proof-bytes-v1";
 const PUBLIC_KEY_SHARE_RELATION_COMMITMENT_BYTE_COUNT: usize = 32;
+const PUBLIC_KEY_SHARE_LIFTED_PRODUCT_CRT_LIMB_COUNT: usize = 4;
 pub(super) const PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS: usize = 80;
 pub(super) const PUBLIC_KEY_SHARE_ERROR_MASK_BITS: usize = 80;
 pub(super) const PUBLIC_KEY_SHARE_CARRY_MASK_BITS: usize = 64;
@@ -900,38 +902,16 @@ fn public_a_coefficients_for_relation(
 }
 
 fn negacyclic_product_lifted_i128(left: &[u64], right: &[i128]) -> CanonicalResult<Vec<i128>> {
-    if left.len() != right.len() {
-        return Err(invalid_public_key_share_proof(
-            "public-key lifted relation product inputs must have the same width",
-        ));
-    }
-    let ring_degree = left.len();
-    let mut output = vec![0_i128; ring_degree];
-    for (left_index, left_value) in left.iter().enumerate() {
-        for (right_index, right_value) in right.iter().enumerate() {
-            let product = i128::from(*left_value)
-                .checked_mul(*right_value)
-                .ok_or_else(|| {
-                    invalid_public_key_share_proof("public-key lifted relation product overflowed")
-                })?;
-            let raw_index = left_index + right_index;
-            let output_index = if raw_index < ring_degree {
-                raw_index
-            } else {
-                raw_index - ring_degree
-            };
-            output[output_index] = if raw_index < ring_degree {
-                output[output_index].checked_add(product)
-            } else {
-                output[output_index].checked_sub(product)
-            }
-            .ok_or_else(|| {
-                invalid_public_key_share_proof("public-key lifted relation accumulation overflowed")
-            })?;
-        }
-    }
-
-    Ok(output)
+    negacyclic_product_lifted_big_int(left, right)?
+        .into_iter()
+        .map(|coefficient| {
+            coefficient.to_i128().ok_or_else(|| {
+                invalid_public_key_share_proof(
+                    "public-key lifted relation coefficient does not fit i128",
+                )
+            })
+        })
+        .collect()
 }
 
 fn negacyclic_product_lifted_big_int(left: &[u64], right: &[i128]) -> CanonicalResult<Vec<BigInt>> {
@@ -941,27 +921,83 @@ fn negacyclic_product_lifted_big_int(left: &[u64], right: &[i128]) -> CanonicalR
         ));
     }
     let ring_degree = left.len();
-    let mut output = vec![BigInt::from(0_i8); ring_degree];
-    for (left_index, left_value) in left.iter().enumerate() {
-        for (right_index, right_value) in right.iter().enumerate() {
-            let product = BigInt::from(*left_value) * BigInt::from(*right_value);
-            let raw_index = left_index.checked_add(right_index).ok_or_else(|| {
-                invalid_public_key_share_proof("public-key lifted product index overflowed")
-            })?;
-            let output_index = if raw_index < ring_degree {
-                raw_index
-            } else {
-                raw_index - ring_degree
-            };
-            if raw_index < ring_degree {
-                output[output_index] += product;
-            } else {
-                output[output_index] -= product;
-            }
-        }
+    if DATA_PRIMES.len() < PUBLIC_KEY_SHARE_LIFTED_PRODUCT_CRT_LIMB_COUNT {
+        return Err(invalid_public_key_share_proof(
+            "public-key lifted relation CRT basis is too small",
+        ));
+    }
+    let crt_moduli = &DATA_PRIMES[..PUBLIC_KEY_SHARE_LIFTED_PRODUCT_CRT_LIMB_COUNT];
+    let product_residues_by_modulus = crt_moduli
+        .iter()
+        .map(|modulus| {
+            let left_residues = left
+                .iter()
+                .map(|coefficient| coefficient % modulus)
+                .collect::<Vec<_>>();
+            let right_residues = right
+                .iter()
+                .map(|coefficient| signed_i128_residue_u64(*coefficient, *modulus))
+                .collect::<CanonicalResult<Vec<_>>>()?;
+            negacyclic_product_mod(&left_residues, &right_residues, *modulus)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut output = Vec::with_capacity(ring_degree);
+    for coefficient_index in 0..ring_degree {
+        let residues = product_residues_by_modulus
+            .iter()
+            .map(|residues| residues[coefficient_index])
+            .collect::<Vec<_>>();
+        output.push(reconstruct_centered_big_int_from_crt_residues(
+            &residues, crt_moduli,
+        )?);
     }
 
     Ok(output)
+}
+
+fn reconstruct_centered_big_int_from_crt_residues(
+    residues: &[u64],
+    moduli: &[u64],
+) -> CanonicalResult<BigInt> {
+    if residues.len() != moduli.len() || residues.is_empty() {
+        return Err(invalid_public_key_share_proof(
+            "public-key lifted relation CRT inputs must have matching non-empty length",
+        ));
+    }
+    let mut value = BigInt::from(residues[0]);
+    let mut modulus_product = BigInt::from(moduli[0]);
+    for (residue, modulus) in residues.iter().copied().zip(moduli.iter().copied()).skip(1) {
+        let current_residue = nonnegative_big_int_mod_u64(&value, modulus)?;
+        let delta = if residue >= current_residue {
+            residue - current_residue
+        } else {
+            residue
+                .checked_add(modulus)
+                .and_then(|sum| sum.checked_sub(current_residue))
+                .ok_or_else(|| {
+                    invalid_public_key_share_proof("public-key lifted CRT residue delta overflowed")
+                })?
+        };
+        let product_residue = nonnegative_big_int_mod_u64(&modulus_product, modulus)?;
+        let product_inverse = inverse_mod(product_residue, modulus)?;
+        let correction = mul_mod(delta, product_inverse, modulus)?;
+        value += &modulus_product * BigInt::from(correction);
+        modulus_product *= BigInt::from(modulus);
+    }
+
+    if value > (&modulus_product >> 1_usize) {
+        value -= modulus_product;
+    }
+
+    Ok(value)
+}
+
+fn nonnegative_big_int_mod_u64(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
+    let modulus_big = BigInt::from(modulus);
+    let residue = ((value % &modulus_big) + &modulus_big) % &modulus_big;
+    residue.to_u64().ok_or_else(|| {
+        invalid_public_key_share_proof("public-key lifted CRT residue does not fit u64")
+    })
 }
 
 fn verify_secret_support_response(

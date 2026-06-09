@@ -27,6 +27,7 @@ import {
     type RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
 import { setupProofProfileId } from '#packages/protocol/src/setup/same-secret-consistency-records';
+import type { SetupProofTboxZ34Metadata } from '#packages/protocol/src/setup/setup-proof-material-transport';
 import type { CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 
 type TransportedRelinearizationKeyShareProofMaterial = Extract<
@@ -48,6 +49,24 @@ const fixtureHash = (label: string): string =>
         fixture: 'setup-evaluation-key-proof-records',
         label,
     });
+
+const setupProofTboxZ34Metadata = (
+    label: string,
+): SetupProofTboxZ34Metadata => ({
+    z34SeedMaterialHash: fixtureHash(`${label}-z34-seed-material`),
+    z34ChallengeSeedHash: fixtureHash(`${label}-z34-challenge-seed`),
+    z34ChallengeTailHash: fixtureHash(`${label}-z34-challenge-tail`),
+    z34ChallengeRowDomainHash: fixtureHash(`${label}-z34-row-domain`),
+    z34ChallengeZ3RowSetHash: fixtureHash(`${label}-z34-z3-row-set`),
+    z34ChallengeZ4RowSetHash: fixtureHash(`${label}-z34-z4-row-set`),
+    tboxLowerProtocolChallengeHash: fixtureHash(
+        `${label}-tbox-lower-protocol-challenge`,
+    ),
+    z34Z3CheckWindowHash: fixtureHash(`${label}-z34-z3-check-window`),
+    z34Z4CheckWindowHash: fixtureHash(`${label}-z34-z4-check-window`),
+    z34Z3L2SquaredDecimal: '64',
+    z34Z4InfinityNormDecimal: '1',
+});
 
 const setupContext = {
     ceremonyId: 'ceremony-1',
@@ -702,7 +721,10 @@ describe('evaluation-key proof record builders', () => {
                 tboxCommitmentPrefixHash: fixtureHash(
                     `generated-relinearization-tbox-prefix-${String(callNumber)}`,
                 ),
-                challenge: 29 + callNumber,
+                ...setupProofTboxZ34Metadata(
+                    `generated-relinearization-${String(callNumber)}`,
+                ),
+                challenge: String(29 + callNumber),
                 proofSizeBytes: 4,
                 proofBytesHash: fixtureHash(
                     `generated-relinearization-proof-bytes-${String(callNumber)}`,
@@ -739,6 +761,14 @@ describe('evaluation-key proof record builders', () => {
         expect(rounds.roundOneRecords[0].statementHash).toBe(
             fixtureHash('generated-relinearization-statement-0'),
         );
+        expect(rounds.roundOneRecords[0]).toMatchObject({
+            challenge: '29',
+            z34SeedMaterialHash: fixtureHash(
+                'generated-relinearization-0-z34-seed-material',
+            ),
+            z34Z3L2SquaredDecimal: '64',
+            z34Z4InfinityNormDecimal: '1',
+        });
         expect(rounds.roundTwoRecords[0].statementHash).toBe(
             fixtureHash('generated-relinearization-statement-2'),
         );
@@ -892,7 +922,10 @@ describe('evaluation-key proof record builders', () => {
                 tboxCommitmentPrefixHash: fixtureHash(
                     `generated-galois-tbox-prefix-${String(callNumber)}`,
                 ),
-                challenge: 41 + callNumber,
+                ...setupProofTboxZ34Metadata(
+                    `generated-galois-${String(callNumber)}`,
+                ),
+                challenge: String(41 + callNumber),
                 proofSizeBytes: 4,
                 proofBytesHash: fixtureHash(
                     `generated-galois-proof-bytes-${String(callNumber)}`,
@@ -930,6 +963,14 @@ describe('evaluation-key proof record builders', () => {
         expect(batches[0].galoisKeyShareProofs[0].statementHash).toBe(
             fixtureHash('generated-galois-statement-0'),
         );
+        expect(batches[0].galoisKeyShareProofs[0]).toMatchObject({
+            challenge: '41',
+            z34SeedMaterialHash: fixtureHash(
+                'generated-galois-0-z34-seed-material',
+            ),
+            z34Z3L2SquaredDecimal: '64',
+            z34Z4InfinityNormDecimal: '1',
+        });
         expect(galoisKeyShareProofRoot).toBe(
             deriveProtocolHash('GaloisKeyShareProofRoot', proofWithoutRoot),
         );

@@ -10,12 +10,13 @@ use unicode_normalization::UnicodeNormalization;
 use super::*;
 use super::{
     commitment::{
-        SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_PROFILE_ID,
-        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-        SETUP_COMMITMENT_ROW_COUNT, parse_setup_commitment_full_value,
-        setup_commitment_matrix_sampled_entries, setup_commitment_modulus_limb_values,
-        setup_commitment_modulus_product, setup_commitment_modulus_product_ceil_bits,
-        setup_commitment_profile_hash, setup_commitment_profile_value, setup_commitment_root,
+        SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+        SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+        SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+        parse_setup_commitment_full_value, setup_commitment_matrix_sampled_entries,
+        setup_commitment_modulus_limb_values, setup_commitment_modulus_product,
+        setup_commitment_modulus_product_ceil_bits, setup_commitment_profile_hash,
+        setup_commitment_profile_value, setup_commitment_root,
     },
     evaluation_key_share_proof::{
         EVALUATION_KEY_SHARE_CARRY_MASK_BITS, EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -21957,16 +21958,55 @@ fn setup_transport_chunk_manifest_root(
 }
 
 fn setup_transport_vss_material_byte_length() -> CanonicalResult<u64> {
-    let byte_length = public_vss_commitment_material_size_profile_value()?
-        .get("fullMaterialCoefficientBytes")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public VSS material size profile did not expose fullMaterialCoefficientBytes",
-            )
-        })?;
-    Ok(byte_length)
+    let mut header = Vec::new();
+    header.extend(b"SLVSSMAT");
+    crate::encoding::append_varuint(&mut header, 1);
+    crate::encoding::append_varuint(&mut header, FIRST_PROFILE_PARTICIPANT_COUNT);
+    crate::encoding::append_varuint(&mut header, FIRST_PROFILE_DECRYPTION_THRESHOLD);
+    crate::encoding::append_varuint(&mut header, DATA_PRIMES.len() as u64);
+    crate::encoding::append_varuint(&mut header, POLYNOMIAL_DEGREE as u64);
+    crate::encoding::append_varuint(
+        &mut header,
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64,
+    );
+    crate::encoding::append_varuint(&mut header, SETUP_COMMITMENT_ROW_COUNT as u64);
+
+    let coordinate_byte_length = (0..FIRST_PROFILE_PARTICIPANT_COUNT)
+        .flat_map(|source_trustee_roster_position| {
+            (0..DATA_PRIMES.len()).flat_map(move |rns_limb_index| {
+                (0..FIRST_PROFILE_DECRYPTION_THRESHOLD).map(move |shamir_coefficient_index| {
+                    let mut coordinate_bytes = Vec::new();
+                    crate::encoding::append_varuint(
+                        &mut coordinate_bytes,
+                        source_trustee_roster_position,
+                    );
+                    crate::encoding::append_varuint(&mut coordinate_bytes, rns_limb_index as u64);
+                    crate::encoding::append_varuint(
+                        &mut coordinate_bytes,
+                        shamir_coefficient_index,
+                    );
+                    coordinate_bytes.len() as u64
+                })
+            })
+        })
+        .sum::<u64>();
+    let commitment_limb_byte_length = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .map(|commitment_modulus_index| {
+            let mut index_bytes = Vec::new();
+            crate::encoding::append_varuint(&mut index_bytes, *commitment_modulus_index as u64);
+            index_bytes.len() as u64
+                + 8
+                + (SETUP_COMMITMENT_ROW_COUNT as u64 * POLYNOMIAL_DEGREE as u64 * 8)
+        })
+        .sum::<u64>();
+    let material_record_count = FIRST_PROFILE_PARTICIPANT_COUNT
+        * DATA_PRIMES.len() as u64
+        * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+
+    Ok(header.len() as u64
+        + coordinate_byte_length
+        + material_record_count * commitment_limb_byte_length)
 }
 
 fn setup_transport_chunk_count(byte_length: u64) -> CanonicalResult<u64> {

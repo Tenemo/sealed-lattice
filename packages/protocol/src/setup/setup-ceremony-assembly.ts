@@ -3,15 +3,18 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { SetupCommonRandomness } from './common-randomness-records.js';
 import {
+    createBinaryChunkedEvaluationKeyShareMaterialTransport,
     createBinaryChunkedPublicEvaluationKeyMaterialTransport,
     createGaloisKeyShareBatches,
     createPublicEvaluationKeySet,
     createRelinearizationKeyShareRounds,
     type EvaluationKeyShareProofGenerator,
+    type GaloisKeyShareProofMaterial,
     type GaloisKeyShareBatch,
     type GaloisKeyShareBatchContribution,
     type PublicEvaluationKeyMaterialReference,
     type PublicEvaluationKeySet,
+    type RelinearizationKeyShareProofMaterial,
     type RelinearizationKeyShareRounds,
     type RelinearizationRoundOneContribution,
     type RelinearizationRoundTwoContribution,
@@ -838,6 +841,51 @@ const assertTransportedEvaluationKeyProofMaterial = (
     }
 };
 
+const evaluationKeyProofContributions = (
+    input: SetupCeremonyAssemblyInput,
+): readonly {
+    readonly proofMaterial?: unknown;
+    readonly proofGeneration?: unknown;
+}[] => [
+    ...input.relinearizationRoundOneContributions,
+    ...input.relinearizationRoundTwoContributions,
+    ...input.galoisKeyShareBatchContributions.flatMap(
+        (batchContribution) => batchContribution.galoisKeyShareProofs,
+    ),
+];
+
+const usesGeneratedEvaluationKeyProofMaterial = (
+    input: SetupCeremonyAssemblyInput,
+): boolean => {
+    const proofContributions = evaluationKeyProofContributions(input);
+    const generatedContributionCount = proofContributions.filter(
+        (contribution) => contribution.proofGeneration !== undefined,
+    ).length;
+    if (generatedContributionCount === 0) {
+        return false;
+    }
+    if (generatedContributionCount !== proofContributions.length) {
+        throw new Error(
+            'setup assembly requires evaluation-key proof material to be either fully generated or fully pre-transported when automatic evaluation-key material transport is used.',
+        );
+    }
+    if (input.evaluationKeyShareProofGenerator === undefined) {
+        throw new Error(
+            'setup assembly requires evaluationKeyShareProofGenerator when evaluation-key proofGeneration is supplied.',
+        );
+    }
+    if (
+        input.transportedEvaluationKeyShareProofMaterial !== undefined ||
+        input.transportedEvaluationKeyShareComponentMaterial !== undefined
+    ) {
+        throw new Error(
+            'setup assembly generates evaluation-key proof and component transports when evaluation-key proofGeneration is supplied.',
+        );
+    }
+
+    return true;
+};
+
 const assertProfileRingUsesTerminalMaterialTransport = (
     input: SetupCeremonyAssemblyInput,
 ): void => {
@@ -906,12 +954,9 @@ const assertProfileRingUsesTerminalMaterialTransport = (
         input.publicKeyShareLnpProofMaterials,
         'publicKeyShareLnpProofMaterials',
     );
+    const generatedEvaluationKeyProofMaterial =
+        usesGeneratedEvaluationKeyProofMaterial(input);
     input.relinearizationRoundOneContributions.forEach((contribution) => {
-        if (contribution.proofGeneration !== undefined) {
-            throw new Error(
-                'profile-ring setup assembly requires pre-transported relinearization proof material.',
-            );
-        }
         if (contribution.proofMaterial !== undefined) {
             assertTransportedEvaluationKeyProofMaterial(
                 contribution.proofMaterial,
@@ -920,11 +965,6 @@ const assertProfileRingUsesTerminalMaterialTransport = (
         }
     });
     input.relinearizationRoundTwoContributions.forEach((contribution) => {
-        if (contribution.proofGeneration !== undefined) {
-            throw new Error(
-                'profile-ring setup assembly requires pre-transported relinearization proof material.',
-            );
-        }
         if (contribution.proofMaterial !== undefined) {
             assertTransportedEvaluationKeyProofMaterial(
                 contribution.proofMaterial,
@@ -934,11 +974,6 @@ const assertProfileRingUsesTerminalMaterialTransport = (
     });
     input.galoisKeyShareBatchContributions.forEach((batchContribution) =>
         batchContribution.galoisKeyShareProofs.forEach((proofContribution) => {
-            if (proofContribution.proofGeneration !== undefined) {
-                throw new Error(
-                    'profile-ring setup assembly requires pre-transported Galois proof material.',
-                );
-            }
             if (proofContribution.proofMaterial !== undefined) {
                 assertTransportedEvaluationKeyProofMaterial(
                     proofContribution.proofMaterial,
@@ -947,14 +982,16 @@ const assertProfileRingUsesTerminalMaterialTransport = (
             }
         }),
     );
-    assertTransportedEvaluationKeyProofMaterialSetCovers(
-        input.transportedEvaluationKeyShareProofMaterial,
-        transportedEvaluationKeyProofMaterialRoots(input),
-    );
-    assertTransportedEvaluationKeyComponentMaterialSetCovers(
-        input.transportedEvaluationKeyShareComponentMaterial,
-        transportedEvaluationKeyComponentMaterialRoots(input),
-    );
+    if (!generatedEvaluationKeyProofMaterial) {
+        assertTransportedEvaluationKeyProofMaterialSetCovers(
+            input.transportedEvaluationKeyShareProofMaterial,
+            transportedEvaluationKeyProofMaterialRoots(input),
+        );
+        assertTransportedEvaluationKeyComponentMaterialSetCovers(
+            input.transportedEvaluationKeyShareComponentMaterial,
+            transportedEvaluationKeyComponentMaterialRoots(input),
+        );
+    }
     if (
         input.sourceTrusteeOpeningStateProvider === undefined ||
         input.sourceTrusteeOpeningStates !== undefined
@@ -1008,6 +1045,202 @@ const protocolHashField = (
 
     return fieldValue;
 };
+
+const setupProofTboxZ34MetadataFieldNames = [
+    'z34SeedMaterialHash',
+    'z34ChallengeSeedHash',
+    'z34ChallengeTailHash',
+    'z34ChallengeRowDomainHash',
+    'z34ChallengeZ3RowSetHash',
+    'z34ChallengeZ4RowSetHash',
+    'tboxLowerProtocolChallengeHash',
+    'z34Z3CheckWindowHash',
+    'z34Z4CheckWindowHash',
+    'z34Z3L2SquaredDecimal',
+    'z34Z4InfinityNormDecimal',
+] as const;
+
+const optionalGeneratedSetupProofTboxZ34Metadata = (
+    record: JsonRecord,
+): JsonRecord => {
+    const metadata: JsonRecord = {};
+    setupProofTboxZ34MetadataFieldNames.forEach((fieldName) => {
+        if (record[fieldName] !== undefined) {
+            metadata[fieldName] = record[fieldName];
+        }
+    });
+
+    return metadata;
+};
+
+const generatedEvaluationKeyProofMaterialBaseFromRecord = (
+    record: JsonRecord,
+    fieldName: string,
+): JsonRecord => {
+    if (typeof record.proofBytesHex !== 'string') {
+        throw new TypeError(
+            `${fieldName}.proofBytesHex must be embedded before terminal evaluation-key material transport generation.`,
+        );
+    }
+    if (
+        record.keySwitchMaterialEncoding !==
+            'embedded-full-key-switch-component-vectors' ||
+        !Array.isArray(record.keySwitchComponentVectors)
+    ) {
+        throw new TypeError(
+            `${fieldName}.keySwitchComponentVectors must be embedded before terminal evaluation-key material transport generation.`,
+        );
+    }
+
+    return {
+        setupProofBinding: record.setupProofBinding,
+        keySwitchMaterialEncoding: record.keySwitchMaterialEncoding,
+        keySwitchDomain: record.keySwitchDomain,
+        keySwitchSeedHex: record.keySwitchSeedHex,
+        ringDegree: record.ringDegree,
+        keySwitchComponentVectorRoot: record.keySwitchComponentVectorRoot,
+        keySwitchComponentVectors: record.keySwitchComponentVectors,
+        statementHash: record.statementHash,
+        relationCommitmentHash: record.relationCommitmentHash,
+        tboxCommitmentPrefixHash: record.tboxCommitmentPrefixHash,
+        ...optionalGeneratedSetupProofTboxZ34Metadata(record),
+        challenge: record.challenge,
+        proofSizeBytes: record.proofSizeBytes,
+        proofBytesHash: record.proofBytesHash,
+        proofBytesHex: record.proofBytesHex,
+    };
+};
+
+const generatedRelinearizationProofMaterialFromRecord = (
+    record: JsonRecord,
+    fieldName: string,
+): RelinearizationKeyShareProofMaterial =>
+    ({
+        proofProfileId: record.proofProfileId,
+        ...generatedEvaluationKeyProofMaterialBaseFromRecord(record, fieldName),
+        relinearizationKeyShareTboxParameterProfileHash:
+            record.relinearizationKeyShareTboxParameterProfileHash,
+    }) as RelinearizationKeyShareProofMaterial;
+
+const generatedGaloisProofMaterialFromRecord = (
+    record: JsonRecord,
+    fieldName: string,
+): GaloisKeyShareProofMaterial =>
+    ({
+        proofProfileId: record.proofProfileId,
+        ...generatedEvaluationKeyProofMaterialBaseFromRecord(record, fieldName),
+        galoisKeyShareTboxParameterProfileHash:
+            record.galoisKeyShareTboxParameterProfileHash,
+    }) as GaloisKeyShareProofMaterial;
+
+const createGeneratedEvaluationKeyShareMaterialTransport = (
+    sameSecretProofReferences: readonly SameSecretProofReference[],
+    relinearizationKeyShareRounds: RelinearizationKeyShareRounds,
+    galoisKeyShareBatches: readonly GaloisKeyShareBatch[],
+): ReturnType<typeof createBinaryChunkedEvaluationKeyShareMaterialTransport> =>
+    createBinaryChunkedEvaluationKeyShareMaterialTransport({
+        sameSecretProofReferences,
+        relinearizationRoundOneContributions:
+            relinearizationKeyShareRounds.roundOneRecords.map(
+                (record, recordIndex) => {
+                    const recordFields = record as JsonRecord;
+
+                    return {
+                        trusteeRosterPosition: nonNegativeIntegerField(
+                            recordFields,
+                            'trusteeRosterPosition',
+                            `relinearizationKeyShareRounds.roundOneRecords.${String(recordIndex)}`,
+                        ),
+                        level: nonNegativeIntegerField(
+                            recordFields,
+                            'level',
+                            `relinearizationKeyShareRounds.roundOneRecords.${String(recordIndex)}`,
+                        ),
+                        roundOneShareRoot: protocolHashField(
+                            recordFields,
+                            'roundOneShareRoot',
+                            `relinearizationKeyShareRounds.roundOneRecords.${String(recordIndex)}`,
+                        ),
+                        proofMaterial:
+                            generatedRelinearizationProofMaterialFromRecord(
+                                recordFields,
+                                `relinearizationKeyShareRounds.roundOneRecords.${String(recordIndex)}`,
+                            ),
+                    } satisfies RelinearizationRoundOneContribution;
+                },
+            ),
+        relinearizationRoundTwoContributions:
+            relinearizationKeyShareRounds.roundTwoRecords.map(
+                (record, recordIndex) => {
+                    const recordFields = record as JsonRecord;
+
+                    return {
+                        trusteeRosterPosition: nonNegativeIntegerField(
+                            recordFields,
+                            'trusteeRosterPosition',
+                            `relinearizationKeyShareRounds.roundTwoRecords.${String(recordIndex)}`,
+                        ),
+                        level: nonNegativeIntegerField(
+                            recordFields,
+                            'level',
+                            `relinearizationKeyShareRounds.roundTwoRecords.${String(recordIndex)}`,
+                        ),
+                        roundTwoShareRoot: protocolHashField(
+                            recordFields,
+                            'roundTwoShareRoot',
+                            `relinearizationKeyShareRounds.roundTwoRecords.${String(recordIndex)}`,
+                        ),
+                        proofMaterial:
+                            generatedRelinearizationProofMaterialFromRecord(
+                                recordFields,
+                                `relinearizationKeyShareRounds.roundTwoRecords.${String(recordIndex)}`,
+                            ),
+                    } satisfies RelinearizationRoundTwoContribution;
+                },
+            ),
+        galoisKeyShareBatchContributions: galoisKeyShareBatches.map(
+            (batch, batchIndex) => {
+                const batchFields = batch as JsonRecord;
+
+                return {
+                    trusteeRosterPosition: nonNegativeIntegerField(
+                        batchFields,
+                        'trusteeRosterPosition',
+                        `galoisKeyShareBatches.${String(batchIndex)}`,
+                    ),
+                    galoisKeyShareProofs: batch.galoisKeyShareProofs.map(
+                        (proofRecord, proofIndex) => {
+                            const proofRecordFields = proofRecord as JsonRecord;
+                            const fieldName = `galoisKeyShareBatches.${String(batchIndex)}.galoisKeyShareProofs.${String(proofIndex)}`;
+
+                            return {
+                                rotation: nonNegativeIntegerField(
+                                    proofRecordFields,
+                                    'rotation',
+                                    fieldName,
+                                ),
+                                level: nonNegativeIntegerField(
+                                    proofRecordFields,
+                                    'level',
+                                    fieldName,
+                                ),
+                                galoisKeyShareRoot: protocolHashField(
+                                    proofRecordFields,
+                                    'galoisKeyShareRoot',
+                                    fieldName,
+                                ),
+                                proofMaterial:
+                                    generatedGaloisProofMaterialFromRecord(
+                                        proofRecordFields,
+                                        fieldName,
+                                    ),
+                            };
+                        },
+                    ),
+                } satisfies GaloisKeyShareBatchContribution;
+            },
+        ),
+    });
 
 const orderedTrustees = (
     trustees: readonly SetupCeremonyTrusteeInput[],
@@ -2254,15 +2487,50 @@ export const createSetupCeremonyAssembly = async (
         evaluationKeyShareProofGenerator:
             input.evaluationKeyShareProofGenerator,
     } as const;
-    const relinearizationKeyShareRounds = createRelinearizationKeyShareRounds({
-        ...evaluationKeyProofCommonInput,
-        roundOneContributions: input.relinearizationRoundOneContributions,
-        roundTwoContributions: input.relinearizationRoundTwoContributions,
-    });
-    const galoisKeyShareBatches = createGaloisKeyShareBatches({
+    const generateEvaluationKeyShareMaterialTransport =
+        usesGeneratedEvaluationKeyProofMaterial(input);
+    const generatedRelinearizationKeyShareRounds =
+        createRelinearizationKeyShareRounds({
+            ...evaluationKeyProofCommonInput,
+            roundOneContributions: input.relinearizationRoundOneContributions,
+            roundTwoContributions: input.relinearizationRoundTwoContributions,
+        });
+    const generatedGaloisKeyShareBatches = createGaloisKeyShareBatches({
         ...evaluationKeyProofCommonInput,
         batchContributions: input.galoisKeyShareBatchContributions,
     });
+    const generatedEvaluationKeyShareMaterialTransport =
+        generateEvaluationKeyShareMaterialTransport
+            ? createGeneratedEvaluationKeyShareMaterialTransport(
+                  sameSecretProofReferences,
+                  generatedRelinearizationKeyShareRounds,
+                  generatedGaloisKeyShareBatches,
+              )
+            : undefined;
+    const transportedEvaluationKeyShareProofMaterial =
+        generatedEvaluationKeyShareMaterialTransport?.transportedEvaluationKeyShareProofMaterial ??
+        input.transportedEvaluationKeyShareProofMaterial;
+    const transportedEvaluationKeyShareComponentMaterial =
+        generatedEvaluationKeyShareMaterialTransport?.transportedEvaluationKeyShareComponentMaterial ??
+        input.transportedEvaluationKeyShareComponentMaterial;
+    const relinearizationKeyShareRounds =
+        generatedEvaluationKeyShareMaterialTransport === undefined
+            ? generatedRelinearizationKeyShareRounds
+            : createRelinearizationKeyShareRounds({
+                  ...evaluationKeyProofCommonInput,
+                  roundOneContributions:
+                      generatedEvaluationKeyShareMaterialTransport.relinearizationRoundOneContributions,
+                  roundTwoContributions:
+                      generatedEvaluationKeyShareMaterialTransport.relinearizationRoundTwoContributions,
+              });
+    const galoisKeyShareBatches =
+        generatedEvaluationKeyShareMaterialTransport === undefined
+            ? generatedGaloisKeyShareBatches
+            : createGaloisKeyShareBatches({
+                  ...evaluationKeyProofCommonInput,
+                  batchContributions:
+                      generatedEvaluationKeyShareMaterialTransport.galoisKeyShareBatchContributions,
+              });
     const generatedPublicEvaluationKeyMaterialTransport =
         input.publicEvaluationKeyMaterialReference === undefined &&
         input.ringDegree === acceptedBgvProfileRingDegree
@@ -2270,12 +2538,12 @@ export const createSetupCeremonyAssembly = async (
                   ...evaluationKeyProofCommonInput,
                   relinearizationKeyShareRounds,
                   galoisKeyShareBatches,
-                  ...(input.transportedEvaluationKeyShareComponentMaterial ===
+                  ...(transportedEvaluationKeyShareComponentMaterial ===
                   undefined
                       ? {}
                       : {
                             transportedEvaluationKeyShareComponentMaterial:
-                                input.transportedEvaluationKeyShareComponentMaterial,
+                                transportedEvaluationKeyShareComponentMaterial,
                         }),
               })
             : undefined;
@@ -2467,17 +2735,17 @@ export const createSetupCeremonyAssembly = async (
         evaluatorKeySchedule,
         relinearizationKeyShareRounds,
         galoisKeyShareBatches,
-        ...(input.transportedEvaluationKeyShareProofMaterial === undefined
+        ...(transportedEvaluationKeyShareProofMaterial === undefined
             ? {}
             : {
                   transportedEvaluationKeyShareProofMaterial:
-                      input.transportedEvaluationKeyShareProofMaterial,
+                      transportedEvaluationKeyShareProofMaterial,
               }),
-        ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
+        ...(transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}
             : {
                   transportedEvaluationKeyShareComponentMaterial:
-                      input.transportedEvaluationKeyShareComponentMaterial,
+                      transportedEvaluationKeyShareComponentMaterial,
               }),
         evaluationKeys,
         ...(transportedPublicEvaluationKeyMaterial === undefined
@@ -2547,17 +2815,17 @@ export const createSetupCeremonyAssembly = async (
         evaluatorKeySchedule,
         relinearizationKeyShareRounds,
         galoisKeyShareBatches,
-        ...(input.transportedEvaluationKeyShareProofMaterial === undefined
+        ...(transportedEvaluationKeyShareProofMaterial === undefined
             ? {}
             : {
                   transportedEvaluationKeyShareProofMaterial:
-                      input.transportedEvaluationKeyShareProofMaterial,
+                      transportedEvaluationKeyShareProofMaterial,
               }),
-        ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
+        ...(transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}
             : {
                   transportedEvaluationKeyShareComponentMaterial:
-                      input.transportedEvaluationKeyShareComponentMaterial,
+                      transportedEvaluationKeyShareComponentMaterial,
               }),
         evaluationKeys,
         ...(transportedPublicEvaluationKeyMaterial === undefined
