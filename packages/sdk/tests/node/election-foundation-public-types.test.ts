@@ -69,6 +69,17 @@ type PublicFoundationTypes = [
 
 type PublicSetupTypes = [
     publicTypes.BgvHeSecurityCertificate,
+    publicTypes.BinaryChunkedSameSecretProofMaterialTransport,
+    publicTypes.BinaryChunkedPublicKeyShareMaterialSet,
+    publicTypes.BinaryChunkedPublicKeyShareMaterialTransport,
+    publicTypes.BinaryChunkedPublicKeyShareProofMaterialTransport,
+    publicTypes.BinaryChunkedEvaluationKeyShareMaterialTransport,
+    publicTypes.BinaryChunkedPublicEvaluationKeyMaterialTransport,
+    publicTypes.SetupPackageVssCoefficientCommitmentMaterialSet,
+    publicTypes.SetupTransportedVssCoefficientCommitmentMaterial,
+    publicTypes.SetupTransportedVssCoefficientCommitmentMaterialReference,
+    publicTypes.SetupTransportedVssCoefficientCommitmentMaterialLike,
+    publicTypes.VerifiedVssCoefficientCommitmentMaterial,
     publicTypes.CommonRandomnessCommit,
     publicTypes.CommonRandomnessCommitInput,
     publicTypes.CommonRandomnessReveal,
@@ -77,6 +88,7 @@ type PublicSetupTypes = [
     publicTypes.EncryptedLocalTrusteeSetupState,
     publicTypes.EvaluatorKeySchedule,
     publicTypes.EvaluatorKeyScheduleInput,
+    publicTypes.EvaluationKeyShareMaterialTransportInput,
     publicTypes.ExportEncryptedLocalTrusteeSetupStateInput,
     publicTypes.ExportEncryptedLocalTrusteeSetupStateResult,
     publicTypes.GaloisKeyRootReference,
@@ -97,6 +109,7 @@ type PublicSetupTypes = [
     publicTypes.PrivateVssShareVerification,
     publicTypes.ProtocolRootSigner,
     publicTypes.PublicEvaluationKeySet,
+    publicTypes.PublicEvaluationKeyMaterialTransportInput,
     publicTypes.PublicEvaluationKeySetInput,
     publicTypes.PublicKeyShareCoefficientVectorHash,
     publicTypes.PublicKeyShareCoefficientVectorMaterial,
@@ -109,6 +122,13 @@ type PublicSetupTypes = [
     publicTypes.PublicKeyShareMaterialRecord,
     publicTypes.PublicKeyShareMaterialSet,
     publicTypes.PublicKeyShareMaterialSetInput,
+    publicTypes.SetupPackagePublicKeyShareMaterialSet,
+    publicTypes.SetupTransportedPublicKeyShareMaterial,
+    publicTypes.TransportedSameSecretProofMaterialSet,
+    publicTypes.TransportedPublicKeyShareProofMaterialSet,
+    publicTypes.TransportedEvaluationKeyShareProofMaterialSet,
+    publicTypes.TransportedEvaluationKeyShareComponentMaterialSet,
+    publicTypes.TransportedPublicEvaluationKeyMaterialSet,
     publicTypes.PublicKeyShareProofRecord,
     publicTypes.PublicKeyShareProofSet,
     publicTypes.PublicKeyShareProofSetInput,
@@ -144,6 +164,7 @@ type PublicSetupTypes = [
     publicTypes.SetupIntentInput,
     publicTypes.SetupPackage,
     publicTypes.SetupPackageInput,
+    publicTypes.SetupPackageVerificationInputSource,
     publicTypes.SetupPackageVerification,
     publicTypes.SetupPhaseParticipantObject,
     publicTypes.SetupPhaseRecord,
@@ -165,6 +186,93 @@ type PublicTypeSurfaceProbe = {
     readonly publicFoundationTypes: PublicFoundationTypes;
     readonly publicSetupTypes: PublicSetupTypes;
 };
+
+type OptionalInputField<Input, FieldName extends keyof Input> = Exclude<
+    Input[FieldName],
+    undefined
+>;
+
+type VerifySetupPackageTransportFieldProbe = [
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedVssCoefficientCommitmentMaterial'
+    > extends publicTypes.SetupTransportedVssCoefficientCommitmentMaterialLike
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'verifiedVssCoefficientCommitmentMaterial'
+    > extends publicTypes.VerifiedVssCoefficientCommitmentMaterial
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedSameSecretProofMaterial'
+    > extends publicTypes.TransportedSameSecretProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedPublicKeyShareMaterial'
+    > extends publicTypes.SetupTransportedPublicKeyShareMaterial
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedPublicKeyShareProofMaterial'
+    > extends publicTypes.TransportedPublicKeyShareProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedEvaluationKeyShareProofMaterial'
+    > extends publicTypes.TransportedEvaluationKeyShareProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedEvaluationKeyShareComponentMaterial'
+    > extends publicTypes.TransportedEvaluationKeyShareComponentMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedPublicEvaluationKeyMaterial'
+    > extends publicTypes.TransportedPublicEvaluationKeyMaterialSet
+        ? true
+        : false,
+];
+
+const verifySetupPackageTransportFieldProbe = [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+] as const satisfies VerifySetupPackageTransportFieldProbe;
+
+type SetupPackageTransportInputProbe = [
+    OptionalInputField<
+        publicTypes.SetupPackageInput,
+        'transportedVssCoefficientCommitmentMaterial'
+    > extends publicTypes.SetupTransportedVssCoefficientCommitmentMaterial
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.SetupPackageInput,
+        'transportedPublicKeyShareMaterial'
+    > extends publicTypes.SetupTransportedPublicKeyShareMaterial
+        ? true
+        : false,
+];
+
+const setupPackageTransportInputProbe = [
+    true,
+    true,
+] as const satisfies SetupPackageTransportInputProbe;
 
 type PublicFoundationTypeNames = readonly string[] & {
     readonly length: PublicTypeSurfaceProbe['publicFoundationTypes']['length'];
@@ -195,6 +303,17 @@ type PublicSetupTypeNames = readonly string[] & {
 
 const publicSetupTypeNames = [
     'BgvHeSecurityCertificate',
+    'BinaryChunkedSameSecretProofMaterialTransport',
+    'BinaryChunkedPublicKeyShareMaterialSet',
+    'BinaryChunkedPublicKeyShareMaterialTransport',
+    'BinaryChunkedPublicKeyShareProofMaterialTransport',
+    'BinaryChunkedEvaluationKeyShareMaterialTransport',
+    'BinaryChunkedPublicEvaluationKeyMaterialTransport',
+    'SetupPackageVssCoefficientCommitmentMaterialSet',
+    'SetupTransportedVssCoefficientCommitmentMaterial',
+    'SetupTransportedVssCoefficientCommitmentMaterialReference',
+    'SetupTransportedVssCoefficientCommitmentMaterialLike',
+    'VerifiedVssCoefficientCommitmentMaterial',
     'CommonRandomnessCommit',
     'CommonRandomnessCommitInput',
     'CommonRandomnessReveal',
@@ -203,6 +322,7 @@ const publicSetupTypeNames = [
     'EncryptedLocalTrusteeSetupState',
     'EvaluatorKeySchedule',
     'EvaluatorKeyScheduleInput',
+    'EvaluationKeyShareMaterialTransportInput',
     'ExportEncryptedLocalTrusteeSetupStateInput',
     'ExportEncryptedLocalTrusteeSetupStateResult',
     'GaloisKeyRootReference',
@@ -223,6 +343,7 @@ const publicSetupTypeNames = [
     'PrivateVssShareVerification',
     'ProtocolRootSigner',
     'PublicEvaluationKeySet',
+    'PublicEvaluationKeyMaterialTransportInput',
     'PublicEvaluationKeySetInput',
     'PublicKeyShareCoefficientVectorHash',
     'PublicKeyShareCoefficientVectorMaterial',
@@ -235,6 +356,13 @@ const publicSetupTypeNames = [
     'PublicKeyShareMaterialRecord',
     'PublicKeyShareMaterialSet',
     'PublicKeyShareMaterialSetInput',
+    'SetupPackagePublicKeyShareMaterialSet',
+    'SetupTransportedPublicKeyShareMaterial',
+    'TransportedSameSecretProofMaterialSet',
+    'TransportedPublicKeyShareProofMaterialSet',
+    'TransportedEvaluationKeyShareProofMaterialSet',
+    'TransportedEvaluationKeyShareComponentMaterialSet',
+    'TransportedPublicEvaluationKeyMaterialSet',
     'PublicKeyShareProofRecord',
     'PublicKeyShareProofSet',
     'PublicKeyShareProofSetInput',
@@ -270,6 +398,7 @@ const publicSetupTypeNames = [
     'SetupIntentInput',
     'SetupPackage',
     'SetupPackageInput',
+    'SetupPackageVerificationInputSource',
     'SetupPackageVerification',
     'SetupPhaseParticipantObject',
     'SetupPhaseRecord',
@@ -289,6 +418,14 @@ describe('election foundation public type surface', () => {
     });
 
     it('keeps accepted setup phase, randomness, key-record, and local-state types available', () => {
-        expect(publicSetupTypeNames).toHaveLength(87);
+        expect(publicSetupTypeNames).toHaveLength(108);
+    });
+
+    it('keeps setup verifier transport companions on concrete public types', () => {
+        expect(verifySetupPackageTransportFieldProbe).toHaveLength(8);
+    });
+
+    it('keeps setup package transport companions on concrete public types', () => {
+        expect(setupPackageTransportInputProbe).toHaveLength(2);
     });
 });

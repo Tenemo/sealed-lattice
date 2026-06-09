@@ -79,12 +79,32 @@ const requiredPublicFunctions = [
         publicApiRuntimeRecord.createPublicKeyShareProofSet,
     ],
     [
+        'createBinaryChunkedSameSecretProofMaterialTransport',
+        publicApiRuntimeRecord.createBinaryChunkedSameSecretProofMaterialTransport,
+    ],
+    [
         'createSameSecretProofSet',
         publicApiRuntimeRecord.createSameSecretProofSet,
     ],
     [
         'createPublicKeyShareMaterialSet',
         publicApiRuntimeRecord.createPublicKeyShareMaterialSet,
+    ],
+    [
+        'createBinaryChunkedPublicKeyShareMaterialTransport',
+        publicApiRuntimeRecord.createBinaryChunkedPublicKeyShareMaterialTransport,
+    ],
+    [
+        'createBinaryChunkedPublicKeyShareProofMaterialTransport',
+        publicApiRuntimeRecord.createBinaryChunkedPublicKeyShareProofMaterialTransport,
+    ],
+    [
+        'createBinaryChunkedEvaluationKeyShareMaterialTransport',
+        publicApiRuntimeRecord.createBinaryChunkedEvaluationKeyShareMaterialTransport,
+    ],
+    [
+        'createBinaryChunkedPublicEvaluationKeyMaterialTransport',
+        publicApiRuntimeRecord.createBinaryChunkedPublicEvaluationKeyMaterialTransport,
     ],
     [
         'createPublicKeyShareLnpProofSet',
@@ -97,6 +117,10 @@ const requiredPublicFunctions = [
     ],
     ['createSetupCertificates', publicApiRuntimeRecord.createSetupCertificates],
     ['createSetupPackage', publicApiRuntimeRecord.createSetupPackage],
+    [
+        'createSetupPackageVerificationInput',
+        publicApiRuntimeRecord.createSetupPackageVerificationInput,
+    ],
     [
         'createSetupCommonRandomness',
         publicApiRuntimeRecord.createSetupCommonRandomness,

@@ -59,6 +59,7 @@ reserved_root_namespaces! {
     SETUP_PROOF_MATERIAL_ROOT_NAMESPACE => "sealed-lattice-root/setup-proof-material-root-v1",
     SETUP_PROOF_CHUNK_MANIFEST_ROOT_NAMESPACE => "sealed-lattice-root/setup-proof-chunk-manifest-root-v1",
     SETUP_TRANSPORT_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/setup-transport-profile-hash-v1",
+    SETUP_TRANSPORT_FULL_OBJECT_SET_HASH_NAMESPACE => "sealed-lattice-root/setup-transport-full-object-set-hash-v1",
     SETUP_TRANSPORT_CHUNK_MANIFEST_ROOT_NAMESPACE => "sealed-lattice-root/setup-transport-chunk-manifest-root-v1",
     SETUP_TRANSPORT_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/setup-transport-certificate-hash-v1",
     SETUP_COMMITMENT_SECURITY_CERTIFICATE_HASH_NAMESPACE => "sealed-lattice-root/setup-commitment-security-certificate-hash-v1",

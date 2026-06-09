@@ -19,10 +19,14 @@ use crate::{
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
         setup::{
+            absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
+            begin_threshold_share_commitment_transport_derivation_stream_request,
+            compute_setup_commitment_from_opening_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             derive_threshold_share_commitments_from_request,
             derive_threshold_share_commitments_from_transport_request,
             describe_collective_bgv_setup_profile, describe_passive_setup_object_model,
+            finish_threshold_share_commitment_transport_derivation_stream_request,
             generate_evaluation_key_share_lnp_proof_from_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
@@ -167,6 +171,10 @@ pub(crate) fn generate_evaluation_key_share_lnp_proof(request: &Value) -> Canoni
     generate_evaluation_key_share_lnp_proof_from_request(request)
 }
 
+pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {
+    compute_setup_commitment_from_opening_request(request)
+}
+
 pub(crate) fn derive_threshold_share_commitments(request: &Value) -> CanonicalResult<Value> {
     derive_threshold_share_commitments_from_request(request)
 }
@@ -175,6 +183,24 @@ pub(crate) fn derive_threshold_share_commitments_from_transport(
     request: &Value,
 ) -> CanonicalResult<Value> {
     derive_threshold_share_commitments_from_transport_request(request)
+}
+
+pub(crate) fn begin_threshold_share_commitments_from_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    begin_threshold_share_commitment_transport_derivation_stream_request(request)
+}
+
+pub(crate) fn absorb_threshold_share_commitments_from_transport_stream_chunk(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(request)
+}
+
+pub(crate) fn finish_threshold_share_commitments_from_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    finish_threshold_share_commitment_transport_derivation_stream_request(request)
 }
 
 pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {

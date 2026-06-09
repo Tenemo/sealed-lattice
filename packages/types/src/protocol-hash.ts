@@ -56,6 +56,7 @@ export const protocolHashNamespaceValues = [
     'SetupProofMaterialRoot',
     'SetupProofChunkManifestRoot',
     'SetupTransportProfileHash',
+    'SetupTransportFullObjectSetHash',
     'SetupTransportChunkManifestRoot',
     'SetupTransportCertificateHash',
     'SetupCommitmentSecurityCertificateHash',

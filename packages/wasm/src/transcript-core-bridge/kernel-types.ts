@@ -12,7 +12,9 @@ import type {
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,
     BgvCiphertextConventionFixture,
+    BgvCollectiveSetupTransportCompanions,
     BgvCollectiveSetupProfileDescription,
+    BgvTransportedVssCoefficientCommitmentMaterial,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvEvaluationKeyShareLnpProofGeneration,
@@ -29,11 +31,17 @@ import type {
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvSameSecretLnpProofGeneration,
+    BgvSetupCommitmentOpeningComputation,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
+    BgvThresholdShareCommitmentTransportStreamBegin,
+    BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
+    BgvThresholdShareCommitmentTransportStreamDerivation,
+    BgvTransportedVssCoefficientCommitmentMaterialReference,
+    BgvTransportedVssCoefficientCommitmentMaterialTemplate,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -59,11 +67,17 @@ export type {
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvSameSecretLnpProofGeneration,
+    BgvSetupCommitmentOpeningComputation,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
+    BgvThresholdShareCommitmentTransportStreamBegin,
+    BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
+    BgvThresholdShareCommitmentTransportStreamDerivation,
+    BgvTransportedVssCoefficientCommitmentMaterialReference,
+    BgvTransportedVssCoefficientCommitmentMaterialTemplate,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -159,18 +173,16 @@ export type TranscriptCoreKernel = {
         readonly expectedRotSetHash?: ProtocolHash;
         readonly expectedEvaluationKeyRoot?: ProtocolHash;
     }): BgvPassiveSetupVerification;
-    verifyCollectiveBgvSetup(input: {
-        readonly setupPackage: unknown;
-        readonly expectedSetupPackageHash?: ProtocolHash;
-        readonly expectedManifestHash?: ProtocolHash;
-        readonly expectedRosterHash?: ProtocolHash;
-        readonly transportedVssCoefficientCommitmentMaterial?: unknown;
-        readonly transportedSameSecretProofMaterial?: unknown;
-        readonly transportedPublicKeyShareProofMaterial?: unknown;
-        readonly transportedEvaluationKeyShareProofMaterial?: unknown;
-        readonly transportedEvaluationKeyShareComponentMaterial?: unknown;
-        readonly transportedPublicEvaluationKeyMaterial?: unknown;
-    }): BgvCollectiveSetupVerification;
+    verifyCollectiveBgvSetup(
+        input: Readonly<
+            {
+                readonly setupPackage: unknown;
+                readonly expectedSetupPackageHash?: ProtocolHash;
+                readonly expectedManifestHash?: ProtocolHash;
+                readonly expectedRosterHash?: ProtocolHash;
+            } & BgvCollectiveSetupTransportCompanions
+        >,
+    ): BgvCollectiveSetupVerification;
     verifyPrivateVssShareEnvelope(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -262,6 +274,15 @@ export type TranscriptCoreKernel = {
             | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
     }): BgvEvaluationKeyShareLnpProofGeneration;
+    computeSetupCommitmentFromOpening(input: {
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly sourceRnsLimbIndex: number;
+        readonly sourceMessageModulus: number;
+        readonly shamirCoefficientIndex: number;
+        readonly messageCoefficients: readonly number[];
+        readonly randomnessByColumn: readonly (readonly number[])[];
+        readonly ringDegree: number;
+    }): BgvSetupCommitmentOpeningComputation;
     deriveThresholdShareCommitments(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -273,8 +294,26 @@ export type TranscriptCoreKernel = {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-        readonly transportedVssCoefficientCommitmentMaterial: unknown;
+        readonly transportedVssCoefficientCommitmentMaterial: BgvTransportedVssCoefficientCommitmentMaterial;
     }): BgvThresholdShareCommitmentTransportDerivation;
+    beginThresholdShareCommitmentsFromTransportStream(input: {
+        readonly derivationId: string;
+        readonly setupContext: unknown;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly transportedVssCoefficientCommitmentMaterial:
+            | BgvTransportedVssCoefficientCommitmentMaterialReference
+            | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
+    }): BgvThresholdShareCommitmentTransportStreamBegin;
+    absorbThresholdShareCommitmentsFromTransportStreamChunk(input: {
+        readonly derivationId: string;
+        readonly chunkIndex: number;
+        readonly bytesHex: string;
+    }): BgvThresholdShareCommitmentTransportStreamChunkAbsorption;
+    finishThresholdShareCommitmentsFromTransportStream(input: {
+        readonly derivationId: string;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+    }): BgvThresholdShareCommitmentTransportStreamDerivation;
     verifyLocalTrusteeSetupState(input: {
         readonly setupContext: unknown;
         readonly localStateCommitment: unknown;
@@ -424,19 +463,15 @@ type TranscriptCoreKernelCommand =
           readonly expectedRotSetHash?: ProtocolHash;
           readonly expectedEvaluationKeyRoot?: ProtocolHash;
       }
-    | {
-          readonly command: 'VerifyCollectiveBgvSetup';
-          readonly setupPackage: unknown;
-          readonly expectedSetupPackageHash?: ProtocolHash;
-          readonly expectedManifestHash?: ProtocolHash;
-          readonly expectedRosterHash?: ProtocolHash;
-          readonly transportedVssCoefficientCommitmentMaterial?: unknown;
-          readonly transportedSameSecretProofMaterial?: unknown;
-          readonly transportedPublicKeyShareProofMaterial?: unknown;
-          readonly transportedEvaluationKeyShareProofMaterial?: unknown;
-          readonly transportedEvaluationKeyShareComponentMaterial?: unknown;
-          readonly transportedPublicEvaluationKeyMaterial?: unknown;
-      }
+    | Readonly<
+          {
+              readonly command: 'VerifyCollectiveBgvSetup';
+              readonly setupPackage: unknown;
+              readonly expectedSetupPackageHash?: ProtocolHash;
+              readonly expectedManifestHash?: ProtocolHash;
+              readonly expectedRosterHash?: ProtocolHash;
+          } & BgvCollectiveSetupTransportCompanions
+      >
     | {
           readonly command: 'VerifyPrivateVssShareEnvelope';
           readonly setupContext: unknown;
@@ -536,6 +571,16 @@ type TranscriptCoreKernelCommand =
           readonly proofRandomnessSeedHex: string;
       }
     | {
+          readonly command: 'ComputeSetupCommitmentFromOpening';
+          readonly publicMatrixSeedHash: ProtocolHash;
+          readonly sourceRnsLimbIndex: number;
+          readonly sourceMessageModulus: number;
+          readonly shamirCoefficientIndex: number;
+          readonly messageCoefficients: readonly number[];
+          readonly randomnessByColumn: readonly (readonly number[])[];
+          readonly ringDegree: number;
+      }
+    | {
           readonly command: 'DeriveThresholdShareCommitments';
           readonly setupContext: unknown;
           readonly publicMatrixSeedHash: ProtocolHash;
@@ -548,7 +593,28 @@ type TranscriptCoreKernelCommand =
           readonly publicMatrixSeedHash: ProtocolHash;
           readonly vssCoefficientCommitmentRoot: ProtocolHash;
           readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-          readonly transportedVssCoefficientCommitmentMaterial: unknown;
+          readonly transportedVssCoefficientCommitmentMaterial: BgvTransportedVssCoefficientCommitmentMaterial;
+      }
+    | {
+          readonly command: 'BeginThresholdShareCommitmentsFromTransportStream';
+          readonly derivationId: string;
+          readonly setupContext: unknown;
+          readonly publicMatrixSeedHash: ProtocolHash;
+          readonly transportedVssCoefficientCommitmentMaterial:
+              | BgvTransportedVssCoefficientCommitmentMaterialReference
+              | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
+      }
+    | {
+          readonly command: 'AbsorbThresholdShareCommitmentsFromTransportStreamChunk';
+          readonly derivationId: string;
+          readonly chunkIndex: number;
+          readonly bytesHex: string;
+      }
+    | {
+          readonly command: 'FinishThresholdShareCommitmentsFromTransportStream';
+          readonly derivationId: string;
+          readonly vssCoefficientCommitmentRoot: ProtocolHash;
+          readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
       }
     | {
           readonly command: 'VerifyLocalTrusteeSetupState';

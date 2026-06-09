@@ -3,20 +3,32 @@ import {
     deriveProtocolHash,
     hash512Hex,
 } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     collectForbiddenLocalTrusteeSetupStateFieldPaths,
     collectForbiddenSetupContributionAssemblyFieldPaths,
     collectForbiddenSetupPackageAssemblyFieldPaths,
+    acceptedBgvProfileRingDegree,
+    acceptedBgvSetupQShare,
+    acceptedBgvSetupQShareHash,
+    acceptedBgvSetupQSharePrimes,
+    binaryVssCoefficientCommitmentMaterialByteLength,
     createEvaluatorKeySchedule,
+    createBinaryChunkedPublicKeyShareProofMaterialTransport,
+    createBinaryChunkedPublicEvaluationKeyMaterialTransport,
+    createBinaryChunkedSameSecretProofMaterialTransport,
+    createBinaryChunkedEvaluationKeyShareMaterialTransport,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     createSameSecretConsistencyStatementSet,
     createSetupCeremonyAssembly,
+    createSetupPackageVerificationInput,
     createSetupPhaseRecord,
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssCoefficientCommitmentBundle,
+    deriveThresholdShareCommitments,
     type CollectiveBgvSetupContext,
     type EvaluatorKeySchedule,
     type GaloisKeyShareBatchContribution,
@@ -44,6 +56,7 @@ import {
     publicKeyShareCoefficientVectorHashDomain,
     publicKeyShareLnpProofModelStatus,
     publicKeyShareLnpProofVerificationStatus,
+    publicKeyShareMaterialTransportEncoding,
     sameSecretLnpProofModelStatus,
     sameSecretLnpProofVerificationStatus,
 } from '#packages/protocol/src/index';
@@ -58,9 +71,9 @@ import {
 } from '#tests/support/protocol-signature-fixtures';
 
 const qSharePrimes = [65_537, 114_689, 147_457] as const;
-const setupCommitmentModulusLimbs = qSharePrimes;
 const ringDegree = 2;
 const thresholdDegree = 2;
+const firstProfileThresholdDegree = 4;
 
 const fixtureHash = (label: string): string =>
     deriveProtocolHash('ActionContextHash', {
@@ -76,6 +89,28 @@ const jsonRecord = (value: unknown, label: string): JsonRecord => {
     }
 
     return value as JsonRecord;
+};
+
+const setupTransportCertificateTransportedObjects = (
+    setupPackage: Readonly<{ readonly setupTransportCertificate: unknown }>,
+): readonly JsonRecord[] => {
+    const setupTransportCertificate = jsonRecord(
+        setupPackage.setupTransportCertificate,
+        'setupTransportCertificate',
+    );
+    const transportedObjects = setupTransportCertificate.transportedObjects;
+    if (!Array.isArray(transportedObjects)) {
+        throw new Error(
+            'setupTransportCertificate.transportedObjects must be an array.',
+        );
+    }
+
+    return transportedObjects.map((transportedObject, transportedObjectIndex) =>
+        jsonRecord(
+            transportedObject,
+            `setupTransportCertificate.transportedObjects.${String(transportedObjectIndex)}`,
+        ),
+    );
 };
 
 const textEncoder = new TextEncoder();
@@ -101,6 +136,11 @@ const setupContext = {
     setupEpoch: 'setup-epoch-1',
 } satisfies CollectiveBgvSetupContext;
 
+const acceptedQShareSetupContext = {
+    ...setupContext,
+    qShareHash: acceptedBgvSetupQShareHash,
+} satisfies CollectiveBgvSetupContext;
+
 const requiredGaloisKeySchedule = [
     {
         rotation: 3,
@@ -116,16 +156,18 @@ const requiredGaloisKeySchedule = [
     },
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
-const setupProofBinding = {
+const setupProofBindingFixture = (
+    context: CollectiveBgvSetupContext,
+): JsonRecord => ({
     objectType: 'SetupCeremonyAssemblyProofBindingFixture',
     objectVersion: 1,
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    setupEpoch: setupContext.setupEpoch,
-} as const;
+    ceremonyId: context.ceremonyId,
+    manifestHash: context.manifestHash,
+    rosterHash: context.rosterHash,
+    setupProfileHash: context.setupProfileHash,
+    qShareHash: context.qShareHash,
+    setupEpoch: context.setupEpoch,
+});
 
 const sameSecretTboxParameterProfileHash = fixtureHash('same-secret-tbox');
 const publicKeyShareTboxParameterProfileHash = fixtureHash(
@@ -233,6 +275,108 @@ const proofBytes = (bytesHex: string): Uint8Array =>
         ),
     );
 
+const evaluationKeyCoefficientVectorBytes = (
+    coefficients: readonly number[],
+): Uint8Array => {
+    const bytes = new Uint8Array(coefficients.length * 8);
+    coefficients.forEach((coefficient, coefficientIndex) => {
+        let value = BigInt(coefficient);
+        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
+            bytes[coefficientIndex * 8 + byteIndex] = Number(value & 0xffn);
+            value >>= 8n;
+        }
+    });
+
+    return bytes;
+};
+
+const evaluationKeyCoefficientVectorLeHex = (
+    coefficients: readonly number[],
+): string =>
+    Array.from(evaluationKeyCoefficientVectorBytes(coefficients), (byte) =>
+        byte.toString(16).padStart(2, '0'),
+    ).join('');
+
+const evaluationKeyComponentVector = (
+    label: string,
+    digitIndex: number,
+    rnsLimbIndex: number,
+    applicationRingDegree = ringDegree,
+    qSharePrimeList: readonly number[] = qSharePrimes,
+): JsonRecord => {
+    const rnsPrime = qSharePrimeList[rnsLimbIndex];
+    const coefficients = Array.from(
+        { length: applicationRingDegree },
+        (_unused, coefficientIndex) =>
+            ((label.length + 1) * 31 +
+                digitIndex * 17 +
+                rnsLimbIndex * 11 +
+                coefficientIndex * 7) %
+            rnsPrime,
+    );
+    const coefficientBytes = evaluationKeyCoefficientVectorBytes(coefficients);
+
+    return {
+        digitIndex,
+        rnsLimbIndex,
+        rnsPrime,
+        component: 'b',
+        coefficientByteLength: coefficientBytes.byteLength,
+        coefficientVectorHash512: hash512Hex(
+            'sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1',
+            [coefficientBytes],
+        ),
+        coefficientsLeHex: evaluationKeyCoefficientVectorLeHex(coefficients),
+    };
+};
+
+const evaluationKeyComponentVectors = (
+    label: string,
+    level: number,
+    applicationRingDegree = ringDegree,
+    qSharePrimeList: readonly number[] = qSharePrimes,
+): readonly JsonRecord[] => {
+    const componentVectors: JsonRecord[] = [];
+    for (let digitIndex = 0; digitIndex <= level; digitIndex += 1) {
+        for (let rnsLimbIndex = 0; rnsLimbIndex <= level; rnsLimbIndex += 1) {
+            componentVectors.push(
+                evaluationKeyComponentVector(
+                    label,
+                    digitIndex,
+                    rnsLimbIndex,
+                    applicationRingDegree,
+                    qSharePrimeList,
+                ),
+            );
+        }
+    }
+
+    return componentVectors;
+};
+
+const evaluationKeyComponentVectorRoot = (
+    proofFamily: 'relinearization-key-share' | 'galois-key-share',
+    keySwitchDomain: string,
+    keySwitchSeedHex: string,
+    level: number,
+    componentVectors: readonly JsonRecord[],
+    applicationRingDegree = ringDegree,
+): string =>
+    deriveProtocolHash('EvaluationKeyShareComponentVectorRoot', {
+        objectType: 'EvaluationKeyShareComponentVectorSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        proofFamily,
+        keySwitchDomain,
+        keySwitchSeedHex,
+        level,
+        ringDegree: applicationRingDegree,
+        digitCount: level + 1,
+        rnsLimbCount: level + 1,
+        componentVectors,
+    });
+
 const sameSecretProofMaterial = (
     trusteeRosterPosition: number,
 ): SameSecretProofMaterial => {
@@ -292,6 +436,47 @@ const publicKeyShareLnpProofMaterial = (
             `public-key-lnp-proof-bytes-${String(trusteeRosterPosition)}`,
         ),
         proofBytesHex: proofMaterialBytesHex,
+    };
+};
+
+const embeddedProofMaterialBytesHex = (
+    material: SameSecretProofMaterial | PublicKeyShareLnpProofMaterial,
+): string => {
+    const embeddedMaterial = material as Readonly<{ proofBytesHex?: unknown }>;
+    if (typeof embeddedMaterial.proofBytesHex !== 'string') {
+        throw new Error('fixture proof material must contain proofBytesHex.');
+    }
+
+    return embeddedMaterial.proofBytesHex;
+};
+
+const hashBoundSameSecretProofMaterial = (
+    trusteeRosterPosition: number,
+): SameSecretProofMaterial => {
+    const material = sameSecretProofMaterial(trusteeRosterPosition);
+    const bytesHex = embeddedProofMaterialBytesHex(material);
+
+    return {
+        ...material,
+        proofBytesHash: hash512Hex(
+            'sealed-lattice/setup/same-secret/lnp-proof-bytes-v1',
+            [proofBytes(bytesHex)],
+        ),
+    };
+};
+
+const hashBoundPublicKeyShareProofMaterial = (
+    trusteeRosterPosition: number,
+): PublicKeyShareLnpProofMaterial => {
+    const material = publicKeyShareLnpProofMaterial(trusteeRosterPosition);
+    const bytesHex = embeddedProofMaterialBytesHex(material);
+
+    return {
+        ...material,
+        proofBytesHash: hash512Hex(
+            'sealed-lattice/setup/public-key-share/lnp-proof-bytes-v1',
+            [proofBytes(bytesHex)],
+        ),
     };
 };
 
@@ -499,34 +684,42 @@ const coefficientMessage = (
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
     rnsPrime: number,
+    applicationRingDegree = ringDegree,
 ): readonly number[] =>
-    Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
-        const value =
-            (sourceTrusteeRosterPosition + 1) * 31 +
-            (rnsLimbIndex + 1) * 17 +
-            (shamirCoefficientIndex + 1) * 7 +
-            coefficientIndex * 3;
+    Array.from(
+        { length: applicationRingDegree },
+        (_unused, coefficientIndex) => {
+            const value =
+                (sourceTrusteeRosterPosition + 1) * 31 +
+                (rnsLimbIndex + 1) * 17 +
+                (shamirCoefficientIndex + 1) * 7 +
+                coefficientIndex * 3;
 
-        return value % rnsPrime;
-    });
+            return value % rnsPrime;
+        },
+    );
 
 const randomnessByColumn = (
     sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
+    applicationRingDegree = ringDegree,
 ): readonly (readonly number[])[] =>
     Array.from({ length: 5 }, (_unusedColumn, randomnessColumnIndex) =>
-        Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
-            const selector =
-                (sourceTrusteeRosterPosition +
-                    rnsLimbIndex +
-                    shamirCoefficientIndex +
-                    randomnessColumnIndex +
-                    coefficientIndex) %
-                3;
+        Array.from(
+            { length: applicationRingDegree },
+            (_unused, coefficientIndex) => {
+                const selector =
+                    (sourceTrusteeRosterPosition +
+                        rnsLimbIndex +
+                        shamirCoefficientIndex +
+                        randomnessColumnIndex +
+                        coefficientIndex) %
+                    3;
 
-            return selector === 0 ? -1 : selector === 1 ? 0 : 1;
-        }),
+                return selector === 0 ? -1 : selector === 1 ? 0 : 1;
+            },
+        ),
     );
 
 const coefficientOpening = (
@@ -534,6 +727,7 @@ const coefficientOpening = (
     rnsPrime: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
+    applicationRingDegree = ringDegree,
 ): VssCoefficientOpeningInput => ({
     rnsLimbIndex,
     rnsPrime,
@@ -543,27 +737,36 @@ const coefficientOpening = (
         rnsLimbIndex,
         shamirCoefficientIndex,
         rnsPrime,
+        applicationRingDegree,
     ),
     randomnessByColumn: randomnessByColumn(
         sourceTrusteeRosterPosition,
         rnsLimbIndex,
         shamirCoefficientIndex,
+        applicationRingDegree,
     ),
 });
 
 const sourceTrusteeOpeningState = (
     sourceTrusteeRosterPosition: number,
+    applicationRingDegree = ringDegree,
+    applicationThresholdDegree = thresholdDegree,
+    qSharePrimeList: readonly number[] = qSharePrimes,
 ): VssSourceTrusteeCoefficientOpeningState => ({
     sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
     sourceTrusteeRosterPosition,
-    coefficientOpenings: qSharePrimes.flatMap((rnsPrime, rnsLimbIndex) =>
-        Array.from({ length: thresholdDegree }, (_unused, coefficientIndex) =>
-            coefficientOpening(
-                sourceTrusteeRosterPosition,
-                rnsPrime,
-                rnsLimbIndex,
-                coefficientIndex,
-            ),
+    coefficientOpenings: qSharePrimeList.flatMap((rnsPrime, rnsLimbIndex) =>
+        Array.from(
+            { length: applicationThresholdDegree },
+            (_unused, coefficientIndex) => {
+                return coefficientOpening(
+                    sourceTrusteeRosterPosition,
+                    rnsPrime,
+                    rnsLimbIndex,
+                    coefficientIndex,
+                    applicationRingDegree,
+                );
+            },
         ),
     ),
 });
@@ -616,34 +819,41 @@ const publicKeyShareCoefficients = (
     trusteeRosterPosition: number,
     rnsLimbIndex: number,
     rnsPrime: number,
+    applicationRingDegree = ringDegree,
 ): readonly number[] =>
-    Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
-        const value =
-            (trusteeRosterPosition + 1) * 101 +
-            (rnsLimbIndex + 1) * 29 +
-            coefficientIndex * 13;
+    Array.from(
+        { length: applicationRingDegree },
+        (_unused, coefficientIndex) => {
+            const value =
+                (trusteeRosterPosition + 1) * 101 +
+                (rnsLimbIndex + 1) * 29 +
+                coefficientIndex * 13;
 
-        return value % rnsPrime;
-    });
+            return value % rnsPrime;
+        },
+    );
 
 const publicKeyShareMaterialContribution = (
     trusteeRosterPosition: number,
+    applicationRingDegree = ringDegree,
+    qSharePrimeList: readonly number[] = qSharePrimes,
 ): PublicKeyShareMaterialContributionInput => ({
     trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
     trusteeRosterPosition,
-    shareCoefficientVectorsByLimb: qSharePrimes.map(
+    shareCoefficientVectorsByLimb: qSharePrimeList.map(
         (rnsPrime, rnsLimbIndex) => {
             const coefficients = publicKeyShareCoefficients(
                 trusteeRosterPosition,
                 rnsLimbIndex,
                 rnsPrime,
+                applicationRingDegree,
             );
 
             return {
                 rnsLimbIndex,
                 rnsPrime,
                 component: 'b_i',
-                coefficientByteLength: ringDegree * 8,
+                coefficientByteLength: applicationRingDegree * 8,
                 coefficientVectorHash512:
                     publicKeyShareCoefficientVectorHash(coefficients),
                 coefficientsLeHex: coefficientVectorLeHex(coefficients),
@@ -691,108 +901,152 @@ const galoisKeySwitchSeed = (
 
 const relinearizationProofMaterial = (
     evaluatorKeySchedule: EvaluatorKeySchedule,
-    shareRoot: string,
     label: string,
     round: 'round-one' | 'round-two',
     level: number,
-): RelinearizationKeyShareProofMaterial => ({
-    proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
-    setupProofBinding: {
-        objectType: 'SetupCeremonyAssemblyProofBindingFixture',
-        label,
-    },
-    keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
-    keySwitchDomain: 'relinearization',
-    keySwitchSeedHex: relinearizationKeySwitchSeed(
+    applicationRingDegree = ringDegree,
+    qSharePrimeList: readonly number[] = qSharePrimes,
+): RelinearizationKeyShareProofMaterial => {
+    const keySwitchDomain = 'relinearization';
+    const keySwitchSeedHex = relinearizationKeySwitchSeed(
         evaluatorKeySchedule,
         round,
         level,
-    ),
-    ringDegree,
-    keySwitchComponentVectorRoot: shareRoot,
-    keySwitchComponentVectors: [
-        {
-            component: 'b',
-            digitIndex: 0,
-            vectorHash: fixtureHash(`component-vector-${label}`),
+    );
+    const keySwitchComponentVectors = evaluationKeyComponentVectors(
+        `relinearization-${label}`,
+        level,
+        applicationRingDegree,
+        qSharePrimeList,
+    );
+    const proofMaterialBytesHex = '00112233';
+
+    return {
+        proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
+        setupProofBinding: {
+            objectType: 'SetupCeremonyAssemblyProofBindingFixture',
+            label,
         },
-    ],
-    relinearizationKeyShareTboxParameterProfileHash: fixtureHash(
-        `relinearization-tbox-${label}`,
-    ),
-    statementHash: fixtureHash(`statement-${label}`),
-    relationCommitmentHash: fixtureHash(`relation-commitment-${label}`),
-    tboxCommitmentPrefixHash: fixtureHash(`tbox-commitment-${label}`),
-    challenge: 17,
-    proofSizeBytes: 4,
-    proofBytesHash: fixtureHash(`proof-bytes-${label}`),
-    proofBytesHex: '00112233',
-});
+        keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
+        keySwitchDomain,
+        keySwitchSeedHex,
+        ringDegree: applicationRingDegree,
+        keySwitchComponentVectorRoot: evaluationKeyComponentVectorRoot(
+            'relinearization-key-share',
+            keySwitchDomain,
+            keySwitchSeedHex,
+            level,
+            keySwitchComponentVectors,
+            applicationRingDegree,
+        ),
+        keySwitchComponentVectors,
+        relinearizationKeyShareTboxParameterProfileHash: fixtureHash(
+            `relinearization-tbox-${label}`,
+        ),
+        statementHash: fixtureHash(`statement-${label}`),
+        relationCommitmentHash: fixtureHash(`relation-commitment-${label}`),
+        tboxCommitmentPrefixHash: fixtureHash(`tbox-commitment-${label}`),
+        challenge: 17,
+        proofSizeBytes: proofMaterialBytesHex.length / 2,
+        proofBytesHash: hash512Hex(
+            'sealed-lattice/setup/relinearization-key-share/lnp-proof-bytes-v1',
+            [proofBytes(proofMaterialBytesHex)],
+        ),
+        proofBytesHex: proofMaterialBytesHex,
+    };
+};
 
 const galoisProofMaterial = (
     evaluatorKeySchedule: EvaluatorKeySchedule,
-    shareRoot: string,
     label: string,
     rotation: number,
     level: number,
-): GaloisKeyShareProofMaterial => ({
-    proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1',
-    setupProofBinding: {
-        objectType: 'SetupCeremonyAssemblyProofBindingFixture',
-        label,
-    },
-    keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
-    keySwitchDomain: `galois-${String(rotation)}`,
-    keySwitchSeedHex: galoisKeySwitchSeed(
+    applicationRingDegree = ringDegree,
+    qSharePrimeList: readonly number[] = qSharePrimes,
+): GaloisKeyShareProofMaterial => {
+    const keySwitchDomain = `galois-${String(rotation)}`;
+    const keySwitchSeedHex = galoisKeySwitchSeed(
         evaluatorKeySchedule,
         rotation,
         level,
-    ),
-    ringDegree,
-    keySwitchComponentVectorRoot: shareRoot,
-    keySwitchComponentVectors: [
-        {
-            component: 'b',
-            digitIndex: 0,
-            vectorHash: fixtureHash(`galois-component-vector-${label}`),
+    );
+    const keySwitchComponentVectors = evaluationKeyComponentVectors(
+        `galois-${label}`,
+        level,
+        applicationRingDegree,
+        qSharePrimeList,
+    );
+    const proofMaterialBytesHex = '44556677';
+
+    return {
+        proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1',
+        setupProofBinding: {
+            objectType: 'SetupCeremonyAssemblyProofBindingFixture',
+            label,
         },
-    ],
-    galoisKeyShareTboxParameterProfileHash: fixtureHash(`galois-tbox-${label}`),
-    statementHash: fixtureHash(`galois-statement-${label}`),
-    relationCommitmentHash: fixtureHash(`galois-relation-commitment-${label}`),
-    tboxCommitmentPrefixHash: fixtureHash(`galois-tbox-commitment-${label}`),
-    challenge: 19,
-    proofSizeBytes: 4,
-    proofBytesHash: fixtureHash(`galois-proof-bytes-${label}`),
-    proofBytesHex: '44556677',
-});
+        keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
+        keySwitchDomain,
+        keySwitchSeedHex,
+        ringDegree: applicationRingDegree,
+        keySwitchComponentVectorRoot: evaluationKeyComponentVectorRoot(
+            'galois-key-share',
+            keySwitchDomain,
+            keySwitchSeedHex,
+            level,
+            keySwitchComponentVectors,
+            applicationRingDegree,
+        ),
+        keySwitchComponentVectors,
+        galoisKeyShareTboxParameterProfileHash: fixtureHash(
+            `galois-tbox-${label}`,
+        ),
+        statementHash: fixtureHash(`galois-statement-${label}`),
+        relationCommitmentHash: fixtureHash(
+            `galois-relation-commitment-${label}`,
+        ),
+        tboxCommitmentPrefixHash: fixtureHash(
+            `galois-tbox-commitment-${label}`,
+        ),
+        challenge: 19,
+        proofSizeBytes: proofMaterialBytesHex.length / 2,
+        proofBytesHash: hash512Hex(
+            'sealed-lattice/setup/galois-key-share/lnp-proof-bytes-v1',
+            [proofBytes(proofMaterialBytesHex)],
+        ),
+        proofBytesHex: proofMaterialBytesHex,
+    };
+};
 
 const evaluationKeyFixture = (
     participantCount: number,
     sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[],
     publicKeyShareContributions: readonly PublicKeyShareContributionInput[],
+    applicationRingDegree = ringDegree,
+    applicationThresholdDegree = thresholdDegree,
+    context: CollectiveBgvSetupContext = setupContext,
+    qSharePrimeList: readonly number[] = qSharePrimes,
 ): CeremonyEvaluationKeyFixture => {
     const vssCoefficientCommitmentBundle = createVssCoefficientCommitmentBundle(
         {
-            setupContext,
+            setupContext: context,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            qSharePrimes,
-            ringDegree,
+            qSharePrimes: qSharePrimeList,
+            ringDegree: applicationRingDegree,
             participantCount,
-            thresholdDegree,
+            thresholdDegree: applicationThresholdDegree,
             sourceTrusteeOpeningStates,
         },
     );
     const sameSecretConsistency = createSameSecretConsistencyStatementSet({
-        setupContext,
-        qSharePrimes,
+        setupContext: context,
+        qSharePrimes: qSharePrimeList,
         participantCount,
-        thresholdDegree,
+        thresholdDegree: applicationThresholdDegree,
         vssCoefficientCommitments: vssCoefficientCommitmentBundle.commitmentSet,
     });
     const publicKeyShares = createPublicKeyShareSet({
-        setupContext,
-        qSharePrimes,
+        setupContext: context,
+        qSharePrimes: qSharePrimeList,
         participantCount,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         publicKeyCrpRoot: fixtureHash('public-key-crp'),
@@ -801,8 +1055,8 @@ const evaluationKeyFixture = (
         shareContributions: publicKeyShareContributions,
     });
     const publicKeyShareProofs = createPublicKeyShareProofSet({
-        setupContext,
-        qSharePrimes,
+        setupContext: context,
+        qSharePrimes: qSharePrimeList,
         participantCount,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         publicKeyCrpRoot: fixtureHash('public-key-crp'),
@@ -811,8 +1065,8 @@ const evaluationKeyFixture = (
         publicKeyShares,
     });
     const evaluatorKeySchedule = createEvaluatorKeySchedule({
-        setupContext,
-        qSharePrimes,
+        setupContext: context,
+        qSharePrimes: qSharePrimeList,
         participantCount,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         relinearizationCrpRoot: fixtureHash('relinearization-crp'),
@@ -841,26 +1095,24 @@ const evaluationKeyFixture = (
             evaluatorKeySchedule.relinearizationLevelSchedule.flatMap(
                 (scheduleEntry) =>
                     sameSecretProofReferences.map((reference) => {
-                        const roundOneShareRoot = fixtureHash(
-                            `round-one-share-${String(
+                        const proofMaterial = relinearizationProofMaterial(
+                            evaluatorKeySchedule,
+                            `round-one-${String(
                                 reference.trusteeRosterPosition,
                             )}-${String(scheduleEntry.level)}`,
+                            'round-one',
+                            scheduleEntry.level,
+                            applicationRingDegree,
+                            qSharePrimeList,
                         );
 
                         return {
                             trusteeRosterPosition:
                                 reference.trusteeRosterPosition,
                             level: scheduleEntry.level,
-                            roundOneShareRoot,
-                            proofMaterial: relinearizationProofMaterial(
-                                evaluatorKeySchedule,
-                                roundOneShareRoot,
-                                `round-one-${String(
-                                    reference.trusteeRosterPosition,
-                                )}-${String(scheduleEntry.level)}`,
-                                'round-one',
-                                scheduleEntry.level,
-                            ),
+                            roundOneShareRoot:
+                                proofMaterial.keySwitchComponentVectorRoot,
+                            proofMaterial,
                         };
                     }),
             ),
@@ -868,26 +1120,24 @@ const evaluationKeyFixture = (
             evaluatorKeySchedule.relinearizationLevelSchedule.flatMap(
                 (scheduleEntry) =>
                     sameSecretProofReferences.map((reference) => {
-                        const roundTwoShareRoot = fixtureHash(
-                            `round-two-share-${String(
+                        const proofMaterial = relinearizationProofMaterial(
+                            evaluatorKeySchedule,
+                            `round-two-${String(
                                 reference.trusteeRosterPosition,
                             )}-${String(scheduleEntry.level)}`,
+                            'round-two',
+                            scheduleEntry.level,
+                            applicationRingDegree,
+                            qSharePrimeList,
                         );
 
                         return {
                             trusteeRosterPosition:
                                 reference.trusteeRosterPosition,
                             level: scheduleEntry.level,
-                            roundTwoShareRoot,
-                            proofMaterial: relinearizationProofMaterial(
-                                evaluatorKeySchedule,
-                                roundTwoShareRoot,
-                                `round-two-${String(
-                                    reference.trusteeRosterPosition,
-                                )}-${String(scheduleEntry.level)}`,
-                                'round-two',
-                                scheduleEntry.level,
-                            ),
+                            roundTwoShareRoot:
+                                proofMaterial.keySwitchComponentVectorRoot,
+                            proofMaterial,
                         };
                     }),
             ),
@@ -896,29 +1146,25 @@ const evaluationKeyFixture = (
                 trusteeRosterPosition: reference.trusteeRosterPosition,
                 galoisKeyShareProofs: requiredGaloisKeySchedule.map(
                     (scheduleEntry) => {
-                        const galoisKeyShareRoot = fixtureHash(
-                            `galois-share-${String(
+                        const proofMaterial = galoisProofMaterial(
+                            evaluatorKeySchedule,
+                            `${String(
                                 reference.trusteeRosterPosition,
                             )}-${String(scheduleEntry.rotation)}-${String(
                                 scheduleEntry.level,
                             )}`,
+                            scheduleEntry.rotation,
+                            scheduleEntry.level,
+                            applicationRingDegree,
+                            qSharePrimeList,
                         );
 
                         return {
                             rotation: scheduleEntry.rotation,
                             level: scheduleEntry.level,
-                            galoisKeyShareRoot,
-                            proofMaterial: galoisProofMaterial(
-                                evaluatorKeySchedule,
-                                galoisKeyShareRoot,
-                                `${String(
-                                    reference.trusteeRosterPosition,
-                                )}-${String(scheduleEntry.rotation)}-${String(
-                                    scheduleEntry.level,
-                                )}`,
-                                scheduleEntry.rotation,
-                                scheduleEntry.level,
-                            ),
+                            galoisKeyShareRoot:
+                                proofMaterial.keySwitchComponentVectorRoot,
+                            proofMaterial,
                         };
                     },
                 ),
@@ -937,18 +1183,19 @@ const phaseParticipantObjectFixture = (
     }>,
     phaseId: string,
     phaseNumber: number,
+    context: CollectiveBgvSetupContext = setupContext,
 ): SetupPhaseParticipantObject =>
     ({
         objectType: 'SetupPhaseParticipantObject',
         objectVersion: 1,
         phaseId,
         phaseNumber,
-        ceremonyId: setupContext.ceremonyId,
-        manifestHash: setupContext.manifestHash,
-        rosterHash: setupContext.rosterHash,
-        setupProfileHash: setupContext.setupProfileHash,
-        commitmentProfileHash: setupContext.commitmentProfileHash,
-        setupEpoch: setupContext.setupEpoch,
+        ceremonyId: context.ceremonyId,
+        manifestHash: context.manifestHash,
+        rosterHash: context.rosterHash,
+        setupProfileHash: context.setupProfileHash,
+        commitmentProfileHash: context.commitmentProfileHash,
+        setupEpoch: context.setupEpoch,
         signerRole: 'Trustee',
         trusteeIdentity: trustee.trusteeIdentity,
         rosterPosition: trustee.trusteeRosterPosition,
@@ -978,12 +1225,13 @@ const phaseParticipantObjectFixture = (
 
 const phaseTranscriptFixture = (
     trustees: readonly SetupCeremonyTrusteeInput[],
+    context: CollectiveBgvSetupContext = setupContext,
 ): readonly SetupPhaseRecord[] => {
     let previousPhaseRoot: string | null = null;
 
     return setupPhaseOrder.map(([phaseId, phaseNumber]) => {
         const phaseRecord = createSetupPhaseRecord({
-            setupContext,
+            setupContext: context,
             phaseId,
             phaseNumber,
             previousPhaseRoot,
@@ -1007,12 +1255,44 @@ const phaseTranscriptFixture = (
     });
 };
 
-const commonRandomnessFixture = (): SetupCommonRandomness => {
+const commonRandomnessFixture = (
+    context: CollectiveBgvSetupContext = setupContext,
+): SetupCommonRandomness => {
+    const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
     const publicDerivationsWithoutRoot = {
         objectType: 'SetupPublicDerivations',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
-        publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+        publicMatrixSeedHash,
+        bgvPublicA: {
+            objectType: 'BgvPublicAPolynomial',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            publicMatrixSeedHash,
+            publicPolynomialRoot: fixtureHash('public-a-polynomial'),
+        },
+        publicMatrices: {
+            objectType: 'SetupPublicMatrixMaterial',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            publicMatrixSeedHash,
+            commitmentMatrix: {
+                matrixRoot: fixtureHash('commitment-matrix'),
+            },
+            setupProofMatrix: {
+                matrixRoot: fixtureHash('setup-proof-matrix'),
+            },
+            materializationStatus: 'deterministic-entry-streams-bound',
+            publicMatricesRoot: fixtureHash('public-matrices'),
+        },
+        crpRoots: {
+            publicKeyCrpRoot: fixtureHash('public-key-crp'),
+            relinearizationCrpRoot: fixtureHash('relinearization-crp'),
+            galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
+            commitmentMatrixCrpRoot: fixtureHash('commitment-matrix-crp'),
+            proofMatrixCrpRoot: fixtureHash('proof-matrix-crp'),
+        },
+        status: 'deterministic-public-derivations-bound',
     } as const;
     const publicDerivations = {
         ...publicDerivationsWithoutRoot,
@@ -1024,14 +1304,14 @@ const commonRandomnessFixture = (): SetupCommonRandomness => {
     const commonRandomnessWithoutRoot = {
         objectType: 'SetupCommonRandomness',
         objectVersion: 1,
-        ceremonyId: setupContext.ceremonyId,
-        manifestHash: setupContext.manifestHash,
-        rosterHash: setupContext.rosterHash,
-        setupProfileHash: setupContext.setupProfileHash,
-        setupEpoch: setupContext.setupEpoch,
+        ceremonyId: context.ceremonyId,
+        manifestHash: context.manifestHash,
+        rosterHash: context.rosterHash,
+        setupProfileHash: context.setupProfileHash,
+        setupEpoch: context.setupEpoch,
         commitRecords: [],
         revealRecords: [],
-        publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+        publicMatrixSeedHash,
         publicDerivations,
     } as const;
 
@@ -1114,12 +1394,17 @@ const setupProofSampledDifferenceChecks = (): Record<string, unknown>[] => {
 const setupCertificateInputFixture = (
     participantCount: number,
     fullMaterialCoefficientBytes = 1,
+    applicationRingDegree = ringDegree,
+    applicationThresholdDegree = thresholdDegree,
+    context: CollectiveBgvSetupContext = setupContext,
+    qShareRecord: SetupCeremonyAssemblyInput['qShare'] = qShare,
+    qSharePrimeList: readonly number[] = qSharePrimes,
 ): SetupPackageCertificateInput => {
     const commitmentProfile = {
         objectType: 'SetupCommitmentProfile',
         objectVersion: 1,
         messageEncoding: {
-            commitmentModulusLimbs: setupCommitmentModulusLimbs,
+            commitmentModulusLimbs: qSharePrimeList,
         },
     };
     const setupProofProfile = {
@@ -1129,7 +1414,7 @@ const setupCertificateInputFixture = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         proofSystem: 'fixed-lnp-linear-relation-subset',
         relationModel: {
-            applicationRingDegree: ringDegree,
+            applicationRingDegree,
         },
         challengeBinding: {
             transform: 'Fiat-Shamir',
@@ -1151,8 +1436,7 @@ const setupCertificateInputFixture = (
                 setupProofChallengeDifferenceInvertibilityStatus,
             challengeDifferenceInvertibilityAccounting:
                 setupProofChallengeDifferenceInvertibilityAccounting,
-            qromStatus:
-                'repo-owned-qrom-accounting-required-before-claim-closure',
+            qromStatus: 'qrom-reduction-theorem-accepted-for-setup-proof-claim',
             transcriptBinding: [
                 'setupProfileHash',
                 'manifestHash',
@@ -1169,7 +1453,7 @@ const setupCertificateInputFixture = (
             objectVersion: 1,
             setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
             proofFamilies: setupProofFamilies,
-            applicationRingDegree: ringDegree,
+            applicationRingDegree,
             lnpTboxProofRingDegree: 128,
             challengeCoefficientBound: 2,
             lnpTboxChallengeLog2Range: 3,
@@ -1218,13 +1502,13 @@ const setupCertificateInputFixture = (
         objectType: 'CollectiveBgvSetupProfile',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProfileHash: setupContext.setupProfileHash,
+        setupProfileHash: context.setupProfileHash,
         participantCount,
-        qDec: thresholdDegree,
-        qShare,
-        qShareHash: setupContext.qShareHash,
+        qDec: applicationThresholdDegree,
+        qShare: qShareRecord,
+        qShareHash: context.qShareHash,
         carryAwareVssShareRelationProfileHash:
-            setupContext.carryAwareVssShareRelationProfileHash,
+            context.carryAwareVssShareRelationProfileHash,
         commitmentProfile,
         commitmentProfileHash: deriveProtocolHash(
             'SetupCommitmentProfileHash',
@@ -1258,11 +1542,11 @@ const setupCertificateInputFixture = (
             profile: {
                 profileId: 'fixture-bgv-profile',
                 backendProfileId: 'fixture-bgv-backend',
-                polynomialDegree: ringDegree,
+                polynomialDegree: applicationRingDegree,
                 plaintextModulus: 65_537,
                 dataBasisId: 'fixture-data-basis',
-                dataPrimes: qSharePrimes,
-                specialPrime: 147_457,
+                dataPrimes: qSharePrimeList,
+                specialPrime: qSharePrimeList[qSharePrimeList.length - 1],
             },
             securityEstimatorInputHash: fixtureHash('security-estimator-input'),
         },
@@ -1275,6 +1559,7 @@ const setupCertificateInputFixture = (
 
 const createTrusteeInput = (
     trusteeRosterPosition: number,
+    context: CollectiveBgvSetupContext = setupContext,
 ): SetupCeremonyTrusteeInput => {
     const mailboxKeyPair = createPrivateVssMailboxKeyPair(
         fixtureHash(`mailbox-key-${String(trusteeRosterPosition)}`),
@@ -1324,18 +1609,40 @@ const createTrusteeInput = (
                     trusteeWithoutPhaseObjects,
                     phaseId,
                     phaseNumber,
+                    context,
                 ),
         ),
     };
 };
 
+type AssemblyInputFixtureOptions = Readonly<{
+    readonly setupContext?: CollectiveBgvSetupContext;
+    readonly qShare?: SetupCeremonyAssemblyInput['qShare'];
+    readonly qSharePrimes?: readonly number[];
+    readonly setupProofBinding?: SetupCeremonyAssemblyInput['setupProofBinding'];
+}>;
+
 const createAssemblyInput = (
     participantCount: number,
     kernel: PrivateVssMailboxDeliveryKernel,
+    applicationRingDegree = ringDegree,
+    applicationThresholdDegree = thresholdDegree,
+    options: AssemblyInputFixtureOptions = {},
 ): SetupCeremonyAssemblyInput => {
+    const fixtureSetupContext = options.setupContext ?? setupContext;
+    const fixtureQShare = options.qShare ?? qShare;
+    const fixtureQSharePrimes = options.qSharePrimes ?? qSharePrimes;
+    const fixtureSetupProofBinding =
+        options.setupProofBinding ??
+        setupProofBindingFixture(fixtureSetupContext);
     const publicKeyShareMaterialContributions = Array.from(
         { length: participantCount },
-        (_unused, position) => publicKeyShareMaterialContribution(position),
+        (_unused, position) =>
+            publicKeyShareMaterialContribution(
+                position,
+                applicationRingDegree,
+                fixtureQSharePrimes,
+            ),
     );
     const publicKeyShareContributions = publicKeyShareMaterialContributions.map(
         (materialContribution) =>
@@ -1343,29 +1650,40 @@ const createAssemblyInput = (
     );
     const sourceTrusteeOpeningStates = Array.from(
         { length: participantCount },
-        (_unused, position) => sourceTrusteeOpeningState(position),
+        (_unused, position) =>
+            sourceTrusteeOpeningState(
+                position,
+                applicationRingDegree,
+                applicationThresholdDegree,
+                fixtureQSharePrimes,
+            ),
     );
     const evaluationKeyInputs = evaluationKeyFixture(
         participantCount,
         sourceTrusteeOpeningStates,
         publicKeyShareContributions,
+        applicationRingDegree,
+        applicationThresholdDegree,
+        fixtureSetupContext,
+        fixtureQSharePrimes,
     );
     const trustees = Array.from(
         { length: participantCount },
-        (_unused, position) => createTrusteeInput(position),
+        (_unused, position) =>
+            createTrusteeInput(position, fixtureSetupContext),
     );
 
     return {
         kernel,
-        setupContext,
-        qShare,
-        phaseTranscript: phaseTranscriptFixture(trustees),
-        commonRandomness: commonRandomnessFixture(),
+        setupContext: fixtureSetupContext,
+        qShare: fixtureQShare,
+        phaseTranscript: phaseTranscriptFixture(trustees, fixtureSetupContext),
+        commonRandomness: commonRandomnessFixture(fixtureSetupContext),
         phaseOrderHash: fixtureHash('phase-order'),
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         publicKeyCrpRoot: fixtureHash('public-key-crp'),
         publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-        setupProofBinding,
+        setupProofBinding: fixtureSetupProofBinding,
         sameSecretTboxParameterProfileHash,
         sameSecretProofMaterials: Array.from(
             { length: participantCount },
@@ -1386,10 +1704,18 @@ const createAssemblyInput = (
             evaluationKeyInputs.relinearizationRoundTwoContributions,
         galoisKeyShareBatchContributions:
             evaluationKeyInputs.galoisKeyShareBatchContributions,
-        setupCertificateInput: setupCertificateInputFixture(participantCount),
-        qSharePrimes,
-        ringDegree,
-        thresholdDegree,
+        setupCertificateInput: setupCertificateInputFixture(
+            participantCount,
+            1,
+            applicationRingDegree,
+            applicationThresholdDegree,
+            fixtureSetupContext,
+            fixtureQShare,
+            fixtureQSharePrimes,
+        ),
+        qSharePrimes: fixtureQSharePrimes,
+        ringDegree: applicationRingDegree,
+        thresholdDegree: applicationThresholdDegree,
         trustees,
         sourceTrusteeOpeningStates,
         deliveryPhaseNumber: 6,
@@ -1398,28 +1724,1284 @@ const createAssemblyInput = (
     };
 };
 
+const createAcceptedQShareAssemblyInput = (
+    participantCount: number,
+    kernel: PrivateVssMailboxDeliveryKernel,
+    applicationRingDegree = ringDegree,
+    applicationThresholdDegree = firstProfileThresholdDegree,
+): SetupCeremonyAssemblyInput =>
+    createAssemblyInput(
+        participantCount,
+        kernel,
+        applicationRingDegree,
+        applicationThresholdDegree,
+        {
+            setupContext: acceptedQShareSetupContext,
+            qShare: acceptedBgvSetupQShare,
+            qSharePrimes: acceptedBgvSetupQSharePrimes,
+        },
+    );
+
+const sameSecretProofReferencesFixture = (
+    participantCount: number,
+): readonly {
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+}[] =>
+    Array.from({ length: participantCount }, (_unused, trusteeIndex) => ({
+        trusteeIdentity: `trustee-${String(trusteeIndex)}`,
+        trusteeRosterPosition: trusteeIndex,
+    }));
+
 const binaryVssMaterialByteLengthForInput = (
     input: SetupCeremonyAssemblyInput,
 ): number => {
-    const commitmentBundle = createVssCoefficientCommitmentBundle({
-        setupContext: input.setupContext,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        qSharePrimes: input.qSharePrimes,
-        ringDegree: input.ringDegree,
+    return binaryVssCoefficientCommitmentMaterialByteLength({
         participantCount: input.trustees.length,
         thresholdDegree: input.thresholdDegree,
-        sourceTrusteeOpeningStates: input.sourceTrusteeOpeningStates,
+        rnsLimbCount: input.qSharePrimes.length,
+        ringDegree: input.ringDegree,
     });
-    const transport =
-        createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
-            commitmentBundle.materialSet,
-        );
-
-    return transport.transportedVssCoefficientCommitmentMaterial
-        .totalByteLength;
 };
 
 describe('setup ceremony assembly', () => {
+    it('creates transported setup proof material for same-secret and public-key-share proofs', () => {
+        const participantCount = 3;
+        const sameSecretProofMaterials = Array.from(
+            { length: participantCount },
+            (_unused, position) => hashBoundSameSecretProofMaterial(position),
+        );
+        const publicKeyShareProofMaterials = Array.from(
+            { length: participantCount },
+            (_unused, position) =>
+                hashBoundPublicKeyShareProofMaterial(position),
+        );
+
+        expect(() =>
+            createBinaryChunkedSameSecretProofMaterialTransport([
+                sameSecretProofMaterial(0),
+            ]),
+        ).toThrow('proofBytesHash must match proofBytesHex before transport');
+        const sameSecretTransport =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                sameSecretProofMaterials,
+            );
+        const publicKeyShareTransport =
+            createBinaryChunkedPublicKeyShareProofMaterialTransport(
+                publicKeyShareProofMaterials,
+            );
+
+        expect(
+            sameSecretTransport.transportedSameSecretProofMaterial,
+        ).toMatchObject({
+            objectType: 'SetupTransportedSameSecretProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamily: 'same-secret-consistency',
+        });
+        expect(
+            publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+        ).toMatchObject({
+            objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamily: 'public-key-share',
+        });
+        sameSecretTransport.proofMaterials.forEach(
+            (proofMaterial, proofIndex) => {
+                const proofMaterialRecord = jsonRecord(
+                    proofMaterial,
+                    'sameSecretTransport.proofMaterials',
+                );
+                const transportedMaterialRecord = jsonRecord(
+                    sameSecretTransport.transportedSameSecretProofMaterial
+                        .proofMaterials[proofIndex],
+                    'transportedSameSecretProofMaterial.proofMaterials',
+                );
+                expect(proofMaterialRecord.proofBytesHex).toBeUndefined();
+                expect(proofMaterialRecord.proofBytesEncoding).toBe(
+                    'binary-chunked-proof-bytes',
+                );
+                expect(proofMaterialRecord.proofTotalByteLength).toBe(
+                    proofMaterial.proofSizeBytes,
+                );
+                expect(proofMaterialRecord.proofMaterialRoot).toBe(
+                    transportedMaterialRecord.proofMaterialRoot,
+                );
+                expect(proofMaterialRecord.proofFullObjectHash).toBe(
+                    transportedMaterialRecord.fullObjectHash,
+                );
+                expect(proofMaterialRecord.proofChunkRoot).toBe(
+                    transportedMaterialRecord.chunkRoot,
+                );
+                expect(proofMaterialRecord.proofChunkHashes).toEqual(
+                    transportedMaterialRecord.chunkHashes,
+                );
+                expect(transportedMaterialRecord.chunks).toEqual([
+                    {
+                        chunkIndex: 0,
+                        bytesHex: embeddedProofMaterialBytesHex(
+                            sameSecretProofMaterials[proofIndex],
+                        ),
+                    },
+                ]);
+            },
+        );
+        publicKeyShareTransport.proofMaterials.forEach(
+            (proofMaterial, proofIndex) => {
+                const proofMaterialRecord = jsonRecord(
+                    proofMaterial,
+                    'publicKeyShareTransport.proofMaterials',
+                );
+                const transportedMaterialRecord = jsonRecord(
+                    publicKeyShareTransport
+                        .transportedPublicKeyShareProofMaterial.proofMaterials[
+                        proofIndex
+                    ],
+                    'transportedPublicKeyShareProofMaterial.proofMaterials',
+                );
+                expect(proofMaterialRecord.proofBytesHex).toBeUndefined();
+                expect(proofMaterialRecord.proofBytesEncoding).toBe(
+                    'binary-chunked-proof-bytes',
+                );
+                expect(proofMaterialRecord.proofTotalByteLength).toBe(
+                    proofMaterial.proofSizeBytes,
+                );
+                expect(proofMaterialRecord.proofMaterialRoot).toBe(
+                    transportedMaterialRecord.proofMaterialRoot,
+                );
+                expect(proofMaterialRecord.proofFullObjectHash).toBe(
+                    transportedMaterialRecord.fullObjectHash,
+                );
+                expect(proofMaterialRecord.proofChunkRoot).toBe(
+                    transportedMaterialRecord.chunkRoot,
+                );
+                expect(proofMaterialRecord.proofChunkHashes).toEqual(
+                    transportedMaterialRecord.chunkHashes,
+                );
+                expect(transportedMaterialRecord.chunks).toEqual([
+                    {
+                        chunkIndex: 0,
+                        bytesHex: embeddedProofMaterialBytesHex(
+                            publicKeyShareProofMaterials[proofIndex],
+                        ),
+                    },
+                ]);
+            },
+        );
+    });
+
+    it('creates transported evaluation-key proof and component material companions', () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+
+        const transport =
+            createBinaryChunkedEvaluationKeyShareMaterialTransport({
+                sameSecretProofReferences:
+                    sameSecretProofReferencesFixture(participantCount),
+                relinearizationRoundOneContributions:
+                    input.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    input.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    input.galoisKeyShareBatchContributions,
+            });
+
+        const transportedProofSet =
+            transport.transportedEvaluationKeyShareProofMaterial;
+        const transportedComponentSet =
+            transport.transportedEvaluationKeyShareComponentMaterial;
+        expect(transportedProofSet).toMatchObject({
+            objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamily: 'evaluation-key-share',
+        });
+        expect(transportedComponentSet).toMatchObject({
+            objectType:
+                'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        });
+        const expectedProofMaterialCount =
+            input.relinearizationRoundOneContributions.length +
+            input.relinearizationRoundTwoContributions.length +
+            input.galoisKeyShareBatchContributions.reduce(
+                (proofCount, batchContribution) =>
+                    proofCount + batchContribution.galoisKeyShareProofs.length,
+                0,
+            );
+        expect(transportedProofSet.proofMaterials).toHaveLength(
+            expectedProofMaterialCount,
+        );
+        expect(transportedComponentSet.componentMaterials).toHaveLength(
+            expectedProofMaterialCount,
+        );
+        const transportedProofRoots = new Set(
+            transportedProofSet.proofMaterials.map(
+                (proofMaterial) =>
+                    jsonRecord(proofMaterial, 'proofMaterial')
+                        .proofMaterialRoot,
+            ),
+        );
+        const transportedComponentRoots = new Set(
+            transportedComponentSet.componentMaterials.map(
+                (componentMaterial) =>
+                    jsonRecord(componentMaterial, 'componentMaterial')
+                        .keySwitchComponentMaterialRoot,
+            ),
+        );
+        for (const contribution of [
+            ...transport.relinearizationRoundOneContributions,
+            ...transport.relinearizationRoundTwoContributions,
+        ]) {
+            const proofMaterial = jsonRecord(
+                contribution.proofMaterial,
+                'relinearization proof material',
+            );
+            expect(proofMaterial.proofBytesHex).toBeUndefined();
+            expect(proofMaterial.keySwitchComponentVectors).toBeUndefined();
+            expect(proofMaterial.proofBytesEncoding).toBe(
+                'binary-chunked-proof-bytes',
+            );
+            expect(proofMaterial.keySwitchMaterialEncoding).toBe(
+                'binary-chunked-key-switch-component-vectors',
+            );
+            expect(
+                transportedProofRoots.has(proofMaterial.proofMaterialRoot),
+            ).toBe(true);
+            expect(
+                transportedComponentRoots.has(
+                    proofMaterial.keySwitchComponentMaterialRoot,
+                ),
+            ).toBe(true);
+        }
+        for (const batchContribution of transport.galoisKeyShareBatchContributions) {
+            for (const proofContribution of batchContribution.galoisKeyShareProofs) {
+                const proofMaterial = jsonRecord(
+                    proofContribution.proofMaterial,
+                    'Galois proof material',
+                );
+                expect(proofMaterial.proofBytesHex).toBeUndefined();
+                expect(proofMaterial.keySwitchComponentVectors).toBeUndefined();
+                expect(proofMaterial.proofBytesEncoding).toBe(
+                    'binary-chunked-proof-bytes',
+                );
+                expect(proofMaterial.keySwitchMaterialEncoding).toBe(
+                    'binary-chunked-key-switch-component-vectors',
+                );
+                expect(
+                    transportedProofRoots.has(proofMaterial.proofMaterialRoot),
+                ).toBe(true);
+                expect(
+                    transportedComponentRoots.has(
+                        proofMaterial.keySwitchComponentMaterialRoot,
+                    ),
+                ).toBe(true);
+            }
+        }
+        const firstProofMaterial = jsonRecord(
+            transportedProofSet.proofMaterials[0],
+            'transported evaluation-key proof material',
+        );
+        expect(firstProofMaterial.proofFullObjectHash).toMatch(
+            /^[0-9a-f]{128}$/u,
+        );
+        expect(firstProofMaterial.fullObjectHash).toBeUndefined();
+        const firstComponentMaterial = jsonRecord(
+            transportedComponentSet.componentMaterials[0],
+            'transported evaluation-key component material',
+        );
+        const firstComponentChunk = jsonRecord(
+            (firstComponentMaterial.chunks as readonly JsonRecord[])[0],
+            'transported evaluation-key component chunk',
+        );
+        expect(firstComponentChunk.bytesHex).toMatch(/^534c454b434d5631/u);
+    });
+
+    it('assembles transported evaluation-key proof records with material companions', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const transport =
+            createBinaryChunkedEvaluationKeyShareMaterialTransport({
+                sameSecretProofReferences:
+                    sameSecretProofReferencesFixture(participantCount),
+                relinearizationRoundOneContributions:
+                    input.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    input.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    input.galoisKeyShareBatchContributions,
+            });
+
+        const assembly = await createSetupCeremonyAssembly({
+            ...input,
+            relinearizationRoundOneContributions:
+                transport.relinearizationRoundOneContributions,
+            relinearizationRoundTwoContributions:
+                transport.relinearizationRoundTwoContributions,
+            galoisKeyShareBatchContributions:
+                transport.galoisKeyShareBatchContributions,
+            transportedEvaluationKeyShareProofMaterial:
+                transport.transportedEvaluationKeyShareProofMaterial,
+            transportedEvaluationKeyShareComponentMaterial:
+                transport.transportedEvaluationKeyShareComponentMaterial,
+        });
+
+        expect(assembly.transportedEvaluationKeyShareProofMaterial).toBe(
+            transport.transportedEvaluationKeyShareProofMaterial,
+        );
+        expect(assembly.transportedEvaluationKeyShareComponentMaterial).toBe(
+            transport.transportedEvaluationKeyShareComponentMaterial,
+        );
+        const setupTransportedObjects =
+            setupTransportCertificateTransportedObjects(assembly.setupPackage);
+        transport.transportedEvaluationKeyShareProofMaterial.proofMaterials.forEach(
+            (transportedProofMaterial) => {
+                const transportedProofMaterialRecord = jsonRecord(
+                    transportedProofMaterial,
+                    'transported evaluation-key proof material',
+                );
+                expect(setupTransportedObjects).toEqual(
+                    expect.arrayContaining([
+                        expect.objectContaining({
+                            objectName: 'evaluationKeyShareProofMaterial',
+                            objectRole: 'evaluation-key-share-proof-material',
+                            objectRoot:
+                                transportedProofMaterialRecord.proofMaterialRoot,
+                            byteLength:
+                                transportedProofMaterialRecord.proofTotalByteLength,
+                            fullObjectHash:
+                                transportedProofMaterialRecord.proofFullObjectHash,
+                            chunkRoot:
+                                transportedProofMaterialRecord.proofChunkRoot,
+                            chunkHashes:
+                                transportedProofMaterialRecord.proofChunkHashes,
+                        }),
+                    ]),
+                );
+            },
+        );
+        transport.transportedEvaluationKeyShareComponentMaterial.componentMaterials.forEach(
+            (transportedComponentMaterial) => {
+                const transportedComponentMaterialRecord = jsonRecord(
+                    transportedComponentMaterial,
+                    'transported evaluation-key component material',
+                );
+                expect(setupTransportedObjects).toEqual(
+                    expect.arrayContaining([
+                        expect.objectContaining({
+                            objectName: 'evaluationKeyShareComponentMaterial',
+                            objectRole:
+                                'evaluation-key-share-component-material',
+                            objectRoot:
+                                transportedComponentMaterialRecord.keySwitchComponentMaterialRoot,
+                            byteLength:
+                                transportedComponentMaterialRecord.totalByteLength,
+                            fullObjectHash:
+                                transportedComponentMaterialRecord.fullObjectHash,
+                            chunkRoot:
+                                transportedComponentMaterialRecord.chunkRoot,
+                            chunkHashes:
+                                transportedComponentMaterialRecord.chunkHashes,
+                        }),
+                    ]),
+                );
+            },
+        );
+        expect(
+            assembly.relinearizationKeyShareRounds.roundOneRecords.every(
+                (record) =>
+                    !('proofBytesHex' in record) &&
+                    !('keySwitchComponentVectors' in record) &&
+                    record.proofBytesEncoding ===
+                        'binary-chunked-proof-bytes' &&
+                    record.keySwitchMaterialEncoding ===
+                        'binary-chunked-key-switch-component-vectors',
+            ),
+        ).toBe(true);
+        expect(
+            assembly.galoisKeyShareBatches.every((batch) =>
+                batch.galoisKeyShareProofs.every(
+                    (proofRecord) =>
+                        !('proofBytesHex' in proofRecord) &&
+                        !('keySwitchComponentVectors' in proofRecord) &&
+                        proofRecord.proofBytesEncoding ===
+                            'binary-chunked-proof-bytes' &&
+                        proofRecord.keySwitchMaterialEncoding ===
+                            'binary-chunked-key-switch-component-vectors',
+                ),
+            ),
+        ).toBe(true);
+    });
+
+    it('assembles root-referenced setup proof records with transported proof material companions', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const sameSecretTransport =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundSameSecretProofMaterial(position),
+                ),
+            );
+        const publicKeyShareTransport =
+            createBinaryChunkedPublicKeyShareProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundPublicKeyShareProofMaterial(position),
+                ),
+            );
+
+        const assembly = await createSetupCeremonyAssembly({
+            ...input,
+            sameSecretProofMaterials: sameSecretTransport.proofMaterials,
+            transportedSameSecretProofMaterial:
+                sameSecretTransport.transportedSameSecretProofMaterial,
+            publicKeyShareLnpProofMaterials:
+                publicKeyShareTransport.proofMaterials,
+            transportedPublicKeyShareProofMaterial:
+                publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+        });
+
+        expect(assembly.transportedSameSecretProofMaterial).toBe(
+            sameSecretTransport.transportedSameSecretProofMaterial,
+        );
+        expect(assembly.transportedPublicKeyShareProofMaterial).toBe(
+            publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+        );
+        const setupTransportedObjects =
+            setupTransportCertificateTransportedObjects(assembly.setupPackage);
+        sameSecretTransport.transportedSameSecretProofMaterial.proofMaterials.forEach(
+            (transportedProofMaterial) => {
+                const transportedProofMaterialRecord = jsonRecord(
+                    transportedProofMaterial,
+                    'transported same-secret proof material',
+                );
+                expect(setupTransportedObjects).toEqual(
+                    expect.arrayContaining([
+                        expect.objectContaining({
+                            objectName: 'sameSecretProofMaterial',
+                            objectRole: 'same-secret-proof-material',
+                            objectRoot:
+                                transportedProofMaterialRecord.proofMaterialRoot,
+                            byteLength:
+                                transportedProofMaterialRecord.totalByteLength,
+                            fullObjectHash:
+                                transportedProofMaterialRecord.fullObjectHash,
+                            chunkRoot: transportedProofMaterialRecord.chunkRoot,
+                            chunkHashes:
+                                transportedProofMaterialRecord.chunkHashes,
+                        }),
+                    ]),
+                );
+            },
+        );
+        publicKeyShareTransport.transportedPublicKeyShareProofMaterial.proofMaterials.forEach(
+            (transportedProofMaterial) => {
+                const transportedProofMaterialRecord = jsonRecord(
+                    transportedProofMaterial,
+                    'transported public-key proof material',
+                );
+                expect(setupTransportedObjects).toEqual(
+                    expect.arrayContaining([
+                        expect.objectContaining({
+                            objectName: 'publicKeyShareProofMaterial',
+                            objectRole: 'public-key-share-proof-material',
+                            objectRoot:
+                                transportedProofMaterialRecord.proofMaterialRoot,
+                            byteLength:
+                                transportedProofMaterialRecord.totalByteLength,
+                            fullObjectHash:
+                                transportedProofMaterialRecord.fullObjectHash,
+                            chunkRoot: transportedProofMaterialRecord.chunkRoot,
+                            chunkHashes:
+                                transportedProofMaterialRecord.chunkHashes,
+                        }),
+                    ]),
+                );
+            },
+        );
+        sameSecretTransport.proofMaterials.forEach(
+            (proofMaterial, proofIndex) => {
+                const proofRecord = jsonRecord(
+                    assembly.sameSecretProofs.proofRecords[proofIndex],
+                    'sameSecretProofRecord',
+                );
+                expect(proofRecord.proofMaterialRoot).toBe(
+                    jsonRecord(proofMaterial, 'sameSecretProofMaterial')
+                        .proofMaterialRoot,
+                );
+                expect(proofRecord.proofBytesEncoding).toBe(
+                    'binary-chunked-proof-bytes',
+                );
+                expect(proofRecord).not.toHaveProperty('proofBytesHex');
+            },
+        );
+        publicKeyShareTransport.proofMaterials.forEach(
+            (proofMaterial, proofIndex) => {
+                const proofRecord = jsonRecord(
+                    assembly.publicKeyShareLnpProofs.proofRecords[proofIndex],
+                    'publicKeyShareLnpProofRecord',
+                );
+                expect(proofRecord.proofMaterialRoot).toBe(
+                    jsonRecord(proofMaterial, 'publicKeyShareProofMaterial')
+                        .proofMaterialRoot,
+                );
+                expect(proofRecord.proofBytesEncoding).toBe(
+                    'binary-chunked-proof-bytes',
+                );
+                expect(proofRecord).not.toHaveProperty('proofBytesHex');
+            },
+        );
+    });
+
+    it('builds public-only setup verification input from transported assembly companions', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const sameSecretTransport =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundSameSecretProofMaterial(position),
+                ),
+            );
+        const publicKeyShareTransport =
+            createBinaryChunkedPublicKeyShareProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundPublicKeyShareProofMaterial(position),
+                ),
+            );
+        const evaluationKeyTransport =
+            createBinaryChunkedEvaluationKeyShareMaterialTransport({
+                sameSecretProofReferences:
+                    sameSecretProofReferencesFixture(participantCount),
+                relinearizationRoundOneContributions:
+                    input.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    input.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    input.galoisKeyShareBatchContributions,
+            });
+        const binaryVssMaterialByteLength =
+            binaryVssMaterialByteLengthForInput(input);
+        const transportedAssemblyInput = {
+            ...input,
+            sameSecretProofMaterials: sameSecretTransport.proofMaterials,
+            transportedSameSecretProofMaterial:
+                sameSecretTransport.transportedSameSecretProofMaterial,
+            publicKeyShareLnpProofMaterials:
+                publicKeyShareTransport.proofMaterials,
+            transportedPublicKeyShareProofMaterial:
+                publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+            relinearizationRoundOneContributions:
+                evaluationKeyTransport.relinearizationRoundOneContributions,
+            relinearizationRoundTwoContributions:
+                evaluationKeyTransport.relinearizationRoundTwoContributions,
+            galoisKeyShareBatchContributions:
+                evaluationKeyTransport.galoisKeyShareBatchContributions,
+            transportedEvaluationKeyShareProofMaterial:
+                evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
+            transportedEvaluationKeyShareComponentMaterial:
+                evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+            vssCoefficientCommitmentMaterialEncoding:
+                'binary-chunked-full-public-setup-commitment-values',
+            publicKeyShareMaterialEncoding:
+                publicKeyShareMaterialTransportEncoding,
+            setupCertificateInput: setupCertificateInputFixture(
+                participantCount,
+                binaryVssMaterialByteLength,
+            ),
+        } satisfies SetupCeremonyAssemblyInput;
+        const assemblyWithoutPublicEvaluationKeyMaterial =
+            await createSetupCeremonyAssembly(transportedAssemblyInput);
+        const publicEvaluationKeyMaterialTransport =
+            createBinaryChunkedPublicEvaluationKeyMaterialTransport({
+                setupContext: input.setupContext,
+                qSharePrimes: input.qSharePrimes,
+                participantCount,
+                evaluatorKeySchedule:
+                    assemblyWithoutPublicEvaluationKeyMaterial.evaluatorKeySchedule,
+                sameSecretProofSetRoot:
+                    assemblyWithoutPublicEvaluationKeyMaterial.sameSecretProofs
+                        .sameSecretProofSetRoot,
+                sameSecretProofFamilyBindingRoot:
+                    assemblyWithoutPublicEvaluationKeyMaterial
+                        .sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+                publicKeyShareLnpProofSetRoot:
+                    assemblyWithoutPublicEvaluationKeyMaterial
+                        .publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+                sameSecretProofReferences:
+                    assemblyWithoutPublicEvaluationKeyMaterial.sameSecretProofs.proofRecords.map(
+                        (proofRecord) => ({
+                            trusteeIdentity: proofRecord.trusteeIdentity,
+                            trusteeRosterPosition:
+                                proofRecord.trusteeRosterPosition,
+                            sameSecretStatementRoot:
+                                proofRecord.sameSecretStatementRoot,
+                            trusteeSecretCommitmentRoot:
+                                proofRecord.trusteeSecretCommitmentRoot,
+                            sameSecretProofRoot:
+                                proofRecord.sameSecretProofRoot,
+                        }),
+                    ),
+                relinearizationKeyShareRounds:
+                    assemblyWithoutPublicEvaluationKeyMaterial.relinearizationKeyShareRounds,
+                galoisKeyShareBatches:
+                    assemblyWithoutPublicEvaluationKeyMaterial.galoisKeyShareBatches,
+                transportedEvaluationKeyShareComponentMaterial:
+                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+            });
+
+        const assembly = await createSetupCeremonyAssembly({
+            ...transportedAssemblyInput,
+            publicEvaluationKeyMaterialReference:
+                publicEvaluationKeyMaterialTransport.publicEvaluationKeyMaterialReference,
+            transportedPublicEvaluationKeyMaterial:
+                publicEvaluationKeyMaterialTransport.transportedPublicEvaluationKeyMaterial,
+        });
+        const transportedVssMaterial =
+            assembly.transportedVssCoefficientCommitmentMaterial;
+        if (transportedVssMaterial === undefined) {
+            throw new Error('assembly must include transported VSS material.');
+        }
+        const { chunks: omittedVssChunks, ...transportedVssMaterialReference } =
+            transportedVssMaterial;
+        void omittedVssChunks;
+        const verificationInput = createSetupPackageVerificationInput({
+            ...assembly,
+            transportedVssCoefficientCommitmentMaterial:
+                transportedVssMaterialReference,
+        });
+
+        expect(Object.keys(verificationInput).sort()).toEqual([
+            'setupPackage',
+            'transportedEvaluationKeyShareComponentMaterial',
+            'transportedEvaluationKeyShareProofMaterial',
+            'transportedPublicEvaluationKeyMaterial',
+            'transportedPublicKeyShareMaterial',
+            'transportedPublicKeyShareProofMaterial',
+            'transportedSameSecretProofMaterial',
+            'transportedVssCoefficientCommitmentMaterial',
+        ]);
+        expect(verificationInput.setupPackage).toBe(assembly.setupPackage);
+        expect(
+            verificationInput.transportedVssCoefficientCommitmentMaterial,
+        ).toEqual(transportedVssMaterialReference);
+        expect(
+            verificationInput.transportedVssCoefficientCommitmentMaterial,
+        ).not.toHaveProperty('chunks');
+        expect(verificationInput.transportedSameSecretProofMaterial).toBe(
+            sameSecretTransport.transportedSameSecretProofMaterial,
+        );
+        expect(verificationInput.transportedPublicKeyShareMaterial).toBe(
+            assembly.transportedPublicKeyShareMaterial,
+        );
+        expect(verificationInput.transportedPublicKeyShareProofMaterial).toBe(
+            publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+        );
+        expect(
+            verificationInput.transportedEvaluationKeyShareProofMaterial,
+        ).toBe(
+            evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
+        );
+        expect(
+            verificationInput.transportedEvaluationKeyShareComponentMaterial,
+        ).toBe(
+            evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+        );
+        expect(verificationInput.transportedPublicEvaluationKeyMaterial).toBe(
+            publicEvaluationKeyMaterialTransport.transportedPublicEvaluationKeyMaterial,
+        );
+        const publicEvaluationKeyMaterialRoot =
+            publicEvaluationKeyMaterialTransport
+                .publicEvaluationKeyMaterialReference
+                .publicEvaluationKeyMaterialRoot;
+        expect(assembly.evaluationKeys.publicEvaluationKeyMaterialRoot).toBe(
+            publicEvaluationKeyMaterialRoot,
+        );
+        expect(
+            setupTransportCertificateTransportedObjects(assembly.setupPackage),
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    objectName: 'publicEvaluationKeyMaterial',
+                    objectRole: 'public-evaluation-key-runtime-material',
+                    objectRoot: publicEvaluationKeyMaterialRoot,
+                }),
+            ]),
+        );
+        const serializedVerificationInput = JSON.stringify(verificationInput);
+        expect(serializedVerificationInput).not.toMatch(
+            /localTrusteeSetupStates|setupContributions|sourceTrusteeOpeningStates|coefficientOpenings|mailboxSecretKeyBytesHex|storageKeyBytesHex|proofGeneration|secretCoefficients/u,
+        );
+    });
+
+    it('builds public-only setup verification input from provider-backed binary assembly', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const sourceOpeningLoadCounts = new Map<number, number>();
+        const sourceTrusteeOpeningStateProvider = {
+            sourceTrusteeReferences: input.trustees.map((trustee) => ({
+                sourceTrusteeIdentity: trustee.trusteeIdentity,
+                sourceTrusteeRosterPosition: trustee.trusteeRosterPosition,
+            })),
+            loadSourceTrusteeOpeningState: (sourceTrusteeReference: {
+                readonly sourceTrusteeIdentity: string;
+                readonly sourceTrusteeRosterPosition: number;
+            }) => {
+                if (
+                    sourceTrusteeReference.sourceTrusteeIdentity !==
+                    `trustee-${String(sourceTrusteeReference.sourceTrusteeRosterPosition)}`
+                ) {
+                    throw new Error(
+                        'test provider reference must match the deterministic trustee identity.',
+                    );
+                }
+
+                sourceOpeningLoadCounts.set(
+                    sourceTrusteeReference.sourceTrusteeRosterPosition,
+                    (sourceOpeningLoadCounts.get(
+                        sourceTrusteeReference.sourceTrusteeRosterPosition,
+                    ) ?? 0) + 1,
+                );
+
+                return sourceTrusteeOpeningState(
+                    sourceTrusteeReference.sourceTrusteeRosterPosition,
+                    input.ringDegree,
+                    input.thresholdDegree,
+                );
+            },
+        };
+        const sameSecretTransport =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundSameSecretProofMaterial(position),
+                ),
+            );
+        const publicKeyShareTransport =
+            createBinaryChunkedPublicKeyShareProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundPublicKeyShareProofMaterial(position),
+                ),
+            );
+        const evaluationKeyTransport =
+            createBinaryChunkedEvaluationKeyShareMaterialTransport({
+                sameSecretProofReferences:
+                    sameSecretProofReferencesFixture(participantCount),
+                relinearizationRoundOneContributions:
+                    input.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    input.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    input.galoisKeyShareBatchContributions,
+            });
+        const binaryVssMaterialByteLength =
+            binaryVssMaterialByteLengthForInput(input);
+        const providerBackedTransportedInput = {
+            ...input,
+            sourceTrusteeOpeningStates: undefined,
+            sourceTrusteeOpeningStateProvider,
+            sameSecretProofMaterials: sameSecretTransport.proofMaterials,
+            transportedSameSecretProofMaterial:
+                sameSecretTransport.transportedSameSecretProofMaterial,
+            publicKeyShareLnpProofMaterials:
+                publicKeyShareTransport.proofMaterials,
+            transportedPublicKeyShareProofMaterial:
+                publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+            relinearizationRoundOneContributions:
+                evaluationKeyTransport.relinearizationRoundOneContributions,
+            relinearizationRoundTwoContributions:
+                evaluationKeyTransport.relinearizationRoundTwoContributions,
+            galoisKeyShareBatchContributions:
+                evaluationKeyTransport.galoisKeyShareBatchContributions,
+            transportedEvaluationKeyShareProofMaterial:
+                evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
+            transportedEvaluationKeyShareComponentMaterial:
+                evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+            vssCoefficientCommitmentMaterialEncoding:
+                'binary-chunked-full-public-setup-commitment-values',
+            publicKeyShareMaterialEncoding:
+                publicKeyShareMaterialTransportEncoding,
+            setupCertificateInput: setupCertificateInputFixture(
+                participantCount,
+                binaryVssMaterialByteLength,
+            ),
+        } satisfies SetupCeremonyAssemblyInput;
+        const assemblyWithoutPublicEvaluationKeyMaterial =
+            await createSetupCeremonyAssembly(providerBackedTransportedInput);
+        const publicEvaluationKeyMaterialTransport =
+            createBinaryChunkedPublicEvaluationKeyMaterialTransport({
+                setupContext: input.setupContext,
+                qSharePrimes: input.qSharePrimes,
+                participantCount,
+                evaluatorKeySchedule:
+                    assemblyWithoutPublicEvaluationKeyMaterial.evaluatorKeySchedule,
+                sameSecretProofSetRoot:
+                    assemblyWithoutPublicEvaluationKeyMaterial.sameSecretProofs
+                        .sameSecretProofSetRoot,
+                sameSecretProofFamilyBindingRoot:
+                    assemblyWithoutPublicEvaluationKeyMaterial
+                        .sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+                publicKeyShareLnpProofSetRoot:
+                    assemblyWithoutPublicEvaluationKeyMaterial
+                        .publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+                sameSecretProofReferences:
+                    assemblyWithoutPublicEvaluationKeyMaterial.sameSecretProofs.proofRecords.map(
+                        (proofRecord) => ({
+                            trusteeIdentity: proofRecord.trusteeIdentity,
+                            trusteeRosterPosition:
+                                proofRecord.trusteeRosterPosition,
+                            sameSecretStatementRoot:
+                                proofRecord.sameSecretStatementRoot,
+                            trusteeSecretCommitmentRoot:
+                                proofRecord.trusteeSecretCommitmentRoot,
+                            sameSecretProofRoot:
+                                proofRecord.sameSecretProofRoot,
+                        }),
+                    ),
+                relinearizationKeyShareRounds:
+                    assemblyWithoutPublicEvaluationKeyMaterial.relinearizationKeyShareRounds,
+                galoisKeyShareBatches:
+                    assemblyWithoutPublicEvaluationKeyMaterial.galoisKeyShareBatches,
+                transportedEvaluationKeyShareComponentMaterial:
+                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+            });
+
+        const assembly = await createSetupCeremonyAssembly({
+            ...providerBackedTransportedInput,
+            publicEvaluationKeyMaterialReference:
+                publicEvaluationKeyMaterialTransport.publicEvaluationKeyMaterialReference,
+            transportedPublicEvaluationKeyMaterial:
+                publicEvaluationKeyMaterialTransport.transportedPublicEvaluationKeyMaterial,
+        });
+        const transportedVssMaterial =
+            assembly.transportedVssCoefficientCommitmentMaterial;
+        if (transportedVssMaterial === undefined) {
+            throw new Error('assembly must include transported VSS material.');
+        }
+        const verificationInput = createSetupPackageVerificationInput({
+            ...assembly,
+            transportedVssCoefficientCommitmentMaterial: transportedVssMaterial,
+        });
+
+        expect(
+            Array.from(
+                { length: participantCount },
+                (_unused, position) =>
+                    sourceOpeningLoadCounts.get(position) ?? 0,
+            ).every((loadCount) => loadCount > 0),
+        ).toBe(true);
+        expect(assembly.vssCoefficientCommitmentMaterial).not.toHaveProperty(
+            'coefficientCommitments',
+        );
+        expect(assembly.transportedVssCoefficientCommitmentMaterial).toEqual(
+            transportedVssMaterial,
+        );
+        expect(assembly.transportedPublicKeyShareMaterial).toBeDefined();
+        expect(assembly.transportedSameSecretProofMaterial).toBe(
+            sameSecretTransport.transportedSameSecretProofMaterial,
+        );
+        expect(assembly.transportedPublicKeyShareProofMaterial).toBe(
+            publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+        );
+        expect(assembly.transportedEvaluationKeyShareComponentMaterial).toBe(
+            evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+        );
+        expect(verificationInput).toMatchObject({
+            setupPackage: assembly.setupPackage,
+            transportedVssCoefficientCommitmentMaterial: transportedVssMaterial,
+            transportedPublicKeyShareMaterial:
+                assembly.transportedPublicKeyShareMaterial,
+            transportedPublicEvaluationKeyMaterial:
+                publicEvaluationKeyMaterialTransport.transportedPublicEvaluationKeyMaterial,
+        });
+        expect(JSON.stringify(verificationInput)).not.toMatch(
+            /localTrusteeSetupStates|setupContributions|sourceTrusteeOpeningStates|coefficientOpenings|mailboxSecretKeyBytesHex|storageKeyBytesHex|proofGeneration|secretCoefficients/u,
+        );
+    });
+
+    it('refuses profile-ring assembly without terminal material transports', async () => {
+        const participantCount = 10;
+        const kernelFixture = createKernelFixture();
+        const input = createAcceptedQShareAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                ringDegree: acceptedBgvProfileRingDegree,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires binary-chunked VSS coefficient commitment material.',
+        );
+    });
+
+    it('refuses profile-ring assembly outside the first setup profile roster and threshold', async () => {
+        const kernelFixture = createKernelFixture();
+        const wrongRosterInput = createAssemblyInput(
+            3,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...wrongRosterInput,
+                ringDegree: acceptedBgvProfileRingDegree,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires the first-profile 10-trustee roster.',
+        );
+
+        const wrongThresholdInput = createAssemblyInput(
+            10,
+            kernelFixture.kernel,
+            ringDegree,
+            thresholdDegree,
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...wrongThresholdInput,
+                ringDegree: acceptedBgvProfileRingDegree,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires first-profile q_dec 4 threshold shares.',
+        );
+    });
+
+    it('refuses profile-ring assembly with embedded proof material', async () => {
+        const participantCount = 10;
+        const kernelFixture = createKernelFixture();
+        const input = createAcceptedQShareAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                ringDegree: acceptedBgvProfileRingDegree,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+                publicEvaluationKeyMaterialReference: {
+                    publicEvaluationKeyMaterialEncoding:
+                        'binary-chunked-public-evaluation-key-root-manifest',
+                    publicEvaluationKeyMaterialRoot: fixtureHash(
+                        'public-evaluation-key-material',
+                    ),
+                    publicEvaluationKeyMaterialChunkSizeBytes: 1_048_576,
+                    publicEvaluationKeyMaterialChunkCount: 1,
+                    publicEvaluationKeyMaterialTotalByteLength: 64,
+                    publicEvaluationKeyMaterialFullObjectHash: fixtureHash(
+                        'public-evaluation-key-material-full',
+                    ),
+                    publicEvaluationKeyMaterialChunkRoot: fixtureHash(
+                        'public-evaluation-key-material-chunk-root',
+                    ),
+                    publicEvaluationKeyMaterialChunkHashes: [
+                        fixtureHash('public-evaluation-key-material-chunk'),
+                    ],
+                },
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires transported same-secret proof material.',
+        );
+    });
+
+    it('refuses profile-ring assembly with eager source opening state loading', async () => {
+        const participantCount = 10;
+        const kernelFixture = createKernelFixture();
+        const input = createAcceptedQShareAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+        const sameSecretTransport =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundSameSecretProofMaterial(position),
+                ),
+            );
+        const publicKeyShareTransport =
+            createBinaryChunkedPublicKeyShareProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundPublicKeyShareProofMaterial(position),
+                ),
+            );
+        const evaluationKeyTransport =
+            createBinaryChunkedEvaluationKeyShareMaterialTransport({
+                sameSecretProofReferences:
+                    sameSecretProofReferencesFixture(participantCount),
+                relinearizationRoundOneContributions:
+                    input.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    input.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    input.galoisKeyShareBatchContributions,
+            });
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                ringDegree: acceptedBgvProfileRingDegree,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+                sameSecretProofMaterials: sameSecretTransport.proofMaterials,
+                transportedSameSecretProofMaterial:
+                    sameSecretTransport.transportedSameSecretProofMaterial,
+                publicKeyShareLnpProofMaterials:
+                    publicKeyShareTransport.proofMaterials,
+                transportedPublicKeyShareProofMaterial:
+                    publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+                relinearizationRoundOneContributions:
+                    evaluationKeyTransport.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    evaluationKeyTransport.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    evaluationKeyTransport.galoisKeyShareBatchContributions,
+                transportedEvaluationKeyShareProofMaterial:
+                    evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
+                transportedEvaluationKeyShareComponentMaterial:
+                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires provider-backed source trustee opening state loading.',
+        );
+    });
+
+    it('refuses profile-ring assembly with public derivation root mismatches', async () => {
+        const participantCount = 10;
+        const kernelFixture = createKernelFixture();
+        const input = createAcceptedQShareAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+        const sameSecretTransport =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundSameSecretProofMaterial(position),
+                ),
+            );
+        const publicKeyShareTransport =
+            createBinaryChunkedPublicKeyShareProofMaterialTransport(
+                Array.from({ length: participantCount }, (_unused, position) =>
+                    hashBoundPublicKeyShareProofMaterial(position),
+                ),
+            );
+        const evaluationKeyTransport =
+            createBinaryChunkedEvaluationKeyShareMaterialTransport({
+                sameSecretProofReferences:
+                    sameSecretProofReferencesFixture(participantCount),
+                relinearizationRoundOneContributions:
+                    input.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    input.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    input.galoisKeyShareBatchContributions,
+            });
+        const sourceTrusteeOpeningStateProvider = {
+            sourceTrusteeReferences: input.trustees.map((trustee) => ({
+                sourceTrusteeIdentity: trustee.trusteeIdentity,
+                sourceTrusteeRosterPosition: trustee.trusteeRosterPosition,
+            })),
+            loadSourceTrusteeOpeningState: (sourceTrusteeReference: {
+                readonly sourceTrusteeIdentity: string;
+                readonly sourceTrusteeRosterPosition: number;
+            }) =>
+                sourceTrusteeOpeningState(
+                    sourceTrusteeReference.sourceTrusteeRosterPosition,
+                    input.ringDegree,
+                    input.thresholdDegree,
+                    input.qSharePrimes,
+                ),
+        };
+        const commonRandomnessPublicDerivations = jsonRecord(
+            input.commonRandomness.publicDerivations,
+            'commonRandomness.publicDerivations',
+        );
+        const mismatchedCommonRandomness = {
+            ...input.commonRandomness,
+            publicDerivations: {
+                ...commonRandomnessPublicDerivations,
+                crpRoots: {
+                    ...jsonRecord(
+                        commonRandomnessPublicDerivations.crpRoots,
+                        'commonRandomness.publicDerivations.crpRoots',
+                    ),
+                    publicKeyCrpRoot: fixtureHash('mutated-public-key-crp'),
+                },
+            },
+        } satisfies SetupCommonRandomness;
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                commonRandomness: mismatchedCommonRandomness,
+                ringDegree: acceptedBgvProfileRingDegree,
+                sourceTrusteeOpeningStates: undefined,
+                sourceTrusteeOpeningStateProvider,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+                setupCertificateInput: setupCertificateInputFixture(
+                    participantCount,
+                    binaryVssMaterialByteLengthForInput(input),
+                    input.ringDegree,
+                    input.thresholdDegree,
+                    input.setupContext,
+                    input.qShare,
+                    input.qSharePrimes,
+                ),
+                sameSecretProofMaterials: sameSecretTransport.proofMaterials,
+                transportedSameSecretProofMaterial:
+                    sameSecretTransport.transportedSameSecretProofMaterial,
+                publicKeyShareLnpProofMaterials:
+                    publicKeyShareTransport.proofMaterials,
+                transportedPublicKeyShareProofMaterial:
+                    publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+                relinearizationRoundOneContributions:
+                    evaluationKeyTransport.relinearizationRoundOneContributions,
+                relinearizationRoundTwoContributions:
+                    evaluationKeyTransport.relinearizationRoundTwoContributions,
+                galoisKeyShareBatchContributions:
+                    evaluationKeyTransport.galoisKeyShareBatchContributions,
+                transportedEvaluationKeyShareProofMaterial:
+                    evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
+                transportedEvaluationKeyShareComponentMaterial:
+                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires publicKeyCrpRoot to match commonRandomness public derivations.',
+        );
+    });
+
+    it('refuses profile-ring assembly with a non-accepted Q_share list', async () => {
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            10,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                ringDegree: acceptedBgvProfileRingDegree,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires the accepted Q_share prime list.',
+        );
+    });
+
+    it('refuses profile-ring assembly with accepted primes but non-accepted Q_share metadata', async () => {
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            10,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                ringDegree: acceptedBgvProfileRingDegree,
+                qSharePrimes: acceptedBgvSetupQSharePrimes,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires the accepted Q_share object.',
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...createAcceptedQShareAssemblyInput(
+                    10,
+                    kernelFixture.kernel,
+                    ringDegree,
+                    firstProfileThresholdDegree,
+                ),
+                qShare: {
+                    ...acceptedBgvSetupQShare,
+                    targetDecryptionReadiness:
+                        'target-decryption-ready-without-target-certificate',
+                },
+                ringDegree: acceptedBgvProfileRingDegree,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires the accepted Q_share object.',
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...createAcceptedQShareAssemblyInput(
+                    10,
+                    kernelFixture.kernel,
+                    ringDegree,
+                    firstProfileThresholdDegree,
+                ),
+                setupContext,
+                ringDegree: acceptedBgvProfileRingDegree,
+                vssCoefficientCommitmentMaterialEncoding:
+                    'binary-chunked-full-public-setup-commitment-values',
+                publicKeyShareMaterialEncoding:
+                    publicKeyShareMaterialTransportEncoding,
+            }),
+        ).rejects.toThrow(
+            'profile-ring setup assembly requires setupContext.qShareHash to match the accepted Q_share object.',
+        );
+    });
+
     it('assembles full-roster VSS delivery, acceptances, local state, and contributions', async () => {
         const participantCount = 10;
         const kernelFixture = createKernelFixture();
@@ -1873,14 +3455,42 @@ describe('setup ceremony assembly', () => {
         expect(assembly.setupPackage.vssCoefficientCommitmentMaterial).toEqual(
             assembly.vssCoefficientCommitmentMaterial,
         );
+        const transportedObjects = assembly.setupPackage
+            .setupTransportCertificate.transportedObjects as readonly Record<
+            string,
+            unknown
+        >[];
+        const vssTransportedObject = transportedObjects.find(
+            (transportedObject) =>
+                transportedObject.objectName ===
+                'vssCoefficientCommitmentMaterial',
+        );
         expect(assembly.setupPackage.setupTransportCertificate).toMatchObject({
-            fullObjectHash:
-                assembly.transportedVssCoefficientCommitmentMaterial
-                    ?.fullObjectHash,
-            chunkRoot:
-                assembly.transportedVssCoefficientCommitmentMaterial?.chunkRoot,
             totalByteLength: fullMaterialCoefficientBytes,
+            chunkCount:
+                assembly.transportedVssCoefficientCommitmentMaterial
+                    ?.chunkCount,
+            transportedObjects: [
+                expect.objectContaining({
+                    objectName: 'vssCoefficientCommitmentMaterial',
+                    objectRole: 'public-vss-coefficient-commitment-material',
+                    objectRoot:
+                        assembly.vssCoefficientCommitmentMaterial
+                            .vssCoefficientCommitmentMaterialRoot,
+                    fullObjectHash:
+                        assembly.transportedVssCoefficientCommitmentMaterial
+                            ?.fullObjectHash,
+                    chunkRoot:
+                        assembly.transportedVssCoefficientCommitmentMaterial
+                            ?.chunkRoot,
+                    chunkHashes:
+                        assembly.transportedVssCoefficientCommitmentMaterial
+                            ?.chunkHashes,
+                    byteLength: fullMaterialCoefficientBytes,
+                }),
+            ],
         });
+        expect(vssTransportedObject).toBeDefined();
         expect(
             assembly.sameSecretProofs.vssCoefficientCommitmentMaterialRoot,
         ).toBe(
@@ -1892,6 +3502,358 @@ describe('setup ceremony assembly', () => {
         );
     });
 
+    it('uses kernel-derived threshold commitments from transported VSS material', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const commitmentBundle = createVssCoefficientCommitmentBundle({
+            setupContext: input.setupContext,
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            qSharePrimes: input.qSharePrimes,
+            ringDegree: input.ringDegree,
+            participantCount: input.trustees.length,
+            thresholdDegree: input.thresholdDegree,
+            sourceTrusteeOpeningStates: input.sourceTrusteeOpeningStates,
+        });
+        const expectedTransport =
+            createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+                commitmentBundle.materialSet,
+            );
+        const expectedThresholdShareCommitments =
+            deriveThresholdShareCommitments({
+                setupContext: input.setupContext,
+                vssCoefficientCommitments: commitmentBundle.commitmentSet,
+                vssCoefficientCommitmentMaterial: expectedTransport.materialSet,
+                transportedVssCoefficientCommitmentMaterial:
+                    expectedTransport.transportedVssCoefficientCommitmentMaterial,
+            });
+        let transportDerivationCount = 0;
+        const deriveThresholdShareCommitmentsFromTransport = (
+            request: Readonly<{
+                readonly setupContext: unknown;
+                readonly publicMatrixSeedHash: ProtocolHash;
+                readonly vssCoefficientCommitmentRoot: ProtocolHash;
+                readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+                readonly transportedVssCoefficientCommitmentMaterial: unknown;
+            }>,
+        ): {
+            readonly thresholdShareCommitmentRoot: ProtocolHash;
+            readonly thresholdShareCommitments: JsonRecord;
+            readonly vssCoefficientCommitmentMaterial: JsonRecord;
+        } => {
+            transportDerivationCount += 1;
+            expect(request.transportedVssCoefficientCommitmentMaterial).toEqual(
+                expectedTransport.transportedVssCoefficientCommitmentMaterial,
+            );
+
+            return {
+                thresholdShareCommitmentRoot:
+                    expectedThresholdShareCommitments.thresholdShareCommitmentRoot,
+                thresholdShareCommitments: expectedThresholdShareCommitments,
+                vssCoefficientCommitmentMaterial: expectedTransport.materialSet,
+            };
+        };
+
+        const assembly = await createSetupCeremonyAssembly({
+            ...input,
+            kernel: {
+                ...input.kernel,
+                deriveThresholdShareCommitmentsFromTransport,
+            },
+            vssCoefficientCommitmentMaterialEncoding:
+                'binary-chunked-full-public-setup-commitment-values',
+            setupCertificateInput: setupCertificateInputFixture(
+                participantCount,
+                expectedTransport.transportedVssCoefficientCommitmentMaterial
+                    .totalByteLength,
+            ),
+        });
+
+        expect(transportDerivationCount).toBe(1);
+        expect(assembly.thresholdShareCommitments).toEqual(
+            expectedThresholdShareCommitments,
+        );
+        expect(assembly.setupPackage.thresholdShareCommitments).toEqual(
+            expectedThresholdShareCommitments,
+        );
+    });
+
+    it('uses stream-verified VSS material for binary setup assembly', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const commitmentBundle = createVssCoefficientCommitmentBundle({
+            setupContext: input.setupContext,
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            qSharePrimes: input.qSharePrimes,
+            ringDegree: input.ringDegree,
+            participantCount: input.trustees.length,
+            thresholdDegree: input.thresholdDegree,
+            sourceTrusteeOpeningStates: input.sourceTrusteeOpeningStates,
+        });
+        const expectedTransport =
+            createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+                commitmentBundle.materialSet,
+            );
+        const expectedThresholdShareCommitments =
+            deriveThresholdShareCommitments({
+                setupContext: input.setupContext,
+                vssCoefficientCommitments: commitmentBundle.commitmentSet,
+                vssCoefficientCommitmentMaterial: expectedTransport.materialSet,
+                transportedVssCoefficientCommitmentMaterial:
+                    expectedTransport.transportedVssCoefficientCommitmentMaterial,
+            });
+        const capturedChunks: {
+            readonly chunkIndex: number;
+            readonly bytesHex: string;
+        }[] = [];
+        let beginCount = 0;
+        let finishCount = 0;
+        const verifiedVssCoefficientCommitmentMaterial = {
+            objectType: 'VerifiedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            verificationId: 'assembly-vss-stream-1',
+            materialBinaryFormat:
+                'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+            publicMatrixSeedHash:
+                expectedTransport.materialSet.publicMatrixSeedHash,
+            vssCoefficientCommitmentRoot:
+                commitmentBundle.commitmentSet.vssCoefficientCommitmentRoot,
+            vssCoefficientCommitmentMaterialRoot:
+                expectedTransport.materialSet
+                    .vssCoefficientCommitmentMaterialRoot,
+            thresholdShareCommitmentRoot:
+                expectedThresholdShareCommitments.thresholdShareCommitmentRoot,
+            transportProfileId:
+                'sealed-lattice-setup-binary-chunked-transport-v1',
+            transportChunkSizeBytes: 1_048_576,
+            transportChunkCount:
+                expectedTransport.transportedVssCoefficientCommitmentMaterial
+                    .chunkCount,
+            transportTotalByteLength:
+                expectedTransport.transportedVssCoefficientCommitmentMaterial
+                    .totalByteLength,
+            transportFullObjectHash:
+                expectedTransport.transportedVssCoefficientCommitmentMaterial
+                    .fullObjectHash,
+            transportChunkRoot:
+                expectedTransport.transportedVssCoefficientCommitmentMaterial
+                    .chunkRoot,
+        } as const;
+
+        const assembly = await createSetupCeremonyAssembly({
+            ...input,
+            kernel: {
+                ...input.kernel,
+                beginThresholdShareCommitmentsFromTransportStream: (
+                    request,
+                ) => {
+                    beginCount += 1;
+                    expect(request.derivationId).toMatch(/^vss-transport-/u);
+                    expect(request.setupContext).toBe(input.setupContext);
+                    expect(request.publicMatrixSeedHash).toBe(
+                        input.publicMatrixSeedHash,
+                    );
+                    expect(
+                        request.transportedVssCoefficientCommitmentMaterial,
+                    ).toMatchObject({
+                        objectType:
+                            'SetupTransportedVssCoefficientCommitmentMaterial',
+                        chunkCount:
+                            expectedTransport
+                                .transportedVssCoefficientCommitmentMaterial
+                                .chunkCount,
+                        totalByteLength:
+                            expectedTransport
+                                .transportedVssCoefficientCommitmentMaterial
+                                .totalByteLength,
+                    });
+                    expect(
+                        request.transportedVssCoefficientCommitmentMaterial,
+                    ).not.toHaveProperty('chunks');
+
+                    return { ok: true };
+                },
+                absorbThresholdShareCommitmentsFromTransportStreamChunk: (
+                    request,
+                ) => {
+                    capturedChunks.push({
+                        chunkIndex: request.chunkIndex,
+                        bytesHex: request.bytesHex,
+                    });
+
+                    return { ok: true };
+                },
+                finishThresholdShareCommitmentsFromTransportStream: (
+                    request,
+                ) => {
+                    finishCount += 1;
+                    expect(request.vssCoefficientCommitmentRoot).toBe(
+                        commitmentBundle.commitmentSet
+                            .vssCoefficientCommitmentRoot,
+                    );
+                    expect(
+                        request.sourceTrusteeCoefficientCommitmentRecords,
+                    ).toEqual(
+                        commitmentBundle.commitmentSet.sourceTrusteeRecords,
+                    );
+                    expect(capturedChunks).toEqual(
+                        expectedTransport
+                            .transportedVssCoefficientCommitmentMaterial.chunks,
+                    );
+
+                    return {
+                        thresholdShareCommitmentRoot:
+                            expectedThresholdShareCommitments.thresholdShareCommitmentRoot,
+                        thresholdShareCommitments:
+                            expectedThresholdShareCommitments,
+                        vssCoefficientCommitmentMaterial:
+                            expectedTransport.materialSet,
+                        verifiedVssCoefficientCommitmentMaterial,
+                        transport: {
+                            fullObjectHash:
+                                expectedTransport
+                                    .transportedVssCoefficientCommitmentMaterial
+                                    .fullObjectHash,
+                        },
+                    };
+                },
+            },
+            vssCoefficientCommitmentMaterialEncoding:
+                'binary-chunked-full-public-setup-commitment-values',
+            setupCertificateInput: setupCertificateInputFixture(
+                participantCount,
+                expectedTransport.transportedVssCoefficientCommitmentMaterial
+                    .totalByteLength,
+            ),
+        });
+        const verificationInput = createSetupPackageVerificationInput(assembly);
+
+        expect(beginCount).toBe(1);
+        expect(finishCount).toBe(1);
+        expect(assembly.thresholdShareCommitments).toEqual(
+            expectedThresholdShareCommitments,
+        );
+        expect(assembly.verifiedVssCoefficientCommitmentMaterial).toBe(
+            verifiedVssCoefficientCommitmentMaterial,
+        );
+        const streamedTransportedVssMaterialReference =
+            assembly.transportedVssCoefficientCommitmentMaterial;
+        expect(streamedTransportedVssMaterialReference).not.toHaveProperty(
+            'chunks',
+        );
+        expect(verificationInput.verifiedVssCoefficientCommitmentMaterial).toBe(
+            verifiedVssCoefficientCommitmentMaterial,
+        );
+        expect(
+            verificationInput.transportedVssCoefficientCommitmentMaterial,
+        ).toEqual(streamedTransportedVssMaterialReference);
+
+        const verificationInputWithRawVssMaterial =
+            createSetupPackageVerificationInput({
+                ...assembly,
+                transportedVssCoefficientCommitmentMaterial:
+                    expectedTransport.transportedVssCoefficientCommitmentMaterial,
+            });
+
+        expect(
+            verificationInputWithRawVssMaterial.verifiedVssCoefficientCommitmentMaterial,
+        ).toBe(verifiedVssCoefficientCommitmentMaterial);
+        expect(
+            verificationInputWithRawVssMaterial.transportedVssCoefficientCommitmentMaterial,
+        ).toEqual(streamedTransportedVssMaterialReference);
+        expect(
+            verificationInputWithRawVssMaterial.transportedVssCoefficientCommitmentMaterial,
+        ).not.toHaveProperty('chunks');
+    });
+
+    it('assembles a setup package bound to binary-chunked public-key share material', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const assembly = await createSetupCeremonyAssembly({
+            ...input,
+            publicKeyShareMaterialEncoding:
+                publicKeyShareMaterialTransportEncoding,
+        });
+
+        expect(assembly.publicKeyShareMaterial).toMatchObject({
+            objectType: 'PublicKeyShareMaterialSet',
+            materialEncoding: publicKeyShareMaterialTransportEncoding,
+            publicKeyShareSetRoot:
+                assembly.publicKeyShares.publicKeyShareSetRoot,
+            transport: {
+                fullObjectHash:
+                    assembly.transportedPublicKeyShareMaterial?.fullObjectHash,
+                chunkRoot:
+                    assembly.transportedPublicKeyShareMaterial?.chunkRoot,
+                totalByteLength:
+                    assembly.transportedPublicKeyShareMaterial?.totalByteLength,
+            },
+        });
+        expect(assembly.publicKeyShareMaterial).not.toHaveProperty(
+            'shareMaterialRecords',
+        );
+        expect(assembly.transportedPublicKeyShareMaterial).toMatchObject({
+            objectType: 'SetupTransportedPublicKeyShareMaterial',
+            binaryFormat: 'sealed-lattice-public-key-share-material-binary-v1',
+        });
+        expect(
+            assembly.transportedPublicKeyShareMaterial?.totalByteLength,
+        ).toBeGreaterThan(0);
+        expect(assembly.setupPackage.publicKeyShareMaterial).toEqual(
+            assembly.publicKeyShareMaterial,
+        );
+        const transportedObjects = assembly.setupPackage
+            .setupTransportCertificate.transportedObjects as readonly Record<
+            string,
+            unknown
+        >[];
+        expect(transportedObjects).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    objectName: 'publicKeyShareMaterial',
+                    objectRole: 'public-key-share-material',
+                    objectRoot:
+                        assembly.publicKeyShareMaterial
+                            .publicKeyShareMaterialSetRoot,
+                    fullObjectHash:
+                        assembly.transportedPublicKeyShareMaterial
+                            ?.fullObjectHash,
+                    chunkRoot:
+                        assembly.transportedPublicKeyShareMaterial?.chunkRoot,
+                    chunkHashes:
+                        assembly.transportedPublicKeyShareMaterial?.chunkHashes,
+                    byteLength:
+                        assembly.transportedPublicKeyShareMaterial
+                            ?.totalByteLength,
+                }),
+            ]),
+        );
+        expect(
+            assembly.publicKeyShareLnpProofs.publicKeyShareMaterialSetRoot,
+        ).toBe(assembly.publicKeyShareMaterial.publicKeyShareMaterialSetRoot);
+        expect(assembly.collectivePublicKey.publicKeyShareMaterialSetRoot).toBe(
+            assembly.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
+        );
+        expect(
+            assembly.collectivePublicKey.sourceShareMaterialRoots,
+        ).toHaveLength(participantCount);
+        expect(
+            assembly.collectivePublicKey.aggregateCoefficientVectorsByLimb,
+        ).toHaveLength(qSharePrimes.length);
+    });
+
     it('rejects opening states rebound to another trustee identity', async () => {
         const participantCount = 3;
         const kernelFixture = createKernelFixture();
@@ -1899,22 +3861,60 @@ describe('setup ceremony assembly', () => {
             participantCount,
             kernelFixture.kernel,
         );
+        const sourceTrusteeOpeningStates = input.sourceTrusteeOpeningStates;
+        if (sourceTrusteeOpeningStates === undefined) {
+            throw new Error(
+                'setup assembly fixture must provide source trustee opening states.',
+            );
+        }
 
         await expect(
             createSetupCeremonyAssembly({
                 ...input,
-                sourceTrusteeOpeningStates:
-                    input.sourceTrusteeOpeningStates.map(
-                        (sourceTrusteeState) =>
-                            sourceTrusteeState.sourceTrusteeRosterPosition === 1
-                                ? {
-                                      ...sourceTrusteeState,
-                                      sourceTrusteeIdentity: 'trustee-0',
-                                  }
-                                : sourceTrusteeState,
-                    ),
+                sourceTrusteeOpeningStates: sourceTrusteeOpeningStates.map(
+                    (sourceTrusteeState) =>
+                        sourceTrusteeState.sourceTrusteeRosterPosition === 1
+                            ? {
+                                  ...sourceTrusteeState,
+                                  sourceTrusteeIdentity: 'trustee-0',
+                              }
+                            : sourceTrusteeState,
+                ),
             }),
         ).rejects.toThrow(/identities must match trustees/u);
+    });
+
+    it('rejects provider-loaded opening states rebound to another trustee identity', async () => {
+        const participantCount = 3;
+        const kernelFixture = createKernelFixture();
+        const input = createAssemblyInput(
+            participantCount,
+            kernelFixture.kernel,
+        );
+        const sourceTrusteeOpeningStateProvider = {
+            sourceTrusteeReferences: input.trustees.map((trustee) => ({
+                sourceTrusteeIdentity: trustee.trusteeIdentity,
+                sourceTrusteeRosterPosition: trustee.trusteeRosterPosition,
+            })),
+            loadSourceTrusteeOpeningState: (sourceTrusteeReference: {
+                readonly sourceTrusteeRosterPosition: number;
+            }) =>
+                sourceTrusteeReference.sourceTrusteeRosterPosition === 1
+                    ? sourceTrusteeOpeningState(0)
+                    : sourceTrusteeOpeningState(
+                          sourceTrusteeReference.sourceTrusteeRosterPosition,
+                      ),
+        };
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                sourceTrusteeOpeningStates: undefined,
+                sourceTrusteeOpeningStateProvider,
+            }),
+        ).rejects.toThrow(
+            /loaded source trustee opening state must match the requested source trustee reference/u,
+        );
     });
 
     it('rejects public-key share material whose coefficients do not match the accepted hash', async () => {

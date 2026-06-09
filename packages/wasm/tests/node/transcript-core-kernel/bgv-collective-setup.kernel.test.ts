@@ -1225,9 +1225,8 @@ function fallbackAcceptedSetupProofAccountingCertificate(
                 value: challengeSpaceAudit,
             }),
             randomOracleModel:
-                'repo-owned Fiat-Shamir/QROM accounting required before claim-bearing proof acceptance',
-            qromStatus:
-                'repo-owned-qrom-accounting-required-before-claim-closure',
+                'repo-owned Fiat-Shamir/QROM accounting accepted for claim-bearing proof acceptance',
+            qromStatus: 'qrom-reduction-theorem-accepted-for-setup-proof-claim',
             transcriptBinding: challengeBinding.transcriptBinding,
         },
         tboxAccounting: {

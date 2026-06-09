@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use serde_json::{Value, json};
 use sha3::{
@@ -45,10 +48,19 @@ const SETUP_TRANSPORT_PROFILE_ID: &str = "sealed-lattice-setup-binary-chunked-tr
 const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const VSS_MATERIAL_BINARY_OBJECT_TYPE: &str = "SetupTransportedVssCoefficientCommitmentMaterial";
+const VERIFIED_VSS_MATERIAL_OBJECT_TYPE: &str = "VerifiedVssCoefficientCommitmentMaterial";
 const VSS_MATERIAL_BINARY_FORMAT: &str =
     "sealed-lattice-vss-coefficient-commitment-material-binary-v1";
 const VSS_MATERIAL_BINARY_MAGIC: &[u8] = b"SLVSSMAT";
 const VSS_MATERIAL_BINARY_VERSION: u64 = 1;
+const VSS_TRANSPORT_STREAM_DERIVATION_ID_MAX_BYTES: usize = 128;
+
+static VSS_TRANSPORT_THRESHOLD_DERIVATION_SESSIONS: OnceLock<
+    Mutex<BTreeMap<String, VssTransportThresholdDerivationSession>>,
+> = OnceLock::new();
+static VSS_TRANSPORT_VERIFIED_MATERIALS: OnceLock<
+    Mutex<BTreeMap<String, VerifiedTransportedVssMaterial>>,
+> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub(crate) struct SetupVssMaterialTransportHashes {
@@ -60,7 +72,19 @@ pub(crate) struct SetupVssMaterialTransportHashes {
 
 pub(crate) struct VerifiedTransportedConstantVssCommitments {
     pub(crate) material_set: Value,
-    pub(crate) constant_commitments_by_source_trustee: BTreeMap<u64, Vec<SetupCommitmentValue>>,
+    pub(crate) constant_commitments_by_source_trustee:
+        Arc<BTreeMap<u64, Vec<SetupCommitmentValue>>>,
+}
+
+pub(crate) struct VerifiedTransportedVssMaterial {
+    pub(crate) reference: Value,
+    pub(crate) setup_context: Value,
+    pub(crate) public_matrix_seed_hash: String,
+    pub(crate) vss_coefficient_commitment_root: String,
+    pub(crate) material_set: Value,
+    pub(crate) threshold_share_commitments: Value,
+    pub(crate) constant_commitments_by_source_trustee:
+        Arc<BTreeMap<u64, Vec<SetupCommitmentValue>>>,
 }
 
 #[derive(Clone)]
@@ -242,6 +266,606 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
     }))
 }
 
+pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &[
+            "derivationId",
+            "setupContext",
+            "publicMatrixSeedHash",
+            "transportedVssCoefficientCommitmentMaterial",
+        ],
+        "beginThresholdShareCommitmentsFromTransportStream",
+    )?;
+
+    let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
+    let setup_context = object_field(request, "setupContext")?;
+    let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
+    let transported_material =
+        object_field(request, "transportedVssCoefficientCommitmentMaterial")?;
+
+    verify_setup_context(setup_context)?;
+    validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let transport_header = read_transport_material_stream_header(transported_material)?;
+    let sessions = vss_transport_derivation_sessions();
+    let mut sessions = sessions.lock().map_err(|_| {
+        invalid_threshold_commitment_input("transport derivation session store is unavailable")
+    })?;
+    if sessions.contains_key(&derivation_id) {
+        return Err(invalid_threshold_commitment_input(
+            "transport derivationId is already active",
+        ));
+    }
+    if vss_transport_verified_materials()
+        .lock()
+        .map_err(|_| invalid_threshold_commitment_input("verified material store is unavailable"))?
+        .contains_key(&derivation_id)
+    {
+        return Err(invalid_threshold_commitment_input(
+            "transport derivationId already has verified material",
+        ));
+    }
+    let full_object_hasher = streaming_hash512_hasher(
+        "sealed-lattice/setup/vss-coefficient-commitment-material/full-object-v1",
+        transport_header.total_byte_length,
+    );
+    let observed_chunk_hashes = Vec::with_capacity(transport_header.chunk_count);
+    sessions.insert(
+        derivation_id.clone(),
+        VssTransportThresholdDerivationSession {
+            setup_context: setup_context.clone(),
+            public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+            transport_header: transport_header.clone(),
+            observed_chunk_hashes,
+            full_object_hasher,
+            next_chunk_index: 0,
+            observed_total_byte_length: 0,
+            parser: StreamingVssThresholdMaterialParser::new(),
+        },
+    );
+
+    Ok(json!({
+        "ok": true,
+        "operation": "beginThresholdShareCommitmentsFromTransportStream",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "derivationId": derivation_id,
+        "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
+        "transport": {
+            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": transport_header.chunk_count,
+            "totalByteLength": transport_header.total_byte_length,
+        },
+    }))
+}
+
+pub(crate) fn absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &["derivationId", "chunkIndex", "bytesHex"],
+        "absorbThresholdShareCommitmentsFromTransportStreamChunk",
+    )?;
+    let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
+    let chunk_index = usize_field(request, "chunkIndex")?;
+    let bytes_hex = string_field(request, "bytesHex")?;
+    let chunk = decode_hex(bytes_hex)?;
+    let sessions = vss_transport_derivation_sessions();
+    let mut sessions = sessions.lock().map_err(|_| {
+        invalid_threshold_commitment_input("transport derivation session store is unavailable")
+    })?;
+    let absorb_result = {
+        let session = sessions.get_mut(&derivation_id).ok_or_else(|| {
+            invalid_threshold_commitment_input("transport derivationId is not active")
+        })?;
+        absorb_threshold_share_commitment_transport_chunk(session, chunk_index, &chunk)
+    };
+    match absorb_result {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            sessions.remove(&derivation_id);
+            Err(error)
+        }
+    }
+}
+
+pub(crate) fn finish_threshold_share_commitment_transport_derivation_stream_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &[
+            "derivationId",
+            "vssCoefficientCommitmentRoot",
+            "sourceTrusteeCoefficientCommitmentRecords",
+        ],
+        "finishThresholdShareCommitmentsFromTransportStream",
+    )?;
+    let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
+    let vss_coefficient_commitment_root =
+        hash_string_field(request, "vssCoefficientCommitmentRoot")?.to_string();
+    let source_trustee_record_values =
+        array_field(request, "sourceTrusteeCoefficientCommitmentRecords")?.clone();
+    let sessions = vss_transport_derivation_sessions();
+    let mut sessions = sessions.lock().map_err(|_| {
+        invalid_threshold_commitment_input("transport derivation session store is unavailable")
+    })?;
+    let session = sessions.remove(&derivation_id).ok_or_else(|| {
+        invalid_threshold_commitment_input("transport derivationId is not active")
+    })?;
+    drop(sessions);
+
+    finish_threshold_share_commitment_transport_stream(
+        &derivation_id,
+        session,
+        &vss_coefficient_commitment_root,
+        &source_trustee_record_values,
+    )
+}
+
+fn vss_transport_derivation_sessions()
+-> &'static Mutex<BTreeMap<String, VssTransportThresholdDerivationSession>> {
+    VSS_TRANSPORT_THRESHOLD_DERIVATION_SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn vss_transport_verified_materials()
+-> &'static Mutex<BTreeMap<String, VerifiedTransportedVssMaterial>> {
+    VSS_TRANSPORT_VERIFIED_MATERIALS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+pub(crate) fn with_verified_transported_vss_material<T>(
+    verified_material_reference: &Value,
+    callback: impl FnOnce(&VerifiedTransportedVssMaterial) -> CanonicalResult<T>,
+) -> CanonicalResult<T> {
+    reject_unexpected_verified_material_reference_fields(verified_material_reference)?;
+    if verified_material_reference
+        .get("objectType")
+        .and_then(Value::as_str)
+        != Some(VERIFIED_VSS_MATERIAL_OBJECT_TYPE)
+    {
+        return Err(invalid_threshold_commitment_input(
+            "verifiedVssCoefficientCommitmentMaterial.objectType must be VerifiedVssCoefficientCommitmentMaterial",
+        ));
+    }
+    if verified_material_reference
+        .get("objectVersion")
+        .and_then(Value::as_u64)
+        != Some(1)
+    {
+        return Err(invalid_threshold_commitment_input(
+            "verifiedVssCoefficientCommitmentMaterial.objectVersion must be 1",
+        ));
+    }
+    if verified_material_reference
+        .get("setupProfileId")
+        .and_then(Value::as_str)
+        != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+    {
+        return Err(invalid_threshold_commitment_input(
+            "verified VSS material setupProfileId must match CollectiveBgvSetup-v1",
+        ));
+    }
+    let verification_id =
+        derivation_stream_id_field(verified_material_reference, "verificationId")?;
+    for field_name in [
+        "publicMatrixSeedHash",
+        "vssCoefficientCommitmentRoot",
+        "vssCoefficientCommitmentMaterialRoot",
+        "thresholdShareCommitmentRoot",
+        "transportFullObjectHash",
+        "transportChunkRoot",
+    ] {
+        validate_hash_string(
+            hash_string_field(verified_material_reference, field_name)?,
+            &format!("verifiedVssCoefficientCommitmentMaterial.{field_name}"),
+        )?;
+    }
+    if u64_field(verified_material_reference, "transportChunkSizeBytes")?
+        != SETUP_TRANSPORT_CHUNK_SIZE_BYTES
+    {
+        return Err(invalid_threshold_commitment_input(
+            "verified VSS material transportChunkSizeBytes must match the setup transport profile",
+        ));
+    }
+    if u64_field(verified_material_reference, "transportChunkCount")? == 0 {
+        return Err(invalid_threshold_commitment_input(
+            "verified VSS material transportChunkCount must be positive",
+        ));
+    }
+    if u64_field(verified_material_reference, "transportTotalByteLength")? == 0 {
+        return Err(invalid_threshold_commitment_input(
+            "verified VSS material transportTotalByteLength must be positive",
+        ));
+    }
+    let verified_materials = vss_transport_verified_materials();
+    let verified_materials = verified_materials.lock().map_err(|_| {
+        invalid_threshold_commitment_input("verified material store is unavailable")
+    })?;
+    let verified_material = verified_materials.get(verification_id).ok_or_else(|| {
+        invalid_threshold_commitment_input(
+            "verified VSS material reference does not match a live stream-verified material",
+        )
+    })?;
+    if &verified_material.reference != verified_material_reference {
+        return Err(invalid_threshold_commitment_input(
+            "verified VSS material reference does not match the stream-verified material metadata",
+        ));
+    }
+
+    callback(verified_material)
+}
+
+fn verified_transported_vss_material_reference_value(
+    verification_id: &str,
+    public_matrix_seed_hash: &str,
+    vss_coefficient_commitment_root: &str,
+    vss_coefficient_commitment_material_root: &str,
+    threshold_share_commitment_root: &str,
+    hashes: &SetupVssMaterialTransportHashes,
+) -> Value {
+    json!({
+        "objectType": VERIFIED_VSS_MATERIAL_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "verificationId": verification_id,
+        "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
+        "vssCoefficientCommitmentMaterialRoot": vss_coefficient_commitment_material_root,
+        "thresholdShareCommitmentRoot": threshold_share_commitment_root,
+        "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+        "transportChunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        "transportChunkCount": hashes.chunk_hashes.len(),
+        "transportTotalByteLength": hashes.total_byte_length,
+        "transportFullObjectHash": hashes.full_object_hash,
+        "transportChunkRoot": hashes.chunk_root,
+    })
+}
+
+fn reject_unexpected_verified_material_reference_fields(value: &Value) -> CanonicalResult<()> {
+    let Some(object) = value.as_object() else {
+        return Err(invalid_threshold_commitment_input(
+            "verifiedVssCoefficientCommitmentMaterial must be an object",
+        ));
+    };
+    for field_name in object.keys() {
+        if ![
+            "objectType",
+            "objectVersion",
+            "setupProfileId",
+            "verificationId",
+            "materialBinaryFormat",
+            "publicMatrixSeedHash",
+            "vssCoefficientCommitmentRoot",
+            "vssCoefficientCommitmentMaterialRoot",
+            "thresholdShareCommitmentRoot",
+            "transportProfileId",
+            "transportChunkSizeBytes",
+            "transportChunkCount",
+            "transportTotalByteLength",
+            "transportFullObjectHash",
+            "transportChunkRoot",
+        ]
+        .contains(&field_name.as_str())
+        {
+            return Err(invalid_threshold_commitment_input(format!(
+                "verifiedVssCoefficientCommitmentMaterial contains unexpected field {field_name}"
+            )));
+        }
+    }
+    if value.get("materialBinaryFormat").and_then(Value::as_str) != Some(VSS_MATERIAL_BINARY_FORMAT)
+    {
+        return Err(invalid_threshold_commitment_input(
+            "verified VSS material must use the accepted binary format",
+        ));
+    }
+    if value.get("transportProfileId").and_then(Value::as_str) != Some(SETUP_TRANSPORT_PROFILE_ID) {
+        return Err(invalid_threshold_commitment_input(
+            "verified VSS material transportProfileId must match the setup transport profile",
+        ));
+    }
+
+    Ok(())
+}
+
+fn absorb_threshold_share_commitment_transport_chunk(
+    session: &mut VssTransportThresholdDerivationSession,
+    chunk_index: usize,
+    chunk: &[u8],
+) -> CanonicalResult<Value> {
+    if chunk_index != session.next_chunk_index {
+        return Err(invalid_threshold_commitment_input(
+            "transport stream chunks must be absorbed in ascending chunk-index order",
+        ));
+    }
+    if chunk_index >= session.transport_header.chunk_count {
+        return Err(invalid_threshold_commitment_input(
+            "transport stream received more chunks than declared",
+        ));
+    }
+    validate_transport_stream_chunk_shape(
+        chunk_index,
+        chunk,
+        &session.transport_header,
+        session.observed_total_byte_length,
+    )?;
+    let observed_chunk_hash = setup_vss_material_chunk_hash(chunk_index, chunk)?;
+    if let Some(expected_manifest) = &session.transport_header.expected_manifest {
+        let expected_chunk_hash =
+            expected_manifest
+                .chunk_hashes
+                .get(chunk_index)
+                .ok_or_else(|| {
+                    invalid_threshold_commitment_input("transport stream chunk hash is missing")
+                })?;
+        if &observed_chunk_hash != expected_chunk_hash {
+            return Err(invalid_threshold_commitment_input(
+                "transport stream chunk bytes do not match the declared chunk hash",
+            ));
+        }
+    }
+    session.observed_chunk_hashes.push(observed_chunk_hash);
+    session.full_object_hasher.update(chunk);
+    session.observed_total_byte_length = session
+        .observed_total_byte_length
+        .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+            invalid_threshold_commitment_input("transport chunk length does not fit u64")
+        })?)
+        .ok_or_else(|| invalid_threshold_commitment_input("transport byte length overflowed"))?;
+    session.parser.append_chunk(
+        &session.setup_context,
+        &session.public_matrix_seed_hash,
+        chunk,
+    )?;
+    session.next_chunk_index += 1;
+
+    Ok(json!({
+        "ok": true,
+        "operation": "absorbThresholdShareCommitmentsFromTransportStreamChunk",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "absorbedChunkIndex": chunk_index,
+        "absorbedByteLength": chunk.len(),
+        "nextChunkIndex": session.next_chunk_index,
+        "observedTotalByteLength": session.observed_total_byte_length,
+    }))
+}
+
+fn validate_transport_stream_chunk_shape(
+    chunk_index: usize,
+    chunk: &[u8],
+    header: &TransportedMaterialStreamHeader,
+    observed_total_byte_length: u64,
+) -> CanonicalResult<()> {
+    if chunk.is_empty() {
+        return Err(invalid_threshold_commitment_input(
+            "setup transport chunks must be non-empty",
+        ));
+    }
+    let chunk_size_usize = usize::try_from(SETUP_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
+        invalid_threshold_commitment_input("setup transport chunk size does not fit usize")
+    })?;
+    if chunk.len() > chunk_size_usize {
+        return Err(invalid_threshold_commitment_input(
+            "setup transport chunk exceeds the accepted chunk size",
+        ));
+    }
+    let is_final_chunk = chunk_index + 1 == header.chunk_count;
+    if !is_final_chunk && chunk.len() != chunk_size_usize {
+        return Err(invalid_threshold_commitment_input(
+            "setup transport contains a short non-final chunk",
+        ));
+    }
+    let chunk_length = u64::try_from(chunk.len()).map_err(|_| {
+        invalid_threshold_commitment_input("transport chunk length does not fit u64")
+    })?;
+    let new_total = observed_total_byte_length
+        .checked_add(chunk_length)
+        .ok_or_else(|| invalid_threshold_commitment_input("transport byte length overflowed"))?;
+    if new_total > header.total_byte_length {
+        return Err(invalid_threshold_commitment_input(
+            "transport stream chunk bytes exceed declared totalByteLength",
+        ));
+    }
+    if is_final_chunk && new_total != header.total_byte_length {
+        return Err(invalid_threshold_commitment_input(
+            "final transport stream chunk must finish at declared totalByteLength",
+        ));
+    }
+
+    Ok(())
+}
+
+fn finish_threshold_share_commitment_transport_stream(
+    derivation_id: &str,
+    session: VssTransportThresholdDerivationSession,
+    vss_coefficient_commitment_root: &str,
+    source_trustee_record_values: &[Value],
+) -> CanonicalResult<Value> {
+    validate_hash_string(
+        vss_coefficient_commitment_root,
+        "vssCoefficientCommitmentRoot",
+    )?;
+    let source_trustee_bindings = verify_source_trustee_commitment_records(
+        source_trustee_record_values,
+        &session.setup_context,
+        &session.public_matrix_seed_hash,
+    )?;
+    if session.next_chunk_index != session.transport_header.chunk_count {
+        return Err(invalid_threshold_commitment_input(
+            "transport stream is missing declared chunks",
+        ));
+    }
+    if session.observed_total_byte_length != session.transport_header.total_byte_length {
+        return Err(invalid_threshold_commitment_input(
+            "transport stream totalByteLength does not match absorbed chunk bytes",
+        ));
+    }
+    let full_object_hash = finalize_streaming_hash512_hex(session.full_object_hasher);
+    let chunk_root = setup_transport_chunk_manifest_root(
+        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        u64::try_from(session.transport_header.chunk_count).map_err(|_| {
+            invalid_threshold_commitment_input("setup transport chunk count does not fit u64")
+        })?,
+        session.transport_header.total_byte_length,
+        &session.observed_chunk_hashes,
+        &full_object_hash,
+    )?;
+    if let Some(expected_manifest) = &session.transport_header.expected_manifest {
+        let observed_hashes = SetupVssMaterialTransportHashes {
+            full_object_hash: full_object_hash.clone(),
+            chunk_hashes: session.observed_chunk_hashes.clone(),
+            chunk_root: chunk_root.clone(),
+            total_byte_length: session.transport_header.total_byte_length,
+        };
+        compare_transport_manifest_hashes(expected_manifest, &observed_hashes)?;
+    }
+    let derivation = session
+        .parser
+        .finish(&session.setup_context, &session.public_matrix_seed_hash)?;
+    verify_observed_transport_commitment_roots(
+        &source_trustee_bindings,
+        &derivation.observed_commitment_roots,
+    )?;
+    let material_record_count = vss_material_record_count();
+    let hashes = SetupVssMaterialTransportHashes {
+        full_object_hash,
+        chunk_hashes: session.observed_chunk_hashes,
+        chunk_root,
+        total_byte_length: session.transport_header.total_byte_length,
+    };
+    let material_set = transported_vss_material_set_value(
+        &session.setup_context,
+        &session.public_matrix_seed_hash,
+        derivation.ring_degree,
+        derivation.ring_degree_status,
+        material_record_count,
+        vss_coefficient_commitment_root,
+        &hashes,
+    )?;
+    let material_root = material_set
+        .get("vssCoefficientCommitmentMaterialRoot")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input(
+                "transport stream derivation did not return a material root",
+            )
+        })?;
+    let threshold_share_commitment_root = derivation
+        .threshold_share_commitments
+        .get("thresholdShareCommitmentRoot")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input(
+                "transport stream derivation did not return a threshold root",
+            )
+        })?;
+    let verified_material_reference = verified_transported_vss_material_reference_value(
+        derivation_id,
+        &session.public_matrix_seed_hash,
+        vss_coefficient_commitment_root,
+        material_root,
+        threshold_share_commitment_root,
+        &hashes,
+    );
+    let constant_commitments_by_source_trustee =
+        Arc::new(derivation.constant_commitments_by_source_trustee);
+    vss_transport_verified_materials()
+        .lock()
+        .map_err(|_| invalid_threshold_commitment_input("verified material store is unavailable"))?
+        .insert(
+            derivation_id.to_string(),
+            VerifiedTransportedVssMaterial {
+                reference: verified_material_reference.clone(),
+                setup_context: session.setup_context.clone(),
+                public_matrix_seed_hash: session.public_matrix_seed_hash.clone(),
+                vss_coefficient_commitment_root: vss_coefficient_commitment_root.to_string(),
+                material_set: material_set.clone(),
+                threshold_share_commitments: derivation.threshold_share_commitments.clone(),
+                constant_commitments_by_source_trustee,
+            },
+        );
+
+    Ok(json!({
+        "ok": true,
+        "operation": "finishThresholdShareCommitmentsFromTransportStream",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "derivationId": derivation_id,
+        "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
+        "ringDegree": derivation.ring_degree,
+        "ringDegreeStatus": derivation.ring_degree_status,
+        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "rnsLimbCount": DATA_PRIMES.len(),
+        "thresholdDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "derivedLimbCommitmentCount": FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len(),
+        "transport": {
+            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": session.transport_header.chunk_count,
+            "totalByteLength": hashes.total_byte_length,
+            "fullObjectHash": hashes.full_object_hash,
+            "chunkRoot": hashes.chunk_root,
+            "chunkHashes": hashes.chunk_hashes,
+        },
+        "vssCoefficientCommitmentMaterial": material_set,
+        "verifiedVssCoefficientCommitmentMaterial": verified_material_reference,
+        "thresholdShareCommitmentRoot": threshold_share_commitment_root,
+        "thresholdShareCommitments": derivation.threshold_share_commitments,
+    }))
+}
+
+fn verify_observed_transport_commitment_roots(
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
+    observed_commitment_roots: &BTreeMap<(u64, usize, u64), String>,
+) -> CanonicalResult<()> {
+    if observed_commitment_roots.len() != vss_material_record_count() {
+        return Err(invalid_threshold_commitment_input(
+            "transport stream did not observe every accepted VSS commitment coordinate",
+        ));
+    }
+    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        let source_trustee_binding = source_trustee_bindings
+            .get(&source_trustee_roster_position)
+            .ok_or_else(|| {
+                invalid_threshold_commitment_input(
+                    "transport stream finish is missing a source trustee binding",
+                )
+            })?;
+        for rns_limb_index in 0..DATA_PRIMES.len() {
+            for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+                let observed_commitment_root = observed_commitment_roots
+                    .get(&(
+                        source_trustee_roster_position,
+                        rns_limb_index,
+                        shamir_coefficient_index,
+                    ))
+                    .ok_or_else(|| {
+                        invalid_threshold_commitment_input(
+                            "transport stream is missing an observed VSS commitment coordinate",
+                        )
+                    })?;
+                let expected_commitment_root = source_trustee_binding
+                    .coefficient_commitment_roots
+                    .get(&(rns_limb_index, shamir_coefficient_index))
+                    .ok_or_else(|| {
+                        invalid_threshold_commitment_input(
+                            "transport stream finish source record is missing a VSS commitment coordinate",
+                        )
+                    })?;
+                if observed_commitment_root != expected_commitment_root {
+                    return Err(invalid_threshold_commitment_input(
+                        "transported setup commitment material does not match the source trustee commitment root",
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) fn verify_constant_vss_commitments_from_transport_request(
     request: &Value,
 ) -> CanonicalResult<VerifiedTransportedConstantVssCommitments> {
@@ -296,8 +920,9 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
 
     Ok(VerifiedTransportedConstantVssCommitments {
         material_set,
-        constant_commitments_by_source_trustee: constant_material
-            .constant_commitments_by_source_trustee,
+        constant_commitments_by_source_trustee: Arc::new(
+            constant_material.constant_commitments_by_source_trustee,
+        ),
     })
 }
 
@@ -345,16 +970,43 @@ pub(crate) fn derive_threshold_share_commitment_set_from_parts(
 }
 
 struct TransportedMaterialChunks {
+    manifest: TransportedMaterialManifest,
+    chunks: Vec<Vec<u8>>,
+}
+
+#[derive(Clone)]
+struct TransportedMaterialManifest {
     full_object_hash: String,
     chunk_hashes: Vec<String>,
     chunk_root: String,
-    chunks: Vec<Vec<u8>>,
+    chunk_count: usize,
+    total_byte_length: u64,
+}
+
+#[derive(Clone)]
+struct TransportedMaterialStreamHeader {
+    chunk_count: usize,
+    total_byte_length: u64,
+    expected_manifest: Option<TransportedMaterialManifest>,
 }
 
 struct TransportThresholdDerivation {
     ring_degree: usize,
     ring_degree_status: &'static str,
+    observed_commitment_roots: BTreeMap<(u64, usize, u64), String>,
     threshold_share_commitments: Value,
+    constant_commitments_by_source_trustee: BTreeMap<u64, Vec<SetupCommitmentValue>>,
+}
+
+struct VssTransportThresholdDerivationSession {
+    setup_context: Value,
+    public_matrix_seed_hash: String,
+    transport_header: TransportedMaterialStreamHeader,
+    observed_chunk_hashes: Vec<String>,
+    full_object_hasher: Shake256,
+    next_chunk_index: usize,
+    observed_total_byte_length: u64,
+    parser: StreamingVssThresholdMaterialParser,
 }
 
 struct TransportConstantVssMaterial {
@@ -366,6 +1018,62 @@ struct TransportConstantVssMaterial {
 struct TransportThresholdAccumulator {
     coefficient_commitment_roots: Vec<String>,
     commitment: SetupCommitmentValue,
+}
+
+trait BinaryMaterialReader {
+    fn is_finished(&self) -> bool;
+
+    fn read_exact_vec(&mut self, length: usize) -> CanonicalResult<Vec<u8>>;
+
+    fn read_varuint(&mut self) -> CanonicalResult<u64> {
+        let mut shift = 0_u32;
+        let mut value = 0_u64;
+        let mut consumed = Vec::new();
+
+        for byte_index in 0..10 {
+            let byte = self.read_exact_vec(1)?[0];
+            consumed.push(byte);
+            let payload = u64::from(byte & 0x7f);
+            if byte_index == 9 && payload > 1 {
+                return Err(invalid_threshold_commitment_input(
+                    "binary varuint exceeds u64",
+                ));
+            }
+            value |= payload << shift;
+
+            if byte & 0x80 == 0 {
+                let mut canonical = Vec::new();
+                append_varuint(&mut canonical, value);
+                if canonical != consumed {
+                    return Err(invalid_threshold_commitment_input(
+                        "binary varuint is not minimally encoded",
+                    ));
+                }
+                return Ok(value);
+            }
+
+            shift += 7;
+        }
+
+        Err(invalid_threshold_commitment_input(
+            "binary varuint is too long",
+        ))
+    }
+
+    fn read_usize(&mut self, field_name: &str) -> CanonicalResult<usize> {
+        usize::try_from(self.read_varuint()?).map_err(|_| {
+            invalid_threshold_commitment_input(format!("{field_name} does not fit usize"))
+        })
+    }
+
+    fn read_u64_le(&mut self, field_name: &str) -> CanonicalResult<u64> {
+        let bytes = self.read_exact_vec(8)?;
+        let array: [u8; 8] = bytes.try_into().map_err(|_| {
+            invalid_threshold_commitment_input(format!("{field_name} is malformed"))
+        })?;
+
+        Ok(u64::from_le_bytes(array))
+    }
 }
 
 struct ChunkedMaterialReader<'a> {
@@ -429,56 +1137,419 @@ impl<'a> ChunkedMaterialReader<'a> {
 
         Ok(output)
     }
+}
 
-    fn read_varuint(&mut self) -> CanonicalResult<u64> {
-        let mut shift = 0_u32;
-        let mut value = 0_u64;
-        let mut consumed = Vec::new();
-
-        for byte_index in 0..10 {
-            let byte = self.read_exact_vec(1)?[0];
-            consumed.push(byte);
-            let payload = u64::from(byte & 0x7f);
-            if byte_index == 9 && payload > 1 {
-                return Err(invalid_threshold_commitment_input(
-                    "binary varuint exceeds u64",
-                ));
-            }
-            value |= payload << shift;
-
-            if byte & 0x80 == 0 {
-                let mut canonical = Vec::new();
-                append_varuint(&mut canonical, value);
-                if canonical != consumed {
-                    return Err(invalid_threshold_commitment_input(
-                        "binary varuint is not minimally encoded",
-                    ));
-                }
-                return Ok(value);
-            }
-
-            shift += 7;
-        }
-
-        Err(invalid_threshold_commitment_input(
-            "binary varuint is too long",
-        ))
+impl BinaryMaterialReader for ChunkedMaterialReader<'_> {
+    fn is_finished(&self) -> bool {
+        self.is_finished()
     }
 
-    fn read_usize(&mut self, field_name: &str) -> CanonicalResult<usize> {
-        usize::try_from(self.read_varuint()?).map_err(|_| {
-            invalid_threshold_commitment_input(format!("{field_name} does not fit usize"))
+    fn read_exact_vec(&mut self, length: usize) -> CanonicalResult<Vec<u8>> {
+        self.read_exact_vec(length)
+    }
+}
+
+struct SliceMaterialReader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> SliceMaterialReader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+}
+
+impl BinaryMaterialReader for SliceMaterialReader<'_> {
+    fn is_finished(&self) -> bool {
+        self.offset == self.bytes.len()
+    }
+
+    fn read_exact_vec(&mut self, length: usize) -> CanonicalResult<Vec<u8>> {
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or_else(|| invalid_threshold_commitment_input("transport slice read overflowed"))?;
+        if end > self.bytes.len() {
+            return Err(invalid_threshold_commitment_input(
+                "transported material ended before the binary object was complete",
+            ));
+        }
+        let output = self.bytes[self.offset..end].to_vec();
+        self.offset = end;
+
+        Ok(output)
+    }
+}
+
+enum PendingRead<T> {
+    Ready(T),
+    NeedMore,
+}
+
+struct StreamingVssThresholdMaterialParser {
+    pending_bytes: Vec<u8>,
+    pending_offset: usize,
+    ring_degree: Option<usize>,
+    completed_record_count: usize,
+    observed_commitment_roots: BTreeMap<(u64, usize, u64), String>,
+    accumulators: BTreeMap<(u64, usize), TransportThresholdAccumulator>,
+    constant_commitments_by_source_trustee: BTreeMap<u64, Vec<SetupCommitmentValue>>,
+}
+
+impl StreamingVssThresholdMaterialParser {
+    fn new() -> Self {
+        Self {
+            pending_bytes: Vec::new(),
+            pending_offset: 0,
+            ring_degree: None,
+            completed_record_count: 0,
+            observed_commitment_roots: BTreeMap::new(),
+            accumulators: BTreeMap::new(),
+            constant_commitments_by_source_trustee: BTreeMap::new(),
+        }
+    }
+
+    fn append_chunk(
+        &mut self,
+        setup_context: &Value,
+        public_matrix_seed_hash: &str,
+        chunk: &[u8],
+    ) -> CanonicalResult<()> {
+        self.pending_bytes.extend_from_slice(chunk);
+        self.process_available(setup_context, public_matrix_seed_hash)
+    }
+
+    fn finish(
+        mut self,
+        setup_context: &Value,
+        public_matrix_seed_hash: &str,
+    ) -> CanonicalResult<TransportThresholdDerivation> {
+        self.process_available(setup_context, public_matrix_seed_hash)?;
+        let ring_degree = self.ring_degree.ok_or_else(|| {
+            invalid_threshold_commitment_input(
+                "transported VSS material ended before the binary header was complete",
+            )
+        })?;
+        let expected_record_count = vss_material_record_count();
+        if self.completed_record_count != expected_record_count {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material ended before every commitment record was supplied",
+            ));
+        }
+        if self.available_byte_count() != 0 {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material has trailing bytes after the final commitment record",
+            ));
+        }
+        for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+            if self
+                .constant_commitments_by_source_trustee
+                .get(&source_trustee_roster_position)
+                .map(Vec::len)
+                != Some(DATA_PRIMES.len())
+            {
+                return Err(invalid_threshold_commitment_input(
+                    "transported VSS material is missing a constant commitment limb",
+                ));
+            }
+        }
+
+        let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
+            "profile-ring"
+        } else {
+            "development-reduced-ring"
+        };
+        let threshold_share_commitments =
+            threshold_share_commitment_set_from_transport_accumulators(
+                setup_context,
+                public_matrix_seed_hash,
+                ring_degree,
+                ring_degree_status,
+                &self.accumulators,
+            )?;
+
+        Ok(TransportThresholdDerivation {
+            ring_degree,
+            ring_degree_status,
+            observed_commitment_roots: self.observed_commitment_roots,
+            threshold_share_commitments,
+            constant_commitments_by_source_trustee: self.constant_commitments_by_source_trustee,
         })
     }
 
-    fn read_u64_le(&mut self, field_name: &str) -> CanonicalResult<u64> {
-        let bytes = self.read_exact_vec(8)?;
-        let array: [u8; 8] = bytes.try_into().map_err(|_| {
-            invalid_threshold_commitment_input(format!("{field_name} is malformed"))
-        })?;
+    fn process_available(
+        &mut self,
+        setup_context: &Value,
+        public_matrix_seed_hash: &str,
+    ) -> CanonicalResult<()> {
+        if self.ring_degree.is_none() {
+            self.try_parse_header()?;
+        }
+        let Some(ring_degree) = self.ring_degree else {
+            return Ok(());
+        };
+        let record_length = vss_material_binary_record_length(ring_degree)?;
+        let expected_record_count = vss_material_record_count();
+        while self.completed_record_count < expected_record_count
+            && self.available_byte_count() >= record_length
+        {
+            let record_end = self
+                .pending_offset
+                .checked_add(record_length)
+                .ok_or_else(|| {
+                    invalid_threshold_commitment_input("transport parser offset overflowed")
+                })?;
+            let (source_trustee_roster_position, rns_limb_index, shamir_coefficient_index) =
+                expected_vss_material_record_coordinates(self.completed_record_count)?;
+            let rns_prime = DATA_PRIMES[rns_limb_index];
+            let mut reader =
+                SliceMaterialReader::new(&self.pending_bytes[self.pending_offset..record_end]);
+            let commitment = read_binary_setup_commitment(
+                &mut reader,
+                source_trustee_roster_position,
+                rns_limb_index,
+                rns_prime,
+                shamir_coefficient_index,
+                ring_degree,
+            )?;
+            if !reader.is_finished() {
+                return Err(invalid_threshold_commitment_input(
+                    "transported VSS material record has trailing bytes",
+                ));
+            }
+            let commitment_root = setup_commitment_root(&commitment)?;
+            if self
+                .observed_commitment_roots
+                .insert(
+                    (
+                        source_trustee_roster_position,
+                        rns_limb_index,
+                        shamir_coefficient_index,
+                    ),
+                    commitment_root.clone(),
+                )
+                .is_some()
+            {
+                return Err(invalid_threshold_commitment_input(
+                    "transported VSS material contains duplicate commitment coordinates",
+                ));
+            }
+            accumulate_transport_threshold_commitments(
+                setup_context,
+                public_matrix_seed_hash,
+                source_trustee_roster_position,
+                rns_limb_index,
+                rns_prime,
+                shamir_coefficient_index,
+                &commitment_root,
+                &commitment,
+                &mut self.accumulators,
+            )?;
+            if shamir_coefficient_index == 0 {
+                self.constant_commitments_by_source_trustee
+                    .entry(source_trustee_roster_position)
+                    .or_default()
+                    .push(commitment);
+            }
+            self.pending_offset = record_end;
+            self.completed_record_count += 1;
+            self.drain_consumed_bytes();
+        }
 
-        Ok(u64::from_le_bytes(array))
+        Ok(())
     }
+
+    fn try_parse_header(&mut self) -> CanonicalResult<()> {
+        let pending_slice = &self.pending_bytes[self.pending_offset..];
+        if pending_slice.len() < VSS_MATERIAL_BINARY_MAGIC.len() {
+            return Ok(());
+        }
+        if &pending_slice[..VSS_MATERIAL_BINARY_MAGIC.len()] != VSS_MATERIAL_BINARY_MAGIC {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material binary magic does not match",
+            ));
+        }
+        let mut cursor = self.pending_offset + VSS_MATERIAL_BINARY_MAGIC.len();
+        let version = match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)? {
+            PendingRead::Ready(value) => value,
+            PendingRead::NeedMore => return Ok(()),
+        };
+        let participant_count =
+            match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)? {
+                PendingRead::Ready(value) => value,
+                PendingRead::NeedMore => return Ok(()),
+            };
+        let threshold_degree =
+            match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)? {
+                PendingRead::Ready(value) => value,
+                PendingRead::NeedMore => return Ok(()),
+            };
+        let rns_limb_count = match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)?
+        {
+            PendingRead::Ready(value) => value,
+            PendingRead::NeedMore => return Ok(()),
+        };
+        let ring_degree = match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)? {
+            PendingRead::Ready(value) => usize::try_from(value)
+                .map_err(|_| invalid_threshold_commitment_input("ringDegree does not fit usize"))?,
+            PendingRead::NeedMore => return Ok(()),
+        };
+        let commitment_limb_count =
+            match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)? {
+                PendingRead::Ready(value) => value,
+                PendingRead::NeedMore => return Ok(()),
+            };
+        let commitment_row_count =
+            match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)? {
+                PendingRead::Ready(value) => value,
+                PendingRead::NeedMore => return Ok(()),
+            };
+
+        if version != VSS_MATERIAL_BINARY_VERSION {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material binary version is unsupported",
+            ));
+        }
+        if participant_count != FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material participant count does not match the accepted profile",
+            ));
+        }
+        if threshold_degree != FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material threshold degree does not match the accepted profile",
+            ));
+        }
+        if rns_limb_count != DATA_PRIMES.len() as u64 {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material RNS limb count does not match Q_share",
+            ));
+        }
+        if commitment_limb_count != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64 {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material commitment limb count does not match the commitment profile",
+            ));
+        }
+        if commitment_row_count != SETUP_COMMITMENT_ROW_COUNT as u64 {
+            return Err(invalid_threshold_commitment_input(
+                "transported VSS material row count does not match the commitment profile",
+            ));
+        }
+
+        self.ring_degree = Some(ring_degree);
+        self.pending_offset = cursor;
+        self.drain_consumed_bytes();
+
+        Ok(())
+    }
+
+    fn available_byte_count(&self) -> usize {
+        self.pending_bytes.len().saturating_sub(self.pending_offset)
+    }
+
+    fn drain_consumed_bytes(&mut self) {
+        if self.pending_offset == 0 {
+            return;
+        }
+        self.pending_bytes.drain(0..self.pending_offset);
+        self.pending_offset = 0;
+    }
+}
+
+fn try_read_varuint_from_pending(
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> CanonicalResult<PendingRead<u64>> {
+    let start_cursor = *cursor;
+    let mut local_cursor = start_cursor;
+    let mut shift = 0_u32;
+    let mut value = 0_u64;
+    let mut consumed = Vec::new();
+
+    for byte_index in 0..10 {
+        let Some(byte) = bytes.get(local_cursor).copied() else {
+            return Ok(PendingRead::NeedMore);
+        };
+        local_cursor += 1;
+        consumed.push(byte);
+        let payload = u64::from(byte & 0x7f);
+        if byte_index == 9 && payload > 1 {
+            return Err(invalid_threshold_commitment_input(
+                "binary varuint exceeds u64",
+            ));
+        }
+        value |= payload << shift;
+
+        if byte & 0x80 == 0 {
+            let mut canonical = Vec::new();
+            append_varuint(&mut canonical, value);
+            if canonical != consumed {
+                return Err(invalid_threshold_commitment_input(
+                    "binary varuint is not minimally encoded",
+                ));
+            }
+            *cursor = local_cursor;
+            return Ok(PendingRead::Ready(value));
+        }
+
+        shift += 7;
+    }
+
+    Err(invalid_threshold_commitment_input(
+        "binary varuint is too long",
+    ))
+}
+
+fn vss_material_record_count() -> usize {
+    FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD
+}
+
+fn vss_material_binary_record_length(ring_degree: usize) -> CanonicalResult<usize> {
+    let row_coefficient_bytes = SETUP_COMMITMENT_ROW_COUNT
+        .checked_mul(ring_degree)
+        .and_then(|coefficient_count| coefficient_count.checked_mul(8))
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input("transported VSS material record length overflowed")
+        })?;
+    let commitment_limb_bytes = 1_usize
+        .checked_add(8)
+        .and_then(|prefix_bytes| prefix_bytes.checked_add(row_coefficient_bytes))
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input("transported VSS material record length overflowed")
+        })?;
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .len()
+        .checked_mul(commitment_limb_bytes)
+        .and_then(|limb_bytes| limb_bytes.checked_add(3))
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input("transported VSS material record length overflowed")
+        })
+}
+
+fn expected_vss_material_record_coordinates(
+    record_index: usize,
+) -> CanonicalResult<(u64, usize, u64)> {
+    let records_per_source_trustee = DATA_PRIMES
+        .len()
+        .checked_mul(FIRST_PROFILE_DECRYPTION_THRESHOLD)
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input("transport material coordinate overflowed")
+        })?;
+    let source_trustee_roster_position = record_index / records_per_source_trustee;
+    let record_within_source = record_index % records_per_source_trustee;
+    let rns_limb_index = record_within_source / FIRST_PROFILE_DECRYPTION_THRESHOLD;
+    let shamir_coefficient_index = record_within_source % FIRST_PROFILE_DECRYPTION_THRESHOLD;
+
+    Ok((
+        u64::try_from(source_trustee_roster_position).map_err(|_| {
+            invalid_threshold_commitment_input("source trustee roster position does not fit u64")
+        })?,
+        rns_limb_index,
+        u64::try_from(shamir_coefficient_index).map_err(|_| {
+            invalid_threshold_commitment_input("Shamir coefficient index does not fit u64")
+        })?,
+    ))
 }
 
 pub(crate) fn setup_vss_material_transport_hashes(
@@ -535,11 +1606,7 @@ pub(crate) fn setup_vss_material_transport_hashes(
     )?;
     let mut chunk_hashes = Vec::with_capacity(chunks.len());
     for (chunk_index, chunk) in chunks.iter().enumerate() {
-        chunk_hashes.push(setup_vss_material_chunk_hash(
-            &full_object_hash,
-            chunk_index,
-            chunk,
-        )?);
+        chunk_hashes.push(setup_vss_material_chunk_hash(chunk_index, chunk)?);
     }
     let chunk_root = setup_transport_chunk_manifest_root(
         chunk_size_bytes,
@@ -560,7 +1627,57 @@ pub(crate) fn setup_vss_material_transport_hashes(
 }
 
 fn read_transport_material(value: &Value) -> CanonicalResult<TransportedMaterialChunks> {
-    reject_unexpected_transport_material_fields(value)?;
+    let manifest = read_transport_material_manifest(value, true)?;
+    let chunk_values = array_field(value, "chunks")?;
+    if chunk_values.len() != manifest.chunk_count {
+        return Err(invalid_threshold_commitment_input(
+            "transport chunks length must match chunkCount",
+        ));
+    }
+    let chunks = chunk_values
+        .iter()
+        .enumerate()
+        .map(|(expected_chunk_index, chunk_value)| {
+            let chunk_object = chunk_value.as_object().ok_or_else(|| {
+                invalid_threshold_commitment_input("transport chunk entries must be objects")
+            })?;
+            let observed_chunk_index = chunk_object
+                .get("chunkIndex")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| invalid_threshold_commitment_input("chunkIndex is required"))?;
+            if observed_chunk_index != expected_chunk_index as u64 {
+                return Err(invalid_threshold_commitment_input(
+                    "transport chunks must be supplied in ascending chunk-index order",
+                ));
+            }
+            let bytes_hex = chunk_object
+                .get("bytesHex")
+                .and_then(Value::as_str)
+                .ok_or_else(|| invalid_threshold_commitment_input("chunk bytesHex is required"))?;
+            decode_hex(bytes_hex)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let observed_total_byte_length = chunks.iter().try_fold(0_u64, |accumulator, chunk| {
+        accumulator
+            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                invalid_threshold_commitment_input("transport chunk length does not fit u64")
+            })?)
+            .ok_or_else(|| invalid_threshold_commitment_input("transport byte length overflowed"))
+    })?;
+    if observed_total_byte_length != manifest.total_byte_length {
+        return Err(invalid_threshold_commitment_input(
+            "transport totalByteLength must match supplied chunk bytes",
+        ));
+    }
+
+    Ok(TransportedMaterialChunks { manifest, chunks })
+}
+
+fn read_transport_material_manifest(
+    value: &Value,
+    allow_embedded_chunks: bool,
+) -> CanonicalResult<TransportedMaterialManifest> {
+    reject_unexpected_transport_material_fields(value, allow_embedded_chunks)?;
     if value.get("objectType").and_then(Value::as_str) != Some(VSS_MATERIAL_BINARY_OBJECT_TYPE) {
         return Err(invalid_threshold_commitment_input(
             "transportedVssCoefficientCommitmentMaterial.objectType must be SetupTransportedVssCoefficientCommitmentMaterial",
@@ -604,64 +1721,125 @@ fn read_transport_material(value: &Value) -> CanonicalResult<TransportedMaterial
             Ok(chunk_hash.to_string())
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let chunk_values = array_field(value, "chunks")?;
-    if chunk_values.len() != expected_chunk_count {
+    if expected_chunk_count == 0 {
         return Err(invalid_threshold_commitment_input(
-            "transport chunks length must match chunkCount",
+            "setup transport requires at least one material chunk",
         ));
     }
-    let chunks = chunk_values
-        .iter()
-        .enumerate()
-        .map(|(expected_chunk_index, chunk_value)| {
-            let chunk_object = chunk_value.as_object().ok_or_else(|| {
-                invalid_threshold_commitment_input("transport chunk entries must be objects")
-            })?;
-            let observed_chunk_index = chunk_object
-                .get("chunkIndex")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| invalid_threshold_commitment_input("chunkIndex is required"))?;
-            if observed_chunk_index != expected_chunk_index as u64 {
-                return Err(invalid_threshold_commitment_input(
-                    "transport chunks must be supplied in ascending chunk-index order",
-                ));
-            }
-            let bytes_hex = chunk_object
-                .get("bytesHex")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid_threshold_commitment_input("chunk bytesHex is required"))?;
-            decode_hex(bytes_hex)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let observed_total_byte_length = chunks.iter().try_fold(0_u64, |accumulator, chunk| {
-        accumulator
-            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
-                invalid_threshold_commitment_input("transport chunk length does not fit u64")
-            })?)
-            .ok_or_else(|| invalid_threshold_commitment_input("transport byte length overflowed"))
-    })?;
-    if observed_total_byte_length != expected_total_byte_length {
-        return Err(invalid_threshold_commitment_input(
-            "transport totalByteLength must match supplied chunk bytes",
-        ));
-    }
+    validate_transport_manifest_shape(
+        expected_chunk_count,
+        expected_total_byte_length,
+        &chunk_hashes,
+        &full_object_hash,
+        &chunk_root,
+    )?;
 
-    Ok(TransportedMaterialChunks {
+    Ok(TransportedMaterialManifest {
         full_object_hash,
         chunk_hashes,
         chunk_root,
-        chunks,
+        chunk_count: expected_chunk_count,
+        total_byte_length: expected_total_byte_length,
     })
 }
 
-fn reject_unexpected_transport_material_fields(value: &Value) -> CanonicalResult<()> {
+fn read_transport_material_stream_header(
+    value: &Value,
+) -> CanonicalResult<TransportedMaterialStreamHeader> {
+    reject_unexpected_transport_material_fields(value, false)?;
+    if value.get("objectType").and_then(Value::as_str) != Some(VSS_MATERIAL_BINARY_OBJECT_TYPE) {
+        return Err(invalid_threshold_commitment_input(
+            "transportedVssCoefficientCommitmentMaterial.objectType must be SetupTransportedVssCoefficientCommitmentMaterial",
+        ));
+    }
+    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(invalid_threshold_commitment_input(
+            "transportedVssCoefficientCommitmentMaterial.objectVersion must be 1",
+        ));
+    }
+    if value.get("binaryFormat").and_then(Value::as_str) != Some(VSS_MATERIAL_BINARY_FORMAT) {
+        return Err(invalid_threshold_commitment_input(
+            "transported VSS coefficient material must use the accepted binary format",
+        ));
+    }
+    if u64_field(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
+        return Err(invalid_threshold_commitment_input(
+            "transported VSS coefficient material must use the accepted 1 MiB setup chunk size",
+        ));
+    }
+    let chunk_count = usize_field(value, "chunkCount")?;
+    if chunk_count == 0 {
+        return Err(invalid_threshold_commitment_input(
+            "setup transport requires at least one material chunk",
+        ));
+    }
+    let total_byte_length = u64_field(value, "totalByteLength")?;
+    let has_full_object_hash = value.get("fullObjectHash").is_some();
+    let has_chunk_hashes = value.get("chunkHashes").is_some();
+    let has_chunk_root = value.get("chunkRoot").is_some();
+    let expected_manifest = if has_full_object_hash || has_chunk_hashes || has_chunk_root {
+        if !(has_full_object_hash && has_chunk_hashes && has_chunk_root) {
+            return Err(invalid_threshold_commitment_input(
+                "transport stream expected manifest must include fullObjectHash, chunkHashes, and chunkRoot together",
+            ));
+        }
+        let full_object_hash = hash_string_field(value, "fullObjectHash")?.to_string();
+        let chunk_root = hash_string_field(value, "chunkRoot")?.to_string();
+        let chunk_hash_values = array_field(value, "chunkHashes")?;
+        if chunk_hash_values.len() != chunk_count {
+            return Err(invalid_threshold_commitment_input(
+                "transport chunkHashes length must match chunkCount",
+            ));
+        }
+        let chunk_hashes = chunk_hash_values
+            .iter()
+            .enumerate()
+            .map(|(chunk_index, chunk_hash_value)| {
+                let Some(chunk_hash) = chunk_hash_value.as_str() else {
+                    return Err(invalid_threshold_commitment_input(format!(
+                        "chunkHashes[{chunk_index}] must be a hash string"
+                    )));
+                };
+                validate_hash_string(chunk_hash, &format!("chunkHashes[{chunk_index}]"))?;
+                Ok(chunk_hash.to_string())
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        validate_transport_manifest_shape(
+            chunk_count,
+            total_byte_length,
+            &chunk_hashes,
+            &full_object_hash,
+            &chunk_root,
+        )?;
+        Some(TransportedMaterialManifest {
+            full_object_hash,
+            chunk_hashes,
+            chunk_root,
+            chunk_count,
+            total_byte_length,
+        })
+    } else {
+        None
+    };
+
+    Ok(TransportedMaterialStreamHeader {
+        chunk_count,
+        total_byte_length,
+        expected_manifest,
+    })
+}
+
+fn reject_unexpected_transport_material_fields(
+    value: &Value,
+    allow_embedded_chunks: bool,
+) -> CanonicalResult<()> {
     let Some(object) = value.as_object() else {
         return Err(invalid_threshold_commitment_input(
             "transportedVssCoefficientCommitmentMaterial must be an object",
         ));
     };
     for field_name in object.keys() {
-        if ![
+        let is_known_field = [
             "objectType",
             "objectVersion",
             "binaryFormat",
@@ -673,8 +1851,9 @@ fn reject_unexpected_transport_material_fields(value: &Value) -> CanonicalResult
             "chunkRoot",
             "chunks",
         ]
-        .contains(&field_name.as_str())
-        {
+        .contains(&field_name.as_str());
+        let is_allowed_field = is_known_field && (allow_embedded_chunks || field_name != "chunks");
+        if !is_allowed_field {
             return Err(invalid_threshold_commitment_input(format!(
                 "transportedVssCoefficientCommitmentMaterial contains unexpected field {field_name}"
             )));
@@ -684,8 +1863,52 @@ fn reject_unexpected_transport_material_fields(value: &Value) -> CanonicalResult
     Ok(())
 }
 
+fn validate_transport_manifest_shape(
+    chunk_count: usize,
+    total_byte_length: u64,
+    chunk_hashes: &[String],
+    full_object_hash: &str,
+    chunk_root: &str,
+) -> CanonicalResult<()> {
+    if chunk_count == 0 {
+        return Err(invalid_threshold_commitment_input(
+            "setup transport requires at least one material chunk",
+        ));
+    }
+    if chunk_hashes.len() != chunk_count {
+        return Err(invalid_threshold_commitment_input(
+            "transport chunkHashes length must match chunkCount",
+        ));
+    }
+    validate_hash_string(full_object_hash, "fullObjectHash")?;
+    validate_hash_string(chunk_root, "chunkRoot")?;
+    let expected_chunk_root = setup_transport_chunk_manifest_root(
+        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        u64::try_from(chunk_count).map_err(|_| {
+            invalid_threshold_commitment_input("setup transport chunk count does not fit u64")
+        })?,
+        total_byte_length,
+        chunk_hashes,
+        full_object_hash,
+    )?;
+    if expected_chunk_root != chunk_root {
+        return Err(invalid_threshold_commitment_input(
+            "transport chunkRoot does not match the canonical chunk manifest",
+        ));
+    }
+
+    Ok(())
+}
+
 fn compare_transport_hashes(
     transport: &TransportedMaterialChunks,
+    hashes: &SetupVssMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    compare_transport_manifest_hashes(&transport.manifest, hashes)
+}
+
+fn compare_transport_manifest_hashes(
+    transport: &TransportedMaterialManifest,
     hashes: &SetupVssMaterialTransportHashes,
 ) -> CanonicalResult<()> {
     if transport.full_object_hash != hashes.full_object_hash {
@@ -707,12 +1930,7 @@ fn compare_transport_hashes(
     Ok(())
 }
 
-fn setup_vss_material_chunk_hash(
-    full_object_hash: &str,
-    chunk_index: usize,
-    chunk: &[u8],
-) -> CanonicalResult<String> {
-    validate_hash_string(full_object_hash, "transport fullObjectHash")?;
+fn setup_vss_material_chunk_hash(chunk_index: usize, chunk: &[u8]) -> CanonicalResult<String> {
     let mut chunk_index_bytes = Vec::new();
     append_varuint(
         &mut chunk_index_bytes,
@@ -723,7 +1941,7 @@ fn setup_vss_material_chunk_hash(
 
     Ok(hash512_hex(
         "sealed-lattice/setup/vss-coefficient-commitment-material/chunk-v1",
-        &[full_object_hash.as_bytes(), &chunk_index_bytes, chunk],
+        &[&chunk_index_bytes, chunk],
     ))
 }
 
@@ -732,6 +1950,15 @@ fn streaming_hash512_hex(
     total_byte_length: u64,
     chunks: &[Vec<u8>],
 ) -> CanonicalResult<String> {
+    let mut hasher = streaming_hash512_hasher(domain, total_byte_length);
+    for chunk in chunks {
+        hasher.update(chunk);
+    }
+
+    Ok(finalize_streaming_hash512_hex(hasher))
+}
+
+fn streaming_hash512_hasher(domain: &str, total_byte_length: u64) -> Shake256 {
     let mut prefix = Vec::new();
     prefix.extend(HASH512_PREIMAGE_PREFIX);
     append_bytes(&mut prefix, domain.as_bytes());
@@ -740,14 +1967,16 @@ fn streaming_hash512_hex(
 
     let mut hasher = Shake256::default();
     hasher.update(&prefix);
-    for chunk in chunks {
-        hasher.update(chunk);
-    }
+
+    hasher
+}
+
+fn finalize_streaming_hash512_hex(hasher: Shake256) -> String {
     let mut reader = hasher.finalize_xof();
     let mut output = [0_u8; 64];
     reader.read(&mut output);
 
-    Ok(to_hex(&output))
+    to_hex(&output)
 }
 
 fn setup_transport_chunk_manifest_root(
@@ -933,6 +2162,9 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
     }
 
     let mut accumulators = BTreeMap::<(u64, usize), TransportThresholdAccumulator>::new();
+    let mut observed_commitment_roots = BTreeMap::<(u64, usize, u64), String>::new();
+    let mut constant_commitments_by_source_trustee =
+        BTreeMap::<u64, Vec<SetupCommitmentValue>>::new();
     for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
         let source_trustee_binding = source_trustee_bindings
             .get(&source_trustee_roster_position)
@@ -965,6 +2197,14 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
                         "transported setup commitment material does not match the source trustee commitment root",
                     ));
                 }
+                observed_commitment_roots.insert(
+                    (
+                        source_trustee_roster_position,
+                        rns_limb_index,
+                        shamir_coefficient_index,
+                    ),
+                    commitment_root.clone(),
+                );
                 accumulate_transport_threshold_commitments(
                     setup_context,
                     public_matrix_seed_hash,
@@ -976,6 +2216,12 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
                     &commitment,
                     &mut accumulators,
                 )?;
+                if shamir_coefficient_index == 0 {
+                    constant_commitments_by_source_trustee
+                        .entry(source_trustee_roster_position)
+                        .or_default()
+                        .push(commitment);
+                }
             }
         }
     }
@@ -1000,12 +2246,14 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
     Ok(TransportThresholdDerivation {
         ring_degree,
         ring_degree_status,
+        observed_commitment_roots,
         threshold_share_commitments,
+        constant_commitments_by_source_trustee,
     })
 }
 
 fn read_binary_setup_commitment(
-    reader: &mut ChunkedMaterialReader<'_>,
+    reader: &mut impl BinaryMaterialReader,
     expected_source_trustee_roster_position: u64,
     expected_rns_limb_index: usize,
     expected_rns_prime: u64,
@@ -2078,6 +3326,21 @@ fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a s
         .ok_or_else(|| {
             invalid_threshold_commitment_input(format!("{field_name} must be a non-empty string"))
         })
+}
+
+fn derivation_stream_id_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
+    let derivation_id = string_field(value, field_name)?;
+    if derivation_id.len() > VSS_TRANSPORT_STREAM_DERIVATION_ID_MAX_BYTES
+        || !derivation_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(invalid_threshold_commitment_input(format!(
+            "{field_name} must be a bounded ASCII derivation identifier"
+        )));
+    }
+
+    Ok(derivation_id)
 }
 
 fn hash_string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {

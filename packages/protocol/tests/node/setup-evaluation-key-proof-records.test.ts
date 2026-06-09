@@ -2,6 +2,7 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+    createBinaryChunkedPublicEvaluationKeyMaterialTransport,
     createGaloisKeyShareBatches,
     createPublicEvaluationKeySet,
     createRelinearizationKeyShareRounds,
@@ -1044,6 +1045,86 @@ describe('evaluation-key proof record builders', () => {
                 'EvaluationKeySetHash',
                 evaluationKeysWithoutHash,
             ),
+        );
+    });
+
+    it('creates transported public evaluation-key runtime material', () => {
+        const input = commonInput();
+        const relinearizationKeyShareRounds =
+            createRelinearizationKeyShareRounds({
+                ...input,
+                roundOneContributions: transportedRoundOneContributions(),
+                roundTwoContributions: transportedRoundTwoContributions(),
+            });
+        const galoisKeyShareBatches = createGaloisKeyShareBatches({
+            ...input,
+            batchContributions: galoisBatchContributions(),
+        });
+        const componentMaterials = [
+            ...relinearizationKeyShareRounds.roundOneRecords,
+            ...relinearizationKeyShareRounds.roundTwoRecords,
+        ].map((record) => ({
+            objectType: 'SetupTransportedEvaluationKeyShareComponentMaterial',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: 'relinearization-key-share',
+            keySwitchMaterialEncoding:
+                'binary-chunked-key-switch-component-vectors',
+            keySwitchComponentMaterialRoot:
+                record.keySwitchComponentMaterialRoot,
+        }));
+        const transport =
+            createBinaryChunkedPublicEvaluationKeyMaterialTransport({
+                ...input,
+                relinearizationKeyShareRounds,
+                galoisKeyShareBatches,
+                transportedEvaluationKeyShareComponentMaterial: {
+                    objectType:
+                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                    objectVersion: 1,
+                    setupProfileId: 'CollectiveBgvSetup-v1',
+                    setupProofProfileId,
+                    componentMaterials,
+                },
+            });
+        const materialSet = transport.transportedPublicEvaluationKeyMaterial;
+        const material = materialSet.publicEvaluationKeyMaterials[0];
+        const { evaluationKeySetHash, ...evaluationKeysWithoutHash } =
+            transport.evaluationKeys;
+
+        expect(transport.evaluationKeys.publicEvaluationKeyMaterialRoot).toBe(
+            transport.publicEvaluationKeyMaterialReference
+                .publicEvaluationKeyMaterialRoot,
+        );
+        expect(transport.evaluationKeys.evaluationKeySetHash).toBe(
+            deriveProtocolHash(
+                'EvaluationKeySetHash',
+                evaluationKeysWithoutHash,
+            ),
+        );
+        expect(materialSet.objectType).toBe(
+            'SetupTransportedPublicEvaluationKeyMaterialSet',
+        );
+        expect(materialSet).not.toHaveProperty('componentMaterials');
+        expect(material.objectType).toBe(
+            'SetupTransportedPublicEvaluationKeyMaterial',
+        );
+        expect(material.evaluationKeySetHash).toBe(evaluationKeySetHash);
+        expect(material.publicEvaluationKeyMaterialRoot).toBe(
+            transport.publicEvaluationKeyMaterialReference
+                .publicEvaluationKeyMaterialRoot,
+        );
+        expect(material.chunkSizeBytes).toBe(1_048_576);
+        expect(material.chunkCount).toBe(material.chunks.length);
+        expect(material.chunkHashes).toHaveLength(material.chunks.length);
+        expect(material.fullObjectHash).toBe(
+            transport.publicEvaluationKeyMaterialReference
+                .publicEvaluationKeyMaterialFullObjectHash,
+        );
+        expect(material.chunks[0].chunkIndex).toBe(0);
+        expect(material.chunks[0].bytesHex.startsWith('534c454b504d5631')).toBe(
+            true,
         );
     });
 

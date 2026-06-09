@@ -1,17 +1,19 @@
 use super::super::accepted_setup::{
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-    PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING, accepted_hashes_from_package,
-    accepted_he_security_certificate_hash, accepted_he_security_certificate_value,
-    accepted_setup_collective_public_key_from_package,
+    PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING, PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT,
+    PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING, PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE,
+    accepted_hashes_from_package, accepted_he_security_certificate_hash,
+    accepted_he_security_certificate_value, accepted_setup_collective_public_key_from_package,
     accepted_setup_public_galois_keys_from_transport,
     accepted_setup_public_relinearization_keys_from_transport,
     active_static_setup_theorem_certificate_hash, active_static_setup_theorem_certificate_value,
     encode_public_evaluation_key_material_manifest, public_evaluation_key_material_manifest,
     public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
-    setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
-    setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
-    verify_profile_ring_material,
+    public_key_share_material_transport_hashes, setup_key_correctness_certificate_hash,
+    setup_key_correctness_certificate_value, setup_proof_accounting_certificate_hash,
+    setup_proof_accounting_certificate_value, verify_profile_ring_material,
+    verify_terminal_setup_transport_policy,
 };
 use super::super::evaluation_key_share_proof::{
     EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -53,7 +55,7 @@ use super::super::setup_proof::{
 };
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
-use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint};
 use crate::hashing::canonical_json;
 use crate::hashing::{hash512_hex, to_hex};
 use crate::protocol_signatures::{
@@ -66,6 +68,8 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+static TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
+    OnceLock::new();
 static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
     OnceLock::new();
 static PUBLIC_KEY_SHARE_LNP_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
@@ -636,9 +640,9 @@ fn collective_setup_verifier_refuses_tampered_threshold_share_commitments() {
 }
 
 #[test]
-fn collective_setup_verifier_consumes_transported_threshold_material_when_supplied() {
+fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_metadata_drifted() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_consumes_transported_threshold_material_when_supplied",
+        "collective_setup_verifier_refuses_transported_vss_material_when_certificate_metadata_drifted",
     );
     let mut package = minimal_collective_setup_package();
     let material_bytes = encode_transport_material_from_package(&package);
@@ -676,7 +680,7 @@ fn collective_setup_verifier_consumes_transported_threshold_material_when_suppli
     );
     assert_eq!(
         missing_transport_result["missingObjects"][0],
-        "transportedVssCoefficientCommitmentMaterial"
+        "verifiedVssCoefficientCommitmentMaterial"
     );
 
     let transported_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -684,14 +688,98 @@ fn collective_setup_verifier_consumes_transported_threshold_material_when_suppli
         "transportedVssCoefficientCommitmentMaterial": transported_material,
     }))
     .expect("transported material result");
-    assert_eq!(transported_result["verifierStatus"], "pending");
+    assert_eq!(transported_result["verifierStatus"], "refused");
     assert_eq!(
         transported_result["currentPhase"],
         "setupPackageVerification"
     );
     assert_eq!(
-        transported_result["missingObjects"][0],
-        serde_json::json!("sameSecretProofs")
+        transported_result["refusedObjects"][0]["reasonCode"],
+        "vssMaterialTransportReferenceMetadataMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_uses_stream_verified_vss_material_without_chunk_sidecar() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_uses_stream_verified_vss_material_without_chunk_sidecar",
+    );
+    let mut package = minimal_collective_setup_package();
+    let material_bytes = encode_transport_material_from_package(&package);
+    let transported_material = transported_material_value(&material_bytes);
+    let stream_derivation = stream_verified_vss_material_from_package(
+        &package,
+        &transported_material,
+        "accepted-setup-vss-stream-test",
+    );
+    package["vssCoefficientCommitmentMaterial"] =
+        stream_derivation["vssCoefficientCommitmentMaterial"].clone();
+    package["thresholdShareCommitments"] = stream_derivation["thresholdShareCommitments"].clone();
+    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    let setup_transport_certificate =
+        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    package["setupTransportCertificate"] = setup_transport_certificate.clone();
+    package["setupTransportCertificateHash"] =
+        setup_transport_certificate["setupTransportCertificateHash"].clone();
+    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedVssCoefficientCommitmentMaterial": transported_material_reference_value(&transported_material),
+        "verifiedVssCoefficientCommitmentMaterial": stream_derivation["verifiedVssCoefficientCommitmentMaterial"],
+    }))
+    .expect("verification response");
+
+    assert_ne!(result["currentPhase"], "thresholdShareCommitments");
+    assert!(
+        !result["missingObjects"]
+            .as_array()
+            .expect("missing objects")
+            .iter()
+            .any(|missing| missing == "verifiedVssCoefficientCommitmentMaterial")
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_unmatched_stream_verified_vss_material() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_unmatched_stream_verified_vss_material",
+    );
+    let mut package = minimal_collective_setup_package();
+    let material_bytes = encode_transport_material_from_package(&package);
+    let transported_material = transported_material_value(&material_bytes);
+    let stream_derivation = stream_verified_vss_material_from_package(
+        &package,
+        &transported_material,
+        "accepted-setup-vss-stream-unmatched-test",
+    );
+    package["vssCoefficientCommitmentMaterial"] =
+        stream_derivation["vssCoefficientCommitmentMaterial"].clone();
+    package["thresholdShareCommitments"] = stream_derivation["thresholdShareCommitments"].clone();
+    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    let setup_transport_certificate =
+        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    package["setupTransportCertificate"] = setup_transport_certificate.clone();
+    package["setupTransportCertificateHash"] =
+        setup_transport_certificate["setupTransportCertificateHash"].clone();
+    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+    let mut forged_verified_material =
+        stream_derivation["verifiedVssCoefficientCommitmentMaterial"].clone();
+    forged_verified_material["verificationId"] = serde_json::json!("missing-vss-stream");
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedVssCoefficientCommitmentMaterial": transported_material_reference_value(&transported_material),
+        "verifiedVssCoefficientCommitmentMaterial": forged_verified_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "thresholdShareCommitmentVerifiedMaterialMismatch"
     );
 }
 
@@ -1127,15 +1215,10 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_lnp_proofs_
     .expect("verification response");
 
     assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
-        result["missingObjects"],
-        serde_json::json!([
-            "publicKeyShareMaterial",
-            "publicKeyShareLnpProofs",
-            "collectivePublicKey",
-            "collectivePublicKeyRoot"
-        ])
+        result["refusedObjects"][0]["reasonCode"],
+        "vssMaterialTransportReferenceMetadataMismatch"
     );
 }
 
@@ -1582,6 +1665,82 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareLnpProofVerificationFailed"
+    );
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_public_key_share_material()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_public_key_share_material",
+    );
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    move_public_key_share_material_to_transport(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(
+        result["missingObjects"],
+        serde_json::json!(["transportedPublicKeyShareMaterial"])
+    );
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_material_from_transport()
+{
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_material_from_transport",
+    );
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let transported_public_key_share_material =
+        move_public_key_share_material_to_transport(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicKeyShareMaterial": transported_public_key_share_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(
+        result["missingObjects"],
+        serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
+    );
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_material()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_material",
+    );
+    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut transported_public_key_share_material =
+        move_public_key_share_material_to_transport(&mut package);
+    transported_public_key_share_material["chunks"][0]["bytesHex"] = serde_json::json!("00");
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicKeyShareMaterial": transported_public_key_share_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "publicKeyShareMaterialVerificationFailed"
     );
 }
 
@@ -2355,6 +2514,45 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_transported_public_eval
 }
 
 #[test]
+#[ignore = "manual accepted setup closure diagnostic"]
+fn manual_accepted_setup_collective_setup_verifier_checks_all_transported_public_setup_companions_before_profile_closure()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "manual_accepted_setup_collective_setup_verifier_checks_all_transported_public_setup_companions_before_profile_closure",
+    );
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
+        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
+        "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
+        "transportedPublicKeyShareMaterial": companions.public_key_share_material,
+        "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
+        "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
+        "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
+        "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(
+        result["verifierStatus"],
+        "accepted",
+        "terminal setup verification result: {}",
+        serde_json::to_string_pretty(&result).expect("verification result JSON")
+    );
+    assert_eq!(result["currentPhase"], "setupPackageVerification");
+    assert_eq!(
+        result["acceptedSetupHandoff"]["objectType"],
+        "CollectiveBgvAcceptedSetupHandoff"
+    );
+    assert!(
+        result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
+        "accepted terminal setup response must carry a handoff root"
+    );
+}
+
+#[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk()
  {
@@ -2394,23 +2592,20 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evalua
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_uses_public_evaluation_key_material_component_chunks()
+fn heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_uses_public_evaluation_key_material_component_chunks",
+        "heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks",
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let component_material_set =
         move_first_galois_key_share_component_vectors_to_transport(&mut package);
-    let mut transported_public_evaluation_key_material =
+    let transported_public_evaluation_key_material =
         add_public_evaluation_key_material_transport(&mut package);
-    add_component_materials_to_public_evaluation_key_material_transport(
-        &mut transported_public_evaluation_key_material,
-        &[component_material_set],
-    );
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
+        "transportedEvaluationKeyShareComponentMaterial": component_material_set,
         "transportedPublicEvaluationKeyMaterial": transported_public_evaluation_key_material,
     }))
     .expect("verification response");
@@ -2819,22 +3014,18 @@ fn heavy_accepted_setup_generate_evaluation_key_share_lnp_proof_command_self_ver
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evaluation_key_component_chunk()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_duplicated_public_evaluation_key_component_chunks()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evaluation_key_component_chunk",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_duplicated_public_evaluation_key_component_chunks",
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     let component_material_set =
         move_first_galois_key_share_component_vectors_to_transport(&mut package);
     let mut transported_public_evaluation_key_material =
         add_public_evaluation_key_material_transport(&mut package);
-    add_component_materials_to_public_evaluation_key_material_transport(
-        &mut transported_public_evaluation_key_material,
-        &[component_material_set],
-    );
-    transported_public_evaluation_key_material["componentMaterials"][0]["chunks"][0]["bytesHex"] =
-        serde_json::json!("00");
+    transported_public_evaluation_key_material["componentMaterials"] =
+        component_material_set["componentMaterials"].clone();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
@@ -2846,6 +3037,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evalua
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("must not duplicate evaluation-key component material chunks")
     );
 }
 
@@ -3793,6 +3990,136 @@ fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
 }
 
 #[test]
+fn terminal_transport_policy_refuses_embedded_setup_material() {
+    let package = terminal_transport_policy_package_with_material_encodings(
+        "full-public-setup-commitment-values",
+        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    );
+
+    let response = verify_terminal_setup_transport_policy(&package, &serde_json::json!({}))
+        .expect("terminal transport policy")
+        .expect("embedded VSS material refusal");
+
+    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(
+        response["refusedObjects"][0]["reasonCode"],
+        "terminalVssMaterialTransportRequired"
+    );
+}
+
+#[test]
+fn terminal_transport_policy_accepts_binary_setup_and_key_material_references() {
+    let package = terminal_transport_policy_package_with_material_encodings(
+        "binary-chunked-full-public-setup-commitment-values",
+        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    );
+    let request = serde_json::json!({
+        "transportedVssCoefficientCommitmentMaterial": {
+            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
+            "chunkSizeBytes": 1_048_576,
+            "chunkCount": 1,
+            "totalByteLength": 64,
+            "fullObjectHash": valid_hash('5'),
+            "chunkHashes": [valid_hash('6')],
+            "chunkRoot": valid_hash('7'),
+        },
+        "verifiedVssCoefficientCommitmentMaterial": {
+            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "verifiedMaterialId": "terminal-policy-test-material",
+        },
+    });
+
+    let response = verify_terminal_setup_transport_policy(&package, &request)
+        .expect("terminal transport policy");
+
+    assert!(response.is_none());
+}
+
+#[test]
+fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
+    let package = terminal_transport_policy_package_with_material_encodings(
+        "binary-chunked-full-public-setup-commitment-values",
+        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    );
+    let request = serde_json::json!({
+        "transportedVssCoefficientCommitmentMaterial": {
+            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
+            "chunkSizeBytes": 1_048_576,
+            "chunkCount": 1,
+            "totalByteLength": 64,
+            "fullObjectHash": valid_hash('5'),
+            "chunkHashes": [valid_hash('6')],
+            "chunkRoot": valid_hash('7'),
+            "chunks": [
+                {
+                    "chunkIndex": 0,
+                    "bytesHex": "00",
+                }
+            ],
+        },
+        "verifiedVssCoefficientCommitmentMaterial": {
+            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "verifiedMaterialId": "terminal-policy-test-material",
+        },
+    });
+
+    let response = verify_terminal_setup_transport_policy(&package, &request)
+        .expect("terminal transport policy")
+        .expect("raw VSS chunk sidecar refusal");
+
+    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(
+        response["refusedObjects"][0]["reasonCode"],
+        "terminalVssMaterialHandleRequired"
+    );
+}
+
+#[test]
+fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
+    let package = terminal_transport_policy_package_with_material_encodings(
+        "binary-chunked-full-public-setup-commitment-values",
+        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    );
+    let request = serde_json::json!({
+        "transportedVssCoefficientCommitmentMaterial": {
+            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
+            "chunkSizeBytes": 1_048_576,
+            "chunkCount": 1,
+            "totalByteLength": 64,
+            "fullObjectHash": valid_hash('5'),
+            "chunkHashes": [valid_hash('6')],
+            "chunkRoot": valid_hash('7'),
+        },
+    });
+
+    let response = verify_terminal_setup_transport_policy(&package, &request)
+        .expect("terminal transport policy")
+        .expect("missing stream-verified VSS handle response");
+
+    assert_eq!(response["verifierStatus"], "pending");
+    assert_eq!(
+        response["missingObjects"],
+        serde_json::json!(["verifiedVssCoefficientCommitmentMaterial"])
+    );
+}
+
+#[test]
 fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
     let package = serde_json::json!({
         "setupContext": {
@@ -3866,6 +4193,67 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
                     == "transported public evaluation-key runtime material is verified against evaluationKeys when supplied"
             })
     );
+}
+
+fn terminal_transport_policy_package_with_material_encodings(
+    vss_material_encoding: &str,
+    public_key_share_material_encoding: &str,
+    proof_material_encoding: &str,
+    key_switch_material_encoding: &str,
+) -> serde_json::Value {
+    let proof_record = serde_json::json!({
+        "proofBytesEncoding": proof_material_encoding,
+    });
+    let key_switch_record = serde_json::json!({
+        "proofBytesEncoding": proof_material_encoding,
+        "keySwitchMaterialEncoding": key_switch_material_encoding,
+    });
+
+    serde_json::json!({
+        "vssCoefficientCommitmentMaterial": {
+            "materialEncoding": vss_material_encoding,
+        },
+        "sameSecretProofs": {
+            "proofRecords": [
+                proof_record.clone()
+            ],
+        },
+        "publicKeyShareMaterial": {
+            "materialEncoding": public_key_share_material_encoding,
+        },
+        "publicKeyShareLnpProofs": {
+            "proofRecords": [
+                proof_record
+            ],
+        },
+        "relinearizationKeyShareRounds": {
+            "roundOneRecords": [
+                key_switch_record.clone()
+            ],
+            "roundTwoRecords": [
+                key_switch_record.clone()
+            ],
+        },
+        "galoisKeyShareBatches": [
+            {
+                "galoisKeyShareProofs": [
+                    key_switch_record
+                ],
+            }
+        ],
+        "evaluationKeys": {
+            "publicEvaluationKeyMaterialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+            "publicEvaluationKeyMaterialRoot": valid_hash('1'),
+            "publicEvaluationKeyMaterialChunkSizeBytes": 1_048_576,
+            "publicEvaluationKeyMaterialChunkCount": 1,
+            "publicEvaluationKeyMaterialTotalByteLength": 64,
+            "publicEvaluationKeyMaterialFullObjectHash": valid_hash('2'),
+            "publicEvaluationKeyMaterialChunkRoot": valid_hash('3'),
+            "publicEvaluationKeyMaterialChunkHashes": [
+                valid_hash('4')
+            ],
+        },
+    })
 }
 
 #[test]
@@ -4133,6 +4521,102 @@ fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object",
+    );
+    let package = minimal_collective_setup_package();
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedPublicKeyShareMaterial": {
+            "totalByteLength": 1_u64,
+            "fullObjectHash": valid_hash('1'),
+            "chunkRoot": valid_hash('2'),
+            "chunkHashes": [valid_hash('3')],
+        },
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["currentPhase"], "setupPackageVerification");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "transportedObjectBindingMissing"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_unrequested_setup_transport_object() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_unrequested_setup_transport_object",
+    );
+    let mut package = minimal_collective_setup_package();
+    append_unrequested_setup_transport_object(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["currentPhase"], "setupPackageVerification");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "transportedObjectUnexpected"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar",
+    );
+    let mut package = minimal_collective_setup_package();
+    let transported_same_secret_proof_material =
+        append_unreferenced_same_secret_transport_sidecar(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedSameSecretProofMaterial": transported_same_secret_proof_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["currentPhase"], "setupPackageVerification");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "transportedObjectUnreferenced"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidecar() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidecar",
+    );
+    let mut package = minimal_collective_setup_package();
+    let transported_evaluation_key_component_material =
+        append_unreferenced_evaluation_key_component_transport_sidecar(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedEvaluationKeyShareComponentMaterial": transported_evaluation_key_component_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["currentPhase"], "setupPackageVerification");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "transportedObjectUnreferenced"
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_setup_transport_certificate_hash_drift() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_setup_transport_certificate_hash_drift",
@@ -4178,11 +4662,20 @@ fn terminal_profile_ring_gate_refuses_reduced_vss_material() {
 
 fn minimal_collective_setup_package() -> serde_json::Value {
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(build_minimal_collective_setup_package)
+        .get_or_init(|| build_collective_setup_package_fixture(8, "development-reduced-ring"))
         .clone()
 }
 
-fn build_minimal_collective_setup_package() -> serde_json::Value {
+fn terminal_profile_ring_minimal_collective_setup_package() -> serde_json::Value {
+    TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(|| build_collective_setup_package_fixture(POLYNOMIAL_DEGREE, "profile-ring"))
+        .clone()
+}
+
+fn build_collective_setup_package_fixture(
+    vss_material_ring_degree: usize,
+    vss_material_ring_degree_status: &str,
+) -> serde_json::Value {
     let profile = describe_collective_bgv_setup_profile().expect("profile");
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_protocol_hash(
@@ -4387,6 +4880,8 @@ fn build_minimal_collective_setup_package() -> serde_json::Value {
             commitment_profile_hash,
             setup_epoch,
             public_matrix_seed_hash,
+            vss_material_ring_degree,
+            vss_material_ring_degree_status,
         );
     let threshold_share_commitments =
         derive_threshold_share_commitments_from_request(&serde_json::json!({
@@ -4729,6 +5224,321 @@ fn ceil_log2_fixture(value: &BigUint) -> u32 {
     }
 }
 
+fn append_unrequested_setup_transport_object(package: &mut serde_json::Value) {
+    let extra_object_root = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "fixture": "unrequested-setup-transport-object",
+            "field": "object-root",
+        }),
+    )
+    .expect("extra setup transport object root");
+    let extra_full_object_hash = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "fixture": "unrequested-setup-transport-object",
+            "field": "full-object-hash",
+        }),
+    )
+    .expect("extra setup transport full object hash");
+    let extra_chunk_hash = derive_protocol_hash(
+        "SetupTransportChunkManifestRoot",
+        &serde_json::json!({
+            "fixture": "unrequested-setup-transport-object",
+            "field": "chunk-hash",
+        }),
+    )
+    .expect("extra setup transport chunk hash");
+    let extra_chunk_root = setup_transport_chunk_manifest_root_fixture(
+        1,
+        1,
+        std::slice::from_ref(&extra_chunk_hash),
+        &extra_full_object_hash,
+    );
+    append_setup_transport_certificate_object(
+        package,
+        SetupTransportCertificateObjectFixture {
+            object_name: "unrequestedSetupMaterial",
+            object_role: "unrequested-setup-material",
+            object_root: extra_object_root,
+            byte_length: 1,
+            full_object_hash: extra_full_object_hash,
+            chunk_root: extra_chunk_root,
+            chunk_hashes: vec![extra_chunk_hash],
+        },
+    );
+}
+
+fn append_unreferenced_same_secret_transport_sidecar(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let proof_material_root = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "fixture": "unreferenced-same-secret-proof-material",
+            "field": "proof-material-root",
+        }),
+    )
+    .expect("unreferenced proof material root");
+    let full_object_hash = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "fixture": "unreferenced-same-secret-proof-material",
+            "field": "full-object-hash",
+        }),
+    )
+    .expect("unreferenced proof full object hash");
+    let chunk_hash = derive_protocol_hash(
+        "SetupTransportChunkManifestRoot",
+        &serde_json::json!({
+            "fixture": "unreferenced-same-secret-proof-material",
+            "field": "chunk-hash",
+        }),
+    )
+    .expect("unreferenced proof chunk hash");
+    let chunk_root = setup_transport_chunk_manifest_root_fixture(
+        1,
+        1,
+        std::slice::from_ref(&chunk_hash),
+        &full_object_hash,
+    );
+
+    append_setup_transport_certificate_object(
+        package,
+        SetupTransportCertificateObjectFixture {
+            object_name: "sameSecretProofMaterial",
+            object_role: "same-secret-proof-material",
+            object_root: proof_material_root.clone(),
+            byte_length: 1,
+            full_object_hash: full_object_hash.clone(),
+            chunk_root: chunk_root.clone(),
+            chunk_hashes: vec![chunk_hash.clone()],
+        },
+    );
+
+    serde_json::json!({
+        "proofMaterials": [{
+            "proofMaterialRoot": proof_material_root,
+            "totalByteLength": 1_u64,
+            "fullObjectHash": full_object_hash,
+            "chunkRoot": chunk_root,
+            "chunkHashes": [chunk_hash],
+        }],
+    })
+}
+
+fn append_unreferenced_evaluation_key_component_transport_sidecar(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let material_root = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "fixture": "unreferenced-evaluation-key-component-material",
+            "field": "component-material-root",
+        }),
+    )
+    .expect("unreferenced component material root");
+    let full_object_hash = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "fixture": "unreferenced-evaluation-key-component-material",
+            "field": "full-object-hash",
+        }),
+    )
+    .expect("unreferenced component full object hash");
+    let chunk_hash = derive_protocol_hash(
+        "SetupTransportChunkManifestRoot",
+        &serde_json::json!({
+            "fixture": "unreferenced-evaluation-key-component-material",
+            "field": "chunk-hash",
+        }),
+    )
+    .expect("unreferenced component chunk hash");
+    let chunk_root = setup_transport_chunk_manifest_root_fixture(
+        1,
+        1,
+        std::slice::from_ref(&chunk_hash),
+        &full_object_hash,
+    );
+
+    append_setup_transport_certificate_object(
+        package,
+        SetupTransportCertificateObjectFixture {
+            object_name: "evaluationKeyShareComponentMaterial",
+            object_role: "evaluation-key-share-component-material",
+            object_root: material_root.clone(),
+            byte_length: 1,
+            full_object_hash: full_object_hash.clone(),
+            chunk_root: chunk_root.clone(),
+            chunk_hashes: vec![chunk_hash.clone()],
+        },
+    );
+
+    serde_json::json!({
+        "componentMaterials": [{
+            "keySwitchComponentMaterialRoot": material_root,
+            "totalByteLength": 1_u64,
+            "fullObjectHash": full_object_hash,
+            "chunkRoot": chunk_root,
+            "chunkHashes": [chunk_hash],
+        }],
+    })
+}
+
+struct SetupTransportCertificateObjectFixture {
+    object_name: &'static str,
+    object_role: &'static str,
+    object_root: String,
+    byte_length: u64,
+    full_object_hash: String,
+    chunk_root: String,
+    chunk_hashes: Vec<String>,
+}
+
+fn append_setup_transport_certificate_object(
+    package: &mut serde_json::Value,
+    object_fixture: SetupTransportCertificateObjectFixture,
+) {
+    let certificate_hash = {
+        let certificate = package
+            .get_mut("setupTransportCertificate")
+            .expect("setup transport certificate");
+        let chunk_start_index = certificate["chunkCount"]
+            .as_u64()
+            .expect("setup transport chunk count");
+        let chunk_count =
+            u64::try_from(object_fixture.chunk_hashes.len()).expect("chunk hash count");
+        certificate["transportedObjects"]
+            .as_array_mut()
+            .expect("transported objects")
+            .push(serde_json::json!({
+                "objectType": "SetupTransportedObject",
+                "objectVersion": 1,
+                "objectName": object_fixture.object_name,
+                "objectRole": object_fixture.object_role,
+                "objectRoot": object_fixture.object_root,
+                "byteLength": object_fixture.byte_length,
+                "chunkStartIndex": chunk_start_index,
+                "chunkCount": chunk_count,
+                "chunkRoot": object_fixture.chunk_root,
+                "chunkHashes": object_fixture.chunk_hashes,
+                "fullObjectHash": object_fixture.full_object_hash,
+                "encoding": "binary",
+                "loadingPolicy": "stream-verified-before-object-use",
+            }));
+        rebind_setup_transport_certificate(certificate)
+    };
+    package["setupTransportCertificateHash"] = serde_json::json!(certificate_hash);
+}
+
+fn rebind_setup_transport_certificate(certificate: &mut serde_json::Value) -> String {
+    let transported_objects = certificate["transportedObjects"]
+        .as_array()
+        .expect("transported objects");
+    let mut total_byte_length = 0_u64;
+    let mut chunk_count = 0_u64;
+    let mut chunk_hashes = Vec::new();
+    let mut transported_object_summaries = Vec::new();
+
+    for transported_object in transported_objects {
+        let byte_length = transported_object["byteLength"]
+            .as_u64()
+            .expect("transported object byte length");
+        let object_chunk_count = transported_object["chunkCount"]
+            .as_u64()
+            .expect("transported object chunk count");
+        total_byte_length = total_byte_length
+            .checked_add(byte_length)
+            .expect("transport byte length sum");
+        chunk_count = chunk_count
+            .checked_add(object_chunk_count)
+            .expect("transport chunk count sum");
+        chunk_hashes.extend(
+            transported_object["chunkHashes"]
+                .as_array()
+                .expect("transported object chunk hashes")
+                .iter()
+                .map(|chunk_hash| {
+                    chunk_hash
+                        .as_str()
+                        .expect("transported object chunk hash")
+                        .to_string()
+                }),
+        );
+        transported_object_summaries.push(serde_json::json!({
+            "objectName": transported_object["objectName"].clone(),
+            "objectRole": transported_object["objectRole"].clone(),
+            "objectRoot": transported_object["objectRoot"].clone(),
+            "byteLength": byte_length,
+            "chunkStartIndex": transported_object["chunkStartIndex"].clone(),
+            "chunkCount": object_chunk_count,
+            "chunkRoot": transported_object["chunkRoot"].clone(),
+            "fullObjectHash": transported_object["fullObjectHash"].clone(),
+        }));
+    }
+
+    let aggregate_full_object_hash = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "objectType": "SetupTransportFullObjectSet",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+            "transportedObjects": transported_object_summaries,
+            "totalByteLength": total_byte_length,
+            "chunkCount": chunk_count,
+            "chunkHashes": chunk_hashes.clone(),
+        }),
+    )
+    .expect("setup transport aggregate full object hash");
+    let aggregate_chunk_root = setup_transport_chunk_manifest_root_fixture(
+        chunk_count,
+        total_byte_length,
+        &chunk_hashes,
+        &aggregate_full_object_hash,
+    );
+
+    certificate["chunkCount"] = serde_json::json!(chunk_count);
+    certificate["totalByteLength"] = serde_json::json!(total_byte_length);
+    certificate["chunkHashes"] = serde_json::json!(chunk_hashes);
+    certificate["fullObjectHash"] = serde_json::json!(aggregate_full_object_hash);
+    certificate["chunkRoot"] = serde_json::json!(aggregate_chunk_root);
+    let mut certificate_hash_input = certificate.clone();
+    certificate_hash_input
+        .as_object_mut()
+        .expect("setup transport certificate object")
+        .remove("setupTransportCertificateHash");
+    let certificate_hash =
+        derive_protocol_hash("SetupTransportCertificateHash", &certificate_hash_input)
+            .expect("setup transport certificate hash");
+    certificate["setupTransportCertificateHash"] = serde_json::json!(certificate_hash);
+
+    certificate_hash
+}
+
+fn setup_transport_chunk_manifest_root_fixture(
+    chunk_count: u64,
+    total_byte_length: u64,
+    chunk_hashes: &[String],
+    full_object_hash: &str,
+) -> String {
+    derive_protocol_hash(
+        "SetupTransportChunkManifestRoot",
+        &serde_json::json!({
+            "objectType": "SetupTransportChunkManifest",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+            "chunkSizeBytes": 1_048_576_u64,
+            "chunkCount": chunk_count,
+            "totalByteLength": total_byte_length,
+            "chunkHashes": chunk_hashes,
+            "fullObjectHash": full_object_hash,
+        }),
+    )
+    .expect("setup transport chunk manifest root")
+}
+
 fn setup_transport_certificate_fixture(
     profile: &serde_json::Value,
     vss_coefficient_commitment_material: &serde_json::Value,
@@ -4739,7 +5549,7 @@ fn setup_transport_certificate_fixture(
             .as_u64()
             .expect("public VSS material byte length");
     let chunk_count = total_byte_length.div_ceil(chunk_size_bytes);
-    let full_object_hash = derive_protocol_hash(
+    let vss_full_object_hash = derive_protocol_hash(
         "SetupTransportChunkManifestRoot",
         &serde_json::json!({
             "fixture": "setup-transport-full-object-hash",
@@ -4759,6 +5569,61 @@ fn setup_transport_certificate_fixture(
             .expect("transport chunk hash")
         })
         .collect::<Vec<_>>();
+    let vss_chunk_root = derive_protocol_hash(
+        "SetupTransportChunkManifestRoot",
+        &serde_json::json!({
+            "objectType": "SetupTransportChunkManifest",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+            "chunkSizeBytes": chunk_size_bytes,
+            "chunkCount": chunk_count,
+            "totalByteLength": total_byte_length,
+            "chunkHashes": chunk_hashes,
+            "fullObjectHash": vss_full_object_hash,
+        }),
+    )
+    .expect("setup transport chunk root");
+    let transported_objects = serde_json::json!([
+        {
+            "objectType": "SetupTransportedObject",
+            "objectVersion": 1,
+            "objectName": "vssCoefficientCommitmentMaterial",
+            "objectRole": "public-vss-coefficient-commitment-material",
+            "objectRoot": vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"],
+            "byteLength": total_byte_length,
+            "chunkStartIndex": 0_u64,
+            "chunkCount": chunk_count,
+            "chunkRoot": vss_chunk_root,
+            "chunkHashes": chunk_hashes,
+            "fullObjectHash": vss_full_object_hash,
+            "encoding": "binary",
+            "loadingPolicy": "stream-verified-before-object-use",
+        }
+    ]);
+    let aggregate_full_object_hash = derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &serde_json::json!({
+            "objectType": "SetupTransportFullObjectSet",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+            "transportedObjects": [{
+                "objectName": "vssCoefficientCommitmentMaterial",
+                "objectRole": "public-vss-coefficient-commitment-material",
+                "objectRoot": vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"],
+                "byteLength": total_byte_length,
+                "chunkStartIndex": 0_u64,
+                "chunkCount": chunk_count,
+                "chunkRoot": vss_chunk_root,
+                "fullObjectHash": vss_full_object_hash,
+            }],
+            "totalByteLength": total_byte_length,
+            "chunkCount": chunk_count,
+            "chunkHashes": chunk_hashes,
+        }),
+    )
+    .expect("setup transport full object set hash");
     let chunk_root = derive_protocol_hash(
         "SetupTransportChunkManifestRoot",
         &serde_json::json!({
@@ -4770,10 +5635,10 @@ fn setup_transport_certificate_fixture(
             "chunkCount": chunk_count,
             "totalByteLength": total_byte_length,
             "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
+            "fullObjectHash": aggregate_full_object_hash,
         }),
     )
-    .expect("setup transport chunk root");
+    .expect("setup transport aggregate chunk root");
     let mut certificate = serde_json::json!({
         "objectType": "SetupTransportCertificate",
         "objectVersion": 1,
@@ -4791,29 +5656,53 @@ fn setup_transport_certificate_fixture(
         "streamVerificationOrder": "ascending-chunk-index",
         "resumePolicy": "chunk-index-checkpointed-by-hash",
         "lazyLoadingPolicy": "root-addressed-large-object-loading",
-        "transportedObjects": [
-            {
-                "objectType": "SetupTransportedObject",
-                "objectVersion": 1,
-                "objectName": "vssCoefficientCommitmentMaterial",
-                "objectRole": "public-vss-coefficient-commitment-material",
-                "objectRoot": vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"],
-                "byteLength": total_byte_length,
-                "chunkStartIndex": 0_u64,
-                "chunkCount": chunk_count,
-                "chunkRoot": chunk_root,
-                "fullObjectHash": full_object_hash,
-                "encoding": "binary",
-                "loadingPolicy": "stream-verified-before-object-use",
-            }
-        ],
+        "transportedObjects": transported_objects,
         "chunkHashes": chunk_hashes,
         "chunkRoot": chunk_root,
-        "fullObjectHash": full_object_hash,
+        "fullObjectHash": aggregate_full_object_hash,
     });
     let certificate_hash = derive_protocol_hash("SetupTransportCertificateHash", &certificate)
         .expect("setup transport certificate hash");
     certificate["setupTransportCertificateHash"] = serde_json::json!(certificate_hash);
+
+    certificate
+}
+
+fn setup_transport_certificate_for_transported_vss_material(
+    profile: &serde_json::Value,
+    vss_coefficient_commitment_material: &serde_json::Value,
+    transported_vss_material: &serde_json::Value,
+) -> serde_json::Value {
+    let mut certificate =
+        setup_transport_certificate_fixture(profile, vss_coefficient_commitment_material);
+    let vss_transport_object = certificate["transportedObjects"][0]
+        .as_object_mut()
+        .expect("VSS transport certificate object");
+    vss_transport_object.insert(
+        "objectRoot".to_string(),
+        vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"].clone(),
+    );
+    vss_transport_object.insert(
+        "byteLength".to_string(),
+        transported_vss_material["totalByteLength"].clone(),
+    );
+    vss_transport_object.insert(
+        "chunkCount".to_string(),
+        transported_vss_material["chunkCount"].clone(),
+    );
+    vss_transport_object.insert(
+        "chunkRoot".to_string(),
+        transported_vss_material["chunkRoot"].clone(),
+    );
+    vss_transport_object.insert(
+        "chunkHashes".to_string(),
+        transported_vss_material["chunkHashes"].clone(),
+    );
+    vss_transport_object.insert(
+        "fullObjectHash".to_string(),
+        transported_vss_material["fullObjectHash"].clone(),
+    );
+    rebind_setup_transport_certificate(&mut certificate);
 
     certificate
 }
@@ -4829,8 +5718,9 @@ fn vss_coefficient_commitments_object(
     commitment_profile_hash: &str,
     setup_epoch: &str,
     public_matrix_seed_hash: &str,
+    ring_degree: usize,
+    ring_degree_status: &str,
 ) -> (serde_json::Value, serde_json::Value) {
-    let development_ring_degree = 8_usize;
     let mut source_trustee_records = Vec::new();
     let mut coefficient_commitment_material = Vec::new();
 
@@ -4844,7 +5734,7 @@ fn vss_coefficient_commitments_object(
                     rns_limb_index,
                     shamir_coefficient_index,
                     rns_prime,
-                    development_ring_degree,
+                    ring_degree,
                 );
                 let coefficient_message_wide = coefficient_message
                     .iter()
@@ -4854,7 +5744,7 @@ fn vss_coefficient_commitments_object(
                     source_trustee_roster_position,
                     rns_limb_index,
                     shamir_coefficient_index,
-                    development_ring_degree,
+                    ring_degree,
                 );
                 let commitment = compute_setup_commitment_for_tests(
                     public_matrix_seed_hash,
@@ -4863,7 +5753,7 @@ fn vss_coefficient_commitments_object(
                     shamir_coefficient_index,
                     &coefficient_message_wide,
                     &randomness_by_column,
-                    development_ring_degree,
+                    ring_degree,
                 )
                 .expect("setup commitment");
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
@@ -4992,8 +5882,8 @@ fn vss_coefficient_commitments_object(
         "participantCount": 10,
         "thresholdDegree": 4,
         "rnsLimbCount": DATA_PRIMES.len(),
-        "ringDegree": development_ring_degree,
-        "ringDegreeStatus": "development-reduced-ring",
+        "ringDegree": ring_degree,
+        "ringDegreeStatus": ring_degree_status,
         "materialRecordCount": coefficient_commitment_material.len(),
         "coefficientCommitments": coefficient_commitment_material,
     });
@@ -7140,22 +8030,251 @@ fn add_public_evaluation_key_material_transport(
     })
 }
 
-fn add_component_materials_to_public_evaluation_key_material_transport(
-    transported_public_evaluation_key_material: &mut serde_json::Value,
-    component_material_sets: &[serde_json::Value],
+struct TransportedPublicSetupCompanions {
+    vss_coefficient_commitment_material: serde_json::Value,
+    verified_vss_coefficient_commitment_material: serde_json::Value,
+    same_secret_proof_material: serde_json::Value,
+    public_key_share_material: serde_json::Value,
+    public_key_share_proof_material: serde_json::Value,
+    evaluation_key_share_component_material: serde_json::Value,
+    evaluation_key_share_proof_material: serde_json::Value,
+    public_evaluation_key_material: serde_json::Value,
+}
+
+struct TransportedMaterialCertificateFields {
+    byte_length: &'static str,
+    full_object_hash: &'static str,
+    chunk_root: &'static str,
+    chunk_hashes: &'static str,
+}
+
+const DIRECT_TRANSPORT_CERTIFICATE_FIELDS: TransportedMaterialCertificateFields =
+    TransportedMaterialCertificateFields {
+        byte_length: "totalByteLength",
+        full_object_hash: "fullObjectHash",
+        chunk_root: "chunkRoot",
+        chunk_hashes: "chunkHashes",
+    };
+
+const PROOF_TRANSPORT_CERTIFICATE_FIELDS: TransportedMaterialCertificateFields =
+    TransportedMaterialCertificateFields {
+        byte_length: "proofTotalByteLength",
+        full_object_hash: "proofFullObjectHash",
+        chunk_root: "proofChunkRoot",
+        chunk_hashes: "proofChunkHashes",
+    };
+
+fn setup_package_with_transported_public_setup_companions()
+-> (serde_json::Value, TransportedPublicSetupCompanions) {
+    let mut package = terminal_profile_ring_minimal_collective_setup_package();
+    let vss_material_bytes = encode_transport_material_from_package(&package);
+    let transported_vss_material = transported_material_value(&vss_material_bytes);
+    let stream_derivation = stream_verified_vss_material_from_package(
+        &package,
+        &transported_vss_material,
+        "terminal-accepted-setup-vss-stream",
+    );
+    package["vssCoefficientCommitmentMaterial"] =
+        stream_derivation["vssCoefficientCommitmentMaterial"].clone();
+    package["thresholdShareCommitments"] = stream_derivation["thresholdShareCommitments"].clone();
+    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    let setup_transport_certificate = setup_transport_certificate_for_transported_vss_material(
+        &profile,
+        &package["vssCoefficientCommitmentMaterial"],
+        &transported_vss_material,
+    );
+    package["setupTransportCertificate"] = setup_transport_certificate.clone();
+    package["setupTransportCertificateHash"] =
+        setup_transport_certificate["setupTransportCertificateHash"].clone();
+    package["sameSecretProofs"] = same_secret_proofs_object(&package);
+    let same_secret_proof_material = move_same_secret_proof_bytes_to_transport(&mut package);
+    append_transport_certificate_entries_from_material_set(
+        &mut package,
+        &same_secret_proof_material,
+        "proofMaterials",
+        "proofMaterialRoot",
+        "sameSecretProofMaterial",
+        "same-secret-proof-material",
+        DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+
+    replace_public_key_share_hashes_with_material_hashes(&mut package);
+    package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
+    package["publicKeyShareLnpProofs"] = public_key_share_lnp_proofs_object(&package);
+    let public_key_share_proof_material =
+        move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
+    append_transport_certificate_entries_from_material_set(
+        &mut package,
+        &public_key_share_proof_material,
+        "proofMaterials",
+        "proofMaterialRoot",
+        "publicKeyShareProofMaterial",
+        "public-key-share-proof-material",
+        DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+
+    package["collectivePublicKey"] = collective_public_key_object(&package);
+    package["collectivePublicKeyRoot"] =
+        package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
+    let public_key_share_material = move_public_key_share_material_to_transport(&mut package);
+    let public_key_share_material_root =
+        package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
+            .as_str()
+            .expect("public-key share material root")
+            .to_string();
+    append_direct_transport_certificate_entry(
+        &mut package,
+        &public_key_share_material,
+        public_key_share_material_root,
+        "publicKeyShareMaterial",
+        "public-key-share-material",
+    );
+
+    package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds_object(&package);
+    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);
+    package["evaluationKeys"] = public_evaluation_key_set_object(&package);
+    let evaluation_key_share_component_material =
+        move_all_evaluation_key_share_component_vectors_to_transport(&mut package);
+    append_transport_certificate_entries_from_material_set(
+        &mut package,
+        &evaluation_key_share_component_material,
+        "componentMaterials",
+        "keySwitchComponentMaterialRoot",
+        "evaluationKeyShareComponentMaterial",
+        "evaluation-key-share-component-material",
+        DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+
+    let evaluation_key_share_proof_material =
+        move_all_evaluation_key_share_lnp_proof_bytes_to_transport(&mut package);
+    append_transport_certificate_entries_from_material_set(
+        &mut package,
+        &evaluation_key_share_proof_material,
+        "proofMaterials",
+        "proofMaterialRoot",
+        "evaluationKeyShareProofMaterial",
+        "evaluation-key-share-proof-material",
+        PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+
+    let public_evaluation_key_material = add_public_evaluation_key_material_transport(&mut package);
+    append_transport_certificate_entries_from_material_set(
+        &mut package,
+        &public_evaluation_key_material,
+        "publicEvaluationKeyMaterials",
+        "publicEvaluationKeyMaterialRoot",
+        "publicEvaluationKeyMaterial",
+        "public-evaluation-key-runtime-material",
+        DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+
+    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    (
+        package,
+        TransportedPublicSetupCompanions {
+            vss_coefficient_commitment_material: transported_material_reference_value(
+                &transported_vss_material,
+            ),
+            verified_vss_coefficient_commitment_material:
+                stream_derivation["verifiedVssCoefficientCommitmentMaterial"].clone(),
+            same_secret_proof_material,
+            public_key_share_material,
+            public_key_share_proof_material,
+            evaluation_key_share_component_material,
+            evaluation_key_share_proof_material,
+            public_evaluation_key_material,
+        },
+    )
+}
+
+fn append_direct_transport_certificate_entry(
+    package: &mut serde_json::Value,
+    transported_material: &serde_json::Value,
+    object_root: String,
+    object_name: &'static str,
+    object_role: &'static str,
 ) {
-    let mut component_materials = Vec::new();
-    for component_material_set in component_material_sets {
-        component_materials.extend(
-            component_material_set["componentMaterials"]
-                .as_array()
-                .expect("component materials")
-                .iter()
-                .cloned(),
+    append_setup_transport_certificate_object(
+        package,
+        SetupTransportCertificateObjectFixture {
+            object_name,
+            object_role,
+            object_root,
+            byte_length: transported_material["totalByteLength"]
+                .as_u64()
+                .expect("transported material byte length"),
+            full_object_hash: transported_material["fullObjectHash"]
+                .as_str()
+                .expect("transported material full object hash")
+                .to_string(),
+            chunk_root: transported_material["chunkRoot"]
+                .as_str()
+                .expect("transported material chunk root")
+                .to_string(),
+            chunk_hashes: transport_certificate_chunk_hashes(transported_material, "chunkHashes"),
+        },
+    );
+}
+
+fn append_transport_certificate_entries_from_material_set(
+    package: &mut serde_json::Value,
+    material_set: &serde_json::Value,
+    materials_field_name: &'static str,
+    object_root_field_name: &'static str,
+    object_name: &'static str,
+    object_role: &'static str,
+    fields: TransportedMaterialCertificateFields,
+) {
+    for transported_material in material_set[materials_field_name]
+        .as_array()
+        .expect("transported material entries")
+    {
+        append_setup_transport_certificate_object(
+            package,
+            SetupTransportCertificateObjectFixture {
+                object_name,
+                object_role,
+                object_root: transported_material[object_root_field_name]
+                    .as_str()
+                    .expect("transported material root")
+                    .to_string(),
+                byte_length: transported_material[fields.byte_length]
+                    .as_u64()
+                    .expect("transported material byte length"),
+                full_object_hash: transported_material[fields.full_object_hash]
+                    .as_str()
+                    .expect("transported material full object hash")
+                    .to_string(),
+                chunk_root: transported_material[fields.chunk_root]
+                    .as_str()
+                    .expect("transported material chunk root")
+                    .to_string(),
+                chunk_hashes: transport_certificate_chunk_hashes(
+                    transported_material,
+                    fields.chunk_hashes,
+                ),
+            },
         );
     }
-    transported_public_evaluation_key_material["componentMaterials"] =
-        serde_json::json!(component_materials);
+}
+
+fn transport_certificate_chunk_hashes(
+    transported_material: &serde_json::Value,
+    field_name: &str,
+) -> Vec<String> {
+    transported_material[field_name]
+        .as_array()
+        .expect("transported material chunk hashes")
+        .iter()
+        .map(|chunk_hash| {
+            chunk_hash
+                .as_str()
+                .expect("transported material chunk hash")
+                .to_string()
+        })
+        .collect()
 }
 
 fn rebind_public_evaluation_key_material_transport(
@@ -7332,6 +8451,590 @@ fn move_first_galois_key_share_component_vectors_to_transport(
     rebind_collective_setup_package_hash(package);
 
     transported_component_material_set
+}
+
+fn move_all_evaluation_key_share_component_vectors_to_transport(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let mut component_materials = Vec::new();
+    component_materials.extend(
+        move_relinearization_key_share_component_vectors_to_transport(
+            package,
+            "roundOneRecords",
+            "RelinearizationRoundOneProofRandomness",
+        ),
+    );
+    rebind_relinearization_records_and_aggregate_roots(package);
+    component_materials.extend(
+        move_relinearization_key_share_component_vectors_to_transport(
+            package,
+            "roundTwoRecords",
+            "RelinearizationRoundTwoProofRandomness",
+        ),
+    );
+    rebind_relinearization_records_and_aggregate_roots(package);
+    component_materials.extend(move_galois_key_share_component_vectors_to_transport(
+        package,
+    ));
+    package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    rebind_setup_key_correctness_certificate(package);
+    rebind_collective_setup_package_hash(package);
+
+    serde_json::json!({
+        "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "componentMaterials": component_materials,
+    })
+}
+
+fn move_relinearization_key_share_component_vectors_to_transport(
+    package: &mut serde_json::Value,
+    records_field_name: &'static str,
+    proof_randomness_label: &'static str,
+) -> Vec<serde_json::Value> {
+    let record_count = package["relinearizationKeyShareRounds"][records_field_name]
+        .as_array()
+        .expect("relinearization records")
+        .len();
+    let mut component_materials = Vec::new();
+    for record_index in 0..record_count {
+        let proof_record_snapshot =
+            package["relinearizationKeyShareRounds"][records_field_name][record_index].clone();
+        let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
+            .as_u64()
+            .expect("trustee roster position");
+        let statement_record = package["sameSecretConsistency"]["statementRecords"]
+            [trustee_roster_position as usize]
+            .clone();
+        let constant_commitments =
+            same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
+        let setup_proof_binding = setup_proof_binding_for_test_package(package);
+        let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+            .as_str()
+            .expect("public matrix seed hash")
+            .to_string();
+        let fixture_material = evaluation_key_share_fixture_material_for_record(
+            EvaluationKeyShareProofFamily::Relinearization,
+            &proof_record_snapshot,
+        );
+        let transported_component_material_set = {
+            let proof_record =
+                &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
+            move_evaluation_key_share_component_vectors_to_transport(
+                proof_record,
+                EvaluationKeyShareProofFamily::Relinearization,
+                &fixture_material,
+            )
+        };
+        {
+            let proof_record =
+                &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
+            populate_evaluation_key_share_lnp_proof_fields(
+                proof_record,
+                EvaluationKeyShareProofFamily::Relinearization,
+                &public_matrix_seed_hash,
+                &statement_record,
+                &constant_commitments,
+                &setup_proof_binding,
+                &fixture_material,
+                trustee_roster_position,
+                Some(&transported_component_material_set),
+                proof_randomness_label,
+            );
+        }
+        component_materials.extend(
+            transported_component_material_set["componentMaterials"]
+                .as_array()
+                .expect("component materials")
+                .iter()
+                .cloned(),
+        );
+    }
+
+    component_materials
+}
+
+fn move_galois_key_share_component_vectors_to_transport(
+    package: &mut serde_json::Value,
+) -> Vec<serde_json::Value> {
+    let batch_count = package["galoisKeyShareBatches"]
+        .as_array()
+        .expect("Galois key-share batches")
+        .len();
+    let mut component_materials = Vec::new();
+    for batch_index in 0..batch_count {
+        let proof_count = package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
+            .as_array()
+            .expect("Galois key-share proofs")
+            .len();
+        for proof_index in 0..proof_count {
+            let proof_record_snapshot =
+                package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"][proof_index]
+                    .clone();
+            let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
+                .as_u64()
+                .expect("trustee roster position");
+            let statement_record = package["sameSecretConsistency"]["statementRecords"]
+                [trustee_roster_position as usize]
+                .clone();
+            let constant_commitments = same_secret_constant_commitments_from_fixture_package(
+                package,
+                trustee_roster_position,
+            );
+            let setup_proof_binding = setup_proof_binding_for_test_package(package);
+            let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+                .as_str()
+                .expect("public matrix seed hash")
+                .to_string();
+            let fixture_material = evaluation_key_share_fixture_material_for_record(
+                EvaluationKeyShareProofFamily::Galois,
+                &proof_record_snapshot,
+            );
+            let transported_component_material_set = {
+                let proof_record = &mut package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
+                    [proof_index];
+                move_evaluation_key_share_component_vectors_to_transport(
+                    proof_record,
+                    EvaluationKeyShareProofFamily::Galois,
+                    &fixture_material,
+                )
+            };
+            {
+                let proof_record = &mut package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
+                    [proof_index];
+                populate_evaluation_key_share_lnp_proof_fields(
+                    proof_record,
+                    EvaluationKeyShareProofFamily::Galois,
+                    &public_matrix_seed_hash,
+                    &statement_record,
+                    &constant_commitments,
+                    &setup_proof_binding,
+                    &fixture_material,
+                    trustee_roster_position,
+                    Some(&transported_component_material_set),
+                    "GaloisKeyShareProofRandomness",
+                );
+                proof_record
+                    .as_object_mut()
+                    .expect("Galois proof record")
+                    .remove("galoisKeyShareProofRoot");
+                proof_record["galoisKeyShareProofRoot"] = serde_json::json!(
+                    derive_protocol_hash("GaloisKeyShareProofRoot", proof_record)
+                        .expect("Galois proof root")
+                );
+            }
+            component_materials.extend(
+                transported_component_material_set["componentMaterials"]
+                    .as_array()
+                    .expect("component materials")
+                    .iter()
+                    .cloned(),
+            );
+        }
+        rebind_galois_key_batch_proof_root(package, batch_index);
+        rebind_galois_key_share_batch_root(package, batch_index);
+    }
+
+    component_materials
+}
+
+fn move_all_evaluation_key_share_lnp_proof_bytes_to_transport(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let mut proof_materials = Vec::new();
+    proof_materials.extend(move_relinearization_key_share_lnp_proof_bytes_to_transport(
+        package,
+        "roundOneRecords",
+        "roundOneProofRoot",
+    ));
+    rebind_relinearization_records_and_aggregate_roots(package);
+    proof_materials.extend(move_relinearization_key_share_lnp_proof_bytes_to_transport(
+        package,
+        "roundTwoRecords",
+        "roundTwoProofRoot",
+    ));
+    rebind_relinearization_records_and_aggregate_roots(package);
+    proof_materials.extend(move_galois_key_share_lnp_proof_bytes_to_transport(package));
+    package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    rebind_setup_key_correctness_certificate(package);
+    rebind_collective_setup_package_hash(package);
+
+    serde_json::json!({
+        "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "proofFamily": "evaluation-key-share",
+        "proofMaterials": proof_materials,
+    })
+}
+
+fn move_relinearization_key_share_lnp_proof_bytes_to_transport(
+    package: &mut serde_json::Value,
+    records_field_name: &'static str,
+    proof_root_field_name: &'static str,
+) -> Vec<serde_json::Value> {
+    let record_count = package["relinearizationKeyShareRounds"][records_field_name]
+        .as_array()
+        .expect("relinearization records")
+        .len();
+    let mut proof_materials = Vec::new();
+    for record_index in 0..record_count {
+        let proof_material = {
+            let proof_record =
+                &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
+            move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
+                proof_record,
+                "relinearization-key-share",
+                proof_root_field_name,
+                "RelinearizationKeyShareProofRoot",
+            )
+        };
+        proof_materials.push(proof_material);
+    }
+
+    proof_materials
+}
+
+fn move_galois_key_share_lnp_proof_bytes_to_transport(
+    package: &mut serde_json::Value,
+) -> Vec<serde_json::Value> {
+    let batch_count = package["galoisKeyShareBatches"]
+        .as_array()
+        .expect("Galois key-share batches")
+        .len();
+    let mut proof_materials = Vec::new();
+    for batch_index in 0..batch_count {
+        let proof_count = package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
+            .as_array()
+            .expect("Galois key-share proofs")
+            .len();
+        for proof_index in 0..proof_count {
+            let proof_material = {
+                let proof_record = &mut package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
+                    [proof_index];
+                move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
+                    proof_record,
+                    "galois-key-share",
+                    "galoisKeyShareProofRoot",
+                    "GaloisKeyShareProofRoot",
+                )
+            };
+            proof_materials.push(proof_material);
+        }
+        rebind_galois_key_batch_proof_root(package, batch_index);
+        rebind_galois_key_share_batch_root(package, batch_index);
+    }
+
+    proof_materials
+}
+
+fn evaluation_key_share_fixture_material_for_record(
+    proof_family: EvaluationKeyShareProofFamily,
+    proof_record: &serde_json::Value,
+) -> EvaluationKeyShareFixtureMaterial {
+    let trustee_roster_position = proof_record["trusteeRosterPosition"]
+        .as_u64()
+        .expect("trustee roster position");
+    let level = proof_record["level"].as_u64().expect("level");
+    let rotation = proof_record
+        .get("rotation")
+        .and_then(serde_json::Value::as_u64);
+    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
+    let key_switch_seed_hex = proof_record["keySwitchSeedHex"]
+        .as_str()
+        .expect("key-switch seed");
+    let relinearization_source = match proof_family {
+        EvaluationKeyShareProofFamily::Relinearization => {
+            match proof_record["objectType"].as_str() {
+                Some("RelinearizationKeyShareRoundOne") => {
+                    Some(relinearization_round_one_source_coefficients_for_fixture(
+                        trustee_roster_position,
+                        ring_degree,
+                    ))
+                }
+                Some("RelinearizationKeyShareRoundTwo") => {
+                    Some(relinearization_round_two_source_coefficients_for_fixture(
+                        trustee_roster_position,
+                        ring_degree,
+                    ))
+                }
+                _ => panic!("unsupported relinearization proof record object type"),
+            }
+        }
+        EvaluationKeyShareProofFamily::Galois => None,
+    };
+
+    evaluation_key_share_fixture_material(
+        proof_family,
+        trustee_roster_position,
+        level,
+        rotation,
+        ring_degree,
+        key_switch_seed_hex,
+        relinearization_source.as_deref(),
+    )
+}
+
+fn rebind_relinearization_records_and_aggregate_roots(package: &mut serde_json::Value) {
+    let round_one_count = package["relinearizationKeyShareRounds"]["roundOneRecords"]
+        .as_array()
+        .expect("round-one records")
+        .len();
+    for record_index in 0..round_one_count {
+        rebind_relinearization_record_roots(
+            package,
+            "roundOneRecords",
+            record_index,
+            "round-one",
+            "roundOneProofRoot",
+            "roundOneRecordRoot",
+            "RelinearizationRoundOneRecordRoot",
+            "roundOneShareRoot",
+        );
+    }
+
+    let level_schedule = package["evaluatorKeySchedule"]["relinearizationLevelSchedule"]
+        .as_array()
+        .expect("relinearization level schedule")
+        .clone();
+    let (
+        round_one_aggregate_roots,
+        round_one_aggregate_root_by_level,
+        round_one_source_square_aggregate_root_by_level,
+    ) = relinearization_round_one_aggregate_roots_from_records(package, &level_schedule);
+    package["relinearizationKeyShareRounds"]["roundOneAggregateRoots"] =
+        serde_json::json!(round_one_aggregate_roots);
+
+    let round_two_count = package["relinearizationKeyShareRounds"]["roundTwoRecords"]
+        .as_array()
+        .expect("round-two records")
+        .len();
+    for record_index in 0..round_two_count {
+        let level =
+            package["relinearizationKeyShareRounds"]["roundTwoRecords"][record_index]["level"]
+                .as_u64()
+                .expect("round-two level");
+        package["relinearizationKeyShareRounds"]["roundTwoRecords"][record_index]["roundOneAggregateRoot"] = serde_json::json!(
+            round_one_aggregate_root_by_level
+                .get(&level)
+                .expect("round-one aggregate root by level")
+        );
+        package["relinearizationKeyShareRounds"]["roundTwoRecords"][record_index]["roundOneSourceSquareAggregateRoot"] = serde_json::json!(
+            round_one_source_square_aggregate_root_by_level
+                .get(&level)
+                .expect("round-one source-square aggregate root by level")
+        );
+        rebind_relinearization_record_roots(
+            package,
+            "roundTwoRecords",
+            record_index,
+            "round-two",
+            "roundTwoProofRoot",
+            "roundTwoRecordRoot",
+            "RelinearizationRoundTwoRecordRoot",
+            "roundTwoShareRoot",
+        );
+    }
+
+    package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"] =
+        serde_json::json!(relinearization_round_two_aggregate_roots_from_records(
+            package,
+            &level_schedule,
+            &round_one_aggregate_root_by_level,
+            &round_one_source_square_aggregate_root_by_level,
+        ));
+    rebind_relinearization_key_share_rounds_root(package);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rebind_relinearization_record_roots(
+    package: &mut serde_json::Value,
+    records_field_name: &'static str,
+    record_index: usize,
+    round: &'static str,
+    proof_root_field_name: &'static str,
+    record_root_field_name: &'static str,
+    record_root_namespace: &'static str,
+    share_root_field_name: &'static str,
+) {
+    let source_square_binding_root = {
+        let record = &package["relinearizationKeyShareRounds"][records_field_name][record_index];
+        relinearization_source_square_binding_root_for_test(
+            record,
+            round,
+            record[share_root_field_name]
+                .as_str()
+                .expect("relinearization share root"),
+        )
+    };
+    let record = &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
+    record["sourceSquareBindingRoot"] = serde_json::json!(source_square_binding_root);
+    let mut proof_root_input = record.clone();
+    {
+        let proof_root_input_object = proof_root_input
+            .as_object_mut()
+            .expect("relinearization proof root input");
+        proof_root_input_object.remove(proof_root_field_name);
+        proof_root_input_object.remove(record_root_field_name);
+    }
+    record[proof_root_field_name] = serde_json::json!(
+        derive_protocol_hash("RelinearizationKeyShareProofRoot", &proof_root_input)
+            .expect("relinearization proof root")
+    );
+    record
+        .as_object_mut()
+        .expect("relinearization record")
+        .remove(record_root_field_name);
+    record[record_root_field_name] = serde_json::json!(
+        derive_protocol_hash(record_root_namespace, record).expect("relinearization record root")
+    );
+}
+
+fn relinearization_round_one_aggregate_roots_from_records(
+    package: &serde_json::Value,
+    level_schedule: &[serde_json::Value],
+) -> (
+    Vec<serde_json::Value>,
+    BTreeMap<u64, String>,
+    BTreeMap<u64, String>,
+) {
+    let mut aggregate_roots = Vec::new();
+    let mut aggregate_root_by_level = BTreeMap::new();
+    let mut source_square_aggregate_root_by_level = BTreeMap::new();
+    for level_entry in level_schedule {
+        let level = level_entry["level"].as_u64().expect("level");
+        let source_square_binding_roots = relinearization_record_roots_for_level(
+            package,
+            "roundOneRecords",
+            level,
+            "sourceSquareBindingRoot",
+        );
+        let source_square_aggregate_root = relinearization_source_square_aggregate_root_for_test(
+            "round-one",
+            &package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
+            level,
+            &source_square_binding_roots,
+            None,
+        );
+        let round_one_record_roots = relinearization_record_roots_for_level(
+            package,
+            "roundOneRecords",
+            level,
+            "roundOneRecordRoot",
+        );
+        let aggregate_root = derive_protocol_hash(
+            "RelinearizationRoundOneAggregateRoot",
+            &serde_json::json!({
+                "objectType": "RelinearizationRoundOneAggregate",
+                "objectVersion": 1,
+                "setupProfileId": "CollectiveBgvSetup-v1",
+                "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+                "evaluatorKeyScheduleRoot": package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
+                "level": level,
+                "roundOneSourceSquareAggregateRoot": source_square_aggregate_root,
+                "roundOneRecordRoots": round_one_record_roots,
+            }),
+        )
+        .expect("round-one aggregate root");
+        aggregate_roots.push(serde_json::json!({
+            "level": level,
+            "roundOneAggregateRoot": aggregate_root,
+            "roundOneSourceSquareAggregateRoot": source_square_aggregate_root,
+        }));
+        aggregate_root_by_level.insert(level, aggregate_root);
+        source_square_aggregate_root_by_level.insert(level, source_square_aggregate_root);
+    }
+
+    (
+        aggregate_roots,
+        aggregate_root_by_level,
+        source_square_aggregate_root_by_level,
+    )
+}
+
+fn relinearization_round_two_aggregate_roots_from_records(
+    package: &serde_json::Value,
+    level_schedule: &[serde_json::Value],
+    round_one_aggregate_root_by_level: &BTreeMap<u64, String>,
+    round_one_source_square_aggregate_root_by_level: &BTreeMap<u64, String>,
+) -> Vec<serde_json::Value> {
+    level_schedule
+        .iter()
+        .map(|level_entry| {
+            let level = level_entry["level"].as_u64().expect("level");
+            let round_one_source_square_aggregate_root =
+                round_one_source_square_aggregate_root_by_level
+                    .get(&level)
+                    .expect("round-one source-square aggregate root");
+            let source_square_binding_roots = relinearization_record_roots_for_level(
+                package,
+                "roundTwoRecords",
+                level,
+                "sourceSquareBindingRoot",
+            );
+            let round_two_source_square_aggregate_root =
+                relinearization_source_square_aggregate_root_for_test(
+                    "round-two",
+                    &package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
+                    level,
+                    &source_square_binding_roots,
+                    Some(round_one_source_square_aggregate_root),
+                );
+            let round_two_record_roots = relinearization_record_roots_for_level(
+                package,
+                "roundTwoRecords",
+                level,
+                "roundTwoRecordRoot",
+            );
+            let aggregate_root = derive_protocol_hash(
+                "RelinearizationRoundTwoAggregateRoot",
+                &serde_json::json!({
+                    "objectType": "RelinearizationRoundTwoAggregate",
+                    "objectVersion": 1,
+                    "setupProfileId": "CollectiveBgvSetup-v1",
+                    "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+                    "evaluatorKeyScheduleRoot": package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
+                    "level": level,
+                    "roundOneAggregateRoot": round_one_aggregate_root_by_level
+                        .get(&level)
+                        .expect("round-one aggregate root"),
+                    "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
+                    "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
+                    "roundTwoRecordRoots": round_two_record_roots,
+                }),
+            )
+            .expect("round-two aggregate root");
+            serde_json::json!({
+                "level": level,
+                "roundTwoAggregateRoot": aggregate_root,
+                "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
+            })
+        })
+        .collect()
+}
+
+fn relinearization_record_roots_for_level(
+    package: &serde_json::Value,
+    records_field_name: &'static str,
+    level: u64,
+    root_field_name: &'static str,
+) -> Vec<serde_json::Value> {
+    package["relinearizationKeyShareRounds"][records_field_name]
+        .as_array()
+        .expect("relinearization records")
+        .iter()
+        .filter(|record| record["level"].as_u64() == Some(level))
+        .map(|record| {
+            serde_json::json!({
+                "trusteeIdentity": record["trusteeIdentity"],
+                "trusteeRosterPosition": record["trusteeRosterPosition"],
+                root_field_name: record[root_field_name],
+            })
+        })
+        .collect()
 }
 
 fn move_evaluation_key_share_component_vectors_to_transport(
@@ -7783,6 +9486,144 @@ fn public_key_share_material_object(package: &serde_json::Value) -> serde_json::
     material_set
 }
 
+fn move_public_key_share_material_to_transport(
+    package: &mut serde_json::Value,
+) -> serde_json::Value {
+    let embedded_material_set = package["publicKeyShareMaterial"].clone();
+    let chunks = encode_public_key_share_material_transport_chunks(&embedded_material_set);
+    let transport_hashes = public_key_share_material_transport_hashes(&chunks)
+        .expect("public-key material transport hashes");
+    let mut transported_material_set = embedded_material_set;
+    {
+        let material_set_object = transported_material_set
+            .as_object_mut()
+            .expect("public-key material set object");
+        material_set_object.insert(
+            "materialEncoding".to_string(),
+            serde_json::json!(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING),
+        );
+        material_set_object.insert(
+            "binaryFormat".to_string(),
+            serde_json::json!(PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT),
+        );
+        material_set_object.remove("shareMaterialRecords");
+        material_set_object.remove("publicKeyShareMaterialSetRoot");
+        material_set_object.insert(
+            "transport".to_string(),
+            serde_json::json!({
+                "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+                "chunkSizeBytes": 1_048_576,
+                "chunkCount": transport_hashes.chunk_hashes.len(),
+                "totalByteLength": transport_hashes.total_byte_length,
+                "fullObjectHash": transport_hashes.full_object_hash,
+                "chunkRoot": transport_hashes.chunk_root,
+            }),
+        );
+    }
+    transported_material_set["publicKeyShareMaterialSetRoot"] = serde_json::json!(
+        derive_protocol_hash("PublicKeyShareRoot", &transported_material_set)
+            .expect("transported public-key material set root")
+    );
+    package["publicKeyShareMaterial"] = transported_material_set;
+    package["publicKeyShareLnpProofs"]["publicKeyShareMaterialSetRoot"] =
+        package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"].clone();
+    rebind_collective_public_key_lnp_proof_roots(package);
+    if package["collectivePublicKey"].is_object() {
+        package["collectivePublicKey"]["publicKeyShareMaterialSetRoot"] =
+            package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"].clone();
+        package["collectivePublicKey"]["publicKeyShareLnpProofSetRoot"] =
+            package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"].clone();
+        rebind_collective_public_key_root(package);
+    }
+
+    serde_json::json!({
+        "objectType": PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE,
+        "objectVersion": 1,
+        "binaryFormat": PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT,
+        "chunkSizeBytes": 1_048_576,
+        "chunkCount": transport_hashes.chunk_hashes.len(),
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkHashes": transport_hashes.chunk_hashes,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunks": chunks
+            .into_iter()
+            .enumerate()
+            .map(|(chunk_index, chunk)| serde_json::json!({
+                "chunkIndex": chunk_index,
+                "bytesHex": to_hex(&chunk),
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn encode_public_key_share_material_transport_chunks(
+    material_set: &serde_json::Value,
+) -> Vec<Vec<u8>> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"SLPKSMV1");
+    append_varuint(&mut bytes, 1);
+    append_varuint(
+        &mut bytes,
+        material_set["participantCount"]
+            .as_u64()
+            .expect("participant count"),
+    );
+    append_varuint(
+        &mut bytes,
+        material_set["rnsLimbCount"]
+            .as_u64()
+            .expect("RNS limb count"),
+    );
+    append_varuint(
+        &mut bytes,
+        material_set["ringDegree"].as_u64().expect("ring degree"),
+    );
+    let material_records = material_set["shareMaterialRecords"]
+        .as_array()
+        .expect("public-key share material records");
+    for expected_roster_position in 0..10_u64 {
+        let material_record = material_records
+            .iter()
+            .find(|record| {
+                record["trusteeRosterPosition"].as_u64() == Some(expected_roster_position)
+            })
+            .expect("public-key material record");
+        append_varuint(&mut bytes, expected_roster_position);
+        let limbs = material_record["shareCoefficientVectorsByLimb"]
+            .as_array()
+            .expect("public-key material limbs");
+        for (expected_rns_limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+            let limb = limbs
+                .iter()
+                .find(|candidate| {
+                    candidate["rnsLimbIndex"].as_u64() == Some(expected_rns_limb_index as u64)
+                })
+                .expect("public-key material limb");
+            append_varuint(&mut bytes, expected_rns_limb_index as u64);
+            bytes.extend_from_slice(&modulus.to_le_bytes());
+            let coefficients = coefficient_vector_from_le_hex(
+                limb["coefficientsLeHex"]
+                    .as_str()
+                    .expect("public-key coefficient hex"),
+                material_set["ringDegree"]
+                    .as_u64()
+                    .expect("ring degree")
+                    .try_into()
+                    .expect("ring degree usize"),
+                "public-key material fixture coefficient width",
+            )
+            .expect("public-key coefficients");
+            for coefficient in coefficients {
+                bytes.extend_from_slice(&coefficient.to_le_bytes());
+            }
+        }
+    }
+
+    let chunk_size = 1_048_576_usize;
+    bytes.chunks(chunk_size).map(<[u8]>::to_vec).collect()
+}
+
 fn public_key_share_lnp_proofs_object(package: &serde_json::Value) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let setup_proof_binding = setup_proof_binding_for_test_package(package);
@@ -8106,9 +9947,16 @@ fn same_secret_constant_commitments_from_fixture_package(
     package: &serde_json::Value,
     trustee_roster_position: u64,
 ) -> Vec<super::super::commitment::SetupCommitmentValue> {
-    let material_records = package["vssCoefficientCommitmentMaterial"]["coefficientCommitments"]
-        .as_array()
-        .expect("coefficient material records");
+    let material_set = &package["vssCoefficientCommitmentMaterial"];
+    let Some(material_records) = material_set
+        .get("coefficientCommitments")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return same_secret_constant_commitments_from_deterministic_fixture(
+            package,
+            trustee_roster_position,
+        );
+    };
     let mut commitments_by_limb = BTreeMap::new();
     for material_record in material_records {
         if material_record["sourceTrusteeRosterPosition"].as_u64() != Some(trustee_roster_position)
@@ -8135,6 +9983,52 @@ fn same_secret_constant_commitments_from_fixture_package(
             commitments_by_limb
                 .remove(&rns_limb_index)
                 .expect("constant commitment limb")
+        })
+        .collect()
+}
+
+fn same_secret_constant_commitments_from_deterministic_fixture(
+    package: &serde_json::Value,
+    trustee_roster_position: u64,
+) -> Vec<super::super::commitment::SetupCommitmentValue> {
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let ring_degree = package["vssCoefficientCommitmentMaterial"]["ringDegree"]
+        .as_u64()
+        .expect("VSS material ring degree") as usize;
+    DATA_PRIMES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(rns_limb_index, rns_prime)| {
+            let coefficient_message = accepted_vss_coefficient_message_fixture(
+                trustee_roster_position,
+                rns_limb_index,
+                0,
+                rns_prime,
+                ring_degree,
+            );
+            let coefficient_message_wide = coefficient_message
+                .iter()
+                .map(|coefficient| u128::from(*coefficient))
+                .collect::<Vec<_>>();
+            let randomness_by_column = accepted_vss_randomness_fixture(
+                trustee_roster_position,
+                rns_limb_index,
+                0,
+                ring_degree,
+            );
+            compute_setup_commitment_for_tests(
+                public_matrix_seed_hash,
+                rns_limb_index,
+                rns_prime,
+                0,
+                &coefficient_message_wide,
+                &randomness_by_column,
+                ring_degree,
+            )
+            .expect("deterministic setup commitment")
         })
         .collect()
 }
@@ -9688,4 +11582,55 @@ fn transported_material_value(material_bytes: &[u8]) -> serde_json::Value {
             })
         }).collect::<Vec<_>>(),
     })
+}
+
+fn transported_material_reference_value(
+    transported_material: &serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "objectType": transported_material["objectType"],
+        "objectVersion": transported_material["objectVersion"],
+        "binaryFormat": transported_material["binaryFormat"],
+        "chunkSizeBytes": transported_material["chunkSizeBytes"],
+        "chunkCount": transported_material["chunkCount"],
+        "totalByteLength": transported_material["totalByteLength"],
+        "fullObjectHash": transported_material["fullObjectHash"],
+        "chunkHashes": transported_material["chunkHashes"],
+        "chunkRoot": transported_material["chunkRoot"],
+    })
+}
+
+fn stream_verified_vss_material_from_package(
+    package: &serde_json::Value,
+    transported_material: &serde_json::Value,
+    derivation_id: &str,
+) -> serde_json::Value {
+    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+        "derivationId": derivation_id,
+        "setupContext": package["setupContext"],
+        "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
+        "transportedVssCoefficientCommitmentMaterial": transported_material_reference_value(transported_material),
+    }))
+    .expect("begin VSS material stream verification");
+
+    for chunk in transported_material["chunks"]
+        .as_array()
+        .expect("transport chunks")
+    {
+        absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
+            &serde_json::json!({
+                "derivationId": derivation_id,
+                "chunkIndex": chunk["chunkIndex"],
+                "bytesHex": chunk["bytesHex"],
+            }),
+        )
+        .expect("absorb VSS material stream chunk");
+    }
+
+    finish_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+        "derivationId": derivation_id,
+        "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
+        "sourceTrusteeCoefficientCommitmentRecords": package["vssCoefficientCommitments"]["sourceTrusteeRecords"],
+    }))
+    .expect("finish VSS material stream verification")
 }

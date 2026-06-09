@@ -8,6 +8,7 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { setupProofProfileId } from './same-secret-consistency-records.js';
+import type { VerifiedVssCoefficientCommitmentMaterial } from './vss-coefficient-commitments.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -79,6 +80,53 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly namespace: string;
         readonly value: unknown;
     }) => ProtocolHash;
+    readonly computeSetupCommitmentFromOpening?: (input: {
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly sourceRnsLimbIndex: number;
+        readonly sourceMessageModulus: number;
+        readonly shamirCoefficientIndex: number;
+        readonly messageCoefficients: readonly number[];
+        readonly randomnessByColumn: readonly (readonly number[])[];
+        readonly ringDegree: number;
+    }) => {
+        readonly commitment: JsonRecord;
+        readonly commitmentRoot: ProtocolHash;
+        readonly commitmentChunkRoot: ProtocolHash;
+        readonly coefficientVectorHash512: string;
+    };
+    readonly deriveThresholdShareCommitmentsFromTransport?: (input: {
+        readonly setupContext: unknown;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+        readonly transportedVssCoefficientCommitmentMaterial: unknown;
+    }) => {
+        readonly thresholdShareCommitmentRoot: ProtocolHash;
+        readonly thresholdShareCommitments: JsonRecord;
+        readonly vssCoefficientCommitmentMaterial: JsonRecord;
+    };
+    readonly beginThresholdShareCommitmentsFromTransportStream?: (input: {
+        readonly derivationId: string;
+        readonly setupContext: unknown;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly transportedVssCoefficientCommitmentMaterial: unknown;
+    }) => JsonRecord;
+    readonly absorbThresholdShareCommitmentsFromTransportStreamChunk?: (input: {
+        readonly derivationId: string;
+        readonly chunkIndex: number;
+        readonly bytesHex: string;
+    }) => JsonRecord;
+    readonly finishThresholdShareCommitmentsFromTransportStream?: (input: {
+        readonly derivationId: string;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+    }) => {
+        readonly thresholdShareCommitmentRoot: ProtocolHash;
+        readonly thresholdShareCommitments: JsonRecord;
+        readonly vssCoefficientCommitmentMaterial: JsonRecord;
+        readonly verifiedVssCoefficientCommitmentMaterial: VerifiedVssCoefficientCommitmentMaterial;
+        readonly transport: JsonRecord;
+    };
     readonly generatePrivateVssShareProof?: (input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -203,6 +251,19 @@ export type PrivateVssEnvelopeCommitment = Readonly<
         readonly privateEnvelopeCommitmentRoot: ProtocolHash;
     }
 >;
+
+type PrivateVssMailboxDeliverySetFromReferencesInput = Pick<
+    PrivateVssMailboxDeliverySetInput,
+    | 'kernel'
+    | 'setupContext'
+    | 'publicMatrixSeedHash'
+    | 'vssCoefficientCommitmentRoot'
+    | 'participantCount'
+    | 'deliveryPhaseNumber'
+    | 'verificationPhaseNumber'
+> & {
+    readonly envelopeReferences: readonly PrivateVssEnvelopeCommitment[];
+};
 
 export type TransportedPrivateVssShareProofChunk = Readonly<
     JsonRecord & {
@@ -443,6 +504,32 @@ const sortedByRosterPosition = <Entry>(
     return sortedEntries;
 };
 
+const sortedBySourceTrusteeThenRecipient = (
+    envelopeReferences: readonly PrivateVssEnvelopeCommitment[],
+): PrivateVssEnvelopeCommitment[] =>
+    [...envelopeReferences].sort((left, right) => {
+        const sourceOrder =
+            assertNonNegativeSafeInteger(
+                left.sourceTrusteeRosterPosition,
+                'private VSS envelope reference source trustee roster position',
+            ) -
+            assertNonNegativeSafeInteger(
+                right.sourceTrusteeRosterPosition,
+                'private VSS envelope reference source trustee roster position',
+            );
+
+        return sourceOrder === 0
+            ? assertNonNegativeSafeInteger(
+                  left.recipientRosterPosition,
+                  'private VSS envelope reference recipient roster position',
+              ) -
+                  assertNonNegativeSafeInteger(
+                      right.recipientRosterPosition,
+                      'private VSS envelope reference recipient roster position',
+                  )
+            : sourceOrder;
+    });
+
 const assertFullRosterPositions = (
     positions: readonly number[],
     participantCount: number,
@@ -460,6 +547,77 @@ const assertFullRosterPositions = (
             );
         }
     });
+};
+
+const assertFullEnvelopeReferenceCoverage = (
+    envelopeReferences: readonly PrivateVssEnvelopeCommitment[],
+    participantCount: number,
+): void => {
+    if (envelopeReferences.length !== participantCount * participantCount) {
+        throw new Error(
+            'private VSS envelope reference count must match the accepted participant square.',
+        );
+    }
+    const observedPairs = new Set<string>();
+    envelopeReferences.forEach((envelopeReference, envelopeReferenceIndex) => {
+        const sourceTrusteeRosterPosition = assertNonNegativeSafeInteger(
+            envelopeReference.sourceTrusteeRosterPosition,
+            `private VSS envelope reference ${String(envelopeReferenceIndex)} source trustee roster position`,
+        );
+        const recipientRosterPosition = assertNonNegativeSafeInteger(
+            envelopeReference.recipientRosterPosition,
+            `private VSS envelope reference ${String(envelopeReferenceIndex)} recipient roster position`,
+        );
+        validateSafeRosterPosition(
+            sourceTrusteeRosterPosition,
+            `private VSS envelope reference ${String(envelopeReferenceIndex)} source trustee roster position`,
+        );
+        validateSafeRosterPosition(
+            recipientRosterPosition,
+            `private VSS envelope reference ${String(envelopeReferenceIndex)} recipient roster position`,
+        );
+        if (
+            sourceTrusteeRosterPosition >= participantCount ||
+            recipientRosterPosition >= participantCount
+        ) {
+            throw new Error(
+                'private VSS envelope reference roster positions must be inside the accepted participant count.',
+            );
+        }
+        const pairKey = `${String(sourceTrusteeRosterPosition)}:${String(
+            recipientRosterPosition,
+        )}`;
+        if (observedPairs.has(pairKey)) {
+            throw new Error(
+                'private VSS envelope references must have distinct source-recipient pairs.',
+            );
+        }
+        observedPairs.add(pairKey);
+    });
+
+    for (
+        let sourceTrusteeRosterPosition = 0;
+        sourceTrusteeRosterPosition < participantCount;
+        sourceTrusteeRosterPosition += 1
+    ) {
+        for (
+            let recipientRosterPosition = 0;
+            recipientRosterPosition < participantCount;
+            recipientRosterPosition += 1
+        ) {
+            if (
+                !observedPairs.has(
+                    `${String(sourceTrusteeRosterPosition)}:${String(
+                        recipientRosterPosition,
+                    )}`,
+                )
+            ) {
+                throw new Error(
+                    'private VSS envelope references must cover every source-recipient pair.',
+                );
+            }
+        }
+    }
 };
 
 const shareValuesForRecipient = (
@@ -1040,57 +1198,31 @@ export const createPrivateVssMailboxSourceTrusteeDeliveryReferences = async (
         'mailbox recipient',
     );
 
-    return Promise.all(
-        recipients.map((recipient) =>
-            createEnvelopeCommitment(
+    const envelopeReferences: PrivateVssEnvelopeCommitment[] = [];
+    for (const recipient of recipients) {
+        envelopeReferences.push(
+            await createEnvelopeCommitment(
                 input,
                 input.sourceTrusteeContributionState,
                 recipient,
             ),
-        ),
-    );
+        );
+    }
+
+    return envelopeReferences;
 };
 
-export const createPrivateVssMailboxDeliverySet = async (
-    input: PrivateVssMailboxDeliverySetInput,
-): Promise<PrivateVssMailboxDeliverySet> => {
+export const createPrivateVssMailboxDeliverySetFromReferences = (
+    input: PrivateVssMailboxDeliverySetFromReferencesInput,
+): PrivateVssMailboxDeliverySet => {
     validatePositiveSafeInteger(input.participantCount, 'participantCount');
-    validatePositiveSafeInteger(input.ringDegree, 'ringDegree');
-    const sourceTrusteeStates = sortedByRosterPosition(
-        input.sourceTrusteeContributionStates,
-        (sourceTrusteeState) => sourceTrusteeState.sourceTrusteeRosterPosition,
-        'source trustee contribution state',
+    const envelopeReferences = sortedBySourceTrusteeThenRecipient(
+        input.envelopeReferences,
     );
-    const recipients = sortedByRosterPosition(
-        input.recipients,
-        (recipient) => recipient.recipientRosterPosition,
-        'mailbox recipient',
-    );
-    assertFullRosterPositions(
-        sourceTrusteeStates.map(
-            (sourceTrusteeState) =>
-                sourceTrusteeState.sourceTrusteeRosterPosition,
-        ),
+    assertFullEnvelopeReferenceCoverage(
+        envelopeReferences,
         input.participantCount,
-        'source trustee contribution state',
     );
-    assertFullRosterPositions(
-        recipients.map((recipient) => recipient.recipientRosterPosition),
-        input.participantCount,
-        'mailbox recipient',
-    );
-
-    const envelopeReferences = (
-        await Promise.all(
-            sourceTrusteeStates.map((sourceTrusteeContributionState) =>
-                createPrivateVssMailboxSourceTrusteeDeliveryReferences({
-                    ...input,
-                    sourceTrusteeContributionState,
-                    recipients,
-                }),
-            ),
-        )
-    ).flat();
 
     const commitmentSetWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitmentSet',
@@ -1123,4 +1255,56 @@ export const createPrivateVssMailboxDeliverySet = async (
             ),
         }),
     } satisfies PrivateVssMailboxDeliverySet;
+};
+
+export const createPrivateVssMailboxDeliverySet = async (
+    input: PrivateVssMailboxDeliverySetInput,
+): Promise<PrivateVssMailboxDeliverySet> => {
+    validatePositiveSafeInteger(input.participantCount, 'participantCount');
+    validatePositiveSafeInteger(input.ringDegree, 'ringDegree');
+    const sourceTrusteeStates = sortedByRosterPosition(
+        input.sourceTrusteeContributionStates,
+        (sourceTrusteeState) => sourceTrusteeState.sourceTrusteeRosterPosition,
+        'source trustee contribution state',
+    );
+    const recipients = sortedByRosterPosition(
+        input.recipients,
+        (recipient) => recipient.recipientRosterPosition,
+        'mailbox recipient',
+    );
+    assertFullRosterPositions(
+        sourceTrusteeStates.map(
+            (sourceTrusteeState) =>
+                sourceTrusteeState.sourceTrusteeRosterPosition,
+        ),
+        input.participantCount,
+        'source trustee contribution state',
+    );
+    assertFullRosterPositions(
+        recipients.map((recipient) => recipient.recipientRosterPosition),
+        input.participantCount,
+        'mailbox recipient',
+    );
+
+    const envelopeReferences: PrivateVssEnvelopeCommitment[] = [];
+    for (const sourceTrusteeContributionState of sourceTrusteeStates) {
+        envelopeReferences.push(
+            ...(await createPrivateVssMailboxSourceTrusteeDeliveryReferences({
+                ...input,
+                sourceTrusteeContributionState,
+                recipients,
+            })),
+        );
+    }
+
+    return createPrivateVssMailboxDeliverySetFromReferences({
+        kernel: input.kernel,
+        setupContext: input.setupContext,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
+        participantCount: input.participantCount,
+        deliveryPhaseNumber: input.deliveryPhaseNumber,
+        verificationPhaseNumber: input.verificationPhaseNumber,
+        envelopeReferences,
+    });
 };

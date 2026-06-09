@@ -63,9 +63,20 @@ export type BgvRnsProfileForCertificates = Readonly<
     }
 >;
 
+export type SetupCertificateTransportedObjectInput = Readonly<{
+    readonly objectName: string;
+    readonly objectRole: string;
+    readonly objectRoot: ProtocolHash;
+    readonly byteLength: number;
+    readonly fullObjectHash: ProtocolHash;
+    readonly chunkRoot: ProtocolHash;
+    readonly chunkHashes: readonly ProtocolHash[];
+}>;
+
 export type SetupCertificateTransportInput = Readonly<{
     readonly fullObjectHash: ProtocolHash;
     readonly chunkHashes: readonly ProtocolHash[];
+    readonly transportedObjects?: readonly SetupCertificateTransportedObjectInput[];
 }>;
 
 export type SetupCertificatesInput = Readonly<{
@@ -211,6 +222,22 @@ const setupTransportedObjectLoadingPolicy = 'stream-verified-before-object-use';
 const targetDecryptionProfileId = 'BGV-RNS-AsyncTargetDecryption-v1';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
+type SetupTransportedObjectRecord = Readonly<{
+    readonly objectType: 'SetupTransportedObject';
+    readonly objectVersion: 1;
+    readonly objectName: string;
+    readonly objectRole: string;
+    readonly objectRoot: ProtocolHash;
+    readonly byteLength: number;
+    readonly chunkStartIndex: number;
+    readonly chunkCount: number;
+    readonly chunkRoot: ProtocolHash;
+    readonly chunkHashes: readonly ProtocolHash[];
+    readonly fullObjectHash: ProtocolHash;
+    readonly encoding: 'binary';
+    readonly loadingPolicy: typeof setupTransportedObjectLoadingPolicy;
+}>;
+
 const assertObjectRecord = (value: unknown, fieldName: string): JsonRecord => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         throw new TypeError(`${fieldName} must be an object.`);
@@ -355,6 +382,56 @@ const hashArrayField = (
         );
 
         return item;
+    });
+};
+
+const setupCertificateTransportedObjectInputs = (
+    transport: Readonly<Record<string, unknown>>,
+): readonly SetupCertificateTransportedObjectInput[] => {
+    const transportedObjects = transport.transportedObjects;
+    if (transportedObjects === undefined) {
+        return [];
+    }
+    if (!Array.isArray(transportedObjects)) {
+        throw new TypeError('transport.transportedObjects must be an array.');
+    }
+
+    return transportedObjects.map((transportedObjectValue, objectIndex) => {
+        const objectPath = `transport.transportedObjects.${String(objectIndex)}`;
+        const transportedObject = assertObjectRecord(
+            transportedObjectValue,
+            objectPath,
+        );
+
+        return {
+            objectName: stringField(
+                transportedObject,
+                'objectName',
+                objectPath,
+            ),
+            objectRole: stringField(
+                transportedObject,
+                'objectRole',
+                objectPath,
+            ),
+            objectRoot: hashField(transportedObject, 'objectRoot', objectPath),
+            byteLength: positiveNumberField(
+                transportedObject,
+                'byteLength',
+                objectPath,
+            ),
+            fullObjectHash: hashField(
+                transportedObject,
+                'fullObjectHash',
+                objectPath,
+            ),
+            chunkRoot: hashField(transportedObject, 'chunkRoot', objectPath),
+            chunkHashes: hashArrayField(
+                transportedObject,
+                'chunkHashes',
+                objectPath,
+            ),
+        };
     });
 };
 
@@ -1815,6 +1892,94 @@ const createSetupProofAccountingCertificate = (
     };
 };
 
+function setupTransportChunkManifestRoot(
+    input: Readonly<{
+        readonly chunkCount: number;
+        readonly totalByteLength: number;
+        readonly chunkHashes: readonly ProtocolHash[];
+        readonly fullObjectHash: ProtocolHash;
+    }>,
+): ProtocolHash {
+    return deriveProtocolHash('SetupTransportChunkManifestRoot', {
+        objectType: 'SetupTransportChunkManifest',
+        objectVersion: 1,
+        setupProfileId,
+        transportProfileId: setupTransportProfileId,
+        chunkSizeBytes: setupTransportChunkSizeBytes,
+        chunkCount: input.chunkCount,
+        totalByteLength: input.totalByteLength,
+        chunkHashes: input.chunkHashes,
+        fullObjectHash: input.fullObjectHash,
+    });
+}
+
+function transportedObjectRecords(
+    transportedObjectInputs: readonly SetupCertificateTransportedObjectInput[],
+): readonly SetupTransportedObjectRecord[] {
+    const transportedObjects: SetupTransportedObjectRecord[] = [];
+    const objectRoots = new Set<string>();
+    let chunkStartIndex = 0;
+
+    transportedObjectInputs.forEach((input, objectIndex) => {
+        const objectPath = `transport.transportedObjects.${String(objectIndex)}`;
+        if (input.objectName.length === 0) {
+            throw new TypeError(`${objectPath}.objectName must be non-empty.`);
+        }
+        if (input.objectRole.length === 0) {
+            throw new TypeError(`${objectPath}.objectRole must be non-empty.`);
+        }
+        assertProtocolHash(input.objectRoot, `${objectPath}.objectRoot`);
+        assertProtocolHash(
+            input.fullObjectHash,
+            `${objectPath}.fullObjectHash`,
+        );
+        assertProtocolHash(input.chunkRoot, `${objectPath}.chunkRoot`);
+        if (!Number.isSafeInteger(input.byteLength) || input.byteLength <= 0) {
+            throw new TypeError(
+                `${objectPath}.byteLength must be a positive safe integer.`,
+            );
+        }
+        const expectedChunkCount = Math.ceil(
+            input.byteLength / setupTransportChunkSizeBytes,
+        );
+        if (input.chunkHashes.length !== expectedChunkCount) {
+            throw new Error(
+                `${objectPath}.chunkHashes length must match byteLength and chunkSizeBytes.`,
+            );
+        }
+        input.chunkHashes.forEach((chunkHash, chunkIndex) => {
+            assertProtocolHash(
+                chunkHash,
+                `${objectPath}.chunkHashes.${String(chunkIndex)}`,
+            );
+        });
+        if (objectRoots.has(input.objectRoot)) {
+            throw new Error(
+                'setup transport certificate transported objects must not contain duplicate object roots.',
+            );
+        }
+        objectRoots.add(input.objectRoot);
+        transportedObjects.push({
+            objectType: 'SetupTransportedObject',
+            objectVersion: 1,
+            objectName: input.objectName,
+            objectRole: input.objectRole,
+            objectRoot: input.objectRoot,
+            byteLength: input.byteLength,
+            chunkStartIndex,
+            chunkCount: expectedChunkCount,
+            chunkRoot: input.chunkRoot,
+            chunkHashes: input.chunkHashes,
+            fullObjectHash: input.fullObjectHash,
+            encoding: 'binary',
+            loadingPolicy: setupTransportedObjectLoadingPolicy,
+        });
+        chunkStartIndex += expectedChunkCount;
+    });
+
+    return transportedObjects;
+}
+
 const setupTransportCertificateBody = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
     vssCoefficientCommitmentMaterial: JsonRecord,
@@ -1822,39 +1987,61 @@ const setupTransportCertificateBody = (
 ): SetupTransportCertificateBody => {
     const publicVssMaterialSizeProfile =
         setupProfile.publicVssCommitmentMaterialSizeProfile;
-    const totalByteLength =
-        publicVssMaterialSizeProfile.fullMaterialCoefficientBytes;
-    const chunkCount = Math.ceil(
-        totalByteLength / setupTransportChunkSizeBytes,
+    const transportedObjects = transportedObjectRecords([
+        {
+            objectName: 'vssCoefficientCommitmentMaterial',
+            objectRole: 'public-vss-coefficient-commitment-material',
+            objectRoot: hashField(
+                vssCoefficientCommitmentMaterial,
+                'vssCoefficientCommitmentMaterialRoot',
+                'vssCoefficientCommitmentMaterial',
+            ),
+            byteLength:
+                publicVssMaterialSizeProfile.fullMaterialCoefficientBytes,
+            fullObjectHash: transportInput.fullObjectHash,
+            chunkRoot: setupTransportChunkManifestRoot({
+                chunkCount: transportInput.chunkHashes.length,
+                totalByteLength:
+                    publicVssMaterialSizeProfile.fullMaterialCoefficientBytes,
+                chunkHashes: transportInput.chunkHashes,
+                fullObjectHash: transportInput.fullObjectHash,
+            }),
+            chunkHashes: transportInput.chunkHashes,
+        },
+        ...(transportInput.transportedObjects ?? []),
+    ]);
+    const totalByteLength = transportedObjects.reduce(
+        (accumulatedLength, transportedObject) =>
+            accumulatedLength + transportedObject.byteLength,
+        0,
     );
-    const fullObjectHash = transportInput.fullObjectHash;
-    assertProtocolHash(fullObjectHash, 'transport.fullObjectHash');
-    const chunkHashes = [...transportInput.chunkHashes];
-    chunkHashes.forEach((chunkHash, chunkIndex) => {
-        assertProtocolHash(
-            chunkHash,
-            `transport.chunkHashes.${String(chunkIndex)}`,
-        );
-    });
-    if (chunkHashes.length !== chunkCount) {
-        throw new Error(
-            'transport.chunkHashes length must match the setup transport chunk count.',
-        );
-    }
-    if (new Set(chunkHashes).size !== chunkHashes.length) {
-        throw new Error('transport.chunkHashes must not contain duplicates.');
-    }
-    const objectRoot = hashField(
-        vssCoefficientCommitmentMaterial,
-        'vssCoefficientCommitmentMaterialRoot',
-        'vssCoefficientCommitmentMaterial',
+    const chunkHashes = transportedObjects.flatMap(
+        (transportedObject) => transportedObject.chunkHashes,
     );
-    const chunkRoot = deriveProtocolHash('SetupTransportChunkManifestRoot', {
-        objectType: 'SetupTransportChunkManifest',
-        objectVersion: 1,
-        setupProfileId,
-        transportProfileId: setupTransportProfileId,
-        chunkSizeBytes: setupTransportChunkSizeBytes,
+    const chunkCount = chunkHashes.length;
+    const fullObjectHash = deriveProtocolHash(
+        'SetupTransportFullObjectSetHash',
+        {
+            objectType: 'SetupTransportFullObjectSet',
+            objectVersion: 1,
+            setupProfileId,
+            transportProfileId: setupTransportProfileId,
+            transportedObjects: transportedObjects.map((transportedObject) => ({
+                objectName: transportedObject.objectName,
+                objectRole: transportedObject.objectRole,
+                objectRoot: transportedObject.objectRoot,
+                byteLength: transportedObject.byteLength,
+                chunkStartIndex: transportedObject.chunkStartIndex,
+                chunkCount: transportedObject.chunkCount,
+                chunkRoot: transportedObject.chunkRoot,
+                fullObjectHash: transportedObject.fullObjectHash,
+            })),
+            totalByteLength,
+            chunkCount,
+            chunkHashes,
+        },
+    );
+    const chunkRoot = setupTransportChunkManifestRoot({
         chunkCount,
         totalByteLength,
         chunkHashes,
@@ -1878,22 +2065,7 @@ const setupTransportCertificateBody = (
         streamVerificationOrder: setupTransportStreamOrder,
         resumePolicy: setupTransportResumePolicy,
         lazyLoadingPolicy: setupTransportLazyLoadingPolicy,
-        transportedObjects: [
-            {
-                objectType: 'SetupTransportedObject',
-                objectVersion: 1,
-                objectName: 'vssCoefficientCommitmentMaterial',
-                objectRole: 'public-vss-coefficient-commitment-material',
-                objectRoot,
-                byteLength: totalByteLength,
-                chunkStartIndex: 0,
-                chunkCount,
-                chunkRoot,
-                fullObjectHash,
-                encoding: 'binary',
-                loadingPolicy: setupTransportedObjectLoadingPolicy,
-            },
-        ],
+        transportedObjects,
         chunkHashes,
         chunkRoot,
         fullObjectHash,
@@ -2131,6 +2303,7 @@ export const createSetupCertificates = (
     const transportInput = {
         fullObjectHash: hashField(transport, 'fullObjectHash', 'transport'),
         chunkHashes: hashArrayField(transport, 'chunkHashes', 'transport'),
+        transportedObjects: setupCertificateTransportedObjectInputs(transport),
     };
 
     return {

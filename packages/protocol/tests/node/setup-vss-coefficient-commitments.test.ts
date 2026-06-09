@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
     computeSetupCommitmentFromOpening,
+    createBinaryChunkedVssCoefficientCommitmentBundle,
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
+    createStreamingBinaryChunkedVssCoefficientCommitmentBundle,
     createVssSourceTrusteeCoefficientOpeningState,
+    createVssSourceTrusteeCoefficientOpeningStateProvider,
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
+    deriveThresholdShareCommitments,
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
     setupTransportChunkSizeBytes,
     setupCommitmentRandomnessWidth,
@@ -286,6 +290,84 @@ describe('VSS coefficient commitment builders', () => {
         ).toMatch(/^[0-9a-f]{128}$/u);
     });
 
+    it('loads deterministic source openings through a provider without retained binary material', () => {
+        const sourceTrusteeReferences = [
+            {
+                sourceTrusteeIdentity: 'trustee-0',
+                sourceTrusteeRosterPosition: 0,
+            },
+            {
+                sourceTrusteeIdentity: 'trustee-1',
+                sourceTrusteeRosterPosition: 1,
+            },
+        ] as const;
+        const sourceTrusteeOpeningStateProvider =
+            createVssSourceTrusteeCoefficientOpeningStateProvider({
+                sourceTrustees: sourceTrusteeReferences,
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                thresholdDegree,
+                randomBytesForSourceTrustee: (sourceTrusteeReference) =>
+                    deterministicRandomBytes(
+                        `provider-${sourceTrusteeReference.sourceTrusteeIdentity}`,
+                    ),
+            });
+
+        expect(
+            sourceTrusteeOpeningStateProvider.loadSourceTrusteeOpeningState(
+                sourceTrusteeReferences[0],
+            ),
+        ).toEqual(
+            sourceTrusteeOpeningStateProvider.loadSourceTrusteeOpeningState(
+                sourceTrusteeReferences[0],
+            ),
+        );
+
+        const bundle = createBinaryChunkedVssCoefficientCommitmentBundle({
+            setupContext,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStateProvider,
+        });
+        const firstSourceTrusteeRecord =
+            bundle.commitmentSet.sourceTrusteeRecords[0];
+        if (firstSourceTrusteeRecord === undefined) {
+            throw new Error('Expected first source trustee record.');
+        }
+
+        expect(bundle.privateOpeningMaterialBySourceTrustee).toEqual([]);
+        expect(
+            bundle.sourceTrusteeOpeningMaterialSource.loadSourceTrusteeOpeningMaterial(
+                {
+                    sourceTrusteeIdentity:
+                        firstSourceTrusteeRecord.sourceTrusteeIdentity,
+                    sourceTrusteeRosterPosition:
+                        firstSourceTrusteeRecord.sourceTrusteeRosterPosition,
+                    sourceTrusteeCommitmentRoot:
+                        firstSourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+                },
+            ).sourceTrusteeCoefficientCommitmentRecord,
+        ).toEqual(firstSourceTrusteeRecord);
+        expect(() =>
+            createVssSourceTrusteeCoefficientOpeningStateProvider({
+                sourceTrustees: [
+                    sourceTrusteeReferences[0],
+                    sourceTrusteeReferences[0],
+                ],
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                thresholdDegree,
+                randomBytesForSourceTrustee: () =>
+                    deterministicRandomBytes('duplicate-source'),
+            }),
+        ).toThrow(/contiguous from zero/u);
+    });
+
     it('creates deterministic root-bound commitment material from local openings', () => {
         const bundle = createVssCoefficientCommitmentBundle({
             setupContext,
@@ -451,6 +533,234 @@ describe('VSS coefficient commitment builders', () => {
         expect(reconstructedMaterialRecords).toEqual(
             bundle.materialSet.coefficientCommitments,
         );
+    });
+
+    it('builds direct binary-chunked commitment material without an embedded material set', () => {
+        const sourceTrusteeOpeningStates = [0, 1].map((rosterPosition) =>
+            sourceTrusteeOpeningState(rosterPosition),
+        );
+        const embeddedBundle = createVssCoefficientCommitmentBundle({
+            setupContext,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStates,
+        });
+        const embeddedTransport =
+            createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
+                embeddedBundle.materialSet,
+            );
+        const directBundle = createBinaryChunkedVssCoefficientCommitmentBundle({
+            setupContext,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStates,
+        });
+        const reconstructedMaterialRecords =
+            materialRecordsFromTransportedVssCoefficientCommitmentMaterial({
+                setupContext,
+                vssCoefficientCommitments: directBundle.commitmentSet,
+                materialSet: directBundle.materialSet,
+                transportedVssCoefficientCommitmentMaterial:
+                    directBundle.transportedVssCoefficientCommitmentMaterial,
+            });
+
+        expect(directBundle.commitmentSet).toEqual(
+            embeddedBundle.commitmentSet,
+        );
+        expect(directBundle.materialSet).toEqual(embeddedTransport.materialSet);
+        expect(directBundle.materialSet).not.toHaveProperty(
+            'coefficientCommitments',
+        );
+        expect(
+            directBundle.transportedVssCoefficientCommitmentMaterial,
+        ).toEqual(
+            embeddedTransport.transportedVssCoefficientCommitmentMaterial,
+        );
+        expect(reconstructedMaterialRecords).toEqual(
+            embeddedBundle.materialSet.coefficientCommitments,
+        );
+        expect(
+            directBundle.privateOpeningMaterialBySourceTrustee.map(
+                (sourceMaterial) =>
+                    sourceMaterial.sourceTrusteeCoefficientCommitmentMaterialRecords,
+            ),
+        ).toEqual([[], []]);
+        expect(
+            directBundle.privateOpeningMaterialBySourceTrustee.map(
+                ({
+                    sourceTrusteeCoefficientCommitmentMaterialRecords:
+                        _materialRecords,
+                    ...sourceMaterialWithoutRecords
+                }) => sourceMaterialWithoutRecords,
+            ),
+        ).toEqual(
+            embeddedBundle.privateOpeningMaterialBySourceTrustee.map(
+                ({
+                    sourceTrusteeCoefficientCommitmentMaterialRecords:
+                        _materialRecords,
+                    ...sourceMaterialWithoutRecords
+                }) => sourceMaterialWithoutRecords,
+            ),
+        );
+    });
+
+    it('streams direct binary-chunked commitment material without returning chunks', () => {
+        const sourceTrusteeOpeningStates = [0, 1].map((rosterPosition) =>
+            sourceTrusteeOpeningState(rosterPosition),
+        );
+        const bundleInput = {
+            setupContext,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStates,
+        };
+        const retainedBundle =
+            createBinaryChunkedVssCoefficientCommitmentBundle(bundleInput);
+        const capturedChunks: { chunkIndex: number; bytesHex: string }[] = [];
+        const streamer = {
+            beginThresholdShareCommitmentsFromTransportStream: (input: {
+                readonly transportedVssCoefficientCommitmentMaterial: {
+                    readonly chunkCount: number;
+                    readonly totalByteLength: number;
+                };
+            }) => {
+                expect(
+                    input.transportedVssCoefficientCommitmentMaterial
+                        .chunkCount,
+                ).toBe(
+                    retainedBundle.transportedVssCoefficientCommitmentMaterial
+                        .chunkCount,
+                );
+                expect(
+                    input.transportedVssCoefficientCommitmentMaterial
+                        .totalByteLength,
+                ).toBe(
+                    retainedBundle.transportedVssCoefficientCommitmentMaterial
+                        .totalByteLength,
+                );
+
+                return { ok: true };
+            },
+            absorbThresholdShareCommitmentsFromTransportStreamChunk: (input: {
+                readonly chunkIndex: number;
+                readonly bytesHex: string;
+            }) => {
+                capturedChunks.push({
+                    chunkIndex: input.chunkIndex,
+                    bytesHex: input.bytesHex,
+                });
+
+                return { ok: true };
+            },
+            finishThresholdShareCommitmentsFromTransportStream: () => {
+                expect(capturedChunks).toEqual(
+                    retainedBundle.transportedVssCoefficientCommitmentMaterial
+                        .chunks,
+                );
+                const thresholdShareCommitments =
+                    deriveThresholdShareCommitments({
+                        setupContext,
+                        vssCoefficientCommitments: retainedBundle.commitmentSet,
+                        vssCoefficientCommitmentMaterial:
+                            retainedBundle.materialSet,
+                        transportedVssCoefficientCommitmentMaterial: {
+                            ...retainedBundle.transportedVssCoefficientCommitmentMaterial,
+                            chunks: capturedChunks,
+                        },
+                    });
+
+                return {
+                    thresholdShareCommitmentRoot:
+                        thresholdShareCommitments.thresholdShareCommitmentRoot,
+                    thresholdShareCommitments,
+                    vssCoefficientCommitmentMaterial:
+                        retainedBundle.materialSet,
+                    verifiedVssCoefficientCommitmentMaterial: {
+                        objectType: 'VerifiedVssCoefficientCommitmentMaterial',
+                        objectVersion: 1,
+                        setupProfileId: 'CollectiveBgvSetup-v1',
+                        verificationId: 'vss-transport-1',
+                        materialBinaryFormat:
+                            'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+                        publicMatrixSeedHash:
+                            retainedBundle.materialSet.publicMatrixSeedHash,
+                        vssCoefficientCommitmentRoot:
+                            retainedBundle.commitmentSet
+                                .vssCoefficientCommitmentRoot,
+                        vssCoefficientCommitmentMaterialRoot:
+                            retainedBundle.materialSet
+                                .vssCoefficientCommitmentMaterialRoot,
+                        thresholdShareCommitmentRoot:
+                            thresholdShareCommitments.thresholdShareCommitmentRoot,
+                        transportProfileId:
+                            'sealed-lattice-setup-binary-chunked-transport-v1',
+                        transportChunkSizeBytes: 1_048_576,
+                        transportChunkCount:
+                            retainedBundle
+                                .transportedVssCoefficientCommitmentMaterial
+                                .chunkCount,
+                        transportTotalByteLength:
+                            retainedBundle
+                                .transportedVssCoefficientCommitmentMaterial
+                                .totalByteLength,
+                        transportFullObjectHash:
+                            retainedBundle
+                                .transportedVssCoefficientCommitmentMaterial
+                                .fullObjectHash,
+                        transportChunkRoot:
+                            retainedBundle
+                                .transportedVssCoefficientCommitmentMaterial
+                                .chunkRoot,
+                    } as const,
+                    transport: {
+                        fullObjectHash:
+                            retainedBundle
+                                .transportedVssCoefficientCommitmentMaterial
+                                .fullObjectHash,
+                    },
+                };
+            },
+        };
+
+        const streamingBundle =
+            createStreamingBinaryChunkedVssCoefficientCommitmentBundle({
+                ...bundleInput,
+                thresholdShareCommitmentTransportStreamer: streamer,
+            });
+        const { chunks: _chunks, ...retainedTransportReference } =
+            retainedBundle.transportedVssCoefficientCommitmentMaterial;
+
+        expect(streamingBundle.commitmentSet).toEqual(
+            retainedBundle.commitmentSet,
+        );
+        expect(streamingBundle.materialSet).toEqual(retainedBundle.materialSet);
+        expect(
+            streamingBundle.transportedVssCoefficientCommitmentMaterial,
+        ).toEqual(retainedTransportReference);
+        expect(
+            streamingBundle.transportedVssCoefficientCommitmentMaterial,
+        ).not.toHaveProperty('chunks');
+        expect(streamingBundle.thresholdShareCommitments).toEqual(
+            deriveThresholdShareCommitments({
+                setupContext,
+                vssCoefficientCommitments: retainedBundle.commitmentSet,
+                vssCoefficientCommitmentMaterial: retainedBundle.materialSet,
+                transportedVssCoefficientCommitmentMaterial:
+                    retainedBundle.transportedVssCoefficientCommitmentMaterial,
+            }),
+        );
+        expect(
+            streamingBundle.verifiedVssCoefficientCommitmentMaterial.objectType,
+        ).toBe('VerifiedVssCoefficientCommitmentMaterial');
     });
 
     it('rejects tampered binary coefficient material before reconstruction', () => {

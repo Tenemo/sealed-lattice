@@ -1,5 +1,118 @@
 ﻿import type { ProtocolHash } from '@sealed-lattice/types';
 
+type BgvJsonRecord = Readonly<Record<string, unknown>>;
+
+type BgvTransportedMaterialObject<ObjectType extends string> = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: ObjectType;
+        readonly objectVersion: 1;
+    }
+>;
+
+export type BgvSetupTransportChunk = Readonly<
+    BgvJsonRecord & {
+        readonly chunkIndex: number;
+        readonly bytesHex: string;
+    }
+>;
+
+export type BgvTransportedVssCoefficientCommitmentMaterial =
+    BgvTransportedMaterialObject<'SetupTransportedVssCoefficientCommitmentMaterial'> &
+        Readonly<{
+            readonly binaryFormat: string;
+            readonly chunkSizeBytes: number;
+            readonly chunkCount: number;
+            readonly totalByteLength: number;
+            readonly fullObjectHash: ProtocolHash;
+            readonly chunkHashes: readonly ProtocolHash[];
+            readonly chunkRoot: ProtocolHash;
+            readonly chunks: readonly BgvSetupTransportChunk[];
+        }>;
+
+export type BgvTransportedVssCoefficientCommitmentMaterialReference = Omit<
+    BgvTransportedVssCoefficientCommitmentMaterial,
+    'chunks'
+>;
+
+export type BgvTransportedVssCoefficientCommitmentMaterialTemplate = Omit<
+    BgvTransportedVssCoefficientCommitmentMaterialReference,
+    'fullObjectHash' | 'chunkHashes' | 'chunkRoot'
+>;
+
+export type BgvVerifiedVssCoefficientCommitmentMaterial = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: 'VerifiedVssCoefficientCommitmentMaterial';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly verificationId: string;
+        readonly materialBinaryFormat: string;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+        readonly thresholdShareCommitmentRoot: ProtocolHash;
+        readonly transportProfileId: string;
+        readonly transportChunkSizeBytes: number;
+        readonly transportChunkCount: number;
+        readonly transportTotalByteLength: number;
+        readonly transportFullObjectHash: ProtocolHash;
+        readonly transportChunkRoot: ProtocolHash;
+    }
+>;
+
+export type BgvTransportedSetupProofMaterialSet<
+    ObjectType extends string = string,
+> = BgvTransportedMaterialObject<ObjectType> &
+    Readonly<{
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: string;
+        readonly proofFamily: string;
+        readonly proofMaterials: readonly BgvJsonRecord[];
+    }>;
+
+export type BgvTransportedPublicKeyShareMaterial =
+    BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
+        Readonly<{
+            readonly binaryFormat: string;
+            readonly chunkSizeBytes: number;
+            readonly chunkCount: number;
+            readonly totalByteLength: number;
+            readonly fullObjectHash: ProtocolHash;
+            readonly chunkHashes: readonly ProtocolHash[];
+            readonly chunkRoot: ProtocolHash;
+            readonly chunks: readonly BgvSetupTransportChunk[];
+        }>;
+
+export type BgvTransportedEvaluationKeyShareComponentMaterialSet =
+    BgvTransportedMaterialObject<'SetupTransportedEvaluationKeyShareComponentMaterialSet'> &
+        Readonly<{
+            readonly setupProfileId: 'CollectiveBgvSetup-v1';
+            readonly setupProofProfileId: string;
+            readonly componentMaterials: readonly BgvJsonRecord[];
+        }>;
+
+export type BgvTransportedPublicEvaluationKeyMaterialSet =
+    BgvTransportedMaterialObject<'SetupTransportedPublicEvaluationKeyMaterialSet'> &
+        Readonly<{
+            readonly setupProfileId: 'CollectiveBgvSetup-v1';
+            readonly setupProofProfileId: string;
+            readonly materialEncoding: string;
+            readonly publicEvaluationKeyMaterials: readonly BgvJsonRecord[];
+            readonly componentMaterials?: readonly BgvJsonRecord[];
+        }>;
+
+export type BgvCollectiveSetupTransportCompanions = Readonly<{
+    readonly transportedVssCoefficientCommitmentMaterial?:
+        | BgvTransportedVssCoefficientCommitmentMaterial
+        | BgvTransportedVssCoefficientCommitmentMaterialReference;
+    readonly verifiedVssCoefficientCommitmentMaterial?: BgvVerifiedVssCoefficientCommitmentMaterial;
+    readonly transportedSameSecretProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretProofMaterialSet'>;
+    readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
+    readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
+    readonly transportedEvaluationKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
+    readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
+    readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
+}>;
+
 export type BgvRnsProfileDescription = {
     readonly profile: {
         readonly profileId: string;
@@ -581,6 +694,22 @@ export type BgvPrivateVssShareProofGeneration = {
     };
 };
 
+type BgvSetupProofChallenge = number | string;
+
+type BgvSetupProofTboxZ34Metadata = {
+    readonly z34SeedMaterialHash: ProtocolHash;
+    readonly z34ChallengeSeedHash: ProtocolHash;
+    readonly z34ChallengeTailHash: ProtocolHash;
+    readonly z34ChallengeRowDomainHash: ProtocolHash;
+    readonly z34ChallengeZ3RowSetHash: ProtocolHash;
+    readonly z34ChallengeZ4RowSetHash: ProtocolHash;
+    readonly tboxLowerProtocolChallengeHash: ProtocolHash;
+    readonly z34Z3CheckWindowHash: ProtocolHash;
+    readonly z34Z4CheckWindowHash: ProtocolHash;
+    readonly z34Z3L2SquaredDecimal: string;
+    readonly z34Z4InfinityNormDecimal: string;
+};
+
 export type BgvSameSecretLnpProofGeneration = {
     readonly ok: true;
     readonly operation: 'generateSameSecretLnpProof';
@@ -592,7 +721,7 @@ export type BgvSameSecretLnpProofGeneration = {
     readonly statementHash: ProtocolHash;
     readonly relationCommitmentHash: ProtocolHash;
     readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: number;
+    readonly challenge: BgvSetupProofChallenge;
     readonly proofSizeBytes: number;
     readonly proofBytesHash: ProtocolHash;
     readonly proofBytesHex: string;
@@ -601,7 +730,7 @@ export type BgvSameSecretLnpProofGeneration = {
         readonly seedBytes: 64;
         readonly retention: string;
     };
-};
+} & BgvSetupProofTboxZ34Metadata;
 
 export type BgvPublicKeyShareLnpProofGeneration = {
     readonly ok: true;
@@ -614,7 +743,7 @@ export type BgvPublicKeyShareLnpProofGeneration = {
     readonly statementHash: ProtocolHash;
     readonly relationCommitmentHash: ProtocolHash;
     readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: number;
+    readonly challenge: BgvSetupProofChallenge;
     readonly proofSizeBytes: number;
     readonly proofBytesHash: ProtocolHash;
     readonly proofBytesHex: string;
@@ -623,7 +752,7 @@ export type BgvPublicKeyShareLnpProofGeneration = {
         readonly seedBytes: 64;
         readonly retention: string;
     };
-};
+} & BgvSetupProofTboxZ34Metadata;
 
 type BgvEvaluationKeyShareLnpProofGenerationBase = {
     readonly ok: true;
@@ -634,7 +763,7 @@ type BgvEvaluationKeyShareLnpProofGenerationBase = {
     readonly statementHash: ProtocolHash;
     readonly relationCommitmentHash: ProtocolHash;
     readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: number;
+    readonly challenge: BgvSetupProofChallenge;
     readonly proofSizeBytes: number;
     readonly proofBytesHash: ProtocolHash;
     readonly proofBytesHex: string;
@@ -643,7 +772,7 @@ type BgvEvaluationKeyShareLnpProofGenerationBase = {
         readonly seedBytes: 64;
         readonly retention: string;
     };
-};
+} & BgvSetupProofTboxZ34Metadata;
 
 export type BgvEvaluationKeyShareLnpProofGeneration =
     | (BgvEvaluationKeyShareLnpProofGenerationBase & {
@@ -669,6 +798,16 @@ export type BgvThresholdShareCommitmentDerivation = {
     readonly thresholdShareCommitments: Readonly<Record<string, unknown>>;
 };
 
+export type BgvSetupCommitmentOpeningComputation = {
+    readonly ok: true;
+    readonly operation: 'computeSetupCommitmentFromOpening';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly commitment: Record<string, unknown>;
+    readonly commitmentRoot: ProtocolHash;
+    readonly commitmentChunkRoot: ProtocolHash;
+    readonly coefficientVectorHash512: string;
+};
+
 export type BgvThresholdShareCommitmentTransportDerivation = Omit<
     BgvThresholdShareCommitmentDerivation,
     'operation'
@@ -679,6 +818,34 @@ export type BgvThresholdShareCommitmentTransportDerivation = Omit<
     readonly vssCoefficientCommitmentMaterial: Readonly<
         Record<string, unknown>
     >;
+};
+
+export type BgvThresholdShareCommitmentTransportStreamBegin = {
+    readonly ok: true;
+    readonly operation: 'beginThresholdShareCommitmentsFromTransportStream';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly derivationId: string;
+    readonly materialBinaryFormat: string;
+    readonly transport: Readonly<Record<string, unknown>>;
+};
+
+export type BgvThresholdShareCommitmentTransportStreamChunkAbsorption = {
+    readonly ok: true;
+    readonly operation: 'absorbThresholdShareCommitmentsFromTransportStreamChunk';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly absorbedChunkIndex: number;
+    readonly absorbedByteLength: number;
+    readonly nextChunkIndex: number;
+    readonly observedTotalByteLength: number;
+};
+
+export type BgvThresholdShareCommitmentTransportStreamDerivation = Omit<
+    BgvThresholdShareCommitmentTransportDerivation,
+    'operation'
+> & {
+    readonly operation: 'finishThresholdShareCommitmentsFromTransportStream';
+    readonly derivationId: string;
+    readonly verifiedVssCoefficientCommitmentMaterial: BgvVerifiedVssCoefficientCommitmentMaterial;
 };
 
 export type BgvLocalTrusteeSetupStateVerification = {

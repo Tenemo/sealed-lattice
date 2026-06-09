@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use num_bigint::BigUint;
 use serde_json::{Value, json};
@@ -70,12 +73,13 @@ use super::{
         derive_threshold_share_commitment_set_from_parts,
         derive_threshold_share_commitments_from_transport_request,
         verify_constant_vss_commitments_from_transport_request,
+        with_verified_transported_vss_material,
     },
     vss::{
         carry_aware_vss_share_relation_profile_hash, carry_aware_vss_share_relation_profile_value,
     },
 };
-use crate::bgv::coefficient_codec::coefficient_vector_from_le_hex;
+use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
 use crate::bgv::evaluator::top_k::{
     DIRECT_COMPARISON_OUTPUT_LEVEL, direct_score_packing_basis_galois_elements,
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
@@ -110,6 +114,16 @@ const PUBLIC_KEY_SHARE_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareProofSet";
 const PUBLIC_KEY_SHARE_PROOF_OBJECT_TYPE: &str = "PublicKeyShareProof";
 const PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE: &str = "PublicKeyShareMaterialSet";
 const PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "PublicKeyShareMaterial";
+pub(super) const PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedPublicKeyShareMaterial";
+const PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING: &str =
+    "embedded-full-public-key-share-coefficients";
+pub(super) const PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING: &str =
+    "binary-chunked-full-public-key-share-coefficients";
+pub(super) const PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT: &str =
+    "sealed-lattice-public-key-share-material-binary-v1";
+const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV1";
+const PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION: u64 = 1;
 const PUBLIC_KEY_SHARE_LNP_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareLnpProofSet";
 const PUBLIC_KEY_SHARE_LNP_PROOF_OBJECT_TYPE: &str = "PublicKeyShareLnpProof";
 const COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE: &str = "CollectivePublicKey";
@@ -177,6 +191,24 @@ const SETUP_TRANSPORT_RESUME_POLICY: &str = "chunk-index-checkpointed-by-hash";
 const SETUP_TRANSPORT_LAZY_LOADING_POLICY: &str = "root-addressed-large-object-loading";
 const SETUP_TRANSPORTED_VSS_MATERIAL_NAME: &str = "vssCoefficientCommitmentMaterial";
 const SETUP_TRANSPORTED_VSS_MATERIAL_ROLE: &str = "public-vss-coefficient-commitment-material";
+const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME: &str = "publicKeyShareMaterial";
+const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE: &str = "public-key-share-material";
+const SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_NAME: &str = "sameSecretProofMaterial";
+const SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_ROLE: &str = "same-secret-proof-material";
+const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME: &str = "publicKeyShareProofMaterial";
+const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE: &str =
+    "public-key-share-proof-material";
+const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_NAME: &str =
+    "evaluationKeyShareProofMaterial";
+const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_ROLE: &str =
+    "evaluation-key-share-proof-material";
+const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_NAME: &str =
+    "evaluationKeyShareComponentMaterial";
+const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ROLE: &str =
+    "evaluation-key-share-component-material";
+const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME: &str = "publicEvaluationKeyMaterial";
+const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE: &str =
+    "public-evaluation-key-runtime-material";
 const SETUP_TRANSPORTED_OBJECT_LOADING_POLICY: &str = "stream-verified-before-object-use";
 const HE_SECURITY_CERTIFICATE_OBJECT_TYPE: &str = "BgvHeSecurityCertificate";
 const PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID: &str =
@@ -454,12 +486,14 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
             "expectedRosterHash",
             "expectedSetupPackageHash",
             "setupPackage",
+            "transportedPublicKeyShareMaterial",
             "transportedPublicKeyShareProofMaterial",
             "transportedEvaluationKeyShareProofMaterial",
             "transportedEvaluationKeyShareComponentMaterial",
             "transportedPublicEvaluationKeyMaterial",
             "transportedSameSecretProofMaterial",
             "transportedVssCoefficientCommitmentMaterial",
+            "verifiedVssCoefficientCommitmentMaterial",
         ],
         "verifyCollectiveBgvSetupPackage",
     )?;
@@ -635,7 +669,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_optional_public_key_share_lnp_proofs(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_collective_public_key_material(setup_package)? {
+    if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_public_key_material_acceptance_boundary(setup_package)? {
@@ -657,7 +691,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_setup_proof_accounting_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_transport_certificate(setup_package)? {
+    if let Some(response) = verify_transport_certificate(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_he_security_certificate(setup_package)? {
@@ -682,6 +716,9 @@ fn verify_collective_setup_package(
     if !declares_public_runtime_material
         && let Some(response) = verify_profile_ring_material(setup_package)?
     {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_terminal_setup_transport_policy(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_required_public_evaluation_key_set(setup_package, request)? {
@@ -1292,7 +1329,7 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
             "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
             "challengeDifferenceInvertibilityAccounting": super::setup_proof::challenge_difference_invertibility_accounting_value()?,
-            "qromStatus": "repo-owned-qrom-accounting-required-before-claim-closure",
+            "qromStatus": "qrom-reduction-theorem-accepted-for-setup-proof-claim",
             "transcriptBinding": [
                 "setupProfileHash",
                 "manifestHash",
@@ -3519,6 +3556,276 @@ pub(super) fn verify_profile_ring_material(
     }
 
     Ok(None)
+}
+
+pub(super) fn verify_terminal_setup_transport_policy(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
+    if setup_package
+        .get("vssCoefficientCommitmentMaterial")
+        .and_then(|material_set| material_set.get("materialEncoding"))
+        .and_then(Value::as_str)
+        != Some("binary-chunked-full-public-setup-commitment-values")
+    {
+        return Ok(Some(terminal_transport_policy_refusal(
+            "terminalVssMaterialTransportRequired",
+            "terminal accepted setup requires binary-chunked VSS coefficient commitment material",
+            "setupPackage.vssCoefficientCommitmentMaterial.materialEncoding",
+        )?));
+    }
+    if setup_package
+        .get("publicKeyShareMaterial")
+        .and_then(|material_set| material_set.get("materialEncoding"))
+        .and_then(Value::as_str)
+        != Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING)
+    {
+        return Ok(Some(terminal_transport_policy_refusal(
+            "terminalPublicKeyShareMaterialTransportRequired",
+            "terminal accepted setup requires binary-chunked public-key share material",
+            "setupPackage.publicKeyShareMaterial.materialEncoding",
+        )?));
+    }
+    for (record_set_name, records_field_name, object_path) in [
+        (
+            "sameSecretProofs",
+            "proofRecords",
+            "setupPackage.sameSecretProofs.proofRecords",
+        ),
+        (
+            "publicKeyShareLnpProofs",
+            "proofRecords",
+            "setupPackage.publicKeyShareLnpProofs.proofRecords",
+        ),
+    ] {
+        if let Some(response) = verify_terminal_proof_material_transport_records(
+            setup_package,
+            record_set_name,
+            records_field_name,
+            object_path,
+        )? {
+            return Ok(Some(response));
+        }
+    }
+    if let Some(response) = verify_terminal_key_switch_transport_records(
+        setup_package
+            .get("relinearizationKeyShareRounds")
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "relinearizationKeyShareRounds was required before terminal transport policy verification",
+                )
+            })?,
+        "roundOneRecords",
+        "setupPackage.relinearizationKeyShareRounds.roundOneRecords",
+    )? {
+        return Ok(Some(response));
+    }
+    if let Some(response) = verify_terminal_key_switch_transport_records(
+        setup_package
+            .get("relinearizationKeyShareRounds")
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "relinearizationKeyShareRounds was required before terminal transport policy verification",
+                )
+            })?,
+        "roundTwoRecords",
+        "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
+    )? {
+        return Ok(Some(response));
+    }
+    for galois_batch in array_value(setup_package, "galoisKeyShareBatches")? {
+        if let Some(response) = verify_terminal_key_switch_transport_records(
+            galois_batch,
+            "galoisKeyShareProofs",
+            "setupPackage.galoisKeyShareBatches.galoisKeyShareProofs",
+        )? {
+            return Ok(Some(response));
+        }
+    }
+    let evaluation_keys = setup_package.get("evaluationKeys").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "evaluationKeys was required before terminal transport policy verification",
+        )
+    })?;
+    for field_name in [
+        "publicEvaluationKeyMaterialEncoding",
+        "publicEvaluationKeyMaterialRoot",
+        "publicEvaluationKeyMaterialChunkSizeBytes",
+        "publicEvaluationKeyMaterialChunkCount",
+        "publicEvaluationKeyMaterialTotalByteLength",
+        "publicEvaluationKeyMaterialFullObjectHash",
+        "publicEvaluationKeyMaterialChunkRoot",
+        "publicEvaluationKeyMaterialChunkHashes",
+    ] {
+        if evaluation_keys.get(field_name).is_none() {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalPublicEvaluationKeyMaterialTransportRequired",
+                "terminal accepted setup requires transported public evaluation-key runtime material",
+                format!("setupPackage.evaluationKeys.{field_name}"),
+            )?));
+        }
+    }
+    if evaluation_keys
+        .get("publicEvaluationKeyMaterialEncoding")
+        .and_then(Value::as_str)
+        != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
+    {
+        return Ok(Some(terminal_transport_policy_refusal(
+            "terminalPublicEvaluationKeyMaterialEncodingMismatch",
+            "terminal accepted setup requires binary-chunked public evaluation-key material",
+            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
+        )?));
+    }
+    if let Some(response) = verify_terminal_vss_material_handle_policy(request)? {
+        return Ok(Some(response));
+    }
+
+    Ok(None)
+}
+
+fn verify_terminal_vss_material_handle_policy(request: &Value) -> CanonicalResult<Option<Value>> {
+    let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial")
+    else {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageVerification"),
+            vec!["transportedVssCoefficientCommitmentMaterial".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    if transported_material.get("chunks").is_some() {
+        return Ok(Some(terminal_transport_policy_refusal(
+            "terminalVssMaterialHandleRequired",
+            "terminal accepted setup requires a chunkless VSS material transport reference plus a stream-verified VSS material handle",
+            "transportedVssCoefficientCommitmentMaterial.chunks",
+        )?));
+    }
+    if request
+        .get("verifiedVssCoefficientCommitmentMaterial")
+        .is_none()
+    {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageVerification"),
+            vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    }
+
+    Ok(None)
+}
+
+fn verify_terminal_proof_material_transport_records(
+    setup_package: &Value,
+    record_set_name: &str,
+    records_field_name: &str,
+    object_path: &str,
+) -> CanonicalResult<Option<Value>> {
+    let record_set = setup_package.get(record_set_name).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{record_set_name} was required before terminal transport policy verification"),
+        )
+    })?;
+    for proof_record in array_value(record_set, records_field_name)? {
+        if proof_record.get("proofBytesHex").is_some() {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalProofMaterialTransportRequired",
+                "terminal accepted setup requires transported setup proof bytes",
+                format!("{object_path}.proofBytesHex"),
+            )?));
+        }
+        if proof_record
+            .get("proofBytesEncoding")
+            .and_then(Value::as_str)
+            != Some(SETUP_PROOF_MATERIAL_ENCODING)
+        {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalProofMaterialTransportRequired",
+                "terminal accepted setup requires binary-chunked setup proof bytes",
+                format!("{object_path}.proofBytesEncoding"),
+            )?));
+        }
+    }
+
+    Ok(None)
+}
+
+fn verify_terminal_key_switch_transport_records(
+    record_set: &Value,
+    records_field_name: &str,
+    object_path: &str,
+) -> CanonicalResult<Option<Value>> {
+    for proof_record in array_value(record_set, records_field_name)? {
+        if let Some(response) = verify_terminal_proof_record_transport(proof_record, object_path)? {
+            return Ok(Some(response));
+        }
+        if proof_record.get("keySwitchComponentVectors").is_some() {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalKeySwitchMaterialTransportRequired",
+                "terminal accepted setup requires transported key-switch component material",
+                format!("{object_path}.keySwitchComponentVectors"),
+            )?));
+        }
+        if proof_record
+            .get("keySwitchMaterialEncoding")
+            .and_then(Value::as_str)
+            != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING)
+        {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalKeySwitchMaterialTransportRequired",
+                "terminal accepted setup requires binary-chunked key-switch component material",
+                format!("{object_path}.keySwitchMaterialEncoding"),
+            )?));
+        }
+    }
+
+    Ok(None)
+}
+
+fn verify_terminal_proof_record_transport(
+    proof_record: &Value,
+    object_path: &str,
+) -> CanonicalResult<Option<Value>> {
+    if proof_record.get("proofBytesHex").is_some() {
+        return Ok(Some(terminal_transport_policy_refusal(
+            "terminalProofMaterialTransportRequired",
+            "terminal accepted setup requires transported setup proof bytes",
+            format!("{object_path}.proofBytesHex"),
+        )?));
+    }
+    if proof_record
+        .get("proofBytesEncoding")
+        .and_then(Value::as_str)
+        != Some(SETUP_PROOF_MATERIAL_ENCODING)
+    {
+        return Ok(Some(terminal_transport_policy_refusal(
+            "terminalProofMaterialTransportRequired",
+            "terminal accepted setup requires binary-chunked setup proof bytes",
+            format!("{object_path}.proofBytesEncoding"),
+        )?));
+    }
+
+    Ok(None)
+}
+
+fn terminal_transport_policy_refusal(
+    reason_code: &'static str,
+    message: impl Into<String>,
+    object_path: impl Into<String>,
+) -> CanonicalResult<Value> {
+    verification_response(
+        VerifierStatus::Refused,
+        Some("setupPackageVerification"),
+        Vec::new(),
+        vec![Refusal::new(reason_code, message, object_path)],
+        Vec::new(),
+    )
 }
 
 fn verify_profile_ring_records(
@@ -6690,16 +6997,6 @@ fn verify_threshold_share_commitments(
     let expected_threshold_share_commitments = if material_encoding
         == "binary-chunked-full-public-setup-commitment-values"
     {
-        let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial")
-        else {
-            return Ok(Some(verification_response(
-                VerifierStatus::Pending,
-                Some("thresholdShareCommitments"),
-                vec!["transportedVssCoefficientCommitmentMaterial".to_string()],
-                Vec::new(),
-                Vec::new(),
-            )?));
-        };
         let vss_coefficient_commitment_root = material_set
             .get("vssCoefficientCommitmentRoot")
             .and_then(Value::as_str)
@@ -6709,38 +7006,82 @@ fn verify_threshold_share_commitments(
                     "VSS coefficient commitment root was required before transported threshold-share verification",
                 )
             })?;
-        let transport_result = match derive_threshold_share_commitments_from_transport_request(
-            &json!({
-                "setupContext": setup_context,
-                "publicMatrixSeedHash": public_matrix_seed_hash,
-                "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-                "sourceTrusteeCoefficientCommitmentRecords": source_trustee_records,
-                "transportedVssCoefficientCommitmentMaterial": transported_material,
-            }),
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                return Ok(Some(threshold_share_refusal(
-                    "thresholdShareCommitmentTransportDerivationMismatch",
-                    format!(
-                        "thresholdShareCommitments must be derived from verifier-checked transported VSS material: {}",
-                        error.message
-                    ),
-                    "transportedVssCoefficientCommitmentMaterial",
+        if let Some(verified_material_reference) =
+            request.get("verifiedVssCoefficientCommitmentMaterial")
+        {
+            match threshold_share_commitments_from_verified_vss_material(
+                verified_material_reference,
+                setup_context,
+                public_matrix_seed_hash,
+                vss_coefficient_commitment_root,
+                material_set,
+                threshold_share_commitment_root,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return Ok(Some(threshold_share_refusal(
+                        "thresholdShareCommitmentVerifiedMaterialMismatch",
+                        format!(
+                            "thresholdShareCommitments must be derived from stream-verified VSS material: {}",
+                            error.message
+                        ),
+                        "verifiedVssCoefficientCommitmentMaterial",
+                    )?));
+                }
+            }
+        } else {
+            let Some(transported_material) =
+                request.get("transportedVssCoefficientCommitmentMaterial")
+            else {
+                return Ok(Some(verification_response(
+                    VerifierStatus::Pending,
+                    Some("thresholdShareCommitments"),
+                    vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
+                    Vec::new(),
+                    Vec::new(),
+                )?));
+            };
+            if transported_material.get("chunks").is_none() {
+                return Ok(Some(verification_response(
+                    VerifierStatus::Pending,
+                    Some("thresholdShareCommitments"),
+                    vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
+                    Vec::new(),
+                    Vec::new(),
                 )?));
             }
-        };
-        let derived_material_root = transport_result
-            .get("vssCoefficientCommitmentMaterial")
-            .and_then(|value| value.get("vssCoefficientCommitmentMaterialRoot"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "transport derivation did not return a material root",
-                )
-            })?;
-        let package_material_root = material_set
+            let transport_result = match derive_threshold_share_commitments_from_transport_request(
+                &json!({
+                    "setupContext": setup_context,
+                    "publicMatrixSeedHash": public_matrix_seed_hash,
+                    "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
+                    "sourceTrusteeCoefficientCommitmentRecords": source_trustee_records,
+                    "transportedVssCoefficientCommitmentMaterial": transported_material,
+                }),
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return Ok(Some(threshold_share_refusal(
+                        "thresholdShareCommitmentTransportDerivationMismatch",
+                        format!(
+                            "thresholdShareCommitments must be derived from verifier-checked transported VSS material: {}",
+                            error.message
+                        ),
+                        "transportedVssCoefficientCommitmentMaterial",
+                    )?));
+                }
+            };
+            let derived_material_root = transport_result
+                .get("vssCoefficientCommitmentMaterial")
+                .and_then(|value| value.get("vssCoefficientCommitmentMaterialRoot"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "transport derivation did not return a material root",
+                    )
+                })?;
+            let package_material_root = material_set
             .get("vssCoefficientCommitmentMaterialRoot")
             .and_then(Value::as_str)
             .ok_or_else(|| {
@@ -6749,22 +7090,23 @@ fn verify_threshold_share_commitments(
                     "package material root was required before transported threshold-share verification",
                 )
             })?;
-        if derived_material_root != package_material_root {
-            return Ok(Some(threshold_share_refusal(
-                "thresholdShareCommitmentTransportMaterialRootMismatch",
-                "transported VSS material root must match setupPackage.vssCoefficientCommitmentMaterial",
-                "setupPackage.vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot",
-            )?));
+            if derived_material_root != package_material_root {
+                return Ok(Some(threshold_share_refusal(
+                    "thresholdShareCommitmentTransportMaterialRootMismatch",
+                    "transported VSS material root must match setupPackage.vssCoefficientCommitmentMaterial",
+                    "setupPackage.vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot",
+                )?));
+            }
+            transport_result
+                .get("thresholdShareCommitments")
+                .cloned()
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "transport derivation did not return thresholdShareCommitments",
+                    )
+                })?
         }
-        transport_result
-            .get("thresholdShareCommitments")
-            .cloned()
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "transport derivation did not return thresholdShareCommitments",
-                )
-            })?
     } else {
         let coefficient_commitments = material_set
             .get("coefficientCommitments")
@@ -6804,6 +7146,78 @@ fn verify_threshold_share_commitments(
     }
 
     Ok(None)
+}
+
+fn threshold_share_commitments_from_verified_vss_material(
+    verified_material_reference: &Value,
+    setup_context: &Value,
+    public_matrix_seed_hash: &str,
+    vss_coefficient_commitment_root: &str,
+    material_set: &Value,
+    threshold_share_commitment_root: &str,
+) -> CanonicalResult<Value> {
+    with_verified_transported_vss_material(verified_material_reference, |verified_material| {
+        validate_verified_vss_material_matches_package(
+            verified_material,
+            setup_context,
+            public_matrix_seed_hash,
+            vss_coefficient_commitment_root,
+            material_set,
+        )?;
+        let verified_threshold_share_commitment_root = verified_material
+            .threshold_share_commitments
+            .get("thresholdShareCommitmentRoot")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "stream-verified VSS material did not retain a threshold-share commitment root",
+                )
+            })?;
+        if verified_threshold_share_commitment_root != threshold_share_commitment_root {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "stream-verified threshold-share commitment root does not match setupPackage.thresholdShareCommitments",
+            ));
+        }
+
+        Ok(verified_material.threshold_share_commitments.clone())
+    })
+}
+
+fn validate_verified_vss_material_matches_package(
+    verified_material: &super::threshold_share_commitments::VerifiedTransportedVssMaterial,
+    setup_context: &Value,
+    public_matrix_seed_hash: &str,
+    vss_coefficient_commitment_root: &str,
+    material_set: &Value,
+) -> CanonicalResult<()> {
+    if verified_material.setup_context != *setup_context {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "stream-verified VSS material setup context does not match setupPackage.setupContext",
+        ));
+    }
+    if verified_material.public_matrix_seed_hash != public_matrix_seed_hash {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "stream-verified VSS material publicMatrixSeedHash does not match setupPackage.commonRandomness",
+        ));
+    }
+    if verified_material.vss_coefficient_commitment_root != vss_coefficient_commitment_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "stream-verified VSS material commitment root does not match setupPackage.vssCoefficientCommitments",
+        ));
+    }
+    if verified_material.material_set != *material_set {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "stream-verified VSS material set does not match setupPackage.vssCoefficientCommitmentMaterial",
+        ));
+    }
+
+    Ok(())
 }
 
 fn threshold_share_refusal(
@@ -8712,7 +9126,7 @@ fn same_secret_proof_bindings_from_package(
 fn same_secret_transported_constant_commitments_by_roster_position(
     setup_package: &Value,
     request: &Value,
-) -> CanonicalResult<BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>> {
+) -> CanonicalResult<Arc<BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>>> {
     let material_set = setup_package
         .get("vssCoefficientCommitmentMaterial")
         .ok_or_else(|| {
@@ -8724,16 +9138,8 @@ fn same_secret_transported_constant_commitments_by_roster_position(
     if material_set.get("materialEncoding").and_then(Value::as_str)
         != Some("binary-chunked-full-public-setup-commitment-values")
     {
-        return Ok(BTreeMap::new());
+        return Ok(Arc::new(BTreeMap::new()));
     }
-    let transported_material = request
-        .get("transportedVssCoefficientCommitmentMaterial")
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transportedVssCoefficientCommitmentMaterial was required before same-secret proof verification",
-            )
-        })?;
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -8759,6 +9165,40 @@ fn same_secret_transported_constant_commitments_by_roster_position(
                 "vssCoefficientCommitmentMaterial.vssCoefficientCommitmentRoot was required before transported same-secret proof verification",
             )
         })?;
+    if let Some(verified_material_reference) =
+        request.get("verifiedVssCoefficientCommitmentMaterial")
+    {
+        return with_verified_transported_vss_material(
+            verified_material_reference,
+            |verified_material| {
+                validate_verified_vss_material_matches_package(
+                    verified_material,
+                    setup_context,
+                    public_matrix_seed_hash,
+                    vss_coefficient_commitment_root,
+                    material_set,
+                )?;
+
+                Ok(Arc::clone(
+                    &verified_material.constant_commitments_by_source_trustee,
+                ))
+            },
+        );
+    }
+    let transported_material = request
+        .get("transportedVssCoefficientCommitmentMaterial")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "verifiedVssCoefficientCommitmentMaterial was required before same-secret proof verification",
+            )
+        })?;
+    if transported_material.get("chunks").is_none() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "stream-verified VSS material was required before same-secret proof verification",
+        ));
+    }
     let source_trustee_records = setup_package
         .get("vssCoefficientCommitments")
         .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
@@ -9866,12 +10306,24 @@ fn verify_optional_public_key_share_lnp_proofs(
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    if public_key_share_material_uses_transport(material_set)
+        && request.get("transportedPublicKeyShareMaterial").is_none()
+    {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageAssembly"),
+            vec!["transportedPublicKeyShareMaterial".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    }
     let material_bindings = match verify_public_key_share_material_set(
         material_set,
         setup_context,
         &common_binding,
         public_key_share_set_root,
         &share_records,
+        request,
     ) {
         Ok(bindings) => bindings,
         Err(error) => {
@@ -10124,7 +10576,10 @@ fn verify_public_key_material_acceptance_boundary(
     Ok(None)
 }
 
-fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+fn verify_collective_public_key_material(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
     let aggregate_object = setup_package.get("collectivePublicKey");
     let aggregate_root = setup_package.get("collectivePublicKeyRoot");
     if aggregate_object.is_none() && aggregate_root.is_none() {
@@ -10224,6 +10679,17 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
                 "publicKeyShareLnpProofs was required before collective public-key verification",
             )
         })?;
+    if public_key_share_material_uses_transport(material_set)
+        && request.get("transportedPublicKeyShareMaterial").is_none()
+    {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageAssembly"),
+            vec!["transportedPublicKeyShareMaterial".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    }
     let common_binding = public_key_common_binding(setup_package)?;
     let share_records = public_key_share_records_by_roster_position(setup_package)?;
     let material_bindings = match verify_public_key_share_material_set(
@@ -10240,6 +10706,7 @@ fn verify_collective_public_key_material(setup_package: &Value) -> CanonicalResu
             "publicKeyShareSetRoot",
         )?,
         &share_records,
+        request,
     ) {
         Ok(bindings) => bindings,
         Err(error) => {
@@ -10619,12 +11086,749 @@ fn verify_collective_public_key_coefficients(
     Ok(())
 }
 
+fn public_key_share_material_uses_transport(material_set: &Value) -> bool {
+    material_set.get("materialEncoding").and_then(Value::as_str)
+        == Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING)
+}
+
+fn verify_embedded_public_key_share_material_set(
+    material_set: &Value,
+    setup_context: &Value,
+    common_binding: &PublicKeyCommonBinding,
+    ring_degree: usize,
+    share_records: &BTreeMap<u64, Value>,
+) -> CanonicalResult<(BTreeMap<u64, PublicKeyShareMaterialBinding>, Vec<Value>)> {
+    if material_set.get("binaryFormat").is_some() || material_set.get("transport").is_some() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "embedded public-key share material must not declare binary transport fields",
+        ));
+    }
+    let material_records = material_set
+        .get("shareMaterialRecords")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "publicKeyShareMaterial.shareMaterialRecords are required",
+            )
+        })?;
+    if material_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "publicKeyShareMaterial.shareMaterialRecords must contain one record per trustee",
+        ));
+    }
+    let mut bindings = BTreeMap::new();
+    let mut material_roots = Vec::new();
+    for material_record in material_records {
+        let binding = verify_public_key_share_material_record(
+            material_record,
+            setup_context,
+            common_binding,
+            ring_degree,
+            share_records,
+        )?;
+        if bindings
+            .insert(binding.trustee_roster_position, binding.clone())
+            .is_some()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "publicKeyShareMaterial.shareMaterialRecords contain duplicate roster positions",
+            ));
+        }
+        material_roots.push(public_key_share_material_root_reference(&binding));
+    }
+
+    Ok((bindings, material_roots))
+}
+
+fn verify_transport_public_key_share_material_set(
+    material_set: &Value,
+    setup_context: &Value,
+    common_binding: &PublicKeyCommonBinding,
+    ring_degree: usize,
+    share_records: &BTreeMap<u64, Value>,
+    request: &Value,
+) -> CanonicalResult<(BTreeMap<u64, PublicKeyShareMaterialBinding>, Vec<Value>)> {
+    if material_set.get("shareMaterialRecords").is_some() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "binary-chunked public-key share material must not embed shareMaterialRecords",
+        ));
+    }
+    if material_set.get("binaryFormat").and_then(Value::as_str)
+        != Some(PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "publicKeyShareMaterial.binaryFormat must match the accepted public-key share material binary format",
+        ));
+    }
+    let Some(transported_material) = request.get("transportedPublicKeyShareMaterial") else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareMaterial is required for binary-chunked public-key share material",
+        ));
+    };
+    verify_public_key_share_material_transport_header(transported_material)?;
+    let chunks = public_key_share_material_chunks(transported_material)?;
+    let transport_hashes = public_key_share_material_transport_hashes(&chunks)?;
+    verify_public_key_share_material_transport_hash_fields(
+        transported_material,
+        &transport_hashes,
+        true,
+        "transported public-key share material",
+    )?;
+    verify_public_key_share_material_set_transport_reference(material_set, &transport_hashes)?;
+    let (bindings, material_roots) = decode_public_key_share_material_bindings(
+        setup_context,
+        common_binding,
+        ring_degree,
+        share_records,
+        &chunks,
+    )?;
+
+    Ok((bindings, material_roots))
+}
+
+fn public_key_share_material_root_reference(binding: &PublicKeyShareMaterialBinding) -> Value {
+    json!({
+        "trusteeIdentity": binding.trustee_identity,
+        "trusteeRosterPosition": binding.trustee_roster_position,
+        "publicKeyShareMaterialRoot": binding.public_key_share_material_root,
+    })
+}
+
+#[derive(Debug)]
+pub(super) struct PublicKeyShareMaterialTransportHashes {
+    pub(super) full_object_hash: String,
+    pub(super) chunk_hashes: Vec<String>,
+    pub(super) chunk_root: String,
+    pub(super) total_byte_length: u64,
+}
+
+struct PublicKeyShareMaterialByteReader {
+    bytes: Vec<u8>,
+    offset: usize,
+}
+
+impl PublicKeyShareMaterialByteReader {
+    fn new(chunks: &[Vec<u8>]) -> CanonicalResult<Self> {
+        let total_byte_length = chunks.iter().try_fold(0_usize, |byte_count, chunk| {
+            byte_count.checked_add(chunk.len()).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "public-key share material byte length overflowed",
+                )
+            })
+        })?;
+        let mut bytes = Vec::with_capacity(total_byte_length);
+        for chunk in chunks {
+            bytes.extend_from_slice(chunk);
+        }
+
+        Ok(Self { bytes, offset: 0 })
+    }
+
+    fn is_finished(&self) -> bool {
+        self.offset == self.bytes.len()
+    }
+
+    fn read_exact(&mut self, length: usize) -> CanonicalResult<&[u8]> {
+        let end_offset = self.offset.checked_add(length).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key share material read offset overflowed",
+            )
+        })?;
+        let Some(slice) = self.bytes.get(self.offset..end_offset) else {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "transported public-key share material ended before the binary object was complete",
+            ));
+        };
+        self.offset = end_offset;
+
+        Ok(slice)
+    }
+
+    fn read_varuint(&mut self, field_name: &str) -> CanonicalResult<u64> {
+        let mut shift = 0_u32;
+        let mut value = 0_u64;
+        let mut consumed = Vec::new();
+        for byte_index in 0..10 {
+            let byte = self.read_exact(1)?[0];
+            consumed.push(byte);
+            let payload = u64::from(byte & 0x7f);
+            if byte_index == 9 && payload > 1 {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    format!("{field_name} binary varuint exceeds u64"),
+                ));
+            }
+            value |= payload << shift;
+            if byte & 0x80 == 0 {
+                let mut canonical = Vec::new();
+                crate::encoding::append_varuint(&mut canonical, value);
+                if canonical != consumed {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        format!("{field_name} binary varuint is not minimally encoded"),
+                    ));
+                }
+
+                return Ok(value);
+            }
+            shift += 7;
+        }
+
+        Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{field_name} binary varuint is too long"),
+        ))
+    }
+
+    fn read_u64_le(&mut self, field_name: &str) -> CanonicalResult<u64> {
+        let bytes = self.read_exact(8)?;
+        let byte_array: [u8; 8] = bytes.try_into().map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                format!("{field_name} is malformed"),
+            )
+        })?;
+
+        Ok(u64::from_le_bytes(byte_array))
+    }
+}
+
+fn verify_public_key_share_material_transport_header(value: &Value) -> CanonicalResult<()> {
+    let Some(object) = value.as_object() else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareMaterial must be an object",
+        ));
+    };
+    for field_name in object.keys() {
+        if ![
+            "objectType",
+            "objectVersion",
+            "binaryFormat",
+            "chunkSizeBytes",
+            "chunkCount",
+            "totalByteLength",
+            "fullObjectHash",
+            "chunkHashes",
+            "chunkRoot",
+            "chunks",
+        ]
+        .contains(&field_name.as_str())
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("transportedPublicKeyShareMaterial contains unexpected field {field_name}"),
+            ));
+        }
+    }
+    if value.get("objectType").and_then(Value::as_str)
+        != Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareMaterial.objectType must be SetupTransportedPublicKeyShareMaterial",
+        ));
+    }
+    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareMaterial.objectVersion must be 1",
+        ));
+    }
+    if value.get("binaryFormat").and_then(Value::as_str)
+        != Some(PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareMaterial.binaryFormat must match the accepted public-key share material binary format",
+        ));
+    }
+
+    Ok(())
+}
+
+fn public_key_share_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
+    if value_u64(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public-key share material chunkSizeBytes must match the setup transport profile",
+        ));
+    }
+    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public-key share material chunkCount does not fit usize",
+        )
+    })?;
+    let chunk_values = array_value(value, "chunks")?;
+    if chunk_values.len() != expected_chunk_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public-key share material chunks length must match chunkCount",
+        ));
+    }
+    let mut chunks = Vec::with_capacity(expected_chunk_count);
+    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
+        if value_u64(chunk_value, "chunkIndex")?
+            != u64::try_from(expected_chunk_index).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "public-key share material chunk index does not fit u64",
+                )
+            })?
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public-key share material chunks must be in ascending chunk-index order",
+            ));
+        }
+        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
+    }
+
+    Ok(chunks)
+}
+
+pub(super) fn public_key_share_material_transport_hashes(
+    chunks: &[Vec<u8>],
+) -> CanonicalResult<PublicKeyShareMaterialTransportHashes> {
+    if chunks.is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material transport requires at least one chunk",
+        ));
+    }
+    let chunk_size = usize::try_from(SETUP_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup transport chunk size does not fit usize",
+        )
+    })?;
+    let total_byte_length =
+        chunks
+            .iter()
+            .enumerate()
+            .try_fold(0_u64, |byte_count, (chunk_index, chunk)| {
+                if chunk.is_empty() {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "public-key share material chunks must be non-empty",
+                    ));
+                }
+                if chunk.len() > chunk_size {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "public-key share material chunk exceeds the accepted chunk size",
+                    ));
+                }
+                if chunk_index + 1 < chunks.len() && chunk.len() != chunk_size {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "public-key share material contains a short non-final chunk",
+                    ));
+                }
+                byte_count
+                    .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "public-key share material chunk length does not fit u64",
+                        )
+                    })?)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "public-key share material byte length overflowed",
+                        )
+                    })
+            })?;
+    let full_object_hash = public_key_share_material_full_object_hash(total_byte_length, chunks);
+    let chunk_hashes = chunks
+        .iter()
+        .enumerate()
+        .map(|(chunk_index, chunk)| {
+            public_key_share_material_chunk_hash(&full_object_hash, chunk_index, chunk)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let chunk_root = setup_transport_chunk_manifest_root(
+        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        u64::try_from(chunk_hashes.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key share material chunk count does not fit u64",
+            )
+        })?,
+        total_byte_length,
+        &chunk_hashes,
+        &full_object_hash,
+    )?;
+
+    Ok(PublicKeyShareMaterialTransportHashes {
+        full_object_hash,
+        chunk_hashes,
+        chunk_root,
+        total_byte_length,
+    })
+}
+
+fn public_key_share_material_full_object_hash(
+    total_byte_length: u64,
+    chunks: &[Vec<u8>],
+) -> String {
+    let total_length_bytes = total_byte_length.to_le_bytes();
+    let mut parts = Vec::with_capacity(chunks.len() + 1);
+    parts.push(total_length_bytes.as_slice());
+    for chunk in chunks {
+        parts.push(chunk.as_slice());
+    }
+
+    hash512_hex(
+        "sealed-lattice/setup/public-key-share-material/full-object-v1",
+        &parts,
+    )
+}
+
+fn public_key_share_material_chunk_hash(
+    full_object_hash: &str,
+    chunk_index: usize,
+    chunk: &[u8],
+) -> CanonicalResult<String> {
+    let chunk_index_bytes = u64::try_from(chunk_index)
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key share material chunk index does not fit u64",
+            )
+        })?
+        .to_le_bytes();
+
+    Ok(hash512_hex(
+        "sealed-lattice/setup/public-key-share-material/chunk-v1",
+        &[full_object_hash.as_bytes(), &chunk_index_bytes, chunk],
+    ))
+}
+
+fn verify_public_key_share_material_transport_hash_fields(
+    value: &Value,
+    transport_hashes: &PublicKeyShareMaterialTransportHashes,
+    require_chunk_hashes: bool,
+    value_name: &str,
+) -> CanonicalResult<()> {
+    let chunk_size = value_u64(value, "chunkSizeBytes")?;
+    let chunk_count = value_u64(value, "chunkCount")?;
+    let total_byte_length = value_u64(value, "totalByteLength")?;
+    let full_object_hash = value_string(value, "fullObjectHash")?;
+    let chunk_root = value_string(value, "chunkRoot")?;
+    if chunk_size != SETUP_TRANSPORT_CHUNK_SIZE_BYTES
+        || chunk_count
+            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "public-key share material chunk count does not fit u64",
+                )
+            })?
+        || total_byte_length != transport_hashes.total_byte_length
+        || full_object_hash != transport_hashes.full_object_hash
+        || chunk_root != transport_hashes.chunk_root
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{value_name} hash metadata does not match supplied chunks"),
+        ));
+    }
+    if require_chunk_hashes {
+        let chunk_hash_values = value
+            .get("chunkHashes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!("{value_name} must list every public-key share material chunk hash"),
+                )
+            })?;
+        if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{value_name} chunk hash count must match supplied chunks"),
+            ));
+        }
+        for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
+            .iter()
+            .zip(transport_hashes.chunk_hashes.iter())
+        {
+            if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!("{value_name} chunk hashes must match supplied chunks"),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn verify_public_key_share_material_set_transport_reference(
+    material_set: &Value,
+    transport_hashes: &PublicKeyShareMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    let transport = material_set.get("transport").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "publicKeyShareMaterial.transport is required for binary-chunked material",
+        )
+    })?;
+    let Some(transport_object) = transport.as_object() else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "publicKeyShareMaterial.transport must be an object",
+        ));
+    };
+    for field_name in transport_object.keys() {
+        if ![
+            "transportProfileId",
+            "chunkSizeBytes",
+            "chunkCount",
+            "totalByteLength",
+            "fullObjectHash",
+            "chunkRoot",
+        ]
+        .contains(&field_name.as_str())
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("publicKeyShareMaterial.transport contains unexpected field {field_name}"),
+            ));
+        }
+    }
+    if transport.get("transportProfileId").and_then(Value::as_str)
+        != Some(SETUP_TRANSPORT_PROFILE_ID)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "publicKeyShareMaterial.transport.transportProfileId must match the setup transport profile",
+        ));
+    }
+    verify_public_key_share_material_transport_hash_fields(
+        transport,
+        transport_hashes,
+        false,
+        "public-key share material transport reference",
+    )
+}
+
+fn decode_public_key_share_material_bindings(
+    setup_context: &Value,
+    common_binding: &PublicKeyCommonBinding,
+    ring_degree: usize,
+    share_records: &BTreeMap<u64, Value>,
+    chunks: &[Vec<u8>],
+) -> CanonicalResult<(BTreeMap<u64, PublicKeyShareMaterialBinding>, Vec<Value>)> {
+    let mut reader = PublicKeyShareMaterialByteReader::new(chunks)?;
+    let magic = reader.read_exact(PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len())?;
+    if magic != PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key share material binary magic does not match",
+        ));
+    }
+    if reader.read_varuint("binary version")? != PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key share material binary version is unsupported",
+        ));
+    }
+    if reader.read_varuint("participantCount")? != FIRST_PROFILE_PARTICIPANT_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "transported public-key share material participant count does not match the accepted profile",
+        ));
+    }
+    if reader.read_varuint("rnsLimbCount")? != DATA_PRIMES.len() as u64 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "transported public-key share material RNS limb count does not match Q_share",
+        ));
+    }
+    if usize::try_from(reader.read_varuint("ringDegree")?).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported public-key share material ringDegree does not fit usize",
+        )
+    })? != ring_degree
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "transported public-key share material ring degree must match the material set",
+        ));
+    }
+
+    let mut bindings = BTreeMap::new();
+    let mut material_roots = Vec::new();
+    for expected_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT {
+        if reader.read_varuint("trusteeRosterPosition")? != expected_roster_position {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public-key share material trustee order is not canonical",
+            ));
+        }
+        let share_record = share_records
+            .get(&expected_roster_position)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "transported public-key share material must reference an accepted share record",
+                )
+            })?;
+        let trustee_identity = value_string(share_record, "trusteeIdentity")?.to_string();
+        let public_key_share_root = value_string(share_record, "publicKeyShareRoot")?.to_string();
+        let share_hashes = share_record
+            .get("shareCoefficientVectorHash512ByLimb")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "accepted public-key share hashes are required",
+                )
+            })?;
+        let mut coefficients_by_limb = Vec::with_capacity(DATA_PRIMES.len());
+        let mut limb_records = Vec::with_capacity(DATA_PRIMES.len());
+        for (rns_limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+            if reader.read_varuint("rnsLimbIndex")? != rns_limb_index as u64 {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "transported public-key share material RNS limb order is not canonical",
+                ));
+            }
+            if reader.read_u64_le("rnsPrime")? != modulus {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "transported public-key share material RNS prime does not match Q_share",
+                ));
+            }
+            let mut coefficients = Vec::with_capacity(ring_degree);
+            for _coefficient_index in 0..ring_degree {
+                let coefficient = reader.read_u64_le("public-key share coefficient")?;
+                if coefficient >= modulus {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ProfileComponentMismatch,
+                        "transported public-key share coefficient is not a canonical residue",
+                    ));
+                }
+                coefficients.push(coefficient);
+            }
+            let coefficient_hash = public_key_share_coefficient_vector_hash(&coefficients);
+            if share_hashes
+                .get(rns_limb_index)
+                .and_then(|share_hash| share_hash.get("rnsLimbIndex"))
+                .and_then(Value::as_u64)
+                != Some(rns_limb_index as u64)
+                || share_hashes
+                    .get(rns_limb_index)
+                    .and_then(|share_hash| share_hash.get("rnsPrime"))
+                    .and_then(Value::as_u64)
+                    != Some(modulus)
+                || share_hashes
+                    .get(rns_limb_index)
+                    .and_then(|share_hash| share_hash.get("component"))
+                    .and_then(Value::as_str)
+                    != Some("b_i")
+                || share_hashes
+                    .get(rns_limb_index)
+                    .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
+                    .and_then(Value::as_str)
+                    != Some(coefficient_hash.as_str())
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "transported public-key share coefficient hash must match the accepted share record",
+                ));
+            }
+            limb_records.push(json!({
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": modulus,
+                "component": "b_i",
+                "coefficientByteLength": ring_degree * 8,
+                "coefficientVectorHash512": coefficient_hash,
+                "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
+            }));
+            coefficients_by_limb.push(coefficients);
+        }
+        let material_record = json!({
+            "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": "public-key-share",
+            "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+            "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
+            "ceremonyId": value_string(setup_context, "ceremonyId")?,
+            "manifestHash": value_string(setup_context, "manifestHash")?,
+            "rosterHash": value_string(setup_context, "rosterHash")?,
+            "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
+            "qShareHash": value_string(setup_context, "qShareHash")?,
+            "carryAwareVssShareRelationProfileHash": value_string(
+                setup_context,
+                "carryAwareVssShareRelationProfileHash",
+            )?,
+            "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+            "setupEpoch": value_string(setup_context, "setupEpoch")?,
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": expected_roster_position,
+            "rnsLimbCount": DATA_PRIMES.len(),
+            "ringDegree": ring_degree,
+            "publicMatrixSeedHash": common_binding.public_matrix_seed_hash,
+            "publicKeyCrpRoot": common_binding.public_key_crp_root,
+            "publicAPolynomialRoot": common_binding.public_a_polynomial_root,
+            "publicKeyShareRoot": public_key_share_root,
+            "shareCoefficientVectorsByLimb": limb_records,
+        });
+        let public_key_share_material_root =
+            derive_protocol_hash("PublicKeyShareRoot", &material_record)?;
+        let binding = PublicKeyShareMaterialBinding {
+            trustee_identity: value_string(&material_record, "trusteeIdentity")?.to_string(),
+            trustee_roster_position: expected_roster_position,
+            public_key_share_root: value_string(&material_record, "publicKeyShareRoot")?
+                .to_string(),
+            public_key_share_material_root,
+            coefficients_by_limb,
+        };
+        material_roots.push(public_key_share_material_root_reference(&binding));
+        if bindings
+            .insert(binding.trustee_roster_position, binding)
+            .is_some()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported public-key share material contains duplicate trustee records",
+            ));
+        }
+    }
+    if !reader.is_finished() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key share material has trailing bytes after the final trustee record",
+        ));
+    }
+
+    Ok((bindings, material_roots))
+}
+
 fn verify_public_key_share_material_set(
     material_set: &Value,
     setup_context: &Value,
     common_binding: &PublicKeyCommonBinding,
     public_key_share_set_root: &str,
     share_records: &BTreeMap<u64, Value>,
+    request: &Value,
 ) -> CanonicalResult<BTreeMap<u64, PublicKeyShareMaterialBinding>> {
     if !material_set.is_object() {
         return Err(CanonicalError::new(
@@ -10657,10 +11861,6 @@ fn verify_public_key_share_material_set(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        (
-            "materialEncoding",
-            "embedded-full-public-key-share-coefficients",
-        ),
         ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
     ] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -10669,6 +11869,18 @@ fn verify_public_key_share_material_set(
                 format!("publicKeyShareMaterial.{field_name} must be {expected_value}"),
             ));
         }
+    }
+    let material_encoding = value_string(material_set, "materialEncoding")?;
+    if ![
+        PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
+        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+    ]
+    .contains(&material_encoding)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "publicKeyShareMaterial.materialEncoding must be embedded full public-key share coefficients or binary-chunked full public-key share coefficients",
+        ));
     }
     for (field_name, expected_value) in [
         ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
@@ -10713,46 +11925,25 @@ fn verify_public_key_share_material_set(
             "publicKeyShareMaterial must bind accepted public randomness and public-key share set root",
         ));
     }
-    let material_records = material_set
-        .get("shareMaterialRecords")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareMaterial.shareMaterialRecords are required",
-            )
-        })?;
-    if material_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "publicKeyShareMaterial.shareMaterialRecords must contain one record per trustee",
-        ));
-    }
-    let mut bindings = BTreeMap::new();
-    let mut material_roots = Vec::new();
-    for material_record in material_records {
-        let binding = verify_public_key_share_material_record(
-            material_record,
-            setup_context,
-            common_binding,
-            ring_degree,
-            share_records,
-        )?;
-        if bindings
-            .insert(binding.trustee_roster_position, binding.clone())
-            .is_some()
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareMaterial.shareMaterialRecords contain duplicate roster positions",
-            ));
-        }
-        material_roots.push(json!({
-            "trusteeIdentity": binding.trustee_identity,
-            "trusteeRosterPosition": binding.trustee_roster_position,
-            "publicKeyShareMaterialRoot": binding.public_key_share_material_root,
-        }));
-    }
+    let (bindings, material_roots) =
+        if material_encoding == PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING {
+            verify_embedded_public_key_share_material_set(
+                material_set,
+                setup_context,
+                common_binding,
+                ring_degree,
+                share_records,
+            )?
+        } else {
+            verify_transport_public_key_share_material_set(
+                material_set,
+                setup_context,
+                common_binding,
+                ring_degree,
+                share_records,
+                request,
+            )?
+        };
     if material_set.get("publicKeyShareMaterialRoots") != Some(&Value::Array(material_roots)) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
@@ -12521,6 +13712,7 @@ fn verify_public_evaluation_key_material_transport(
     if let Err(error) = verify_public_evaluation_key_material_component_roots(
         setup_package,
         transported_material_set,
+        request,
     ) {
         return Ok(Some(evaluation_key_material_verification_failure(
             error,
@@ -12668,6 +13860,7 @@ fn evaluation_key_material_verification_failure(
 fn verify_public_evaluation_key_material_component_roots(
     setup_package: &Value,
     transported_material_set: &Value,
+    request: &Value,
 ) -> CanonicalResult<()> {
     let expected_roots = expected_public_evaluation_key_component_material_roots(setup_package)?;
     let supplied_component_materials = match transported_material_set.get("componentMaterials") {
@@ -12679,6 +13872,8 @@ fn verify_public_evaluation_key_material_component_roots(
         })?),
         None => None,
     };
+    let request_component_material_roots =
+        transported_evaluation_key_share_component_material_roots_from_request(request)?;
     if expected_roots.is_empty() {
         if supplied_component_materials.is_some_and(|materials| !materials.is_empty()) {
             return Err(CanonicalError::new(
@@ -12686,42 +13881,87 @@ fn verify_public_evaluation_key_material_component_roots(
                 "transported public evaluation-key material must not include undeclared component material",
             ));
         }
+        if request_component_material_roots.is_some_and(|roots| !roots.is_empty()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported evaluation-key component material must not be supplied when public evaluation-key records do not use binary component material",
+            ));
+        }
         return Ok(());
     }
-    let Some(component_materials) = supplied_component_materials else {
+    if let Some(component_materials) = supplied_component_materials
+        && !component_materials.is_empty()
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "transported public evaluation-key material must include componentMaterials for binary proof records",
-        ));
-    };
-    if component_materials.len() != expected_roots.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public evaluation-key material componentMaterials count does not match proof records",
+            "transported public evaluation-key material must not duplicate evaluation-key component material chunks; use transportedEvaluationKeyShareComponentMaterial",
         ));
     }
+    let Some(supplied_roots) = request_component_material_roots else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "request must include transportedEvaluationKeyShareComponentMaterial for binary public evaluation-key proof records",
+        ));
+    };
+    if supplied_roots != expected_roots {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "request-side transported evaluation-key component roots do not match proof records",
+        ));
+    }
+
+    Ok(())
+}
+
+fn transported_evaluation_key_share_component_material_roots_from_request(
+    request: &Value,
+) -> CanonicalResult<Option<BTreeSet<String>>> {
+    let Some(material_set) = request.get("transportedEvaluationKeyShareComponentMaterial") else {
+        return Ok(None);
+    };
+    if material_set.get("objectType").and_then(Value::as_str)
+        != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
+        || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
+        || material_set.get("setupProfileId").and_then(Value::as_str)
+            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
+        || material_set
+            .get("setupProofProfileId")
+            .and_then(Value::as_str)
+            != Some(SETUP_PROOF_PROFILE_ID)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedEvaluationKeyShareComponentMaterial must be an evaluation-key component material transport set",
+        ));
+    }
+    let component_materials = array_value(material_set, "componentMaterials")?;
+    evaluation_key_component_material_roots_from_values(
+        component_materials,
+        "transportedEvaluationKeyShareComponentMaterial.componentMaterials",
+    )
+    .map(Some)
+}
+
+fn evaluation_key_component_material_roots_from_values(
+    component_materials: &[Value],
+    object_path: &str,
+) -> CanonicalResult<BTreeSet<String>> {
     let mut supplied_roots = BTreeSet::new();
     for component_material in component_materials {
         let material_root = value_string(component_material, "keySwitchComponentMaterialRoot")?;
         validate_hash_string(
             material_root,
-            "transportedPublicEvaluationKeyMaterial.componentMaterials.keySwitchComponentMaterialRoot",
+            &format!("{object_path}.keySwitchComponentMaterialRoot"),
         )?;
         if !supplied_roots.insert(material_root.to_string()) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "transported public evaluation-key material contains duplicate component material roots",
+                format!("{object_path} contains duplicate component material roots"),
             ));
         }
     }
-    if supplied_roots != expected_roots {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public evaluation-key material component roots do not match proof records",
-        ));
-    }
 
-    Ok(())
+    Ok(supplied_roots)
 }
 
 fn expected_public_evaluation_key_component_material_roots(
@@ -15892,6 +17132,9 @@ fn transported_evaluation_key_share_proof_material_chunks(
                 "transportedEvaluationKeyShareProofMaterial was required by transported evaluation-key LNP proof records",
             )
         })?;
+    let material_set_proof_family = material_set.get("proofFamily").and_then(Value::as_str);
+    let material_set_family_matches = material_set_proof_family == Some("evaluation-key-share")
+        || material_set_proof_family == Some(proof_family.proof_family());
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
         || material_set.get("setupProfileId").and_then(Value::as_str)
@@ -15900,8 +17143,7 @@ fn transported_evaluation_key_share_proof_material_chunks(
             .get("setupProofProfileId")
             .and_then(Value::as_str)
             != Some(SETUP_PROOF_PROFILE_ID)
-        || material_set.get("proofFamily").and_then(Value::as_str)
-            != Some(proof_family.proof_family())
+        || !material_set_family_matches
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -15927,8 +17169,6 @@ fn transported_evaluation_key_share_proof_material_chunks(
                 .get("setupProofProfileId")
                 .and_then(Value::as_str)
                 != Some(SETUP_PROOF_PROFILE_ID)
-            || proof_material.get("proofFamily").and_then(Value::as_str)
-                != Some(proof_family.proof_family())
             || proof_material
                 .get("proofBytesEncoding")
                 .and_then(Value::as_str)
@@ -15937,6 +17177,26 @@ fn transported_evaluation_key_share_proof_material_chunks(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "transported evaluation-key proof material header is invalid",
+            ));
+        }
+        let proof_material_family = proof_material
+            .get("proofFamily")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "transported evaluation-key proof material proofFamily is required",
+                )
+            })?;
+        if proof_material_family != proof_family.proof_family() {
+            if proof_material_family == "relinearization-key-share"
+                || proof_material_family == "galois-key-share"
+            {
+                continue;
+            }
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported evaluation-key proof material proofFamily is invalid",
             ));
         }
         if value_string(proof_material, "proofMaterialRoot")? != expected_proof_material_root {
@@ -16655,6 +17915,7 @@ fn unexpected_public_key_share_material_set_field(value: &Value) -> Option<Strin
             "proofFamily",
             "proofModelStatus",
             "materialEncoding",
+            "binaryFormat",
             "ceremonyId",
             "manifestHash",
             "rosterHash",
@@ -16672,6 +17933,7 @@ fn unexpected_public_key_share_material_set_field(value: &Value) -> Option<Strin
             "publicKeyShareSetRoot",
             "publicKeyShareMaterialRoots",
             "shareMaterialRecords",
+            "transport",
             "publicKeyShareMaterialSetRoot",
         ],
     )
@@ -19184,7 +20446,10 @@ fn he_security_certificate_refusal(
     )
 }
 
-fn verify_transport_certificate(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+fn verify_transport_certificate(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
     let Some(transport_certificate) = setup_package.get("setupTransportCertificate") else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
@@ -19194,7 +20459,7 @@ fn verify_transport_certificate(setup_package: &Value) -> CanonicalResult<Option
             Vec::new(),
         )?));
     };
-    match verify_transport_certificate_body(setup_package, transport_certificate)? {
+    match verify_transport_certificate_body(setup_package, request, transport_certificate)? {
         Ok(()) => {}
         Err(refusal) => {
             return Ok(Some(setup_transport_refusal(
@@ -19212,6 +20477,7 @@ fn verify_transport_certificate(setup_package: &Value) -> CanonicalResult<Option
 
 fn verify_transport_certificate_body(
     setup_package: &Value,
+    request: &Value,
     transport_certificate: &Value,
 ) -> CanonicalResult<Result<(), Refusal>> {
     macro_rules! transport_try {
@@ -19341,23 +20607,6 @@ fn verify_transport_certificate_body(
         "setupTransportCertificate.copyCountLimit must match the setup transport profile",
     ));
 
-    let expected_vss_material_byte_length = setup_transport_vss_material_byte_length()?;
-    let expected_chunk_count = setup_transport_chunk_count(expected_vss_material_byte_length)?;
-    transport_try!(expect_transport_u64(
-        transport_certificate,
-        "totalByteLength",
-        expected_vss_material_byte_length,
-        "transportTotalByteLengthMismatch",
-        "setupTransportCertificate.totalByteLength must match the full-profile public VSS material byte count",
-    ));
-    transport_try!(expect_transport_u64(
-        transport_certificate,
-        "chunkCount",
-        expected_chunk_count,
-        "transportChunkCountMismatch",
-        "setupTransportCertificate.chunkCount must match totalByteLength and chunkSizeBytes",
-    ));
-
     let setup_transport_profile_hash_value = transport_canonical_try!(require_transport_hash(
         transport_certificate,
         "setupTransportProfileHash",
@@ -19371,45 +20620,63 @@ fn verify_transport_certificate_body(
             "setupPackage.setupTransportCertificate.setupTransportProfileHash",
         )));
     }
+
+    let aggregate = transport_canonical_try!(verify_setup_transported_objects(
+        setup_package,
+        request,
+        transport_certificate,
+    ));
+    transport_try!(expect_transport_u64(
+        transport_certificate,
+        "totalByteLength",
+        aggregate.total_byte_length,
+        "transportTotalByteLengthMismatch",
+        "setupTransportCertificate.totalByteLength must match the aggregate byte count of transported setup objects",
+    ));
+    transport_try!(expect_transport_u64(
+        transport_certificate,
+        "chunkCount",
+        aggregate.chunk_count,
+        "transportChunkCountMismatch",
+        "setupTransportCertificate.chunkCount must match the aggregate transported-object chunk count",
+    ));
     let full_object_hash = transport_canonical_try!(require_transport_hash(
         transport_certificate,
         "fullObjectHash",
         "transportFullObjectHashMissing",
         "setupTransportCertificate.fullObjectHash is required",
-    ))
-    .to_string();
+    ));
+    if full_object_hash != aggregate.full_object_hash {
+        return Ok(Err(Refusal::new(
+            "transportFullObjectHashMismatch",
+            "setupTransportCertificate.fullObjectHash must match the aggregate transported-object set hash",
+            "setupPackage.setupTransportCertificate.fullObjectHash",
+        )));
+    }
     let chunk_hashes = transport_canonical_try!(transport_chunk_hashes(
         transport_certificate,
-        expected_chunk_count as usize
+        aggregate.chunk_count as usize
     ));
-    let expected_chunk_root = setup_transport_chunk_manifest_root(
-        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-        expected_chunk_count,
-        expected_vss_material_byte_length,
-        &chunk_hashes,
-        &full_object_hash,
-    )?;
+    if chunk_hashes != aggregate.chunk_hashes {
+        return Ok(Err(Refusal::new(
+            "transportChunkHashesMismatch",
+            "setupTransportCertificate.chunkHashes must concatenate the transported-object chunk hashes in order",
+            "setupPackage.setupTransportCertificate.chunkHashes",
+        )));
+    }
     let chunk_root = transport_canonical_try!(require_transport_hash(
         transport_certificate,
         "chunkRoot",
         "transportChunkRootMissing",
         "setupTransportCertificate.chunkRoot is required",
     ));
-    if chunk_root != expected_chunk_root {
+    if chunk_root != aggregate.chunk_root {
         return Ok(Err(Refusal::new(
             "transportChunkRootMismatch",
-            "setupTransportCertificate.chunkRoot must match the canonical chunk manifest",
+            "setupTransportCertificate.chunkRoot must match the aggregate transported-object chunk manifest",
             "setupPackage.setupTransportCertificate.chunkRoot",
         )));
     }
-    transport_canonical_try!(verify_setup_transported_objects(
-        setup_package,
-        transport_certificate,
-        expected_vss_material_byte_length,
-        expected_chunk_count,
-        &expected_chunk_root,
-        &full_object_hash,
-    ));
 
     let certificate_hash = transport_canonical_try!(require_transport_hash(
         transport_certificate,
@@ -19490,6 +20757,7 @@ fn unexpected_setup_transported_object_field(value: &Value) -> Option<String> {
             "chunkStartIndex",
             "chunkCount",
             "chunkRoot",
+            "chunkHashes",
             "fullObjectHash",
             "encoding",
             "loadingPolicy",
@@ -19499,11 +20767,408 @@ fn unexpected_setup_transported_object_field(value: &Value) -> Option<String> {
 
 fn verify_setup_transported_objects(
     setup_package: &Value,
+    request: &Value,
     transport_certificate: &Value,
-    expected_byte_length: u64,
-    expected_chunk_count: u64,
-    expected_chunk_root: &str,
-    expected_full_object_hash: &str,
+) -> CanonicalResult<Result<SetupTransportAggregate, Refusal>> {
+    macro_rules! transport_canonical_try {
+        ($expression:expr) => {
+            match $expression? {
+                Ok(value) => value,
+                Err(refusal) => return Ok(Err(refusal)),
+            }
+        };
+    }
+
+    let transported_object_values = match transport_certificate
+        .get("transportedObjects")
+        .and_then(Value::as_array)
+    {
+        Some(value) => value,
+        None => {
+            return Ok(Err(Refusal::new(
+                "transportedObjectsMissing",
+                "setupTransportCertificate.transportedObjects must list the transported setup objects",
+                "setupPackage.setupTransportCertificate.transportedObjects",
+            )));
+        }
+    };
+    if transported_object_values.is_empty() {
+        return Ok(Err(Refusal::new(
+            "transportedObjectsEmpty",
+            "setupTransportCertificate.transportedObjects must bind at least the full public VSS material object",
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        )));
+    }
+
+    let mut transported_objects = Vec::with_capacity(transported_object_values.len());
+    let mut seen_object_roots = BTreeSet::new();
+    let mut expected_chunk_start_index = 0_u64;
+    for (object_index, transported_object_value) in transported_object_values.iter().enumerate() {
+        let transported_object = transport_canonical_try!(setup_transported_object_binding(
+            transported_object_value,
+            object_index,
+            expected_chunk_start_index,
+            &mut seen_object_roots,
+        ));
+        expected_chunk_start_index = expected_chunk_start_index
+            .checked_add(transported_object.chunk_count)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "setup transport chunk count overflowed",
+                )
+            })?;
+        transported_objects.push(transported_object);
+    }
+    let total_byte_length =
+        transported_objects
+            .iter()
+            .try_fold(0_u64, |byte_length, transported_object| {
+                byte_length
+                    .checked_add(transported_object.byte_length)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "setup transport total byte length overflowed",
+                        )
+                    })
+            })?;
+    let chunk_count =
+        transported_objects
+            .iter()
+            .try_fold(0_u64, |chunk_count, transported_object| {
+                chunk_count
+                    .checked_add(transported_object.chunk_count)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "setup transport aggregate chunk count overflowed",
+                        )
+                    })
+            })?;
+    let chunk_hashes = transported_objects
+        .iter()
+        .flat_map(|transported_object| transported_object.chunk_hashes.clone())
+        .collect::<Vec<_>>();
+    let full_object_hash = setup_transport_full_object_set_hash(
+        &transported_objects,
+        total_byte_length,
+        chunk_count,
+        &chunk_hashes,
+    )?;
+    let chunk_root = setup_transport_chunk_manifest_root(
+        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        chunk_count,
+        total_byte_length,
+        &chunk_hashes,
+        &full_object_hash,
+    )?;
+
+    let vss_material_root = package_nested_hash(
+        setup_package,
+        "vssCoefficientCommitmentMaterial",
+        "vssCoefficientCommitmentMaterialRoot",
+    )?;
+    let expected_vss_material_byte_length = setup_transport_vss_material_byte_length()?;
+    let expected_vss_chunk_count = setup_transport_chunk_count(expected_vss_material_byte_length)?;
+    let Some(vss_object) = transported_objects.iter().find(|transported_object| {
+        transported_object.object_name == SETUP_TRANSPORTED_VSS_MATERIAL_NAME
+            && transported_object.object_role == SETUP_TRANSPORTED_VSS_MATERIAL_ROLE
+            && transported_object.object_root == vss_material_root
+    }) else {
+        return Ok(Err(Refusal::new(
+            "transportedVssObjectMissing",
+            "setupTransportCertificate.transportedObjects must bind vssCoefficientCommitmentMaterial",
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        )));
+    };
+    if vss_object.byte_length != expected_vss_material_byte_length
+        || vss_object.chunk_count != expected_vss_chunk_count
+    {
+        return Ok(Err(Refusal::new(
+            "transportedVssObjectMetadataMismatch",
+            "vssCoefficientCommitmentMaterial transported object metadata must match the accepted setup profile",
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        )));
+    }
+    transport_canonical_try!(verify_binary_vss_material_transport_reference(
+        setup_package,
+        vss_object.byte_length,
+        vss_object.chunk_count,
+        &vss_object.chunk_root,
+        &vss_object.full_object_hash,
+    ));
+    let mut expected_transported_object_roots = BTreeSet::new();
+    expected_transported_object_roots.insert(vss_material_root);
+    transport_canonical_try!(verify_setup_transport_request_bindings(
+        setup_package,
+        request,
+        &transported_objects,
+        &mut expected_transported_object_roots,
+    ));
+    transport_canonical_try!(refuse_unexpected_setup_transported_objects(
+        &transported_objects,
+        &expected_transported_object_roots,
+    ));
+
+    Ok(Ok(SetupTransportAggregate {
+        total_byte_length,
+        chunk_count,
+        chunk_hashes,
+        chunk_root,
+        full_object_hash,
+    }))
+}
+
+#[derive(Clone, Debug)]
+struct SetupTransportedObjectBinding {
+    object_name: String,
+    object_role: String,
+    object_root: String,
+    byte_length: u64,
+    chunk_start_index: u64,
+    chunk_count: u64,
+    chunk_root: String,
+    chunk_hashes: Vec<String>,
+    full_object_hash: String,
+}
+
+#[derive(Debug)]
+struct SetupTransportAggregate {
+    total_byte_length: u64,
+    chunk_count: u64,
+    chunk_hashes: Vec<String>,
+    chunk_root: String,
+    full_object_hash: String,
+}
+
+fn setup_transported_object_binding(
+    transported_object: &Value,
+    object_index: usize,
+    expected_chunk_start_index: u64,
+    seen_object_roots: &mut BTreeSet<String>,
+) -> CanonicalResult<Result<SetupTransportedObjectBinding, Refusal>> {
+    macro_rules! transport_try {
+        ($expression:expr) => {
+            match $expression {
+                Ok(value) => value,
+                Err(refusal) => return Ok(Err(refusal)),
+            }
+        };
+    }
+    macro_rules! transport_canonical_try {
+        ($expression:expr) => {
+            match $expression? {
+                Ok(value) => value,
+                Err(refusal) => return Ok(Err(refusal)),
+            }
+        };
+    }
+
+    if !transported_object.is_object() {
+        return Ok(Err(Refusal::new(
+            "transportedObjectNotObject",
+            "setupTransportCertificate.transportedObjects entries must be root-bound objects",
+            format!("setupPackage.setupTransportCertificate.transportedObjects[{object_index}]"),
+        )));
+    }
+    if let Some(unexpected_field) = unexpected_setup_transported_object_field(transported_object) {
+        return Ok(Err(Refusal::new(
+            "transportedObjectUnexpectedField",
+            format!("setup transported object contains unexpected field {unexpected_field}"),
+            format!(
+                "setupPackage.setupTransportCertificate.transportedObjects[{object_index}].{unexpected_field}"
+            ),
+        )));
+    }
+    let object_path =
+        format!("setupPackage.setupTransportCertificate.transportedObjects[{object_index}]");
+    transport_try!(expect_transport_string_at(
+        transported_object,
+        "objectType",
+        SETUP_TRANSPORTED_OBJECT_TYPE,
+        "transportedObjectTypeMismatch",
+        "transported object objectType must be SetupTransportedObject",
+        &object_path,
+    ));
+    transport_try!(expect_transport_u64_at(
+        transported_object,
+        "objectVersion",
+        1,
+        "transportedObjectVersionMismatch",
+        "transported object objectVersion must be 1",
+        &object_path,
+    ));
+    transport_try!(expect_transport_string_at(
+        transported_object,
+        "encoding",
+        "binary",
+        "transportedObjectEncodingMismatch",
+        "transported object encoding must be binary",
+        &object_path,
+    ));
+    transport_try!(expect_transport_string_at(
+        transported_object,
+        "loadingPolicy",
+        SETUP_TRANSPORTED_OBJECT_LOADING_POLICY,
+        "transportedObjectLoadingPolicyMismatch",
+        "transported object loading policy must match the setup transport profile",
+        &object_path,
+    ));
+    let object_name = transport_try!(require_transport_non_empty_string_at(
+        transported_object,
+        "objectName",
+        "transportedObjectNameMissing",
+        "transported object objectName is required",
+        &object_path,
+    ));
+    let object_role = transport_try!(require_transport_non_empty_string_at(
+        transported_object,
+        "objectRole",
+        "transportedObjectRoleMissing",
+        "transported object objectRole is required",
+        &object_path,
+    ));
+    let object_root = transport_try!(require_transport_hash_at(
+        transported_object,
+        "objectRoot",
+        "transportedObjectRootMissing",
+        "transported object objectRoot is required",
+        &object_path,
+    ));
+    if !seen_object_roots.insert(object_root.clone()) {
+        return Ok(Err(Refusal::new(
+            "transportedObjectRootDuplicate",
+            "setupTransportCertificate.transportedObjects must not contain duplicate objectRoot entries",
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        )));
+    }
+    let byte_length = transport_try!(require_positive_transport_u64_at(
+        transported_object,
+        "byteLength",
+        "transportedObjectByteLengthInvalid",
+        "transported object byteLength must be positive",
+        &object_path,
+    ));
+    let chunk_start_index = transport_try!(require_transport_u64_at(
+        transported_object,
+        "chunkStartIndex",
+        "transportedObjectStartIndexMissing",
+        "transported object chunkStartIndex is required",
+        &object_path,
+    ));
+    if chunk_start_index != expected_chunk_start_index {
+        return Ok(Err(Refusal::new(
+            "transportedObjectStartIndexMismatch",
+            "transported object chunkStartIndex must continue the aggregate transport stream",
+            format!("{object_path}.chunkStartIndex"),
+        )));
+    }
+    let chunk_count = transport_try!(require_positive_transport_u64_at(
+        transported_object,
+        "chunkCount",
+        "transportedObjectChunkCountInvalid",
+        "transported object chunkCount must be positive",
+        &object_path,
+    ));
+    let expected_chunk_count = setup_transport_chunk_count(byte_length)?;
+    if chunk_count != expected_chunk_count {
+        return Ok(Err(Refusal::new(
+            "transportedObjectChunkCountMismatch",
+            "transported object chunkCount must match byteLength and the setup transport chunk size",
+            format!("{object_path}.chunkCount"),
+        )));
+    }
+    let full_object_hash = transport_try!(require_transport_hash_at(
+        transported_object,
+        "fullObjectHash",
+        "transportedObjectFullHashMissing",
+        "transported object fullObjectHash is required",
+        &object_path,
+    ));
+    let chunk_hashes = transport_canonical_try!(transport_hashes_at(
+        transported_object,
+        "chunkHashes",
+        usize::try_from(chunk_count).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "transported object chunkCount does not fit usize",
+            )
+        })?,
+        &object_path,
+    ));
+    let chunk_root = transport_try!(require_transport_hash_at(
+        transported_object,
+        "chunkRoot",
+        "transportedObjectChunkRootMissing",
+        "transported object chunkRoot is required",
+        &object_path,
+    ));
+
+    Ok(Ok(SetupTransportedObjectBinding {
+        object_name,
+        object_role,
+        object_root,
+        byte_length,
+        chunk_start_index,
+        chunk_count,
+        chunk_root,
+        chunk_hashes,
+        full_object_hash,
+    }))
+}
+
+struct SetupTransportExpectedObject {
+    object_name: &'static str,
+    object_role: &'static str,
+    object_root: String,
+    byte_length: u64,
+    chunk_root: String,
+    chunk_hashes: Vec<String>,
+    full_object_hash: String,
+    object_path: String,
+}
+
+#[derive(Clone, Copy)]
+struct SetupTransportHashFieldNames {
+    byte_length: &'static str,
+    full_object_hash: &'static str,
+    chunk_root: &'static str,
+    chunk_hashes: &'static str,
+}
+
+#[derive(Clone, Copy)]
+struct SetupTransportMaterialDescriptor {
+    object_name: &'static str,
+    object_role: &'static str,
+    object_root: &'static str,
+    hash_fields: SetupTransportHashFieldNames,
+}
+
+const SETUP_TRANSPORT_DIRECT_HASH_FIELDS: SetupTransportHashFieldNames =
+    SetupTransportHashFieldNames {
+        byte_length: "totalByteLength",
+        full_object_hash: "fullObjectHash",
+        chunk_root: "chunkRoot",
+        chunk_hashes: "chunkHashes",
+    };
+
+const SETUP_TRANSPORT_PLAIN_PROOF_HASH_FIELDS: SetupTransportHashFieldNames =
+    SETUP_TRANSPORT_DIRECT_HASH_FIELDS;
+
+const SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS: SetupTransportHashFieldNames =
+    SetupTransportHashFieldNames {
+        byte_length: "proofTotalByteLength",
+        full_object_hash: "proofFullObjectHash",
+        chunk_root: "proofChunkRoot",
+        chunk_hashes: "proofChunkHashes",
+    };
+
+fn verify_setup_transport_request_bindings(
+    setup_package: &Value,
+    request: &Value,
+    transported_objects: &[SetupTransportedObjectBinding],
+    expected_object_roots: &mut BTreeSet<String>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     macro_rules! transport_try {
         ($expression:expr) => {
@@ -19522,161 +21187,593 @@ fn verify_setup_transported_objects(
         };
     }
 
-    let transported_objects = match transport_certificate
-        .get("transportedObjects")
+    if let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial") {
+        transport_try!(require_setup_transport_entry(
+            transported_objects,
+            &setup_transport_expected_direct_material(
+                transported_material,
+                package_nested_hash(
+                    setup_package,
+                    "vssCoefficientCommitmentMaterial",
+                    "vssCoefficientCommitmentMaterialRoot",
+                )?,
+                SETUP_TRANSPORTED_VSS_MATERIAL_NAME,
+                SETUP_TRANSPORTED_VSS_MATERIAL_ROLE,
+                SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
+                "transportedVssCoefficientCommitmentMaterial",
+            )?,
+            expected_object_roots,
+        ));
+    }
+    if let Some(transported_material) = request.get("transportedPublicKeyShareMaterial") {
+        let Some(public_key_share_material_root) = setup_package
+            .get("publicKeyShareMaterial")
+            .and_then(|material| material.get("publicKeyShareMaterialSetRoot"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            return Ok(Err(Refusal::new(
+                "transportedObjectBindingMissing",
+                "transportedPublicKeyShareMaterial requires setupPackage.publicKeyShareMaterial.publicKeyShareMaterialSetRoot",
+                "setupPackage.publicKeyShareMaterial.publicKeyShareMaterialSetRoot",
+            )));
+        };
+        validate_hash_string(
+            public_key_share_material_root,
+            "setupPackage.publicKeyShareMaterial.publicKeyShareMaterialSetRoot",
+        )?;
+        transport_try!(require_setup_transport_entry(
+            transported_objects,
+            &setup_transport_expected_direct_material(
+                transported_material,
+                public_key_share_material_root.to_string(),
+                SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME,
+                SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE,
+                SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
+                "transportedPublicKeyShareMaterial",
+            )?,
+            expected_object_roots,
+        ));
+    }
+    if let Some(material_set) = request.get("transportedSameSecretProofMaterial") {
+        let referenced_material_roots = setup_transport_referenced_proof_material_roots(
+            setup_package,
+            "sameSecretProofs",
+            "proofRecords",
+            "proofMaterialRoot",
+        )?;
+        transport_canonical_try!(require_setup_transport_proof_material_entries(
+            transported_objects,
+            material_set,
+            "transportedSameSecretProofMaterial",
+            SetupTransportMaterialDescriptor {
+                object_name: SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_NAME,
+                object_role: SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_ROLE,
+                object_root: "proofMaterialRoot",
+                hash_fields: SETUP_TRANSPORT_PLAIN_PROOF_HASH_FIELDS,
+            },
+            &referenced_material_roots,
+            expected_object_roots,
+        ));
+    }
+    if let Some(material_set) = request.get("transportedPublicKeyShareProofMaterial") {
+        let referenced_material_roots = setup_transport_referenced_proof_material_roots(
+            setup_package,
+            "publicKeyShareLnpProofs",
+            "proofRecords",
+            "proofMaterialRoot",
+        )?;
+        transport_canonical_try!(require_setup_transport_proof_material_entries(
+            transported_objects,
+            material_set,
+            "transportedPublicKeyShareProofMaterial",
+            SetupTransportMaterialDescriptor {
+                object_name: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME,
+                object_role: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE,
+                object_root: "proofMaterialRoot",
+                hash_fields: SETUP_TRANSPORT_PLAIN_PROOF_HASH_FIELDS,
+            },
+            &referenced_material_roots,
+            expected_object_roots,
+        ));
+    }
+    if let Some(material_set) = request.get("transportedEvaluationKeyShareProofMaterial") {
+        let referenced_material_roots = setup_transport_referenced_evaluation_key_material_roots(
+            setup_package,
+            "proofMaterialRoot",
+        )?;
+        transport_canonical_try!(require_setup_transport_proof_material_entries(
+            transported_objects,
+            material_set,
+            "transportedEvaluationKeyShareProofMaterial",
+            SetupTransportMaterialDescriptor {
+                object_name: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_NAME,
+                object_role: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_ROLE,
+                object_root: "proofMaterialRoot",
+                hash_fields: SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS,
+            },
+            &referenced_material_roots,
+            expected_object_roots,
+        ));
+    }
+    if let Some(material_set) = request.get("transportedEvaluationKeyShareComponentMaterial") {
+        let referenced_material_roots = setup_transport_referenced_evaluation_key_material_roots(
+            setup_package,
+            "keySwitchComponentMaterialRoot",
+        )?;
+        transport_canonical_try!(require_setup_transport_material_entries(
+            transported_objects,
+            material_set,
+            "transportedEvaluationKeyShareComponentMaterial",
+            "componentMaterials",
+            SetupTransportMaterialDescriptor {
+                object_name: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_NAME,
+                object_role: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ROLE,
+                object_root: "keySwitchComponentMaterialRoot",
+                hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
+            },
+            &referenced_material_roots,
+            expected_object_roots,
+        ));
+    }
+    if let Some(material_set) = request.get("transportedPublicEvaluationKeyMaterial") {
+        let referenced_material_roots =
+            setup_transport_referenced_public_evaluation_key_material_roots(setup_package)?;
+        transport_canonical_try!(require_setup_transport_material_entries(
+            transported_objects,
+            material_set,
+            "transportedPublicEvaluationKeyMaterial",
+            "publicEvaluationKeyMaterials",
+            SetupTransportMaterialDescriptor {
+                object_name: SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME,
+                object_role: SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE,
+                object_root: "publicEvaluationKeyMaterialRoot",
+                hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
+            },
+            &referenced_material_roots,
+            expected_object_roots,
+        ));
+    }
+
+    Ok(Ok(()))
+}
+
+fn setup_transport_referenced_proof_material_roots(
+    setup_package: &Value,
+    record_set_name: &str,
+    records_field_name: &str,
+    root_field_name: &str,
+) -> CanonicalResult<BTreeSet<String>> {
+    let Some(record_set) = setup_package.get(record_set_name) else {
+        return Ok(BTreeSet::new());
+    };
+    let Some(records) = record_set.get(records_field_name).and_then(Value::as_array) else {
+        return Ok(BTreeSet::new());
+    };
+
+    let mut referenced_roots = BTreeSet::new();
+    for record in records {
+        if let Some(root) = record.get(root_field_name).and_then(Value::as_str) {
+            validate_hash_string(
+                root,
+                &format!("setupPackage.{record_set_name}.{records_field_name}.{root_field_name}"),
+            )?;
+            referenced_roots.insert(root.to_string());
+        }
+    }
+
+    Ok(referenced_roots)
+}
+
+fn setup_transport_referenced_evaluation_key_material_roots(
+    setup_package: &Value,
+    root_field_name: &str,
+) -> CanonicalResult<BTreeSet<String>> {
+    let mut referenced_roots = BTreeSet::new();
+    if let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") {
+        for records_field_name in ["roundOneRecords", "roundTwoRecords"] {
+            setup_transport_collect_optional_record_roots(
+                rounds,
+                records_field_name,
+                root_field_name,
+                &format!(
+                    "setupPackage.relinearizationKeyShareRounds.{records_field_name}.{root_field_name}"
+                ),
+                &mut referenced_roots,
+            )?;
+        }
+    }
+    if let Some(batches) = setup_package
+        .get("galoisKeyShareBatches")
         .and_then(Value::as_array)
     {
-        Some(value) => value,
-        None => {
+        for batch in batches {
+            setup_transport_collect_optional_record_roots(
+                batch,
+                "galoisKeyShareProofs",
+                root_field_name,
+                &format!(
+                    "setupPackage.galoisKeyShareBatches.galoisKeyShareProofs.{root_field_name}"
+                ),
+                &mut referenced_roots,
+            )?;
+        }
+    }
+
+    Ok(referenced_roots)
+}
+
+fn setup_transport_referenced_public_evaluation_key_material_roots(
+    setup_package: &Value,
+) -> CanonicalResult<BTreeSet<String>> {
+    let mut referenced_roots = BTreeSet::new();
+    if let Some(root) = setup_package
+        .get("evaluationKeys")
+        .and_then(|evaluation_keys| evaluation_keys.get("publicEvaluationKeyMaterialRoot"))
+        .and_then(Value::as_str)
+    {
+        validate_hash_string(
+            root,
+            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialRoot",
+        )?;
+        referenced_roots.insert(root.to_string());
+    }
+
+    Ok(referenced_roots)
+}
+
+fn setup_transport_collect_optional_record_roots(
+    value: &Value,
+    records_field_name: &str,
+    root_field_name: &str,
+    object_path: &str,
+    referenced_roots: &mut BTreeSet<String>,
+) -> CanonicalResult<()> {
+    let Some(records) = value.get(records_field_name).and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for record in records {
+        if let Some(root) = record.get(root_field_name).and_then(Value::as_str) {
+            validate_hash_string(root, object_path)?;
+            referenced_roots.insert(root.to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn require_setup_transport_proof_material_entries(
+    transported_objects: &[SetupTransportedObjectBinding],
+    material_set: &Value,
+    material_set_path: &'static str,
+    descriptor: SetupTransportMaterialDescriptor,
+    referenced_material_roots: &BTreeSet<String>,
+    expected_object_roots: &mut BTreeSet<String>,
+) -> CanonicalResult<Result<(), Refusal>> {
+    let Some(proof_materials) = material_set.get("proofMaterials").and_then(Value::as_array) else {
+        return Ok(Err(Refusal::new(
+            "transportedProofMaterialListMissing",
+            format!(
+                "{material_set_path}.proofMaterials must list transported proof material objects"
+            ),
+            format!("{material_set_path}.proofMaterials"),
+        )));
+    };
+    for (material_index, proof_material) in proof_materials.iter().enumerate() {
+        let object_path = format!("{material_set_path}.proofMaterials[{material_index}]");
+        let expected_material =
+            setup_transport_expected_material(proof_material, descriptor, object_path)?;
+        if !referenced_material_roots.contains(&expected_material.object_root) {
             return Ok(Err(Refusal::new(
-                "transportedObjectsMissing",
-                "setupTransportCertificate.transportedObjects must list the transported setup objects",
-                "setupPackage.setupTransportCertificate.transportedObjects",
+                "transportedObjectUnreferenced",
+                format!(
+                    "{material_set_path}.proofMaterials contains transported material not referenced by setupPackage records"
+                ),
+                expected_material.object_path,
             )));
         }
-    };
-    if transported_objects.len() != 1 {
+        if let Err(refusal) = require_setup_transport_entry(
+            transported_objects,
+            &expected_material,
+            expected_object_roots,
+        ) {
+            return Ok(Err(refusal));
+        }
+    }
+
+    Ok(Ok(()))
+}
+
+fn require_setup_transport_material_entries(
+    transported_objects: &[SetupTransportedObjectBinding],
+    material_set: &Value,
+    material_set_path: &'static str,
+    material_array_field_name: &'static str,
+    descriptor: SetupTransportMaterialDescriptor,
+    referenced_material_roots: &BTreeSet<String>,
+    expected_object_roots: &mut BTreeSet<String>,
+) -> CanonicalResult<Result<(), Refusal>> {
+    let Some(materials) = material_set
+        .get(material_array_field_name)
+        .and_then(Value::as_array)
+    else {
         return Ok(Err(Refusal::new(
-            "transportedObjectsCountMismatch",
-            "setupTransportCertificate.transportedObjects must currently bind the full public VSS material object",
+            "transportedMaterialListMissing",
+            format!(
+                "{material_set_path}.{material_array_field_name} must list transported material objects"
+            ),
+            format!("{material_set_path}.{material_array_field_name}"),
+        )));
+    };
+    for (material_index, material) in materials.iter().enumerate() {
+        let object_path =
+            format!("{material_set_path}.{material_array_field_name}[{material_index}]");
+        let expected_material =
+            setup_transport_expected_material(material, descriptor, object_path)?;
+        if !referenced_material_roots.contains(&expected_material.object_root) {
+            return Ok(Err(Refusal::new(
+                "transportedObjectUnreferenced",
+                format!(
+                    "{material_set_path}.{material_array_field_name} contains transported material not referenced by setupPackage records"
+                ),
+                expected_material.object_path,
+            )));
+        }
+        if let Err(refusal) = require_setup_transport_entry(
+            transported_objects,
+            &expected_material,
+            expected_object_roots,
+        ) {
+            return Ok(Err(refusal));
+        }
+    }
+
+    Ok(Ok(()))
+}
+
+fn setup_transport_expected_direct_material(
+    material: &Value,
+    object_root: String,
+    object_name: &'static str,
+    object_role: &'static str,
+    hash_fields: SetupTransportHashFieldNames,
+    object_path: &'static str,
+) -> CanonicalResult<SetupTransportExpectedObject> {
+    setup_transport_expected_material_with_root(
+        material,
+        object_root,
+        object_name,
+        object_role,
+        hash_fields,
+        object_path.to_string(),
+    )
+}
+
+fn setup_transport_expected_material(
+    material: &Value,
+    descriptor: SetupTransportMaterialDescriptor,
+    object_path: String,
+) -> CanonicalResult<SetupTransportExpectedObject> {
+    let object_root = value_string(material, descriptor.object_root)?.to_string();
+    validate_hash_string(
+        &object_root,
+        &format!("{object_path}.{}", descriptor.object_root),
+    )?;
+
+    setup_transport_expected_material_with_root(
+        material,
+        object_root,
+        descriptor.object_name,
+        descriptor.object_role,
+        descriptor.hash_fields,
+        object_path,
+    )
+}
+
+fn setup_transport_expected_material_with_root(
+    material: &Value,
+    object_root: String,
+    object_name: &'static str,
+    object_role: &'static str,
+    hash_fields: SetupTransportHashFieldNames,
+    object_path: String,
+) -> CanonicalResult<SetupTransportExpectedObject> {
+    let byte_length = value_u64(material, hash_fields.byte_length)?;
+    let full_object_hash = value_string(material, hash_fields.full_object_hash)?.to_string();
+    validate_hash_string(
+        &full_object_hash,
+        &format!("{object_path}.{}", hash_fields.full_object_hash),
+    )?;
+    let chunk_root = value_string(material, hash_fields.chunk_root)?.to_string();
+    validate_hash_string(
+        &chunk_root,
+        &format!("{object_path}.{}", hash_fields.chunk_root),
+    )?;
+    let chunk_hashes =
+        setup_transport_expected_hash_array(material, hash_fields.chunk_hashes, &object_path)?;
+
+    Ok(SetupTransportExpectedObject {
+        object_name,
+        object_role,
+        object_root,
+        byte_length,
+        chunk_root,
+        chunk_hashes,
+        full_object_hash,
+        object_path,
+    })
+}
+
+fn require_setup_transport_entry(
+    transported_objects: &[SetupTransportedObjectBinding],
+    expected: &SetupTransportExpectedObject,
+    expected_object_roots: &mut BTreeSet<String>,
+) -> Result<(), Refusal> {
+    expected_object_roots.insert(expected.object_root.clone());
+    let Some(transported_object) = transported_objects
+        .iter()
+        .find(|transported_object| transported_object.object_root == expected.object_root)
+    else {
+        return Err(Refusal::new(
+            "transportedObjectBindingMissing",
+            format!(
+                "setupTransportCertificate.transportedObjects must bind {}",
+                expected.object_path
+            ),
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        ));
+    };
+    if transported_object.object_name != expected.object_name
+        || transported_object.object_role != expected.object_role
+        || transported_object.byte_length != expected.byte_length
+        || transported_object.chunk_root != expected.chunk_root
+        || transported_object.chunk_hashes != expected.chunk_hashes
+        || transported_object.full_object_hash != expected.full_object_hash
+    {
+        return Err(Refusal::new(
+            "transportedObjectBindingMismatch",
+            format!(
+                "setupTransportCertificate.transportedObjects metadata must match {}",
+                expected.object_path
+            ),
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        ));
+    }
+
+    Ok(())
+}
+
+fn refuse_unexpected_setup_transported_objects(
+    transported_objects: &[SetupTransportedObjectBinding],
+    expected_object_roots: &BTreeSet<String>,
+) -> CanonicalResult<Result<(), Refusal>> {
+    for transported_object in transported_objects {
+        if expected_object_roots.contains(&transported_object.object_root) {
+            continue;
+        }
+
+        return Ok(Err(Refusal::new(
+            "transportedObjectUnexpected",
+            format!(
+                "setupTransportCertificate.transportedObjects contains unrequested transported object {} with role {}",
+                transported_object.object_name, transported_object.object_role
+            ),
             "setupPackage.setupTransportCertificate.transportedObjects",
         )));
     }
-    let transported_object = &transported_objects[0];
-    if !transported_object.is_object() {
-        return Ok(Err(Refusal::new(
-            "transportedObjectNotObject",
-            "setupTransportCertificate.transportedObjects entries must be root-bound objects",
-            "setupPackage.setupTransportCertificate.transportedObjects[0]",
-        )));
-    }
-    if let Some(unexpected_field) = unexpected_setup_transported_object_field(transported_object) {
-        return Ok(Err(Refusal::new(
-            "transportedObjectUnexpectedField",
-            format!("setup transported object contains unexpected field {unexpected_field}"),
-            format!(
-                "setupPackage.setupTransportCertificate.transportedObjects[0].{unexpected_field}"
-            ),
-        )));
-    }
-    for (field_name, expected_value, reason_code, message) in [
-        (
-            "objectType",
-            SETUP_TRANSPORTED_OBJECT_TYPE,
-            "transportedObjectTypeMismatch",
-            "transported object objectType must be SetupTransportedObject",
-        ),
-        (
-            "objectName",
-            SETUP_TRANSPORTED_VSS_MATERIAL_NAME,
-            "transportedObjectNameMismatch",
-            "transported object must bind vssCoefficientCommitmentMaterial",
-        ),
-        (
-            "objectRole",
-            SETUP_TRANSPORTED_VSS_MATERIAL_ROLE,
-            "transportedObjectRoleMismatch",
-            "transported object role must be public VSS coefficient commitment material",
-        ),
-        (
-            "encoding",
-            "binary",
-            "transportedObjectEncodingMismatch",
-            "transported object encoding must be binary",
-        ),
-        (
-            "loadingPolicy",
-            SETUP_TRANSPORTED_OBJECT_LOADING_POLICY,
-            "transportedObjectLoadingPolicyMismatch",
-            "transported object loading policy must match the setup transport profile",
-        ),
-    ] {
-        transport_try!(expect_transport_string(
-            transported_object,
-            field_name,
-            expected_value,
-            reason_code,
-            message,
-        ));
-    }
-    transport_try!(expect_transport_u64(
-        transported_object,
-        "objectVersion",
-        1,
-        "transportedObjectVersionMismatch",
-        "transported object objectVersion must be 1",
-    ));
-    transport_try!(expect_transport_u64(
-        transported_object,
-        "byteLength",
-        expected_byte_length,
-        "transportedObjectByteLengthMismatch",
-        "transported object byteLength must match the full-profile public VSS material byte count",
-    ));
-    transport_try!(expect_transport_u64(
-        transported_object,
-        "chunkStartIndex",
-        0,
-        "transportedObjectStartIndexMismatch",
-        "transported object chunkStartIndex must be zero for the first setup transport object",
-    ));
-    transport_try!(expect_transport_u64(
-        transported_object,
-        "chunkCount",
-        expected_chunk_count,
-        "transportedObjectChunkCountMismatch",
-        "transported object chunkCount must match the setup transport manifest",
-    ));
-    let object_root = transport_canonical_try!(require_transport_hash(
-        transported_object,
-        "objectRoot",
-        "transportedObjectRootMissing",
-        "transported object objectRoot is required",
-    ));
-    let expected_vss_material_root = setup_package
+
+    Ok(Ok(()))
+}
+
+fn verify_binary_vss_material_transport_reference(
+    setup_package: &Value,
+    expected_byte_length: u64,
+    expected_chunk_count: u64,
+    expected_chunk_root: &str,
+    expected_full_object_hash: &str,
+) -> CanonicalResult<Result<(), Refusal>> {
+    let material_set = setup_package
         .get("vssCoefficientCommitmentMaterial")
-        .and_then(|material_set| material_set.get("vssCoefficientCommitmentMaterialRoot"))
-        .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "vssCoefficientCommitmentMaterialRoot was required before setup transport verification",
+                "vssCoefficientCommitmentMaterial was required before setup transport verification",
             )
         })?;
-    if object_root != expected_vss_material_root {
+    if material_set.get("materialEncoding").and_then(Value::as_str)
+        != Some("binary-chunked-full-public-setup-commitment-values")
+    {
+        return Ok(Ok(()));
+    }
+    let transport = match material_set.get("transport") {
+        Some(value) => value,
+        None => {
+            return Ok(Err(Refusal::new(
+                "vssMaterialTransportReferenceMissing",
+                "binary-chunked vssCoefficientCommitmentMaterial must include transport metadata bound to the setup transport certificate",
+                "setupPackage.vssCoefficientCommitmentMaterial.transport",
+            )));
+        }
+    };
+    let Some(transport_object) = transport.as_object() else {
         return Ok(Err(Refusal::new(
-            "transportedObjectRootMismatch",
-            "transported object objectRoot must match vssCoefficientCommitmentMaterialRoot",
-            "setupPackage.setupTransportCertificate.transportedObjects[0].objectRoot",
+            "vssMaterialTransportReferenceNotObject",
+            "vssCoefficientCommitmentMaterial.transport must be an object",
+            "setupPackage.vssCoefficientCommitmentMaterial.transport",
+        )));
+    };
+    if let Some(unexpected_field) = unexpected_field(
+        transport,
+        &[
+            "transportProfileId",
+            "chunkSizeBytes",
+            "chunkCount",
+            "totalByteLength",
+            "fullObjectHash",
+            "chunkRoot",
+        ],
+    ) {
+        return Ok(Err(Refusal::new(
+            "vssMaterialTransportReferenceUnexpectedField",
+            format!(
+                "vssCoefficientCommitmentMaterial.transport contains unexpected field {unexpected_field}"
+            ),
+            format!("setupPackage.vssCoefficientCommitmentMaterial.transport.{unexpected_field}"),
         )));
     }
-    for (field_name, expected_value, reason_code, message) in [
-        (
-            "chunkRoot",
-            expected_chunk_root,
-            "transportedObjectChunkRootMismatch",
-            "transported object chunkRoot must match setupTransportCertificate.chunkRoot",
-        ),
-        (
-            "fullObjectHash",
-            expected_full_object_hash,
-            "transportedObjectFullHashMismatch",
-            "transported object fullObjectHash must match setupTransportCertificate.fullObjectHash",
-        ),
+    if transport_object
+        .get("transportProfileId")
+        .and_then(Value::as_str)
+        != Some(SETUP_TRANSPORT_PROFILE_ID)
+    {
+        return Ok(Err(Refusal::new(
+            "vssMaterialTransportReferenceProfileMismatch",
+            "vssCoefficientCommitmentMaterial.transport.transportProfileId must match the setup transport profile",
+            "setupPackage.vssCoefficientCommitmentMaterial.transport.transportProfileId",
+        )));
+    }
+    for (field_name, expected_value) in [
+        ("chunkSizeBytes", SETUP_TRANSPORT_CHUNK_SIZE_BYTES),
+        ("chunkCount", expected_chunk_count),
+        ("totalByteLength", expected_byte_length),
     ] {
-        let observed_value = transport_canonical_try!(require_transport_hash(
-            transported_object,
-            field_name,
-            reason_code,
-            message,
-        ));
+        match transport_object.get(field_name).and_then(Value::as_u64) {
+            Some(observed_value) if observed_value == expected_value => {}
+            Some(_) => {
+                return Ok(Err(Refusal::new(
+                    "vssMaterialTransportReferenceMetadataMismatch",
+                    "vssCoefficientCommitmentMaterial.transport numeric metadata must match the setup transport certificate",
+                    format!("setupPackage.vssCoefficientCommitmentMaterial.transport.{field_name}"),
+                )));
+            }
+            None => {
+                return Ok(Err(Refusal::new(
+                    "vssMaterialTransportReferenceMetadataMissing",
+                    format!("vssCoefficientCommitmentMaterial.transport.{field_name} is required"),
+                    format!("setupPackage.vssCoefficientCommitmentMaterial.transport.{field_name}"),
+                )));
+            }
+        }
+    }
+    for (field_name, expected_value) in [
+        ("fullObjectHash", expected_full_object_hash),
+        ("chunkRoot", expected_chunk_root),
+    ] {
+        let Some(observed_value) = transport_object.get(field_name).and_then(Value::as_str) else {
+            return Ok(Err(Refusal::new(
+                "vssMaterialTransportReferenceHashMissing",
+                format!("vssCoefficientCommitmentMaterial.transport.{field_name} is required"),
+                format!("setupPackage.vssCoefficientCommitmentMaterial.transport.{field_name}"),
+            )));
+        };
+        validate_hash_string(
+            observed_value,
+            &format!("vssCoefficientCommitmentMaterial.transport.{field_name}"),
+        )?;
         if observed_value != expected_value {
             return Ok(Err(Refusal::new(
-                reason_code,
-                message,
-                format!(
-                    "setupPackage.setupTransportCertificate.transportedObjects[0].{field_name}"
-                ),
+                "vssMaterialTransportReferenceHashMismatch",
+                "vssCoefficientCommitmentMaterial.transport hash metadata must match the setup transport certificate",
+                format!("setupPackage.vssCoefficientCommitmentMaterial.transport.{field_name}"),
             )));
         }
     }
@@ -19688,51 +21785,152 @@ fn transport_chunk_hashes(
     transport_certificate: &Value,
     expected_chunk_count: usize,
 ) -> CanonicalResult<Result<Vec<String>, Refusal>> {
-    let chunk_hash_values = match transport_certificate
-        .get("chunkHashes")
-        .and_then(Value::as_array)
-    {
+    transport_hashes_at(
+        transport_certificate,
+        "chunkHashes",
+        expected_chunk_count,
+        "setupPackage.setupTransportCertificate",
+    )
+}
+
+fn transport_hashes_at(
+    value: &Value,
+    field_name: &'static str,
+    expected_chunk_count: usize,
+    object_path: &str,
+) -> CanonicalResult<Result<Vec<String>, Refusal>> {
+    match transport_hash_array(value, field_name, object_path, Some(expected_chunk_count)) {
+        Ok(value) => Ok(Ok(value)),
+        Err(refusal) => Ok(Err(refusal)),
+    }
+}
+
+fn transport_hash_array(
+    value: &Value,
+    field_name: &'static str,
+    object_path: &str,
+    expected_chunk_count: Option<usize>,
+) -> Result<Vec<String>, Refusal> {
+    let chunk_hash_values = match value.get(field_name).and_then(Value::as_array) {
         Some(value) => value,
         None => {
-            return Ok(Err(Refusal::new(
+            return Err(Refusal::new(
                 "transportChunkHashesMissing",
-                "setupTransportCertificate.chunkHashes must list every setup transport chunk hash",
-                "setupPackage.setupTransportCertificate.chunkHashes",
-            )));
+                format!("{object_path}.{field_name} must list every setup transport chunk hash"),
+                format!("{object_path}.{field_name}"),
+            ));
         }
     };
-    if chunk_hash_values.len() != expected_chunk_count {
-        return Ok(Err(Refusal::new(
+    if let Some(expected_chunk_count) = expected_chunk_count
+        && chunk_hash_values.len() != expected_chunk_count
+    {
+        return Err(Refusal::new(
             "transportChunkHashCountMismatch",
-            "setupTransportCertificate.chunkHashes length must match chunkCount",
-            "setupPackage.setupTransportCertificate.chunkHashes",
-        )));
+            format!("{object_path}.{field_name} length must match chunkCount"),
+            format!("{object_path}.{field_name}"),
+        ));
     }
-    let mut chunk_hashes = Vec::with_capacity(expected_chunk_count);
+    let mut chunk_hashes = Vec::with_capacity(chunk_hash_values.len());
     let mut seen_chunk_hashes = BTreeSet::new();
     for (chunk_index, chunk_hash_value) in chunk_hash_values.iter().enumerate() {
         let Some(chunk_hash) = chunk_hash_value.as_str() else {
-            return Ok(Err(Refusal::new(
+            return Err(Refusal::new(
                 "transportChunkHashNotString",
-                "setupTransportCertificate.chunkHashes entries must be protocol hashes",
-                format!("setupPackage.setupTransportCertificate.chunkHashes[{chunk_index}]"),
-            )));
+                format!("{object_path}.{field_name} entries must be protocol hashes"),
+                format!("{object_path}.{field_name}[{chunk_index}]"),
+            ));
         };
-        validate_hash_string(
-            chunk_hash,
-            &format!("setupTransportCertificate.chunkHashes[{chunk_index}]"),
-        )?;
+        if chunk_hash.len() != 128
+            || !chunk_hash
+                .chars()
+                .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
+        {
+            return Err(Refusal::new(
+                "transportChunkHashInvalid",
+                format!("{object_path}.{field_name} entries must be protocol hashes"),
+                format!("{object_path}.{field_name}[{chunk_index}]"),
+            ));
+        }
         if !seen_chunk_hashes.insert(chunk_hash.to_string()) {
-            return Ok(Err(Refusal::new(
+            return Err(Refusal::new(
                 "transportChunkHashDuplicate",
-                "setupTransportCertificate.chunkHashes must not contain duplicate chunk hashes",
-                "setupPackage.setupTransportCertificate.chunkHashes",
-            )));
+                format!("{object_path}.{field_name} must not contain duplicate chunk hashes"),
+                format!("{object_path}.{field_name}"),
+            ));
         }
         chunk_hashes.push(chunk_hash.to_string());
     }
 
-    Ok(Ok(chunk_hashes))
+    Ok(chunk_hashes)
+}
+
+fn setup_transport_expected_hash_array(
+    value: &Value,
+    field_name: &str,
+    object_path: &str,
+) -> CanonicalResult<Vec<String>> {
+    let chunk_hash_values = value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{object_path}.{field_name} must list transported chunk hashes"),
+            )
+        })?;
+    let mut chunk_hashes = Vec::with_capacity(chunk_hash_values.len());
+    for (chunk_index, chunk_hash_value) in chunk_hash_values.iter().enumerate() {
+        let Some(chunk_hash) = chunk_hash_value.as_str() else {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{object_path}.{field_name}[{chunk_index}] must be a protocol hash"),
+            ));
+        };
+        validate_hash_string(
+            chunk_hash,
+            &format!("{object_path}.{field_name}[{chunk_index}]"),
+        )?;
+        chunk_hashes.push(chunk_hash.to_string());
+    }
+
+    Ok(chunk_hashes)
+}
+
+fn setup_transport_full_object_set_hash(
+    transported_objects: &[SetupTransportedObjectBinding],
+    total_byte_length: u64,
+    chunk_count: u64,
+    chunk_hashes: &[String],
+) -> CanonicalResult<String> {
+    let transported_object_values = transported_objects
+        .iter()
+        .map(|transported_object| {
+            json!({
+                "objectName": transported_object.object_name,
+                "objectRole": transported_object.object_role,
+                "objectRoot": transported_object.object_root,
+                "byteLength": transported_object.byte_length,
+                "chunkStartIndex": transported_object.chunk_start_index,
+                "chunkCount": transported_object.chunk_count,
+                "chunkRoot": transported_object.chunk_root,
+                "fullObjectHash": transported_object.full_object_hash,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    derive_protocol_hash(
+        "SetupTransportFullObjectSetHash",
+        &json!({
+            "objectType": "SetupTransportFullObjectSet",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+            "transportedObjects": transported_object_values,
+            "totalByteLength": total_byte_length,
+            "chunkCount": chunk_count,
+            "chunkHashes": chunk_hashes,
+        }),
+    )
 }
 
 fn setup_transport_chunk_manifest_root(
@@ -19823,6 +22021,139 @@ fn expect_transport_u64(
             format!("setupPackage.setupTransportCertificate.{field_name}"),
         )),
     }
+}
+
+fn expect_transport_string_at(
+    value: &Value,
+    field_name: &'static str,
+    expected_value: &str,
+    reason_code: &'static str,
+    message: &'static str,
+    object_path: &str,
+) -> Result<(), Refusal> {
+    match value.get(field_name).and_then(Value::as_str) {
+        Some(observed_value) if observed_value == expected_value => Ok(()),
+        Some(_) => Err(Refusal::new(
+            reason_code,
+            message,
+            format!("{object_path}.{field_name}"),
+        )),
+        None => Err(Refusal::new(
+            reason_code,
+            format!("{object_path}.{field_name} is required"),
+            format!("{object_path}.{field_name}"),
+        )),
+    }
+}
+
+fn require_transport_non_empty_string_at(
+    value: &Value,
+    field_name: &'static str,
+    reason_code: &'static str,
+    message: &'static str,
+    object_path: &str,
+) -> Result<String, Refusal> {
+    let Some(field_value) = value.get(field_name).and_then(Value::as_str) else {
+        return Err(Refusal::new(
+            reason_code,
+            message,
+            format!("{object_path}.{field_name}"),
+        ));
+    };
+    if field_value.is_empty() {
+        return Err(Refusal::new(
+            reason_code,
+            message,
+            format!("{object_path}.{field_name}"),
+        ));
+    }
+
+    Ok(field_value.to_string())
+}
+
+fn expect_transport_u64_at(
+    value: &Value,
+    field_name: &'static str,
+    expected_value: u64,
+    reason_code: &'static str,
+    message: &'static str,
+    object_path: &str,
+) -> Result<(), Refusal> {
+    match value.get(field_name).and_then(Value::as_u64) {
+        Some(observed_value) if observed_value == expected_value => Ok(()),
+        Some(_) => Err(Refusal::new(
+            reason_code,
+            message,
+            format!("{object_path}.{field_name}"),
+        )),
+        None => Err(Refusal::new(
+            reason_code,
+            format!("{object_path}.{field_name} is required"),
+            format!("{object_path}.{field_name}"),
+        )),
+    }
+}
+
+fn require_transport_u64_at(
+    value: &Value,
+    field_name: &'static str,
+    reason_code: &'static str,
+    message: &'static str,
+    object_path: &str,
+) -> Result<u64, Refusal> {
+    value
+        .get(field_name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| Refusal::new(reason_code, message, format!("{object_path}.{field_name}")))
+}
+
+fn require_positive_transport_u64_at(
+    value: &Value,
+    field_name: &'static str,
+    reason_code: &'static str,
+    message: &'static str,
+    object_path: &str,
+) -> Result<u64, Refusal> {
+    let field_value =
+        require_transport_u64_at(value, field_name, reason_code, message, object_path)?;
+    if field_value == 0 {
+        return Err(Refusal::new(
+            reason_code,
+            message,
+            format!("{object_path}.{field_name}"),
+        ));
+    }
+
+    Ok(field_value)
+}
+
+fn require_transport_hash_at(
+    value: &Value,
+    field_name: &'static str,
+    reason_code: &'static str,
+    message: &'static str,
+    object_path: &str,
+) -> Result<String, Refusal> {
+    let Some(hash) = value.get(field_name).and_then(Value::as_str) else {
+        return Err(Refusal::new(
+            reason_code,
+            message,
+            format!("{object_path}.{field_name}"),
+        ));
+    };
+    if hash.len() != 128
+        || !hash
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
+    {
+        return Err(Refusal::new(
+            reason_code,
+            format!("{object_path}.{field_name} must be a protocol hash"),
+            format!("{object_path}.{field_name}"),
+        ));
+    }
+
+    Ok(hash.to_string())
 }
 
 fn require_transport_hash<'a>(

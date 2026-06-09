@@ -1,3 +1,8 @@
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
 use num_bigint::BigUint;
 use serde_json::{Value, json};
 
@@ -20,6 +25,31 @@ pub(super) const SETUP_COMMITMENT_RANDOMNESS_WIDTH: usize = (2 * SETUP_COMMITMEN
 pub(super) const SETUP_COMMITMENT_ROW_COUNT: usize = SETUP_COMMITMENT_MODULE_RANK + 1;
 pub(super) const SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 1;
 pub(super) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
+
+static SETUP_COMMITMENT_MATRIX_NTT_CACHE: OnceLock<Mutex<SetupCommitmentMatrixNttCache>> =
+    OnceLock::new();
+
+#[derive(Debug, Default)]
+struct SetupCommitmentMatrixNttCache {
+    public_matrix_seed_hash: Option<String>,
+    entries: HashMap<SetupCommitmentMatrixNttKey, Vec<u64>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SetupCommitmentMatrixNttKey {
+    source_rns_limb_index: usize,
+    commitment_modulus_index: usize,
+    matrix_row_index: usize,
+    randomness_column_index: usize,
+    ring_degree: usize,
+    modulus: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StructuralMatrixPolynomial {
+    Zero,
+    One,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupCommitmentLimb {
@@ -143,7 +173,6 @@ pub(super) fn setup_coefficient_fits_commitment_modulus_product(coefficient: u12
     BigUint::from(coefficient) < setup_commitment_modulus_product()
 }
 
-#[cfg(test)]
 pub(super) fn setup_coefficients_fit_commitment_modulus_product(coefficients: &[u128]) -> bool {
     let commitment_modulus_product = setup_commitment_modulus_product();
     coefficients
@@ -456,7 +485,47 @@ pub(super) fn setup_commitment_root(commitment: &SetupCommitmentValue) -> Canoni
     )
 }
 
-#[cfg(test)]
+fn setup_commitment_chunk_root(
+    commitment: &SetupCommitmentValue,
+    commitment_root: &str,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "VssCoefficientCommitmentRoot",
+        &json!({
+            "objectType": "VssCoefficientCommitmentChunkRoot",
+            "objectVersion": 1,
+            "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
+            "commitmentRoot": commitment_root,
+            "commitmentLimbs": commitment.limbs.iter().map(|limb| {
+                json!({
+                    "commitmentModulusIndex": limb.commitment_modulus_index,
+                    "modulus": limb.modulus,
+                    "rowCoefficientHash512": limb.rows.iter().map(|row| {
+                        coefficient_vector_hash512(
+                            row,
+                            "sealed-lattice-bdlop-lnp-commitment/row-coefficients-v1",
+                        )
+                    }).collect::<Vec<_>>()
+                })
+            }).collect::<Vec<_>>()
+        }),
+    )
+}
+
+fn public_commitment_coefficient_vector_hash512(commitment: &SetupCommitmentValue) -> String {
+    let coefficients = commitment
+        .limbs
+        .iter()
+        .flat_map(|limb| limb.rows.iter())
+        .flat_map(|row| row.iter().copied())
+        .collect::<Vec<_>>();
+
+    coefficient_vector_hash512(
+        &coefficients,
+        "sealed-lattice-bdlop-lnp-commitment/public-commitment-coefficients-v1",
+    )
+}
+
 pub(super) fn setup_commitment_full_value(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
@@ -600,6 +669,62 @@ fn read_usize(value: &Value, field_name: &str) -> CanonicalResult<usize> {
         .map_err(|_| invalid_commitment_input(format!("{field_name} does not fit usize")))
 }
 
+fn read_unsigned_message_coefficients(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<u128>> {
+    let coefficient_values = value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_commitment_input(format!(
+                "{field_name} must be an array of unsigned integers"
+            ))
+        })?;
+    coefficient_values
+        .iter()
+        .enumerate()
+        .map(|(coefficient_index, coefficient_value)| {
+            coefficient_value.as_u64().map(u128::from).ok_or_else(|| {
+                invalid_commitment_input(format!(
+                    "{field_name}[{coefficient_index}] must be a non-negative integer"
+                ))
+            })
+        })
+        .collect()
+}
+
+fn read_randomness_by_column(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<i128>>> {
+    let column_values = value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_commitment_input(format!("{field_name} must be an array of columns"))
+        })?;
+    column_values
+        .iter()
+        .enumerate()
+        .map(|(column_index, column_value)| {
+            let coefficient_values = column_value.as_array().ok_or_else(|| {
+                invalid_commitment_input(format!(
+                    "{field_name}[{column_index}] must be an array of signed integers"
+                ))
+            })?;
+            coefficient_values
+                .iter()
+                .enumerate()
+                .map(|(coefficient_index, coefficient_value)| {
+                    coefficient_value.as_i64().map(i128::from).ok_or_else(|| {
+                        invalid_commitment_input(format!(
+                            "{field_name}[{column_index}][{coefficient_index}] must be a signed integer"
+                        ))
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn read_residue_row(value: &Value, ring_degree: usize, modulus: u64) -> CanonicalResult<Vec<u64>> {
     let row = value
         .as_array()
@@ -624,7 +749,6 @@ fn read_residue_row(value: &Value, ring_degree: usize, modulus: u64) -> Canonica
         .collect()
 }
 
-#[cfg(test)]
 fn compute_setup_commitment_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -640,63 +764,18 @@ fn compute_setup_commitment_for_degree(
     validate_message_coefficients(message_coefficients, None, ring_degree)?;
     validate_randomness_shape(randomness_by_column, ring_degree)?;
 
-    let mut limbs = Vec::with_capacity(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
-    for commitment_modulus_index in SETUP_COMMITMENT_MODULUS_LIMB_INDICES {
-        let modulus = DATA_PRIMES[commitment_modulus_index];
-        let message_residues = message_coefficients
-            .iter()
-            .map(|coefficient| u64::try_from(*coefficient % u128::from(modulus)))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| {
+    let limbs = compute_setup_commitment_limbs(
+        public_matrix_seed_hash,
+        source_rns_limb_index,
+        message_coefficients,
+        randomness_by_column,
+        ring_degree,
+        |coefficient, modulus| {
+            u64::try_from(*coefficient % u128::from(modulus)).map_err(|_| {
                 invalid_commitment_input("message coefficient residue does not fit u64")
-            })?;
-        let randomness_residues = randomness_by_column
-            .iter()
-            .map(|column| {
-                column
-                    .iter()
-                    .map(|coefficient| centered_integer_to_residue(*coefficient, modulus))
-                    .collect::<CanonicalResult<Vec<_>>>()
             })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-
-        let mut rows = Vec::with_capacity(SETUP_COMMITMENT_ROW_COUNT);
-        for matrix_row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
-            let mut row_accumulator = vec![0_u64; ring_degree];
-            for (randomness_column_index, randomness_column) in
-                randomness_residues.iter().enumerate()
-            {
-                let matrix_polynomial = setup_commitment_matrix_polynomial(
-                    public_matrix_seed_hash,
-                    source_rns_limb_index,
-                    commitment_modulus_index,
-                    matrix_row_index,
-                    randomness_column_index,
-                    ring_degree,
-                    modulus,
-                )?;
-                let product = negacyclic_product(&matrix_polynomial, randomness_column, modulus)?;
-                for (accumulated_value, product_value) in
-                    row_accumulator.iter_mut().zip(product.iter())
-                {
-                    *accumulated_value = add_mod_fast(*accumulated_value, *product_value, modulus);
-                }
-            }
-            if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK {
-                for (accumulated_value, message_value) in
-                    row_accumulator.iter_mut().zip(message_residues.iter())
-                {
-                    *accumulated_value = add_mod_fast(*accumulated_value, *message_value, modulus);
-                }
-            }
-            rows.push(row_accumulator);
-        }
-        limbs.push(SetupCommitmentLimb {
-            commitment_modulus_index,
-            modulus,
-            rows,
-        });
-    }
+        },
+    )?;
 
     Ok(SetupCommitmentValue {
         source_rns_limb_index,
@@ -722,60 +801,14 @@ fn compute_setup_signed_lifted_commitment_for_degree(
     validate_signed_message_coefficients(message_coefficients, ring_degree)?;
     validate_randomness_shape(randomness_by_column, ring_degree)?;
 
-    let mut limbs = Vec::with_capacity(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
-    for commitment_modulus_index in SETUP_COMMITMENT_MODULUS_LIMB_INDICES {
-        let modulus = DATA_PRIMES[commitment_modulus_index];
-        let message_residues = message_coefficients
-            .iter()
-            .map(|coefficient| centered_integer_to_residue(*coefficient, modulus))
-            .collect::<CanonicalResult<Vec<_>>>()?;
-        let randomness_residues = randomness_by_column
-            .iter()
-            .map(|column| {
-                column
-                    .iter()
-                    .map(|coefficient| centered_integer_to_residue(*coefficient, modulus))
-                    .collect::<CanonicalResult<Vec<_>>>()
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-
-        let mut rows = Vec::with_capacity(SETUP_COMMITMENT_ROW_COUNT);
-        for matrix_row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
-            let mut row_accumulator = vec![0_u64; ring_degree];
-            for (randomness_column_index, randomness_column) in
-                randomness_residues.iter().enumerate()
-            {
-                let matrix_polynomial = setup_commitment_matrix_polynomial(
-                    public_matrix_seed_hash,
-                    source_rns_limb_index,
-                    commitment_modulus_index,
-                    matrix_row_index,
-                    randomness_column_index,
-                    ring_degree,
-                    modulus,
-                )?;
-                let product = negacyclic_product(&matrix_polynomial, randomness_column, modulus)?;
-                for (accumulated_value, product_value) in
-                    row_accumulator.iter_mut().zip(product.iter())
-                {
-                    *accumulated_value = add_mod_fast(*accumulated_value, *product_value, modulus);
-                }
-            }
-            if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK {
-                for (accumulated_value, message_value) in
-                    row_accumulator.iter_mut().zip(message_residues.iter())
-                {
-                    *accumulated_value = add_mod_fast(*accumulated_value, *message_value, modulus);
-                }
-            }
-            rows.push(row_accumulator);
-        }
-        limbs.push(SetupCommitmentLimb {
-            commitment_modulus_index,
-            modulus,
-            rows,
-        });
-    }
+    let limbs = compute_setup_commitment_limbs(
+        public_matrix_seed_hash,
+        source_rns_limb_index,
+        message_coefficients,
+        randomness_by_column,
+        ring_degree,
+        |coefficient, modulus| centered_integer_to_residue(*coefficient, modulus),
+    )?;
 
     Ok(SetupCommitmentValue {
         source_rns_limb_index,
@@ -804,6 +837,152 @@ pub(super) fn compute_setup_signed_lifted_commitment(
         randomness_by_column,
         ring_degree,
     )
+}
+
+fn compute_setup_commitment_limbs<MessageCoefficient>(
+    public_matrix_seed_hash: &str,
+    source_rns_limb_index: usize,
+    message_coefficients: &[MessageCoefficient],
+    randomness_by_column: &[Vec<i128>],
+    ring_degree: usize,
+    message_residue: impl Fn(&MessageCoefficient, u64) -> CanonicalResult<u64>,
+) -> CanonicalResult<Vec<SetupCommitmentLimb>> {
+    let mut limbs = Vec::with_capacity(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
+    for commitment_modulus_index in SETUP_COMMITMENT_MODULUS_LIMB_INDICES {
+        let modulus = DATA_PRIMES[commitment_modulus_index];
+        let message_residues = message_coefficients
+            .iter()
+            .map(|coefficient| message_residue(coefficient, modulus))
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let randomness_residues = randomness_by_column
+            .iter()
+            .map(|column| {
+                column
+                    .iter()
+                    .map(|coefficient| centered_integer_to_residue(*coefficient, modulus))
+                    .collect::<CanonicalResult<Vec<_>>>()
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let mut randomness_ntts: Vec<Option<Vec<u64>>> =
+            vec![None; SETUP_COMMITMENT_RANDOMNESS_WIDTH];
+        let mut rows = Vec::with_capacity(SETUP_COMMITMENT_ROW_COUNT);
+        for matrix_row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
+            let mut row_ntt = vec![0_u64; ring_degree];
+            let mut has_sampled_matrix_product = false;
+            for randomness_column_index in 0..SETUP_COMMITMENT_RANDOMNESS_WIDTH {
+                if structural_matrix_polynomial_kind(matrix_row_index, randomness_column_index)
+                    .is_some()
+                {
+                    continue;
+                }
+                if randomness_ntts[randomness_column_index].is_none() {
+                    randomness_ntts[randomness_column_index] = Some(forward_negacyclic_ntt(
+                        &randomness_residues[randomness_column_index],
+                        modulus,
+                    )?);
+                }
+                let matrix_ntt = setup_commitment_matrix_ntt(
+                    public_matrix_seed_hash,
+                    source_rns_limb_index,
+                    commitment_modulus_index,
+                    matrix_row_index,
+                    randomness_column_index,
+                    ring_degree,
+                    modulus,
+                )?;
+                let randomness_ntt = randomness_ntts[randomness_column_index]
+                    .as_ref()
+                    .expect("randomness NTT was populated before use");
+                for ((accumulated_value, matrix_value), randomness_value) in row_ntt
+                    .iter_mut()
+                    .zip(matrix_ntt.iter())
+                    .zip(randomness_ntt.iter())
+                {
+                    *accumulated_value = add_mod_fast(
+                        *accumulated_value,
+                        mul_mod_fast(*matrix_value, *randomness_value, modulus),
+                        modulus,
+                    );
+                }
+                has_sampled_matrix_product = true;
+            }
+
+            let mut row_accumulator = if has_sampled_matrix_product {
+                inverse_negacyclic_ntt(&row_ntt, modulus)?
+            } else {
+                vec![0_u64; ring_degree]
+            };
+            for (randomness_column_index, randomness_column) in
+                randomness_residues.iter().enumerate()
+            {
+                match structural_matrix_polynomial_kind(matrix_row_index, randomness_column_index) {
+                    Some(StructuralMatrixPolynomial::One) => {
+                        for (accumulated_value, randomness_value) in
+                            row_accumulator.iter_mut().zip(randomness_column.iter())
+                        {
+                            *accumulated_value =
+                                add_mod_fast(*accumulated_value, *randomness_value, modulus);
+                        }
+                    }
+                    Some(StructuralMatrixPolynomial::Zero) | None => {}
+                }
+            }
+            if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK {
+                for (accumulated_value, message_value) in
+                    row_accumulator.iter_mut().zip(message_residues.iter())
+                {
+                    *accumulated_value = add_mod_fast(*accumulated_value, *message_value, modulus);
+                }
+            }
+            rows.push(row_accumulator);
+        }
+        limbs.push(SetupCommitmentLimb {
+            commitment_modulus_index,
+            modulus,
+            rows,
+        });
+    }
+
+    Ok(limbs)
+}
+
+pub(crate) fn compute_setup_commitment_from_opening_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_commitment_request_fields(request)?;
+    let public_matrix_seed_hash = request
+        .get("publicMatrixSeedHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_commitment_input("publicMatrixSeedHash must be a string"))?;
+    let source_rns_limb_index = read_usize(request, "sourceRnsLimbIndex")?;
+    let source_message_modulus = read_u64(request, "sourceMessageModulus")?;
+    let shamir_coefficient_index = read_u64(request, "shamirCoefficientIndex")?;
+    let ring_degree = read_usize(request, "ringDegree")?;
+    let message_coefficients = read_unsigned_message_coefficients(request, "messageCoefficients")?;
+    let randomness_by_column = read_randomness_by_column(request, "randomnessByColumn")?;
+
+    let commitment = compute_setup_commitment_for_degree(
+        public_matrix_seed_hash,
+        source_rns_limb_index,
+        source_message_modulus,
+        shamir_coefficient_index,
+        &message_coefficients,
+        &randomness_by_column,
+        ring_degree,
+    )?;
+    let commitment_root = setup_commitment_root(&commitment)?;
+    let commitment_chunk_root = setup_commitment_chunk_root(&commitment, &commitment_root)?;
+    let coefficient_vector_hash = public_commitment_coefficient_vector_hash512(&commitment);
+
+    Ok(json!({
+        "ok": true,
+        "operation": "computeSetupCommitmentFromOpening",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "commitment": setup_commitment_full_value(&commitment),
+        "commitmentRoot": commitment_root,
+        "commitmentChunkRoot": commitment_chunk_root,
+        "coefficientVectorHash512": coefficient_vector_hash,
+    }))
 }
 
 #[cfg(test)]
@@ -850,6 +1029,62 @@ fn setup_commitment_matrix_polynomial(
     }
 
     Ok(coefficients)
+}
+
+fn setup_commitment_matrix_ntt(
+    public_matrix_seed_hash: &str,
+    source_rns_limb_index: usize,
+    commitment_modulus_index: usize,
+    matrix_row_index: usize,
+    randomness_column_index: usize,
+    ring_degree: usize,
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    let key = SetupCommitmentMatrixNttKey {
+        source_rns_limb_index,
+        commitment_modulus_index,
+        matrix_row_index,
+        randomness_column_index,
+        ring_degree,
+        modulus,
+    };
+    let cache_mutex = SETUP_COMMITMENT_MATRIX_NTT_CACHE
+        .get_or_init(|| Mutex::new(SetupCommitmentMatrixNttCache::default()));
+    {
+        let mut cache = cache_mutex
+            .lock()
+            .map_err(|_| invalid_commitment_input("setup commitment matrix cache poisoned"))?;
+        if cache.public_matrix_seed_hash.as_deref() != Some(public_matrix_seed_hash) {
+            cache.public_matrix_seed_hash = Some(public_matrix_seed_hash.to_string());
+            cache.entries.clear();
+        }
+        if let Some(cached_ntt) = cache.entries.get(&key) {
+            return Ok(cached_ntt.clone());
+        }
+    }
+
+    let matrix_polynomial = setup_commitment_matrix_polynomial(
+        public_matrix_seed_hash,
+        source_rns_limb_index,
+        commitment_modulus_index,
+        matrix_row_index,
+        randomness_column_index,
+        ring_degree,
+        modulus,
+    )?;
+    let matrix_ntt = forward_negacyclic_ntt(&matrix_polynomial, modulus)?;
+    {
+        let mut cache = cache_mutex
+            .lock()
+            .map_err(|_| invalid_commitment_input("setup commitment matrix cache poisoned"))?;
+        if cache.public_matrix_seed_hash.as_deref() != Some(public_matrix_seed_hash) {
+            cache.public_matrix_seed_hash = Some(public_matrix_seed_hash.to_string());
+            cache.entries.clear();
+        }
+        cache.entries.insert(key, matrix_ntt.clone());
+    }
+
+    Ok(matrix_ntt)
 }
 
 fn setup_commitment_matrix_coefficient(
@@ -908,6 +1143,33 @@ fn structural_matrix_coefficient(
         return Some(u64::from(
             is_message_blinding_column && ring_coefficient_position == 0,
         ));
+    }
+
+    None
+}
+
+fn structural_matrix_polynomial_kind(
+    matrix_row_index: usize,
+    randomness_column_index: usize,
+) -> Option<StructuralMatrixPolynomial> {
+    if matrix_row_index < SETUP_COMMITMENT_MODULE_RANK
+        && randomness_column_index > SETUP_COMMITMENT_MODULE_RANK
+    {
+        let identity_column_index = randomness_column_index - SETUP_COMMITMENT_MODULE_RANK - 1;
+        if identity_column_index == matrix_row_index {
+            return Some(StructuralMatrixPolynomial::One);
+        }
+
+        return Some(StructuralMatrixPolynomial::Zero);
+    }
+    if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK
+        && randomness_column_index >= SETUP_COMMITMENT_MODULE_RANK
+    {
+        if randomness_column_index == SETUP_COMMITMENT_MODULE_RANK {
+            return Some(StructuralMatrixPolynomial::One);
+        }
+
+        return Some(StructuralMatrixPolynomial::Zero);
     }
 
     None
@@ -976,24 +1238,6 @@ fn setup_commitment_matrix_entry_hash(
     )
 }
 
-fn negacyclic_product(left: &[u64], right: &[u64], modulus: u64) -> CanonicalResult<Vec<u64>> {
-    if left.len() != right.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "negacyclic product inputs must have the same length",
-        ));
-    }
-    let left_ntt = forward_negacyclic_ntt(left, modulus)?;
-    let right_ntt = forward_negacyclic_ntt(right, modulus)?;
-    let product_ntt = left_ntt
-        .iter()
-        .zip(right_ntt.iter())
-        .map(|(left_value, right_value)| mul_mod_fast(*left_value, *right_value, modulus))
-        .collect::<Vec<_>>();
-
-    inverse_negacyclic_ntt(&product_ntt, modulus)
-}
-
 fn centered_integer_to_residue(value: i128, modulus: u64) -> CanonicalResult<u64> {
     let modulus_wide = i128::from(modulus);
     let residue = value.rem_euclid(modulus_wide);
@@ -1001,7 +1245,6 @@ fn centered_integer_to_residue(value: i128, modulus: u64) -> CanonicalResult<u64
         .map_err(|_| invalid_commitment_input("centered residue does not fit u64"))
 }
 
-#[cfg(test)]
 fn validate_message_coefficients(
     message_coefficients: &[u128],
     exclusive_bound: Option<u128>,
@@ -1213,6 +1456,34 @@ fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
     Ok(())
 }
 
+fn reject_unexpected_commitment_request_fields(request: &Value) -> CanonicalResult<()> {
+    let Some(object) = request.as_object() else {
+        return Err(invalid_commitment_input(
+            "setup commitment request must be an object",
+        ));
+    };
+    for field_name in object.keys() {
+        if ![
+            "command",
+            "publicMatrixSeedHash",
+            "sourceRnsLimbIndex",
+            "sourceMessageModulus",
+            "shamirCoefficientIndex",
+            "messageCoefficients",
+            "randomnessByColumn",
+            "ringDegree",
+        ]
+        .contains(&field_name.as_str())
+        {
+            return Err(invalid_commitment_input(format!(
+                "setup commitment request contains unexpected field {field_name}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
@@ -1220,10 +1491,12 @@ fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use num_bigint::BigUint;
+    use serde_json::json;
 
     use super::{
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
+        compute_setup_commitment_from_opening_request,
         compute_setup_signed_lifted_commitment_for_degree,
         setup_coefficient_fits_commitment_modulus_product, setup_commitment_profile_hash,
         setup_commitment_profile_value, setup_commitment_root, verify_setup_commitment_opening,
@@ -1320,6 +1593,71 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn commitment_command_computes_canonical_roots() -> CanonicalResult<()> {
+        let public_matrix_seed_hash = valid_hash('e');
+        let message = message_coefficients();
+        let randomness = randomness_columns(1);
+        let response = compute_setup_commitment_from_opening_request(&json!({
+            "command": "ComputeSetupCommitmentFromOpening",
+            "publicMatrixSeedHash": public_matrix_seed_hash,
+            "sourceRnsLimbIndex": 0,
+            "sourceMessageModulus": DATA_PRIMES[0],
+            "shamirCoefficientIndex": 1,
+            "messageCoefficients": message,
+            "randomnessByColumn": randomness,
+            "ringDegree": TEST_RING_DEGREE,
+        }))?;
+
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["operation"], "computeSetupCommitmentFromOpening");
+        assert_eq!(
+            response["commitmentRoot"]
+                .as_str()
+                .expect("commitment root")
+                .len(),
+            128
+        );
+        assert_eq!(
+            response["commitmentChunkRoot"]
+                .as_str()
+                .expect("commitment chunk root")
+                .len(),
+            128
+        );
+        assert_eq!(
+            response["coefficientVectorHash512"]
+                .as_str()
+                .expect("coefficient vector hash")
+                .len(),
+            128
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn commitment_command_rejects_extra_fields_and_wrong_source_prime() {
+        let public_matrix_seed_hash = valid_hash('f');
+        let valid_request = json!({
+            "command": "ComputeSetupCommitmentFromOpening",
+            "publicMatrixSeedHash": public_matrix_seed_hash,
+            "sourceRnsLimbIndex": 0,
+            "sourceMessageModulus": DATA_PRIMES[0],
+            "shamirCoefficientIndex": 1,
+            "messageCoefficients": message_coefficients(),
+            "randomnessByColumn": randomness_columns(1),
+            "ringDegree": TEST_RING_DEGREE,
+        });
+        let mut extra_field_request = valid_request.clone();
+        extra_field_request["setupSeed"] = json!("forbidden");
+        assert!(compute_setup_commitment_from_opening_request(&extra_field_request).is_err());
+
+        let mut wrong_prime_request = valid_request;
+        wrong_prime_request["sourceMessageModulus"] = json!(DATA_PRIMES[1]);
+        assert!(compute_setup_commitment_from_opening_request(&wrong_prime_request).is_err());
     }
 
     #[test]

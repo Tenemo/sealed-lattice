@@ -70,6 +70,32 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly publicMatrixSeedHash: ProtocolHash;
+        readonly bgvPublicA: Readonly<
+            JsonRecord & {
+                readonly objectType: 'BgvPublicAPolynomial';
+                readonly objectVersion: 1;
+                readonly setupProfileId: 'CollectiveBgvSetup-v1';
+                readonly publicMatrixSeedHash: ProtocolHash;
+                readonly publicPolynomialRoot: ProtocolHash;
+            }
+        >;
+        readonly publicMatrices: Readonly<
+            JsonRecord & {
+                readonly objectType: 'SetupPublicMatrixMaterial';
+                readonly objectVersion: 1;
+                readonly setupProfileId: 'CollectiveBgvSetup-v1';
+                readonly publicMatrixSeedHash: ProtocolHash;
+                readonly publicMatricesRoot: ProtocolHash;
+            }
+        >;
+        readonly crpRoots: Readonly<{
+            readonly publicKeyCrpRoot: ProtocolHash;
+            readonly relinearizationCrpRoot: ProtocolHash;
+            readonly galoisKeyCrpRoot: ProtocolHash;
+            readonly commitmentMatrixCrpRoot: ProtocolHash;
+            readonly proofMatrixCrpRoot: ProtocolHash;
+        }>;
+        readonly status: 'deterministic-public-derivations-bound';
         readonly publicDerivationRoot: ProtocolHash;
     }
 >;
@@ -127,6 +153,14 @@ const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
         throw new TypeError(`${fieldName} must be a positive safe integer.`);
     }
+};
+
+const assertJsonRecord = (value: unknown, fieldName: string): JsonRecord => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new TypeError(`${fieldName} must be an object.`);
+    }
+
+    return value as JsonRecord;
 };
 
 const assertRevealHex = (value: string, fieldName: string): void => {
@@ -314,6 +348,108 @@ const validateFullRosterRecords = <
     return sortedRecords;
 };
 
+const assertPublicDerivationsMatchKernelShape = (
+    publicDerivations: SetupCommonRandomnessPublicDerivations,
+    publicMatrixSeedHash: ProtocolHash,
+): void => {
+    if (publicDerivations.objectType !== 'SetupPublicDerivations') {
+        throw new Error(
+            'publicDerivations.objectType must be SetupPublicDerivations.',
+        );
+    }
+    if (publicDerivations.objectVersion !== 1) {
+        throw new Error('publicDerivations.objectVersion must be 1.');
+    }
+    if (publicDerivations.setupProfileId !== 'CollectiveBgvSetup-v1') {
+        throw new Error(
+            'publicDerivations.setupProfileId must be CollectiveBgvSetup-v1.',
+        );
+    }
+    if (publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash) {
+        throw new Error(
+            'publicDerivations.publicMatrixSeedHash must match the derived public matrix seed hash.',
+        );
+    }
+    if (publicDerivations.status !== 'deterministic-public-derivations-bound') {
+        throw new Error(
+            'publicDerivations.status must be deterministic-public-derivations-bound.',
+        );
+    }
+
+    const bgvPublicA = assertJsonRecord(
+        publicDerivations.bgvPublicA,
+        'publicDerivations.bgvPublicA',
+    );
+    if (
+        bgvPublicA.objectType !== 'BgvPublicAPolynomial' ||
+        bgvPublicA.objectVersion !== 1 ||
+        bgvPublicA.setupProfileId !== 'CollectiveBgvSetup-v1' ||
+        bgvPublicA.publicMatrixSeedHash !== publicMatrixSeedHash
+    ) {
+        throw new Error(
+            'publicDerivations.bgvPublicA must match the accepted public-a derivation profile.',
+        );
+    }
+    assertProtocolHash(
+        bgvPublicA.publicPolynomialRoot as string,
+        'publicDerivations.bgvPublicA.publicPolynomialRoot',
+    );
+
+    const publicMatrices = assertJsonRecord(
+        publicDerivations.publicMatrices,
+        'publicDerivations.publicMatrices',
+    );
+    if (
+        publicMatrices.objectType !== 'SetupPublicMatrixMaterial' ||
+        publicMatrices.objectVersion !== 1 ||
+        publicMatrices.setupProfileId !== 'CollectiveBgvSetup-v1' ||
+        publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash ||
+        publicMatrices.materializationStatus !==
+            'deterministic-entry-streams-bound'
+    ) {
+        throw new Error(
+            'publicDerivations.publicMatrices must match the accepted setup public matrix profile.',
+        );
+    }
+    assertProtocolHash(
+        publicMatrices.publicMatricesRoot as string,
+        'publicDerivations.publicMatrices.publicMatricesRoot',
+    );
+
+    const crpRoots = assertJsonRecord(
+        publicDerivations.crpRoots,
+        'publicDerivations.crpRoots',
+    );
+    for (const fieldName of [
+        'publicKeyCrpRoot',
+        'relinearizationCrpRoot',
+        'galoisKeyCrpRoot',
+        'commitmentMatrixCrpRoot',
+        'proofMatrixCrpRoot',
+    ] as const) {
+        assertProtocolHash(
+            crpRoots[fieldName] as string,
+            `publicDerivations.crpRoots.${fieldName}`,
+        );
+    }
+
+    assertProtocolHash(
+        publicDerivations.publicDerivationRoot,
+        'publicDerivations.publicDerivationRoot',
+    );
+    const expectedPublicDerivationRoot = deriveProtocolHash(
+        'SetupPublicDerivationRoot',
+        withoutHashField(publicDerivations, 'publicDerivationRoot'),
+    );
+    if (
+        publicDerivations.publicDerivationRoot !== expectedPublicDerivationRoot
+    ) {
+        throw new Error(
+            'publicDerivations.publicDerivationRoot does not match the canonical payload.',
+        );
+    }
+};
+
 export const createCommonRandomnessReveal = (
     input: CommonRandomnessRevealInput,
 ): CommonRandomnessReveal => {
@@ -427,11 +563,10 @@ export const createSetupCommonRandomness = (
     );
     const publicDerivations =
         input.derivePublicDerivations(publicMatrixSeedHash);
-    if (publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash) {
-        throw new Error(
-            'publicDerivations.publicMatrixSeedHash must match the derived public matrix seed hash.',
-        );
-    }
+    assertPublicDerivationsMatchKernelShape(
+        publicDerivations,
+        publicMatrixSeedHash,
+    );
 
     const commonRandomnessWithoutRoot = {
         objectType: 'SetupCommonRandomness',

@@ -2,6 +2,14 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    assertSetupProofChallenge,
+    optionalSetupProofTboxZ34Metadata,
+    transportSetupProofMaterials,
+    type SetupProofChallenge,
+    type SetupProofTboxZ34Metadata,
+    type TransportedSetupProofMaterialSet,
+} from './setup-proof-material-transport.js';
+import {
     setupCommitmentProfileId,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentRecord,
@@ -14,6 +22,8 @@ type JsonRecord = Record<string, unknown>;
 
 export const setupProofProfileId = 'SealedLattice-LNP-SetupProof-v1';
 export const sameSecretProofFamily = 'same-secret-consistency';
+const sameSecretProofBytesHashDomain =
+    'sealed-lattice/setup/same-secret/lnp-proof-bytes-v1';
 export const sameSecretProofVerificationStatus =
     'lnp-proof-verification-pending';
 export const sameSecretLnpProofVerificationStatus =
@@ -121,10 +131,10 @@ export type SameSecretProofMaterial = Readonly<
         readonly statementHash: ProtocolHash;
         readonly relationCommitmentHash: ProtocolHash;
         readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: number;
+        readonly challenge: SetupProofChallenge;
         readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
-    }
+    } & Partial<SetupProofTboxZ34Metadata>
 >;
 
 export type SameSecretProofRecord = Readonly<
@@ -148,11 +158,11 @@ export type SameSecretProofRecord = Readonly<
             readonly statementHash: ProtocolHash;
             readonly relationCommitmentHash: ProtocolHash;
             readonly tboxCommitmentPrefixHash: ProtocolHash;
-            readonly challenge: number;
+            readonly challenge: SetupProofChallenge;
             readonly proofSizeBytes: number;
             readonly proofBytesHash: ProtocolHash;
             readonly sameSecretProofRoot: ProtocolHash;
-        }
+        } & Partial<SetupProofTboxZ34Metadata>
 >;
 
 export type SameSecretProofRootReference = Readonly<{
@@ -202,6 +212,18 @@ export type SameSecretProofSetInput = {
     readonly sameSecretTboxParameterProfileHash: ProtocolHash;
     readonly proofMaterials: readonly SameSecretProofMaterial[];
 };
+
+export type TransportedSameSecretProofMaterialSet = Readonly<
+    TransportedSetupProofMaterialSet & {
+        readonly objectType: 'SetupTransportedSameSecretProofMaterialSet';
+        readonly proofFamily: typeof sameSecretProofFamily;
+    }
+>;
+
+export type BinaryChunkedSameSecretProofMaterialTransport = Readonly<{
+    readonly proofMaterials: readonly SameSecretProofMaterial[];
+    readonly transportedSameSecretProofMaterial: TransportedSameSecretProofMaterialSet;
+}>;
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
@@ -372,7 +394,8 @@ const validateSameSecretProofMaterial = (
         material.tboxCommitmentPrefixHash,
         `${fieldName}.tboxCommitmentPrefixHash`,
     );
-    assertNonNegativeSafeInteger(material.challenge, `${fieldName}.challenge`);
+    assertSetupProofChallenge(material.challenge, `${fieldName}.challenge`);
+    optionalSetupProofTboxZ34Metadata(material, fieldName);
     assertPositiveSafeInteger(
         material.proofSizeBytes,
         `${fieldName}.proofSizeBytes`,
@@ -878,6 +901,10 @@ export const createSameSecretProofSet = (
                 relationCommitmentHash: proofMaterial.relationCommitmentHash,
                 tboxCommitmentPrefixHash:
                     proofMaterial.tboxCommitmentPrefixHash,
+                ...optionalSetupProofTboxZ34Metadata(
+                    proofMaterial,
+                    `sameSecretProofMaterials.${String(expectedRosterPosition)}`,
+                ),
                 challenge: proofMaterial.challenge,
                 proofSizeBytes: proofMaterial.proofSizeBytes,
                 proofBytesHash: proofMaterial.proofBytesHash,
@@ -933,4 +960,21 @@ export const createSameSecretProofSet = (
             proofSetWithoutRoot,
         ),
     } satisfies SameSecretProofSet;
+};
+
+export const createBinaryChunkedSameSecretProofMaterialTransport = (
+    proofMaterials: readonly SameSecretProofMaterial[],
+): BinaryChunkedSameSecretProofMaterialTransport => {
+    const transport = transportSetupProofMaterials(proofMaterials, {
+        proofFamily: sameSecretProofFamily,
+        proofBytesHashDomain: sameSecretProofBytesHashDomain,
+        transportedSetObjectType: 'SetupTransportedSameSecretProofMaterialSet',
+        transportedObjectType: 'SetupTransportedSameSecretProofMaterial',
+    });
+
+    return {
+        proofMaterials: transport.proofMaterials,
+        transportedSameSecretProofMaterial:
+            transport.transportedProofMaterial as TransportedSameSecretProofMaterialSet,
+    };
 };

@@ -158,39 +158,93 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
         const setupPackage = { objectType: 'SetupPackage' };
+        const hashOne = '1'.repeat(128);
+        const hashTwo = '2'.repeat(128);
+        const hashThree = '3'.repeat(128);
+        const emptyTransportChunk = { chunkIndex: 0, bytesHex: '00' };
         const transportedVssCoefficientCommitmentMaterial = {
-            objectType: 'SetupTransportedVssCoefficientCommitmentMaterialSet',
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            binaryFormat:
+                'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+            chunkSizeBytes: 1_048_576,
+            chunkCount: 1,
+            totalByteLength: 1,
+            fullObjectHash: hashOne,
+            chunkHashes: [hashOne],
+            chunkRoot: hashOne,
+            chunks: [emptyTransportChunk],
             marker: 'vss-material',
-        };
+        } as const;
         const transportedSameSecretProofMaterial = {
             objectType: 'SetupTransportedSameSecretProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamily: 'same-secret',
+            proofMaterials: [],
             marker: 'same-secret-proof',
-        };
+        } as const;
+        const transportedPublicKeyShareMaterial = {
+            objectType: 'SetupTransportedPublicKeyShareMaterial',
+            objectVersion: 1,
+            binaryFormat: 'sealed-lattice-public-key-share-material-binary-v1',
+            chunkSizeBytes: 1_048_576,
+            chunkCount: 1,
+            totalByteLength: 1,
+            fullObjectHash: hashTwo,
+            chunkHashes: [hashTwo],
+            chunkRoot: hashTwo,
+            chunks: [emptyTransportChunk],
+            marker: 'public-key-share-material',
+        } as const;
         const transportedPublicKeyShareProofMaterial = {
             objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamily: 'public-key-share',
+            proofMaterials: [],
             marker: 'public-key-proof',
-        };
+        } as const;
         const transportedEvaluationKeyShareProofMaterial = {
             objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamily: 'evaluation-key-share',
+            proofMaterials: [],
             marker: 'evaluation-key-proof',
-        };
+        } as const;
         const transportedEvaluationKeyShareComponentMaterial = {
             objectType:
                 'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            componentMaterials: [],
             marker: 'evaluation-key-component-material',
-        };
+        } as const;
         const transportedPublicEvaluationKeyMaterial = {
             objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            materialEncoding:
+                'sealed-lattice-public-evaluation-key-material-binary-v1',
+            publicEvaluationKeyMaterials: [],
+            componentMaterials: [],
             marker: 'public-evaluation-key-material',
-        };
+        } as const;
 
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
-            expectedSetupPackageHash: '1'.repeat(128),
-            expectedManifestHash: '2'.repeat(128),
-            expectedRosterHash: '3'.repeat(128),
+            expectedSetupPackageHash: hashOne,
+            expectedManifestHash: hashTwo,
+            expectedRosterHash: hashThree,
             transportedVssCoefficientCommitmentMaterial,
             transportedSameSecretProofMaterial,
+            transportedPublicKeyShareMaterial,
             transportedPublicKeyShareProofMaterial,
             transportedEvaluationKeyShareProofMaterial,
             transportedEvaluationKeyShareComponentMaterial,
@@ -202,11 +256,12 @@ describe('transcript-core kernel in Node', () => {
             {
                 command: 'VerifyCollectiveBgvSetup',
                 setupPackage,
-                expectedSetupPackageHash: '1'.repeat(128),
-                expectedManifestHash: '2'.repeat(128),
-                expectedRosterHash: '3'.repeat(128),
+                expectedSetupPackageHash: hashOne,
+                expectedManifestHash: hashTwo,
+                expectedRosterHash: hashThree,
                 transportedVssCoefficientCommitmentMaterial,
                 transportedSameSecretProofMaterial,
+                transportedPublicKeyShareMaterial,
                 transportedPublicKeyShareProofMaterial,
                 transportedEvaluationKeyShareProofMaterial,
                 transportedEvaluationKeyShareComponentMaterial,

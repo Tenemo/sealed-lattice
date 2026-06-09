@@ -26,8 +26,12 @@ enum TranscriptCoreCommand {
     GenerateSameSecretLnpProof,
     GeneratePublicKeyShareLnpProof,
     GenerateEvaluationKeyShareLnpProof,
+    ComputeSetupCommitmentFromOpening,
     DeriveThresholdShareCommitments,
     DeriveThresholdShareCommitmentsFromTransport,
+    BeginThresholdShareCommitmentsFromTransportStream,
+    AbsorbThresholdShareCommitmentsFromTransportStreamChunk,
+    FinishThresholdShareCommitmentsFromTransportStream,
     VerifyLocalTrusteeSetupState,
     GenerateBgvEvaluationKeyMaterial,
     EncodeBgvBatchPlaintext,
@@ -210,8 +214,12 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateSameSecretLnpProof
         | TranscriptCoreCommand::GeneratePublicKeyShareLnpProof
         | TranscriptCoreCommand::GenerateEvaluationKeyShareLnpProof
+        | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
         | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
+        | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
+        | TranscriptCoreCommand::AbsorbThresholdShareCommitmentsFromTransportStreamChunk
+        | TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
         | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
@@ -273,11 +281,25 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::GenerateEvaluationKeyShareLnpProof => {
             crate::bgv::commands::generate_evaluation_key_share_lnp_proof(request)
         }
+        TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
+            crate::bgv::commands::compute_setup_commitment_from_opening(request)
+        }
         TranscriptCoreCommand::DeriveThresholdShareCommitments => {
             crate::bgv::commands::derive_threshold_share_commitments(request)
         }
         TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport => {
             crate::bgv::commands::derive_threshold_share_commitments_from_transport(request)
+        }
+        TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream => {
+            crate::bgv::commands::begin_threshold_share_commitments_from_transport_stream(request)
+        }
+        TranscriptCoreCommand::AbsorbThresholdShareCommitmentsFromTransportStreamChunk => {
+            crate::bgv::commands::absorb_threshold_share_commitments_from_transport_stream_chunk(
+                request,
+            )
+        }
+        TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream => {
+            crate::bgv::commands::finish_threshold_share_commitments_from_transport_stream(request)
         }
         TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
             crate::bgv::commands::verify_local_trustee_setup_state(request)

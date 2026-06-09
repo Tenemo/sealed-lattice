@@ -32,6 +32,7 @@ pub(crate) use accepted_setup::{
     derive_collective_bgv_setup_public_derivations_from_request,
     describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
 };
+pub(crate) use commitment::compute_setup_commitment_from_opening_request;
 pub(crate) use evaluation_key_share_proof::generate_evaluation_key_share_lnp_proof_from_request;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
@@ -47,8 +48,13 @@ use public_evaluation_key_material::{
 };
 pub(crate) use public_key_share_proof::generate_public_key_share_lnp_proof_from_request;
 pub(crate) use same_secret_proof::generate_same_secret_lnp_proof_from_request;
-pub(crate) use threshold_share_commitments::derive_threshold_share_commitments_from_request;
-pub(crate) use threshold_share_commitments::derive_threshold_share_commitments_from_transport_request;
+pub(crate) use threshold_share_commitments::{
+    absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
+    begin_threshold_share_commitment_transport_derivation_stream_request,
+    derive_threshold_share_commitments_from_request,
+    derive_threshold_share_commitments_from_transport_request,
+    finish_threshold_share_commitment_transport_derivation_stream_request,
+};
 
 use sampling::{
     dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,

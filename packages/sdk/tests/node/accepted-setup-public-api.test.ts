@@ -69,6 +69,9 @@ type PublicSetupApi = {
         input: unknown,
     ) => Promise<Record<string, unknown>>;
     readonly createSetupPackage: (input: unknown) => Record<string, unknown>;
+    readonly createSetupPackageVerificationInput: (
+        input: unknown,
+    ) => Record<string, unknown>;
     readonly createSetupPhaseRecord: (
         input: unknown,
     ) => Record<string, unknown>;
@@ -1165,14 +1168,16 @@ describe('accepted setup public package API in Node', () => {
             kernel,
             'key-record-public-matrix-seed',
         );
-        const publicKeyCrpRoot = hashFromKernel(
-            kernel,
-            'key-record-public-key-crp',
-        );
-        const publicAPolynomialRoot = hashFromKernel(
-            kernel,
-            'key-record-public-a-polynomial',
-        );
+        const publicDerivations =
+            kernel.deriveCollectiveBgvSetupPublicDerivations({
+                publicMatrixSeedHash,
+            });
+        const publicKeyCrpRoot = publicDerivations.crpRoots.publicKeyCrpRoot;
+        const publicAPolynomialRoot =
+            publicDerivations.bgvPublicA.publicPolynomialRoot;
+        const relinearizationCrpRoot =
+            publicDerivations.crpRoots.relinearizationCrpRoot;
+        const galoisKeyCrpRoot = publicDerivations.crpRoots.galoisKeyCrpRoot;
         const vssCoefficientCommitmentBundle =
             createVssCoefficientCommitmentBundle({
                 setupContext: setupContext,
@@ -1324,11 +1329,8 @@ describe('accepted setup public package API in Node', () => {
             qSharePrimes,
             participantCount,
             publicMatrixSeedHash,
-            relinearizationCrpRoot: hashFromKernel(
-                kernel,
-                'key-record-relinearization-crp',
-            ),
-            galoisKeyCrpRoot: hashFromKernel(kernel, 'key-record-galois-crp'),
+            relinearizationCrpRoot,
+            galoisKeyCrpRoot,
             sameSecretConsistency,
             publicKeyShares,
             publicKeyShareProofs,
@@ -1487,35 +1489,29 @@ describe('accepted setup public package API in Node', () => {
             >;
         const heSecurityCertificate =
             setupCertificates.heSecurityCertificate as Record<string, unknown>;
+        const commonRandomnessWithoutRoot = {
+            objectType: 'SetupCommonRandomness',
+            objectVersion: 1,
+            ceremonyId: setupContext.ceremonyId,
+            manifestHash: setupContext.manifestHash,
+            rosterHash: setupContext.rosterHash,
+            setupProfileHash: setupContext.setupProfileHash,
+            setupEpoch: setupContext.setupEpoch,
+            publicMatrixSeedHash,
+            publicDerivations,
+            commitRecords: [],
+            revealRecords: [],
+        } as const;
         const setupPackageInput = {
             setupContext,
             qShare: setupProfile.qShare,
             phaseTranscript: phaseTranscriptFixture(kernel, setupContext),
             commonRandomness: {
-                objectType: 'SetupCommonRandomness',
-                objectVersion: 1,
-                ceremonyId: setupContext.ceremonyId,
-                manifestHash: setupContext.manifestHash,
-                rosterHash: setupContext.rosterHash,
-                setupProfileHash: setupContext.setupProfileHash,
-                setupEpoch: setupContext.setupEpoch,
-                publicMatrixSeedHash,
-                publicDerivations: {
-                    objectType: 'SetupPublicDerivations',
-                    objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    publicMatrixSeedHash,
-                    publicDerivationRoot: hashFromKernel(
-                        kernel,
-                        'package-public-derivation-root',
-                    ),
-                },
-                commitRecords: [],
-                revealRecords: [],
-                commonRandomnessRoot: hashFromKernel(
-                    kernel,
-                    'package-common-randomness-root',
-                ),
+                ...commonRandomnessWithoutRoot,
+                commonRandomnessRoot: kernel.deriveProtocolHash({
+                    namespace: 'SetupCommonRandomnessRoot',
+                    value: commonRandomnessWithoutRoot,
+                }),
             },
             vssCoefficientCommitments,
             vssCoefficientCommitmentMaterial,
@@ -1739,6 +1735,10 @@ describe('accepted setup public package API in Node', () => {
             );
 
         expect(exportedState).not.toHaveProperty('localStatePlaintext');
+        expect(exportedState).not.toHaveProperty('localStatePlaintextHash');
+        expect(exportedState.sealedLocalStatePayloadHash).toMatch(
+            /^[0-9a-f]{128}$/u,
+        );
         expect(JSON.stringify(exportedState.localStateCommitment)).not.toMatch(
             /shareValues|privateEnvelope|coefficientMessage/u,
         );
@@ -1794,9 +1794,14 @@ describe('accepted setup public package API in Node', () => {
                 ).localStateRoot,
             },
         });
-        expect(JSON.stringify(restoredState.localStatePlaintext)).not.toMatch(
-            /shareValues|rawShare|coefficientMessage/u,
+        expect(restoredState).not.toHaveProperty('localStatePlaintext');
+        expect(restoredState).not.toHaveProperty('localStatePlaintextHash');
+        expect(restoredState.sealedLocalStatePayloadHash).toBe(
+            exportedState.sealedLocalStatePayloadHash,
         );
+        expect(
+            JSON.stringify(restoredState.sealedLocalStatePayload),
+        ).not.toMatch(/shareValues|rawShare|coefficientMessage/u);
     });
 
     it('rejects incomplete export input and stale restored device state', async () => {
@@ -1830,6 +1835,78 @@ describe('accepted setup public package API in Node', () => {
     });
 
     it('exposes setup package verification without accepting legacy setup objects', async () => {
+        const transportHash = hash512Hex(
+            'sealed-lattice/test/setup-verification-vss-transport',
+            [new Uint8Array([1, 2, 3, 4])],
+        );
+        const chunkHash = hash512Hex(
+            'sealed-lattice/test/setup-verification-vss-chunk',
+            [new Uint8Array([1, 2, 3, 4])],
+        );
+        const vssMaterialReference = {
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            binaryFormat:
+                'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+            chunkSizeBytes: 1_048_576,
+            chunkCount: 1,
+            totalByteLength: 4,
+            fullObjectHash: transportHash,
+            chunkHashes: [chunkHash],
+            chunkRoot: chunkHash,
+        };
+        const transportedVssCoefficientCommitmentMaterial = {
+            ...vssMaterialReference,
+            chunks: [
+                {
+                    chunkIndex: 0,
+                    bytesHex: '01020304',
+                },
+            ],
+        };
+        const verifiedVssCoefficientCommitmentMaterial = {
+            objectType: 'VerifiedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            verificationId: 'sdk-public-verification-input-test',
+            materialBinaryFormat:
+                'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+            publicMatrixSeedHash: transportHash,
+            vssCoefficientCommitmentRoot: transportHash,
+            vssCoefficientCommitmentMaterialRoot: transportHash,
+            thresholdShareCommitmentRoot: transportHash,
+            transportProfileId:
+                'sealed-lattice-setup-binary-chunked-transport-v1',
+            transportChunkSizeBytes: 1_048_576,
+            transportChunkCount: 1,
+            transportTotalByteLength: 4,
+            transportFullObjectHash: transportHash,
+            transportChunkRoot: chunkHash,
+        };
+        const setupPackage = {
+            objectType: 'SetupPackage',
+            objectVersion: 1,
+            setupPackageHash: transportHash,
+        };
+
+        const verificationInput =
+            publicSetupApi.createSetupPackageVerificationInput({
+                setupPackage,
+                transportedVssCoefficientCommitmentMaterial,
+                verifiedVssCoefficientCommitmentMaterial,
+            });
+
+        expect(verificationInput.setupPackage).toBe(setupPackage);
+        expect(verificationInput.verifiedVssCoefficientCommitmentMaterial).toBe(
+            verifiedVssCoefficientCommitmentMaterial,
+        );
+        expect(
+            verificationInput.transportedVssCoefficientCommitmentMaterial,
+        ).toEqual(vssMaterialReference);
+        expect(
+            verificationInput.transportedVssCoefficientCommitmentMaterial,
+        ).not.toHaveProperty('chunks');
+
         const verification = await publicSetupApi.verifySetupPackage({
             setupPackage: {
                 objectType: 'BgvPassiveSetupPackage',

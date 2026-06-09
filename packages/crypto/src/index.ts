@@ -1,9 +1,11 @@
 export {
     canonicalJson,
+    createSetupVssMaterialFullObjectHasher,
     hash512Hex,
     setupProofMaterialFullObjectHashHex,
     setupVssMaterialFullObjectHashHex,
 } from './canonical-json.js';
+export type { SetupVssMaterialFullObjectHasher } from './canonical-json.js';
 export {
     deriveProtocolHash,
     protocolHashNamespaceValues,

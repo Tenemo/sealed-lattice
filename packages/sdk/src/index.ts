@@ -1,4 +1,9 @@
 import {
+    createBinaryChunkedEvaluationKeyShareMaterialTransport as createBinaryChunkedEvaluationKeyShareMaterialTransportInternal,
+    createBinaryChunkedPublicEvaluationKeyMaterialTransport as createBinaryChunkedPublicEvaluationKeyMaterialTransportInternal,
+    createBinaryChunkedPublicKeyShareMaterialTransport as createBinaryChunkedPublicKeyShareMaterialTransportInternal,
+    createBinaryChunkedPublicKeyShareProofMaterialTransport as createBinaryChunkedPublicKeyShareProofMaterialTransportInternal,
+    createBinaryChunkedSameSecretProofMaterialTransport as createBinaryChunkedSameSecretProofMaterialTransportInternal,
     createCommonRandomnessCommit as createCommonRandomnessCommitInternal,
     createCommonRandomnessReveal as createCommonRandomnessRevealInternal,
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares as exportEncryptedLocalTrusteeSetupStateInternal,
@@ -15,6 +20,7 @@ import {
     createSetupContributionAssembly as createSetupContributionInternal,
     createSetupCertificates as createSetupCertificatesInternal,
     createSetupPackage as createSetupPackageInternal,
+    createSetupPackageVerificationInput as createSetupPackageVerificationInputInternal,
     createSetupPhaseParticipantObject as createSetupIntentInternal,
     createSetupPhaseRecord as createSetupPhaseRecordInternal,
     createVssShareAcceptanceRecord as createVssShareAcceptanceInternal,
@@ -40,6 +46,7 @@ import {
     decryptLocalTrusteeSetupState as restoreEncryptedLocalTrusteeSetupStateInternal,
 } from '@sealed-lattice/protocol';
 import type {
+    BinaryChunkedEvaluationKeyShareMaterialTransport as ProtocolBinaryChunkedEvaluationKeyShareMaterialTransport,
     EvaluatorKeySchedule as ProtocolEvaluatorKeySchedule,
     EvaluatorKeyScheduleInput as ProtocolEvaluatorKeyScheduleInput,
     GaloisKeyRootReference as ProtocolGaloisKeyRootReference,
@@ -47,10 +54,15 @@ import type {
     GaloisKeyShareBatchRootReference as ProtocolGaloisKeyShareBatchRootReference,
     GaloisKeyShareProof as ProtocolGaloisKeyShareProof,
     GaloisKeyShareProofMaterial as ProtocolGaloisKeyShareProofMaterial,
+    EvaluationKeyShareMaterialTransportInput as ProtocolEvaluationKeyShareMaterialTransportInput,
     GaloisKeyShareRootReference as ProtocolGaloisKeyShareRootReference,
     LocalTrusteeSetupStateDecryptionInput,
     PublicEvaluationKeySet as ProtocolPublicEvaluationKeySet,
     PublicEvaluationKeySetInput as ProtocolPublicEvaluationKeySetInput,
+    BinaryChunkedSameSecretProofMaterialTransport as ProtocolBinaryChunkedSameSecretProofMaterialTransport,
+    BinaryChunkedPublicKeyShareMaterialSet as ProtocolBinaryChunkedPublicKeyShareMaterialSet,
+    BinaryChunkedPublicKeyShareMaterialTransport as ProtocolBinaryChunkedPublicKeyShareMaterialTransport,
+    BinaryChunkedPublicKeyShareProofMaterialTransport as ProtocolBinaryChunkedPublicKeyShareProofMaterialTransport,
     PublicKeyShareCoefficientVectorHash as ProtocolPublicKeyShareCoefficientVectorHash,
     PublicKeyShareCoefficientVectorMaterial as ProtocolPublicKeyShareCoefficientVectorMaterial,
     PublicKeyShareContributionInput as ProtocolPublicKeyShareContributionInput,
@@ -62,12 +74,20 @@ import type {
     PublicKeyShareMaterialRecord as ProtocolPublicKeyShareMaterialRecord,
     PublicKeyShareMaterialSet as ProtocolPublicKeyShareMaterialSet,
     PublicKeyShareMaterialSetInput as ProtocolPublicKeyShareMaterialSetInput,
+    SetupPackagePublicKeyShareMaterialSet as ProtocolSetupPackagePublicKeyShareMaterialSet,
+    SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
     PublicKeyShareProofRecord as ProtocolPublicKeyShareProofRecord,
     PublicKeyShareProofSet as ProtocolPublicKeyShareProofSet,
     PublicKeyShareProofSetInput as ProtocolPublicKeyShareProofSetInput,
     PublicKeyShareRecord as ProtocolPublicKeyShareRecord,
     PublicKeyShareSet as ProtocolPublicKeyShareSet,
     PublicKeyShareSetInput as ProtocolPublicKeyShareSetInput,
+    PublicEvaluationKeyMaterialTransportInput as ProtocolPublicEvaluationKeyMaterialTransportInput,
+    SetupPackageVssCoefficientCommitmentMaterialSet as ProtocolSetupPackageVssCoefficientCommitmentMaterialSet,
+    SetupTransportedVssCoefficientCommitmentMaterial as ProtocolSetupTransportedVssCoefficientCommitmentMaterial,
+    SetupTransportedVssCoefficientCommitmentMaterialLike as ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike,
+    SetupTransportedVssCoefficientCommitmentMaterialReference as ProtocolSetupTransportedVssCoefficientCommitmentMaterialReference,
+    VerifiedVssCoefficientCommitmentMaterial as ProtocolVerifiedVssCoefficientCommitmentMaterial,
     RelinearizationKeyRootReference as ProtocolRelinearizationKeyRootReference,
     RelinearizationKeyShareProofMaterial as ProtocolRelinearizationKeyShareProofMaterial,
     RelinearizationKeyShareRoundOneRecord as ProtocolRelinearizationKeyShareRoundOneRecord,
@@ -82,15 +102,23 @@ import type {
     SameSecretProofReference as ProtocolSameSecretProofReference,
     SameSecretProofSet as ProtocolSameSecretProofSet,
     SameSecretProofSetInput as ProtocolSameSecretProofSetInput,
+    TransportedSameSecretProofMaterialSet as ProtocolTransportedSameSecretProofMaterialSet,
+    TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
+    TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
+    TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
+    TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
+    BinaryChunkedPublicEvaluationKeyMaterialTransport as ProtocolBinaryChunkedPublicEvaluationKeyMaterialTransport,
     BgvHeSecurityCertificate as ProtocolBgvHeSecurityCertificate,
     SetupCertificates as ProtocolSetupCertificates,
     SetupCommitmentSecurityCertificate as ProtocolSetupCommitmentSecurityCertificate,
     SetupProofAccountingCertificate as ProtocolSetupProofAccountingCertificate,
+    SetupCertificateTransportedObjectInput as ProtocolSetupCertificateTransportedObjectInput,
     SetupTransportCertificate as ProtocolSetupTransportCertificate,
     SetupContributionAssemblyInput,
     SetupKeyCorrectnessCertificate as ProtocolSetupKeyCorrectnessCertificate,
     SetupPackage as ProtocolSetupPackage,
     SetupPackageInput as ProtocolSetupPackageInput,
+    SetupPackageVerificationInputSource as ProtocolSetupPackageVerificationInputSource,
     SetupPhaseParticipantObjectInput as ProtocolSetupPhaseParticipantObjectInput,
 } from '@sealed-lattice/protocol';
 import type {
@@ -698,7 +726,10 @@ export type SetupContribution = Readonly<
 export type SetupCertificateTransportInput = Readonly<{
     readonly fullObjectHash: ProtocolHash;
     readonly chunkHashes: readonly ProtocolHash[];
+    readonly transportedObjects?: readonly ProtocolSetupCertificateTransportedObjectInput[];
 }>;
+export type SetupCertificateTransportedObjectInput =
+    ProtocolSetupCertificateTransportedObjectInput;
 
 export type SetupCertificatesInput = Readonly<{
     readonly setupProfile: JsonRecord;
@@ -723,7 +754,10 @@ export type SetupPackageInput = Readonly<{
     readonly phaseTranscript: readonly JsonRecord[];
     readonly commonRandomness: JsonRecord;
     readonly vssCoefficientCommitments: JsonRecord;
-    readonly vssCoefficientCommitmentMaterial: JsonRecord;
+    readonly vssCoefficientCommitmentMaterial:
+        | SetupPackageVssCoefficientCommitmentMaterialSet
+        | JsonRecord;
+    readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterial;
     readonly privateVssEnvelopeCommitments: JsonRecord;
     readonly vssShareAcceptances: JsonRecord;
     readonly vssComplaints?: JsonRecord;
@@ -732,7 +766,10 @@ export type SetupPackageInput = Readonly<{
     readonly sameSecretProofs: JsonRecord;
     readonly publicKeyShares: JsonRecord;
     readonly publicKeyShareProofs: JsonRecord;
-    readonly publicKeyShareMaterial: JsonRecord;
+    readonly publicKeyShareMaterial:
+        | SetupPackagePublicKeyShareMaterialSet
+        | JsonRecord;
+    readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly publicKeyShareLnpProofs: JsonRecord;
     readonly evaluatorKeySchedule: JsonRecord;
     readonly relinearizationKeyShareRounds: JsonRecord;
@@ -768,6 +805,38 @@ export type PublicKeyShareMaterialRecord = ProtocolPublicKeyShareMaterialRecord;
 export type PublicKeyShareMaterialSet = ProtocolPublicKeyShareMaterialSet;
 export type PublicKeyShareMaterialSetInput =
     ProtocolPublicKeyShareMaterialSetInput;
+export type BinaryChunkedSameSecretProofMaterialTransport =
+    ProtocolBinaryChunkedSameSecretProofMaterialTransport;
+export type BinaryChunkedPublicKeyShareMaterialSet =
+    ProtocolBinaryChunkedPublicKeyShareMaterialSet;
+export type BinaryChunkedPublicKeyShareMaterialTransport =
+    ProtocolBinaryChunkedPublicKeyShareMaterialTransport;
+export type BinaryChunkedPublicKeyShareProofMaterialTransport =
+    ProtocolBinaryChunkedPublicKeyShareProofMaterialTransport;
+export type BinaryChunkedEvaluationKeyShareMaterialTransport =
+    ProtocolBinaryChunkedEvaluationKeyShareMaterialTransport;
+export type SetupPackageVssCoefficientCommitmentMaterialSet =
+    ProtocolSetupPackageVssCoefficientCommitmentMaterialSet;
+export type SetupTransportedVssCoefficientCommitmentMaterial =
+    ProtocolSetupTransportedVssCoefficientCommitmentMaterial;
+export type SetupTransportedVssCoefficientCommitmentMaterialReference =
+    ProtocolSetupTransportedVssCoefficientCommitmentMaterialReference;
+export type SetupTransportedVssCoefficientCommitmentMaterialLike =
+    ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike;
+export type VerifiedVssCoefficientCommitmentMaterial =
+    ProtocolVerifiedVssCoefficientCommitmentMaterial;
+export type SetupPackagePublicKeyShareMaterialSet =
+    ProtocolSetupPackagePublicKeyShareMaterialSet;
+export type SetupTransportedPublicKeyShareMaterial =
+    ProtocolSetupTransportedPublicKeyShareMaterial;
+export type TransportedSameSecretProofMaterialSet =
+    ProtocolTransportedSameSecretProofMaterialSet;
+export type TransportedPublicKeyShareProofMaterialSet =
+    ProtocolTransportedPublicKeyShareProofMaterialSet;
+export type TransportedEvaluationKeyShareProofMaterialSet =
+    ProtocolTransportedEvaluationKeyShareProofMaterialSet;
+export type TransportedEvaluationKeyShareComponentMaterialSet =
+    ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
 export type PublicKeyShareLnpProofMaterial =
     ProtocolPublicKeyShareLnpProofMaterial;
 export type PublicKeyShareLnpProofRecord = ProtocolPublicKeyShareLnpProofRecord;
@@ -837,6 +906,12 @@ export type GaloisKeyShareBatchesInput = PublicEvaluationKeyProofCommonInput &
     Readonly<{
         readonly batchContributions: readonly GaloisKeyShareBatchContribution[];
     }>;
+export type EvaluationKeyShareMaterialTransportInput = Readonly<{
+    readonly sameSecretProofReferences: ProtocolEvaluationKeyShareMaterialTransportInput['sameSecretProofReferences'];
+    readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
+    readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
+    readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
+}>;
 export type RelinearizationKeyRootReference =
     ProtocolRelinearizationKeyRootReference;
 export type GaloisKeyShareBatchRootReference =
@@ -852,6 +927,20 @@ export type PublicEvaluationKeySetInput = PublicEvaluationKeyProofCommonInput &
             | 'publicEvaluationKeyMaterialReference'
         >
     >;
+export type TransportedPublicEvaluationKeyMaterialSet =
+    ProtocolTransportedPublicEvaluationKeyMaterialSet;
+export type BinaryChunkedPublicEvaluationKeyMaterialTransport =
+    ProtocolBinaryChunkedPublicEvaluationKeyMaterialTransport;
+export type PublicEvaluationKeyMaterialTransportInput =
+    PublicEvaluationKeyProofCommonInput &
+        Readonly<
+            Pick<
+                ProtocolPublicEvaluationKeyMaterialTransportInput,
+                | 'relinearizationKeyShareRounds'
+                | 'galoisKeyShareBatches'
+                | 'transportedEvaluationKeyShareComponentMaterial'
+            >
+        >;
 
 export type ExportEncryptedLocalTrusteeSetupStateInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
@@ -871,7 +960,7 @@ export type ExportEncryptedLocalTrusteeSetupStateInput = Readonly<{
 export type ExportEncryptedLocalTrusteeSetupStateResult = Readonly<{
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
-    readonly localStatePlaintextHash: ProtocolHash;
+    readonly sealedLocalStatePayloadHash: ProtocolHash;
     readonly storageAadHash: ProtocolHash;
 }>;
 
@@ -911,8 +1000,8 @@ export type RestoredLocalTrusteeSetupState = Readonly<{
     readonly operation: 'restoreLocalTrusteeSetupState';
     readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
-    readonly localStatePlaintext: LocalTrusteeSetupStateSealedPayload;
-    readonly localStatePlaintextHash: ProtocolHash;
+    readonly sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload;
+    readonly sealedLocalStatePayloadHash: ProtocolHash;
     readonly storageAadHash: ProtocolHash;
     readonly localStateVerification: LocalTrusteeSetupStateVerification;
 }>;
@@ -922,13 +1011,21 @@ export type VerifySetupPackageInput = Readonly<{
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash?: ProtocolHash;
     readonly expectedRosterHash?: ProtocolHash;
-    readonly transportedVssCoefficientCommitmentMaterial?: unknown;
-    readonly transportedSameSecretProofMaterial?: unknown;
-    readonly transportedPublicKeyShareProofMaterial?: unknown;
-    readonly transportedEvaluationKeyShareProofMaterial?: unknown;
-    readonly transportedEvaluationKeyShareComponentMaterial?: unknown;
-    readonly transportedPublicEvaluationKeyMaterial?: unknown;
+    readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
+    readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
+    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
+    readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
+    readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
+    readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
+    readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+    readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
 }>;
+
+export type SetupPackageVerificationInputSource = Readonly<
+    Omit<ProtocolSetupPackageVerificationInputSource, 'setupPackage'> & {
+        readonly setupPackage: SetupPackage;
+    }
+>;
 
 export type AcceptedSetupHandoff = Readonly<{
     readonly objectType: 'CollectiveBgvAcceptedSetupHandoff';
@@ -1287,6 +1384,12 @@ export const createSetupCertificates = (
 export const createSetupPackage = (input: SetupPackageInput): SetupPackage =>
     createSetupPackageInternal(input as unknown as ProtocolSetupPackageInput);
 
+/** Builds the public-only setup package verification input from package and transported setup material. */
+export const createSetupPackageVerificationInput = (
+    input: SetupPackageVerificationInputSource,
+): VerifySetupPackageInput =>
+    createSetupPackageVerificationInputInternal(input);
+
 const assertNoEvaluationKeyProofGeneration = (
     contribution: Readonly<Record<string, unknown>>,
     fieldName: string,
@@ -1313,10 +1416,42 @@ export const createSameSecretProofSet = (
     input: SameSecretProofSetInput,
 ): SameSecretProofSet => createSameSecretProofSetInternal(input);
 
+/** Creates root-addressed binary transport for same-secret proof material. */
+export const createBinaryChunkedSameSecretProofMaterialTransport = (
+    proofMaterials: readonly SameSecretProofMaterial[],
+): BinaryChunkedSameSecretProofMaterialTransport =>
+    createBinaryChunkedSameSecretProofMaterialTransportInternal(proofMaterials);
+
 /** Creates root-bound public-key share material records from public coefficients. */
 export const createPublicKeyShareMaterialSet = (
     input: PublicKeyShareMaterialSetInput,
 ): PublicKeyShareMaterialSet => createPublicKeyShareMaterialSetInternal(input);
+
+/** Creates root-addressed binary transport for public-key share material. */
+export const createBinaryChunkedPublicKeyShareMaterialTransport = (
+    materialSet: PublicKeyShareMaterialSet,
+): BinaryChunkedPublicKeyShareMaterialTransport =>
+    createBinaryChunkedPublicKeyShareMaterialTransportInternal(materialSet);
+
+/** Creates root-addressed binary transport for public-key share proof material. */
+export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
+    proofMaterials: readonly PublicKeyShareLnpProofMaterial[],
+): BinaryChunkedPublicKeyShareProofMaterialTransport =>
+    createBinaryChunkedPublicKeyShareProofMaterialTransportInternal(
+        proofMaterials,
+    );
+
+/** Creates root-addressed binary transport for evaluation-key proof and component material. */
+export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
+    input: EvaluationKeyShareMaterialTransportInput,
+): BinaryChunkedEvaluationKeyShareMaterialTransport =>
+    createBinaryChunkedEvaluationKeyShareMaterialTransportInternal(input);
+
+/** Creates root-addressed binary transport for public evaluation-key runtime material. */
+export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
+    input: PublicEvaluationKeyMaterialTransportInput,
+): BinaryChunkedPublicEvaluationKeyMaterialTransport =>
+    createBinaryChunkedPublicEvaluationKeyMaterialTransportInternal(input);
 
 /** Creates root-bound public-key LNP proof records from generated proof material. */
 export const createPublicKeyShareLnpProofSet = (
@@ -1379,7 +1514,7 @@ export const exportEncryptedLocalTrusteeSetupState = async (
     return {
         localStateCommitment: result.localStateCommitment,
         encryptedLocalState: result.encryptedLocalState,
-        localStatePlaintextHash: result.localStatePlaintextHash,
+        sealedLocalStatePayloadHash: result.localStatePlaintextHash,
         storageAadHash: result.storageAadHash,
     };
 };
@@ -1416,7 +1551,7 @@ const assertExpectedHash = (
 
 const assertRestoredLocalStateBindings = (
     input: RestoreLocalTrusteeSetupStateInput,
-    localStatePlaintext: LocalTrusteeSetupStateSealedPayload,
+    sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload,
 ): void => {
     const expectedSetupEpoch =
         input.expectedSetupEpoch ?? input.setupContext.setupEpoch;
@@ -1426,9 +1561,9 @@ const assertRestoredLocalStateBindings = (
         'localStateCommitment.setupEpoch',
     );
     assertExpectedString(
-        localStatePlaintext.setupEpoch,
+        sealedLocalStatePayload.setupEpoch,
         expectedSetupEpoch,
-        'localStatePlaintext.setupEpoch',
+        'sealedLocalStatePayload.setupEpoch',
     );
     assertExpectedString(
         input.localStateCommitment.trusteeIdentity,
@@ -1436,9 +1571,9 @@ const assertRestoredLocalStateBindings = (
         'localStateCommitment.trusteeIdentity',
     );
     assertExpectedString(
-        localStatePlaintext.trusteeIdentity,
+        sealedLocalStatePayload.trusteeIdentity,
         input.expectedTrusteeIdentity,
-        'localStatePlaintext.trusteeIdentity',
+        'sealedLocalStatePayload.trusteeIdentity',
     );
     assertExpectedNumber(
         input.localStateCommitment.trusteeRosterPosition,
@@ -1446,21 +1581,21 @@ const assertRestoredLocalStateBindings = (
         'localStateCommitment.trusteeRosterPosition',
     );
     assertExpectedNumber(
-        localStatePlaintext.trusteeRosterPosition,
+        sealedLocalStatePayload.trusteeRosterPosition,
         input.expectedTrusteeRosterPosition,
-        'localStatePlaintext.trusteeRosterPosition',
+        'sealedLocalStatePayload.trusteeRosterPosition',
     );
     assertExpectedNumber(
-        localStatePlaintext.deviceEpoch,
+        sealedLocalStatePayload.deviceEpoch,
         input.expectedDeviceEpoch,
-        'localStatePlaintext.deviceEpoch',
+        'sealedLocalStatePayload.deviceEpoch',
     );
     if (
         input.minimumDeviceEpoch !== undefined &&
-        localStatePlaintext.deviceEpoch < input.minimumDeviceEpoch
+        sealedLocalStatePayload.deviceEpoch < input.minimumDeviceEpoch
     ) {
         throw new Error(
-            'localStatePlaintext.deviceEpoch is older than the minimum accepted device epoch.',
+            'sealedLocalStatePayload.deviceEpoch is older than the minimum accepted device epoch.',
         );
     }
     assertExpectedHash(
@@ -1469,9 +1604,9 @@ const assertRestoredLocalStateBindings = (
         'localStateCommitment.thresholdShareCommitmentRecipientRoot',
     );
     assertExpectedHash(
-        localStatePlaintext.thresholdShareCommitmentRecipientRoot,
+        sealedLocalStatePayload.thresholdShareCommitmentRecipientRoot,
         input.expectedThresholdShareCommitmentRecipientRoot,
-        'localStatePlaintext.thresholdShareCommitmentRecipientRoot',
+        'sealedLocalStatePayload.thresholdShareCommitmentRecipientRoot',
     );
     assertExpectedHash(
         input.localStateCommitment.aggregateThresholdShareRoot,
@@ -1479,32 +1614,32 @@ const assertRestoredLocalStateBindings = (
         'localStateCommitment.aggregateThresholdShareRoot',
     );
     assertExpectedHash(
-        localStatePlaintext.sealedAggregateThresholdShare.materialRoot,
+        sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot,
         input.expectedAggregateThresholdShareRoot,
-        'localStatePlaintext.sealedAggregateThresholdShare.materialRoot',
+        'sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot',
     );
     assertExpectedHash(
         input.localStateCommitment.issuedVssAcceptanceRoot,
         input.expectedIssuedVssAcceptanceRoot,
         'localStateCommitment.issuedVssAcceptanceRoot',
     );
-    if (localStatePlaintext.issuedVssAcceptanceRoots.length !== 1) {
+    if (sealedLocalStatePayload.issuedVssAcceptanceRoots.length !== 1) {
         throw new Error(
-            'localStatePlaintext.issuedVssAcceptanceRoots must contain exactly one issued acceptance root.',
+            'sealedLocalStatePayload.issuedVssAcceptanceRoots must contain exactly one issued acceptance root.',
         );
     }
     assertExpectedHash(
-        localStatePlaintext.issuedVssAcceptanceRoots[0],
+        sealedLocalStatePayload.issuedVssAcceptanceRoots[0],
         input.expectedIssuedVssAcceptanceRoot ??
             input.localStateCommitment.issuedVssAcceptanceRoot,
-        'localStatePlaintext.issuedVssAcceptanceRoots.0',
+        'sealedLocalStatePayload.issuedVssAcceptanceRoots.0',
     );
     if (
-        localStatePlaintext.sealedAggregateThresholdShare.materialRoot !==
+        sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot !==
         input.localStateCommitment.aggregateThresholdShareRoot
     ) {
         throw new Error(
-            'localStatePlaintext.sealedAggregateThresholdShare.materialRoot must match the local state commitment.',
+            'sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot must match the local state commitment.',
         );
     }
 };
@@ -1541,17 +1676,17 @@ export const restoreLocalTrusteeSetupState = async (
             storageKeyBytesHex: input.storageKeyBytesHex,
         },
     );
-    const localStatePlaintext =
+    const sealedLocalStatePayload =
         decryptedState.localStatePlaintext as LocalTrusteeSetupStateSealedPayload;
-    assertRestoredLocalStateBindings(input, localStatePlaintext);
+    assertRestoredLocalStateBindings(input, sealedLocalStatePayload);
 
     return {
         ok: true,
         operation: 'restoreLocalTrusteeSetupState',
         setupProfileId: 'CollectiveBgvSetup-v1',
         localStateCommitment: input.localStateCommitment,
-        localStatePlaintext,
-        localStatePlaintextHash: decryptedState.localStatePlaintextHash,
+        sealedLocalStatePayload,
+        sealedLocalStatePayloadHash: decryptedState.localStatePlaintextHash,
         storageAadHash: decryptedState.storageAadHash,
         localStateVerification,
     };

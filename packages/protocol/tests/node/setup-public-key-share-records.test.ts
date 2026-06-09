@@ -1,14 +1,22 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+    createBinaryChunkedPublicKeyShareMaterialBundle,
+    createBinaryChunkedPublicKeyShareMaterialTransport,
+    createPublicKeyShareMaterialSet,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
     createVssSourceTrusteeCoefficientOpeningState,
+    materialRecordsFromTransportedPublicKeyShareMaterial,
+    publicKeyShareCoefficientVectorHashDomain,
+    publicKeyShareMaterialBinaryFormat,
+    setupTransportChunkSizeBytes,
     type CollectiveBgvSetupContext,
     type PublicKeyShareContributionInput,
+    type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareSet,
     type SameSecretConsistencyStatementSet,
     type VssOpeningRandomByteSource,
@@ -135,6 +143,71 @@ const shareContribution = (
     ),
 });
 
+const coefficientVectorBytes = (
+    coefficients: readonly number[],
+): Uint8Array => {
+    const bytes = new Uint8Array(coefficients.length * 8);
+    const view = new DataView(bytes.buffer);
+    coefficients.forEach((coefficient, coefficientIndex) => {
+        view.setBigUint64(coefficientIndex * 8, BigInt(coefficient), true);
+    });
+
+    return bytes;
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const coefficientVectorLeHex = (coefficients: readonly number[]): string =>
+    bytesToHex(coefficientVectorBytes(coefficients));
+
+const publicKeyShareCoefficientVectorHash = (
+    coefficients: readonly number[],
+): string =>
+    hash512Hex(publicKeyShareCoefficientVectorHashDomain, [
+        coefficientVectorBytes(coefficients),
+    ]);
+
+const shareMaterialCoefficients = (
+    trusteeRosterPosition: number,
+    rnsLimbIndex: number,
+    rnsPrime: number,
+): readonly number[] =>
+    Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
+        const value =
+            (trusteeRosterPosition + 1) * 83 +
+            (rnsLimbIndex + 1) * 31 +
+            coefficientIndex * 17;
+
+        return value % rnsPrime;
+    });
+
+const shareMaterialContribution = (
+    trusteeRosterPosition: number,
+): PublicKeyShareMaterialContributionInput => ({
+    trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
+    trusteeRosterPosition,
+    shareCoefficientVectorsByLimb: qSharePrimes.map(
+        (rnsPrime, rnsLimbIndex) => {
+            const coefficients = shareMaterialCoefficients(
+                trusteeRosterPosition,
+                rnsLimbIndex,
+                rnsPrime,
+            );
+
+            return {
+                rnsLimbIndex,
+                rnsPrime,
+                component: 'b_i',
+                coefficientByteLength: ringDegree * 8,
+                coefficientVectorHash512:
+                    publicKeyShareCoefficientVectorHash(coefficients),
+                coefficientsLeHex: coefficientVectorLeHex(coefficients),
+            };
+        },
+    ),
+});
+
 const createShareSet = (
     sameSecretStatements: SameSecretConsistencyStatementSet,
 ): PublicKeyShareSet =>
@@ -258,5 +331,83 @@ describe('public-key share statement builders', () => {
                 publicKeyShares,
             }),
         ).toThrow(/same common randomness/u);
+    });
+
+    it('builds direct binary-chunked public-key share material without an embedded material set', () => {
+        const sameSecretStatements = sameSecretConsistency();
+        const materialContributions = [
+            shareMaterialContribution(1),
+            shareMaterialContribution(0),
+        ] as const;
+        const publicKeyShares = createPublicKeyShareSet({
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            publicKeyCrpRoot: fixtureHash('public-key-crp'),
+            publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
+            sameSecretConsistency: sameSecretStatements,
+            shareContributions: materialContributions.map((contribution) => ({
+                trusteeIdentity: contribution.trusteeIdentity,
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                shareCoefficientVectorHash512ByLimb:
+                    contribution.shareCoefficientVectorsByLimb.map(
+                        (coefficientVector) => ({
+                            rnsLimbIndex: coefficientVector.rnsLimbIndex,
+                            rnsPrime: coefficientVector.rnsPrime,
+                            component: coefficientVector.component,
+                            coefficientVectorHash512:
+                                coefficientVector.coefficientVectorHash512,
+                        }),
+                    ),
+            })),
+        });
+        const materialSetInput = {
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            ringDegree,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            publicKeyCrpRoot: fixtureHash('public-key-crp'),
+            publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
+            publicKeyShares,
+            materialContributions,
+        } as const;
+        const embeddedMaterialSet =
+            createPublicKeyShareMaterialSet(materialSetInput);
+        const transportedEmbeddedMaterial =
+            createBinaryChunkedPublicKeyShareMaterialTransport(
+                embeddedMaterialSet,
+            );
+        const directMaterialBundle =
+            createBinaryChunkedPublicKeyShareMaterialBundle(materialSetInput);
+        const reconstructedMaterialRecords =
+            materialRecordsFromTransportedPublicKeyShareMaterial({
+                setupContext,
+                publicKeyShares,
+                materialSet: directMaterialBundle.materialSet,
+                transportedPublicKeyShareMaterial:
+                    directMaterialBundle.transportedPublicKeyShareMaterial,
+            });
+
+        expect(directMaterialBundle.materialSet).toEqual(
+            transportedEmbeddedMaterial.materialSet,
+        );
+        expect(directMaterialBundle.materialSet).not.toHaveProperty(
+            'shareMaterialRecords',
+        );
+        expect(directMaterialBundle.transportedPublicKeyShareMaterial).toEqual(
+            transportedEmbeddedMaterial.transportedPublicKeyShareMaterial,
+        );
+        expect(
+            directMaterialBundle.transportedPublicKeyShareMaterial,
+        ).toMatchObject({
+            binaryFormat: publicKeyShareMaterialBinaryFormat,
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+        });
+        expect(directMaterialBundle).not.toHaveProperty('shareMaterialRecords');
+        expect(reconstructedMaterialRecords).toEqual(
+            embeddedMaterialSet.shareMaterialRecords,
+        );
     });
 });

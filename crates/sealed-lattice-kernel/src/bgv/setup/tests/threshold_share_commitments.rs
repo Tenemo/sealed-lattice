@@ -142,11 +142,146 @@ fn threshold_share_commitment_derivation_consumes_transported_binary_material() 
 }
 
 #[test]
+fn threshold_share_commitment_derivation_consumes_streamed_binary_material() {
+    let request = threshold_share_commitment_derivation_request(64);
+    let material_bytes = encode_transport_material_from_request(&request);
+    let transported_material = transported_material_value(&material_bytes);
+    let transport_request = serde_json::json!({
+        "setupContext": request["setupContext"],
+        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
+        "vssCoefficientCommitmentRoot": vss_commitment_root_from_derivation_request(&request),
+        "sourceTrusteeCoefficientCommitmentRecords": request["sourceTrusteeCoefficientCommitmentRecords"],
+        "transportedVssCoefficientCommitmentMaterial": transported_material,
+    });
+    let transport_result =
+        derive_threshold_share_commitments_from_transport_request(&transport_request)
+            .expect("transport threshold share commitment derivation");
+    let derivation_id = "threshold-share-stream-test";
+    let stream_template = transported_material_stream_template_value(
+        transport_request
+            .get("transportedVssCoefficientCommitmentMaterial")
+            .expect("transported material"),
+    );
+
+    let begin_result =
+        begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+            "derivationId": derivation_id,
+            "setupContext": request["setupContext"],
+            "publicMatrixSeedHash": request["publicMatrixSeedHash"],
+            "transportedVssCoefficientCommitmentMaterial": stream_template,
+        }))
+        .expect("begin stream threshold derivation");
+    assert_eq!(
+        begin_result["operation"],
+        "beginThresholdShareCommitmentsFromTransportStream"
+    );
+
+    for chunk in transport_request["transportedVssCoefficientCommitmentMaterial"]["chunks"]
+        .as_array()
+        .expect("chunks")
+    {
+        let absorb_result =
+            absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
+                &serde_json::json!({
+                    "derivationId": derivation_id,
+                    "chunkIndex": chunk["chunkIndex"],
+                    "bytesHex": chunk["bytesHex"],
+                }),
+            )
+            .expect("absorb stream chunk");
+        assert_eq!(
+            absorb_result["operation"],
+            "absorbThresholdShareCommitmentsFromTransportStreamChunk"
+        );
+    }
+
+    let stream_result =
+        finish_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+            "derivationId": derivation_id,
+            "vssCoefficientCommitmentRoot": vss_commitment_root_from_derivation_request(&request),
+            "sourceTrusteeCoefficientCommitmentRecords": request["sourceTrusteeCoefficientCommitmentRecords"],
+        }))
+        .expect("finish stream threshold derivation");
+
+    assert_eq!(
+        stream_result["operation"],
+        "finishThresholdShareCommitmentsFromTransportStream"
+    );
+    assert_eq!(
+        stream_result["thresholdShareCommitmentRoot"],
+        transport_result["thresholdShareCommitmentRoot"]
+    );
+    assert_eq!(
+        stream_result["thresholdShareCommitments"],
+        transport_result["thresholdShareCommitments"]
+    );
+    assert_eq!(
+        stream_result["vssCoefficientCommitmentMaterial"],
+        transport_result["vssCoefficientCommitmentMaterial"]
+    );
+    assert_eq!(
+        stream_result["verifiedVssCoefficientCommitmentMaterial"]["objectType"],
+        "VerifiedVssCoefficientCommitmentMaterial"
+    );
+    assert_eq!(
+        stream_result["verifiedVssCoefficientCommitmentMaterial"]["thresholdShareCommitmentRoot"],
+        stream_result["thresholdShareCommitmentRoot"]
+    );
+}
+
+#[test]
+fn threshold_share_commitment_stream_refuses_tampered_chunk_bytes() {
+    let request = threshold_share_commitment_derivation_request(64);
+    let material_bytes = encode_transport_material_from_request(&request);
+    let transported_material = transported_material_value(&material_bytes);
+    let derivation_id = "threshold-share-stream-tamper-test";
+    let manifest = transported_material_manifest_value(&transported_material);
+    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+        "derivationId": derivation_id,
+        "setupContext": request["setupContext"],
+        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
+        "transportedVssCoefficientCommitmentMaterial": manifest,
+    }))
+    .expect("begin stream threshold derivation");
+    let first_chunk = &transported_material["chunks"].as_array().expect("chunks")[0];
+    let mut tampered_bytes =
+        crate::transcript_core::decode_hex(first_chunk["bytesHex"].as_str().expect("chunk bytes"))
+            .expect("chunk hex");
+    tampered_bytes[0] ^= 0x01;
+
+    let error = absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
+        &serde_json::json!({
+            "derivationId": derivation_id,
+            "chunkIndex": 0,
+            "bytesHex": crate::hashing::to_hex(&tampered_bytes),
+        }),
+    )
+    .expect_err("tampered stream chunk must reject");
+
+    assert_eq!(
+        error.code,
+        crate::encoding::CanonicalErrorCode::InvalidFixture
+    );
+    assert!(
+        error
+            .message
+            .contains("transport stream chunk bytes do not match the declared chunk hash")
+    );
+}
+
+#[test]
 fn threshold_share_commitment_transport_refuses_chunk_hash_drift() {
     let request = threshold_share_commitment_derivation_request(64);
     let material_bytes = encode_transport_material_from_request(&request);
     let mut transported_material = transported_material_value(&material_bytes);
-    transported_material["chunkHashes"][0] = serde_json::json!("f".repeat(128));
+    let first_chunk = &mut transported_material["chunks"]
+        .as_array_mut()
+        .expect("chunks")[0];
+    let mut tampered_bytes =
+        crate::transcript_core::decode_hex(first_chunk["bytesHex"].as_str().expect("chunk bytes"))
+            .expect("chunk hex");
+    tampered_bytes[0] ^= 0x01;
+    first_chunk["bytesHex"] = serde_json::json!(crate::hashing::to_hex(&tampered_bytes));
     let transport_request = serde_json::json!({
         "setupContext": request["setupContext"],
         "publicMatrixSeedHash": request["publicMatrixSeedHash"],
@@ -165,7 +300,7 @@ fn threshold_share_commitment_transport_refuses_chunk_hash_drift() {
     assert!(
         error
             .message
-            .contains("transport chunkHashes do not match supplied chunk bytes")
+            .contains("transport fullObjectHash does not match supplied chunk bytes")
     );
 }
 
@@ -439,6 +574,32 @@ fn transported_material_value(material_bytes: &[u8]) -> serde_json::Value {
             })
         }).collect::<Vec<_>>(),
     })
+}
+
+fn transported_material_manifest_value(
+    transported_material: &serde_json::Value,
+) -> serde_json::Value {
+    let mut manifest = transported_material.clone();
+    manifest
+        .as_object_mut()
+        .expect("transported material object")
+        .remove("chunks");
+
+    manifest
+}
+
+fn transported_material_stream_template_value(
+    transported_material: &serde_json::Value,
+) -> serde_json::Value {
+    let mut template = transported_material_manifest_value(transported_material);
+    let template_object = template
+        .as_object_mut()
+        .expect("transported material object");
+    template_object.remove("fullObjectHash");
+    template_object.remove("chunkHashes");
+    template_object.remove("chunkRoot");
+
+    template
 }
 
 fn vss_commitment_root_from_derivation_request(request: &serde_json::Value) -> String {

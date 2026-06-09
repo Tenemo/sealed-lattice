@@ -1,16 +1,33 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import {
+    canonicalJson,
+    deriveProtocolHash,
+    hash512Hex,
+} from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { BinaryChunkWriter } from './binary-chunk-writer.js';
 import {
     type EvaluatorKeySchedule,
     type RelinearizationLevelScheduleEntry,
     type RequiredGaloisKeyScheduleEntry,
 } from './evaluator-key-schedule.js';
 import { setupProofProfileId } from './same-secret-consistency-records.js';
+import {
+    assertSetupProofChallenge,
+    optionalSetupProofTboxZ34Metadata,
+    setupProofTransportChunkSizeBytes,
+    transportSetupProofMaterials,
+    type SetupProofChallenge,
+    type SetupProofTboxZ34Metadata,
+    type TransportedSetupProofMaterialSet,
+} from './setup-proof-material-transport.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
 type WideInteger = number | string;
+type EvaluationKeyShareProofFamily =
+    | 'relinearization-key-share'
+    | 'galois-key-share';
 type ProofRandomnessSource =
     | 'fresh-csprng'
     | 'development-deterministic-fixture';
@@ -31,6 +48,37 @@ const publicEvaluationKeyTransportMaterialEncoding =
     'binary-chunked-public-evaluation-key-root-manifest';
 const publicEvaluationKeyMaterialSource =
     'verified-relinearization-and-galois-proof-records';
+const publicEvaluationKeyMaterialTransportSetObjectType =
+    'SetupTransportedPublicEvaluationKeyMaterialSet';
+const publicEvaluationKeyMaterialTransportObjectType =
+    'SetupTransportedPublicEvaluationKeyMaterial';
+const evaluationKeyShareProofTransportSetObjectType =
+    'SetupTransportedEvaluationKeyShareProofMaterialSet';
+const evaluationKeyShareProofTransportObjectType =
+    'SetupTransportedEvaluationKeyShareProofMaterial';
+const evaluationKeyShareComponentMaterialTransportSetObjectType =
+    'SetupTransportedEvaluationKeyShareComponentMaterialSet';
+const evaluationKeyShareComponentMaterialTransportObjectType =
+    'SetupTransportedEvaluationKeyShareComponentMaterial';
+const evaluationKeyShareComponentMaterialEncoding =
+    'binary-chunked-key-switch-component-vectors';
+const evaluationKeyShareComponentVectorHashDomain =
+    'sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1';
+const evaluationKeyShareComponentMaterialFullObjectHashDomain =
+    'sealed-lattice/setup/evaluation-key-share/component-material/full-object-v1';
+const evaluationKeyShareComponentMaterialChunkHashDomain =
+    'sealed-lattice/setup/evaluation-key-share/component-material/chunk-v1';
+const relinearizationProofBytesHashDomain =
+    'sealed-lattice/setup/relinearization-key-share/lnp-proof-bytes-v1';
+const galoisProofBytesHashDomain =
+    'sealed-lattice/setup/galois-key-share/lnp-proof-bytes-v1';
+const evaluationKeyShareComponentMaterialMagic = new Uint8Array([
+    0x53, 0x4c, 0x45, 0x4b, 0x43, 0x4d, 0x56, 0x31,
+]);
+const publicEvaluationKeyMaterialMagic = new Uint8Array([
+    0x53, 0x4c, 0x45, 0x4b, 0x50, 0x4d, 0x56, 0x31,
+]);
+const textEncoder = new TextEncoder();
 
 export type SameSecretProofReference = Readonly<{
     readonly trusteeIdentity: string;
@@ -123,7 +171,7 @@ export type EvaluationKeyShareProofGenerationOutput = Readonly<{
     readonly statementHash: ProtocolHash;
     readonly relationCommitmentHash: ProtocolHash;
     readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: number;
+    readonly challenge: SetupProofChallenge;
     readonly proofSizeBytes: number;
     readonly proofBytesHash: ProtocolHash;
     readonly proofBytesHex: string;
@@ -134,7 +182,8 @@ export type EvaluationKeyShareProofGenerationOutput = Readonly<{
         readonly seedBytes: 64;
         readonly retention: string;
     }>;
-}>;
+}> &
+    SetupProofTboxZ34Metadata;
 
 export type EvaluationKeyShareProofGenerator = (
     input: Readonly<{
@@ -164,11 +213,12 @@ export type EvaluationKeyShareProofMaterialBase = Readonly<{
     readonly statementHash: ProtocolHash;
     readonly relationCommitmentHash: ProtocolHash;
     readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: number;
+    readonly challenge: SetupProofChallenge;
     readonly proofSizeBytes: number;
     readonly proofBytesHash: ProtocolHash;
 }> &
     EvaluationKeyShareKeySwitchComponentMaterial &
+    Partial<SetupProofTboxZ34Metadata> &
     EvaluationKeyShareProofByteMaterial;
 
 export type RelinearizationKeyShareProofMaterial =
@@ -233,12 +283,13 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
         readonly statementHash: ProtocolHash;
         readonly relationCommitmentHash: ProtocolHash;
         readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: number;
+        readonly challenge: SetupProofChallenge;
         readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
         readonly roundOneProofRoot: ProtocolHash;
         readonly roundOneRecordRoot: ProtocolHash;
     } & EvaluationKeyShareKeySwitchComponentMaterial &
+        Partial<SetupProofTboxZ34Metadata> &
         EvaluationKeyShareProofByteMaterial
 >;
 
@@ -280,12 +331,13 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
         readonly statementHash: ProtocolHash;
         readonly relationCommitmentHash: ProtocolHash;
         readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: number;
+        readonly challenge: SetupProofChallenge;
         readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
         readonly roundTwoProofRoot: ProtocolHash;
         readonly roundTwoRecordRoot: ProtocolHash;
     } & EvaluationKeyShareKeySwitchComponentMaterial &
+        Partial<SetupProofTboxZ34Metadata> &
         EvaluationKeyShareProofByteMaterial
 >;
 
@@ -375,11 +427,12 @@ export type GaloisKeyShareProof = Readonly<
         readonly statementHash: ProtocolHash;
         readonly relationCommitmentHash: ProtocolHash;
         readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: number;
+        readonly challenge: SetupProofChallenge;
         readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
         readonly galoisKeyShareProofRoot: ProtocolHash;
     } & EvaluationKeyShareKeySwitchComponentMaterial &
+        Partial<SetupProofTboxZ34Metadata> &
         EvaluationKeyShareProofByteMaterial
 >;
 
@@ -492,6 +545,87 @@ export type PublicEvaluationKeyMaterialReference = Readonly<{
     readonly publicEvaluationKeyMaterialChunkHashes: readonly ProtocolHash[];
 }>;
 
+export type TransportedEvaluationKeyShareProofMaterialSet =
+    TransportedSetupProofMaterialSet<
+        typeof evaluationKeyShareProofTransportSetObjectType
+    >;
+
+export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
+    JsonRecord & {
+        readonly objectType: typeof evaluationKeyShareComponentMaterialTransportSetObjectType;
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly componentMaterials: readonly JsonRecord[];
+    }
+>;
+
+export type TransportedPublicEvaluationKeyMaterial = Readonly<
+    JsonRecord & {
+        readonly objectType: typeof publicEvaluationKeyMaterialTransportObjectType;
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
+        readonly ceremonyId: string;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly setupProfileHash: ProtocolHash;
+        readonly qShareHash: ProtocolHash;
+        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
+        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupEpoch: string;
+        readonly evaluationKeySetHash: ProtocolHash;
+        readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
+        readonly chunkSizeBytes: number;
+        readonly chunkCount: number;
+        readonly totalByteLength: number;
+        readonly fullObjectHash: ProtocolHash;
+        readonly chunkRoot: ProtocolHash;
+        readonly chunkHashes: readonly ProtocolHash[];
+        readonly chunks: readonly {
+            readonly chunkIndex: number;
+            readonly bytesHex: string;
+        }[];
+    }
+>;
+
+export type TransportedPublicEvaluationKeyMaterialSet = Readonly<
+    JsonRecord & {
+        readonly objectType: typeof publicEvaluationKeyMaterialTransportSetObjectType;
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
+        readonly publicEvaluationKeyMaterials: readonly TransportedPublicEvaluationKeyMaterial[];
+        readonly componentMaterials?: readonly JsonRecord[];
+    }
+>;
+
+export type BinaryChunkedPublicEvaluationKeyMaterialTransport = Readonly<{
+    readonly evaluationKeys: PublicEvaluationKeySet;
+    readonly publicEvaluationKeyMaterialReference: PublicEvaluationKeyMaterialReference;
+    readonly transportedPublicEvaluationKeyMaterial: TransportedPublicEvaluationKeyMaterialSet;
+}>;
+
+export type BinaryChunkedEvaluationKeyShareMaterialTransport = Readonly<{
+    readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
+    readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
+    readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
+    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
+    readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
+}>;
+
+export type EvaluationKeyShareMaterialTransportInput = Readonly<{
+    readonly sameSecretProofReferences: readonly Pick<
+        SameSecretProofReference,
+        'trusteeIdentity' | 'trusteeRosterPosition'
+    >[];
+    readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
+    readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
+    readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
+}>;
+
 export type EvaluationKeyProofCommonInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly qSharePrimes: readonly number[];
@@ -520,6 +654,14 @@ export type PublicEvaluationKeySetInput = EvaluationKeyProofCommonInput &
         readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
         readonly publicEvaluationKeyMaterialReference?: PublicEvaluationKeyMaterialReference;
+    }>;
+
+export type PublicEvaluationKeyMaterialTransportInput = Omit<
+    PublicEvaluationKeySetInput,
+    'publicEvaluationKeyMaterialReference'
+> &
+    Readonly<{
+        readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     }>;
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -569,6 +711,294 @@ const assertLowercaseHex = (value: string, fieldName: string): void => {
         throw new TypeError(`${fieldName} must be lowercase hex.`);
     }
 };
+
+const jsonRecordValue = (value: unknown, fieldName: string): JsonRecord => {
+    if (value === null || Array.isArray(value) || typeof value !== 'object') {
+        throw new TypeError(`${fieldName} must be a JSON object.`);
+    }
+
+    return value as JsonRecord;
+};
+
+const stringRecordField = (
+    record: JsonRecord,
+    fieldName: string,
+    objectPath: string,
+): string => {
+    const value = record[fieldName];
+    if (typeof value !== 'string' || value.length === 0) {
+        throw new TypeError(`${objectPath}.${fieldName} must be non-empty.`);
+    }
+
+    return value;
+};
+
+const nonNegativeIntegerRecordField = (
+    record: JsonRecord,
+    fieldName: string,
+    objectPath: string,
+): number => {
+    const value = record[fieldName];
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0
+    ) {
+        throw new TypeError(
+            `${objectPath}.${fieldName} must be a non-negative safe integer.`,
+        );
+    }
+
+    return value;
+};
+
+const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
+    if (!/^(?:[0-9a-f]{2})*$/u.test(hex)) {
+        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
+    }
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
+        bytes[byteIndex] = Number.parseInt(
+            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
+            16,
+        );
+    }
+
+    return bytes;
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const appendVaruint = (outputBytes: number[], value: number): void => {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new TypeError(
+            'binary varuint value must be a non-negative safe integer.',
+        );
+    }
+    let remainingValue = value;
+    do {
+        let byte = remainingValue & 0x7f;
+        remainingValue = Math.floor(remainingValue / 128);
+        if (remainingValue !== 0) {
+            byte |= 0x80;
+        }
+        outputBytes.push(byte);
+    } while (remainingValue !== 0);
+};
+
+const varUintBytes = (value: number): Uint8Array => {
+    const outputBytes: number[] = [];
+    appendVaruint(outputBytes, value);
+
+    return Uint8Array.from(outputBytes);
+};
+
+const coefficientVectorFromLittleEndianHex = (
+    coefficientsLeHex: string,
+    expectedCoefficientCount: number,
+    fieldName: string,
+): readonly number[] => {
+    const coefficientBytes = bytesFromHex(coefficientsLeHex, fieldName);
+    if (coefficientBytes.byteLength !== expectedCoefficientCount * 8) {
+        throw new Error(`${fieldName} byte length must match ringDegree.`);
+    }
+
+    return Array.from(
+        { length: expectedCoefficientCount },
+        (_unused, coefficientIndex) => {
+            let coefficient = 0n;
+            for (let byteOffset = 7; byteOffset >= 0; byteOffset -= 1) {
+                coefficient <<= 8n;
+                coefficient |= BigInt(
+                    coefficientBytes[coefficientIndex * 8 + byteOffset] ?? 0,
+                );
+            }
+            if (coefficient > BigInt(Number.MAX_SAFE_INTEGER)) {
+                throw new Error(
+                    `${fieldName} contains a coefficient outside the JavaScript safe integer range.`,
+                );
+            }
+
+            return Number(coefficient);
+        },
+    );
+};
+
+const coefficientVectorBytes = (
+    coefficients: readonly number[],
+): Uint8Array => {
+    const bytes = new Uint8Array(coefficients.length * 8);
+    coefficients.forEach((coefficient, coefficientIndex) => {
+        if (!Number.isSafeInteger(coefficient) || coefficient < 0) {
+            throw new TypeError(
+                'evaluation-key component coefficient must be a non-negative safe integer.',
+            );
+        }
+        let remainingValue = BigInt(coefficient);
+        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
+            bytes[coefficientIndex * 8 + byteIndex] = Number(
+                remainingValue & 0xffn,
+            );
+            remainingValue >>= 8n;
+        }
+    });
+
+    return bytes;
+};
+
+const evaluationKeyShareComponentVectorHash = (
+    coefficients: readonly number[],
+): ProtocolHash =>
+    hash512Hex(evaluationKeyShareComponentVectorHashDomain, [
+        coefficientVectorBytes(coefficients),
+    ]);
+
+const u64LittleEndianBytes = (value: number, fieldName: string): Uint8Array => {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new TypeError(
+            `${fieldName} must be a non-negative safe integer.`,
+        );
+    }
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+
+    return bytes;
+};
+
+const evaluationKeyShareComponentVectorRoot = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    keySwitchDomain: string,
+    keySwitchSeedHex: string,
+    level: number,
+    ringDegree: number,
+    componentVectors: readonly JsonRecord[],
+): ProtocolHash =>
+    deriveProtocolHash('EvaluationKeyShareComponentVectorRoot', {
+        objectType: 'EvaluationKeyShareComponentVectorSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        proofFamily,
+        keySwitchDomain,
+        keySwitchSeedHex,
+        level,
+        ringDegree,
+        digitCount: level + 1,
+        rnsLimbCount: level + 1,
+        componentVectors,
+    });
+
+const evaluationKeyShareComponentMaterialFullObjectHash = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    totalByteLength: number,
+    chunks: readonly Uint8Array[],
+): ProtocolHash =>
+    hash512Hex(evaluationKeyShareComponentMaterialFullObjectHashDomain, [
+        textEncoder.encode(proofFamily),
+        varUintBytes(totalByteLength),
+        ...chunks,
+    ]);
+
+const evaluationKeyShareComponentMaterialChunkHash = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    fullObjectHash: ProtocolHash,
+    chunkIndex: number,
+    chunk: Uint8Array,
+): ProtocolHash =>
+    hash512Hex(evaluationKeyShareComponentMaterialChunkHashDomain, [
+        textEncoder.encode(proofFamily),
+        textEncoder.encode(fullObjectHash),
+        varUintBytes(chunkIndex),
+        chunk,
+    ]);
+
+const evaluationKeyShareComponentMaterialTransportHashes = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    chunks: readonly Uint8Array[],
+): Readonly<{
+    readonly fullObjectHash: ProtocolHash;
+    readonly chunkHashes: readonly ProtocolHash[];
+    readonly chunkRoot: ProtocolHash;
+    readonly totalByteLength: number;
+}> => {
+    const totalByteLength = chunks.reduce(
+        (byteLength, chunk) => byteLength + chunk.byteLength,
+        0,
+    );
+    const fullObjectHash = evaluationKeyShareComponentMaterialFullObjectHash(
+        proofFamily,
+        totalByteLength,
+        chunks,
+    );
+    const chunkHashes = chunks.map((chunk, chunkIndex) =>
+        evaluationKeyShareComponentMaterialChunkHash(
+            proofFamily,
+            fullObjectHash,
+            chunkIndex,
+            chunk,
+        ),
+    );
+    const chunkRoot = deriveProtocolHash(
+        'EvaluationKeyShareComponentMaterialChunkRoot',
+        {
+            objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily,
+            keySwitchMaterialEncoding:
+                evaluationKeyShareComponentMaterialEncoding,
+            chunkSizeBytes: setupProofTransportChunkSizeBytes,
+            chunkCount: chunkHashes.length,
+            totalByteLength,
+            chunkHashes,
+            fullObjectHash,
+        },
+    );
+
+    return {
+        fullObjectHash,
+        chunkHashes,
+        chunkRoot,
+        totalByteLength,
+    };
+};
+
+const evaluationKeyShareComponentMaterialReferenceRoot = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    proofMaterial: EvaluationKeyShareProofMaterialBase,
+    trusteeIdentity: string,
+    trusteeRosterPosition: number,
+    level: number,
+    transportHashes: ReturnType<
+        typeof evaluationKeyShareComponentMaterialTransportHashes
+    >,
+): ProtocolHash =>
+    deriveProtocolHash('EvaluationKeyShareComponentMaterialRoot', {
+        objectType: 'EvaluationKeyShareComponentMaterialReference',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        proofFamily,
+        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
+        trusteeIdentity,
+        trusteeRosterPosition,
+        keySwitchDomain: proofMaterial.keySwitchDomain,
+        keySwitchSeedHex: proofMaterial.keySwitchSeedHex,
+        level,
+        ringDegree: proofMaterial.ringDegree,
+        digitCount: level + 1,
+        rnsLimbCount: level + 1,
+        keySwitchComponentVectorRoot:
+            proofMaterial.keySwitchComponentVectorRoot,
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        chunkCount: transportHashes.chunkHashes.length,
+        totalByteLength: transportHashes.totalByteLength,
+        fullObjectHash: transportHashes.fullObjectHash,
+        chunkRoot: transportHashes.chunkRoot,
+        chunkHashes: transportHashes.chunkHashes,
+    });
 
 const assertJsonRecord = (value: JsonRecord, fieldName: string): void => {
     if (value === null || Array.isArray(value) || typeof value !== 'object') {
@@ -745,10 +1175,11 @@ const assertEvaluationKeyShareProofMaterial = (
     ] as const) {
         assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
     }
-    assertNonNegativeSafeInteger(
+    assertSetupProofChallenge(
         proofMaterial.challenge,
         `${fieldName}.challenge`,
     );
+    optionalSetupProofTboxZ34Metadata(proofMaterial, fieldName);
     assertPositiveSafeInteger(
         proofMaterial.proofSizeBytes,
         `${fieldName}.proofSizeBytes`,
@@ -1010,10 +1441,11 @@ const assertGeneratedProofCommon = (
     ] as const) {
         assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
     }
-    assertNonNegativeSafeInteger(
+    assertSetupProofChallenge(
         generatedProof.challenge,
         `${fieldName}.challenge`,
     );
+    optionalSetupProofTboxZ34Metadata(generatedProof, fieldName);
     assertPositiveSafeInteger(
         generatedProof.proofSizeBytes,
         `${fieldName}.proofSizeBytes`,
@@ -1175,6 +1607,10 @@ const resolveRelinearizationProofMaterial = (
         statementHash: generatedProof.statementHash,
         relationCommitmentHash: generatedProof.relationCommitmentHash,
         tboxCommitmentPrefixHash: generatedProof.tboxCommitmentPrefixHash,
+        ...optionalSetupProofTboxZ34Metadata(
+            generatedProof,
+            `${fieldName}.generatedProof`,
+        ),
         challenge: generatedProof.challenge,
         proofSizeBytes: generatedProof.proofSizeBytes,
         proofBytesHash: generatedProof.proofBytesHash,
@@ -1311,6 +1747,10 @@ const resolveGaloisProofMaterial = (
         statementHash: generatedProof.statementHash,
         relationCommitmentHash: generatedProof.relationCommitmentHash,
         tboxCommitmentPrefixHash: generatedProof.tboxCommitmentPrefixHash,
+        ...optionalSetupProofTboxZ34Metadata(
+            generatedProof,
+            `${fieldName}.generatedProof`,
+        ),
         challenge: generatedProof.challenge,
         proofSizeBytes: generatedProof.proofSizeBytes,
         proofBytesHash: generatedProof.proofBytesHash,
@@ -1749,6 +2189,621 @@ const validateCommonInput = (
     }
 
     return sortedSameSecretProofReferences(input);
+};
+
+type EvaluationKeyShareCompletedProofMaterial =
+    | RelinearizationKeyShareProofMaterial
+    | GaloisKeyShareProofMaterial;
+
+type EvaluationKeyShareTransportWorkItem = Readonly<{
+    readonly key: string;
+    readonly proofFamily: EvaluationKeyShareProofFamily;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly level: number;
+    readonly proofMaterial: EvaluationKeyShareCompletedProofMaterial;
+}>;
+
+const proofBytesHashDomainForFamily = (
+    proofFamily: EvaluationKeyShareProofFamily,
+): string =>
+    proofFamily === 'relinearization-key-share'
+        ? relinearizationProofBytesHashDomain
+        : galoisProofBytesHashDomain;
+
+const evaluationKeyTransportItemKey = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    scope: string,
+    trusteeRosterPosition: number,
+    level: number,
+    rotation?: number,
+): string =>
+    [
+        proofFamily,
+        scope,
+        String(trusteeRosterPosition),
+        String(level),
+        ...(rotation === undefined ? [] : [String(rotation)]),
+    ].join(':');
+
+const trusteeIdentityByRosterPosition = (
+    sameSecretProofReferences: readonly Pick<
+        SameSecretProofReference,
+        'trusteeIdentity' | 'trusteeRosterPosition'
+    >[],
+): ReadonlyMap<number, string> => {
+    const identities = new Map<number, string>();
+    sameSecretProofReferences.forEach((reference, referenceIndex) => {
+        assertNonEmptyString(
+            reference.trusteeIdentity,
+            `sameSecretProofReferences.${String(referenceIndex)}.trusteeIdentity`,
+        );
+        assertNonNegativeSafeInteger(
+            reference.trusteeRosterPosition,
+            `sameSecretProofReferences.${String(referenceIndex)}.trusteeRosterPosition`,
+        );
+        if (identities.has(reference.trusteeRosterPosition)) {
+            throw new Error(
+                'sameSecretProofReferences must not repeat trusteeRosterPosition.',
+            );
+        }
+        identities.set(
+            reference.trusteeRosterPosition,
+            reference.trusteeIdentity,
+        );
+    });
+
+    return identities;
+};
+
+const trusteeIdentityForContribution = (
+    identities: ReadonlyMap<number, string>,
+    trusteeRosterPosition: number,
+    fieldName: string,
+): string => {
+    const trusteeIdentity = identities.get(trusteeRosterPosition);
+    if (trusteeIdentity === undefined) {
+        throw new Error(
+            `${fieldName} references a trustee roster position without a same-secret proof reference.`,
+        );
+    }
+
+    return trusteeIdentity;
+};
+
+const evaluationKeyShareTransportWorkItems = (
+    input: EvaluationKeyShareMaterialTransportInput,
+): readonly EvaluationKeyShareTransportWorkItem[] => {
+    const identities = trusteeIdentityByRosterPosition(
+        input.sameSecretProofReferences,
+    );
+    const workItems: EvaluationKeyShareTransportWorkItem[] = [];
+    input.relinearizationRoundOneContributions.forEach(
+        (contribution, contributionIndex) => {
+            if (
+                contribution.proofGeneration !== undefined ||
+                contribution.proofMaterial === undefined
+            ) {
+                throw new Error(
+                    'evaluation-key material transport requires completed relinearization round-one proof material.',
+                );
+            }
+            assertRelinearizationProofMaterial(
+                contribution.proofMaterial,
+                contribution.roundOneShareRoot,
+                `relinearizationRoundOneContributions.${String(contributionIndex)}.proofMaterial`,
+            );
+            workItems.push({
+                key: evaluationKeyTransportItemKey(
+                    'relinearization-key-share',
+                    'round-one',
+                    contribution.trusteeRosterPosition,
+                    contribution.level,
+                ),
+                proofFamily: 'relinearization-key-share',
+                trusteeIdentity: trusteeIdentityForContribution(
+                    identities,
+                    contribution.trusteeRosterPosition,
+                    'relinearizationRoundOneContributions',
+                ),
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                proofMaterial: contribution.proofMaterial,
+            });
+        },
+    );
+    input.relinearizationRoundTwoContributions.forEach(
+        (contribution, contributionIndex) => {
+            if (
+                contribution.proofGeneration !== undefined ||
+                contribution.proofMaterial === undefined
+            ) {
+                throw new Error(
+                    'evaluation-key material transport requires completed relinearization round-two proof material.',
+                );
+            }
+            assertRelinearizationProofMaterial(
+                contribution.proofMaterial,
+                contribution.roundTwoShareRoot,
+                `relinearizationRoundTwoContributions.${String(contributionIndex)}.proofMaterial`,
+            );
+            workItems.push({
+                key: evaluationKeyTransportItemKey(
+                    'relinearization-key-share',
+                    'round-two',
+                    contribution.trusteeRosterPosition,
+                    contribution.level,
+                ),
+                proofFamily: 'relinearization-key-share',
+                trusteeIdentity: trusteeIdentityForContribution(
+                    identities,
+                    contribution.trusteeRosterPosition,
+                    'relinearizationRoundTwoContributions',
+                ),
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                proofMaterial: contribution.proofMaterial,
+            });
+        },
+    );
+    input.galoisKeyShareBatchContributions.forEach((batchContribution) => {
+        const trusteeIdentity = trusteeIdentityForContribution(
+            identities,
+            batchContribution.trusteeRosterPosition,
+            'galoisKeyShareBatchContributions',
+        );
+        batchContribution.galoisKeyShareProofs.forEach(
+            (proofContribution, proofIndex) => {
+                if (
+                    proofContribution.proofGeneration !== undefined ||
+                    proofContribution.proofMaterial === undefined
+                ) {
+                    throw new Error(
+                        'evaluation-key material transport requires completed Galois proof material.',
+                    );
+                }
+                assertGaloisProofMaterial(
+                    proofContribution.proofMaterial,
+                    proofContribution.galoisKeyShareRoot,
+                    `galoisKeyShareProofs.${String(proofIndex)}.proofMaterial`,
+                );
+                workItems.push({
+                    key: evaluationKeyTransportItemKey(
+                        'galois-key-share',
+                        'proof',
+                        batchContribution.trusteeRosterPosition,
+                        proofContribution.level,
+                        proofContribution.rotation,
+                    ),
+                    proofFamily: 'galois-key-share',
+                    trusteeIdentity,
+                    trusteeRosterPosition:
+                        batchContribution.trusteeRosterPosition,
+                    level: proofContribution.level,
+                    proofMaterial: proofContribution.proofMaterial,
+                });
+            },
+        );
+    });
+
+    return workItems;
+};
+
+const encodeEvaluationKeyShareComponentMaterial = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    proofMaterial: EvaluationKeyShareProofMaterialBase &
+        EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
+    level: number,
+): readonly Uint8Array[] => {
+    const digitCount = level + 1;
+    if (proofMaterial.keySwitchComponentVectors.length !== digitCount ** 2) {
+        throw new Error(
+            'evaluation-key component material must contain one vector per scheduled digit and RNS limb.',
+        );
+    }
+    const writer = new BinaryChunkWriter({
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        emptyErrorMessage:
+            'evaluation-key component material transport requires bytes.',
+    });
+    writer.writeBytes(evaluationKeyShareComponentMaterialMagic);
+    writer.writeU64LittleEndian(level, 'evaluation-key level');
+    writer.writeU64LittleEndian(
+        proofMaterial.ringDegree,
+        'evaluation-key ringDegree',
+    );
+    writer.writeU64LittleEndian(digitCount, 'evaluation-key digitCount');
+    writer.writeU64LittleEndian(digitCount, 'evaluation-key rnsLimbCount');
+    const canonicalComponentVectors: JsonRecord[] = [];
+    for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
+        for (
+            let rnsLimbIndex = 0;
+            rnsLimbIndex < digitCount;
+            rnsLimbIndex += 1
+        ) {
+            const componentVector = jsonRecordValue(
+                proofMaterial.keySwitchComponentVectors[
+                    digitIndex * digitCount + rnsLimbIndex
+                ],
+                'keySwitchComponentVectors',
+            );
+            const vectorPath = `keySwitchComponentVectors.${String(
+                digitIndex,
+            )}.${String(rnsLimbIndex)}`;
+            if (
+                nonNegativeIntegerRecordField(
+                    componentVector,
+                    'digitIndex',
+                    vectorPath,
+                ) !== digitIndex ||
+                nonNegativeIntegerRecordField(
+                    componentVector,
+                    'rnsLimbIndex',
+                    vectorPath,
+                ) !== rnsLimbIndex ||
+                componentVector.component !== 'b'
+            ) {
+                throw new Error(
+                    'evaluation-key component material vectors must be ordered by digit and RNS limb.',
+                );
+            }
+            const rnsPrime = nonNegativeIntegerRecordField(
+                componentVector,
+                'rnsPrime',
+                vectorPath,
+            );
+            const coefficientByteLength = nonNegativeIntegerRecordField(
+                componentVector,
+                'coefficientByteLength',
+                vectorPath,
+            );
+            if (coefficientByteLength !== proofMaterial.ringDegree * 8) {
+                throw new Error(
+                    'evaluation-key component material coefficientByteLength must match ringDegree.',
+                );
+            }
+            const coefficientsLeHex = stringRecordField(
+                componentVector,
+                'coefficientsLeHex',
+                vectorPath,
+            );
+            const coefficients = coefficientVectorFromLittleEndianHex(
+                coefficientsLeHex,
+                proofMaterial.ringDegree,
+                `${vectorPath}.coefficientsLeHex`,
+            );
+            if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
+                throw new Error(
+                    'evaluation-key component material coefficients must be canonical residues.',
+                );
+            }
+            const coefficientVectorHash =
+                evaluationKeyShareComponentVectorHash(coefficients);
+            if (
+                stringRecordField(
+                    componentVector,
+                    'coefficientVectorHash512',
+                    vectorPath,
+                ) !== coefficientVectorHash
+            ) {
+                throw new Error(
+                    'evaluation-key component material coefficient hash must match coefficientsLeHex.',
+                );
+            }
+            canonicalComponentVectors.push({
+                digitIndex,
+                rnsLimbIndex,
+                rnsPrime,
+                component: 'b',
+                coefficientByteLength,
+                coefficientVectorHash512: coefficientVectorHash,
+                coefficientsLeHex,
+            });
+            writer.writeU64LittleEndian(
+                digitIndex,
+                'evaluation-key component digitIndex',
+            );
+            writer.writeU64LittleEndian(
+                rnsLimbIndex,
+                'evaluation-key component rnsLimbIndex',
+            );
+            writer.writeU64LittleEndian(
+                rnsPrime,
+                'evaluation-key component rnsPrime',
+            );
+            writer.writeU64LittleEndian(
+                proofMaterial.ringDegree,
+                'evaluation-key component coefficientCount',
+            );
+            coefficients.forEach((coefficient) =>
+                writer.writeU64LittleEndian(
+                    coefficient,
+                    'evaluation-key component coefficient',
+                ),
+            );
+        }
+    }
+    const componentVectorRoot = evaluationKeyShareComponentVectorRoot(
+        proofFamily,
+        proofMaterial.keySwitchDomain,
+        proofMaterial.keySwitchSeedHex,
+        level,
+        proofMaterial.ringDegree,
+        canonicalComponentVectors,
+    );
+    if (componentVectorRoot !== proofMaterial.keySwitchComponentVectorRoot) {
+        throw new Error(
+            'evaluation-key component material root must match keySwitchComponentVectorRoot before transport.',
+        );
+    }
+
+    return writer.finish();
+};
+
+const transportEvaluationKeyShareComponentMaterial = (
+    workItem: EvaluationKeyShareTransportWorkItem,
+): Readonly<{
+    readonly proofMaterial: EvaluationKeyShareCompletedProofMaterial;
+    readonly componentMaterial: JsonRecord;
+}> => {
+    if (
+        workItem.proofMaterial.keySwitchMaterialEncoding !==
+        'embedded-full-key-switch-component-vectors'
+    ) {
+        throw new Error(
+            'evaluation-key component material transport must be built from embedded full component vectors.',
+        );
+    }
+    const chunks = encodeEvaluationKeyShareComponentMaterial(
+        workItem.proofFamily,
+        workItem.proofMaterial,
+        workItem.level,
+    );
+    const transportHashes = evaluationKeyShareComponentMaterialTransportHashes(
+        workItem.proofFamily,
+        chunks,
+    );
+    const keySwitchComponentMaterialRoot =
+        evaluationKeyShareComponentMaterialReferenceRoot(
+            workItem.proofFamily,
+            workItem.proofMaterial,
+            workItem.trusteeIdentity,
+            workItem.trusteeRosterPosition,
+            workItem.level,
+            transportHashes,
+        );
+    const proofMaterialWithoutVectors = {
+        ...workItem.proofMaterial,
+    } as JsonRecord;
+    delete proofMaterialWithoutVectors.keySwitchComponentVectors;
+    const proofMaterial = {
+        ...proofMaterialWithoutVectors,
+        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
+        keySwitchComponentMaterialRoot,
+        keySwitchComponentChunkSizeBytes: setupProofTransportChunkSizeBytes,
+        keySwitchComponentChunkCount: transportHashes.chunkHashes.length,
+        keySwitchComponentTotalByteLength: transportHashes.totalByteLength,
+        keySwitchComponentFullObjectHash: transportHashes.fullObjectHash,
+        keySwitchComponentChunkRoot: transportHashes.chunkRoot,
+        keySwitchComponentChunkHashes: transportHashes.chunkHashes,
+    } as EvaluationKeyShareCompletedProofMaterial;
+
+    return {
+        proofMaterial,
+        componentMaterial: {
+            objectType: evaluationKeyShareComponentMaterialTransportObjectType,
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: workItem.proofFamily,
+            keySwitchMaterialEncoding:
+                evaluationKeyShareComponentMaterialEncoding,
+            trusteeIdentity: workItem.trusteeIdentity,
+            trusteeRosterPosition: workItem.trusteeRosterPosition,
+            keySwitchDomain: workItem.proofMaterial.keySwitchDomain,
+            keySwitchSeedHex: workItem.proofMaterial.keySwitchSeedHex,
+            level: workItem.level,
+            ringDegree: workItem.proofMaterial.ringDegree,
+            digitCount: workItem.level + 1,
+            rnsLimbCount: workItem.level + 1,
+            keySwitchComponentVectorRoot:
+                workItem.proofMaterial.keySwitchComponentVectorRoot,
+            keySwitchComponentMaterialRoot,
+            chunkSizeBytes: setupProofTransportChunkSizeBytes,
+            chunkCount: transportHashes.chunkHashes.length,
+            totalByteLength: transportHashes.totalByteLength,
+            fullObjectHash: transportHashes.fullObjectHash,
+            chunkRoot: transportHashes.chunkRoot,
+            chunkHashes: transportHashes.chunkHashes,
+            chunks: chunks.map((chunk, chunkIndex) => ({
+                chunkIndex,
+                bytesHex: bytesToHex(chunk),
+            })),
+        },
+    };
+};
+
+const stripEvaluationKeyProofMaterialTransportContext = (
+    proofMaterial: EvaluationKeyShareCompletedProofMaterial &
+        Readonly<{
+            readonly trusteeIdentity: string;
+            readonly trusteeRosterPosition: number;
+            readonly proofFamily: EvaluationKeyShareProofFamily;
+        }>,
+): EvaluationKeyShareCompletedProofMaterial => {
+    const record = { ...proofMaterial } as JsonRecord;
+    delete record.trusteeIdentity;
+    delete record.trusteeRosterPosition;
+    delete record.proofFamily;
+
+    return record as EvaluationKeyShareCompletedProofMaterial;
+};
+
+export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
+    input: EvaluationKeyShareMaterialTransportInput,
+): BinaryChunkedEvaluationKeyShareMaterialTransport => {
+    const workItems = evaluationKeyShareTransportWorkItems(input);
+    const componentTransportByKey = new Map<
+        string,
+        EvaluationKeyShareCompletedProofMaterial
+    >();
+    const componentMaterials: JsonRecord[] = [];
+    const componentRoots = new Set<string>();
+    workItems.forEach((workItem) => {
+        const componentTransport =
+            transportEvaluationKeyShareComponentMaterial(workItem);
+        const componentMaterialRoot = stringRecordField(
+            componentTransport.componentMaterial,
+            'keySwitchComponentMaterialRoot',
+            'componentMaterial',
+        );
+        if (componentRoots.has(componentMaterialRoot)) {
+            throw new Error(
+                'transported evaluation-key component material contains duplicate roots.',
+            );
+        }
+        componentRoots.add(componentMaterialRoot);
+        componentTransportByKey.set(
+            workItem.key,
+            componentTransport.proofMaterial,
+        );
+        componentMaterials.push(componentTransport.componentMaterial);
+    });
+
+    const transportedProofMaterialByKey = new Map<
+        string,
+        EvaluationKeyShareCompletedProofMaterial
+    >();
+    const transportedProofMaterials: JsonRecord[] = [];
+    (['relinearization-key-share', 'galois-key-share'] as const).forEach(
+        (proofFamily) => {
+            const familyItems = workItems.filter(
+                (workItem) => workItem.proofFamily === proofFamily,
+            );
+            if (familyItems.length === 0) {
+                return;
+            }
+            const proofMaterialTransport = transportSetupProofMaterials(
+                familyItems.map((workItem) => ({
+                    ...componentTransportByKey.get(workItem.key),
+                    trusteeIdentity: workItem.trusteeIdentity,
+                    trusteeRosterPosition: workItem.trusteeRosterPosition,
+                    proofFamily,
+                })),
+                {
+                    proofFamily,
+                    proofBytesHashDomain:
+                        proofBytesHashDomainForFamily(proofFamily),
+                    transportedSetObjectType:
+                        evaluationKeyShareProofTransportSetObjectType,
+                    transportedObjectType:
+                        evaluationKeyShareProofTransportObjectType,
+                    transportedObjectHashFieldPrefix: 'proof',
+                },
+            );
+            proofMaterialTransport.proofMaterials.forEach(
+                (proofMaterial, proofIndex) => {
+                    transportedProofMaterialByKey.set(
+                        familyItems[proofIndex].key,
+                        stripEvaluationKeyProofMaterialTransportContext(
+                            proofMaterial as EvaluationKeyShareCompletedProofMaterial &
+                                Readonly<{
+                                    readonly trusteeIdentity: string;
+                                    readonly trusteeRosterPosition: number;
+                                    readonly proofFamily: EvaluationKeyShareProofFamily;
+                                }>,
+                        ),
+                    );
+                },
+            );
+            transportedProofMaterials.push(
+                ...proofMaterialTransport.transportedProofMaterial
+                    .proofMaterials,
+            );
+        },
+    );
+
+    const proofMaterialForKey = (
+        key: string,
+    ): EvaluationKeyShareCompletedProofMaterial => {
+        const proofMaterial = transportedProofMaterialByKey.get(key);
+        if (proofMaterial === undefined) {
+            throw new Error(
+                'evaluation-key proof material transport did not produce a transported proof material.',
+            );
+        }
+
+        return proofMaterial;
+    };
+
+    return {
+        relinearizationRoundOneContributions:
+            input.relinearizationRoundOneContributions.map((contribution) => ({
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                roundOneShareRoot: contribution.roundOneShareRoot,
+                proofMaterial: proofMaterialForKey(
+                    evaluationKeyTransportItemKey(
+                        'relinearization-key-share',
+                        'round-one',
+                        contribution.trusteeRosterPosition,
+                        contribution.level,
+                    ),
+                ) as RelinearizationKeyShareProofMaterial,
+            })),
+        relinearizationRoundTwoContributions:
+            input.relinearizationRoundTwoContributions.map((contribution) => ({
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                roundTwoShareRoot: contribution.roundTwoShareRoot,
+                proofMaterial: proofMaterialForKey(
+                    evaluationKeyTransportItemKey(
+                        'relinearization-key-share',
+                        'round-two',
+                        contribution.trusteeRosterPosition,
+                        contribution.level,
+                    ),
+                ) as RelinearizationKeyShareProofMaterial,
+            })),
+        galoisKeyShareBatchContributions:
+            input.galoisKeyShareBatchContributions.map((batchContribution) => ({
+                trusteeRosterPosition: batchContribution.trusteeRosterPosition,
+                galoisKeyShareProofs:
+                    batchContribution.galoisKeyShareProofs.map(
+                        (proofContribution) => ({
+                            rotation: proofContribution.rotation,
+                            level: proofContribution.level,
+                            galoisKeyShareRoot:
+                                proofContribution.galoisKeyShareRoot,
+                            proofMaterial: proofMaterialForKey(
+                                evaluationKeyTransportItemKey(
+                                    'galois-key-share',
+                                    'proof',
+                                    batchContribution.trusteeRosterPosition,
+                                    proofContribution.level,
+                                    proofContribution.rotation,
+                                ),
+                            ) as GaloisKeyShareProofMaterial,
+                        }),
+                    ),
+            })),
+        transportedEvaluationKeyShareProofMaterial: {
+            objectType: evaluationKeyShareProofTransportSetObjectType,
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: 'evaluation-key-share',
+            proofMaterials: transportedProofMaterials,
+        },
+        transportedEvaluationKeyShareComponentMaterial: {
+            objectType:
+                evaluationKeyShareComponentMaterialTransportSetObjectType,
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            componentMaterials,
+        },
+    };
 };
 
 const contributionMap = <
@@ -2422,9 +3477,414 @@ export const createGaloisKeyShareBatches = (
     });
 };
 
-export const createPublicEvaluationKeySet = (
+const relinearizationShareMaterialManifest = (
+    relinearizationKeyShareRounds: RelinearizationKeyShareRounds,
+): readonly JsonRecord[] => {
+    const entries: {
+        readonly level: number;
+        readonly roundOrder: number;
+        readonly trusteeRosterPosition: number;
+        readonly entry: JsonRecord;
+    }[] = [];
+    const recordGroups = [
+        {
+            round: 'round-one',
+            roundOrder: 0,
+            records: relinearizationKeyShareRounds.roundOneRecords,
+            shareRootFieldName: 'roundOneShareRoot',
+            proofRootFieldName: 'roundOneProofRoot',
+            recordRootFieldName: 'roundOneRecordRoot',
+        },
+        {
+            round: 'round-two',
+            roundOrder: 1,
+            records: relinearizationKeyShareRounds.roundTwoRecords,
+            shareRootFieldName: 'roundTwoShareRoot',
+            proofRootFieldName: 'roundTwoProofRoot',
+            recordRootFieldName: 'roundTwoRecordRoot',
+        },
+    ] as const;
+
+    recordGroups.forEach((group) => {
+        group.records.forEach((record) => {
+            const recordFields = record as JsonRecord;
+            entries.push({
+                level: record.level,
+                roundOrder: group.roundOrder,
+                trusteeRosterPosition: record.trusteeRosterPosition,
+                entry: {
+                    round: group.round,
+                    trusteeIdentity: record.trusteeIdentity,
+                    trusteeRosterPosition: record.trusteeRosterPosition,
+                    level: record.level,
+                    keySwitchMaterialEncoding: record.keySwitchMaterialEncoding,
+                    keySwitchDomain: record.keySwitchDomain,
+                    keySwitchSeedHex: record.keySwitchSeedHex,
+                    keySwitchComponentVectorRoot:
+                        record.keySwitchComponentVectorRoot,
+                    keySwitchComponentMaterialRoot:
+                        recordFields.keySwitchComponentMaterialRoot ?? null,
+                    shareRoot: recordFields[group.shareRootFieldName],
+                    proofRoot: recordFields[group.proofRootFieldName],
+                    recordRoot: recordFields[group.recordRootFieldName],
+                },
+            });
+        });
+    });
+
+    return entries
+        .sort(
+            (left, right) =>
+                left.level - right.level ||
+                left.roundOrder - right.roundOrder ||
+                left.trusteeRosterPosition - right.trusteeRosterPosition,
+        )
+        .map((entry) => entry.entry);
+};
+
+const galoisShareMaterialManifest = (
+    galoisKeyShareBatches: readonly GaloisKeyShareBatch[],
+): readonly JsonRecord[] => {
+    const entries: {
+        readonly rotation: number;
+        readonly level: number;
+        readonly trusteeRosterPosition: number;
+        readonly entry: JsonRecord;
+    }[] = [];
+    galoisKeyShareBatches.forEach((batch) => {
+        batch.galoisKeyShareProofs.forEach((proofRecord) => {
+            const proofFields = proofRecord as JsonRecord;
+            entries.push({
+                rotation: proofRecord.rotation,
+                level: proofRecord.level,
+                trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+                entry: {
+                    trusteeIdentity: proofRecord.trusteeIdentity,
+                    trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+                    rotation: proofRecord.rotation,
+                    level: proofRecord.level,
+                    keySwitchMaterialEncoding:
+                        proofRecord.keySwitchMaterialEncoding,
+                    keySwitchDomain: proofRecord.keySwitchDomain,
+                    keySwitchSeedHex: proofRecord.keySwitchSeedHex,
+                    keySwitchComponentVectorRoot:
+                        proofRecord.keySwitchComponentVectorRoot,
+                    keySwitchComponentMaterialRoot:
+                        proofFields.keySwitchComponentMaterialRoot ?? null,
+                    galoisKeyShareRoot: proofRecord.galoisKeyShareRoot,
+                    galoisKeyShareProofRoot:
+                        proofRecord.galoisKeyShareProofRoot,
+                },
+            });
+        });
+    });
+
+    return entries
+        .sort(
+            (left, right) =>
+                left.rotation - right.rotation ||
+                left.level - right.level ||
+                left.trusteeRosterPosition - right.trusteeRosterPosition,
+        )
+        .map((entry) => entry.entry);
+};
+
+const publicEvaluationKeyMaterialManifest = (
+    input: PublicEvaluationKeyMaterialTransportInput,
+    evaluationKeys: PublicEvaluationKeySet,
+): JsonRecord => ({
+    objectType: 'PublicEvaluationKeyMaterialManifest',
+    objectVersion: 1,
+    setupProfileId: 'CollectiveBgvSetup-v1',
+    setupProofProfileId,
+    assemblyStatus: publicEvaluationKeyAssemblyStatus,
+    materialEncoding: publicEvaluationKeyMaterialEncoding,
+    materialTransportEncoding: publicEvaluationKeyTransportMaterialEncoding,
+    materialSource: publicEvaluationKeyMaterialSource,
+    ...contextFields(input.setupContext),
+    participantCount: input.participantCount,
+    rnsLimbCount: input.qSharePrimes.length,
+    evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
+    sameSecretProofFamilyBindingRoot:
+        evaluationKeys.sameSecretProofFamilyBindingRoot,
+    publicKeyShareLnpProofSetRoot: evaluationKeys.publicKeyShareLnpProofSetRoot,
+    relinearizationKeyShareRoundsRoot:
+        evaluationKeys.relinearizationKeyShareRoundsRoot,
+    relinearizationLevelSchedule: evaluationKeys.relinearizationLevelSchedule,
+    relinearizationKeyRoots: evaluationKeys.relinearizationKeyRoots,
+    relinearizationShareMaterialRoots: relinearizationShareMaterialManifest(
+        input.relinearizationKeyShareRounds,
+    ),
+    requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
+    requiredGaloisKeySchedule: evaluationKeys.requiredGaloisKeySchedule,
+    galoisKeyShareBatchRoots: evaluationKeys.galoisKeyShareBatchRoots,
+    galoisKeyRoots: evaluationKeys.galoisKeyRoots,
+    galoisShareMaterialRoots: galoisShareMaterialManifest(
+        input.galoisKeyShareBatches,
+    ),
+    genericKeySwitchKeyRoots: evaluationKeys.genericKeySwitchKeyRoots,
+    rawKeyBytesEmbedded: false,
+    verifierGeneratedKeyMaterial: false,
+});
+
+const encodePublicEvaluationKeyMaterialManifest = (
+    manifest: JsonRecord,
+): Uint8Array => {
+    const manifestBytes = textEncoder.encode(canonicalJson(manifest));
+    const materialBytes = new Uint8Array(
+        publicEvaluationKeyMaterialMagic.byteLength + manifestBytes.byteLength,
+    );
+    materialBytes.set(publicEvaluationKeyMaterialMagic, 0);
+    materialBytes.set(manifestBytes, publicEvaluationKeyMaterialMagic.length);
+
+    return materialBytes;
+};
+
+const publicEvaluationKeyMaterialChunks = (
+    materialBytes: Uint8Array,
+): readonly Uint8Array[] => {
+    if (materialBytes.byteLength === 0) {
+        throw new Error(
+            'public evaluation-key material transport requires bytes.',
+        );
+    }
+    const chunks: Uint8Array[] = [];
+    for (
+        let byteOffset = 0;
+        byteOffset < materialBytes.byteLength;
+        byteOffset += setupProofTransportChunkSizeBytes
+    ) {
+        chunks.push(
+            materialBytes.slice(
+                byteOffset,
+                byteOffset + setupProofTransportChunkSizeBytes,
+            ),
+        );
+    }
+
+    return chunks;
+};
+
+const publicEvaluationKeyMaterialFullObjectHash = (
+    totalByteLength: number,
+    chunks: readonly Uint8Array[],
+): ProtocolHash =>
+    hash512Hex(
+        'sealed-lattice/setup/public-evaluation-key-material/full-object-v1',
+        [u64LittleEndianBytes(totalByteLength, 'totalByteLength'), ...chunks],
+    );
+
+const publicEvaluationKeyMaterialChunkHash = (
+    fullObjectHash: ProtocolHash,
+    chunkIndex: number,
+    chunk: Uint8Array,
+): ProtocolHash =>
+    hash512Hex('sealed-lattice/setup/public-evaluation-key-material/chunk-v1', [
+        textEncoder.encode(fullObjectHash),
+        u64LittleEndianBytes(chunkIndex, 'chunkIndex'),
+        chunk,
+    ]);
+
+const publicEvaluationKeyMaterialTransportHashes = (
+    chunks: readonly Uint8Array[],
+): Readonly<{
+    readonly fullObjectHash: ProtocolHash;
+    readonly chunkHashes: readonly ProtocolHash[];
+    readonly chunkRoot: ProtocolHash;
+    readonly totalByteLength: number;
+}> => {
+    if (chunks.length === 0) {
+        throw new Error(
+            'public evaluation-key material transport requires at least one chunk.',
+        );
+    }
+    const totalByteLength = chunks.reduce((byteLength, chunk, chunkIndex) => {
+        if (chunk.byteLength === 0) {
+            throw new Error(
+                'public evaluation-key material chunks must be non-empty.',
+            );
+        }
+        if (chunk.byteLength > setupProofTransportChunkSizeBytes) {
+            throw new Error(
+                'public evaluation-key material chunk exceeds the accepted chunk size.',
+            );
+        }
+        if (
+            chunkIndex + 1 < chunks.length &&
+            chunk.byteLength !== setupProofTransportChunkSizeBytes
+        ) {
+            throw new Error(
+                'public evaluation-key material contains a short non-final chunk.',
+            );
+        }
+
+        return byteLength + chunk.byteLength;
+    }, 0);
+    const fullObjectHash = publicEvaluationKeyMaterialFullObjectHash(
+        totalByteLength,
+        chunks,
+    );
+    const chunkHashes = chunks.map((chunk, chunkIndex) =>
+        publicEvaluationKeyMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
+    );
+    const chunkRoot = deriveProtocolHash(
+        'PublicEvaluationKeyMaterialChunkRoot',
+        {
+            objectType: 'PublicEvaluationKeyMaterialChunkManifest',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
+            chunkSizeBytes: setupProofTransportChunkSizeBytes,
+            chunkCount: chunkHashes.length,
+            totalByteLength,
+            chunkHashes,
+            fullObjectHash,
+        },
+    );
+
+    return {
+        fullObjectHash,
+        chunkHashes,
+        chunkRoot,
+        totalByteLength,
+    };
+};
+
+const publicEvaluationKeyMaterialReferenceRoot = (
+    evaluationKeys: PublicEvaluationKeySet,
+    expectedMaterialManifest: JsonRecord,
+    transportHashes: ReturnType<
+        typeof publicEvaluationKeyMaterialTransportHashes
+    >,
+): ProtocolHash =>
+    deriveProtocolHash('PublicEvaluationKeyMaterialRoot', {
+        objectType: 'PublicEvaluationKeyMaterialReference',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        assemblyStatus: publicEvaluationKeyAssemblyStatus,
+        materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
+        materialSource: publicEvaluationKeyMaterialSource,
+        ceremonyId: evaluationKeys.ceremonyId,
+        manifestHash: evaluationKeys.manifestHash,
+        rosterHash: evaluationKeys.rosterHash,
+        setupProfileHash: evaluationKeys.setupProfileHash,
+        qShareHash: evaluationKeys.qShareHash,
+        carryAwareVssShareRelationProfileHash:
+            evaluationKeys.carryAwareVssShareRelationProfileHash,
+        commitmentProfileHash: evaluationKeys.commitmentProfileHash,
+        setupEpoch: evaluationKeys.setupEpoch,
+        evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
+        sameSecretProofFamilyBindingRoot:
+            evaluationKeys.sameSecretProofFamilyBindingRoot,
+        publicKeyShareLnpProofSetRoot:
+            evaluationKeys.publicKeyShareLnpProofSetRoot,
+        relinearizationKeyShareRoundsRoot:
+            evaluationKeys.relinearizationKeyShareRoundsRoot,
+        requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
+        expectedMaterialManifest,
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        chunkCount: transportHashes.chunkHashes.length,
+        totalByteLength: transportHashes.totalByteLength,
+        fullObjectHash: transportHashes.fullObjectHash,
+        chunkRoot: transportHashes.chunkRoot,
+        chunkHashes: transportHashes.chunkHashes,
+    });
+
+const expectedPublicEvaluationKeyComponentMaterialRoots = (
+    input: PublicEvaluationKeyMaterialTransportInput,
+): ReadonlySet<ProtocolHash> => {
+    const roots = new Set<ProtocolHash>();
+    const collectRoot = (record: JsonRecord): void => {
+        if (
+            record.keySwitchMaterialEncoding !==
+            evaluationKeyShareComponentMaterialEncoding
+        ) {
+            return;
+        }
+        const root = record.keySwitchComponentMaterialRoot;
+        if (typeof root !== 'string') {
+            throw new TypeError(
+                'binary evaluation-key proof records must carry keySwitchComponentMaterialRoot.',
+            );
+        }
+        assertProtocolHash(root, 'keySwitchComponentMaterialRoot');
+        roots.add(root);
+    };
+
+    input.relinearizationKeyShareRounds.roundOneRecords.forEach((record) =>
+        collectRoot(record),
+    );
+    input.relinearizationKeyShareRounds.roundTwoRecords.forEach((record) =>
+        collectRoot(record),
+    );
+    input.galoisKeyShareBatches.forEach((batch) =>
+        batch.galoisKeyShareProofs.forEach((proofRecord) =>
+            collectRoot(proofRecord),
+        ),
+    );
+
+    return roots;
+};
+
+const assertPublicEvaluationKeyComponentMaterialCoverage = (
+    input: PublicEvaluationKeyMaterialTransportInput,
+): void => {
+    const expectedRoots =
+        expectedPublicEvaluationKeyComponentMaterialRoots(input);
+    const componentMaterials =
+        input.transportedEvaluationKeyShareComponentMaterial
+            ?.componentMaterials ?? [];
+    if (expectedRoots.size === 0) {
+        if (componentMaterials.length !== 0) {
+            throw new Error(
+                'transportedEvaluationKeyShareComponentMaterial must not be supplied when evaluation-key records do not use binary component material.',
+            );
+        }
+
+        return;
+    }
+    if (componentMaterials.length === 0) {
+        throw new Error(
+            'transportedEvaluationKeyShareComponentMaterial is required for binary evaluation-key component material.',
+        );
+    }
+
+    const suppliedRoots = new Set<ProtocolHash>();
+    componentMaterials.forEach((componentMaterial, componentIndex) => {
+        const materialRoot = componentMaterial.keySwitchComponentMaterialRoot;
+        if (typeof materialRoot !== 'string') {
+            throw new TypeError(
+                `transportedEvaluationKeyShareComponentMaterial.componentMaterials.${String(componentIndex)}.keySwitchComponentMaterialRoot must be a protocol hash.`,
+            );
+        }
+        assertProtocolHash(
+            materialRoot,
+            `transportedEvaluationKeyShareComponentMaterial.componentMaterials.${String(componentIndex)}.keySwitchComponentMaterialRoot`,
+        );
+        if (suppliedRoots.has(materialRoot)) {
+            throw new Error(
+                'transportedEvaluationKeyShareComponentMaterial contains duplicate key-switch component material roots.',
+            );
+        }
+        suppliedRoots.add(materialRoot);
+    });
+    if (
+        suppliedRoots.size !== expectedRoots.size ||
+        [...expectedRoots].some(
+            (expectedRoot) => !suppliedRoots.has(expectedRoot),
+        )
+    ) {
+        throw new Error(
+            'transportedEvaluationKeyShareComponentMaterial must cover every binary evaluation-key component material root.',
+        );
+    }
+};
+
+export function createPublicEvaluationKeySet(
     input: PublicEvaluationKeySetInput,
-): PublicEvaluationKeySet => {
+): PublicEvaluationKeySet {
     validateCommonInput(input);
     assertContextMatches(
         input.setupContext,
@@ -2720,4 +4180,79 @@ export const createPublicEvaluationKeySet = (
             evaluationKeysWithoutHash,
         ),
     } satisfies PublicEvaluationKeySet;
+}
+
+export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
+    input: PublicEvaluationKeyMaterialTransportInput,
+): BinaryChunkedPublicEvaluationKeyMaterialTransport => {
+    const evaluationKeysWithoutMaterialReference =
+        createPublicEvaluationKeySet(input);
+    const manifest = publicEvaluationKeyMaterialManifest(
+        input,
+        evaluationKeysWithoutMaterialReference,
+    );
+    const materialBytes = encodePublicEvaluationKeyMaterialManifest(manifest);
+    const chunks = publicEvaluationKeyMaterialChunks(materialBytes);
+    const transportHashes = publicEvaluationKeyMaterialTransportHashes(chunks);
+    const publicEvaluationKeyMaterialRoot =
+        publicEvaluationKeyMaterialReferenceRoot(
+            evaluationKeysWithoutMaterialReference,
+            manifest,
+            transportHashes,
+        );
+    const publicEvaluationKeyMaterialReference = {
+        publicEvaluationKeyMaterialEncoding:
+            publicEvaluationKeyTransportMaterialEncoding,
+        publicEvaluationKeyMaterialRoot,
+        publicEvaluationKeyMaterialChunkSizeBytes:
+            setupProofTransportChunkSizeBytes,
+        publicEvaluationKeyMaterialChunkCount:
+            transportHashes.chunkHashes.length,
+        publicEvaluationKeyMaterialTotalByteLength:
+            transportHashes.totalByteLength,
+        publicEvaluationKeyMaterialFullObjectHash:
+            transportHashes.fullObjectHash,
+        publicEvaluationKeyMaterialChunkRoot: transportHashes.chunkRoot,
+        publicEvaluationKeyMaterialChunkHashes: transportHashes.chunkHashes,
+    } satisfies PublicEvaluationKeyMaterialReference;
+    const evaluationKeys = createPublicEvaluationKeySet({
+        ...input,
+        publicEvaluationKeyMaterialReference,
+    });
+    assertPublicEvaluationKeyComponentMaterialCoverage(input);
+    const transportedPublicEvaluationKeyMaterial = {
+        objectType: publicEvaluationKeyMaterialTransportSetObjectType,
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
+        publicEvaluationKeyMaterials: [
+            {
+                objectType: publicEvaluationKeyMaterialTransportObjectType,
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId,
+                materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
+                ...contextFields(input.setupContext),
+                evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,
+                publicEvaluationKeyMaterialRoot,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: transportHashes.chunkHashes.length,
+                totalByteLength: transportHashes.totalByteLength,
+                fullObjectHash: transportHashes.fullObjectHash,
+                chunkRoot: transportHashes.chunkRoot,
+                chunkHashes: transportHashes.chunkHashes,
+                chunks: chunks.map((chunk, chunkIndex) => ({
+                    chunkIndex,
+                    bytesHex: bytesToHex(chunk),
+                })),
+            },
+        ],
+    } satisfies TransportedPublicEvaluationKeyMaterialSet;
+
+    return {
+        evaluationKeys,
+        publicEvaluationKeyMaterialReference,
+        transportedPublicEvaluationKeyMaterial,
+    };
 };

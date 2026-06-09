@@ -26,10 +26,14 @@ import type {
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvSameSecretLnpProofGeneration,
+    BgvSetupCommitmentOpeningComputation,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
+    BgvThresholdShareCommitmentTransportStreamBegin,
+    BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
+    BgvThresholdShareCommitmentTransportStreamDerivation,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -345,8 +349,12 @@ export const createTranscriptCoreKernelLoader = (
                             expectedRosterHash: input.expectedRosterHash,
                             transportedVssCoefficientCommitmentMaterial:
                                 input.transportedVssCoefficientCommitmentMaterial,
+                            verifiedVssCoefficientCommitmentMaterial:
+                                input.verifiedVssCoefficientCommitmentMaterial,
                             transportedSameSecretProofMaterial:
                                 input.transportedSameSecretProofMaterial,
+                            transportedPublicKeyShareMaterial:
+                                input.transportedPublicKeyShareMaterial,
                             transportedPublicKeyShareProofMaterial:
                                 input.transportedPublicKeyShareProofMaterial,
                             transportedEvaluationKeyShareProofMaterial:
@@ -463,6 +471,19 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                     }),
+                computeSetupCommitmentFromOpening: (
+                    input,
+                ): BgvSetupCommitmentOpeningComputation =>
+                    executeCommand<BgvSetupCommitmentOpeningComputation>({
+                        command: 'ComputeSetupCommitmentFromOpening',
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        sourceRnsLimbIndex: input.sourceRnsLimbIndex,
+                        sourceMessageModulus: input.sourceMessageModulus,
+                        shamirCoefficientIndex: input.shamirCoefficientIndex,
+                        messageCoefficients: input.messageCoefficients,
+                        randomnessByColumn: input.randomnessByColumn,
+                        ringDegree: input.ringDegree,
+                    }),
                 deriveThresholdShareCommitments: (
                     input,
                 ): BgvThresholdShareCommitmentDerivation =>
@@ -489,6 +510,46 @@ export const createTranscriptCoreKernelLoader = (
                                 input.sourceTrusteeCoefficientCommitmentRecords,
                             transportedVssCoefficientCommitmentMaterial:
                                 input.transportedVssCoefficientCommitmentMaterial,
+                        },
+                    ),
+                beginThresholdShareCommitmentsFromTransportStream: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamBegin =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamBegin>(
+                        {
+                            command:
+                                'BeginThresholdShareCommitmentsFromTransportStream',
+                            derivationId: input.derivationId,
+                            setupContext: input.setupContext,
+                            publicMatrixSeedHash: input.publicMatrixSeedHash,
+                            transportedVssCoefficientCommitmentMaterial:
+                                input.transportedVssCoefficientCommitmentMaterial,
+                        },
+                    ),
+                absorbThresholdShareCommitmentsFromTransportStreamChunk: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamChunkAbsorption =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamChunkAbsorption>(
+                        {
+                            command:
+                                'AbsorbThresholdShareCommitmentsFromTransportStreamChunk',
+                            derivationId: input.derivationId,
+                            chunkIndex: input.chunkIndex,
+                            bytesHex: input.bytesHex,
+                        },
+                    ),
+                finishThresholdShareCommitmentsFromTransportStream: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamDerivation =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamDerivation>(
+                        {
+                            command:
+                                'FinishThresholdShareCommitmentsFromTransportStream',
+                            derivationId: input.derivationId,
+                            vssCoefficientCommitmentRoot:
+                                input.vssCoefficientCommitmentRoot,
+                            sourceTrusteeCoefficientCommitmentRecords:
+                                input.sourceTrusteeCoefficientCommitmentRecords,
                         },
                     ),
                 verifyLocalTrusteeSetupState: (

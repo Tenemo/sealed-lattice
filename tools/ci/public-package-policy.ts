@@ -133,11 +133,13 @@ export const vendoredProtocolRuntimeModules = [
     'roster/object-validation.ts',
     'roster/verification.ts',
     'setup/common-randomness-records.ts',
+    'setup/binary-chunk-writer.ts',
     'setup/evaluation-key-proof-records.ts',
     'setup/evaluator-key-schedule.ts',
     'setup/local-trustee-setup-state.ts',
     'setup/public-key-share-records.ts',
     'setup/same-secret-consistency-records.ts',
+    'setup/setup-proof-material-transport.ts',
     'setup/setup-contribution-orchestration.ts',
     'setup/setup-certificates.ts',
     'setup/setup-package-assembly.ts',
@@ -228,6 +230,8 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'setup/public-key-share-records.js',
         exports: [
+            'createBinaryChunkedPublicKeyShareMaterialTransport',
+            'createBinaryChunkedPublicKeyShareProofMaterialTransport',
             'createPublicKeyShareLnpProofSet',
             'createPublicKeyShareMaterialSet',
             'createPublicKeyShareProofSet',
@@ -236,7 +240,10 @@ export const vendoredProtocolRuntimeEntryExports = [
     },
     {
         source: 'setup/same-secret-consistency-records.js',
-        exports: ['createSameSecretProofSet'],
+        exports: [
+            'createBinaryChunkedSameSecretProofMaterialTransport',
+            'createSameSecretProofSet',
+        ],
     },
     {
         source: 'setup/evaluator-key-schedule.js',
@@ -245,6 +252,8 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'setup/evaluation-key-proof-records.js',
         exports: [
+            'createBinaryChunkedEvaluationKeyShareMaterialTransport',
+            'createBinaryChunkedPublicEvaluationKeyMaterialTransport',
             'createGaloisKeyShareBatches',
             'createPublicEvaluationKeySet',
             'createRelinearizationKeyShareRounds',
@@ -261,7 +270,7 @@ export const vendoredProtocolRuntimeEntryExports = [
     },
     {
         source: 'setup/setup-package-assembly.js',
-        exports: ['createSetupPackage'],
+        exports: ['createSetupPackage', 'createSetupPackageVerificationInput'],
     },
     {
         source: 'setup/setup-phase-records.js',

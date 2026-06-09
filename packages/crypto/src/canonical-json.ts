@@ -225,6 +225,58 @@ export const setupProofMaterialFullObjectHashHex = (
     }
 };
 
+export type SetupVssMaterialFullObjectHasher = Readonly<{
+    update: (chunk: Uint8Array) => void;
+    digestHex: () => string;
+}>;
+
+export const createSetupVssMaterialFullObjectHasher = (
+    totalByteLength: number,
+): SetupVssMaterialFullObjectHasher => {
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength < 0) {
+        throw new TypeError(
+            'setup VSS material totalByteLength must be a non-negative safe integer.',
+        );
+    }
+
+    const hash = shake256.create({ dkLen: 64 });
+    let finalized = false;
+    hash.update(hash512PreimagePrefix);
+    appendBytesToHash(
+        hash,
+        textEncoder.encode(
+            'sealed-lattice/setup/vss-coefficient-commitment-material/full-object-v1',
+        ),
+    );
+    appendVarUintToHash(hash, 1);
+    appendVarUintToHash(hash, totalByteLength);
+
+    return {
+        update: (chunk: Uint8Array): void => {
+            if (finalized) {
+                throw new Error(
+                    'setup VSS material full-object hash is already finalized.',
+                );
+            }
+            hash.update(chunk);
+        },
+        digestHex: (): string => {
+            if (finalized) {
+                throw new Error(
+                    'setup VSS material full-object hash is already finalized.',
+                );
+            }
+            finalized = true;
+
+            try {
+                return bytesToHex(hash.digest());
+            } finally {
+                hash.destroy();
+            }
+        },
+    };
+};
+
 export const setupVssMaterialFullObjectHashHex = (
     totalByteLength: number,
     chunks: readonly Uint8Array[],
@@ -240,23 +292,10 @@ export const setupVssMaterialFullObjectHashHex = (
         );
     }
 
-    const hash = shake256.create({ dkLen: 64 });
-    try {
-        hash.update(hash512PreimagePrefix);
-        appendBytesToHash(
-            hash,
-            textEncoder.encode(
-                'sealed-lattice/setup/vss-coefficient-commitment-material/full-object-v1',
-            ),
-        );
-        appendVarUintToHash(hash, 1);
-        appendVarUintToHash(hash, totalByteLength);
-        for (const chunk of chunks) {
-            hash.update(chunk);
-        }
-
-        return bytesToHex(hash.digest());
-    } finally {
-        hash.destroy();
+    const hasher = createSetupVssMaterialFullObjectHasher(totalByteLength);
+    for (const chunk of chunks) {
+        hasher.update(chunk);
     }
+
+    return hasher.digestHex();
 };

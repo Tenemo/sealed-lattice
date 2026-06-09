@@ -16,6 +16,50 @@ import {
     TranscriptCoreKernelCommandError,
 } from '#packages/wasm/src/transcript-core-bridge';
 
+type SetupCommitmentOpeningComputation = Readonly<{
+    readonly operation: 'computeSetupCommitmentFromOpening';
+    readonly commitment: Record<string, unknown>;
+    readonly commitmentRoot: string;
+    readonly commitmentChunkRoot: string;
+    readonly coefficientVectorHash512: string;
+}>;
+
+type SetupCommitmentKernel = Readonly<{
+    readonly exportedFunctionNames: readonly string[];
+    readonly computeSetupCommitmentFromOpening: (input: {
+        readonly publicMatrixSeedHash: string;
+        readonly sourceRnsLimbIndex: number;
+        readonly sourceMessageModulus: number;
+        readonly shamirCoefficientIndex: number;
+        readonly messageCoefficients: readonly number[];
+        readonly randomnessByColumn: readonly (readonly number[])[];
+        readonly ringDegree: number;
+    }) => SetupCommitmentOpeningComputation;
+}>;
+
+type ThresholdShareTransportStreamKernel = Readonly<{
+    readonly describeCollectiveBgvSetupProfile: () => {
+        readonly setupProfileHash: string;
+        readonly qShareHash: string;
+        readonly carryAwareVssShareRelationProfileHash: string;
+        readonly commitmentProfileHash: string;
+    };
+    readonly beginThresholdShareCommitmentsFromTransportStream: (input: {
+        readonly derivationId: string;
+        readonly setupContext: unknown;
+        readonly publicMatrixSeedHash: string;
+        readonly transportedVssCoefficientCommitmentMaterial: unknown;
+    }) => {
+        readonly operation: 'beginThresholdShareCommitmentsFromTransportStream';
+        readonly derivationId: string;
+    };
+    readonly finishThresholdShareCommitmentsFromTransportStream: (input: {
+        readonly derivationId: string;
+        readonly vssCoefficientCommitmentRoot: string;
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+    }) => unknown;
+}>;
+
 describe('transcript-core kernel in Node', () => {
     it('normalizes host-specific Rust source paths before hashing', () => {
         const windowsBytes = textEncoder.encode(
@@ -126,7 +170,8 @@ describe('transcript-core kernel in Node', () => {
     });
 
     it('loads the transcript-core module and exposes command exports', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel =
+            (await loadTranscriptCoreKernel()) as SetupCommitmentKernel;
 
         expect(kernel.exportedFunctionNames).toEqual(
             expect.arrayContaining([
@@ -262,6 +307,105 @@ describe('transcript-core kernel in Node', () => {
                 (protocolHashError as TranscriptCoreKernelCommandError).code,
             ).toBe(expectedKernelCode);
         }
+    });
+
+    it('computes setup commitments from openings through WASM', async () => {
+        const kernel =
+            (await loadTranscriptCoreKernel()) as SetupCommitmentKernel;
+        const firstAcceptedDataPrime = 140_737_487_306_753;
+        const ringDegree = 8;
+        const messageCoefficients = [0, 1, 2, 3, 5, 8, 13, 21];
+        const randomnessByColumn = Array.from(
+            { length: 5 },
+            (_unused, columnIndex) =>
+                Array.from({ length: ringDegree }, (_unusedAgain, index) => {
+                    const residue = (columnIndex + index) % 3;
+
+                    return residue === 0 ? -1 : residue === 1 ? 0 : 1;
+                }),
+        );
+
+        const computation: SetupCommitmentOpeningComputation =
+            kernel.computeSetupCommitmentFromOpening({
+                publicMatrixSeedHash: 'a'.repeat(128),
+                sourceRnsLimbIndex: 0,
+                sourceMessageModulus: firstAcceptedDataPrime,
+                shamirCoefficientIndex: 1,
+                messageCoefficients,
+                randomnessByColumn,
+                ringDegree,
+            });
+
+        expect(computation.operation).toBe('computeSetupCommitmentFromOpening');
+        expect(computation.commitmentRoot).toHaveLength(128);
+        expect(computation.commitmentChunkRoot).toHaveLength(128);
+        expect(computation.coefficientVectorHash512).toHaveLength(128);
+        expect(computation.commitment).toMatchObject({
+            objectType: 'SetupCommitment',
+            sourceRnsLimbIndex: 0,
+            sourceMessageModulus: firstAcceptedDataPrime,
+            shamirCoefficientIndex: 1,
+            ringDegree,
+        });
+
+        expect(() =>
+            kernel.computeSetupCommitmentFromOpening({
+                publicMatrixSeedHash: 'a'.repeat(128),
+                sourceRnsLimbIndex: 0,
+                sourceMessageModulus: firstAcceptedDataPrime + 1,
+                shamirCoefficientIndex: 1,
+                messageCoefficients,
+                randomnessByColumn,
+                ringDegree,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('exposes chunk-fed VSS threshold derivation stream commands through WASM', async () => {
+        const kernel =
+            (await loadTranscriptCoreKernel()) as ThresholdShareTransportStreamKernel;
+        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const setupContext = {
+            ceremonyId: 'ceremony-main',
+            manifestHash: 'a'.repeat(128),
+            rosterHash: 'b'.repeat(128),
+            setupProfileHash: profile.setupProfileHash,
+            qShareHash: profile.qShareHash,
+            carryAwareVssShareRelationProfileHash:
+                profile.carryAwareVssShareRelationProfileHash,
+            commitmentProfileHash: profile.commitmentProfileHash,
+            setupEpoch: 'setup-epoch-1',
+        };
+        const derivationId = 'wasm-vss-stream-smoke';
+
+        const beginResult =
+            kernel.beginThresholdShareCommitmentsFromTransportStream({
+                derivationId,
+                setupContext,
+                publicMatrixSeedHash: 'c'.repeat(128),
+                transportedVssCoefficientCommitmentMaterial: {
+                    objectType:
+                        'SetupTransportedVssCoefficientCommitmentMaterial',
+                    objectVersion: 1,
+                    binaryFormat:
+                        'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+                    chunkSizeBytes: 1_048_576,
+                    chunkCount: 1,
+                    totalByteLength: 8,
+                },
+            });
+
+        expect(beginResult).toMatchObject({
+            operation: 'beginThresholdShareCommitmentsFromTransportStream',
+            derivationId,
+        });
+        expect(() =>
+            kernel.finishThresholdShareCommitmentsFromTransportStream({
+                derivationId,
+                vssCoefficientCommitmentRoot: 'd'.repeat(128),
+                sourceTrusteeCoefficientCommitmentRecords: [],
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {

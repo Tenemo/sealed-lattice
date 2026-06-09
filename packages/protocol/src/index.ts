@@ -23,20 +23,28 @@ export {
     createPrivateVssMailboxDeliverySet,
 } from './setup/private-vss-mailbox-delivery.js';
 export {
+    createBinaryChunkedPublicKeyShareMaterialBundle,
+    createBinaryChunkedPublicKeyShareMaterialTransport,
+    createBinaryChunkedPublicKeyShareProofMaterialTransport,
     createCollectivePublicKey,
     createPublicKeyShareLnpProofSet,
     createPublicKeyShareMaterialSet,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     publicKeyShareCoefficientVectorHashDomain,
+    publicKeyShareMaterialBinaryFormat,
+    publicKeyShareMaterialTransportEncoding,
     publicKeyShareLnpProofModelStatus,
     publicKeyShareLnpProofVerificationStatus,
     publicKeyShareMaterialEncoding,
     publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
     publicKeyShareProofVerificationStatus,
+    materialRecordsFromTransportedPublicKeyShareMaterial,
 } from './setup/public-key-share-records.js';
 export {
+    createBinaryChunkedEvaluationKeyShareMaterialTransport,
+    createBinaryChunkedPublicEvaluationKeyMaterialTransport,
     createGaloisKeyShareBatches,
     createPublicEvaluationKeySet,
     createRelinearizationKeyShareRounds,
@@ -55,9 +63,16 @@ export {
 } from './setup/evaluator-key-schedule.js';
 export {
     acceptedBgvProfileRingDegree,
+    acceptedBgvSetupQShare,
+    acceptedBgvSetupQShareHash,
+    acceptedBgvSetupQSharePrimes,
+    binaryVssCoefficientCommitmentMaterialByteLength,
     computeSetupCommitmentFromOpening,
+    createBinaryChunkedVssCoefficientCommitmentBundle,
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
+    createStreamingBinaryChunkedVssCoefficientCommitmentBundle,
     createVssSourceTrusteeCoefficientOpeningState,
+    createVssSourceTrusteeCoefficientOpeningStateProvider,
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
@@ -103,9 +118,11 @@ export { deriveThresholdShareCommitments } from './setup/threshold-share-commitm
 export {
     collectForbiddenSetupPackageAssemblyFieldPaths,
     createSetupPackage,
+    createSetupPackageVerificationInput,
     setupPackageHashInput,
 } from './setup/setup-package-assembly.js';
 export {
+    createBinaryChunkedSameSecretProofMaterialTransport,
     createSameSecretProofSet,
     createSameSecretConsistencyStatementSet,
     sameSecretBoundProofFamilies,
@@ -138,7 +155,10 @@ export type {
     PrivateVssShareProofFactoryInput,
 } from './setup/private-vss-mailbox-delivery.js';
 export type {
+    BinaryChunkedEvaluationKeyShareMaterialTransport,
+    BinaryChunkedPublicEvaluationKeyMaterialTransport,
     EvaluationKeyProofCommonInput,
+    EvaluationKeyShareMaterialTransportInput,
     GaloisKeyContributingShareRoot,
     EvaluationKeyShareEmbeddedProofBytes,
     EvaluationKeyShareProofGenerationBase,
@@ -158,6 +178,7 @@ export type {
     GaloisKeyShareProofMaterial,
     GaloisKeyShareRootReference,
     KeySwitchComponentVectorEntry,
+    PublicEvaluationKeyMaterialTransportInput,
     PublicEvaluationKeySet,
     PublicEvaluationKeySetInput,
     RelinearizationKeyRootReference,
@@ -170,6 +191,10 @@ export type {
     RelinearizationRoundOneContribution,
     RelinearizationRoundTwoContribution,
     SameSecretProofReference,
+    TransportedEvaluationKeyShareComponentMaterialSet,
+    TransportedEvaluationKeyShareProofMaterialSet,
+    TransportedPublicEvaluationKeyMaterial,
+    TransportedPublicEvaluationKeyMaterialSet,
 } from './setup/evaluation-key-proof-records.js';
 export type {
     EvaluatorKeySchedule,
@@ -179,6 +204,10 @@ export type {
     RequiredGaloisSet,
 } from './setup/evaluator-key-schedule.js';
 export type {
+    BinaryChunkedPublicKeyShareMaterialBundle,
+    BinaryChunkedPublicKeyShareProofMaterialTransport,
+    BinaryChunkedPublicKeyShareMaterialSet,
+    BinaryChunkedPublicKeyShareMaterialTransport,
     CollectivePublicKey,
     CollectivePublicKeyCoefficientVectorMaterial,
     CollectivePublicKeyInput,
@@ -199,6 +228,9 @@ export type {
     PublicKeyShareMaterialRootReference,
     PublicKeyShareMaterialSet,
     PublicKeyShareMaterialSetInput,
+    SetupPackagePublicKeyShareMaterialSet,
+    SetupTransportedPublicKeyShareMaterial,
+    TransportedPublicKeyShareProofMaterialSet,
     PublicKeyShareProofRecord,
     PublicKeyShareProofSet,
     PublicKeyShareProofSetInput,
@@ -207,6 +239,7 @@ export type {
     PublicKeyShareSetInput,
 } from './setup/public-key-share-records.js';
 export type {
+    BinaryChunkedVssCoefficientCommitmentBundle,
     BinaryChunkedVssCoefficientCommitmentMaterialSet,
     BinaryChunkedVssCoefficientCommitmentMaterialTransport,
     SetupPackageVssCoefficientCommitmentMaterialSet,
@@ -214,6 +247,12 @@ export type {
     SetupCommitmentValue,
     SetupTransportChunk,
     SetupTransportedVssCoefficientCommitmentMaterial,
+    SetupTransportedVssCoefficientCommitmentMaterialLike,
+    SetupTransportedVssCoefficientCommitmentMaterialReference,
+    SetupTransportedVssCoefficientCommitmentMaterialTemplate,
+    StreamingBinaryChunkedVssCoefficientCommitmentBundle,
+    ThresholdShareCommitmentTransportStreamComputer,
+    VerifiedVssCoefficientCommitmentMaterial,
     VssCoefficientCommitmentBundle,
     VssCoefficientCommitmentBundleInput,
     VssCoefficientCommitmentMaterialRecord,
@@ -222,12 +261,17 @@ export type {
     VssCoefficientCommitmentSet,
     VssCoefficientOpeningInput,
     VssCoefficientOpeningMaterial,
+    VssSourceTrusteeCoefficientOpeningStateProvider,
+    VssSourceTrusteeCoefficientOpeningStateProviderInput,
+    VssSourceTrusteeCoefficientOpeningStateReference,
     VssSourceTrusteeCoefficientOpeningStateGenerationInput,
     VssSourceTrusteeCoefficientCommitmentRecord,
     VssSourceTrusteeCoefficientCommitmentContribution,
     VssSourceTrusteeCoefficientCommitmentContributionInput,
     VssSourceTrusteeCoefficientOpeningState,
     VssSourceTrusteeOpeningMaterial,
+    VssSourceTrusteeOpeningMaterialReference,
+    VssSourceTrusteeOpeningMaterialSource,
     VssOpeningRandomByteSource,
 } from './setup/vss-coefficient-commitments.js';
 export type {
@@ -270,6 +314,7 @@ export type {
     BgvHeSecurityCertificate,
     BgvRnsProfileForCertificates,
     CollectiveBgvSetupProfileForCertificates,
+    SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
     SetupCertificates,
     SetupCertificatesInput,
@@ -281,6 +326,8 @@ export type {
     SetupPackage,
     SetupPackageCertificateInput,
     SetupPackageInput,
+    SetupPackageVerificationInput,
+    SetupPackageVerificationInputSource,
     SetupKeyCorrectnessCertificate,
 } from './setup/setup-package-assembly.js';
 export type {
@@ -290,6 +337,7 @@ export type {
     ThresholdShareCommitmentSet,
 } from './setup/threshold-share-commitments.js';
 export type {
+    BinaryChunkedSameSecretProofMaterialTransport,
     SameSecretConsistencyStatementRecord,
     SameSecretConsistencyStatementSet,
     SameSecretConsistencyStatementSetInput,
@@ -302,6 +350,7 @@ export type {
     SameSecretProofSet,
     SameSecretProofSetInput,
     SameSecretTransportedProofBytes,
+    TransportedSameSecretProofMaterialSet,
     TrusteeSecretCommitmentRootReference,
 } from './setup/same-secret-consistency-records.js';
 export type {

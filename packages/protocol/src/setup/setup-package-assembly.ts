@@ -6,6 +6,9 @@ import type {
     GaloisKeyShareBatch,
     PublicEvaluationKeySet,
     RelinearizationKeyShareRounds,
+    TransportedEvaluationKeyShareComponentMaterialSet,
+    TransportedEvaluationKeyShareProofMaterialSet,
+    TransportedPublicEvaluationKeyMaterialSet,
 } from './evaluation-key-proof-records.js';
 import type {
     EvaluatorKeySchedule,
@@ -15,16 +18,24 @@ import type {
     CollectivePublicKey,
     PublicKeyShareProofSet,
     PublicKeyShareLnpProofSet,
-    PublicKeyShareMaterialSet,
+    SetupPackagePublicKeyShareMaterialSet,
+    SetupTransportedPublicKeyShareMaterial,
     PublicKeyShareSet,
+    TransportedPublicKeyShareProofMaterialSet,
 } from './public-key-share-records.js';
-import { createCollectivePublicKey } from './public-key-share-records.js';
+import {
+    createCollectivePublicKey,
+    createCollectivePublicKeyFromTransportedPublicKeyShareMaterial,
+    publicKeyShareMaterialTransportEncoding,
+} from './public-key-share-records.js';
 import type {
     SameSecretConsistencyStatementSet,
     SameSecretProofSet,
+    TransportedSameSecretProofMaterialSet,
 } from './same-secret-consistency-records.js';
 import {
     createSetupCertificates,
+    type SetupCertificateTransportedObjectInput,
     type SetupCertificatesInput,
 } from './setup-certificates.js';
 import type { SetupPhaseRecord } from './setup-phase-records.js';
@@ -35,6 +46,8 @@ import {
 import type {
     SetupPackageVssCoefficientCommitmentMaterialSet,
     SetupTransportedVssCoefficientCommitmentMaterial,
+    SetupTransportedVssCoefficientCommitmentMaterialLike,
+    VerifiedVssCoefficientCommitmentMaterial,
     VssCoefficientCommitmentSet,
 } from './vss-coefficient-commitments.js';
 import type {
@@ -111,15 +124,35 @@ export type SetupPackageInput = Readonly<{
         | JsonRecord;
     readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
+    readonly transportedSameSecretProofMaterial?:
+        | TransportedSameSecretProofMaterialSet
+        | JsonRecord;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
-    readonly publicKeyShareMaterial: PublicKeyShareMaterialSet | JsonRecord;
+    readonly publicKeyShareMaterial:
+        | SetupPackagePublicKeyShareMaterialSet
+        | JsonRecord;
+    readonly transportedPublicKeyShareMaterial?:
+        | SetupTransportedPublicKeyShareMaterial
+        | JsonRecord;
     readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet | JsonRecord;
+    readonly transportedPublicKeyShareProofMaterial?:
+        | TransportedPublicKeyShareProofMaterialSet
+        | JsonRecord;
     readonly collectivePublicKey?: never;
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
     readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
+    readonly transportedEvaluationKeyShareProofMaterial?:
+        | TransportedEvaluationKeyShareProofMaterialSet
+        | JsonRecord;
+    readonly transportedEvaluationKeyShareComponentMaterial?:
+        | TransportedEvaluationKeyShareComponentMaterialSet
+        | JsonRecord;
     readonly evaluationKeys: PublicEvaluationKeySet;
+    readonly transportedPublicEvaluationKeyMaterial?:
+        | TransportedPublicEvaluationKeyMaterialSet
+        | JsonRecord;
     readonly setupCertificateInput?: SetupPackageCertificateInput;
     readonly setupCommitmentSecurityCertificate?: JsonRecord;
     readonly setupTransportCertificate?: JsonRecord;
@@ -149,7 +182,9 @@ export type SetupPackage = Readonly<
         readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
         readonly publicKeyShares: PublicKeyShareSet;
         readonly publicKeyShareProofs: PublicKeyShareProofSet;
-        readonly publicKeyShareMaterial: PublicKeyShareMaterialSet | JsonRecord;
+        readonly publicKeyShareMaterial:
+            | SetupPackagePublicKeyShareMaterialSet
+            | JsonRecord;
         readonly publicKeyShareLnpProofs:
             | PublicKeyShareLnpProofSet
             | JsonRecord;
@@ -174,6 +209,104 @@ export type SetupPackage = Readonly<
         readonly setupPackageHash: ProtocolHash;
     }
 >;
+
+export type SetupPackageVerificationInputSource = Readonly<{
+    readonly setupPackage: SetupPackage;
+    readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
+    readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
+    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
+    readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
+    readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
+    readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
+    readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+    readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
+}>;
+
+export type SetupPackageVerificationInput = SetupPackageVerificationInputSource;
+
+const publicVssMaterialReferenceForVerificationInput = (
+    transportedMaterial:
+        | SetupTransportedVssCoefficientCommitmentMaterialLike
+        | undefined,
+    verifiedMaterial: VerifiedVssCoefficientCommitmentMaterial | undefined,
+): SetupTransportedVssCoefficientCommitmentMaterialLike | undefined => {
+    if (transportedMaterial === undefined) {
+        return undefined;
+    }
+    if (
+        verifiedMaterial === undefined ||
+        !Object.prototype.hasOwnProperty.call(transportedMaterial, 'chunks')
+    ) {
+        return transportedMaterial;
+    }
+
+    const { chunks: omittedChunks, ...transportedMaterialReference } =
+        transportedMaterial as SetupTransportedVssCoefficientCommitmentMaterial;
+    void omittedChunks;
+
+    return transportedMaterialReference;
+};
+
+export const createSetupPackageVerificationInput = (
+    input: SetupPackageVerificationInputSource,
+): SetupPackageVerificationInput => {
+    const transportedVssCoefficientCommitmentMaterial =
+        publicVssMaterialReferenceForVerificationInput(
+            input.transportedVssCoefficientCommitmentMaterial,
+            input.verifiedVssCoefficientCommitmentMaterial,
+        );
+
+    return {
+        setupPackage: input.setupPackage,
+        ...(transportedVssCoefficientCommitmentMaterial === undefined
+            ? {}
+            : {
+                  transportedVssCoefficientCommitmentMaterial,
+              }),
+        ...(input.verifiedVssCoefficientCommitmentMaterial === undefined
+            ? {}
+            : {
+                  verifiedVssCoefficientCommitmentMaterial:
+                      input.verifiedVssCoefficientCommitmentMaterial,
+              }),
+        ...(input.transportedSameSecretProofMaterial === undefined
+            ? {}
+            : {
+                  transportedSameSecretProofMaterial:
+                      input.transportedSameSecretProofMaterial,
+              }),
+        ...(input.transportedPublicKeyShareMaterial === undefined
+            ? {}
+            : {
+                  transportedPublicKeyShareMaterial:
+                      input.transportedPublicKeyShareMaterial,
+              }),
+        ...(input.transportedPublicKeyShareProofMaterial === undefined
+            ? {}
+            : {
+                  transportedPublicKeyShareProofMaterial:
+                      input.transportedPublicKeyShareProofMaterial,
+              }),
+        ...(input.transportedEvaluationKeyShareProofMaterial === undefined
+            ? {}
+            : {
+                  transportedEvaluationKeyShareProofMaterial:
+                      input.transportedEvaluationKeyShareProofMaterial,
+              }),
+        ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
+            ? {}
+            : {
+                  transportedEvaluationKeyShareComponentMaterial:
+                      input.transportedEvaluationKeyShareComponentMaterial,
+              }),
+        ...(input.transportedPublicEvaluationKeyMaterial === undefined
+            ? {}
+            : {
+                  transportedPublicEvaluationKeyMaterial:
+                      input.transportedPublicEvaluationKeyMaterial,
+              }),
+    };
+};
 
 type SetupPackageInputWithDerivedCollectivePublicKey = Omit<
     SetupPackageInput,
@@ -743,9 +876,100 @@ const assertKeyRecordBindings = (input: SetupPackageInput): void => {
     hashField(input.evaluationKeys, 'evaluationKeySetHash', 'evaluationKeys');
 };
 
+const assertCommonRandomnessPublicDerivationsBindPackageInput = (
+    input: SetupPackageInput,
+): void => {
+    const publicMatrixSeedHash = hashField(
+        input.commonRandomness,
+        'publicMatrixSeedHash',
+        'commonRandomness',
+    );
+    const publicDerivations = assertObjectRecord(
+        input.commonRandomness.publicDerivations,
+        'commonRandomness.publicDerivations',
+    );
+    if (
+        publicDerivations.objectType !== 'SetupPublicDerivations' ||
+        publicDerivations.objectVersion !== 1 ||
+        publicDerivations.setupProfileId !== setupProfileId ||
+        publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash ||
+        publicDerivations.status !== 'deterministic-public-derivations-bound'
+    ) {
+        throw new Error(
+            'commonRandomness.publicDerivations must match the accepted setup public derivation profile.',
+        );
+    }
+
+    const crpRoots = assertObjectRecord(
+        publicDerivations.crpRoots,
+        'commonRandomness.publicDerivations.crpRoots',
+    );
+    const bgvPublicA = assertObjectRecord(
+        publicDerivations.bgvPublicA,
+        'commonRandomness.publicDerivations.bgvPublicA',
+    );
+    const publicKeyShareMaterial = assertObjectRecord(
+        input.publicKeyShareMaterial,
+        'publicKeyShareMaterial',
+    );
+    if (publicKeyShareMaterial.publicMatrixSeedHash !== publicMatrixSeedHash) {
+        throw new Error(
+            'publicKeyShareMaterial.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash.',
+        );
+    }
+    if (publicKeyShareMaterial.publicKeyCrpRoot !== crpRoots.publicKeyCrpRoot) {
+        throw new Error(
+            'publicKeyShareMaterial.publicKeyCrpRoot must match commonRandomness public derivations.',
+        );
+    }
+    if (
+        publicKeyShareMaterial.publicAPolynomialRoot !==
+        bgvPublicA.publicPolynomialRoot
+    ) {
+        throw new Error(
+            'publicKeyShareMaterial.publicAPolynomialRoot must match commonRandomness public derivations.',
+        );
+    }
+
+    const evaluatorKeySchedule = assertObjectRecord(
+        input.evaluatorKeySchedule,
+        'evaluatorKeySchedule',
+    );
+    if (evaluatorKeySchedule.publicMatrixSeedHash !== publicMatrixSeedHash) {
+        throw new Error(
+            'evaluatorKeySchedule.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash.',
+        );
+    }
+    if (
+        evaluatorKeySchedule.relinearizationCrpRoot !==
+        crpRoots.relinearizationCrpRoot
+    ) {
+        throw new Error(
+            'evaluatorKeySchedule.relinearizationCrpRoot must match commonRandomness public derivations.',
+        );
+    }
+    if (evaluatorKeySchedule.galoisKeyCrpRoot !== crpRoots.galoisKeyCrpRoot) {
+        throw new Error(
+            'evaluatorKeySchedule.galoisKeyCrpRoot must match commonRandomness public derivations.',
+        );
+    }
+};
+
 const resolveThresholdShareCommitments = (
     input: SetupPackageInput,
 ): ThresholdShareCommitmentSet => {
+    const materialEncoding = (
+        input.vssCoefficientCommitmentMaterial as Readonly<
+            Record<string, unknown>
+        >
+    ).materialEncoding;
+    if (
+        materialEncoding ===
+            'binary-chunked-full-public-setup-commitment-values' &&
+        input.thresholdShareCommitments !== undefined
+    ) {
+        return input.thresholdShareCommitments as ThresholdShareCommitmentSet;
+    }
     const derivedThresholdShareCommitments = deriveThresholdShareCommitments({
         setupContext: input.setupContext,
         vssCoefficientCommitments: input.vssCoefficientCommitments,
@@ -773,6 +997,277 @@ const resolveThresholdShareCommitments = (
     return derivedThresholdShareCommitments;
 };
 
+const positiveSafeIntegerField = (
+    value: Readonly<Record<string, unknown>>,
+    fieldName: string,
+    objectPath: string,
+): number => {
+    const fieldValue = value[fieldName];
+    if (
+        typeof fieldValue !== 'number' ||
+        !Number.isSafeInteger(fieldValue) ||
+        fieldValue <= 0
+    ) {
+        throw new TypeError(
+            `${objectPath}.${fieldName} must be a positive safe integer.`,
+        );
+    }
+
+    return fieldValue;
+};
+
+const protocolHashArrayField = (
+    value: Readonly<Record<string, unknown>>,
+    fieldName: string,
+    objectPath: string,
+): readonly ProtocolHash[] => {
+    const fieldValue = value[fieldName];
+    if (!Array.isArray(fieldValue)) {
+        throw new TypeError(`${objectPath}.${fieldName} must be an array.`);
+    }
+
+    return fieldValue.map((item, itemIndex) => {
+        if (typeof item !== 'string') {
+            throw new TypeError(
+                `${objectPath}.${fieldName}.${String(itemIndex)} must be a string.`,
+            );
+        }
+        assertProtocolHash(
+            item,
+            `${objectPath}.${fieldName}.${String(itemIndex)}`,
+        );
+
+        return item;
+    });
+};
+
+const transportedMaterialObject = (
+    material: Readonly<Record<string, unknown>>,
+    objectPath: string,
+    rootFieldName: string,
+    objectName: string,
+    objectRole: string,
+): SetupCertificateTransportedObjectInput => ({
+    objectName,
+    objectRole,
+    objectRoot: hashField(material, rootFieldName, objectPath),
+    byteLength: positiveSafeIntegerField(
+        material,
+        'totalByteLength',
+        objectPath,
+    ),
+    fullObjectHash: hashField(material, 'fullObjectHash', objectPath),
+    chunkRoot: hashField(material, 'chunkRoot', objectPath),
+    chunkHashes: protocolHashArrayField(material, 'chunkHashes', objectPath),
+});
+
+type TransportedProofMaterialFieldNames = Readonly<{
+    readonly byteLength: string;
+    readonly fullObjectHash: string;
+    readonly chunkRoot: string;
+    readonly chunkHashes: string;
+}>;
+
+const plainTransportedProofMaterialFields: TransportedProofMaterialFieldNames =
+    {
+        byteLength: 'totalByteLength',
+        fullObjectHash: 'fullObjectHash',
+        chunkRoot: 'chunkRoot',
+        chunkHashes: 'chunkHashes',
+    };
+
+const proofPrefixedTransportedProofMaterialFields: TransportedProofMaterialFieldNames =
+    {
+        byteLength: 'proofTotalByteLength',
+        fullObjectHash: 'proofFullObjectHash',
+        chunkRoot: 'proofChunkRoot',
+        chunkHashes: 'proofChunkHashes',
+    };
+
+const transportedProofMaterialObjects = (
+    materialSetValue: unknown,
+    materialSetFieldName: string,
+    objectName: string,
+    objectRole: string,
+    fieldNames: TransportedProofMaterialFieldNames,
+): readonly SetupCertificateTransportedObjectInput[] => {
+    if (materialSetValue === undefined) {
+        return [];
+    }
+    const materialSet = assertObjectRecord(
+        materialSetValue,
+        materialSetFieldName,
+    );
+    const proofMaterials = materialSet.proofMaterials;
+    if (!Array.isArray(proofMaterials)) {
+        throw new TypeError(
+            `${materialSetFieldName}.proofMaterials must be an array.`,
+        );
+    }
+
+    return proofMaterials.map((proofMaterialValue, proofMaterialIndex) => {
+        const objectPath = `${materialSetFieldName}.proofMaterials.${String(proofMaterialIndex)}`;
+        const proofMaterial = assertObjectRecord(
+            proofMaterialValue,
+            objectPath,
+        );
+
+        return {
+            objectName,
+            objectRole,
+            objectRoot: hashField(
+                proofMaterial,
+                'proofMaterialRoot',
+                objectPath,
+            ),
+            byteLength: positiveSafeIntegerField(
+                proofMaterial,
+                fieldNames.byteLength,
+                objectPath,
+            ),
+            fullObjectHash: hashField(
+                proofMaterial,
+                fieldNames.fullObjectHash,
+                objectPath,
+            ),
+            chunkRoot: hashField(
+                proofMaterial,
+                fieldNames.chunkRoot,
+                objectPath,
+            ),
+            chunkHashes: protocolHashArrayField(
+                proofMaterial,
+                fieldNames.chunkHashes,
+                objectPath,
+            ),
+        };
+    });
+};
+
+const transportedMaterialObjects = (
+    materialSetValue: unknown,
+    materialSetFieldName: string,
+    materialArrayFieldName: string,
+    rootFieldName: string,
+    objectName: string,
+    objectRole: string,
+): readonly SetupCertificateTransportedObjectInput[] => {
+    if (materialSetValue === undefined) {
+        return [];
+    }
+    const materialSet = assertObjectRecord(
+        materialSetValue,
+        materialSetFieldName,
+    );
+    const materials = materialSet[materialArrayFieldName];
+    if (!Array.isArray(materials)) {
+        throw new TypeError(
+            `${materialSetFieldName}.${materialArrayFieldName} must be an array.`,
+        );
+    }
+
+    return materials.map((materialValue, materialIndex) =>
+        transportedMaterialObject(
+            assertObjectRecord(
+                materialValue,
+                `${materialSetFieldName}.${materialArrayFieldName}.${String(materialIndex)}`,
+            ),
+            `${materialSetFieldName}.${materialArrayFieldName}.${String(materialIndex)}`,
+            rootFieldName,
+            objectName,
+            objectRole,
+        ),
+    );
+};
+
+const transportedPublicKeyShareMaterialObject = (
+    input: SetupPackageInput,
+): readonly SetupCertificateTransportedObjectInput[] => {
+    if (input.transportedPublicKeyShareMaterial === undefined) {
+        return [];
+    }
+    const transportedMaterial = assertObjectRecord(
+        input.transportedPublicKeyShareMaterial,
+        'transportedPublicKeyShareMaterial',
+    );
+    const packageMaterialRoot = hashField(
+        input.publicKeyShareMaterial,
+        'publicKeyShareMaterialSetRoot',
+        'publicKeyShareMaterial',
+    );
+
+    return [
+        {
+            objectName: 'publicKeyShareMaterial',
+            objectRole: 'public-key-share-material',
+            objectRoot: packageMaterialRoot,
+            byteLength: positiveSafeIntegerField(
+                transportedMaterial,
+                'totalByteLength',
+                'transportedPublicKeyShareMaterial',
+            ),
+            fullObjectHash: hashField(
+                transportedMaterial,
+                'fullObjectHash',
+                'transportedPublicKeyShareMaterial',
+            ),
+            chunkRoot: hashField(
+                transportedMaterial,
+                'chunkRoot',
+                'transportedPublicKeyShareMaterial',
+            ),
+            chunkHashes: protocolHashArrayField(
+                transportedMaterial,
+                'chunkHashes',
+                'transportedPublicKeyShareMaterial',
+            ),
+        },
+    ];
+};
+
+const setupCertificateTransportedObjectsFromPackageInput = (
+    input: SetupPackageInput,
+): readonly SetupCertificateTransportedObjectInput[] => [
+    ...transportedPublicKeyShareMaterialObject(input),
+    ...transportedProofMaterialObjects(
+        input.transportedSameSecretProofMaterial,
+        'transportedSameSecretProofMaterial',
+        'sameSecretProofMaterial',
+        'same-secret-proof-material',
+        plainTransportedProofMaterialFields,
+    ),
+    ...transportedProofMaterialObjects(
+        input.transportedPublicKeyShareProofMaterial,
+        'transportedPublicKeyShareProofMaterial',
+        'publicKeyShareProofMaterial',
+        'public-key-share-proof-material',
+        plainTransportedProofMaterialFields,
+    ),
+    ...transportedProofMaterialObjects(
+        input.transportedEvaluationKeyShareProofMaterial,
+        'transportedEvaluationKeyShareProofMaterial',
+        'evaluationKeyShareProofMaterial',
+        'evaluation-key-share-proof-material',
+        proofPrefixedTransportedProofMaterialFields,
+    ),
+    ...transportedMaterialObjects(
+        input.transportedEvaluationKeyShareComponentMaterial,
+        'transportedEvaluationKeyShareComponentMaterial',
+        'componentMaterials',
+        'keySwitchComponentMaterialRoot',
+        'evaluationKeyShareComponentMaterial',
+        'evaluation-key-share-component-material',
+    ),
+    ...transportedMaterialObjects(
+        input.transportedPublicEvaluationKeyMaterial,
+        'transportedPublicEvaluationKeyMaterial',
+        'publicEvaluationKeyMaterials',
+        'publicEvaluationKeyMaterialRoot',
+        'publicEvaluationKeyMaterial',
+        'public-evaluation-key-runtime-material',
+    ),
+];
+
 const resolveSetupCertificateRecords = (
     input: SetupPackageInput,
 ): SetupPackageCertificateRecords => {
@@ -788,10 +1283,24 @@ const resolveSetupCertificateRecords = (
             );
         }
 
+        const transportedObjects =
+            setupCertificateTransportedObjectsFromPackageInput(input);
+
         return createSetupCertificates({
             ...input.setupCertificateInput,
             vssCoefficientCommitmentMaterial:
                 input.vssCoefficientCommitmentMaterial,
+            transport:
+                transportedObjects.length === 0
+                    ? input.setupCertificateInput.transport
+                    : {
+                          ...input.setupCertificateInput.transport,
+                          transportedObjects: [
+                              ...(input.setupCertificateInput.transport
+                                  .transportedObjects ?? []),
+                              ...transportedObjects,
+                          ],
+                      },
         });
     }
 
@@ -904,6 +1413,7 @@ const validateInput = (
         'thresholdShareCommitments',
     );
     assertKeyRecordBindings(input);
+    assertCommonRandomnessPublicDerivationsBindPackageInput(input);
     assertCertificateBindings(certificates);
     assertGaloisScheduleCovered(input);
 };
@@ -918,31 +1428,70 @@ const contextFieldsForCertificate = (
         ]),
     );
 
-const qSharePrimesFromPublicKeyShareMaterial = (
-    publicKeyShareMaterial: PublicKeyShareMaterialSet,
+const qSharePrimesFromPublicKeyShares = (
+    publicKeyShares: PublicKeyShareSet,
+    expectedRnsLimbCount: number,
 ): readonly number[] => {
-    const [firstMaterialRecord] = publicKeyShareMaterial.shareMaterialRecords;
-    if (firstMaterialRecord === undefined) {
+    const shareRecords = [...publicKeyShares.shareRecords].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    if (shareRecords.length !== publicKeyShares.participantCount) {
         throw new Error(
-            'publicKeyShareMaterial must contain source share material records.',
+            'publicKeyShares.shareRecords must contain one record per participant.',
         );
     }
+    const firstShareRecord = shareRecords[0];
+    if (firstShareRecord === undefined) {
+        throw new Error('publicKeyShares must contain at least one record.');
+    }
+    const qSharePrimes =
+        firstShareRecord.shareCoefficientVectorHash512ByLimb.map(
+            (coefficientVectorHash, rnsLimbIndex) => {
+                if (
+                    coefficientVectorHash.rnsLimbIndex !== rnsLimbIndex ||
+                    coefficientVectorHash.component !== 'b_i' ||
+                    !Number.isSafeInteger(coefficientVectorHash.rnsPrime) ||
+                    coefficientVectorHash.rnsPrime <= 0
+                ) {
+                    throw new Error(
+                        'publicKeyShares coefficient hash limbs must expose accepted Q_share primes in order.',
+                    );
+                }
 
-    return firstMaterialRecord.shareCoefficientVectorsByLimb.map(
-        (coefficientVector, rnsLimbIndex) => {
-            if (
-                coefficientVector.rnsLimbIndex !== rnsLimbIndex ||
-                !Number.isSafeInteger(coefficientVector.rnsPrime) ||
-                coefficientVector.rnsPrime <= 0
-            ) {
-                throw new Error(
-                    'publicKeyShareMaterial coefficient vector limbs must expose accepted Q_share primes in order.',
-                );
-            }
+                return coefficientVectorHash.rnsPrime;
+            },
+        );
+    if (qSharePrimes.length !== expectedRnsLimbCount) {
+        throw new Error('publicKeyShares RNS limbs must match material roots.');
+    }
+    shareRecords.forEach((shareRecord, expectedRosterPosition) => {
+        if (
+            shareRecord.trusteeRosterPosition !== expectedRosterPosition ||
+            shareRecord.shareCoefficientVectorHash512ByLimb.length !==
+                qSharePrimes.length
+        ) {
+            throw new Error(
+                'publicKeyShares share records must have contiguous roster positions and complete RNS limbs.',
+            );
+        }
+        shareRecord.shareCoefficientVectorHash512ByLimb.forEach(
+            (coefficientVectorHash, rnsLimbIndex) => {
+                if (
+                    coefficientVectorHash.rnsLimbIndex !== rnsLimbIndex ||
+                    coefficientVectorHash.component !== 'b_i' ||
+                    coefficientVectorHash.rnsPrime !==
+                        qSharePrimes[rnsLimbIndex]
+                ) {
+                    throw new Error(
+                        'publicKeyShares share records must agree on Q_share primes.',
+                    );
+                }
+            },
+        );
+    });
 
-            return coefficientVector.rnsPrime;
-        },
-    );
+    return qSharePrimes;
 };
 
 const derivedCollectivePublicKey = (
@@ -958,13 +1507,14 @@ const derivedCollectivePublicKey = (
         );
     }
     const publicKeyShareMaterial =
-        input.publicKeyShareMaterial as PublicKeyShareMaterialSet;
-
-    return createCollectivePublicKey({
+        input.publicKeyShareMaterial as SetupPackagePublicKeyShareMaterialSet;
+    const qSharePrimes = qSharePrimesFromPublicKeyShares(
+        input.publicKeyShares,
+        publicKeyShareMaterial.rnsLimbCount,
+    );
+    const commonCollectivePublicKeyInput = {
         setupContext: input.setupContext,
-        qSharePrimes: qSharePrimesFromPublicKeyShareMaterial(
-            publicKeyShareMaterial,
-        ),
+        qSharePrimes,
         participantCount: input.publicKeyShares.participantCount,
         ringDegree: publicKeyShareMaterial.ringDegree,
         publicMatrixSeedHash: publicKeyShareMaterial.publicMatrixSeedHash,
@@ -977,6 +1527,29 @@ const derivedCollectivePublicKey = (
         publicKeyShareMaterial,
         publicKeyShareLnpProofs:
             input.publicKeyShareLnpProofs as PublicKeyShareLnpProofSet,
+    } as const;
+
+    if (
+        publicKeyShareMaterial.materialEncoding ===
+        publicKeyShareMaterialTransportEncoding
+    ) {
+        if (input.transportedPublicKeyShareMaterial === undefined) {
+            throw new Error(
+                'transportedPublicKeyShareMaterial is required when publicKeyShareMaterial is binary-chunked.',
+            );
+        }
+
+        return createCollectivePublicKeyFromTransportedPublicKeyShareMaterial({
+            ...commonCollectivePublicKeyInput,
+            publicKeyShareMaterial,
+            transportedPublicKeyShareMaterial:
+                input.transportedPublicKeyShareMaterial,
+        });
+    }
+
+    return createCollectivePublicKey({
+        ...commonCollectivePublicKeyInput,
+        publicKeyShareMaterial,
     });
 };
 

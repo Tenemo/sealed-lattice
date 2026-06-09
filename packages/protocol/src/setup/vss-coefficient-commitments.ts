@@ -1,4 +1,5 @@
 import {
+    createSetupVssMaterialFullObjectHasher,
     deriveProtocolHash,
     hash512Hex,
     setupVssMaterialFullObjectHashHex,
@@ -9,17 +10,42 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 type JsonRecord = Record<string, unknown>;
 
+let vssTransportDerivationCounter = 0;
+
 export const setupCommitmentProfileId = 'SealedLattice-BDLOP-LNP-Commitment-v1';
 export const setupCommitmentModuleRank = 2;
 export const setupCommitmentRandomnessWidth = 2 * setupCommitmentModuleRank + 1;
 export const setupCommitmentRowCount = setupCommitmentModuleRank + 1;
 export const setupCommitmentModulusLimbIndices = [0, 1, 2] as const;
 export const acceptedBgvProfileRingDegree = 32_768;
+export const acceptedBgvSetupQSharePrimes = [
+    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
+    140_737_485_864_961, 140_737_484_685_313, 140_737_483_898_881,
+    140_737_482_981_377, 140_737_481_801_729, 140_737_481_342_977,
+    140_737_480_949_761, 140_737_480_359_937, 140_737_479_639_041,
+    140_737_476_100_097, 140_737_472_299_009, 140_737_471_971_329,
+    140_737_471_774_721, 140_737_471_578_113,
+] as const;
+export const acceptedBgvSetupQShare = {
+    objectType: 'QSharePrimeList',
+    objectVersion: 1,
+    sharingDomain: 'per-rns-prime',
+    primeOrder: 'profile-order',
+    targetDecryptionReadiness: 'refused-until-q-target-certificate-closes',
+    primes: acceptedBgvSetupQSharePrimes,
+} as const;
+export const acceptedBgvSetupQShareHash = deriveProtocolHash(
+    'QSharePrimeListHash',
+    acceptedBgvSetupQShare,
+);
 export const setupTransportProfileId =
     'sealed-lattice-setup-binary-chunked-transport-v1';
 export const setupTransportChunkSizeBytes = 1_048_576;
 export const vssCoefficientCommitmentMaterialBinaryFormat =
     'sealed-lattice-vss-coefficient-commitment-material-binary-v1';
+const vssCoefficientCommitmentMaterialBinaryMagic = new TextEncoder().encode(
+    'SLVSSMAT',
+);
 
 export type SetupCommitmentLimbValue = {
     readonly commitmentModulusIndex: number;
@@ -55,6 +81,18 @@ export type VssSourceTrusteeCoefficientOpeningState = {
     readonly coefficientOpenings: readonly VssCoefficientOpeningInput[];
 };
 
+export type VssSourceTrusteeCoefficientOpeningStateReference = Readonly<{
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+}>;
+
+export type VssSourceTrusteeCoefficientOpeningStateProvider = Readonly<{
+    readonly sourceTrusteeReferences: readonly VssSourceTrusteeCoefficientOpeningStateReference[];
+    readonly loadSourceTrusteeOpeningState: (
+        sourceTrusteeReference: VssSourceTrusteeCoefficientOpeningStateReference,
+    ) => VssSourceTrusteeCoefficientOpeningState;
+}>;
+
 export type VssOpeningRandomByteSource = (byteLength: number) => Uint8Array;
 
 export type VssSourceTrusteeCoefficientOpeningStateGenerationInput = {
@@ -66,6 +104,17 @@ export type VssSourceTrusteeCoefficientOpeningStateGenerationInput = {
     readonly thresholdDegree: number;
     readonly randomBytes?: VssOpeningRandomByteSource;
 };
+
+export type VssSourceTrusteeCoefficientOpeningStateProviderInput = Readonly<{
+    readonly sourceTrustees: readonly VssSourceTrusteeCoefficientOpeningStateReference[];
+    readonly participantCount: number;
+    readonly qSharePrimes: readonly number[];
+    readonly ringDegree: number;
+    readonly thresholdDegree: number;
+    readonly randomBytesForSourceTrustee: (
+        sourceTrusteeReference: VssSourceTrusteeCoefficientOpeningStateReference,
+    ) => VssOpeningRandomByteSource;
+}>;
 
 export type VssCoefficientCommitmentRecord = Readonly<
     JsonRecord & {
@@ -162,6 +211,36 @@ export type SetupTransportedVssCoefficientCommitmentMaterial = Readonly<
     }
 >;
 
+export type SetupTransportedVssCoefficientCommitmentMaterialReference =
+    Readonly<
+        JsonRecord & {
+            readonly objectType: 'SetupTransportedVssCoefficientCommitmentMaterial';
+            readonly objectVersion: 1;
+            readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
+            readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
+            readonly chunkCount: number;
+            readonly totalByteLength: number;
+            readonly fullObjectHash: ProtocolHash;
+            readonly chunkHashes: readonly ProtocolHash[];
+            readonly chunkRoot: ProtocolHash;
+        }
+    >;
+
+export type SetupTransportedVssCoefficientCommitmentMaterialTemplate = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupTransportedVssCoefficientCommitmentMaterial';
+        readonly objectVersion: 1;
+        readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
+        readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
+        readonly chunkCount: number;
+        readonly totalByteLength: number;
+    }
+>;
+
+export type SetupTransportedVssCoefficientCommitmentMaterialLike =
+    | SetupTransportedVssCoefficientCommitmentMaterial
+    | SetupTransportedVssCoefficientCommitmentMaterialReference;
+
 export type BinaryChunkedVssCoefficientCommitmentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterialSet';
@@ -202,6 +281,71 @@ export type BinaryChunkedVssCoefficientCommitmentMaterialTransport = Readonly<{
     readonly transportedVssCoefficientCommitmentMaterial: SetupTransportedVssCoefficientCommitmentMaterial;
 }>;
 
+export type BinaryChunkedVssCoefficientCommitmentBundle = Readonly<{
+    readonly commitmentSet: VssCoefficientCommitmentSet;
+    readonly materialSet: BinaryChunkedVssCoefficientCommitmentMaterialSet;
+    readonly transportedVssCoefficientCommitmentMaterial: SetupTransportedVssCoefficientCommitmentMaterial;
+    readonly privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[];
+    readonly sourceTrusteeOpeningMaterialSource: VssSourceTrusteeOpeningMaterialSource;
+}>;
+
+export type VerifiedVssCoefficientCommitmentMaterial = Readonly<
+    JsonRecord & {
+        readonly objectType: 'VerifiedVssCoefficientCommitmentMaterial';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly verificationId: string;
+        readonly materialBinaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+        readonly thresholdShareCommitmentRoot: ProtocolHash;
+        readonly transportProfileId: typeof setupTransportProfileId;
+        readonly transportChunkSizeBytes: typeof setupTransportChunkSizeBytes;
+        readonly transportChunkCount: number;
+        readonly transportTotalByteLength: number;
+        readonly transportFullObjectHash: ProtocolHash;
+        readonly transportChunkRoot: ProtocolHash;
+    }
+>;
+
+export type ThresholdShareCommitmentTransportStreamComputer = Readonly<{
+    beginThresholdShareCommitmentsFromTransportStream: (input: {
+        readonly derivationId: string;
+        readonly setupContext: unknown;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly transportedVssCoefficientCommitmentMaterial:
+            | SetupTransportedVssCoefficientCommitmentMaterialReference
+            | SetupTransportedVssCoefficientCommitmentMaterialTemplate;
+    }) => JsonRecord;
+    absorbThresholdShareCommitmentsFromTransportStreamChunk: (input: {
+        readonly derivationId: string;
+        readonly chunkIndex: number;
+        readonly bytesHex: string;
+    }) => JsonRecord;
+    finishThresholdShareCommitmentsFromTransportStream: (input: {
+        readonly derivationId: string;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+    }) => {
+        readonly thresholdShareCommitmentRoot: ProtocolHash;
+        readonly thresholdShareCommitments: JsonRecord;
+        readonly vssCoefficientCommitmentMaterial: JsonRecord;
+        readonly verifiedVssCoefficientCommitmentMaterial: VerifiedVssCoefficientCommitmentMaterial;
+        readonly transport: JsonRecord;
+    };
+}>;
+
+export type StreamingBinaryChunkedVssCoefficientCommitmentBundle = Readonly<{
+    readonly commitmentSet: VssCoefficientCommitmentSet;
+    readonly materialSet: BinaryChunkedVssCoefficientCommitmentMaterialSet;
+    readonly transportedVssCoefficientCommitmentMaterial: SetupTransportedVssCoefficientCommitmentMaterialReference;
+    readonly verifiedVssCoefficientCommitmentMaterial: VerifiedVssCoefficientCommitmentMaterial;
+    readonly privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[];
+    readonly sourceTrusteeOpeningMaterialSource: VssSourceTrusteeOpeningMaterialSource;
+    readonly thresholdShareCommitments: JsonRecord;
+}>;
+
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -209,6 +353,19 @@ export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeCoefficientCommitmentRecord: VssSourceTrusteeCoefficientCommitmentRecord;
     readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly VssCoefficientCommitmentMaterialRecord[];
     readonly coefficientOpenings: readonly VssCoefficientOpeningMaterial[];
+}>;
+
+export type VssSourceTrusteeOpeningMaterialReference = Readonly<{
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+    readonly sourceTrusteeCommitmentRoot: ProtocolHash;
+}>;
+
+export type VssSourceTrusteeOpeningMaterialSource = Readonly<{
+    readonly sourceTrusteeReferences: readonly VssSourceTrusteeOpeningMaterialReference[];
+    readonly loadSourceTrusteeOpeningMaterial: (
+        sourceTrusteeReference: VssSourceTrusteeOpeningMaterialReference,
+    ) => VssSourceTrusteeOpeningMaterial;
 }>;
 
 export type VssSourceTrusteeCoefficientCommitmentContribution = Readonly<{
@@ -221,6 +378,7 @@ export type VssCoefficientCommitmentBundle = Readonly<{
     readonly commitmentSet: VssCoefficientCommitmentSet;
     readonly materialSet: VssCoefficientCommitmentMaterialSet;
     readonly privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[];
+    readonly sourceTrusteeOpeningMaterialSource: VssSourceTrusteeOpeningMaterialSource;
 }>;
 
 export type VssCoefficientCommitmentBundleInput = {
@@ -230,15 +388,44 @@ export type VssCoefficientCommitmentBundleInput = {
     readonly ringDegree: number;
     readonly participantCount: number;
     readonly thresholdDegree: number;
-    readonly sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[];
+    readonly sourceTrusteeOpeningStates?: readonly VssSourceTrusteeCoefficientOpeningState[];
+    readonly sourceTrusteeOpeningStateProvider?: VssSourceTrusteeCoefficientOpeningStateProvider;
+    readonly setupCommitmentComputer?: SetupCommitmentOpeningComputer;
 };
 
 export type VssSourceTrusteeCoefficientCommitmentContributionInput = Omit<
     VssCoefficientCommitmentBundleInput,
-    'sourceTrusteeOpeningStates'
+    'sourceTrusteeOpeningStateProvider' | 'sourceTrusteeOpeningStates'
 > & {
     readonly sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState;
 };
+
+type VssSourceTrusteeCoefficientCommitmentContributionOptions = Readonly<{
+    readonly retainMaterialRecords: boolean;
+    readonly consumeMaterialRecord?: (
+        materialRecord: VssCoefficientCommitmentMaterialRecord,
+    ) => void;
+    readonly setupCommitmentComputer?: SetupCommitmentOpeningComputer;
+}>;
+
+type SetupCommitmentOpeningComputation = Readonly<{
+    readonly commitment: JsonRecord;
+    readonly commitmentRoot: ProtocolHash;
+    readonly commitmentChunkRoot: ProtocolHash;
+    readonly coefficientVectorHash512: string;
+}>;
+
+type SetupCommitmentOpeningComputer = (
+    input: Readonly<{
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly sourceRnsLimbIndex: number;
+        readonly sourceMessageModulus: number;
+        readonly shamirCoefficientIndex: number;
+        readonly messageCoefficients: readonly number[];
+        readonly randomnessByColumn: readonly (readonly number[])[];
+        readonly ringDegree: number;
+    }>,
+) => SetupCommitmentOpeningComputation;
 
 const textEncoder = new TextEncoder();
 const twoToTheSixtyFourth = 1n << 64n;
@@ -380,36 +567,124 @@ const assertRandomness = (
     });
 };
 
-const sortedByRosterPosition = (
-    sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[],
-): VssSourceTrusteeCoefficientOpeningState[] =>
-    [...sourceTrusteeOpeningStates].sort(
+const sourceTrusteeReferenceFromOpeningState = (
+    sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState,
+): VssSourceTrusteeCoefficientOpeningStateReference => ({
+    sourceTrusteeIdentity: sourceTrusteeOpeningState.sourceTrusteeIdentity,
+    sourceTrusteeRosterPosition:
+        sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
+});
+
+const sortedSourceTrusteeReferences = (
+    sourceTrusteeReferences: readonly VssSourceTrusteeCoefficientOpeningStateReference[],
+): VssSourceTrusteeCoefficientOpeningStateReference[] =>
+    [...sourceTrusteeReferences].sort(
         (left, right) =>
             left.sourceTrusteeRosterPosition -
             right.sourceTrusteeRosterPosition,
     );
 
-const assertFullRosterCoverage = (
-    sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[],
+const assertFullSourceTrusteeReferenceCoverage = (
+    sourceTrusteeReferences: readonly VssSourceTrusteeCoefficientOpeningStateReference[],
     participantCount: number,
 ): void => {
-    if (sourceTrusteeOpeningStates.length !== participantCount) {
+    if (sourceTrusteeReferences.length !== participantCount) {
         throw new Error(
-            'sourceTrusteeOpeningStates must contain every accepted participant.',
+            'source trustee opening references must contain every accepted participant.',
         );
     }
-    sourceTrusteeOpeningStates.forEach(
-        (sourceTrusteeState, expectedRosterPosition) => {
+    sourceTrusteeReferences.forEach(
+        (sourceTrusteeReference, expectedRosterPosition) => {
             if (
-                sourceTrusteeState.sourceTrusteeRosterPosition !==
+                sourceTrusteeReference.sourceTrusteeRosterPosition !==
                 expectedRosterPosition
             ) {
                 throw new Error(
-                    'sourceTrusteeOpeningStates roster positions must be contiguous from zero.',
+                    'source trustee opening reference roster positions must be contiguous from zero.',
                 );
             }
+            assertNonEmptyString(
+                sourceTrusteeReference.sourceTrusteeIdentity,
+                'sourceTrusteeIdentity',
+            );
         },
     );
+};
+
+const sourceTrusteeOpeningStateProviderFromInput = (
+    input: Pick<
+        VssCoefficientCommitmentBundleInput,
+        'sourceTrusteeOpeningStateProvider' | 'sourceTrusteeOpeningStates'
+    >,
+): VssSourceTrusteeCoefficientOpeningStateProvider => {
+    if (
+        input.sourceTrusteeOpeningStates !== undefined &&
+        input.sourceTrusteeOpeningStateProvider !== undefined
+    ) {
+        throw new Error(
+            'provide sourceTrusteeOpeningStates or sourceTrusteeOpeningStateProvider, not both.',
+        );
+    }
+    if (input.sourceTrusteeOpeningStateProvider !== undefined) {
+        return input.sourceTrusteeOpeningStateProvider;
+    }
+    if (input.sourceTrusteeOpeningStates === undefined) {
+        throw new Error(
+            'sourceTrusteeOpeningStates or sourceTrusteeOpeningStateProvider is required.',
+        );
+    }
+
+    const sourceTrusteeStatesByRosterPosition = new Map<
+        number,
+        VssSourceTrusteeCoefficientOpeningState
+    >();
+    input.sourceTrusteeOpeningStates.forEach((sourceTrusteeOpeningState) => {
+        sourceTrusteeStatesByRosterPosition.set(
+            sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
+            sourceTrusteeOpeningState,
+        );
+    });
+
+    return {
+        sourceTrusteeReferences: input.sourceTrusteeOpeningStates.map(
+            sourceTrusteeReferenceFromOpeningState,
+        ),
+        loadSourceTrusteeOpeningState: (sourceTrusteeReference) => {
+            const sourceTrusteeOpeningState =
+                sourceTrusteeStatesByRosterPosition.get(
+                    sourceTrusteeReference.sourceTrusteeRosterPosition,
+                );
+            if (sourceTrusteeOpeningState === undefined) {
+                throw new Error(
+                    'source trustee opening provider is missing the requested roster position.',
+                );
+            }
+
+            return sourceTrusteeOpeningState;
+        },
+    };
+};
+
+const loadSourceTrusteeOpeningState = (
+    sourceTrusteeOpeningStateProvider: VssSourceTrusteeCoefficientOpeningStateProvider,
+    sourceTrusteeReference: VssSourceTrusteeCoefficientOpeningStateReference,
+): VssSourceTrusteeCoefficientOpeningState => {
+    const sourceTrusteeOpeningState =
+        sourceTrusteeOpeningStateProvider.loadSourceTrusteeOpeningState(
+            sourceTrusteeReference,
+        );
+    if (
+        sourceTrusteeOpeningState.sourceTrusteeIdentity !==
+            sourceTrusteeReference.sourceTrusteeIdentity ||
+        sourceTrusteeOpeningState.sourceTrusteeRosterPosition !==
+            sourceTrusteeReference.sourceTrusteeRosterPosition
+    ) {
+        throw new Error(
+            'loaded source trustee opening state must match the requested source trustee reference.',
+        );
+    }
+
+    return sourceTrusteeOpeningState;
 };
 
 const openingCoordinateKey = (
@@ -684,6 +959,67 @@ export const createVssSourceTrusteeCoefficientOpeningState = (
         sourceTrusteeIdentity: input.sourceTrusteeIdentity,
         sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
         coefficientOpenings,
+    };
+};
+
+export const createVssSourceTrusteeCoefficientOpeningStateProvider = (
+    input: VssSourceTrusteeCoefficientOpeningStateProviderInput,
+): VssSourceTrusteeCoefficientOpeningStateProvider => {
+    assertPositiveSafeInteger(input.participantCount, 'participantCount');
+    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
+    assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
+    input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
+        assertPositiveSafeInteger(
+            qSharePrime,
+            `qSharePrimes.${String(rnsLimbIndex)}`,
+        );
+    });
+    const sourceTrusteeReferences = input.sourceTrustees.map(
+        (sourceTrusteeReference) => {
+            assertNonEmptyString(
+                sourceTrusteeReference.sourceTrusteeIdentity,
+                'sourceTrusteeIdentity',
+            );
+            assertNonNegativeSafeInteger(
+                sourceTrusteeReference.sourceTrusteeRosterPosition,
+                'sourceTrusteeRosterPosition',
+            );
+            if (
+                sourceTrusteeReference.sourceTrusteeRosterPosition >=
+                input.participantCount
+            ) {
+                throw new Error(
+                    'sourceTrusteeRosterPosition must be inside the accepted participant count.',
+                );
+            }
+
+            return sourceTrusteeReference;
+        },
+    );
+    const sortedReferences = sortedSourceTrusteeReferences(
+        sourceTrusteeReferences,
+    );
+    assertFullSourceTrusteeReferenceCoverage(
+        sortedReferences,
+        input.participantCount,
+    );
+
+    return {
+        sourceTrusteeReferences,
+        loadSourceTrusteeOpeningState: (sourceTrusteeReference) =>
+            createVssSourceTrusteeCoefficientOpeningState({
+                sourceTrusteeIdentity:
+                    sourceTrusteeReference.sourceTrusteeIdentity,
+                sourceTrusteeRosterPosition:
+                    sourceTrusteeReference.sourceTrusteeRosterPosition,
+                participantCount: input.participantCount,
+                qSharePrimes: input.qSharePrimes,
+                ringDegree: input.ringDegree,
+                thresholdDegree: input.thresholdDegree,
+                randomBytes: input.randomBytesForSourceTrustee(
+                    sourceTrusteeReference,
+                ),
+            }),
     };
 };
 
@@ -1026,6 +1362,53 @@ const commitmentChunkRoot = (
         })),
     });
 
+const computeSetupCommitmentWithOptionalKernel = (input: {
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly qSharePrimes: readonly number[];
+    readonly sourceRnsLimbIndex: number;
+    readonly sourceMessageModulus: number;
+    readonly shamirCoefficientIndex: number;
+    readonly messageCoefficients: readonly number[];
+    readonly randomnessByColumn: readonly (readonly number[])[];
+    readonly ringDegree: number;
+    readonly setupCommitmentComputer?: SetupCommitmentOpeningComputer;
+}): SetupCommitmentOpeningComputation => {
+    if (input.setupCommitmentComputer !== undefined) {
+        return input.setupCommitmentComputer({
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            sourceRnsLimbIndex: input.sourceRnsLimbIndex,
+            sourceMessageModulus: input.sourceMessageModulus,
+            shamirCoefficientIndex: input.shamirCoefficientIndex,
+            messageCoefficients: input.messageCoefficients,
+            randomnessByColumn: input.randomnessByColumn,
+            ringDegree: input.ringDegree,
+        });
+    }
+
+    const commitment = computeSetupCommitmentFromOpening({
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        qSharePrimes: input.qSharePrimes,
+        sourceRnsLimbIndex: input.sourceRnsLimbIndex,
+        sourceMessageModulus: input.sourceMessageModulus,
+        shamirCoefficientIndex: input.shamirCoefficientIndex,
+        messageCoefficients: input.messageCoefficients,
+        randomnessByColumn: input.randomnessByColumn,
+        ringDegree: input.ringDegree,
+    });
+    const commitmentRoot = deriveProtocolHash(
+        'SetupCommitmentRoot',
+        setupCommitmentRootPayload(commitment),
+    );
+
+    return {
+        commitment: setupCommitmentFullValue(commitment),
+        commitmentRoot,
+        commitmentChunkRoot: commitmentChunkRoot(commitment, commitmentRoot),
+        coefficientVectorHash512:
+            publicCommitmentCoefficientVectorHash512(commitment),
+    };
+};
+
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
@@ -1085,6 +1468,59 @@ const varuintBytes = (value: number): Uint8Array => {
     return Uint8Array.from(outputBytes);
 };
 
+const varuintByteLength = (value: number): number =>
+    varuintBytes(value).byteLength;
+
+const setupCommitmentBinaryRecordByteLength = (ringDegree: number): number => {
+    if (
+        !Number.isSafeInteger(ringDegree) ||
+        ringDegree <= 0 ||
+        ringDegree > Number.MAX_SAFE_INTEGER
+    ) {
+        throw new TypeError('ringDegree must be a positive safe integer.');
+    }
+    const rowCoefficientBytes = setupCommitmentRowCount * ringDegree * 8;
+    const commitmentLimbBytes = 1 + 8 + rowCoefficientBytes;
+
+    return 3 + setupCommitmentModulusLimbIndices.length * commitmentLimbBytes;
+};
+
+export const binaryVssCoefficientCommitmentMaterialByteLength = (input: {
+    readonly participantCount: number;
+    readonly thresholdDegree: number;
+    readonly rnsLimbCount: number;
+    readonly ringDegree: number;
+}): number => {
+    const headerByteLength =
+        vssCoefficientCommitmentMaterialBinaryMagic.byteLength +
+        varuintByteLength(1) +
+        varuintByteLength(input.participantCount) +
+        varuintByteLength(input.thresholdDegree) +
+        varuintByteLength(input.rnsLimbCount) +
+        varuintByteLength(input.ringDegree) +
+        varuintByteLength(setupCommitmentModulusLimbIndices.length) +
+        varuintByteLength(setupCommitmentRowCount);
+    const materialRecordCount =
+        input.participantCount * input.rnsLimbCount * input.thresholdDegree;
+    const recordByteLength = setupCommitmentBinaryRecordByteLength(
+        input.ringDegree,
+    );
+
+    return headerByteLength + materialRecordCount * recordByteLength;
+};
+
+const setupTransportedVssCoefficientCommitmentMaterialTemplate = (input: {
+    readonly chunkCount: number;
+    readonly totalByteLength: number;
+}): SetupTransportedVssCoefficientCommitmentMaterialTemplate => ({
+    objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+    objectVersion: 1,
+    binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+    chunkSizeBytes: setupTransportChunkSizeBytes,
+    chunkCount: input.chunkCount,
+    totalByteLength: input.totalByteLength,
+});
+
 const assertSafeU64 = (value: number, fieldName: string): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
         throw new TypeError(
@@ -1125,12 +1561,89 @@ const nonNegativeSafeIntegerField = (
     return value;
 };
 
+function setupVssMaterialChunkHash(
+    chunkIndex: number,
+    chunk: Uint8Array,
+): ProtocolHash {
+    return hash512Hex(
+        'sealed-lattice/setup/vss-coefficient-commitment-material/chunk-v1',
+        [varuintBytes(chunkIndex), chunk],
+    );
+}
+
+function setupTransportChunkManifestRoot(input: {
+    readonly chunkSizeBytes: number;
+    readonly chunkCount: number;
+    readonly totalByteLength: number;
+    readonly chunkHashes: readonly ProtocolHash[];
+    readonly fullObjectHash: ProtocolHash;
+}): ProtocolHash {
+    return deriveProtocolHash('SetupTransportChunkManifestRoot', {
+        objectType: 'SetupTransportChunkManifest',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        transportProfileId: setupTransportProfileId,
+        chunkSizeBytes: input.chunkSizeBytes,
+        chunkCount: input.chunkCount,
+        totalByteLength: input.totalByteLength,
+        chunkHashes: input.chunkHashes,
+        fullObjectHash: input.fullObjectHash,
+    });
+}
+
+type BinaryChunkWriterOptions = Readonly<{
+    readonly expectedTotalByteLength?: number;
+    readonly retainChunks?: boolean;
+    readonly consumeChunk?: (chunkIndex: number, chunk: Uint8Array) => void;
+}>;
+
+type BinaryChunkWriterResult = Readonly<{
+    readonly chunks: readonly Uint8Array[];
+    readonly chunkCount: number;
+    readonly totalByteLength: number;
+    readonly transportHashes: Readonly<{
+        readonly fullObjectHash: ProtocolHash;
+        readonly chunkHashes: readonly ProtocolHash[];
+        readonly chunkRoot: ProtocolHash;
+        readonly totalByteLength: number;
+    }>;
+}>;
+
 class BinaryChunkWriter {
     private readonly chunks: Uint8Array[] = [];
+
+    private readonly chunkHashes: ProtocolHash[] = [];
+
+    private readonly retainChunks: boolean;
+
+    private readonly consumeChunk?: (
+        chunkIndex: number,
+        chunk: Uint8Array,
+    ) => void;
+
+    private readonly fullObjectHasher?: ReturnType<
+        typeof createSetupVssMaterialFullObjectHasher
+    >;
+
+    private readonly expectedTotalByteLength?: number;
 
     private currentChunk = new Uint8Array(setupTransportChunkSizeBytes);
 
     private currentChunkOffset = 0;
+
+    private totalByteLength = 0;
+
+    public constructor(options: BinaryChunkWriterOptions = {}) {
+        this.retainChunks = options.retainChunks ?? true;
+        this.consumeChunk = options.consumeChunk;
+        this.expectedTotalByteLength = options.expectedTotalByteLength;
+        this.fullObjectHasher =
+            options.expectedTotalByteLength === undefined
+                ? undefined
+                : createSetupVssMaterialFullObjectHasher(
+                      options.expectedTotalByteLength,
+                  );
+    }
 
     public writeByte(value: number): void {
         if (this.currentChunkOffset === this.currentChunk.byteLength) {
@@ -1172,21 +1685,61 @@ class BinaryChunkWriter {
         }
     }
 
-    public finish(): readonly Uint8Array[] {
+    public finish(): BinaryChunkWriterResult {
         if (this.currentChunkOffset > 0) {
             this.flushCurrentChunk();
         }
-        if (this.chunks.length === 0) {
+        if (this.chunkHashes.length === 0) {
             throw new Error(
                 'binary VSS material transport requires at least one chunk.',
             );
         }
+        if (
+            this.expectedTotalByteLength !== undefined &&
+            this.totalByteLength !== this.expectedTotalByteLength
+        ) {
+            throw new Error(
+                'binary VSS material byte length must match the expected transport length.',
+            );
+        }
+        const fullObjectHash =
+            this.fullObjectHasher === undefined
+                ? setupVssMaterialFullObjectHashHex(
+                      this.totalByteLength,
+                      this.chunks,
+                  )
+                : this.fullObjectHasher.digestHex();
+        const chunkRoot = setupTransportChunkManifestRoot({
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+            chunkCount: this.chunkHashes.length,
+            totalByteLength: this.totalByteLength,
+            chunkHashes: this.chunkHashes,
+            fullObjectHash,
+        });
 
-        return this.chunks;
+        return {
+            chunks: this.chunks,
+            chunkCount: this.chunkHashes.length,
+            totalByteLength: this.totalByteLength,
+            transportHashes: {
+                fullObjectHash,
+                chunkHashes: this.chunkHashes,
+                chunkRoot,
+                totalByteLength: this.totalByteLength,
+            },
+        };
     }
 
     private flushCurrentChunk(): void {
-        this.chunks.push(this.currentChunk.slice(0, this.currentChunkOffset));
+        const chunk = this.currentChunk.slice(0, this.currentChunkOffset);
+        const chunkIndex = this.chunkHashes.length;
+        this.chunkHashes.push(setupVssMaterialChunkHash(chunkIndex, chunk));
+        this.totalByteLength += chunk.byteLength;
+        this.fullObjectHasher?.update(chunk);
+        if (this.retainChunks) {
+            this.chunks.push(chunk);
+        }
+        this.consumeChunk?.(chunkIndex, chunk);
         this.currentChunk = new Uint8Array(setupTransportChunkSizeBytes);
         this.currentChunkOffset = 0;
     }
@@ -1306,35 +1859,6 @@ class BinaryChunkReader {
     }
 }
 
-const setupVssMaterialChunkHash = (
-    fullObjectHash: ProtocolHash,
-    chunkIndex: number,
-    chunk: Uint8Array,
-): ProtocolHash =>
-    hash512Hex(
-        'sealed-lattice/setup/vss-coefficient-commitment-material/chunk-v1',
-        [textEncoder.encode(fullObjectHash), varuintBytes(chunkIndex), chunk],
-    );
-
-const setupTransportChunkManifestRoot = (input: {
-    readonly chunkSizeBytes: number;
-    readonly chunkCount: number;
-    readonly totalByteLength: number;
-    readonly chunkHashes: readonly ProtocolHash[];
-    readonly fullObjectHash: ProtocolHash;
-}): ProtocolHash =>
-    deriveProtocolHash('SetupTransportChunkManifestRoot', {
-        objectType: 'SetupTransportChunkManifest',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        transportProfileId: setupTransportProfileId,
-        chunkSizeBytes: input.chunkSizeBytes,
-        chunkCount: input.chunkCount,
-        totalByteLength: input.totalByteLength,
-        chunkHashes: input.chunkHashes,
-        fullObjectHash: input.fullObjectHash,
-    });
-
 const transportHashesForChunks = (
     chunks: readonly Uint8Array[],
 ): Readonly<{
@@ -1376,7 +1900,7 @@ const transportHashesForChunks = (
         chunks,
     );
     const chunkHashes = chunks.map((chunk, chunkIndex) =>
-        setupVssMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
+        setupVssMaterialChunkHash(chunkIndex, chunk),
     );
     const chunkRoot = setupTransportChunkManifestRoot({
         chunkSizeBytes: setupTransportChunkSizeBytes,
@@ -1608,24 +2132,134 @@ const writeSetupCommitment = (
     }
 };
 
+const writeVssCoefficientCommitmentMaterialHeader = (
+    writer: BinaryChunkWriter,
+    input: Readonly<{
+        readonly participantCount: number;
+        readonly thresholdDegree: number;
+        readonly rnsLimbCount: number;
+        readonly ringDegree: number;
+    }>,
+): void => {
+    writer.writeBytes(vssCoefficientCommitmentMaterialBinaryMagic);
+    writer.writeVaruint(1);
+    writer.writeVaruint(input.participantCount);
+    writer.writeVaruint(input.thresholdDegree);
+    writer.writeVaruint(input.rnsLimbCount);
+    writer.writeVaruint(input.ringDegree);
+    writer.writeVaruint(setupCommitmentModulusLimbIndices.length);
+    writer.writeVaruint(setupCommitmentRowCount);
+};
+
 const encodeVssCoefficientCommitmentMaterial = (
     materialSet: VssCoefficientCommitmentMaterialSet,
 ): readonly Uint8Array[] => {
     const writer = new BinaryChunkWriter();
-    writer.writeBytes(textEncoder.encode('SLVSSMAT'));
-    writer.writeVaruint(1);
-    writer.writeVaruint(materialSet.participantCount);
-    writer.writeVaruint(materialSet.thresholdDegree);
-    writer.writeVaruint(materialSet.rnsLimbCount);
-    writer.writeVaruint(materialSet.ringDegree);
-    writer.writeVaruint(setupCommitmentModulusLimbIndices.length);
-    writer.writeVaruint(setupCommitmentRowCount);
+    writeVssCoefficientCommitmentMaterialHeader(writer, materialSet);
     sortedCoefficientCommitmentMaterialRecords(materialSet).forEach(
         (materialRecord) => writeSetupCommitment(writer, materialRecord),
     );
 
-    return writer.finish();
+    return writer.finish().chunks;
 };
+
+const buildBinaryVssCoefficientCommitmentMaterialSet = (
+    input: Readonly<{
+        readonly setupContext: CollectiveBgvSetupContext;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly vssCoefficientCommitmentRoot: ProtocolHash;
+        readonly participantCount: number;
+        readonly thresholdDegree: number;
+        readonly rnsLimbCount: number;
+        readonly ringDegree: number;
+        readonly materialRecordCount: number;
+        readonly transportHashes: Readonly<{
+            readonly fullObjectHash: ProtocolHash;
+            readonly chunkRoot: ProtocolHash;
+            readonly totalByteLength: number;
+        }>;
+        readonly chunkCount: number;
+    }>,
+): BinaryChunkedVssCoefficientCommitmentMaterialSet => {
+    const commitmentProfileHash = input.setupContext.commitmentProfileHash;
+    assertHashLike(commitmentProfileHash, 'setupContext.commitmentProfileHash');
+    const materialSetWithoutRoot = {
+        objectType: 'VssCoefficientCommitmentMaterialSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        ...contextFields(input.setupContext),
+        commitmentProfileId: setupCommitmentProfileId,
+        commitmentProfileHash,
+        materialEncoding: 'binary-chunked-full-public-setup-commitment-values',
+        binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
+        participantCount: input.participantCount,
+        thresholdDegree: input.thresholdDegree,
+        rnsLimbCount: input.rnsLimbCount,
+        ringDegree: input.ringDegree,
+        ringDegreeStatus:
+            input.ringDegree === acceptedBgvProfileRingDegree
+                ? 'profile-ring'
+                : 'development-reduced-ring',
+        materialRecordCount: input.materialRecordCount,
+        transport: {
+            transportProfileId: setupTransportProfileId,
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+            chunkCount: input.chunkCount,
+            totalByteLength: input.transportHashes.totalByteLength,
+            fullObjectHash: input.transportHashes.fullObjectHash,
+            chunkRoot: input.transportHashes.chunkRoot,
+        },
+    } as const satisfies Omit<
+        BinaryChunkedVssCoefficientCommitmentMaterialSet,
+        'vssCoefficientCommitmentMaterialRoot'
+    >;
+
+    return {
+        ...materialSetWithoutRoot,
+        vssCoefficientCommitmentMaterialRoot: deriveProtocolHash(
+            'VssCoefficientCommitmentMaterialRoot',
+            materialSetWithoutRoot,
+        ),
+    } satisfies BinaryChunkedVssCoefficientCommitmentMaterialSet;
+};
+
+const transportedVssCoefficientCommitmentMaterialFromChunks = (
+    chunks: readonly Uint8Array[],
+): SetupTransportedVssCoefficientCommitmentMaterial => {
+    const transportHashes = transportHashesForChunks(chunks);
+
+    return {
+        objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+        objectVersion: 1,
+        binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+        chunkSizeBytes: setupTransportChunkSizeBytes,
+        chunkCount: chunks.length,
+        totalByteLength: transportHashes.totalByteLength,
+        fullObjectHash: transportHashes.fullObjectHash,
+        chunkHashes: transportHashes.chunkHashes,
+        chunkRoot: transportHashes.chunkRoot,
+        chunks: chunks.map((chunk, chunkIndex) => ({
+            chunkIndex,
+            bytesHex: bytesToHex(chunk),
+        })),
+    };
+};
+
+const transportedVssCoefficientCommitmentMaterialReferenceFromWriterResult = (
+    writerResult: BinaryChunkWriterResult,
+): SetupTransportedVssCoefficientCommitmentMaterialReference => ({
+    objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+    objectVersion: 1,
+    binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+    chunkSizeBytes: setupTransportChunkSizeBytes,
+    chunkCount: writerResult.chunkCount,
+    totalByteLength: writerResult.totalByteLength,
+    fullObjectHash: writerResult.transportHashes.fullObjectHash,
+    chunkHashes: writerResult.transportHashes.chunkHashes,
+    chunkRoot: writerResult.transportHashes.chunkRoot,
+});
 
 export const createBinaryChunkedVssCoefficientCommitmentMaterialTransport = (
     materialSet: VssCoefficientCommitmentMaterialSet,
@@ -1638,71 +2272,28 @@ export const createBinaryChunkedVssCoefficientCommitmentMaterialTransport = (
         );
     }
     const chunks = encodeVssCoefficientCommitmentMaterial(materialSet);
-    const transportHashes = transportHashesForChunks(chunks);
-    const commitmentProfileHash = materialSet.commitmentProfileHash;
-    if (typeof commitmentProfileHash !== 'string') {
-        throw new TypeError(
-            'vssCoefficientCommitmentMaterial.commitmentProfileHash must be a string.',
-        );
-    }
-    assertHashLike(
-        commitmentProfileHash,
-        'vssCoefficientCommitmentMaterial.commitmentProfileHash',
-    );
-    const materialSetWithoutRoot = {
-        objectType: 'VssCoefficientCommitmentMaterialSet',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        ...contextFields(materialSet as unknown as CollectiveBgvSetupContext),
-        commitmentProfileId: setupCommitmentProfileId,
-        commitmentProfileHash,
-        materialEncoding: 'binary-chunked-full-public-setup-commitment-values',
-        binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
+    const transportedMaterial =
+        transportedVssCoefficientCommitmentMaterialFromChunks(chunks);
+    const binaryMaterialSet = buildBinaryVssCoefficientCommitmentMaterialSet({
+        setupContext: materialSet as unknown as CollectiveBgvSetupContext,
         publicMatrixSeedHash: materialSet.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot: materialSet.vssCoefficientCommitmentRoot,
         participantCount: materialSet.participantCount,
         thresholdDegree: materialSet.thresholdDegree,
         rnsLimbCount: materialSet.rnsLimbCount,
         ringDegree: materialSet.ringDegree,
-        ringDegreeStatus: materialSet.ringDegreeStatus,
         materialRecordCount: materialSet.materialRecordCount,
-        transport: {
-            transportProfileId: setupTransportProfileId,
-            chunkSizeBytes: setupTransportChunkSizeBytes,
-            chunkCount: chunks.length,
-            totalByteLength: transportHashes.totalByteLength,
-            fullObjectHash: transportHashes.fullObjectHash,
-            chunkRoot: transportHashes.chunkRoot,
+        transportHashes: {
+            fullObjectHash: transportedMaterial.fullObjectHash,
+            chunkRoot: transportedMaterial.chunkRoot,
+            totalByteLength: transportedMaterial.totalByteLength,
         },
-    } as const satisfies Omit<
-        BinaryChunkedVssCoefficientCommitmentMaterialSet,
-        'vssCoefficientCommitmentMaterialRoot'
-    >;
-    const binaryMaterialSet = {
-        ...materialSetWithoutRoot,
-        vssCoefficientCommitmentMaterialRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentMaterialRoot',
-            materialSetWithoutRoot,
-        ),
-    } satisfies BinaryChunkedVssCoefficientCommitmentMaterialSet;
+        chunkCount: transportedMaterial.chunkCount,
+    });
 
     return {
         materialSet: binaryMaterialSet,
-        transportedVssCoefficientCommitmentMaterial: {
-            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
-            objectVersion: 1,
-            binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
-            chunkSizeBytes: setupTransportChunkSizeBytes,
-            chunkCount: chunks.length,
-            totalByteLength: transportHashes.totalByteLength,
-            fullObjectHash: transportHashes.fullObjectHash,
-            chunkHashes: transportHashes.chunkHashes,
-            chunkRoot: transportHashes.chunkRoot,
-            chunks: chunks.map((chunk, chunkIndex) => ({
-                chunkIndex,
-                bytesHex: bytesToHex(chunk),
-            })),
-        },
+        transportedVssCoefficientCommitmentMaterial: transportedMaterial,
     };
 };
 
@@ -2168,8 +2759,9 @@ const validateCommitmentCommonInput = (
     }
 };
 
-export const createVssSourceTrusteeCoefficientCommitmentContribution = (
+const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
     input: VssSourceTrusteeCoefficientCommitmentContributionInput,
+    options: VssSourceTrusteeCoefficientCommitmentContributionOptions,
 ): VssSourceTrusteeCoefficientCommitmentContribution => {
     validateCommitmentCommonInput(input);
     const context = contextFields(input.setupContext);
@@ -2212,23 +2804,21 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
                     'source trustee coefficientOpenings must cover every declared coordinate.',
                 );
             }
-            const commitment = computeSetupCommitmentFromOpening({
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                qSharePrimes: input.qSharePrimes,
-                sourceRnsLimbIndex: rnsLimbIndex,
-                sourceMessageModulus: rnsPrime,
-                shamirCoefficientIndex,
-                messageCoefficients: openingState.coefficientMessage,
-                randomnessByColumn: openingState.randomnessByColumn,
-                ringDegree: input.ringDegree,
-            });
-            const commitmentRoot = deriveProtocolHash(
-                'SetupCommitmentRoot',
-                setupCommitmentRootPayload(commitment),
-            );
+            const commitmentComputation =
+                computeSetupCommitmentWithOptionalKernel({
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    qSharePrimes: input.qSharePrimes,
+                    sourceRnsLimbIndex: rnsLimbIndex,
+                    sourceMessageModulus: rnsPrime,
+                    shamirCoefficientIndex,
+                    messageCoefficients: openingState.coefficientMessage,
+                    randomnessByColumn: openingState.randomnessByColumn,
+                    ringDegree: input.ringDegree,
+                    setupCommitmentComputer: options.setupCommitmentComputer,
+                });
             sourceTrusteePrivateOpenings.push({
                 ...openingState,
-                commitmentRoot,
+                commitmentRoot: commitmentComputation.commitmentRoot,
             });
             coefficientCommitments.push({
                 objectType: 'VssCoefficientCommitment',
@@ -2241,16 +2831,13 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
                 rnsLimbIndex,
                 rnsPrime,
                 shamirCoefficientIndex,
-                commitmentRoot,
-                commitmentChunkRoot: commitmentChunkRoot(
-                    commitment,
-                    commitmentRoot,
-                ),
+                commitmentRoot: commitmentComputation.commitmentRoot,
+                commitmentChunkRoot: commitmentComputation.commitmentChunkRoot,
                 coefficientVectorHash512:
-                    publicCommitmentCoefficientVectorHash512(commitment),
+                    commitmentComputation.coefficientVectorHash512,
                 openingVerificationStatus: 'pending-private-envelope-opening',
             });
-            materialRecords.push({
+            const materialRecord = {
                 objectType: 'VssCoefficientCommitmentMaterial',
                 objectVersion: 1,
                 ...context,
@@ -2261,9 +2848,13 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
                 rnsLimbIndex,
                 rnsPrime,
                 shamirCoefficientIndex,
-                commitmentRoot,
-                commitment: setupCommitmentFullValue(commitment),
-            });
+                commitmentRoot: commitmentComputation.commitmentRoot,
+                commitment: commitmentComputation.commitment,
+            } satisfies VssCoefficientCommitmentMaterialRecord;
+            options.consumeMaterialRecord?.(materialRecord);
+            if (options.retainMaterialRecords) {
+                materialRecords.push(materialRecord);
+            }
         }
     });
     const sourceTrusteeRecordWithoutRoot = {
@@ -2303,27 +2894,184 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
     };
 };
 
+export const createVssSourceTrusteeCoefficientCommitmentContribution = (
+    input: VssSourceTrusteeCoefficientCommitmentContributionInput,
+): VssSourceTrusteeCoefficientCommitmentContribution =>
+    createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(input, {
+        retainMaterialRecords: true,
+    });
+
+const sourceTrusteeOpeningMaterialReferenceFromMaterial = (
+    sourceTrusteeOpeningMaterial: VssSourceTrusteeOpeningMaterial,
+): VssSourceTrusteeOpeningMaterialReference => ({
+    sourceTrusteeIdentity: sourceTrusteeOpeningMaterial.sourceTrusteeIdentity,
+    sourceTrusteeRosterPosition:
+        sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
+    sourceTrusteeCommitmentRoot:
+        sourceTrusteeOpeningMaterial.sourceTrusteeCommitmentRoot,
+});
+
+const retainedSourceTrusteeOpeningMaterialSource = (
+    privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[],
+): VssSourceTrusteeOpeningMaterialSource => {
+    const materialByRosterPosition = new Map<
+        number,
+        VssSourceTrusteeOpeningMaterial
+    >();
+    privateOpeningMaterialBySourceTrustee.forEach(
+        (sourceTrusteeOpeningMaterial) => {
+            materialByRosterPosition.set(
+                sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
+                sourceTrusteeOpeningMaterial,
+            );
+        },
+    );
+
+    return {
+        sourceTrusteeReferences: privateOpeningMaterialBySourceTrustee.map(
+            sourceTrusteeOpeningMaterialReferenceFromMaterial,
+        ),
+        loadSourceTrusteeOpeningMaterial: (sourceTrusteeReference) => {
+            const sourceTrusteeOpeningMaterial = materialByRosterPosition.get(
+                sourceTrusteeReference.sourceTrusteeRosterPosition,
+            );
+            if (sourceTrusteeOpeningMaterial === undefined) {
+                throw new Error(
+                    'source trustee opening material source is missing the requested roster position.',
+                );
+            }
+            if (
+                sourceTrusteeOpeningMaterial.sourceTrusteeIdentity !==
+                    sourceTrusteeReference.sourceTrusteeIdentity ||
+                sourceTrusteeOpeningMaterial.sourceTrusteeCommitmentRoot !==
+                    sourceTrusteeReference.sourceTrusteeCommitmentRoot
+            ) {
+                throw new Error(
+                    'loaded source trustee opening material must match the requested source trustee reference.',
+                );
+            }
+
+            return sourceTrusteeOpeningMaterial;
+        },
+    };
+};
+
+const sourceTrusteeOpeningMaterialSourceFromProvider = (
+    input: VssCoefficientCommitmentBundleInput,
+    sourceTrusteeRecords: readonly VssSourceTrusteeCoefficientCommitmentRecord[],
+): VssSourceTrusteeOpeningMaterialSource => {
+    const sourceTrusteeOpeningStateProvider =
+        sourceTrusteeOpeningStateProviderFromInput(input);
+    const sourceTrusteeRecordByRosterPosition = new Map<
+        number,
+        VssSourceTrusteeCoefficientCommitmentRecord
+    >();
+    sourceTrusteeRecords.forEach((sourceTrusteeRecord) => {
+        sourceTrusteeRecordByRosterPosition.set(
+            sourceTrusteeRecord.sourceTrusteeRosterPosition,
+            sourceTrusteeRecord,
+        );
+    });
+    const sourceTrusteeReferences = sourceTrusteeRecords.map(
+        (sourceTrusteeRecord) => ({
+            sourceTrusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
+            sourceTrusteeRosterPosition:
+                sourceTrusteeRecord.sourceTrusteeRosterPosition,
+            sourceTrusteeCommitmentRoot:
+                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+        }),
+    );
+
+    return {
+        sourceTrusteeReferences,
+        loadSourceTrusteeOpeningMaterial: (sourceTrusteeReference) => {
+            const sourceTrusteeRecord = sourceTrusteeRecordByRosterPosition.get(
+                sourceTrusteeReference.sourceTrusteeRosterPosition,
+            );
+            if (sourceTrusteeRecord === undefined) {
+                throw new Error(
+                    'source trustee commitment record is missing for the requested opening material.',
+                );
+            }
+            if (
+                sourceTrusteeRecord.sourceTrusteeIdentity !==
+                    sourceTrusteeReference.sourceTrusteeIdentity ||
+                sourceTrusteeRecord.sourceTrusteeCommitmentRoot !==
+                    sourceTrusteeReference.sourceTrusteeCommitmentRoot
+            ) {
+                throw new Error(
+                    'source trustee commitment record must match the requested opening material reference.',
+                );
+            }
+            const sourceTrusteeOpeningState = loadSourceTrusteeOpeningState(
+                sourceTrusteeOpeningStateProvider,
+                sourceTrusteeReference,
+            );
+            const contribution =
+                createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(
+                    {
+                        setupContext: input.setupContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        qSharePrimes: input.qSharePrimes,
+                        ringDegree: input.ringDegree,
+                        participantCount: input.participantCount,
+                        thresholdDegree: input.thresholdDegree,
+                        sourceTrusteeOpeningState,
+                    },
+                    {
+                        retainMaterialRecords: true,
+                        setupCommitmentComputer: input.setupCommitmentComputer,
+                    },
+                );
+            if (
+                contribution.sourceTrusteeRecord.sourceTrusteeCommitmentRoot !==
+                sourceTrusteeReference.sourceTrusteeCommitmentRoot
+            ) {
+                throw new Error(
+                    'loaded source trustee opening material must rebuild the accepted source trustee commitment root.',
+                );
+            }
+
+            return contribution.privateOpeningMaterial;
+        },
+    };
+};
+
 export const createVssCoefficientCommitmentBundle = (
     input: VssCoefficientCommitmentBundleInput,
 ): VssCoefficientCommitmentBundle => {
     validateCommitmentCommonInput(input);
     const context = contextFields(input.setupContext);
-    const sortedSourceTrusteeStates = sortedByRosterPosition(
-        input.sourceTrusteeOpeningStates,
+    const sourceTrusteeOpeningStateProvider =
+        sourceTrusteeOpeningStateProviderFromInput(input);
+    const sortedReferences = sortedSourceTrusteeReferences(
+        sourceTrusteeOpeningStateProvider.sourceTrusteeReferences,
     );
-    assertFullRosterCoverage(sortedSourceTrusteeStates, input.participantCount);
+    assertFullSourceTrusteeReferenceCoverage(
+        sortedReferences,
+        input.participantCount,
+    );
 
-    const sourceTrusteeContributions = sortedSourceTrusteeStates.map(
-        (sourceTrusteeOpeningState) =>
-            createVssSourceTrusteeCoefficientCommitmentContribution({
-                setupContext: input.setupContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                qSharePrimes: input.qSharePrimes,
-                ringDegree: input.ringDegree,
-                participantCount: input.participantCount,
-                thresholdDegree: input.thresholdDegree,
-                sourceTrusteeOpeningState,
-            }),
+    const sourceTrusteeContributions = sortedReferences.map(
+        (sourceTrusteeReference) =>
+            createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(
+                {
+                    setupContext: input.setupContext,
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    qSharePrimes: input.qSharePrimes,
+                    ringDegree: input.ringDegree,
+                    participantCount: input.participantCount,
+                    thresholdDegree: input.thresholdDegree,
+                    sourceTrusteeOpeningState: loadSourceTrusteeOpeningState(
+                        sourceTrusteeOpeningStateProvider,
+                        sourceTrusteeReference,
+                    ),
+                },
+                {
+                    retainMaterialRecords: true,
+                    setupCommitmentComputer: input.setupCommitmentComputer,
+                },
+            ),
     );
     const sourceTrusteeRecords = sourceTrusteeContributions.map(
         (contribution) => contribution.sourceTrusteeRecord,
@@ -2388,5 +3136,311 @@ export const createVssCoefficientCommitmentBundle = (
         commitmentSet,
         materialSet,
         privateOpeningMaterialBySourceTrustee,
+        sourceTrusteeOpeningMaterialSource:
+            retainedSourceTrusteeOpeningMaterialSource(
+                privateOpeningMaterialBySourceTrustee,
+            ),
+    };
+};
+
+export const createBinaryChunkedVssCoefficientCommitmentBundle = (
+    input: VssCoefficientCommitmentBundleInput,
+): BinaryChunkedVssCoefficientCommitmentBundle => {
+    validateCommitmentCommonInput(input);
+    const context = contextFields(input.setupContext);
+    const sourceTrusteeOpeningStateProvider =
+        sourceTrusteeOpeningStateProviderFromInput(input);
+    const sortedReferences = sortedSourceTrusteeReferences(
+        sourceTrusteeOpeningStateProvider.sourceTrusteeReferences,
+    );
+    assertFullSourceTrusteeReferenceCoverage(
+        sortedReferences,
+        input.participantCount,
+    );
+
+    const writer = new BinaryChunkWriter();
+    writeVssCoefficientCommitmentMaterialHeader(writer, {
+        participantCount: input.participantCount,
+        thresholdDegree: input.thresholdDegree,
+        rnsLimbCount: input.qSharePrimes.length,
+        ringDegree: input.ringDegree,
+    });
+
+    const sourceTrusteeRecords: VssSourceTrusteeCoefficientCommitmentRecord[] =
+        [];
+    const privateOpeningMaterialBySourceTrustee: VssSourceTrusteeOpeningMaterial[] =
+        [];
+    const shouldRetainPrivateOpeningMaterial =
+        input.sourceTrusteeOpeningStateProvider === undefined;
+    let materialRecordCount = 0;
+    sortedReferences.forEach((sourceTrusteeReference) => {
+        const contribution =
+            createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(
+                {
+                    setupContext: input.setupContext,
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    qSharePrimes: input.qSharePrimes,
+                    ringDegree: input.ringDegree,
+                    participantCount: input.participantCount,
+                    thresholdDegree: input.thresholdDegree,
+                    sourceTrusteeOpeningState: loadSourceTrusteeOpeningState(
+                        sourceTrusteeOpeningStateProvider,
+                        sourceTrusteeReference,
+                    ),
+                },
+                {
+                    retainMaterialRecords: false,
+                    setupCommitmentComputer: input.setupCommitmentComputer,
+                    consumeMaterialRecord: (materialRecord) => {
+                        writeSetupCommitment(writer, materialRecord);
+                        materialRecordCount += 1;
+                    },
+                },
+            );
+        sourceTrusteeRecords.push(contribution.sourceTrusteeRecord);
+        if (shouldRetainPrivateOpeningMaterial) {
+            privateOpeningMaterialBySourceTrustee.push(
+                contribution.privateOpeningMaterial,
+            );
+        }
+    });
+
+    const commitmentSetWithoutRoot = {
+        objectType: 'VssCoefficientCommitmentSet',
+        objectVersion: 1,
+        ...context,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        sourceTrusteeRecords,
+    } as const satisfies Omit<
+        VssCoefficientCommitmentSet,
+        'vssCoefficientCommitmentRoot'
+    >;
+    const commitmentSet = {
+        ...commitmentSetWithoutRoot,
+        vssCoefficientCommitmentRoot: deriveProtocolHash(
+            'VssCoefficientCommitmentRoot',
+            commitmentSetWithoutRoot,
+        ),
+    } satisfies VssCoefficientCommitmentSet;
+
+    const writerResult = writer.finish();
+    const chunks = writerResult.chunks;
+    const transportedMaterial =
+        transportedVssCoefficientCommitmentMaterialFromChunks(chunks);
+    const materialSet = buildBinaryVssCoefficientCommitmentMaterialSet({
+        setupContext: input.setupContext,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot:
+            commitmentSet.vssCoefficientCommitmentRoot,
+        participantCount: input.participantCount,
+        thresholdDegree: input.thresholdDegree,
+        rnsLimbCount: input.qSharePrimes.length,
+        ringDegree: input.ringDegree,
+        materialRecordCount,
+        transportHashes: writerResult.transportHashes,
+        chunkCount: writerResult.chunkCount,
+    });
+
+    return {
+        commitmentSet,
+        materialSet,
+        transportedVssCoefficientCommitmentMaterial: transportedMaterial,
+        privateOpeningMaterialBySourceTrustee,
+        sourceTrusteeOpeningMaterialSource: shouldRetainPrivateOpeningMaterial
+            ? retainedSourceTrusteeOpeningMaterialSource(
+                  privateOpeningMaterialBySourceTrustee,
+              )
+            : sourceTrusteeOpeningMaterialSourceFromProvider(
+                  input,
+                  sourceTrusteeRecords,
+              ),
+    };
+};
+
+export const createStreamingBinaryChunkedVssCoefficientCommitmentBundle = (
+    input: VssCoefficientCommitmentBundleInput &
+        Readonly<{
+            readonly thresholdShareCommitmentTransportStreamer: ThresholdShareCommitmentTransportStreamComputer;
+            readonly derivationId?: string;
+        }>,
+): StreamingBinaryChunkedVssCoefficientCommitmentBundle => {
+    validateCommitmentCommonInput(input);
+    const context = contextFields(input.setupContext);
+    const sourceTrusteeOpeningStateProvider =
+        sourceTrusteeOpeningStateProviderFromInput(input);
+    const sortedReferences = sortedSourceTrusteeReferences(
+        sourceTrusteeOpeningStateProvider.sourceTrusteeReferences,
+    );
+    assertFullSourceTrusteeReferenceCoverage(
+        sortedReferences,
+        input.participantCount,
+    );
+    const totalByteLength = binaryVssCoefficientCommitmentMaterialByteLength({
+        participantCount: input.participantCount,
+        thresholdDegree: input.thresholdDegree,
+        rnsLimbCount: input.qSharePrimes.length,
+        ringDegree: input.ringDegree,
+    });
+    const chunkCount = Math.ceil(
+        totalByteLength / setupTransportChunkSizeBytes,
+    );
+    const transportedMaterialTemplate =
+        setupTransportedVssCoefficientCommitmentMaterialTemplate({
+            chunkCount,
+            totalByteLength,
+        });
+    const derivationId =
+        input.derivationId ??
+        `vss-transport-${(vssTransportDerivationCounter += 1)}`;
+    input.thresholdShareCommitmentTransportStreamer.beginThresholdShareCommitmentsFromTransportStream(
+        {
+            derivationId,
+            setupContext: input.setupContext,
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            transportedVssCoefficientCommitmentMaterial:
+                transportedMaterialTemplate,
+        },
+    );
+    const writer = new BinaryChunkWriter({
+        expectedTotalByteLength: totalByteLength,
+        retainChunks: false,
+        consumeChunk: (chunkIndex, chunk) => {
+            input.thresholdShareCommitmentTransportStreamer.absorbThresholdShareCommitmentsFromTransportStreamChunk(
+                {
+                    derivationId,
+                    chunkIndex,
+                    bytesHex: bytesToHex(chunk),
+                },
+            );
+        },
+    });
+    writeVssCoefficientCommitmentMaterialHeader(writer, {
+        participantCount: input.participantCount,
+        thresholdDegree: input.thresholdDegree,
+        rnsLimbCount: input.qSharePrimes.length,
+        ringDegree: input.ringDegree,
+    });
+
+    const sourceTrusteeRecords: VssSourceTrusteeCoefficientCommitmentRecord[] =
+        [];
+    const privateOpeningMaterialBySourceTrustee: VssSourceTrusteeOpeningMaterial[] =
+        [];
+    const shouldRetainPrivateOpeningMaterial =
+        input.sourceTrusteeOpeningStateProvider === undefined;
+    let materialRecordCount = 0;
+    sortedReferences.forEach((sourceTrusteeReference) => {
+        const contribution =
+            createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(
+                {
+                    setupContext: input.setupContext,
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    qSharePrimes: input.qSharePrimes,
+                    ringDegree: input.ringDegree,
+                    participantCount: input.participantCount,
+                    thresholdDegree: input.thresholdDegree,
+                    sourceTrusteeOpeningState: loadSourceTrusteeOpeningState(
+                        sourceTrusteeOpeningStateProvider,
+                        sourceTrusteeReference,
+                    ),
+                },
+                {
+                    retainMaterialRecords: false,
+                    setupCommitmentComputer: input.setupCommitmentComputer,
+                    consumeMaterialRecord: (materialRecord) => {
+                        writeSetupCommitment(writer, materialRecord);
+                        materialRecordCount += 1;
+                    },
+                },
+            );
+        sourceTrusteeRecords.push(contribution.sourceTrusteeRecord);
+        if (shouldRetainPrivateOpeningMaterial) {
+            privateOpeningMaterialBySourceTrustee.push(
+                contribution.privateOpeningMaterial,
+            );
+        }
+    });
+
+    const commitmentSetWithoutRoot = {
+        objectType: 'VssCoefficientCommitmentSet',
+        objectVersion: 1,
+        ...context,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        sourceTrusteeRecords,
+    } as const satisfies Omit<
+        VssCoefficientCommitmentSet,
+        'vssCoefficientCommitmentRoot'
+    >;
+    const commitmentSet = {
+        ...commitmentSetWithoutRoot,
+        vssCoefficientCommitmentRoot: deriveProtocolHash(
+            'VssCoefficientCommitmentRoot',
+            commitmentSetWithoutRoot,
+        ),
+    } satisfies VssCoefficientCommitmentSet;
+    const writerResult = writer.finish();
+    const transportedMaterialReference =
+        transportedVssCoefficientCommitmentMaterialReferenceFromWriterResult(
+            writerResult,
+        );
+    const materialSet = buildBinaryVssCoefficientCommitmentMaterialSet({
+        setupContext: input.setupContext,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot:
+            commitmentSet.vssCoefficientCommitmentRoot,
+        participantCount: input.participantCount,
+        thresholdDegree: input.thresholdDegree,
+        rnsLimbCount: input.qSharePrimes.length,
+        ringDegree: input.ringDegree,
+        materialRecordCount,
+        transportHashes: writerResult.transportHashes,
+        chunkCount: writerResult.chunkCount,
+    });
+    const streamDerivation =
+        input.thresholdShareCommitmentTransportStreamer.finishThresholdShareCommitmentsFromTransportStream(
+            {
+                derivationId,
+                vssCoefficientCommitmentRoot:
+                    commitmentSet.vssCoefficientCommitmentRoot,
+                sourceTrusteeCoefficientCommitmentRecords:
+                    commitmentSet.sourceTrusteeRecords,
+            },
+        );
+    const derivedMaterialRoot =
+        streamDerivation.vssCoefficientCommitmentMaterial
+            .vssCoefficientCommitmentMaterialRoot;
+    if (
+        derivedMaterialRoot !== materialSet.vssCoefficientCommitmentMaterialRoot
+    ) {
+        throw new Error(
+            'kernel-streamed VSS material root must match the setup package material root.',
+        );
+    }
+    if (
+        streamDerivation.thresholdShareCommitments
+            .thresholdShareCommitmentRoot !==
+        streamDerivation.thresholdShareCommitmentRoot
+    ) {
+        throw new Error(
+            'kernel-streamed threshold-share commitment root must match the returned threshold-share commitments.',
+        );
+    }
+
+    return {
+        commitmentSet,
+        materialSet,
+        transportedVssCoefficientCommitmentMaterial:
+            transportedMaterialReference,
+        verifiedVssCoefficientCommitmentMaterial:
+            streamDerivation.verifiedVssCoefficientCommitmentMaterial,
+        privateOpeningMaterialBySourceTrustee,
+        sourceTrusteeOpeningMaterialSource: shouldRetainPrivateOpeningMaterial
+            ? retainedSourceTrusteeOpeningMaterialSource(
+                  privateOpeningMaterialBySourceTrustee,
+              )
+            : sourceTrusteeOpeningMaterialSourceFromProvider(
+                  input,
+                  sourceTrusteeRecords,
+              ),
+        thresholdShareCommitments: streamDerivation.thresholdShareCommitments,
     };
 };
