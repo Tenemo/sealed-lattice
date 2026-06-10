@@ -1,6 +1,9 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+    fs::{self, File},
+    io::{Read, Write},
+    path::PathBuf,
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use num_bigint::BigUint;
@@ -211,6 +214,15 @@ const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME: &str = "publicEvalu
 const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE: &str =
     "public-evaluation-key-runtime-material";
 const SETUP_TRANSPORTED_OBJECT_LOADING_POLICY: &str = "stream-verified-before-object-use";
+static VERIFIED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_CHUNKS: OnceLock<
+    Mutex<BTreeMap<String, VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry>>,
+> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry {
+    path: PathBuf,
+    total_byte_length: u64,
+}
 const HE_SECURITY_CERTIFICATE_OBJECT_TYPE: &str = "BgvHeSecurityCertificate";
 const PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID: &str =
     "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1";
@@ -17068,6 +17080,192 @@ fn evaluation_key_share_lnp_proof_bytes_from_record(
     Ok(proof_bytes)
 }
 
+fn verified_evaluation_key_share_proof_material_chunks(
+) -> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry>> {
+    VERIFIED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_CHUNKS
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+pub(super) fn register_verified_evaluation_key_share_proof_material_chunks(
+    proof_material_root: &str,
+    chunks: Vec<Vec<u8>>,
+) -> CanonicalResult<()> {
+    validate_hash_string(
+        proof_material_root,
+        "verifiedEvaluationKeyShareProofMaterial.proofMaterialRoot",
+    )?;
+    let store_entry =
+        write_verified_evaluation_key_share_proof_material_chunks(proof_material_root, &chunks)?;
+    let mut stored_chunks = verified_evaluation_key_share_proof_material_chunks()
+        .lock()
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "verified evaluation-key proof material store is unavailable",
+            )
+        })?;
+    if let Some(existing_chunks) = stored_chunks.get(proof_material_root)
+        && (existing_chunks.path != store_entry.path
+            || existing_chunks.total_byte_length != store_entry.total_byte_length)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "verified evaluation-key proof material root is already bound to different material storage",
+        ));
+    }
+    stored_chunks.insert(proof_material_root.to_string(), store_entry);
+
+    Ok(())
+}
+
+fn stored_verified_evaluation_key_share_proof_material_chunks(
+    proof_material_root: &str,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    let stored_chunks = verified_evaluation_key_share_proof_material_chunks()
+        .lock()
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "verified evaluation-key proof material store is unavailable",
+            )
+        })?;
+    let store_entry = stored_chunks
+        .get(proof_material_root)
+        .cloned()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "transported evaluation-key proof material requires chunks or a live verified material handle",
+            )
+        })?;
+    drop(stored_chunks);
+
+    read_verified_evaluation_key_share_proof_material_chunks(&store_entry)
+}
+
+fn verified_evaluation_key_share_proof_material_store_directory() -> PathBuf {
+    PathBuf::from("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store")
+        .join("evaluation-key-proof-material")
+}
+
+fn write_verified_evaluation_key_share_proof_material_chunks(
+    proof_material_root: &str,
+    chunks: &[Vec<u8>],
+) -> CanonicalResult<VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry> {
+    let total_byte_length = chunks.iter().try_fold(0_u64, |total, chunk| {
+        total
+            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "verified evaluation-key proof material chunk length does not fit u64",
+                )
+            })?)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "verified evaluation-key proof material byte length overflowed",
+                )
+            })
+    })?;
+    let directory = verified_evaluation_key_share_proof_material_store_directory();
+    fs::create_dir_all(&directory).map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("verified evaluation-key proof material store could not be created: {error}"),
+        )
+    })?;
+    let path = directory.join(format!("{proof_material_root}.bin"));
+    if path.exists() {
+        let observed_byte_length = fs::metadata(&path)
+            .map_err(|error| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!(
+                        "verified evaluation-key proof material store entry could not be read: {error}",
+                    ),
+                )
+            })?
+            .len();
+        if observed_byte_length != total_byte_length {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "verified evaluation-key proof material store entry length does not match the registered chunks",
+            ));
+        }
+    } else {
+        let mut file = File::create(&path).map_err(|error| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "verified evaluation-key proof material store entry could not be created: {error}",
+                ),
+            )
+        })?;
+        for chunk in chunks {
+            file.write_all(chunk).map_err(|error| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!(
+                        "verified evaluation-key proof material store entry could not be written: {error}",
+                    ),
+                )
+            })?;
+        }
+    }
+
+    Ok(VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry {
+        path,
+        total_byte_length,
+    })
+}
+
+fn read_verified_evaluation_key_share_proof_material_chunks(
+    store_entry: &VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "evaluation-key proof material chunk size does not fit usize",
+        )
+    })?;
+    let mut remaining_byte_length = store_entry.total_byte_length;
+    let mut file = File::open(&store_entry.path).map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("verified evaluation-key proof material store entry could not be opened: {error}"),
+        )
+    })?;
+    let mut chunks = Vec::new();
+    while remaining_byte_length > 0 {
+        let next_chunk_length =
+            usize::try_from(remaining_byte_length.min(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES))
+                .map_err(|_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "evaluation-key proof material chunk length does not fit usize",
+                    )
+                })?;
+        let mut chunk = vec![0_u8; next_chunk_length.min(chunk_size)];
+        file.read_exact(&mut chunk).map_err(|error| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("verified evaluation-key proof material store entry could not be read: {error}"),
+            )
+        })?;
+        remaining_byte_length -= u64::try_from(chunk.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "evaluation-key proof material chunk length does not fit u64",
+            )
+        })?;
+        chunks.push(chunk);
+    }
+
+    Ok(chunks)
+}
+
 fn verify_evaluation_key_share_lnp_proof_transport_reference(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
@@ -17209,22 +17407,25 @@ fn transported_evaluation_key_share_proof_material_chunks(
                 "transportedEvaluationKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        let chunk_values = proof_material
-            .get("chunks")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
+        let chunks = if let Some(chunk_values) = proof_material.get("chunks") {
+            let chunk_values = chunk_values.as_array().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "transported evaluation-key proof material chunks must be an array",
                 )
             })?;
-        let chunks = chunk_values
-            .iter()
-            .map(|chunk| {
-                let bytes_hex = value_string(chunk, "bytesHex")?;
-                decode_hex(bytes_hex)
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
+            chunk_values
+                .iter()
+                .map(|chunk| {
+                    let bytes_hex = value_string(chunk, "bytesHex")?;
+                    decode_hex(bytes_hex)
+                })
+                .collect::<CanonicalResult<Vec<_>>>()?
+        } else {
+            stored_verified_evaluation_key_share_proof_material_chunks(
+                expected_proof_material_root,
+            )?
+        };
         let transport_hashes = setup_proof_material_transport_hashes(
             proof_family.proof_family(),
             &chunks,

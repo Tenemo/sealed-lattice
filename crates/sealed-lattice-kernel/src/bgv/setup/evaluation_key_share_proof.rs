@@ -1,3 +1,11 @@
+use std::{
+    collections::BTreeMap,
+    fs::{self, File},
+    io::{Read, Write},
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+};
+
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::ToPrimitive;
 use serde_json::{Value, json};
@@ -52,6 +60,15 @@ const RELINEARIZATION_KEY_SHARE_LNP_PROOF_MAGIC: &[u8; 8] = b"SLRKLNP1";
 const GALOIS_KEY_SHARE_LNP_PROOF_MAGIC: &[u8; 8] = b"SLGKLNP1";
 const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
 const EVALUATION_KEY_SHARE_LIFTED_PRODUCT_CRT_LIMB_COUNT: usize = 4;
+static VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS: OnceLock<
+    Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>>,
+> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+    path: PathBuf,
+    total_byte_length: u64,
+}
 pub(super) const RELINEARIZATION_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
     "sealed-lattice/setup/relinearization-key-share/lnp-scalar-challenge-v1";
 pub(super) const GALOIS_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN: &str =
@@ -213,6 +230,11 @@ pub(super) struct EvaluationKeyShareLnpProofVerification {
     pub(super) z34_z3_l2_squared_decimal: String,
     pub(super) z34_z4_infinity_norm_decimal: String,
     pub(super) challenge: u64,
+}
+
+pub(super) struct EvaluationKeyShareLnpProofGenerationOutput {
+    pub(super) proof_bytes: Vec<u8>,
+    pub(super) verification: EvaluationKeyShareLnpProofVerification,
 }
 
 pub(super) struct EvaluationKeyShareLnpProofVerificationInput<'a> {
@@ -682,6 +704,167 @@ pub(super) fn evaluation_key_share_component_material_transport_hashes(
     })
 }
 
+fn verified_evaluation_key_share_component_material_chunks(
+) -> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>> {
+    VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+pub(super) fn register_verified_evaluation_key_share_component_material_chunks(
+    material_root: &str,
+    chunks: Vec<Vec<u8>>,
+) -> CanonicalResult<()> {
+    validate_lowercase_hash(
+        material_root,
+        "verifiedEvaluationKeyShareComponentMaterial.keySwitchComponentMaterialRoot",
+    )?;
+    let store_entry =
+        write_verified_evaluation_key_share_component_material_chunks(material_root, &chunks)?;
+    let mut stored_chunks = verified_evaluation_key_share_component_material_chunks()
+        .lock()
+        .map_err(|_| {
+            invalid_evaluation_key_share_proof(
+                "verified evaluation-key component material store is unavailable",
+            )
+        })?;
+    if let Some(existing_chunks) = stored_chunks.get(material_root)
+        && (existing_chunks.path != store_entry.path
+            || existing_chunks.total_byte_length != store_entry.total_byte_length)
+    {
+        return Err(invalid_evaluation_key_share_proof(
+            "verified evaluation-key component material root is already bound to different material storage",
+        ));
+    }
+    stored_chunks.insert(material_root.to_string(), store_entry);
+
+    Ok(())
+}
+
+fn stored_verified_evaluation_key_share_component_material_chunks(
+    material_root: &str,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    let stored_chunks = verified_evaluation_key_share_component_material_chunks()
+        .lock()
+        .map_err(|_| {
+            invalid_evaluation_key_share_proof(
+                "verified evaluation-key component material store is unavailable",
+            )
+        })?;
+    let store_entry = stored_chunks.get(material_root).cloned().ok_or_else(|| {
+        invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material requires chunks or a live verified material handle",
+        )
+    })?;
+    drop(stored_chunks);
+
+    read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+}
+
+fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf {
+    PathBuf::from("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store")
+        .join("evaluation-key-component-material")
+}
+
+fn write_verified_evaluation_key_share_component_material_chunks(
+    material_root: &str,
+    chunks: &[Vec<u8>],
+) -> CanonicalResult<VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry> {
+    let total_byte_length = chunks.iter().try_fold(0_u64, |total, chunk| {
+        total
+            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                invalid_evaluation_key_share_proof(
+                    "verified evaluation-key component material chunk length does not fit u64",
+                )
+            })?)
+            .ok_or_else(|| {
+                invalid_evaluation_key_share_proof(
+                    "verified evaluation-key component material byte length overflowed",
+                )
+            })
+    })?;
+    let directory = verified_evaluation_key_share_component_material_store_directory();
+    fs::create_dir_all(&directory).map_err(|error| {
+        invalid_evaluation_key_share_proof(format!(
+            "verified evaluation-key component material store could not be created: {error}",
+        ))
+    })?;
+    let path = directory.join(format!("{material_root}.bin"));
+    if path.exists() {
+        let observed_byte_length = fs::metadata(&path)
+            .map_err(|error| {
+                invalid_evaluation_key_share_proof(format!(
+                    "verified evaluation-key component material store entry could not be read: {error}",
+                ))
+            })?
+            .len();
+        if observed_byte_length != total_byte_length {
+            return Err(invalid_evaluation_key_share_proof(
+                "verified evaluation-key component material store entry length does not match the registered chunks",
+            ));
+        }
+    } else {
+        let mut file = File::create(&path).map_err(|error| {
+            invalid_evaluation_key_share_proof(format!(
+                "verified evaluation-key component material store entry could not be created: {error}",
+            ))
+        })?;
+        for chunk in chunks {
+            file.write_all(chunk).map_err(|error| {
+                invalid_evaluation_key_share_proof(format!(
+                    "verified evaluation-key component material store entry could not be written: {error}",
+                ))
+            })?;
+        }
+    }
+
+    Ok(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+        path,
+        total_byte_length,
+    })
+}
+
+fn read_verified_evaluation_key_share_component_material_chunks(
+    store_entry: &VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
+        invalid_evaluation_key_share_proof(
+            "evaluation-key component material chunk size does not fit usize",
+        )
+    })?;
+    let mut remaining_byte_length = store_entry.total_byte_length;
+    let mut file = File::open(&store_entry.path).map_err(|error| {
+        invalid_evaluation_key_share_proof(format!(
+            "verified evaluation-key component material store entry could not be opened: {error}",
+        ))
+    })?;
+    let mut chunks = Vec::new();
+    while remaining_byte_length > 0 {
+        let next_chunk_length =
+            usize::try_from(remaining_byte_length.min(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES))
+                .map_err(|_| {
+                    invalid_evaluation_key_share_proof(
+                        "evaluation-key component material chunk length does not fit usize",
+                    )
+                })?;
+        let mut chunk = vec![0_u8; next_chunk_length.min(chunk_size)];
+        file.read_exact(&mut chunk).map_err(|error| {
+            invalid_evaluation_key_share_proof(format!(
+                "verified evaluation-key component material store entry could not be read: {error}",
+            ))
+        })?;
+        remaining_byte_length -= u64::try_from(chunk.len()).map_err(|_| {
+            invalid_evaluation_key_share_proof(
+                "evaluation-key component material chunk length does not fit u64",
+            )
+        })?;
+        chunks.push(chunk);
+    }
+
+    Ok(chunks)
+}
+
 pub(super) fn evaluation_key_share_component_material_reference_root(
     proof_family: EvaluationKeyShareProofFamily,
     proof_record: &Value,
@@ -897,6 +1080,12 @@ pub(super) fn verify_evaluation_key_share_lnp_relation_proof(
 pub(super) fn generate_evaluation_key_share_lnp_relation_proof(
     input: EvaluationKeyShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<Vec<u8>> {
+    Ok(generate_evaluation_key_share_lnp_relation_proof_with_metadata(input)?.proof_bytes)
+}
+
+pub(super) fn generate_evaluation_key_share_lnp_relation_proof_with_metadata(
+    input: EvaluationKeyShareLnpProofGenerationInput<'_>,
+) -> CanonicalResult<EvaluationKeyShareLnpProofGenerationOutput> {
     validate_evaluation_key_share_generation_material(&input)?;
     let statement_input = EvaluationKeyShareLnpProofVerificationInput {
         proof_family: input.proof_family,
@@ -953,12 +1142,13 @@ pub(super) fn generate_evaluation_key_share_lnp_relation_proof(
         &statement_hash_hex,
         &relation_commitment_hash_hex,
     )?;
-    super::setup_proof::append_setup_proof_lnp_tbox_generated_suffix(
-        &mut tbox_proof_bytes,
-        &layout,
-        &statement_hash_hex,
-        &relation_commitment_hash_hex,
-    )?;
+    let tbox_summary =
+        super::setup_proof::append_setup_proof_lnp_tbox_generated_suffix_with_summary(
+            &mut tbox_proof_bytes,
+            &layout,
+            &statement_hash_hex,
+            &relation_commitment_hash_hex,
+        )?;
 
     let responses = evaluation_key_share_responses(&input, &masks, challenge)?;
     let mut proof_bytes = Vec::new();
@@ -988,7 +1178,28 @@ pub(super) fn generate_evaluation_key_share_lnp_relation_proof(
     }
     write_i128_matrix3(&mut proof_bytes, &responses.carry_response_by_digit_by_limb);
 
-    Ok(proof_bytes)
+    let proof_size_bytes = proof_bytes.len();
+    Ok(EvaluationKeyShareLnpProofGenerationOutput {
+        proof_bytes,
+        verification: EvaluationKeyShareLnpProofVerification {
+            proof_size_bytes,
+            statement_hash_hex,
+            relation_commitment_hash_hex,
+            tbox_commitment_prefix_hash,
+            z34_seed_material_hash: tbox_summary.z34_seed_material_hash,
+            z34_challenge_seed_hash: tbox_summary.z34_challenge_seed_hash,
+            z34_challenge_tail_hash: tbox_summary.z34_challenge_tail_hash,
+            z34_challenge_row_domain_hash: tbox_summary.z34_challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: tbox_summary.z34_challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: tbox_summary.z34_challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: tbox_summary.tbox_lower_protocol_challenge_hash,
+            z34_z3_check_window_hash: tbox_summary.z34_z3_check_window_hash,
+            z34_z4_check_window_hash: tbox_summary.z34_z4_check_window_hash,
+            z34_z3_l2_squared_decimal: tbox_summary.z3_l2_squared.to_string(),
+            z34_z4_infinity_norm_decimal: tbox_summary.z4_infinity_norm.to_string(),
+            challenge,
+        },
+    })
 }
 
 fn validate_evaluation_key_share_statement_material(
@@ -1684,7 +1895,22 @@ fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalRes
             "transported evaluation-key component material chunkCount does not fit usize",
         )
     })?;
-    let chunk_values = array_field(value, "chunks")?;
+    let Some(chunk_values) = value.get("chunks") else {
+        let material_root = string_field(value, "keySwitchComponentMaterialRoot")?;
+        let chunks = stored_verified_evaluation_key_share_component_material_chunks(material_root)?;
+        if chunks.len() != expected_chunk_count {
+            return Err(invalid_evaluation_key_share_proof(
+                "verified evaluation-key component material chunks length must match chunkCount",
+            ));
+        }
+
+        return Ok(chunks);
+    };
+    let chunk_values = chunk_values.as_array().ok_or_else(|| {
+        invalid_evaluation_key_share_proof(
+            "transported evaluation-key component material chunks must be an array",
+        )
+    })?;
     if chunk_values.len() != expected_chunk_count {
         return Err(invalid_evaluation_key_share_proof(
             "transported evaluation-key component material chunks length must match chunkCount",

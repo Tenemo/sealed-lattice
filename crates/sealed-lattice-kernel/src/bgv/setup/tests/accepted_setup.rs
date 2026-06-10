@@ -10,10 +10,11 @@ use super::super::accepted_setup::{
     active_static_setup_theorem_certificate_hash, active_static_setup_theorem_certificate_value,
     encode_public_evaluation_key_material_manifest, public_evaluation_key_material_manifest,
     public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
-    public_key_share_material_transport_hashes, setup_key_correctness_certificate_hash,
-    setup_key_correctness_certificate_value, setup_proof_accounting_certificate_hash,
-    setup_proof_accounting_certificate_value, verify_profile_ring_material,
-    verify_terminal_setup_transport_policy,
+    public_key_share_material_transport_hashes,
+    register_verified_evaluation_key_share_proof_material_chunks,
+    setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
+    setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
+    verify_profile_ring_material, verify_terminal_setup_transport_policy,
 };
 use super::super::evaluation_key_share_proof::{
     EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -31,8 +32,10 @@ use super::super::evaluation_key_share_proof::{
     evaluation_key_share_lnp_relation_proof_bytes_hash,
     generate_evaluation_key_share_lnp_proof_from_request,
     generate_evaluation_key_share_lnp_relation_proof,
+    generate_evaluation_key_share_lnp_relation_proof_with_metadata,
     key_switch_component_b_for_evaluation_key_fixture,
     negacyclic_i128_product_for_evaluation_key_fixture,
+    register_verified_evaluation_key_share_component_material_chunks,
     verify_evaluation_key_share_lnp_relation_proof,
 };
 use super::super::public_key_share_proof::{
@@ -7385,7 +7388,7 @@ fn populate_evaluation_key_share_lnp_proof_fields(
                 fixture_material.component_b_by_digit.len(),
             ),
     };
-    let proof_bytes = generate_evaluation_key_share_lnp_relation_proof(
+    let generation_output = generate_evaluation_key_share_lnp_relation_proof_with_metadata(
         EvaluationKeyShareLnpProofGenerationInput {
             proof_family,
             public_matrix_seed_hash,
@@ -7400,19 +7403,8 @@ fn populate_evaluation_key_share_lnp_proof_fields(
         },
     )
     .expect("evaluation-key proof bytes");
-    let verification = verify_evaluation_key_share_lnp_relation_proof(
-        EvaluationKeyShareLnpProofVerificationInput {
-            proof_family,
-            public_matrix_seed_hash,
-            proof_record,
-            same_secret_statement_record: statement_record,
-            constant_commitments,
-            setup_proof_binding,
-            transported_key_switch_component_material,
-            proof_bytes: &proof_bytes,
-        },
-    )
-    .expect("evaluation-key proof verification");
+    let proof_bytes = generation_output.proof_bytes;
+    let verification = generation_output.verification;
     proof_record["statementHash"] = serde_json::json!(verification.statement_hash_hex);
     proof_record["relationCommitmentHash"] =
         serde_json::json!(verification.relation_commitment_hash_hex);
@@ -7578,6 +7570,21 @@ fn relinearization_key_share_rounds_object(
     package: &serde_json::Value,
     generate_embedded_proofs: bool,
 ) -> serde_json::Value {
+    relinearization_key_share_rounds_object_inner(package, generate_embedded_proofs, None)
+}
+
+fn relinearization_key_share_rounds_object_with_terminal_transport(
+    package: &serde_json::Value,
+    terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
+) -> serde_json::Value {
+    relinearization_key_share_rounds_object_inner(package, false, Some(terminal_transport))
+}
+
+fn relinearization_key_share_rounds_object_inner(
+    package: &serde_json::Value,
+    generate_embedded_proofs: bool,
+    mut terminal_transport: Option<&mut TerminalEvaluationKeyTransportSinks>,
+) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let setup_proof_binding = setup_proof_binding_for_test_package(package);
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -7684,7 +7691,37 @@ fn relinearization_key_share_rounds_object(
                 "keySwitchComponentVectors": fixture_material.component_vector_entries,
                 "relinearizationKeyShareTboxParameterProfileHash": relinearization_tbox_parameter_profile_hash.clone(),
             });
-            if generate_embedded_proofs {
+            let uses_terminal_transport = terminal_transport.is_some();
+            if let Some(sinks) = terminal_transport.as_deref_mut() {
+                let transported_component_material_set =
+                    move_evaluation_key_share_component_vectors_to_compact_transport(
+                        &mut record,
+                        EvaluationKeyShareProofFamily::Relinearization,
+                        &fixture_material,
+                    );
+                sinks.component_materials.extend(
+                    transported_component_material_set["componentMaterials"]
+                        .as_array()
+                        .expect("component materials")
+                        .iter()
+                        .cloned(),
+                );
+                populate_evaluation_key_share_lnp_proof_fields(
+                    &mut record,
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    public_matrix_seed_hash,
+                    statement_record,
+                    &constant_commitments,
+                    &setup_proof_binding,
+                    &fixture_material,
+                    trustee_roster_position,
+                    Some(&transported_component_material_set),
+                    "RelinearizationRoundOneProofRandomness",
+                );
+                println!(
+                    "terminal-accepted-setup-phase generated relinearization round-one proof level {level} trustee {trustee_roster_position}"
+                );
+            } else if generate_embedded_proofs {
                 populate_evaluation_key_share_lnp_proof_fields(
                     &mut record,
                     EvaluationKeyShareProofFamily::Relinearization,
@@ -7708,15 +7745,30 @@ fn relinearization_key_share_rounds_object(
             );
             record["sourceSquareBindingRoot"] =
                 serde_json::json!(source_square_binding_root.clone());
-            let mut proof_root_input = record.clone();
-            proof_root_input
-                .as_object_mut()
-                .expect("round-one proof root input")
-                .remove("roundOneProofRoot");
-            let round_one_proof_root =
-                derive_protocol_hash("RelinearizationKeyShareProofRoot", &proof_root_input)
-                    .expect("round-one proof root");
-            record["roundOneProofRoot"] = serde_json::json!(round_one_proof_root);
+            if uses_terminal_transport {
+                let proof_material =
+                    move_evaluation_key_share_lnp_proof_record_bytes_to_compact_transport(
+                        &mut record,
+                        "relinearization-key-share",
+                        "roundOneProofRoot",
+                        "RelinearizationKeyShareProofRoot",
+                    );
+                terminal_transport
+                    .as_deref_mut()
+                    .expect("terminal transport sinks")
+                    .proof_materials
+                    .push(proof_material);
+            } else {
+                let mut proof_root_input = record.clone();
+                proof_root_input
+                    .as_object_mut()
+                    .expect("round-one proof root input")
+                    .remove("roundOneProofRoot");
+                let round_one_proof_root =
+                    derive_protocol_hash("RelinearizationKeyShareProofRoot", &proof_root_input)
+                        .expect("round-one proof root");
+                record["roundOneProofRoot"] = serde_json::json!(round_one_proof_root);
+            }
             record["roundOneRecordRoot"] = serde_json::json!(
                 derive_protocol_hash("RelinearizationRoundOneRecordRoot", &record)
                     .expect("round-one record root")
@@ -7891,7 +7943,37 @@ fn relinearization_key_share_rounds_object(
                 "keySwitchComponentVectors": fixture_material.component_vector_entries,
                 "relinearizationKeyShareTboxParameterProfileHash": relinearization_tbox_parameter_profile_hash.clone(),
             });
-            if generate_embedded_proofs {
+            let uses_terminal_transport = terminal_transport.is_some();
+            if let Some(sinks) = terminal_transport.as_deref_mut() {
+                let transported_component_material_set =
+                    move_evaluation_key_share_component_vectors_to_compact_transport(
+                        &mut record,
+                        EvaluationKeyShareProofFamily::Relinearization,
+                        &fixture_material,
+                    );
+                sinks.component_materials.extend(
+                    transported_component_material_set["componentMaterials"]
+                        .as_array()
+                        .expect("component materials")
+                        .iter()
+                        .cloned(),
+                );
+                populate_evaluation_key_share_lnp_proof_fields(
+                    &mut record,
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    public_matrix_seed_hash,
+                    statement_record,
+                    &constant_commitments,
+                    &setup_proof_binding,
+                    &fixture_material,
+                    trustee_roster_position,
+                    Some(&transported_component_material_set),
+                    "RelinearizationRoundTwoProofRandomness",
+                );
+                println!(
+                    "terminal-accepted-setup-phase generated relinearization round-two proof level {level} trustee {trustee_roster_position}"
+                );
+            } else if generate_embedded_proofs {
                 populate_evaluation_key_share_lnp_proof_fields(
                     &mut record,
                     EvaluationKeyShareProofFamily::Relinearization,
@@ -7915,15 +7997,30 @@ fn relinearization_key_share_rounds_object(
             );
             record["sourceSquareBindingRoot"] =
                 serde_json::json!(source_square_binding_root.clone());
-            let mut proof_root_input = record.clone();
-            proof_root_input
-                .as_object_mut()
-                .expect("round-two proof root input")
-                .remove("roundTwoProofRoot");
-            let round_two_proof_root =
-                derive_protocol_hash("RelinearizationKeyShareProofRoot", &proof_root_input)
-                    .expect("round-two proof root");
-            record["roundTwoProofRoot"] = serde_json::json!(round_two_proof_root);
+            if uses_terminal_transport {
+                let proof_material =
+                    move_evaluation_key_share_lnp_proof_record_bytes_to_compact_transport(
+                        &mut record,
+                        "relinearization-key-share",
+                        "roundTwoProofRoot",
+                        "RelinearizationKeyShareProofRoot",
+                    );
+                terminal_transport
+                    .as_deref_mut()
+                    .expect("terminal transport sinks")
+                    .proof_materials
+                    .push(proof_material);
+            } else {
+                let mut proof_root_input = record.clone();
+                proof_root_input
+                    .as_object_mut()
+                    .expect("round-two proof root input")
+                    .remove("roundTwoProofRoot");
+                let round_two_proof_root =
+                    derive_protocol_hash("RelinearizationKeyShareProofRoot", &proof_root_input)
+                        .expect("round-two proof root");
+                record["roundTwoProofRoot"] = serde_json::json!(round_two_proof_root);
+            }
             record["roundTwoRecordRoot"] = serde_json::json!(
                 derive_protocol_hash("RelinearizationRoundTwoRecordRoot", &record)
                     .expect("round-two record root")
@@ -8040,6 +8137,21 @@ fn galois_key_share_batches_object(
     package: &serde_json::Value,
     generate_embedded_proofs: bool,
 ) -> serde_json::Value {
+    galois_key_share_batches_object_inner(package, generate_embedded_proofs, None)
+}
+
+fn galois_key_share_batches_object_with_terminal_transport(
+    package: &serde_json::Value,
+    terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
+) -> serde_json::Value {
+    galois_key_share_batches_object_inner(package, false, Some(terminal_transport))
+}
+
+fn galois_key_share_batches_object_inner(
+    package: &serde_json::Value,
+    generate_embedded_proofs: bool,
+    mut terminal_transport: Option<&mut TerminalEvaluationKeyTransportSinks>,
+) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let setup_proof_binding = setup_proof_binding_for_test_package(package);
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -8142,7 +8254,45 @@ fn galois_key_share_batches_object(
                         "keySwitchComponentVectors": fixture_material.component_vector_entries,
                         "galoisKeyShareTboxParameterProfileHash": galois_tbox_parameter_profile_hash.clone(),
                     });
-                    if generate_embedded_proofs {
+                    let uses_terminal_transport = terminal_transport.is_some();
+                    if let Some(sinks) = terminal_transport.as_deref_mut() {
+                        let transported_component_material_set =
+                            move_evaluation_key_share_component_vectors_to_compact_transport(
+                                &mut galois_proof,
+                                EvaluationKeyShareProofFamily::Galois,
+                                &fixture_material,
+                            );
+                        sinks.component_materials.extend(
+                            transported_component_material_set["componentMaterials"]
+                                .as_array()
+                                .expect("component materials")
+                                .iter()
+                                .cloned(),
+                        );
+                        populate_evaluation_key_share_lnp_proof_fields(
+                            &mut galois_proof,
+                            EvaluationKeyShareProofFamily::Galois,
+                            public_matrix_seed_hash,
+                            statement_record,
+                            &constant_commitments,
+                            &setup_proof_binding,
+                            &fixture_material,
+                            trustee_roster_position,
+                            Some(&transported_component_material_set),
+                            "GaloisKeyShareProofRandomness",
+                        );
+                        let proof_material =
+                            move_evaluation_key_share_lnp_proof_record_bytes_to_compact_transport(
+                                &mut galois_proof,
+                                "galois-key-share",
+                                "galoisKeyShareProofRoot",
+                                "GaloisKeyShareProofRoot",
+                            );
+                        sinks.proof_materials.push(proof_material);
+                        println!(
+                            "terminal-accepted-setup-phase generated galois proof level {level} rotation {rotation} trustee {trustee_roster_position}"
+                        );
+                    } else if generate_embedded_proofs {
                         populate_evaluation_key_share_lnp_proof_fields(
                             &mut galois_proof,
                             EvaluationKeyShareProofFamily::Galois,
@@ -8159,16 +8309,18 @@ fn galois_key_share_batches_object(
                             "terminal-accepted-setup-phase generated galois proof level {level} rotation {rotation} trustee {trustee_roster_position}"
                         );
                     }
-                    let mut proof_root_input = galois_proof.clone();
-                    proof_root_input
-                        .as_object_mut()
-                        .expect("Galois proof root input")
-                        .remove("galoisKeyShareProofRoot");
-                    let galois_proof_root =
-                        derive_protocol_hash("GaloisKeyShareProofRoot", &proof_root_input)
-                            .expect("Galois proof root");
-                    galois_proof["galoisKeyShareProofRoot"] =
-                        serde_json::json!(galois_proof_root);
+                    if !uses_terminal_transport {
+                        let mut proof_root_input = galois_proof.clone();
+                        proof_root_input
+                            .as_object_mut()
+                            .expect("Galois proof root input")
+                            .remove("galoisKeyShareProofRoot");
+                        let galois_proof_root =
+                            derive_protocol_hash("GaloisKeyShareProofRoot", &proof_root_input)
+                                .expect("Galois proof root");
+                        galois_proof["galoisKeyShareProofRoot"] =
+                            serde_json::json!(galois_proof_root);
+                    }
                     galois_key_share_proofs.push(galois_proof);
                     serde_json::json!({
                         "rotation": schedule_entry["rotation"],
@@ -8542,6 +8694,12 @@ struct TransportedPublicSetupCompanions {
     public_evaluation_key_material: serde_json::Value,
 }
 
+#[derive(Default)]
+struct TerminalEvaluationKeyTransportSinks {
+    component_materials: Vec<serde_json::Value>,
+    proof_materials: Vec<serde_json::Value>,
+}
+
 struct TransportedMaterialCertificateFields {
     byte_length: &'static str,
     full_object_hash: &'static str,
@@ -8630,12 +8788,27 @@ fn setup_package_with_transported_public_setup_companions()
         "public-key-share-material",
     );
 
+    let mut evaluation_key_transport_sinks = TerminalEvaluationKeyTransportSinks::default();
     package["relinearizationKeyShareRounds"] =
-        relinearization_key_share_rounds_object(&package, false);
-    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package, false);
+        relinearization_key_share_rounds_object_with_terminal_transport(
+            &package,
+            &mut evaluation_key_transport_sinks,
+        );
+    package["galoisKeyShareBatches"] = galois_key_share_batches_object_with_terminal_transport(
+        &package,
+        &mut evaluation_key_transport_sinks,
+    );
     println!("terminal-accepted-setup-phase generated evaluation-key records");
-    let evaluation_key_share_component_material =
-        move_all_evaluation_key_share_component_vectors_to_transport(&mut package);
+    package["evaluationKeys"] = public_evaluation_key_set_object(&package);
+    rebind_setup_key_correctness_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+    let evaluation_key_share_component_material = serde_json::json!({
+        "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "componentMaterials": evaluation_key_transport_sinks.component_materials,
+    });
     append_transport_certificate_entries_from_material_set(
         &mut package,
         &evaluation_key_share_component_material,
@@ -8646,8 +8819,14 @@ fn setup_package_with_transported_public_setup_companions()
         DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
     );
 
-    let evaluation_key_share_proof_material =
-        move_all_evaluation_key_share_lnp_proof_bytes_to_transport(&mut package);
+    let evaluation_key_share_proof_material = serde_json::json!({
+        "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "proofFamily": "evaluation-key-share",
+        "proofMaterials": evaluation_key_transport_sinks.proof_materials,
+    });
     append_transport_certificate_entries_from_material_set(
         &mut package,
         &evaluation_key_share_proof_material,
@@ -8956,640 +9135,37 @@ fn move_first_galois_key_share_component_vectors_to_transport(
     transported_component_material_set
 }
 
-fn move_all_evaluation_key_share_component_vectors_to_transport(
-    package: &mut serde_json::Value,
-) -> serde_json::Value {
-    let mut component_materials = Vec::new();
-    component_materials.extend(
-        move_relinearization_key_share_component_vectors_to_transport(
-            package,
-            "roundOneRecords",
-            "RelinearizationRoundOneProofRandomness",
-        ),
-    );
-    rebind_relinearization_records_and_aggregate_roots(package);
-    component_materials.extend(
-        move_relinearization_key_share_component_vectors_to_transport(
-            package,
-            "roundTwoRecords",
-            "RelinearizationRoundTwoProofRandomness",
-        ),
-    );
-    rebind_relinearization_records_and_aggregate_roots(package);
-    component_materials.extend(move_galois_key_share_component_vectors_to_transport(
-        package,
-    ));
-    package["evaluationKeys"] = public_evaluation_key_set_object(package);
-    rebind_setup_key_correctness_certificate(package);
-    rebind_collective_setup_package_hash(package);
-
-    serde_json::json!({
-        "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "componentMaterials": component_materials,
-    })
-}
-
-fn move_relinearization_key_share_component_vectors_to_transport(
-    package: &mut serde_json::Value,
-    records_field_name: &'static str,
-    proof_randomness_label: &'static str,
-) -> Vec<serde_json::Value> {
-    let record_count = package["relinearizationKeyShareRounds"][records_field_name]
-        .as_array()
-        .expect("relinearization records")
-        .len();
-    let mut component_materials = Vec::new();
-    for record_index in 0..record_count {
-        let proof_record_snapshot =
-            package["relinearizationKeyShareRounds"][records_field_name][record_index].clone();
-        let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
-            .as_u64()
-            .expect("trustee roster position");
-        let statement_record = package["sameSecretConsistency"]["statementRecords"]
-            [trustee_roster_position as usize]
-            .clone();
-        let constant_commitments =
-            same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
-        let setup_proof_binding = setup_proof_binding_for_test_package(package);
-        let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
-            .as_str()
-            .expect("public matrix seed hash")
-            .to_string();
-        let fixture_material = evaluation_key_share_fixture_material_from_embedded_record(
-            EvaluationKeyShareProofFamily::Relinearization,
-            &proof_record_snapshot,
-        );
-        let transported_component_material_set = {
-            let proof_record =
-                &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
-            move_evaluation_key_share_component_vectors_to_transport(
-                proof_record,
-                EvaluationKeyShareProofFamily::Relinearization,
-                &fixture_material,
-            )
-        };
-        {
-            let proof_record =
-                &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
-            populate_evaluation_key_share_lnp_proof_fields(
-                proof_record,
-                EvaluationKeyShareProofFamily::Relinearization,
-                &public_matrix_seed_hash,
-                &statement_record,
-                &constant_commitments,
-                &setup_proof_binding,
-                &fixture_material,
-                trustee_roster_position,
-                Some(&transported_component_material_set),
-                proof_randomness_label,
-            );
-        }
-        component_materials.extend(
-            transported_component_material_set["componentMaterials"]
-                .as_array()
-                .expect("component materials")
-                .iter()
-                .cloned(),
-        );
-    }
-
-    component_materials
-}
-
-fn move_galois_key_share_component_vectors_to_transport(
-    package: &mut serde_json::Value,
-) -> Vec<serde_json::Value> {
-    let batch_count = package["galoisKeyShareBatches"]
-        .as_array()
-        .expect("Galois key-share batches")
-        .len();
-    let mut component_materials = Vec::new();
-    for batch_index in 0..batch_count {
-        let proof_count = package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
-            .as_array()
-            .expect("Galois key-share proofs")
-            .len();
-        for proof_index in 0..proof_count {
-            let proof_record_snapshot =
-                package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"][proof_index]
-                    .clone();
-            let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
-                .as_u64()
-                .expect("trustee roster position");
-            let statement_record = package["sameSecretConsistency"]["statementRecords"]
-                [trustee_roster_position as usize]
-                .clone();
-            let constant_commitments = same_secret_constant_commitments_from_fixture_package(
-                package,
-                trustee_roster_position,
-            );
-            let setup_proof_binding = setup_proof_binding_for_test_package(package);
-            let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
-                .as_str()
-                .expect("public matrix seed hash")
-                .to_string();
-            let fixture_material = evaluation_key_share_fixture_material_from_embedded_record(
-                EvaluationKeyShareProofFamily::Galois,
-                &proof_record_snapshot,
-            );
-            let transported_component_material_set = {
-                let proof_record = &mut package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
-                    [proof_index];
-                move_evaluation_key_share_component_vectors_to_transport(
-                    proof_record,
-                    EvaluationKeyShareProofFamily::Galois,
-                    &fixture_material,
-                )
-            };
-            {
-                let proof_record = &mut package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
-                    [proof_index];
-                populate_evaluation_key_share_lnp_proof_fields(
-                    proof_record,
-                    EvaluationKeyShareProofFamily::Galois,
-                    &public_matrix_seed_hash,
-                    &statement_record,
-                    &constant_commitments,
-                    &setup_proof_binding,
-                    &fixture_material,
-                    trustee_roster_position,
-                    Some(&transported_component_material_set),
-                    "GaloisKeyShareProofRandomness",
-                );
-                proof_record
-                    .as_object_mut()
-                    .expect("Galois proof record")
-                    .remove("galoisKeyShareProofRoot");
-                proof_record["galoisKeyShareProofRoot"] = serde_json::json!(
-                    derive_protocol_hash("GaloisKeyShareProofRoot", proof_record)
-                        .expect("Galois proof root")
-                );
-            }
-            component_materials.extend(
-                transported_component_material_set["componentMaterials"]
-                    .as_array()
-                    .expect("component materials")
-                    .iter()
-                    .cloned(),
-            );
-        }
-        rebind_galois_key_batch_proof_root(package, batch_index);
-        rebind_galois_key_share_batch_root(package, batch_index);
-    }
-
-    component_materials
-}
-
-fn move_all_evaluation_key_share_lnp_proof_bytes_to_transport(
-    package: &mut serde_json::Value,
-) -> serde_json::Value {
-    let mut proof_materials = Vec::new();
-    proof_materials.extend(move_relinearization_key_share_lnp_proof_bytes_to_transport(
-        package,
-        "roundOneRecords",
-        "roundOneProofRoot",
-    ));
-    rebind_relinearization_records_and_aggregate_roots(package);
-    proof_materials.extend(move_relinearization_key_share_lnp_proof_bytes_to_transport(
-        package,
-        "roundTwoRecords",
-        "roundTwoProofRoot",
-    ));
-    rebind_relinearization_records_and_aggregate_roots(package);
-    proof_materials.extend(move_galois_key_share_lnp_proof_bytes_to_transport(package));
-    package["evaluationKeys"] = public_evaluation_key_set_object(package);
-    rebind_setup_key_correctness_certificate(package);
-    rebind_collective_setup_package_hash(package);
-
-    serde_json::json!({
-        "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
-        "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": "evaluation-key-share",
-        "proofMaterials": proof_materials,
-    })
-}
-
-fn move_relinearization_key_share_lnp_proof_bytes_to_transport(
-    package: &mut serde_json::Value,
-    records_field_name: &'static str,
-    proof_root_field_name: &'static str,
-) -> Vec<serde_json::Value> {
-    let record_count = package["relinearizationKeyShareRounds"][records_field_name]
-        .as_array()
-        .expect("relinearization records")
-        .len();
-    let mut proof_materials = Vec::new();
-    for record_index in 0..record_count {
-        let proof_material = {
-            let proof_record =
-                &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
-            move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
-                proof_record,
-                "relinearization-key-share",
-                proof_root_field_name,
-                "RelinearizationKeyShareProofRoot",
-            )
-        };
-        proof_materials.push(proof_material);
-    }
-
-    proof_materials
-}
-
-fn move_galois_key_share_lnp_proof_bytes_to_transport(
-    package: &mut serde_json::Value,
-) -> Vec<serde_json::Value> {
-    let batch_count = package["galoisKeyShareBatches"]
-        .as_array()
-        .expect("Galois key-share batches")
-        .len();
-    let mut proof_materials = Vec::new();
-    for batch_index in 0..batch_count {
-        let proof_count = package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
-            .as_array()
-            .expect("Galois key-share proofs")
-            .len();
-        for proof_index in 0..proof_count {
-            let proof_material = {
-                let proof_record = &mut package["galoisKeyShareBatches"][batch_index]["galoisKeyShareProofs"]
-                    [proof_index];
-                move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
-                    proof_record,
-                    "galois-key-share",
-                    "galoisKeyShareProofRoot",
-                    "GaloisKeyShareProofRoot",
-                )
-            };
-            proof_materials.push(proof_material);
-        }
-        rebind_galois_key_batch_proof_root(package, batch_index);
-        rebind_galois_key_share_batch_root(package, batch_index);
-    }
-
-    proof_materials
-}
-
-fn evaluation_key_share_fixture_material_from_embedded_record(
-    proof_family: EvaluationKeyShareProofFamily,
-    proof_record: &serde_json::Value,
-) -> EvaluationKeyShareFixtureMaterial {
-    let trustee_roster_position = proof_record["trusteeRosterPosition"]
-        .as_u64()
-        .expect("trustee roster position");
-    let level = proof_record["level"].as_u64().expect("level");
-    let level_usize = usize::try_from(level).expect("level fits usize");
-    let rotation = proof_record
-        .get("rotation")
-        .and_then(serde_json::Value::as_u64);
-    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
-    let key_switch_domain = proof_record["keySwitchDomain"]
-        .as_str()
-        .expect("key-switch domain");
-    let key_switch_seed_hex = proof_record["keySwitchSeedHex"]
-        .as_str()
-        .expect("key-switch seed");
-    let component_b_by_digit =
-        key_switch_component_b_by_digit_from_record(proof_record, level_usize, ring_degree)
-            .expect("embedded component vectors");
-    let component_vector_entries = proof_record["keySwitchComponentVectors"]
-        .as_array()
-        .expect("embedded component vector entries")
-        .clone();
-    let component_vector_root = proof_record["keySwitchComponentVectorRoot"]
-        .as_str()
-        .expect("component vector root")
-        .to_string();
-    assert_eq!(
-        evaluation_key_share_component_vector_root(
-            proof_family,
-            key_switch_domain,
-            key_switch_seed_hex,
-            level_usize,
-            ring_degree,
-            &component_vector_entries,
-        )
-        .expect("embedded component vector root"),
-        component_vector_root,
-        "embedded component vector root must match the record"
-    );
-    let secret_i128 =
-        evaluation_key_secret_coefficients_i128_for_fixture(trustee_roster_position, ring_degree);
-    let base_source = match proof_family {
-        EvaluationKeyShareProofFamily::Relinearization => match proof_record["objectType"].as_str()
-        {
-            Some("RelinearizationKeyShareRoundOne") => {
-                relinearization_round_one_source_coefficients_for_fixture(
-                    trustee_roster_position,
-                    ring_degree,
-                )
-            }
-            Some("RelinearizationKeyShareRoundTwo") => {
-                relinearization_round_two_source_coefficients_for_fixture(
-                    trustee_roster_position,
-                    ring_degree,
-                )
-            }
-            _ => panic!("unsupported relinearization proof record object type"),
-        },
-        EvaluationKeyShareProofFamily::Galois => automorphism_i128_for_evaluation_key_fixture(
-            &secret_i128,
-            usize::try_from(rotation.expect("Galois rotation")).expect("rotation fits usize"),
-        )
-        .expect("Galois source"),
-    };
-    let mut error_coefficients_by_digit = Vec::new();
-    let mut relinearization_source_coefficients_by_digit = Vec::new();
-    for digit_index in 0..=level_usize {
-        error_coefficients_by_digit.push(evaluation_key_error_coefficients_for_fixture(
-            proof_family,
-            trustee_roster_position,
-            level_usize,
-            rotation,
-            digit_index,
-            ring_degree,
-        ));
-        if proof_family == EvaluationKeyShareProofFamily::Relinearization {
-            relinearization_source_coefficients_by_digit.push(base_source.clone());
-        }
-    }
-
-    EvaluationKeyShareFixtureMaterial {
-        component_b_by_digit,
-        component_vector_entries,
-        component_vector_root,
-        error_coefficients_by_digit,
-        relinearization_source_coefficients_by_digit,
-    }
-}
-
-fn rebind_relinearization_records_and_aggregate_roots(package: &mut serde_json::Value) {
-    let round_one_count = package["relinearizationKeyShareRounds"]["roundOneRecords"]
-        .as_array()
-        .expect("round-one records")
-        .len();
-    for record_index in 0..round_one_count {
-        rebind_relinearization_record_roots(
-            package,
-            "roundOneRecords",
-            record_index,
-            "round-one",
-            "roundOneProofRoot",
-            "roundOneRecordRoot",
-            "RelinearizationRoundOneRecordRoot",
-            "roundOneShareRoot",
-        );
-    }
-
-    let level_schedule = package["evaluatorKeySchedule"]["relinearizationLevelSchedule"]
-        .as_array()
-        .expect("relinearization level schedule")
-        .clone();
-    let (
-        round_one_aggregate_roots,
-        round_one_aggregate_root_by_level,
-        round_one_source_square_aggregate_root_by_level,
-    ) = relinearization_round_one_aggregate_roots_from_records(package, &level_schedule);
-    package["relinearizationKeyShareRounds"]["roundOneAggregateRoots"] =
-        serde_json::json!(round_one_aggregate_roots);
-
-    let round_two_count = package["relinearizationKeyShareRounds"]["roundTwoRecords"]
-        .as_array()
-        .expect("round-two records")
-        .len();
-    for record_index in 0..round_two_count {
-        let level =
-            package["relinearizationKeyShareRounds"]["roundTwoRecords"][record_index]["level"]
-                .as_u64()
-                .expect("round-two level");
-        package["relinearizationKeyShareRounds"]["roundTwoRecords"][record_index]["roundOneAggregateRoot"] = serde_json::json!(
-            round_one_aggregate_root_by_level
-                .get(&level)
-                .expect("round-one aggregate root by level")
-        );
-        package["relinearizationKeyShareRounds"]["roundTwoRecords"][record_index]["roundOneSourceSquareAggregateRoot"] = serde_json::json!(
-            round_one_source_square_aggregate_root_by_level
-                .get(&level)
-                .expect("round-one source-square aggregate root by level")
-        );
-        rebind_relinearization_record_roots(
-            package,
-            "roundTwoRecords",
-            record_index,
-            "round-two",
-            "roundTwoProofRoot",
-            "roundTwoRecordRoot",
-            "RelinearizationRoundTwoRecordRoot",
-            "roundTwoShareRoot",
-        );
-    }
-
-    package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"] =
-        serde_json::json!(relinearization_round_two_aggregate_roots_from_records(
-            package,
-            &level_schedule,
-            &round_one_aggregate_root_by_level,
-            &round_one_source_square_aggregate_root_by_level,
-        ));
-    rebind_relinearization_key_share_rounds_root(package);
-}
-
-#[allow(clippy::too_many_arguments)]
-fn rebind_relinearization_record_roots(
-    package: &mut serde_json::Value,
-    records_field_name: &'static str,
-    record_index: usize,
-    round: &'static str,
-    proof_root_field_name: &'static str,
-    record_root_field_name: &'static str,
-    record_root_namespace: &'static str,
-    share_root_field_name: &'static str,
-) {
-    let source_square_binding_root = {
-        let record = &package["relinearizationKeyShareRounds"][records_field_name][record_index];
-        relinearization_source_square_binding_root_for_test(
-            record,
-            round,
-            record[share_root_field_name]
-                .as_str()
-                .expect("relinearization share root"),
-        )
-    };
-    let record = &mut package["relinearizationKeyShareRounds"][records_field_name][record_index];
-    record["sourceSquareBindingRoot"] = serde_json::json!(source_square_binding_root);
-    let mut proof_root_input = record.clone();
-    {
-        let proof_root_input_object = proof_root_input
-            .as_object_mut()
-            .expect("relinearization proof root input");
-        proof_root_input_object.remove(proof_root_field_name);
-        proof_root_input_object.remove(record_root_field_name);
-    }
-    record[proof_root_field_name] = serde_json::json!(
-        derive_protocol_hash("RelinearizationKeyShareProofRoot", &proof_root_input)
-            .expect("relinearization proof root")
-    );
-    record
-        .as_object_mut()
-        .expect("relinearization record")
-        .remove(record_root_field_name);
-    record[record_root_field_name] = serde_json::json!(
-        derive_protocol_hash(record_root_namespace, record).expect("relinearization record root")
-    );
-}
-
-fn relinearization_round_one_aggregate_roots_from_records(
-    package: &serde_json::Value,
-    level_schedule: &[serde_json::Value],
-) -> (
-    Vec<serde_json::Value>,
-    BTreeMap<u64, String>,
-    BTreeMap<u64, String>,
-) {
-    let mut aggregate_roots = Vec::new();
-    let mut aggregate_root_by_level = BTreeMap::new();
-    let mut source_square_aggregate_root_by_level = BTreeMap::new();
-    for level_entry in level_schedule {
-        let level = level_entry["level"].as_u64().expect("level");
-        let source_square_binding_roots = relinearization_record_roots_for_level(
-            package,
-            "roundOneRecords",
-            level,
-            "sourceSquareBindingRoot",
-        );
-        let source_square_aggregate_root = relinearization_source_square_aggregate_root_for_test(
-            "round-one",
-            &package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
-            level,
-            &source_square_binding_roots,
-            None,
-        );
-        let round_one_record_roots = relinearization_record_roots_for_level(
-            package,
-            "roundOneRecords",
-            level,
-            "roundOneRecordRoot",
-        );
-        let aggregate_root = derive_protocol_hash(
-            "RelinearizationRoundOneAggregateRoot",
-            &serde_json::json!({
-                "objectType": "RelinearizationRoundOneAggregate",
-                "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-                "evaluatorKeyScheduleRoot": package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
-                "level": level,
-                "roundOneSourceSquareAggregateRoot": source_square_aggregate_root,
-                "roundOneRecordRoots": round_one_record_roots,
-            }),
-        )
-        .expect("round-one aggregate root");
-        aggregate_roots.push(serde_json::json!({
-            "level": level,
-            "roundOneAggregateRoot": aggregate_root,
-            "roundOneSourceSquareAggregateRoot": source_square_aggregate_root,
-        }));
-        aggregate_root_by_level.insert(level, aggregate_root);
-        source_square_aggregate_root_by_level.insert(level, source_square_aggregate_root);
-    }
-
-    (
-        aggregate_roots,
-        aggregate_root_by_level,
-        source_square_aggregate_root_by_level,
-    )
-}
-
-fn relinearization_round_two_aggregate_roots_from_records(
-    package: &serde_json::Value,
-    level_schedule: &[serde_json::Value],
-    round_one_aggregate_root_by_level: &BTreeMap<u64, String>,
-    round_one_source_square_aggregate_root_by_level: &BTreeMap<u64, String>,
-) -> Vec<serde_json::Value> {
-    level_schedule
-        .iter()
-        .map(|level_entry| {
-            let level = level_entry["level"].as_u64().expect("level");
-            let round_one_source_square_aggregate_root =
-                round_one_source_square_aggregate_root_by_level
-                    .get(&level)
-                    .expect("round-one source-square aggregate root");
-            let source_square_binding_roots = relinearization_record_roots_for_level(
-                package,
-                "roundTwoRecords",
-                level,
-                "sourceSquareBindingRoot",
-            );
-            let round_two_source_square_aggregate_root =
-                relinearization_source_square_aggregate_root_for_test(
-                    "round-two",
-                    &package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
-                    level,
-                    &source_square_binding_roots,
-                    Some(round_one_source_square_aggregate_root),
-                );
-            let round_two_record_roots = relinearization_record_roots_for_level(
-                package,
-                "roundTwoRecords",
-                level,
-                "roundTwoRecordRoot",
-            );
-            let aggregate_root = derive_protocol_hash(
-                "RelinearizationRoundTwoAggregateRoot",
-                &serde_json::json!({
-                    "objectType": "RelinearizationRoundTwoAggregate",
-                    "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-                    "evaluatorKeyScheduleRoot": package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
-                    "level": level,
-                    "roundOneAggregateRoot": round_one_aggregate_root_by_level
-                        .get(&level)
-                        .expect("round-one aggregate root"),
-                    "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
-                    "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
-                    "roundTwoRecordRoots": round_two_record_roots,
-                }),
-            )
-            .expect("round-two aggregate root");
-            serde_json::json!({
-                "level": level,
-                "roundTwoAggregateRoot": aggregate_root,
-                "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
-            })
-        })
-        .collect()
-}
-
-fn relinearization_record_roots_for_level(
-    package: &serde_json::Value,
-    records_field_name: &'static str,
-    level: u64,
-    root_field_name: &'static str,
-) -> Vec<serde_json::Value> {
-    package["relinearizationKeyShareRounds"][records_field_name]
-        .as_array()
-        .expect("relinearization records")
-        .iter()
-        .filter(|record| record["level"].as_u64() == Some(level))
-        .map(|record| {
-            serde_json::json!({
-                "trusteeIdentity": record["trusteeIdentity"],
-                "trusteeRosterPosition": record["trusteeRosterPosition"],
-                root_field_name: record[root_field_name],
-            })
-        })
-        .collect()
-}
-
 fn move_evaluation_key_share_component_vectors_to_transport(
     proof_record: &mut serde_json::Value,
     proof_family: EvaluationKeyShareProofFamily,
     fixture_material: &EvaluationKeyShareFixtureMaterial,
+) -> serde_json::Value {
+    move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
+        proof_record,
+        proof_family,
+        fixture_material,
+        true,
+    )
+}
+
+fn move_evaluation_key_share_component_vectors_to_compact_transport(
+    proof_record: &mut serde_json::Value,
+    proof_family: EvaluationKeyShareProofFamily,
+    fixture_material: &EvaluationKeyShareFixtureMaterial,
+) -> serde_json::Value {
+    move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
+        proof_record,
+        proof_family,
+        fixture_material,
+        false,
+    )
+}
+
+fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
+    proof_record: &mut serde_json::Value,
+    proof_family: EvaluationKeyShareProofFamily,
+    fixture_material: &EvaluationKeyShareFixtureMaterial,
+    include_chunks: bool,
 ) -> serde_json::Value {
     let level = proof_record["level"].as_u64().expect("level") as usize;
     let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
@@ -9632,7 +9208,7 @@ fn move_evaluation_key_share_component_vectors_to_transport(
         &transport_hashes,
     )
     .expect("evaluation-key component material root");
-    proof_record["keySwitchComponentMaterialRoot"] = serde_json::json!(material_root);
+    proof_record["keySwitchComponentMaterialRoot"] = serde_json::json!(material_root.clone());
     proof_record["keySwitchComponentChunkSizeBytes"] =
         serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
     proof_record["keySwitchComponentChunkCount"] =
@@ -9645,12 +9221,7 @@ fn move_evaluation_key_share_component_vectors_to_transport(
     proof_record["keySwitchComponentChunkHashes"] =
         serde_json::json!(transport_hashes.chunk_hashes.clone());
 
-    serde_json::json!({
-        "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "componentMaterials": [{
+    let mut component_material = serde_json::json!({
             "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE,
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
@@ -9673,7 +9244,10 @@ fn move_evaluation_key_share_component_vectors_to_transport(
             "fullObjectHash": proof_record["keySwitchComponentFullObjectHash"],
             "chunkRoot": proof_record["keySwitchComponentChunkRoot"],
             "chunkHashes": proof_record["keySwitchComponentChunkHashes"],
-            "chunks": chunks
+    });
+    if include_chunks {
+        component_material["chunks"] = serde_json::Value::Array(
+            chunks
                 .into_iter()
                 .enumerate()
                 .map(|(chunk_index, chunk)| serde_json::json!({
@@ -9681,7 +9255,21 @@ fn move_evaluation_key_share_component_vectors_to_transport(
                     "bytesHex": to_hex(&chunk),
                 }))
                 .collect::<Vec<_>>(),
-        }],
+        );
+    } else {
+        register_verified_evaluation_key_share_component_material_chunks(
+            &material_root,
+            chunks,
+        )
+        .expect("verified evaluation-key component material chunks");
+    }
+
+    serde_json::json!({
+        "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "componentMaterials": [component_material],
     })
 }
 
@@ -9807,6 +9395,37 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
     proof_root_field_name: &str,
     proof_root_namespace: &str,
 ) -> serde_json::Value {
+    move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_policy(
+        proof_record,
+        proof_family,
+        proof_root_field_name,
+        proof_root_namespace,
+        true,
+    )
+}
+
+fn move_evaluation_key_share_lnp_proof_record_bytes_to_compact_transport(
+    proof_record: &mut serde_json::Value,
+    proof_family: &str,
+    proof_root_field_name: &str,
+    proof_root_namespace: &str,
+) -> serde_json::Value {
+    move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_policy(
+        proof_record,
+        proof_family,
+        proof_root_field_name,
+        proof_root_namespace,
+        false,
+    )
+}
+
+fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_policy(
+    proof_record: &mut serde_json::Value,
+    proof_family: &str,
+    proof_root_field_name: &str,
+    proof_root_namespace: &str,
+    include_chunks: bool,
+) -> serde_json::Value {
     let proof_bytes_hex = proof_record["proofBytesHex"]
         .as_str()
         .expect("embedded evaluation-key proof bytes")
@@ -9867,7 +9486,7 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
         proof_record_object.remove(proof_root_field_name);
     }
     proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
-    proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
+    proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
     proof_record["proofChunkSizeBytes"] = serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
     proof_record["proofChunkCount"] = serde_json::json!(transport_hashes.chunk_hashes.len());
     proof_record["proofTotalByteLength"] = serde_json::json!(transport_hashes.total_byte_length);
@@ -9879,7 +9498,7 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
             .expect("transported evaluation-key proof root")
     );
 
-    serde_json::json!({
+    let mut proof_material = serde_json::json!({
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
@@ -9893,7 +9512,10 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
         "proofFullObjectHash": proof_record["proofFullObjectHash"],
         "proofChunkRoot": proof_record["proofChunkRoot"],
         "proofChunkHashes": proof_record["proofChunkHashes"],
-        "chunks": chunks
+    });
+    if include_chunks {
+        proof_material["chunks"] = serde_json::Value::Array(
+            chunks
             .into_iter()
             .enumerate()
             .map(|(chunk_index, chunk)| serde_json::json!({
@@ -9901,7 +9523,13 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
                 "bytesHex": to_hex(&chunk),
             }))
             .collect::<Vec<_>>(),
-    })
+        );
+    } else {
+        register_verified_evaluation_key_share_proof_material_chunks(&proof_material_root, chunks)
+            .expect("verified evaluation-key proof material chunks");
+    }
+
+    proof_material
 }
 
 fn collective_public_key_object(package: &serde_json::Value) -> serde_json::Value {

@@ -925,6 +925,21 @@ pub(crate) struct SetupProofLnpTboxDecodedSummary {
     pub(crate) z34_z4_check_window_hash: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SetupProofLnpTboxGeneratedSuffixSummary {
+    pub(crate) z34_seed_material_hash: String,
+    pub(crate) z34_challenge_seed_hash: String,
+    pub(crate) z34_challenge_tail_hash: String,
+    pub(crate) z34_challenge_row_domain_hash: String,
+    pub(crate) z34_challenge_z3_row_set_hash: String,
+    pub(crate) z34_challenge_z4_row_set_hash: String,
+    pub(crate) tbox_lower_protocol_challenge_hash: String,
+    pub(crate) z34_z3_check_window_hash: String,
+    pub(crate) z34_z4_check_window_hash: String,
+    pub(crate) z3_l2_squared: BigUint,
+    pub(crate) z4_infinity_norm: BigUint,
+}
+
 pub(crate) struct SetupProofLnpTboxChallengeMaterial {
     pub(crate) challenge_coefficients: Vec<i64>,
     pub(crate) lower_protocol_challenge_hash: String,
@@ -1651,6 +1666,25 @@ pub(crate) fn derive_setup_proof_lnp_tbox_challenge_from_prefix(
     relation_commitment_hash_hex: &str,
     prefix_bytes: &[u8],
 ) -> CanonicalResult<SetupProofLnpTboxChallengeMaterial> {
+    let (_, challenge_material) = setup_proof_lnp_tbox_z34_seed_and_challenge_from_prefix(
+        layout,
+        statement_hash_hex,
+        relation_commitment_hash_hex,
+        prefix_bytes,
+    )?;
+
+    Ok(challenge_material)
+}
+
+fn setup_proof_lnp_tbox_z34_seed_and_challenge_from_prefix(
+    layout: &SetupProofLnpTboxLayout,
+    statement_hash_hex: &str,
+    relation_commitment_hash_hex: &str,
+    prefix_bytes: &[u8],
+) -> CanonicalResult<(
+    SetupProofLnpTboxZ34SeedMaterial,
+    SetupProofLnpTboxChallengeMaterial,
+)> {
     validate_lnp_tbox_layout(layout)?;
     validate_hash_string(
         statement_hash_hex,
@@ -1699,12 +1733,14 @@ pub(crate) fn derive_setup_proof_lnp_tbox_challenge_from_prefix(
     )?;
     reader.finish_exact_end("setup proof LNP tbox prefix")?;
 
-    setup_proof_lnp_tbox_challenge_material(
+    let challenge_material = setup_proof_lnp_tbox_challenge_material(
         layout,
         statement_hash_hex,
         relation_commitment_hash_hex,
         &z34_seed_material,
-    )
+    )?;
+
+    Ok((z34_seed_material, challenge_material))
 }
 
 fn setup_proof_lnp_tbox_challenge_material(
@@ -2537,15 +2573,37 @@ pub(super) fn append_setup_proof_lnp_tbox_generated_suffix(
     statement_hash_hex: &str,
     relation_commitment_hash_hex: &str,
 ) -> CanonicalResult<()> {
-    let suffix_bytes = setup_proof_lnp_tbox_generated_suffix_bytes(
+    let generated_suffix = setup_proof_lnp_tbox_generated_suffix(
         layout,
         statement_hash_hex,
         relation_commitment_hash_hex,
         proof_bytes,
     )?;
-    proof_bytes.extend_from_slice(&suffix_bytes);
+    proof_bytes.extend_from_slice(&generated_suffix.bytes);
 
     Ok(())
+}
+
+pub(super) fn append_setup_proof_lnp_tbox_generated_suffix_with_summary(
+    proof_bytes: &mut Vec<u8>,
+    layout: &SetupProofLnpTboxLayout,
+    statement_hash_hex: &str,
+    relation_commitment_hash_hex: &str,
+) -> CanonicalResult<SetupProofLnpTboxGeneratedSuffixSummary> {
+    let generated_suffix = setup_proof_lnp_tbox_generated_suffix(
+        layout,
+        statement_hash_hex,
+        relation_commitment_hash_hex,
+        proof_bytes,
+    )?;
+    proof_bytes.extend_from_slice(&generated_suffix.bytes);
+
+    Ok(generated_suffix.summary)
+}
+
+struct SetupProofLnpTboxGeneratedSuffix {
+    bytes: Vec<u8>,
+    summary: SetupProofLnpTboxGeneratedSuffixSummary,
 }
 
 fn setup_proof_lnp_tbox_generated_suffix_bytes(
@@ -2554,6 +2612,21 @@ fn setup_proof_lnp_tbox_generated_suffix_bytes(
     relation_commitment_hash_hex: &str,
     prefix_bytes: &[u8],
 ) -> CanonicalResult<Vec<u8>> {
+    Ok(setup_proof_lnp_tbox_generated_suffix(
+        layout,
+        statement_hash_hex,
+        relation_commitment_hash_hex,
+        prefix_bytes,
+    )?
+    .bytes)
+}
+
+fn setup_proof_lnp_tbox_generated_suffix(
+    layout: &SetupProofLnpTboxLayout,
+    statement_hash_hex: &str,
+    relation_commitment_hash_hex: &str,
+    prefix_bytes: &[u8],
+) -> CanonicalResult<SetupProofLnpTboxGeneratedSuffix> {
     let expected_prefix_byte_count = setup_proof_lnp_tbox_commitment_prefix_byte_count(layout)?;
     if prefix_bytes.len() != expected_prefix_byte_count {
         return Err(CanonicalError::new(
@@ -2561,12 +2634,13 @@ fn setup_proof_lnp_tbox_generated_suffix_bytes(
             "setup proof LNP tbox generated suffix requires exactly the commitment prefix bytes",
         ));
     }
-    let challenge_material = derive_setup_proof_lnp_tbox_challenge_from_prefix(
-        layout,
-        statement_hash_hex,
-        relation_commitment_hash_hex,
-        prefix_bytes,
-    )?;
+    let (z34_seed_material, challenge_material) =
+        setup_proof_lnp_tbox_z34_seed_and_challenge_from_prefix(
+            layout,
+            statement_hash_hex,
+            relation_commitment_hash_hex,
+            prefix_bytes,
+        )?;
     let suffix_seed = setup_proof_lnp_tbox_generated_suffix_seed(
         layout,
         statement_hash_hex,
@@ -2593,6 +2667,7 @@ fn setup_proof_lnp_tbox_generated_suffix_bytes(
         layout.proof_ring_degree,
         layout.z1_log2_standard_deviation,
         3,
+        0,
     )?;
     encode_lnp_tbox_generated_gaussian_polyvec(
         &mut writer,
@@ -2602,8 +2677,10 @@ fn setup_proof_lnp_tbox_generated_suffix_bytes(
         layout.proof_ring_degree,
         layout.z21_log2_standard_deviation,
         3,
+        0,
     )?;
-    encode_lnp_tbox_generated_gaussian_polyvec(
+    let z34_check_coefficient_count = setup_proof_lnp_tbox_z34_check_coefficient_count(layout)?;
+    let z3_check_coefficients = encode_lnp_tbox_generated_gaussian_polyvec(
         &mut writer,
         &suffix_seed,
         "z3",
@@ -2611,8 +2688,9 @@ fn setup_proof_lnp_tbox_generated_suffix_bytes(
         layout.proof_ring_degree,
         layout.z3_log2_standard_deviation,
         1,
+        z34_check_coefficient_count,
     )?;
-    encode_lnp_tbox_generated_gaussian_polyvec(
+    let z4_check_coefficients = encode_lnp_tbox_generated_gaussian_polyvec(
         &mut writer,
         &suffix_seed,
         "z4",
@@ -2620,10 +2698,33 @@ fn setup_proof_lnp_tbox_generated_suffix_bytes(
         layout.proof_ring_degree,
         layout.z4_log2_standard_deviation,
         1,
+        z34_check_coefficient_count,
     )?;
     writer.finish_with_lazer_padding();
+    let z3_l2_squared = gaussian_l2_squared(&z3_check_coefficients);
+    let z4_infinity_norm = gaussian_infinity_norm(&z4_check_coefficients);
+    verify_lnp_tbox_z34_norm_bounds(layout, &z3_l2_squared, &z4_infinity_norm)?;
+    let z34_z3_check_window_hash =
+        setup_proof_lnp_tbox_z34_check_window_hash(layout, "z3", &z3_check_coefficients)?;
+    let z34_z4_check_window_hash =
+        setup_proof_lnp_tbox_z34_check_window_hash(layout, "z4", &z4_check_coefficients)?;
 
-    Ok(writer.into_bytes())
+    Ok(SetupProofLnpTboxGeneratedSuffix {
+        bytes: writer.into_bytes(),
+        summary: SetupProofLnpTboxGeneratedSuffixSummary {
+            z34_seed_material_hash: z34_seed_material.seed_material_hash,
+            z34_challenge_seed_hash: z34_seed_material.challenge_seed_hash,
+            z34_challenge_tail_hash: z34_seed_material.challenge_tail_hash,
+            z34_challenge_row_domain_hash: z34_seed_material.challenge_row_domain_hash,
+            z34_challenge_z3_row_set_hash: z34_seed_material.challenge_z3_row_set_hash,
+            z34_challenge_z4_row_set_hash: z34_seed_material.challenge_z4_row_set_hash,
+            tbox_lower_protocol_challenge_hash: challenge_material.lower_protocol_challenge_hash,
+            z34_z3_check_window_hash,
+            z34_z4_check_window_hash,
+            z3_l2_squared,
+            z4_infinity_norm,
+        },
+    })
 }
 
 fn setup_proof_lnp_tbox_generated_suffix_seed(
@@ -2761,7 +2862,8 @@ fn encode_lnp_tbox_generated_gaussian_polyvec(
     proof_ring_degree: usize,
     log2_standard_deviation: usize,
     coefficient_bound: i128,
-) -> CanonicalResult<()> {
+    check_coefficient_count: usize,
+) -> CanonicalResult<Vec<LnpTboxGaussianCoefficient>> {
     let coefficient_count = polynomial_count
         .checked_mul(proof_ring_degree)
         .ok_or_else(|| {
@@ -2769,6 +2871,12 @@ fn encode_lnp_tbox_generated_gaussian_polyvec(
                 "setup proof LNP {field_name} coefficient count overflowed"
             ))
         })?;
+    if check_coefficient_count > coefficient_count {
+        return Err(setup_proof_error(format!(
+            "setup proof LNP {field_name} check coefficient count exceeds generated vector length"
+        )));
+    }
+    let mut check_coefficients = Vec::with_capacity(check_coefficient_count);
     for coefficient_index in 0..coefficient_count {
         let value = generated_lnp_tbox_small_signed_value(
             suffix_seed,
@@ -2780,10 +2888,14 @@ fn encode_lnp_tbox_generated_gaussian_polyvec(
                 _ => 1,
             }),
         )?;
-        encode_lnp_tbox_gaussian_coefficient(writer, value, log2_standard_deviation)?;
+        let coefficient =
+            encode_lnp_tbox_gaussian_coefficient(writer, value, log2_standard_deviation)?;
+        if coefficient_index < check_coefficient_count {
+            check_coefficients.push(coefficient);
+        }
     }
 
-    Ok(())
+    Ok(check_coefficients)
 }
 
 fn generated_lnp_tbox_small_signed_value(
@@ -2829,7 +2941,7 @@ fn encode_lnp_tbox_gaussian_coefficient(
     writer: &mut LnpBitWriter,
     value: i128,
     log2_standard_deviation: usize,
-) -> CanonicalResult<()> {
+) -> CanonicalResult<LnpTboxGaussianCoefficient> {
     let low_bit_count = log2_standard_deviation
         .checked_add(1)
         .ok_or_else(|| setup_proof_error("setup proof LNP Gaussian low-bit count overflowed"))?;
@@ -2885,7 +2997,12 @@ fn encode_lnp_tbox_gaussian_coefficient(
         .map_err(|_| setup_proof_error("setup proof LNP Gaussian low bits do not fit u64"))?;
     writer.write_u64_le_bits(low_bits, low_bit_count)?;
 
-    Ok(())
+    Ok(LnpTboxGaussianCoefficient {
+        unary_ones,
+        low_bits,
+        low_bit_count,
+        value,
+    })
 }
 
 fn verify_lnp_tbox_hint_coefficients(
