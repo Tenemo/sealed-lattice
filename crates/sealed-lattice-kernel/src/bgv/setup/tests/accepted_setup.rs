@@ -7388,23 +7388,22 @@ fn populate_evaluation_key_share_lnp_proof_fields(
                 fixture_material.component_b_by_digit.len(),
             ),
     };
-    let generation_output = generate_evaluation_key_share_lnp_relation_proof_with_metadata(
-        EvaluationKeyShareLnpProofGenerationInput {
-            proof_family,
-            public_matrix_seed_hash,
-            proof_record,
-            same_secret_statement_record: statement_record,
-            constant_commitments,
-            component_b_by_digit: &fixture_material.component_b_by_digit,
-            setup_proof_binding,
-            transported_key_switch_component_material,
-            witness: &witness,
-            proof_randomness_seed_hex: &proof_randomness_seed_hex,
-        },
-    )
-    .expect("evaluation-key proof bytes");
-    let proof_bytes = generation_output.proof_bytes;
-    let verification = generation_output.verification;
+    let (proof_bytes, verification) =
+        generate_evaluation_key_share_lnp_relation_proof_with_metadata(
+            EvaluationKeyShareLnpProofGenerationInput {
+                proof_family,
+                public_matrix_seed_hash,
+                proof_record,
+                same_secret_statement_record: statement_record,
+                constant_commitments,
+                component_b_by_digit: &fixture_material.component_b_by_digit,
+                setup_proof_binding,
+                transported_key_switch_component_material,
+                witness: &witness,
+                proof_randomness_seed_hex: &proof_randomness_seed_hex,
+            },
+        )
+        .expect("evaluation-key proof bytes");
     proof_record["statementHash"] = serde_json::json!(verification.statement_hash_hex);
     proof_record["relationCommitmentHash"] =
         serde_json::json!(verification.relation_commitment_hash_hex);
@@ -9250,18 +9249,17 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
             chunks
                 .into_iter()
                 .enumerate()
-                .map(|(chunk_index, chunk)| serde_json::json!({
-                    "chunkIndex": chunk_index,
-                    "bytesHex": to_hex(&chunk),
-                }))
+                .map(|(chunk_index, chunk)| {
+                    serde_json::json!({
+                        "chunkIndex": chunk_index,
+                        "bytesHex": to_hex(&chunk),
+                    })
+                })
                 .collect::<Vec<_>>(),
         );
     } else {
-        register_verified_evaluation_key_share_component_material_chunks(
-            &material_root,
-            chunks,
-        )
-        .expect("verified evaluation-key component material chunks");
+        register_verified_evaluation_key_share_component_material_chunks(&material_root, chunks)
+            .expect("verified evaluation-key component material chunks");
     }
 
     serde_json::json!({
@@ -9516,13 +9514,15 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_poli
     if include_chunks {
         proof_material["chunks"] = serde_json::Value::Array(
             chunks
-            .into_iter()
-            .enumerate()
-            .map(|(chunk_index, chunk)| serde_json::json!({
-                "chunkIndex": chunk_index,
-                "bytesHex": to_hex(&chunk),
-            }))
-            .collect::<Vec<_>>(),
+                .into_iter()
+                .enumerate()
+                .map(|(chunk_index, chunk)| {
+                    serde_json::json!({
+                        "chunkIndex": chunk_index,
+                        "bytesHex": to_hex(&chunk),
+                    })
+                })
+                .collect::<Vec<_>>(),
         );
     } else {
         register_verified_evaluation_key_share_proof_material_chunks(&proof_material_root, chunks)

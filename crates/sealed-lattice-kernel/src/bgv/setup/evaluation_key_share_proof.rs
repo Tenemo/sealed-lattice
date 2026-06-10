@@ -1,10 +1,12 @@
 use std::{
     collections::BTreeMap,
-    fs::{self, File},
-    io::{Read, Write},
+    fs::File,
+    io::Read,
     path::PathBuf,
     sync::{Mutex, OnceLock},
 };
+#[cfg(test)]
+use std::{fs, io::Write};
 
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::ToPrimitive;
@@ -230,11 +232,6 @@ pub(super) struct EvaluationKeyShareLnpProofVerification {
     pub(super) z34_z3_l2_squared_decimal: String,
     pub(super) z34_z4_infinity_norm_decimal: String,
     pub(super) challenge: u64,
-}
-
-pub(super) struct EvaluationKeyShareLnpProofGenerationOutput {
-    pub(super) proof_bytes: Vec<u8>,
-    pub(super) verification: EvaluationKeyShareLnpProofVerification,
 }
 
 pub(super) struct EvaluationKeyShareLnpProofVerificationInput<'a> {
@@ -704,12 +701,13 @@ pub(super) fn evaluation_key_share_component_material_transport_hashes(
     })
 }
 
-fn verified_evaluation_key_share_component_material_chunks(
-) -> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>> {
+fn verified_evaluation_key_share_component_material_chunks()
+-> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>> {
     VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS
         .get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+#[cfg(test)]
 pub(super) fn register_verified_evaluation_key_share_component_material_chunks(
     material_root: &str,
     chunks: Vec<Vec<u8>>,
@@ -760,6 +758,7 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
     read_verified_evaluation_key_share_component_material_chunks(&store_entry)
 }
 
+#[cfg(test)]
 fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf {
     PathBuf::from("temp")
         .join("test-checkpoints")
@@ -767,6 +766,7 @@ fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf
         .join("evaluation-key-component-material")
 }
 
+#[cfg(test)]
 fn write_verified_evaluation_key_share_component_material_chunks(
     material_root: &str,
     chunks: &[Vec<u8>],
@@ -1080,12 +1080,15 @@ pub(super) fn verify_evaluation_key_share_lnp_relation_proof(
 pub(super) fn generate_evaluation_key_share_lnp_relation_proof(
     input: EvaluationKeyShareLnpProofGenerationInput<'_>,
 ) -> CanonicalResult<Vec<u8>> {
-    Ok(generate_evaluation_key_share_lnp_relation_proof_with_metadata(input)?.proof_bytes)
+    let (proof_bytes, _verification) =
+        generate_evaluation_key_share_lnp_relation_proof_with_metadata(input)?;
+
+    Ok(proof_bytes)
 }
 
 pub(super) fn generate_evaluation_key_share_lnp_relation_proof_with_metadata(
     input: EvaluationKeyShareLnpProofGenerationInput<'_>,
-) -> CanonicalResult<EvaluationKeyShareLnpProofGenerationOutput> {
+) -> CanonicalResult<(Vec<u8>, EvaluationKeyShareLnpProofVerification)> {
     validate_evaluation_key_share_generation_material(&input)?;
     let statement_input = EvaluationKeyShareLnpProofVerificationInput {
         proof_family: input.proof_family,
@@ -1179,27 +1182,26 @@ pub(super) fn generate_evaluation_key_share_lnp_relation_proof_with_metadata(
     write_i128_matrix3(&mut proof_bytes, &responses.carry_response_by_digit_by_limb);
 
     let proof_size_bytes = proof_bytes.len();
-    Ok(EvaluationKeyShareLnpProofGenerationOutput {
-        proof_bytes,
-        verification: EvaluationKeyShareLnpProofVerification {
-            proof_size_bytes,
-            statement_hash_hex,
-            relation_commitment_hash_hex,
-            tbox_commitment_prefix_hash,
-            z34_seed_material_hash: tbox_summary.z34_seed_material_hash,
-            z34_challenge_seed_hash: tbox_summary.z34_challenge_seed_hash,
-            z34_challenge_tail_hash: tbox_summary.z34_challenge_tail_hash,
-            z34_challenge_row_domain_hash: tbox_summary.z34_challenge_row_domain_hash,
-            z34_challenge_z3_row_set_hash: tbox_summary.z34_challenge_z3_row_set_hash,
-            z34_challenge_z4_row_set_hash: tbox_summary.z34_challenge_z4_row_set_hash,
-            tbox_lower_protocol_challenge_hash: tbox_summary.tbox_lower_protocol_challenge_hash,
-            z34_z3_check_window_hash: tbox_summary.z34_z3_check_window_hash,
-            z34_z4_check_window_hash: tbox_summary.z34_z4_check_window_hash,
-            z34_z3_l2_squared_decimal: tbox_summary.z3_l2_squared.to_string(),
-            z34_z4_infinity_norm_decimal: tbox_summary.z4_infinity_norm.to_string(),
-            challenge,
-        },
-    })
+    let verification = EvaluationKeyShareLnpProofVerification {
+        proof_size_bytes,
+        statement_hash_hex,
+        relation_commitment_hash_hex,
+        tbox_commitment_prefix_hash,
+        z34_seed_material_hash: tbox_summary.z34_seed_material_hash,
+        z34_challenge_seed_hash: tbox_summary.z34_challenge_seed_hash,
+        z34_challenge_tail_hash: tbox_summary.z34_challenge_tail_hash,
+        z34_challenge_row_domain_hash: tbox_summary.z34_challenge_row_domain_hash,
+        z34_challenge_z3_row_set_hash: tbox_summary.z34_challenge_z3_row_set_hash,
+        z34_challenge_z4_row_set_hash: tbox_summary.z34_challenge_z4_row_set_hash,
+        tbox_lower_protocol_challenge_hash: tbox_summary.tbox_lower_protocol_challenge_hash,
+        z34_z3_check_window_hash: tbox_summary.z34_z3_check_window_hash,
+        z34_z4_check_window_hash: tbox_summary.z34_z4_check_window_hash,
+        z34_z3_l2_squared_decimal: tbox_summary.z3_l2_squared.to_string(),
+        z34_z4_infinity_norm_decimal: tbox_summary.z4_infinity_norm.to_string(),
+        challenge,
+    };
+
+    Ok((proof_bytes, verification))
 }
 
 fn validate_evaluation_key_share_statement_material(
@@ -3580,7 +3582,6 @@ pub(super) fn key_switch_component_b_for_evaluation_key_fixture(
         .collect()
 }
 
-#[cfg(test)]
 fn signed_i128_residue_u64(value: i128, modulus: u64) -> CanonicalResult<u64> {
     let modulus_wide = i128::from(modulus);
     let mut residue = value % modulus_wide;

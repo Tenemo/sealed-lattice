@@ -1660,6 +1660,7 @@ pub(super) fn derive_setup_proof_challenge_coefficients(
     derive_setup_proof_challenge_coefficients_from_sampler(proof_family, ring_degree, sampler)
 }
 
+#[cfg(test)]
 pub(crate) fn derive_setup_proof_lnp_tbox_challenge_from_prefix(
     layout: &SetupProofLnpTboxLayout,
     statement_hash_hex: &str,
@@ -2662,43 +2663,51 @@ fn setup_proof_lnp_tbox_generated_suffix(
     encode_lnp_tbox_generated_gaussian_polyvec(
         &mut writer,
         &suffix_seed,
-        "z1",
-        layout.z1_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z1_log2_standard_deviation,
-        3,
-        0,
+        LnpTboxGeneratedGaussianPolyvecEncoding {
+            field_name: "z1",
+            polynomial_count: layout.z1_polynomial_count,
+            proof_ring_degree: layout.proof_ring_degree,
+            log2_standard_deviation: layout.z1_log2_standard_deviation,
+            coefficient_bound: 3,
+            check_coefficient_count: 0,
+        },
     )?;
     encode_lnp_tbox_generated_gaussian_polyvec(
         &mut writer,
         &suffix_seed,
-        "z21",
-        layout.z21_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z21_log2_standard_deviation,
-        3,
-        0,
+        LnpTboxGeneratedGaussianPolyvecEncoding {
+            field_name: "z21",
+            polynomial_count: layout.z21_polynomial_count,
+            proof_ring_degree: layout.proof_ring_degree,
+            log2_standard_deviation: layout.z21_log2_standard_deviation,
+            coefficient_bound: 3,
+            check_coefficient_count: 0,
+        },
     )?;
     let z34_check_coefficient_count = setup_proof_lnp_tbox_z34_check_coefficient_count(layout)?;
     let z3_check_coefficients = encode_lnp_tbox_generated_gaussian_polyvec(
         &mut writer,
         &suffix_seed,
-        "z3",
-        layout.z3_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z3_log2_standard_deviation,
-        1,
-        z34_check_coefficient_count,
+        LnpTboxGeneratedGaussianPolyvecEncoding {
+            field_name: "z3",
+            polynomial_count: layout.z3_polynomial_count,
+            proof_ring_degree: layout.proof_ring_degree,
+            log2_standard_deviation: layout.z3_log2_standard_deviation,
+            coefficient_bound: 1,
+            check_coefficient_count: z34_check_coefficient_count,
+        },
     )?;
     let z4_check_coefficients = encode_lnp_tbox_generated_gaussian_polyvec(
         &mut writer,
         &suffix_seed,
-        "z4",
-        layout.z4_polynomial_count,
-        layout.proof_ring_degree,
-        layout.z4_log2_standard_deviation,
-        1,
-        z34_check_coefficient_count,
+        LnpTboxGeneratedGaussianPolyvecEncoding {
+            field_name: "z4",
+            polynomial_count: layout.z4_polynomial_count,
+            proof_ring_degree: layout.proof_ring_degree,
+            log2_standard_deviation: layout.z4_log2_standard_deviation,
+            coefficient_bound: 1,
+            check_coefficient_count: z34_check_coefficient_count,
+        },
     )?;
     writer.finish_with_lazer_padding();
     let z3_l2_squared = gaussian_l2_squared(&z3_check_coefficients);
@@ -2854,16 +2863,28 @@ fn encode_lnp_tbox_hint_coefficient(writer: &mut LnpBitWriter, value: i64) -> Ca
     Ok(())
 }
 
-fn encode_lnp_tbox_generated_gaussian_polyvec(
-    writer: &mut LnpBitWriter,
-    suffix_seed: &[u8; 64],
-    field_name: &str,
+struct LnpTboxGeneratedGaussianPolyvecEncoding<'a> {
+    field_name: &'a str,
     polynomial_count: usize,
     proof_ring_degree: usize,
     log2_standard_deviation: usize,
     coefficient_bound: i128,
     check_coefficient_count: usize,
+}
+
+fn encode_lnp_tbox_generated_gaussian_polyvec(
+    writer: &mut LnpBitWriter,
+    suffix_seed: &[u8; 64],
+    encoding: LnpTboxGeneratedGaussianPolyvecEncoding<'_>,
 ) -> CanonicalResult<Vec<LnpTboxGaussianCoefficient>> {
+    let LnpTboxGeneratedGaussianPolyvecEncoding {
+        field_name,
+        polynomial_count,
+        proof_ring_degree,
+        log2_standard_deviation,
+        coefficient_bound,
+        check_coefficient_count,
+    } = encoding;
     let coefficient_count = polynomial_count
         .checked_mul(proof_ring_degree)
         .ok_or_else(|| {

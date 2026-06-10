@@ -901,7 +901,7 @@ fn compute_setup_big_signed_lifted_commitment_for_degree(
         message_coefficients,
         randomness_by_column,
         ring_degree,
-        |coefficient, modulus| centered_big_integer_to_residue(coefficient, modulus),
+        centered_big_integer_to_residue,
     )?;
 
     Ok(SetupCommitmentValue {

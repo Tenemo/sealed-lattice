@@ -1,10 +1,12 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
-    io::{Read, Write},
+    fs::File,
+    io::Read,
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
 };
+#[cfg(test)]
+use std::{fs, io::Write};
 
 use num_bigint::BigUint;
 use serde_json::{Value, json};
@@ -17080,12 +17082,12 @@ fn evaluation_key_share_lnp_proof_bytes_from_record(
     Ok(proof_bytes)
 }
 
-fn verified_evaluation_key_share_proof_material_chunks(
-) -> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry>> {
-    VERIFIED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_CHUNKS
-        .get_or_init(|| Mutex::new(BTreeMap::new()))
+fn verified_evaluation_key_share_proof_material_chunks()
+-> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareProofMaterialChunkStoreEntry>> {
+    VERIFIED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_CHUNKS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+#[cfg(test)]
 pub(super) fn register_verified_evaluation_key_share_proof_material_chunks(
     proof_material_root: &str,
     chunks: Vec<Vec<u8>>,
@@ -17143,6 +17145,7 @@ fn stored_verified_evaluation_key_share_proof_material_chunks(
     read_verified_evaluation_key_share_proof_material_chunks(&store_entry)
 }
 
+#[cfg(test)]
 fn verified_evaluation_key_share_proof_material_store_directory() -> PathBuf {
     PathBuf::from("temp")
         .join("test-checkpoints")
@@ -17150,6 +17153,7 @@ fn verified_evaluation_key_share_proof_material_store_directory() -> PathBuf {
         .join("evaluation-key-proof-material")
 }
 
+#[cfg(test)]
 fn write_verified_evaluation_key_share_proof_material_chunks(
     proof_material_root: &str,
     chunks: &[Vec<u8>],
@@ -17234,7 +17238,9 @@ fn read_verified_evaluation_key_share_proof_material_chunks(
     let mut file = File::open(&store_entry.path).map_err(|error| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("verified evaluation-key proof material store entry could not be opened: {error}"),
+            format!(
+                "verified evaluation-key proof material store entry could not be opened: {error}"
+            ),
         )
     })?;
     let mut chunks = Vec::new();
@@ -17251,7 +17257,9 @@ fn read_verified_evaluation_key_share_proof_material_chunks(
         file.read_exact(&mut chunk).map_err(|error| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                format!("verified evaluation-key proof material store entry could not be read: {error}"),
+                format!(
+                    "verified evaluation-key proof material store entry could not be read: {error}"
+                ),
             )
         })?;
         remaining_byte_length -= u64::try_from(chunk.len()).map_err(|_| {
