@@ -3,8 +3,9 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::{
-        modular_arithmetic::{add_mod, mul_mod, sub_mod},
+        modular_arithmetic::{self, SignedResidueFailure, add_mod, mul_mod, sub_mod},
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        setup_helpers::decimal_i128_value,
         validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -837,14 +838,12 @@ fn setup_commitment_value_byte_count(commitment: &SetupCommitmentValue) -> Canon
 }
 
 fn signed_i128_residue_u64(value: i128, modulus: u64) -> CanonicalResult<u64> {
-    let modulus_wide = i128::from(modulus);
-    let mut residue = value % modulus_wide;
-    if residue < 0 {
-        residue = residue
-            .checked_add(modulus_wide)
-            .ok_or_else(|| invalid_same_secret_proof("signed residue overflowed"))?;
-    }
-    u64::try_from(residue).map_err(|_| invalid_same_secret_proof("signed residue does not fit u64"))
+    modular_arithmetic::signed_i128_residue_u64(value, modulus).map_err(|failure| match failure {
+        SignedResidueFailure::Overflowed => invalid_same_secret_proof("signed residue overflowed"),
+        SignedResidueFailure::DoesNotFitU64 => {
+            invalid_same_secret_proof("signed residue does not fit u64")
+        }
+    })
 }
 
 fn same_secret_lifted_message_response(
@@ -1006,16 +1005,6 @@ fn i128_matrix3_field(value: &Value, field_name: &str) -> CanonicalResult<Vec<Ve
                 .collect()
         })
         .collect()
-}
-
-fn decimal_i128_value(value: &Value) -> Option<i128> {
-    if let Some(value) = value.as_i64() {
-        return Some(i128::from(value));
-    }
-    if let Some(value) = value.as_u64() {
-        return Some(i128::from(value));
-    }
-    value.as_str()?.parse::<i128>().ok()
 }
 
 fn proof_randomness_source(value: &Value) -> CanonicalResult<&'static str> {

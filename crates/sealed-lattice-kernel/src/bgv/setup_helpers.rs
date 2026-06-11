@@ -157,6 +157,16 @@ pub(super) fn read_optional_usize(
         .transpose()
 }
 
+pub(super) fn decimal_i128_value(value: &Value) -> Option<i128> {
+    if let Some(value) = value.as_i64() {
+        return Some(i128::from(value));
+    }
+    if let Some(value) = value.as_u64() {
+        return Some(i128::from(value));
+    }
+    value.as_str()?.parse::<i128>().ok()
+}
+
 pub(super) fn compare_expected_string(
     request: &Value,
     expected_field_name: &str,

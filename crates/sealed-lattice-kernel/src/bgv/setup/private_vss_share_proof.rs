@@ -2,7 +2,10 @@ use num_bigint::BigUint;
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    bgv::{
+        coefficient_codec::write_i128_vector,
+        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{canonical_json, derive_protocol_hash, hash512, hash512_hex, to_hex},
     transcript_core::decode_hex,
@@ -2504,10 +2507,4 @@ fn sample_private_vss_share_mask_i128(
             invalid_private_vss_share_proof("private VSS proof mask bound overflowed")
         })?;
     Ok(sign * (value % bound))
-}
-
-fn write_i128_vector(output: &mut Vec<u8>, values: &[i128]) {
-    for value in values {
-        output.extend_from_slice(&value.to_le_bytes());
-    }
 }

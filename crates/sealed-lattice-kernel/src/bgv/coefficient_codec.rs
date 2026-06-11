@@ -40,6 +40,12 @@ pub(in crate::bgv) fn coefficient_vector_from_le_hex(
         .collect())
 }
 
+pub(in crate::bgv) fn write_i128_vector(output: &mut Vec<u8>, values: &[i128]) {
+    for value in values {
+        output.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
 pub(in crate::bgv) fn coefficient_vector_hash512(coefficients: &[u64], domain: &str) -> String {
     hash512_hex(domain, &[&coefficient_vector_bytes(coefficients)])
 }

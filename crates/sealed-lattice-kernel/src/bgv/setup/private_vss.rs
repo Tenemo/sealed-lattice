@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use crate::{
     bgv::{
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        setup_helpers::decimal_i128_value,
         validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -2070,16 +2071,6 @@ fn i128_matrix3_field(
                 .collect()
         })
         .collect()
-}
-
-fn decimal_i128_value(value: &Value) -> Option<i128> {
-    if let Some(value) = value.as_i64() {
-        return Some(i128::from(value));
-    }
-    if let Some(value) = value.as_u64() {
-        return Some(i128::from(value));
-    }
-    value.as_str()?.parse::<i128>().ok()
 }
 
 fn derive_private_vss_carry_witnesses(
