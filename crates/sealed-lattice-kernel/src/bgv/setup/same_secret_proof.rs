@@ -1,5 +1,5 @@
-use num_bigint::BigUint;
 use num_bigint::BigInt;
+use num_bigint::BigUint;
 use serde_json::{Value, json};
 
 use crate::{
@@ -17,8 +17,8 @@ use super::commitment::{
     SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
     SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
     compute_setup_big_signed_lifted_commitment, linear_combination_setup_commitments,
-    setup_big_signed_coefficient_fits_centered_commitment_modulus_product,
-    parse_setup_commitment_full_value, setup_commitment_root,
+    parse_setup_commitment_full_value,
+    setup_big_signed_coefficient_fits_centered_commitment_modulus_product, setup_commitment_root,
     verify_setup_big_signed_lifted_commitment_opening,
 };
 use super::setup_proof::SETUP_PROOF_PROFILE_ID;

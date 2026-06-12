@@ -114,7 +114,9 @@ fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a s
         .and_then(Value::as_str)
         .filter(|field| !field.is_empty())
         .ok_or_else(|| {
-            invalid_evaluation_key_share_material(format!("{field_name} must be a non-empty string"))
+            invalid_evaluation_key_share_material(format!(
+                "{field_name} must be a non-empty string"
+            ))
         })
 }
 
@@ -122,7 +124,9 @@ fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Ve
     value
         .get(field_name)
         .and_then(Value::as_array)
-        .ok_or_else(|| invalid_evaluation_key_share_material(format!("{field_name} must be an array")))
+        .ok_or_else(|| {
+            invalid_evaluation_key_share_material(format!("{field_name} must be an array"))
+        })
 }
 
 fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
@@ -130,23 +134,21 @@ fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
         .get(field_name)
         .and_then(Value::as_u64)
         .ok_or_else(|| {
-            invalid_evaluation_key_share_material(format!("{field_name} must be an unsigned integer"))
+            invalid_evaluation_key_share_material(format!(
+                "{field_name} must be an unsigned integer"
+            ))
         })
 }
 
 fn value_usize(value: &Value, field_name: &str) -> CanonicalResult<usize> {
     let unsigned = value_u64(value, field_name)?;
-    usize::try_from(unsigned)
-        .map_err(|_| invalid_evaluation_key_share_material(format!("{field_name} does not fit usize")))
+    usize::try_from(unsigned).map_err(|_| {
+        invalid_evaluation_key_share_material(format!("{field_name} does not fit usize"))
+    })
 }
 
 fn validate_hex_string(value: &str, field_name: &str) -> CanonicalResult<()> {
-    if value.is_empty()
-        || !value
-            .as_bytes()
-            .iter()
-            .all(|byte| byte.is_ascii_hexdigit())
-    {
+    if value.is_empty() || !value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(invalid_evaluation_key_share_material(format!(
             "{field_name} must be non-empty hexadecimal"
         )));
@@ -154,7 +156,6 @@ fn validate_hex_string(value: &str, field_name: &str) -> CanonicalResult<()> {
 
     Ok(())
 }
-
 
 #[cfg(test)]
 fn validate_lowercase_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {

@@ -190,7 +190,10 @@ impl EvaluationDomainPlan {
     }
 
     // Interpolate extension-coset evaluations back into coefficient form.
-    pub(super) fn coefficients_from_extension_evaluations(&self, evaluations: &[u64]) -> CanonicalResult<Vec<u64>> {
+    pub(super) fn coefficients_from_extension_evaluations(
+        &self,
+        evaluations: &[u64],
+    ) -> CanonicalResult<Vec<u64>> {
         debug_assert_eq!(evaluations.len(), self.extension_size);
         let mut coefficients = evaluations.to_vec();
         cyclic_transform_in_place(&mut coefficients, &self.extension_plan, true);
@@ -212,13 +215,6 @@ impl EvaluationDomainPlan {
                 .expect("extension root power is a canonical residue"),
             self.modulus,
         )
-    }
-
-    // Z_H(point) = point^m - 1 for the order-m trace subgroup H.
-    pub(super) fn trace_vanishing_at(&self, point: u64) -> u64 {
-        let power = pow_mod(point, self.trace_size as u64, self.modulus)
-            .expect("vanishing power is a canonical residue");
-        sub_mod_fast(power, 1 % self.modulus, self.modulus)
     }
 
     // Barycentric evaluation of the interpolant of trace values at one point

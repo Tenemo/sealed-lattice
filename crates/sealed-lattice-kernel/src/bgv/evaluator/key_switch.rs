@@ -761,7 +761,8 @@ mod tests {
         let key = shared_key();
         let galois_element = 3_usize;
         let slots = [9_u64, 8, 7, 6, 5, 4, 3, 2];
-        let ciphertext = at_test_level(&key.encrypt_slots(&slots, "ksk-trunc-rot").expect("encrypt"));
+        let ciphertext =
+            at_test_level(&key.encrypt_slots(&slots, "ksk-trunc-rot").expect("encrypt"));
         let galois_key =
             generate_galois_key(key, galois_element, TEST_LEVEL + 2, "trunc-galois-seed")
                 .expect("galois key");

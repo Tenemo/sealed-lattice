@@ -126,7 +126,9 @@ fn nonnegative_big_int_mod_u64(value: &BigInt, modulus: u64) -> CanonicalResult<
     let modulus_big = BigInt::from(modulus);
     let residue = ((value % &modulus_big) + &modulus_big) % &modulus_big;
     residue.to_u64().ok_or_else(|| {
-        invalid_evaluation_key_share_material("evaluation-key source product CRT residue overflowed")
+        invalid_evaluation_key_share_material(
+            "evaluation-key source product CRT residue overflowed",
+        )
     })
 }
 
@@ -157,7 +159,9 @@ pub(super) fn automorphism_i128(
             .checked_mul(galois_element)
             .map(|raw| raw % two_n)
             .ok_or_else(|| {
-                invalid_evaluation_key_share_material("evaluation-key automorphism index overflowed")
+                invalid_evaluation_key_share_material(
+                    "evaluation-key automorphism index overflowed",
+                )
             })?;
         if exponent < ring_degree {
             output[exponent] = output[exponent].checked_add(*value).ok_or_else(|| {

@@ -696,7 +696,10 @@ fn expected_public_evaluation_key_component_material_roots(
         })?;
     for batch in batches {
         for material_record in array_value(batch, "galoisKeyShareMaterialRecords")? {
-            collect_binary_key_switch_component_material_root(material_record, &mut expected_roots)?;
+            collect_binary_key_switch_component_material_root(
+                material_record,
+                &mut expected_roots,
+            )?;
         }
     }
 

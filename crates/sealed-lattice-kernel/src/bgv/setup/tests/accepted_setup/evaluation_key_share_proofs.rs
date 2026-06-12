@@ -363,7 +363,8 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_tra
         "heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material",
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    let proof_material_set = move_first_trustee_evaluation_key_proof_bytes_to_transport(&mut package);
+    let proof_material_set =
+        move_first_trustee_evaluation_key_proof_bytes_to_transport(&mut package);
     let transported_public_evaluation_key_material =
         add_public_evaluation_key_material_transport(&mut package);
 
@@ -384,7 +385,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_tra
 #[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk()
- {
+{
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk",
     );
@@ -397,9 +398,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_t
         .to_string();
     let mut tampered = chunk_bytes_hex.into_bytes();
     tampered[0] = if tampered[0] == b'0' { b'1' } else { b'0' };
-    proof_material_set["proofMaterials"][0]["chunks"][0]["bytesHex"] = serde_json::json!(
-        String::from_utf8(tampered).expect("tampered chunk hex")
-    );
+    proof_material_set["proofMaterials"][0]["chunks"][0]["bytesHex"] =
+        serde_json::json!(String::from_utf8(tampered).expect("tampered chunk hex"));
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
@@ -518,7 +518,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_truste
 #[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed()
- {
+{
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed",
     );
@@ -810,15 +810,13 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
     )
     .expect("proof randomness seed");
 
-    let error = match prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
-    {
+    let error = match prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex) {
         Ok(_) => panic!("substituted aggregate source must not prove"),
         Err(error) => error,
     };
 
     assert!(
-        error.message.contains("witness does not satisfy")
-            || error.message.contains("sumcheck"),
+        error.message.contains("witness does not satisfy") || error.message.contains("sumcheck"),
         "{}",
         error.message
     );

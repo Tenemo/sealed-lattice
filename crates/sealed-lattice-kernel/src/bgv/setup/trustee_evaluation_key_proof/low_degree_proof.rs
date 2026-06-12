@@ -1,4 +1,5 @@
 use super::evaluation_domain::batch_inverse;
+use super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::*;
 use crate::bgv::modular_arithmetic::{inverse_mod, pow_mod};
 use fiat_shamir_transcript::FiatShamirTranscript;
@@ -11,6 +12,11 @@ use merkle_commitment::{MerkleTree, leaf_hash, verify_merkle_opening};
 // folded layers are committed as Merkle trees over pair leaves so one opening
 // serves the next fold. The recursion stops at a small final polynomial sent
 // in coefficient form.
+//
+// The evaluation domain stays in the base limb field, but codeword values
+// and every fold challenge live in the degree-four challenge extension, so
+// each fold round's soundness error is governed by the extension size
+// instead of the 47-bit base field.
 pub(super) struct LowDegreeParameters {
     pub(super) modulus: u64,
     pub(super) initial_domain_size: usize,
@@ -23,7 +29,7 @@ pub(super) struct LowDegreeParameters {
 
 pub(super) struct LowDegreeProof {
     pub(super) folded_layer_roots: Vec<[u8; 64]>,
-    pub(super) final_coefficients: Vec<u64>,
+    pub(super) final_coefficients: Vec<ChallengeExtensionElement>,
     pub(super) query_openings: Vec<LowDegreeQueryOpening>,
 }
 
@@ -33,7 +39,7 @@ pub(super) struct LowDegreeQueryOpening {
 }
 
 pub(super) struct LowDegreePairOpening {
-    pub(super) pair: [u64; 2],
+    pub(super) pair: [ChallengeExtensionElement; 2],
     pub(super) path: Vec<[u8; 64]>,
 }
 
@@ -43,13 +49,25 @@ fn fold_count(parameters: &LowDegreeParameters) -> usize {
     (parameters.initial_degree_bound / LOW_DEGREE_FINAL_COEFFICIENT_COUNT).trailing_zeros() as usize
 }
 
+fn flatten_extension_pair(pair: &[ChallengeExtensionElement; 2]) -> [u64; 8] {
+    [
+        pair[0][0], pair[0][1], pair[0][2], pair[0][3], pair[1][0], pair[1][1], pair[1][2],
+        pair[1][3],
+    ]
+}
+
+fn flatten_extension_elements(elements: &[ChallengeExtensionElement]) -> Vec<u64> {
+    elements.iter().flatten().copied().collect()
+}
+
 fn fold_layer(
-    layer: &[u64],
-    challenge: u64,
+    tower: &ChallengeExtensionTower,
+    layer: &[ChallengeExtensionElement],
+    challenge: &ChallengeExtensionElement,
     offset: u64,
     root: u64,
-    modulus: u64,
-) -> CanonicalResult<Vec<u64>> {
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+    let modulus = tower.modulus;
     let half = layer.len() / 2;
     let inverse_two = inverse_mod(2, modulus)?;
     // x positions for the lower half of the layer domain, inverted in batch.
@@ -62,25 +80,18 @@ fn fold_layer(
     let inverted_points = batch_inverse(&points, modulus)?;
     let mut folded = Vec::with_capacity(half);
     for position in 0..half {
-        let even_part = mul_mod_fast(
-            add_mod_fast(layer[position], layer[position + half], modulus),
+        let even_part = tower.scale_base(
+            &tower.add(&layer[position], &layer[position + half]),
             inverse_two,
-            modulus,
         );
-        let odd_part = mul_mod_fast(
-            mul_mod_fast(
-                sub_mod_fast(layer[position], layer[position + half], modulus),
+        let odd_part = tower.scale_base(
+            &tower.scale_base(
+                &tower.sub(&layer[position], &layer[position + half]),
                 inverse_two,
-                modulus,
             ),
             inverted_points[position],
-            modulus,
         );
-        folded.push(add_mod_fast(
-            even_part,
-            mul_mod_fast(challenge, odd_part, modulus),
-            modulus,
-        ));
+        folded.push(tower.add(&even_part, &tower.mul(challenge, &odd_part)));
     }
 
     Ok(folded)
@@ -88,11 +99,15 @@ fn fold_layer(
 
 // Fold-layer values are deterministic functions of the batched codeword, so
 // their leaves carry no independent witness information and stay unsalted.
-fn pair_leaf_hashes(layer: &[u64]) -> Vec<[u8; 64]> {
+fn pair_leaf_hashes(layer: &[ChallengeExtensionElement]) -> Vec<[u8; 64]> {
     let half = layer.len() / 2;
     (0..half)
         .map(|pair_index| {
-            leaf_hash(pair_index, &[], &[layer[pair_index], layer[pair_index + half]])
+            leaf_hash(
+                pair_index,
+                &[],
+                &flatten_extension_pair(&[layer[pair_index], layer[pair_index + half]]),
+            )
         })
         .collect()
 }
@@ -100,11 +115,12 @@ fn pair_leaf_hashes(layer: &[u64]) -> Vec<[u8; 64]> {
 // Interpolate a small layer over its coset into coefficient form by direct
 // Lagrange evaluation; the final layer is tiny so the quadratic cost is fine.
 fn small_coset_interpolation(
-    layer: &[u64],
+    tower: &ChallengeExtensionTower,
+    layer: &[ChallengeExtensionElement],
     offset: u64,
     root: u64,
-    modulus: u64,
-) -> CanonicalResult<Vec<u64>> {
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+    let modulus = tower.modulus;
     let size = layer.len();
     let inverse_size = inverse_mod(size as u64, modulus)?;
     let offset_inverse = inverse_mod(offset, modulus)?;
@@ -112,21 +128,16 @@ fn small_coset_interpolation(
     // Inverse cyclic DFT of size `size`, then unweight the coset offset.
     let mut coefficients = Vec::with_capacity(size);
     for coefficient_index in 0..size {
-        let mut accumulated = 0_u64;
+        let mut accumulated = ChallengeExtensionTower::zero();
         let step = pow_mod(root_inverse, coefficient_index as u64, modulus)?;
         let mut point_power = 1_u64;
         for value in layer {
-            accumulated = add_mod_fast(
-                accumulated,
-                mul_mod_fast(*value, point_power, modulus),
-                modulus,
-            );
+            accumulated = tower.add(&accumulated, &tower.scale_base(value, point_power));
             point_power = mul_mod_fast(point_power, step, modulus);
         }
-        let unweighted = mul_mod_fast(
-            mul_mod_fast(accumulated, inverse_size, modulus),
+        let unweighted = tower.scale_base(
+            &tower.scale_base(&accumulated, inverse_size),
             pow_mod(offset_inverse, coefficient_index as u64, modulus)?,
-            modulus,
         );
         coefficients.push(unweighted);
     }
@@ -134,14 +145,14 @@ fn small_coset_interpolation(
     Ok(coefficients)
 }
 
-fn evaluate_coefficients(coefficients: &[u64], point: u64, modulus: u64) -> u64 {
-    let mut accumulated = 0_u64;
+fn evaluate_coefficients(
+    tower: &ChallengeExtensionTower,
+    coefficients: &[ChallengeExtensionElement],
+    point: u64,
+) -> ChallengeExtensionElement {
+    let mut accumulated = ChallengeExtensionTower::zero();
     for coefficient in coefficients.iter().rev() {
-        accumulated = add_mod_fast(
-            mul_mod_fast(accumulated, point, modulus),
-            *coefficient,
-            modulus,
-        );
+        accumulated = tower.add(&tower.scale_base(&accumulated, point), coefficient);
     }
 
     accumulated
@@ -153,7 +164,7 @@ fn evaluate_coefficients(coefficients: &[u64], point: u64, modulus: u64) -> u64 
 pub(super) fn prove_low_degree(
     transcript: &mut FiatShamirTranscript,
     parameters: &LowDegreeParameters,
-    initial_layer: &[u64],
+    initial_layer: &[ChallengeExtensionElement],
 ) -> CanonicalResult<(LowDegreeProof, Vec<usize>)> {
     if initial_layer.len() != parameters.initial_domain_size
         || parameters.initial_domain_size != 2 * parameters.initial_degree_bound
@@ -162,6 +173,7 @@ pub(super) fn prove_low_degree(
             "low-degree initial layer does not match the declared parameters",
         ));
     }
+    let tower = ChallengeExtensionTower::for_modulus(parameters.modulus)?;
     let total_folds = fold_count(parameters);
     let mut layers = vec![initial_layer.to_vec()];
     let mut trees = Vec::new();
@@ -170,13 +182,13 @@ pub(super) fn prove_low_degree(
     let mut root = parameters.initial_root;
     for fold_index in 0..total_folds {
         let challenge =
-            transcript.challenge_nonzero_field_element("fold-challenge", parameters.modulus);
+            transcript.challenge_nonzero_extension_element("fold-challenge", parameters.modulus);
         let folded = fold_layer(
+            &tower,
             layers.last().expect("layers are non-empty"),
-            challenge,
+            &challenge,
             offset,
             root,
-            parameters.modulus,
         )?;
         offset = mul_mod_fast(offset, offset, parameters.modulus);
         root = mul_mod_fast(root, root, parameters.modulus);
@@ -187,21 +199,22 @@ pub(super) fn prove_low_degree(
             trees.push(tree);
             layers.push(folded);
         } else {
-            let final_coefficients = small_coset_interpolation(
-                &folded,
-                offset,
-                root,
-                parameters.modulus,
-            )?;
+            let final_coefficients = small_coset_interpolation(&tower, &folded, offset, root)?;
             let (low_coefficients, high_coefficients) =
                 final_coefficients.split_at(LOW_DEGREE_FINAL_COEFFICIENT_COUNT);
-            if high_coefficients.iter().any(|coefficient| *coefficient != 0) {
+            if high_coefficients
+                .iter()
+                .any(|coefficient| !ChallengeExtensionTower::is_zero(coefficient))
+            {
                 return Err(invalid_succinct_setup_proof(
                     "low-degree final layer exceeds the final degree bound",
                 ));
             }
             let final_coefficients = low_coefficients.to_vec();
-            transcript.absorb_u64_slice("final-coefficients", &final_coefficients);
+            transcript.absorb_u64_slice(
+                "final-coefficients",
+                &flatten_extension_elements(&final_coefficients),
+            );
             let query_positions = transcript.challenge_positions(
                 "query-position",
                 parameters.initial_domain_size / 2,
@@ -246,7 +259,7 @@ pub(super) fn verify_low_degree(
     transcript: &mut FiatShamirTranscript,
     parameters: &LowDegreeParameters,
     proof: &LowDegreeProof,
-    mut initial_pair_at: impl FnMut(usize, usize) -> CanonicalResult<[u64; 2]>,
+    mut initial_pair_at: impl FnMut(usize, usize) -> CanonicalResult<[ChallengeExtensionElement; 2]>,
 ) -> CanonicalResult<()> {
     let total_folds = fold_count(parameters);
     if proof.folded_layer_roots.len() + 1 != total_folds
@@ -258,15 +271,20 @@ pub(super) fn verify_low_degree(
         ));
     }
     let modulus = parameters.modulus;
+    let tower = ChallengeExtensionTower::for_modulus(modulus)?;
     // Replay the prover transcript order: per fold a challenge, then the root
     // of the layer that fold produced (or the final coefficients).
     let mut fold_challenges = Vec::with_capacity(total_folds);
     for fold_index in 0..total_folds {
-        fold_challenges.push(transcript.challenge_nonzero_field_element("fold-challenge", modulus));
+        fold_challenges
+            .push(transcript.challenge_nonzero_extension_element("fold-challenge", modulus));
         if fold_index + 1 < total_folds {
             transcript.absorb("fold-layer-root", &proof.folded_layer_roots[fold_index]);
         } else {
-            transcript.absorb_u64_slice("final-coefficients", &proof.final_coefficients);
+            transcript.absorb_u64_slice(
+                "final-coefficients",
+                &flatten_extension_elements(&proof.final_coefficients),
+            );
         }
     }
     let query_positions = transcript.challenge_positions(
@@ -297,25 +315,12 @@ pub(super) fn verify_low_degree(
                 pow_mod(root, pair_position as u64, modulus)?,
                 modulus,
             );
-            let even_part = mul_mod_fast(
-                add_mod_fast(pair[0], pair[1], modulus),
-                inverse_two,
-                modulus,
-            );
-            let odd_part = mul_mod_fast(
-                mul_mod_fast(
-                    sub_mod_fast(pair[0], pair[1], modulus),
-                    inverse_two,
-                    modulus,
-                ),
+            let even_part = tower.scale_base(&tower.add(&pair[0], &pair[1]), inverse_two);
+            let odd_part = tower.scale_base(
+                &tower.scale_base(&tower.sub(&pair[0], &pair[1]), inverse_two),
                 inverse_mod(point, modulus)?,
-                modulus,
             );
-            let folded_value = add_mod_fast(
-                even_part,
-                mul_mod_fast(*fold_challenge, odd_part, modulus),
-                modulus,
-            );
+            let folded_value = tower.add(&even_part, &tower.mul(fold_challenge, &odd_part));
             // Move to the folded layer: its size is the current pair count and
             // the folded value sits at the held pair position.
             layer_size /= 2;
@@ -327,7 +332,7 @@ pub(super) fn verify_low_degree(
                 let pair_index = value_position % half;
                 let slot = value_position / half;
                 let pair_opening = &opening.folded_layer_pairs[fold_index];
-                let leaf = leaf_hash(pair_index, &[], &pair_opening.pair);
+                let leaf = leaf_hash(pair_index, &[], &flatten_extension_pair(&pair_opening.pair));
                 if !verify_merkle_opening(
                     &proof.folded_layer_roots[fold_index],
                     pair_index,
@@ -351,7 +356,7 @@ pub(super) fn verify_low_degree(
                     pow_mod(root, value_position as u64, modulus)?,
                     modulus,
                 );
-                if evaluate_coefficients(&proof.final_coefficients, final_point, modulus)
+                if evaluate_coefficients(&tower, &proof.final_coefficients, final_point)
                     != folded_value
                 {
                     return Err(invalid_succinct_setup_proof(

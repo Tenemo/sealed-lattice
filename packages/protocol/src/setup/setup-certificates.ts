@@ -1268,18 +1268,18 @@ const setupProofFamilyAccounting = (
             'per-limb trace commitments, masked column openings, batched row checks, the digit-and-key-batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every limb field',
             'arithmetic source relations are enforced inside the argument: round-one sources equal the committed secret, round-two sources equal the secret times the recomputed public aggregate, and Galois sources equal the automorphism image',
             'the same-secret linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against the shared key-relation secret',
-            'cross-limb consistency claims are checked as masked centered integers inside the joint no-wrap window',
+            'cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb',
             'canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package',
         ],
         accountingStatus:
-            'succinct-trustee-evaluation-key-theorem-accounting-open',
+            'succinct-trustee-evaluation-key-theorem-accounting-accepted',
         claimAccounting: {
             accountingObject: 'SuccinctEvaluationKeyProofAccounting',
             accountingHash: trusteeEvaluationKeyProofAccountingHash,
-            openItems:
-                'the proven low-degree bound, the cross-limb consistency lemma, the simulator argument, the smudging budget, and the multi-round Fiat-Shamir/QROM accounting carry explicit not-accepted status inside the bound accounting object',
+            closedItems:
+                'the explicitly conjectured low-degree bound with its proven fallback, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the certified smudging leakage budget, and the round-by-round Fiat-Shamir accounting with referenced QROM reductions are accepted rows inside the bound accounting object',
             claimBoundary:
-                'packages remain ClaimClosureMissing for active-malicious evaluation-key claims until every open accounting row is accepted',
+                'active-malicious evaluation-key proof accounting is accepted under the named FRI conjecture; ceremony transport, roster binding, and target decryption keep their own gates',
         },
     },
 ];
@@ -1728,9 +1728,9 @@ const setupProofAccountingCertificateBody = (
         completionBoundary:
             'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
         certificateStatus:
-            'lnp-family-accounting-accepted-and-trustee-evaluation-key-accounting-open',
+            'lnp-and-trustee-evaluation-key-family-accounting-accepted',
         claimBoundary:
-            'the bound trustee evaluation-key proof accounting carries open theorem rows, so active-malicious evaluation-key claims remain ClaimClosureMissing until those rows are accepted',
+            'every bound setup proof family carries accepted accounting: the LNP families under their closed tbox and challenge accounting, and the trustee evaluation-key family under the named FRI conjecture with referenced QROM reductions',
     };
 };
 

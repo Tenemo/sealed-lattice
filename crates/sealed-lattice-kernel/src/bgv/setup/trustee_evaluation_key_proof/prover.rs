@@ -1,32 +1,29 @@
-use super::evaluation_domain::{
-    EvaluationDomainPlan, batch_inverse, negacyclic_transpose_product,
+use super::evaluation_domain::{EvaluationDomainPlan, negacyclic_transpose_product};
+use super::extension_field::{
+    CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
 };
 use super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::low_degree_proof::{LowDegreeParameters, LowDegreeProof, prove_low_degree};
 use super::merkle_commitment::{LEAF_SALT_BYTES, MerkleTree, leaf_hash};
 use super::relation::{
-    LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, QUOTIENT_COLUMN_ROW_CHECK_HIGH,
-    QUOTIENT_COLUMN_ROW_CHECK_LOW, QUOTIENT_COLUMN_SUMCHECK_LINEAR,
-    QUOTIENT_COLUMN_SUMCHECK_VANISHING, SumcheckErrorWeights, SumcheckPublicEvaluations,
-    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, batched_row_check_value,
-    batched_sumcheck_value, build_linkage_public_vectors, public_key_switch_sample,
-};
-use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+    BaseColumnDomain, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, SumcheckErrorWeights,
+    SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+    batched_row_check_value, batched_sumcheck_value, build_linkage_public_vectors,
+    public_key_switch_sample,
 };
 use super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::{inverse_mod, pow_mod};
+use crate::bgv::setup::commitment::{
+    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
-const COLUMN_MASK_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/column-mask-v2";
-const LEAF_SALT_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/leaf-salt-v2";
-const CLAIM_MASK_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/claim-mask-v2";
+const COLUMN_MASK_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/column-mask-v2";
+const LEAF_SALT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/leaf-salt-v2";
+const CLAIM_MASK_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/claim-mask-v2";
 
 pub(crate) struct SuccinctEvaluationKeyProof {
     pub(super) limb_proofs: Vec<LimbProof>,
@@ -38,9 +35,10 @@ pub(super) struct LimbProof {
     // Smudging-masked consistency claims in local claim order (consistency
     // vector major, repetition minor).
     pub(super) masked_consistency_claims: Vec<u64>,
-    // Per out-of-domain point: every committed column evaluation, phase-one
-    // columns in layout order followed by the four phase-two columns.
-    pub(super) deep_evaluations: Vec<Vec<u64>>,
+    // Per out-of-domain point: every committed column evaluation in the
+    // challenge extension, phase-one columns in layout order followed by the
+    // four logical phase-two columns.
+    pub(super) deep_evaluations: Vec<Vec<ChallengeExtensionElement>>,
     pub(super) low_degree: LowDegreeProof,
     pub(super) query_openings: Vec<PhaseQueryOpening>,
 }
@@ -92,43 +90,6 @@ fn commit_salted_extension_rows(
     })
 }
 
-fn field_powers(base: u64, count: usize, modulus: u64) -> Vec<u64> {
-    let mut powers = Vec::with_capacity(count);
-    let mut power = 1_u64;
-    for _ in 0..count {
-        powers.push(power);
-        power = mul_mod_fast(power, base, modulus);
-    }
-
-    powers
-}
-
-fn dot_product(left: &[u64], right: &[u64], modulus: u64) -> u64 {
-    let mut accumulated = 0_u64;
-    for (left_value, right_value) in left.iter().zip(right.iter()) {
-        accumulated = add_mod_fast(
-            accumulated,
-            mul_mod_fast(*left_value, *right_value, modulus),
-            modulus,
-        );
-    }
-
-    accumulated
-}
-
-fn evaluate_coefficients(coefficients: &[u64], point: u64, modulus: u64) -> u64 {
-    let mut accumulated = 0_u64;
-    for coefficient in coefficients.iter().rev() {
-        accumulated = add_mod_fast(
-            mul_mod_fast(accumulated, point, modulus),
-            *coefficient,
-            modulus,
-        );
-    }
-
-    accumulated
-}
-
 fn trim_trailing_zeros(mut coefficients: Vec<u64>) -> Vec<u64> {
     while coefficients.last() == Some(&0) {
         coefficients.pop();
@@ -170,31 +131,29 @@ pub(super) fn divide_by_trace_vanishing(
     (quotient, remainder)
 }
 
-// Shared per-point trace interpolation weights at one out-of-domain point.
+// Shared per-point trace interpolation weights at one out-of-domain
+// extension point.
 pub(super) fn barycentric_weights(
     plan: &EvaluationDomainPlan,
-    point: u64,
-) -> CanonicalResult<Vec<u64>> {
+    tower: &ChallengeExtensionTower,
+    point: &ChallengeExtensionElement,
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
     let modulus = plan.modulus;
     let mut differences = Vec::with_capacity(plan.trace_size);
     let mut subgroup_power = 1_u64;
     for _ in 0..plan.trace_size {
-        differences.push(sub_mod_fast(point, subgroup_power, modulus));
+        differences.push(tower.sub(point, &tower.embed_base(subgroup_power)));
         subgroup_power = mul_mod_fast(subgroup_power, plan.trace_root, modulus);
     }
-    let inverted = batch_inverse(&differences, modulus)?;
-    let scale = mul_mod_fast(
-        plan.trace_vanishing_at(point),
-        inverse_mod(plan.trace_size as u64, modulus)?,
-        modulus,
-    );
+    let inverted = tower.batch_inverse(&differences)?;
+    let vanishing = trace_vanishing_at_extension(plan, tower, point);
+    let scale = tower.scale_base(&vanishing, inverse_mod(plan.trace_size as u64, modulus)?);
     let mut weights = Vec::with_capacity(plan.trace_size);
     let mut subgroup_power = 1_u64;
     for inverted_difference in inverted {
-        weights.push(mul_mod_fast(
-            mul_mod_fast(scale, subgroup_power, modulus),
-            inverted_difference,
-            modulus,
+        weights.push(tower.mul(
+            &tower.scale_base(&scale, subgroup_power),
+            &inverted_difference,
         ));
         subgroup_power = mul_mod_fast(subgroup_power, plan.trace_root, modulus);
     }
@@ -202,24 +161,42 @@ pub(super) fn barycentric_weights(
     Ok(weights)
 }
 
+// Z_H(z) = z^T - 1 at an extension point.
+pub(super) fn trace_vanishing_at_extension(
+    plan: &EvaluationDomainPlan,
+    tower: &ChallengeExtensionTower,
+    point: &ChallengeExtensionElement,
+) -> ChallengeExtensionElement {
+    tower.sub(
+        &tower.pow(point, plan.trace_size as u64),
+        &ChallengeExtensionTower::one(),
+    )
+}
+
 // Deterministic rejection sampling of out-of-domain points shared by prover
-// and verifier: avoid zero, the trace subgroup, and the extension coset.
+// and verifier: extension points avoiding zero, the base trace subgroup, and
+// the base extension coset.
 pub(super) fn sample_deep_points(
     transcript: &mut FiatShamirTranscript,
     plan: &EvaluationDomainPlan,
-) -> CanonicalResult<Vec<u64>> {
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
     let modulus = plan.modulus;
-    let coset_marker = pow_mod(plan.coset_offset, plan.extension_size as u64, modulus)?;
+    let tower = ChallengeExtensionTower::for_modulus(modulus)?;
+    let coset_marker = tower.embed_base(pow_mod(
+        plan.coset_offset,
+        plan.extension_size as u64,
+        modulus,
+    )?);
     let mut points = Vec::with_capacity(DEEP_POINT_COUNT);
     while points.len() < DEEP_POINT_COUNT {
-        let candidate = transcript.challenge_field_elements("deep-point", modulus, 1)[0];
-        if candidate == 0 {
+        let candidate = transcript.challenge_extension_elements("deep-point", modulus, 1)[0];
+        if ChallengeExtensionTower::is_zero(&candidate) {
             continue;
         }
-        if pow_mod(candidate, plan.trace_size as u64, modulus)? == 1 {
+        if tower.pow(&candidate, plan.trace_size as u64) == ChallengeExtensionTower::one() {
             continue;
         }
-        if pow_mod(candidate, plan.extension_size as u64, modulus)? == coset_marker {
+        if tower.pow(&candidate, plan.extension_size as u64) == coset_marker {
             continue;
         }
         points.push(candidate);
@@ -230,10 +207,7 @@ pub(super) fn sample_deep_points(
 
 // Global mask bits for one claim, identical across every limb where the claim
 // appears, so the masked claims stay comparable as centered integers.
-pub(super) fn claim_mask_bits(
-    proof_randomness_seed_hex: &str,
-    global_claim_id: u64,
-) -> Vec<u8> {
+pub(super) fn claim_mask_bits(proof_randomness_seed_hex: &str, global_claim_id: u64) -> Vec<u8> {
     let mut sampler = DeterministicSampler::new(
         CLAIM_MASK_DOMAIN,
         &[
@@ -358,8 +332,6 @@ fn mask_digit_columns(
 struct LimbWitnessCommitment {
     plan: EvaluationDomainPlan,
     layout: LimbColumnLayout,
-    // Logical witness residue vectors in local order (secret, then errors).
-    logical_witness: Vec<Vec<u64>>,
     // Mask digit logical vectors.
     // Masked coefficients (length trace + mask degree) per physical column.
     masked_coefficients: Vec<Vec<u64>>,
@@ -474,7 +446,6 @@ fn build_limb_witness_commitment(
     Ok(LimbWitnessCommitment {
         plan,
         layout,
-        logical_witness,
         masked_coefficients,
         extension_columns,
         salted,
@@ -486,23 +457,23 @@ fn build_limb_witness_commitment(
 // vectors, the mask selector combinations, the per-repetition error weights,
 // and the combined lincheck sum.
 pub(super) struct LimbPublicVectors {
-    pub(super) secret_factor: Vec<Vec<u64>>,
-    pub(super) u_powers: Vec<Vec<u64>>,
-    pub(super) mask_selectors: Vec<Vec<u64>>,
+    pub(super) secret_factor: Vec<Vec<ChallengeExtensionElement>>,
+    pub(super) u_powers: Vec<Vec<ChallengeExtensionElement>>,
+    pub(super) mask_selectors: Vec<Vec<ChallengeExtensionElement>>,
     // Linkage pair vectors in SumcheckPublicEvaluations order, empty outside
     // the commitment fields.
-    pub(super) linkage_vectors: Vec<Vec<u64>>,
+    pub(super) linkage_vectors: Vec<Vec<ChallengeExtensionElement>>,
     pub(super) error_weights: SumcheckErrorWeights,
-    pub(super) lincheck_claim: u64,
+    pub(super) lincheck_claim: ChallengeExtensionElement,
 }
 
 pub(super) struct LimbChallenges {
-    pub(super) gamma_by_key: Vec<u64>,
-    pub(super) lincheck_challenges: Vec<u64>,
-    pub(super) lincheck_alpha: Vec<u64>,
-    pub(super) linkage_alpha: Vec<u64>,
-    pub(super) consistency_alpha: Vec<u64>,
-    pub(super) beta: Vec<u64>,
+    pub(super) gamma_by_key: Vec<ChallengeExtensionElement>,
+    pub(super) lincheck_challenges: Vec<ChallengeExtensionElement>,
+    pub(super) lincheck_alpha: Vec<ChallengeExtensionElement>,
+    pub(super) linkage_alpha: Vec<ChallengeExtensionElement>,
+    pub(super) consistency_alpha: Vec<ChallengeExtensionElement>,
+    pub(super) beta: Vec<ChallengeExtensionElement>,
 }
 
 pub(super) fn draw_limb_challenges(
@@ -512,13 +483,14 @@ pub(super) fn draw_limb_challenges(
 ) -> LimbChallenges {
     let mut gamma_by_key = Vec::with_capacity(layout.active_keys.len());
     for _ in 0..layout.active_keys.len() {
-        gamma_by_key.push(transcript.challenge_nonzero_field_element("gamma", modulus));
+        gamma_by_key.push(transcript.challenge_nonzero_extension_element("gamma", modulus));
     }
     let mut lincheck_challenges = Vec::with_capacity(LINCHECK_REPETITIONS);
     for _ in 0..LINCHECK_REPETITIONS {
-        lincheck_challenges.push(transcript.challenge_nonzero_field_element("lincheck-u", modulus));
+        lincheck_challenges
+            .push(transcript.challenge_nonzero_extension_element("lincheck-u", modulus));
     }
-    let lincheck_alpha = transcript.challenge_field_elements(
+    let lincheck_alpha = transcript.challenge_extension_elements(
         "lincheck-alpha",
         modulus,
         layout.active_keys.len() * LINCHECK_REPETITIONS,
@@ -526,7 +498,7 @@ pub(super) fn draw_limb_challenges(
     let linkage_alpha = if layout.linkage_active() {
         let commitment_count =
             layout.linkage_randomness_columns / SETUP_COMMITMENT_RANDOMNESS_WIDTH;
-        transcript.challenge_field_elements(
+        transcript.challenge_extension_elements(
             "linkage-alpha",
             modulus,
             commitment_count * SETUP_COMMITMENT_ROW_COUNT * LINCHECK_REPETITIONS,
@@ -535,8 +507,8 @@ pub(super) fn draw_limb_challenges(
         Vec::new()
     };
     let consistency_alpha =
-        transcript.challenge_field_elements("consistency-alpha", modulus, layout.claim_count());
-    let beta = transcript.challenge_field_elements(
+        transcript.challenge_extension_elements("consistency-alpha", modulus, layout.claim_count());
+    let beta = transcript.challenge_extension_elements(
         "beta",
         modulus,
         layout.row_check_constraint_count(),
@@ -560,26 +532,30 @@ pub(super) fn build_limb_public_vectors(
     challenges: &LimbChallenges,
     masked_claims: &[u64],
 ) -> CanonicalResult<LimbPublicVectors> {
+    let tower = ChallengeExtensionTower::for_modulus(modulus)?;
     let ring_degree = statement.ring_degree;
     let u_powers = challenges
         .lincheck_challenges
         .iter()
-        .map(|challenge| field_powers(*challenge, ring_degree, modulus))
+        .map(|challenge| extension_powers(&tower, challenge, ring_degree))
         .collect::<Vec<_>>();
-    let mut secret_factor =
-        vec![vec![0_u64; ring_degree]; LINCHECK_REPETITIONS];
-    let mut error_weights =
-        vec![vec![0_u64; layout.total_error_columns]; LINCHECK_REPETITIONS];
-    let mut lincheck_claim = 0_u64;
+    let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); ring_degree];
+    let mut secret_factor = vec![extension_zero_vector(); LINCHECK_REPETITIONS];
+    let mut error_weights = vec![
+        vec![ChallengeExtensionTower::zero(); layout.total_error_columns];
+        LINCHECK_REPETITIONS
+    ];
+    let mut lincheck_claim = ChallengeExtensionTower::zero();
     let mut error_cursor = 0_usize;
     for (key_position, (key_index, digit_count)) in layout.active_keys.iter().enumerate() {
         let key = &statement.keys[*key_index];
-        let gamma = challenges.gamma_by_key[key_position];
-        let gamma_powers = field_powers(gamma, *digit_count, modulus);
-        // Combined public sample and component vector for this key at this limb.
-        let mut combined_public_sample = vec![0_u64; ring_degree];
-        let mut combined_component = vec![0_u64; ring_degree];
-        for (digit_index, gamma_power) in gamma_powers.iter().copied().enumerate() {
+        let gamma = &challenges.gamma_by_key[key_position];
+        let gamma_powers = extension_powers(&tower, gamma, *digit_count);
+        // Combined public sample and component vector for this key at this
+        // limb, gamma-weighted into the challenge extension.
+        let mut combined_public_sample = extension_zero_vector();
+        let mut combined_component = extension_zero_vector();
+        for (digit_index, gamma_power) in gamma_powers.iter().enumerate() {
             let public_sample = public_key_switch_sample(
                 &key.key_switch_domain,
                 &key.key_switch_seed_hex,
@@ -589,75 +565,67 @@ pub(super) fn build_limb_public_vectors(
             );
             let component = &key.component_b_by_digit[digit_index][limb_index];
             for coefficient_index in 0..ring_degree {
-                combined_public_sample[coefficient_index] = add_mod_fast(
-                    combined_public_sample[coefficient_index],
-                    mul_mod_fast(gamma_power, public_sample[coefficient_index], modulus),
-                    modulus,
+                combined_public_sample[coefficient_index] = tower.add(
+                    &combined_public_sample[coefficient_index],
+                    &tower.scale_base(gamma_power, public_sample[coefficient_index]),
                 );
-                combined_component[coefficient_index] = add_mod_fast(
-                    combined_component[coefficient_index],
-                    mul_mod_fast(gamma_power, component[coefficient_index], modulus),
-                    modulus,
+                combined_component[coefficient_index] = tower.add(
+                    &combined_component[coefficient_index],
+                    &tower.scale_base(gamma_power, component[coefficient_index]),
                 );
             }
         }
         for (repetition, u_power_vector) in u_powers.iter().enumerate() {
             let alpha_value =
-                challenges.lincheck_alpha[key_position * LINCHECK_REPETITIONS + repetition];
-            let v_vector =
-                negacyclic_transpose_product(&combined_public_sample, u_power_vector, modulus)?;
+                &challenges.lincheck_alpha[key_position * LINCHECK_REPETITIONS + repetition];
+            let v_vector = negacyclic_transpose_product_extension_matrix(
+                &tower,
+                &combined_public_sample,
+                u_power_vector,
+                modulus,
+            )?;
             let diagonal_vector =
-                key.diagonal_source_vector(limb_index, u_power_vector, modulus)?;
-            let gamma_limb_power = gamma_powers[limb_index];
+                key.diagonal_source_vector_extension(limb_index, u_power_vector, modulus)?;
+            let gamma_limb_power = &gamma_powers[limb_index];
             for coefficient_index in 0..ring_degree {
-                let factor = sub_mod_fast(
-                    v_vector[coefficient_index],
-                    mul_mod_fast(gamma_limb_power, diagonal_vector[coefficient_index], modulus),
-                    modulus,
+                let factor = tower.sub(
+                    &v_vector[coefficient_index],
+                    &tower.mul(gamma_limb_power, &diagonal_vector[coefficient_index]),
                 );
-                secret_factor[repetition][coefficient_index] = add_mod_fast(
-                    secret_factor[repetition][coefficient_index],
-                    mul_mod_fast(alpha_value, factor, modulus),
-                    modulus,
+                secret_factor[repetition][coefficient_index] = tower.add(
+                    &secret_factor[repetition][coefficient_index],
+                    &tower.mul(alpha_value, &factor),
                 );
             }
-            let lincheck_sum = sub_mod_fast(
-                0,
-                dot_product(u_power_vector, &combined_component, modulus),
-                modulus,
-            );
-            lincheck_claim = add_mod_fast(
-                lincheck_claim,
-                mul_mod_fast(alpha_value, lincheck_sum, modulus),
-                modulus,
-            );
+            let mut component_dot = ChallengeExtensionTower::zero();
+            for (u_value, component_value) in u_power_vector.iter().zip(combined_component.iter()) {
+                component_dot = tower.add(&component_dot, &tower.mul(u_value, component_value));
+            }
+            let lincheck_sum = tower.sub(&ChallengeExtensionTower::zero(), &component_dot);
+            lincheck_claim = tower.add(&lincheck_claim, &tower.mul(alpha_value, &lincheck_sum));
             for (digit_index, gamma_power) in gamma_powers.iter().enumerate() {
                 error_weights[repetition][error_cursor + digit_index] =
-                    mul_mod_fast(alpha_value, *gamma_power, modulus);
+                    tower.mul(alpha_value, gamma_power);
             }
         }
         error_cursor += digit_count;
     }
     // Mask selector combinations: each claim contributes alpha' * 2^digit at
     // its mask slots, and alpha' * masked claim to the combined sum.
-    let mut mask_selectors = vec![vec![0_u64; ring_degree]; layout.mask_column_count];
+    let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
     let mut combined_claim = lincheck_claim;
     for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
-        combined_claim = add_mod_fast(
-            combined_claim,
-            mul_mod_fast(*alpha_value, masked_claims[local_claim], modulus),
-            modulus,
+        combined_claim = tower.add(
+            &combined_claim,
+            &tower.scale_base(alpha_value, masked_claims[local_claim]),
         );
         for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
             let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
             let position = half * layout.trace_size + half_position;
-            let digit_weight = mul_mod_fast(
-                *alpha_value,
-                (1_u64 << digit_index) % modulus,
-                modulus,
-            );
+            let digit_weight =
+                tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
             mask_selectors[column][position] =
-                add_mod_fast(mask_selectors[column][position], digit_weight, modulus);
+                tower.add(&mask_selectors[column][position], &digit_weight);
         }
     }
 
@@ -671,11 +639,11 @@ pub(super) fn build_limb_public_vectors(
         let (linkage_claim, vectors) = build_linkage_public_vectors(
             linkage,
             limb_index,
-            modulus,
+            &tower,
             &u_powers,
             &challenges.linkage_alpha,
         )?;
-        combined_claim = add_mod_fast(combined_claim, linkage_claim, modulus);
+        combined_claim = tower.add(&combined_claim, &linkage_claim);
         linkage_vectors = vectors;
     }
 
@@ -691,6 +659,58 @@ pub(super) fn build_limb_public_vectors(
     })
 }
 
+fn extension_powers(
+    tower: &ChallengeExtensionTower,
+    base: &ChallengeExtensionElement,
+    count: usize,
+) -> Vec<ChallengeExtensionElement> {
+    let mut powers = Vec::with_capacity(count);
+    let mut power = ChallengeExtensionTower::one();
+    for _ in 0..count {
+        powers.push(power);
+        power = tower.mul(&power, base);
+    }
+
+    powers
+}
+
+// Transpose action of the negacyclic matrix of an extension polynomial on an
+// extension vector: expand both operands over the basis pairs, run the base
+// transpose action per pair, and recombine through the tower basis products.
+fn negacyclic_transpose_product_extension_matrix(
+    tower: &ChallengeExtensionTower,
+    matrix_polynomial: &[ChallengeExtensionElement],
+    vector: &[ChallengeExtensionElement],
+    modulus: u64,
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+    let length = vector.len();
+    let mut result = vec![ChallengeExtensionTower::zero(); length];
+    let mut matrix_coordinate = vec![0_u64; matrix_polynomial.len()];
+    let mut vector_coordinate = vec![0_u64; length];
+    for matrix_basis in 0..CHALLENGE_EXTENSION_DEGREE {
+        for (slot, element) in matrix_coordinate.iter_mut().zip(matrix_polynomial.iter()) {
+            *slot = element[matrix_basis];
+        }
+        let mut matrix_basis_element = ChallengeExtensionTower::zero();
+        matrix_basis_element[matrix_basis] = 1;
+        for vector_basis in 0..CHALLENGE_EXTENSION_DEGREE {
+            for (slot, element) in vector_coordinate.iter_mut().zip(vector.iter()) {
+                *slot = element[vector_basis];
+            }
+            let transposed =
+                negacyclic_transpose_product(&matrix_coordinate, &vector_coordinate, modulus)?;
+            let mut vector_basis_element = ChallengeExtensionTower::zero();
+            vector_basis_element[vector_basis] = 1;
+            let basis_product = tower.mul(&matrix_basis_element, &vector_basis_element);
+            for (target, value) in result.iter_mut().zip(transposed.iter()) {
+                *target = tower.add(target, &tower.scale_base(&basis_product, *value));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 // Split a logical length-N public vector into trace halves and extend each.
 fn extend_logical_vector(plan: &EvaluationDomainPlan, vector: &[u64]) -> [Vec<u64>; 2] {
     let trace_size = plan.trace_size;
@@ -704,11 +724,39 @@ fn extend_logical_vector(plan: &EvaluationDomainPlan, vector: &[u64]) -> [Vec<u6
     ]
 }
 
+// The same split-and-extend for an extension-valued public vector, applied
+// per challenge extension coordinate.
+fn extend_logical_vector_extension(
+    plan: &EvaluationDomainPlan,
+    vector: &[ChallengeExtensionElement],
+) -> [Vec<ChallengeExtensionElement>; 2] {
+    let extension_size = plan.extension_size;
+    let mut halves = [
+        vec![ChallengeExtensionTower::zero(); extension_size],
+        vec![ChallengeExtensionTower::zero(); extension_size],
+    ];
+    let mut coordinate_vector = vec![0_u64; vector.len()];
+    for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+        for (slot, element) in coordinate_vector.iter_mut().zip(vector.iter()) {
+            *slot = element[coordinate];
+        }
+        let extended = extend_logical_vector(plan, &coordinate_vector);
+        for (half, extended_half) in halves.iter_mut().zip(extended.iter()) {
+            for (target, value) in half.iter_mut().zip(extended_half.iter()) {
+                target[coordinate] = *value;
+            }
+        }
+    }
+
+    halves
+}
+
 fn prove_limb(
     statement: &TrusteeEvaluationKeyStatement,
     limb_index: usize,
     commitment: &LimbWitnessCommitment,
     consistency_vectors: &[Vec<u64>],
+    global_claim_integers: &[i128],
     proof_randomness_seed_hex: &str,
     global_transcript: &FiatShamirTranscript,
 ) -> CanonicalResult<LimbProof> {
@@ -720,32 +768,14 @@ fn prove_limb(
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
     let challenges = draw_limb_challenges(&mut transcript, layout, modulus);
 
-    // Masked consistency claims: clear integer sum plus the shared smudging
-    // mask, both reduced into the limb field.
+    // Masked consistency claims: the limb residues of the shared global
+    // integer claims (clear integer sum plus the shared smudging mask), so
+    // every limb publishes the same integer reduced into its field.
     let mut masked_claims = Vec::with_capacity(layout.claim_count());
     for local_claim in 0..layout.claim_count() {
-        let repetition = local_claim % CONSISTENCY_REPETITIONS;
-        let vector_index = local_claim / CONSISTENCY_REPETITIONS;
-        let clear_sum = dot_product(
-            &consistency_vectors[repetition],
-            &commitment.logical_witness[vector_index],
-            modulus,
-        );
-        let bits = claim_mask_bits(
-            proof_randomness_seed_hex,
-            global_claim_id(statement, layout, local_claim),
-        );
-        let mut mask_value = 0_u64;
-        for (digit_index, bit) in bits.iter().enumerate() {
-            if *bit == 1 {
-                mask_value = add_mod_fast(
-                    mask_value,
-                    (1_u64 << digit_index) % modulus,
-                    modulus,
-                );
-            }
-        }
-        masked_claims.push(add_mod_fast(clear_sum, mask_value, modulus));
+        let global_id = global_claim_id(statement, layout, local_claim);
+        let claim_integer = global_claim_integers[global_id as usize];
+        masked_claims.push(claim_integer.rem_euclid(modulus as i128) as u64);
     }
 
     let publics = build_limb_public_vectors(
@@ -758,15 +788,16 @@ fn prove_limb(
     )?;
 
     // Extension evaluations of every public sumcheck vector.
+    let tower = ChallengeExtensionTower::for_modulus(modulus)?;
     let secret_factor_extensions = publics
         .secret_factor
         .iter()
-        .map(|vector| extend_logical_vector(plan, vector))
+        .map(|vector| extend_logical_vector_extension(plan, vector))
         .collect::<Vec<_>>();
     let u_extensions = publics
         .u_powers
         .iter()
-        .map(|vector| extend_logical_vector(plan, vector))
+        .map(|vector| extend_logical_vector_extension(plan, vector))
         .collect::<Vec<_>>();
     let consistency_extensions = consistency_vectors
         .iter()
@@ -775,15 +806,16 @@ fn prove_limb(
     let mask_selector_extensions = publics
         .mask_selectors
         .iter()
-        .map(|vector| extend_logical_vector(plan, vector))
+        .map(|vector| extend_logical_vector_extension(plan, vector))
         .collect::<Vec<_>>();
     let linkage_extensions = publics
         .linkage_vectors
         .iter()
-        .map(|vector| extend_logical_vector(plan, vector))
+        .map(|vector| extend_logical_vector_extension(plan, vector))
         .collect::<Vec<_>>();
 
     // Batched row-check and sumcheck integrand evaluations over the coset.
+    let base_domain = BaseColumnDomain { tower };
     let mut row_check_extension = Vec::with_capacity(extension_size);
     let mut sumcheck_extension = Vec::with_capacity(extension_size);
     let mut row = vec![0_u64; commitment.extension_columns.len()];
@@ -792,10 +824,10 @@ fn prove_limb(
             row[column_index] = column[position];
         }
         row_check_extension.push(batched_row_check_value(
+            &base_domain,
             &row,
             &challenges.beta,
             layout,
-            modulus,
         ));
         let point_publics = SumcheckPublicEvaluations {
             secret_factor: secret_factor_extensions
@@ -820,71 +852,104 @@ fn prove_limb(
                 .collect(),
         };
         sumcheck_extension.push(batched_sumcheck_value(
+            &base_domain,
             &row,
             &point_publics,
             &publics.error_weights,
             &challenges.consistency_alpha,
             layout,
-            modulus,
         ));
     }
 
-    // Quotient decompositions in coefficient form.
-    let row_check_coefficients = plan.coefficients_from_extension_evaluations(&row_check_extension)?;
-    drop(row_check_extension);
-    let (row_quotient, row_remainder) =
-        divide_by_trace_vanishing(&row_check_coefficients, trace_size, modulus);
-    let row_quotient = trim_trailing_zeros(row_quotient);
-    if row_remainder.iter().any(|value| *value != 0) {
-        return Err(invalid_succinct_setup_proof(
-            "witness does not satisfy the batched row checks",
-        ));
-    }
+    // Quotient decompositions in coefficient form, one base decomposition per
+    // challenge extension coordinate.
     let commitment_bound = COMMITMENT_BOUND_FACTOR * trace_size;
-    let mut row_quotient_low = row_quotient.clone();
-    row_quotient_low.truncate(commitment_bound);
-    let row_quotient_high = if row_quotient.len() > commitment_bound {
-        row_quotient[commitment_bound..].to_vec()
-    } else {
-        Vec::new()
-    };
-    if row_quotient_high.len() > commitment_bound {
-        return Err(invalid_succinct_setup_proof(
-            "row check quotient exceeds the commitment bound",
-        ));
-    }
-    let sumcheck_coefficients = plan.coefficients_from_extension_evaluations(&sumcheck_extension)?;
-    drop(sumcheck_extension);
-    let (sumcheck_quotient, sumcheck_remainder) =
-        divide_by_trace_vanishing(&sumcheck_coefficients, trace_size, modulus);
-    let sumcheck_quotient = trim_trailing_zeros(sumcheck_quotient);
-    if sumcheck_quotient.len() > commitment_bound {
-        return Err(invalid_succinct_setup_proof(
-            "sumcheck quotient exceeds the commitment bound",
-        ));
-    }
-    let expected_constant = mul_mod_fast(
-        publics.lincheck_claim,
-        inverse_mod(trace_size as u64, modulus)?,
-        modulus,
-    );
-    if sumcheck_remainder[0] != expected_constant {
-        return Err(invalid_succinct_setup_proof(
-            "witness does not satisfy the batched sumcheck claims",
-        ));
-    }
-    let sumcheck_linear = sumcheck_remainder[1..].to_vec();
+    let inverse_trace_size = inverse_mod(trace_size as u64, modulus)?;
+    let mut row_quotient_low = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+    let mut row_quotient_high = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+    let mut sumcheck_quotient = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+    let mut sumcheck_linear = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+    let mut coordinate_evaluations = vec![0_u64; extension_size];
+    for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+        for (slot, value) in coordinate_evaluations
+            .iter_mut()
+            .zip(row_check_extension.iter())
+        {
+            *slot = value[coordinate];
+        }
+        let coordinate_coefficients =
+            plan.coefficients_from_extension_evaluations(&coordinate_evaluations)?;
+        let (quotient, remainder) =
+            divide_by_trace_vanishing(&coordinate_coefficients, trace_size, modulus);
+        let quotient = trim_trailing_zeros(quotient);
+        if remainder.iter().any(|value| *value != 0) {
+            return Err(invalid_succinct_setup_proof(
+                "witness does not satisfy the batched row checks",
+            ));
+        }
+        let mut low = quotient.clone();
+        low.truncate(commitment_bound);
+        let high = if quotient.len() > commitment_bound {
+            quotient[commitment_bound..].to_vec()
+        } else {
+            Vec::new()
+        };
+        if high.len() > commitment_bound {
+            return Err(invalid_succinct_setup_proof(
+                "row check quotient exceeds the commitment bound",
+            ));
+        }
+        row_quotient_low[coordinate] = low;
+        row_quotient_high[coordinate] = high;
 
-    // Phase-two commitment.
-    let mut phase_two_columns = vec![Vec::new(); PHASE_TWO_COLUMN_COUNT];
-    phase_two_columns[QUOTIENT_COLUMN_ROW_CHECK_LOW] =
-        plan.extension_evaluations_from_coefficients(&row_quotient_low);
-    phase_two_columns[QUOTIENT_COLUMN_ROW_CHECK_HIGH] =
-        plan.extension_evaluations_from_coefficients(&row_quotient_high);
-    phase_two_columns[QUOTIENT_COLUMN_SUMCHECK_VANISHING] =
-        plan.extension_evaluations_from_coefficients(&sumcheck_quotient);
-    phase_two_columns[QUOTIENT_COLUMN_SUMCHECK_LINEAR] =
-        plan.extension_evaluations_from_coefficients(&sumcheck_linear);
+        for (slot, value) in coordinate_evaluations
+            .iter_mut()
+            .zip(sumcheck_extension.iter())
+        {
+            *slot = value[coordinate];
+        }
+        let coordinate_coefficients =
+            plan.coefficients_from_extension_evaluations(&coordinate_evaluations)?;
+        let (quotient, remainder) =
+            divide_by_trace_vanishing(&coordinate_coefficients, trace_size, modulus);
+        let quotient = trim_trailing_zeros(quotient);
+        if quotient.len() > commitment_bound {
+            return Err(invalid_succinct_setup_proof(
+                "sumcheck quotient exceeds the commitment bound",
+            ));
+        }
+        let expected_constant = mul_mod_fast(
+            publics.lincheck_claim[coordinate],
+            inverse_trace_size,
+            modulus,
+        );
+        if remainder[0] != expected_constant {
+            return Err(invalid_succinct_setup_proof(
+                "witness does not satisfy the batched sumcheck claims",
+            ));
+        }
+        sumcheck_quotient[coordinate] = quotient;
+        sumcheck_linear[coordinate] = remainder[1..].to_vec();
+    }
+    drop(row_check_extension);
+    drop(sumcheck_extension);
+
+    // Phase-two commitment: four logical extension-valued quotient columns,
+    // committed as four base coordinate columns each.
+    let logical_phase_two_coefficients = [
+        &row_quotient_low,
+        &row_quotient_high,
+        &sumcheck_quotient,
+        &sumcheck_linear,
+    ];
+    let mut phase_two_columns =
+        vec![Vec::new(); PHASE_TWO_COLUMN_COUNT * CHALLENGE_EXTENSION_DEGREE];
+    for (logical_index, coordinate_sets) in logical_phase_two_coefficients.iter().enumerate() {
+        for (coordinate, coefficients) in coordinate_sets.iter().enumerate() {
+            phase_two_columns[logical_index * CHALLENGE_EXTENSION_DEGREE + coordinate] =
+                plan.extension_evaluations_from_coefficients(coefficients);
+        }
+    }
     let mut phase_two_salt_sampler = DeterministicSampler::new(
         LEAF_SALT_DOMAIN,
         &[
@@ -901,33 +966,61 @@ fn prove_limb(
     transcript.absorb("quotient-tree-root", &phase_two_salted.tree.root());
     transcript.absorb_u64_slice("masked-consistency-claims", &masked_claims);
 
-    // Out-of-domain evaluations of every committed column.
+    // Out-of-domain evaluations of every committed column at the extension
+    // points, via one shared powers table per point.
     let deep_points = sample_deep_points(&mut transcript, plan)?;
-    let phase_two_coefficient_sets = [
-        &row_quotient_low,
-        &row_quotient_high,
-        &sumcheck_quotient,
-        &sumcheck_linear,
-    ];
     let mut deep_evaluations = Vec::with_capacity(DEEP_POINT_COUNT);
     for point in &deep_points {
+        let coefficient_length = commitment
+            .masked_coefficients
+            .iter()
+            .map(Vec::len)
+            .chain(
+                logical_phase_two_coefficients
+                    .iter()
+                    .flat_map(|sets| sets.iter().map(Vec::len)),
+            )
+            .max()
+            .unwrap_or(0);
+        let point_powers = extension_powers(&tower, point, coefficient_length);
+        let evaluate_base = |coefficients: &[u64]| {
+            let mut accumulated = ChallengeExtensionTower::zero();
+            for (coefficient, power) in coefficients.iter().zip(point_powers.iter()) {
+                accumulated = tower.add(&accumulated, &tower.scale_base(power, *coefficient));
+            }
+            accumulated
+        };
         let mut evaluations =
             Vec::with_capacity(commitment.masked_coefficients.len() + PHASE_TWO_COLUMN_COUNT);
         for coefficients in &commitment.masked_coefficients {
-            evaluations.push(evaluate_coefficients(coefficients, *point, modulus));
+            evaluations.push(evaluate_base(coefficients));
         }
-        for coefficients in phase_two_coefficient_sets {
-            evaluations.push(evaluate_coefficients(coefficients, *point, modulus));
+        for coordinate_sets in &logical_phase_two_coefficients {
+            // Recombine the per-coordinate base evaluations through the basis.
+            let mut combined = ChallengeExtensionTower::zero();
+            for (coordinate, coefficients) in coordinate_sets.iter().enumerate() {
+                let coordinate_evaluation = evaluate_base(coefficients);
+                let mut basis_element = ChallengeExtensionTower::zero();
+                basis_element[coordinate] = 1;
+                combined = tower.add(
+                    &combined,
+                    &tower.mul(&basis_element, &coordinate_evaluation),
+                );
+            }
+            evaluations.push(combined);
         }
         deep_evaluations.push(evaluations);
     }
     for evaluations in &deep_evaluations {
-        transcript.absorb_u64_slice("deep-evaluations", evaluations);
+        let flattened = evaluations.iter().flatten().copied().collect::<Vec<u64>>();
+        transcript.absorb_u64_slice("deep-evaluations", &flattened);
     }
 
-    // Lambda-batched DEEP quotient codeword over the extension coset.
+    // Lambda-batched DEEP quotient codeword over the extension coset. The
+    // committed phase-one values stay in the base field; the quotients and
+    // the batching weights live in the challenge extension.
     let total_column_count = commitment.extension_columns.len() + PHASE_TWO_COLUMN_COUNT;
-    let lambda = transcript.challenge_field_elements(
+    let lambda = transcript.challenge_extension_elements(
         "lambda",
         modulus,
         total_column_count * DEEP_POINT_COUNT,
@@ -942,38 +1035,64 @@ fn prove_limb(
     for deep_point in &deep_points {
         let differences = extension_points
             .iter()
-            .map(|extension_point| sub_mod_fast(*extension_point, *deep_point, modulus))
+            .map(|extension_point| tower.sub(&tower.embed_base(*extension_point), deep_point))
             .collect::<Vec<_>>();
-        inverted_differences_by_point.push(batch_inverse(&differences, modulus)?);
+        inverted_differences_by_point.push(tower.batch_inverse(&differences)?);
     }
-    let mut batch_codeword = vec![0_u64; extension_size];
-    for position in 0..extension_size {
-        let mut accumulated = 0_u64;
-        for (column_index, column) in commitment
-            .extension_columns
-            .iter()
-            .chain(phase_two_columns.iter())
-            .enumerate()
-        {
-            let column_value = column[position];
-            for (point_index, evaluations) in deep_evaluations.iter().enumerate() {
-                let quotient = mul_mod_fast(
-                    sub_mod_fast(column_value, evaluations[column_index], modulus),
-                    inverted_differences_by_point[point_index][position],
-                    modulus,
-                );
-                accumulated = add_mod_fast(
-                    accumulated,
-                    mul_mod_fast(
-                        lambda[column_index * DEEP_POINT_COUNT + point_index],
-                        quotient,
-                        modulus,
-                    ),
-                    modulus,
+    // Per point: the lambda-weighted sum of claimed evaluations, hoisted out
+    // of the position loop so the loop runs on base column values.
+    let mut lambda_evaluation_sums = [ChallengeExtensionTower::zero(); DEEP_POINT_COUNT];
+    let mut lambda_by_point =
+        vec![vec![ChallengeExtensionTower::zero(); total_column_count]; DEEP_POINT_COUNT];
+    for column_index in 0..total_column_count {
+        for (point_index, evaluations) in deep_evaluations.iter().enumerate() {
+            let lambda_value = &lambda[column_index * DEEP_POINT_COUNT + point_index];
+            lambda_evaluation_sums[point_index] = tower.add(
+                &lambda_evaluation_sums[point_index],
+                &tower.mul(lambda_value, &evaluations[column_index]),
+            );
+            lambda_by_point[point_index][column_index] = *lambda_value;
+        }
+    }
+    let phase_two_logical_value = |position: usize, logical_index: usize| {
+        let mut value = ChallengeExtensionTower::zero();
+        for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+            value[coordinate] = phase_two_columns
+                [logical_index * CHALLENGE_EXTENSION_DEGREE + coordinate][position];
+        }
+        value
+    };
+    let mut batch_codeword = vec![ChallengeExtensionTower::zero(); extension_size];
+    for (position, batch_value) in batch_codeword.iter_mut().enumerate() {
+        let mut accumulated = ChallengeExtensionTower::zero();
+        for (point_index, lambda_row) in lambda_by_point.iter().enumerate() {
+            let mut point_sum = ChallengeExtensionTower::zero();
+            for (column_index, column) in commitment.extension_columns.iter().enumerate() {
+                point_sum = tower.add(
+                    &point_sum,
+                    &tower.scale_base(&lambda_row[column_index], column[position]),
                 );
             }
+            for logical_index in 0..PHASE_TWO_COLUMN_COUNT {
+                let column_index = commitment.extension_columns.len() + logical_index;
+                point_sum = tower.add(
+                    &point_sum,
+                    &tower.mul(
+                        &lambda_row[column_index],
+                        &phase_two_logical_value(position, logical_index),
+                    ),
+                );
+            }
+            point_sum = tower.sub(&point_sum, &lambda_evaluation_sums[point_index]);
+            accumulated = tower.add(
+                &accumulated,
+                &tower.mul(
+                    &point_sum,
+                    &inverted_differences_by_point[point_index][position],
+                ),
+            );
         }
-        batch_codeword[position] = accumulated;
+        *batch_value = accumulated;
     }
 
     let low_degree_parameters = LowDegreeParameters {
@@ -1088,7 +1207,8 @@ fn validate_witness_support(
             }
             if witness.opening_randomness_by_limb.len() != linkage.commitments.len()
                 || witness.opening_randomness_by_limb.iter().any(|columns| {
-                    columns.len() != crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
+                    columns.len()
+                        != crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
                         || columns.iter().any(|column| {
                             column.len() != statement.ring_degree
                                 || column
@@ -1114,6 +1234,54 @@ fn validate_witness_support(
     }
 
     Ok(())
+}
+
+// The shared global claim integers: for every statement-global witness
+// vector and consistency repetition, the clear integer combination of the
+// signed witness plus the shared smudging mask. Every limb publishes the
+// residues of these integers, so the cross-limb binding is integer equality
+// recovered by lifting from two limb fields.
+fn global_claim_integers(
+    statement: &TrusteeEvaluationKeyStatement,
+    witness: &TrusteeEvaluationKeyWitness,
+    consistency_vectors: &[Vec<u64>],
+    proof_randomness_seed_hex: &str,
+) -> Vec<i128> {
+    let mut signed_vectors: Vec<&[i64]> = Vec::new();
+    signed_vectors.push(&witness.secret_coefficients);
+    for error_vectors in &witness.error_coefficients_by_key {
+        for error_vector in error_vectors {
+            signed_vectors.push(error_vector);
+        }
+    }
+    if statement.same_secret_linkage.is_some() {
+        signed_vectors.push(&witness.negative_indicator_coefficients);
+        for randomness_columns in &witness.opening_randomness_by_limb {
+            for column in randomness_columns {
+                signed_vectors.push(column);
+            }
+        }
+    }
+    let mut integers = Vec::with_capacity(signed_vectors.len() * CONSISTENCY_REPETITIONS);
+    for signed_vector in &signed_vectors {
+        for consistency_vector in consistency_vectors {
+            let global_id = integers.len() as u64;
+            let mut clear_sum = 0_i128;
+            for (coefficient, combination) in signed_vector.iter().zip(consistency_vector.iter()) {
+                clear_sum += i128::from(*coefficient) * i128::from(*combination);
+            }
+            let bits = claim_mask_bits(proof_randomness_seed_hex, global_id);
+            let mut mask_integer = 0_i128;
+            for (digit_index, bit) in bits.iter().enumerate() {
+                if *bit == 1 {
+                    mask_integer += 1_i128 << digit_index;
+                }
+            }
+            integers.push(clear_sum + mask_integer);
+        }
+    }
+
+    integers
 }
 
 pub(crate) fn prove_evaluation_key_share(
@@ -1168,6 +1336,12 @@ pub(crate) fn prove_evaluation_key_share(
             )
         })
         .collect::<Vec<_>>();
+    let claim_integers = global_claim_integers(
+        statement,
+        witness,
+        &consistency_vectors,
+        proof_randomness_seed_hex,
+    );
 
     #[cfg(not(target_arch = "wasm32"))]
     let limb_proofs = commitments
@@ -1179,6 +1353,7 @@ pub(crate) fn prove_evaluation_key_share(
                 limb_index,
                 commitment,
                 &consistency_vectors,
+                &claim_integers,
                 proof_randomness_seed_hex,
                 &transcript,
             )
@@ -1194,6 +1369,7 @@ pub(crate) fn prove_evaluation_key_share(
                 limb_index,
                 commitment,
                 &consistency_vectors,
+                &claim_integers,
                 proof_randomness_seed_hex,
                 &transcript,
             )

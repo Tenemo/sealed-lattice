@@ -79,7 +79,6 @@ use crate::{
             engine::{BgvPublicKey, DevelopmentBgvKey},
             key_switch::{KeySwitchKey, generate_galois_key, generate_relinearization_key},
             records::MAXIMUM_OPTION_COUNT,
-            top_k::selected_evaluator_rotation_key_schedule,
         },
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},

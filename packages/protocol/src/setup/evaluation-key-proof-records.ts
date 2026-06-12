@@ -31,9 +31,9 @@ type EvaluationKeyShareProofFamily =
 export const evaluationKeyShareRecordVerificationStatus =
     'share-records-bound-to-trustee-evaluation-key-argument';
 export const trusteeEvaluationKeyProofModelStatus =
-    'succinct-trustee-evaluation-key-argument-accounting-pending';
+    'succinct-trustee-evaluation-key-argument-accounting-accepted';
 export const trusteeEvaluationKeyProofVerificationStatus =
-    'succinct-trustee-evaluation-key-argument-verified-with-open-proof-accounting';
+    'succinct-trustee-evaluation-key-argument-verified-with-accepted-proof-accounting';
 export const trusteeEvaluationKeyProofFamily = 'trustee-evaluation-key';
 const publicEvaluationKeyAssemblyStatus =
     'assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate';
@@ -1117,7 +1117,7 @@ const assertShareMaterial = (
         );
     } else {
         throw new TypeError(
-            `${fieldName}.keySwitchMaterialEncoding must be embedded-full-key-switch-component-vectors or ${evaluationKeyShareComponentMaterialEncoding}.`,
+            `${fieldName}.keySwitchMaterialEncoding must be embedded-full-key-switch-component-vectors or binary-chunked-key-switch-component-vectors.`,
         );
     }
 };

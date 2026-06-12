@@ -427,7 +427,11 @@ pub(super) fn read_public_evaluation_key_rotation_requests(
     request: &Value,
 ) -> CanonicalResult<Vec<(usize, usize)>> {
     match request.get("rotationKeys") {
-        None => selected_public_evaluation_key_rotation_requests(),
+        // Rotation material is generated only on explicit request. The full
+        // committed working-level rotation schedule is too large for one
+        // material response (each working-level key carries every
+        // decomposition digit), so callers request the rotations they need.
+        None => Ok(Vec::new()),
         Some(Value::Array(entries)) => {
             let mut seen = BTreeSet::new();
             entries
@@ -453,8 +457,10 @@ pub(super) fn read_public_evaluation_key_rotation_requests(
     }
 }
 
-pub(super) fn selected_public_evaluation_key_rotation_requests() -> CanonicalResult<Vec<(usize, usize)>> {
-    selected_evaluator_rotation_key_schedule(MAXIMUM_OPTION_COUNT)
+#[cfg(test)]
+pub(super) fn selected_public_evaluation_key_rotation_requests()
+-> CanonicalResult<Vec<(usize, usize)>> {
+    crate::bgv::evaluator::top_k::selected_evaluator_rotation_key_schedule(MAXIMUM_OPTION_COUNT)
 }
 
 fn public_key_switch_material_entry(

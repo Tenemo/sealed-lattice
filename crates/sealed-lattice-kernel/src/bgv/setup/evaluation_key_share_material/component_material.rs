@@ -548,7 +548,9 @@ fn component_b_vectors_from_embedded_record(
     let entries = array_field(record, "keySwitchComponentVectors")?;
     if entries.len()
         != digit_count.checked_mul(limb_count).ok_or_else(|| {
-            invalid_evaluation_key_share_material("evaluation-key component vector count overflowed")
+            invalid_evaluation_key_share_material(
+                "evaluation-key component vector count overflowed",
+            )
         })?
     {
         return Err(invalid_evaluation_key_share_material(

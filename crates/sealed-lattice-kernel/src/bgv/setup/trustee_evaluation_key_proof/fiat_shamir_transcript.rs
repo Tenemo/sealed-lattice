@@ -1,3 +1,4 @@
+use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
 use crate::hashing::hash512;
 
 const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/transcript-v1";
@@ -93,11 +94,33 @@ impl FiatShamirTranscript {
         elements
     }
 
-    // A nonzero uniform field element.
-    pub(super) fn challenge_nonzero_field_element(&mut self, label: &str, modulus: u64) -> u64 {
+    // Uniform degree-four challenge extension elements: four base-field
+    // coordinates per element, rejection-sampled like every base challenge.
+    pub(super) fn challenge_extension_elements(
+        &mut self,
+        label: &str,
+        modulus: u64,
+        count: usize,
+    ) -> Vec<ChallengeExtensionElement> {
+        self.challenge_field_elements(label, modulus, count * CHALLENGE_EXTENSION_DEGREE)
+            .chunks_exact(CHALLENGE_EXTENSION_DEGREE)
+            .map(|coordinates| {
+                coordinates
+                    .try_into()
+                    .expect("chunks are extension-degree wide")
+            })
+            .collect()
+    }
+
+    // A nonzero uniform challenge extension element.
+    pub(super) fn challenge_nonzero_extension_element(
+        &mut self,
+        label: &str,
+        modulus: u64,
+    ) -> ChallengeExtensionElement {
         loop {
-            let element = self.challenge_field_elements(label, modulus, 1)[0];
-            if element != 0 {
+            let element = self.challenge_extension_elements(label, modulus, 1)[0];
+            if element.iter().any(|coordinate| *coordinate != 0) {
                 return element;
             }
         }

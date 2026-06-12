@@ -163,7 +163,10 @@ const protocolHashFromKernel = (
         value,
     });
 
-const qSharePrimes = [65_537, 114_689, 147_457] as const;
+const qSharePrimes = [
+    65_537, 65_539, 65_543, 65_551, 65_557, 65_563, 65_579, 65_581, 65_587,
+    65_599, 65_609, 65_617, 65_629, 65_633, 65_647, 65_651, 65_657,
+] as const;
 const participantCount = 2;
 const vssFixtureRingDegree = 8;
 const vssFixtureThresholdDegree = 2;
@@ -453,7 +456,7 @@ const galoisKeySwitchSeed = (
         level,
     });
 
-const relinearizationProofMaterial = (
+const relinearizationShareMaterial = (
     kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     shareRoot: string,
@@ -461,11 +464,6 @@ const relinearizationProofMaterial = (
     round: 'round-one' | 'round-two',
     level: number,
 ): Record<string, unknown> => ({
-    proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
-    setupProofBinding: {
-        objectType: 'SetupProofBindingFixture',
-        label,
-    },
     keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
     keySwitchDomain: 'relinearization',
     keySwitchSeedHex: relinearizationKeySwitchSeed(
@@ -483,44 +481,23 @@ const relinearizationProofMaterial = (
             vectorHash: hashFromKernel(kernel, `component-vector-${label}`),
         },
     ],
-    relinearizationKeyShareTboxParameterProfileHash: hashFromKernel(
-        kernel,
-        `relinearization-tbox-${label}`,
-    ),
-    statementHash: hashFromKernel(kernel, `statement-${label}`),
-    relationCommitmentHash: hashFromKernel(
-        kernel,
-        `relation-commitment-${label}`,
-    ),
-    tboxCommitmentPrefixHash: hashFromKernel(
-        kernel,
-        `tbox-commitment-${label}`,
-    ),
-    challenge: 17,
-    proofSizeBytes: 4,
-    proofBytesHash: hashFromKernel(kernel, `proof-bytes-${label}`),
-    proofBytesHex: '00112233',
 });
 
-const galoisProofMaterial = (
+const galoisShareMaterial = (
     kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     shareRoot: string,
     label: string,
     rotation: number,
+    level: number,
 ): Record<string, unknown> => ({
-    proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1',
-    setupProofBinding: {
-        objectType: 'SetupProofBindingFixture',
-        label,
-    },
     keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
     keySwitchDomain: `galois-${String(rotation)}`,
     keySwitchSeedHex: galoisKeySwitchSeed(
         kernel,
         evaluatorKeySchedule,
         rotation,
-        1,
+        level,
     ),
     ringDegree: 8,
     keySwitchComponentVectorRoot: shareRoot,
@@ -531,20 +508,6 @@ const galoisProofMaterial = (
             vectorHash: hashFromKernel(kernel, `galois-component-${label}`),
         },
     ],
-    galoisKeyShareTboxParameterProfileHash: hashFromKernel(
-        kernel,
-        `galois-tbox-${label}`,
-    ),
-    statementHash: hashFromKernel(kernel, `galois-statement-${label}`),
-    relationCommitmentHash: hashFromKernel(kernel, `galois-relation-${label}`),
-    tboxCommitmentPrefixHash: hashFromKernel(
-        kernel,
-        `galois-tbox-commitment-${label}`,
-    ),
-    challenge: 19,
-    proofSizeBytes: 4,
-    proofBytesHash: hashFromKernel(kernel, `galois-proof-bytes-${label}`),
-    proofBytesHex: '44556677',
 });
 
 type SetupIntentSignerFixture = Readonly<{
@@ -1370,7 +1333,7 @@ describe('accepted setup public package API in Node', () => {
                         trusteeRosterPosition: reference.trusteeRosterPosition,
                         level,
                         roundOneShareRoot,
-                        proofMaterial: relinearizationProofMaterial(
+                        shareMaterial: relinearizationShareMaterial(
                             kernel,
                             evaluatorKeySchedule,
                             roundOneShareRoot,
@@ -1394,7 +1357,7 @@ describe('accepted setup public package API in Node', () => {
                         trusteeRosterPosition: reference.trusteeRosterPosition,
                         level,
                         roundTwoShareRoot,
-                        proofMaterial: relinearizationProofMaterial(
+                        shareMaterial: relinearizationShareMaterial(
                             kernel,
                             evaluatorKeySchedule,
                             roundTwoShareRoot,
@@ -1417,7 +1380,7 @@ describe('accepted setup public package API in Node', () => {
                 batchContributions: sameSecretProofReferences.map(
                     (reference) => ({
                         trusteeRosterPosition: reference.trusteeRosterPosition,
-                        galoisKeyShareProofs: requiredGaloisKeySchedule.map(
+                        galoisKeyShares: requiredGaloisKeySchedule.map(
                             (scheduleEntry) => {
                                 const galoisKeyShareRoot = hashFromKernel(
                                     kernel,
@@ -1428,12 +1391,13 @@ describe('accepted setup public package API in Node', () => {
                                     rotation: scheduleEntry.rotation,
                                     level: scheduleEntry.level,
                                     galoisKeyShareRoot,
-                                    proofMaterial: galoisProofMaterial(
+                                    shareMaterial: galoisShareMaterial(
                                         kernel,
                                         evaluatorKeySchedule,
                                         galoisKeyShareRoot,
                                         `${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.rotation)}`,
                                         scheduleEntry.rotation,
+                                        scheduleEntry.level,
                                     ),
                                 };
                             },
@@ -1447,6 +1411,21 @@ describe('accepted setup public package API in Node', () => {
                 relinearizationKeyShareRounds,
                 galoisKeyShareBatches,
             });
+        const trusteeEvaluationKeyProofsWithoutRoot = {
+            objectType: 'TrusteeEvaluationKeyProofSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            relinearizationKeyShareRoundsRoot:
+                relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
+            proofRecords: [],
+        };
+        const trusteeEvaluationKeyProofs = {
+            ...trusteeEvaluationKeyProofsWithoutRoot,
+            trusteeEvaluationKeyProofSetRoot: kernel.deriveProtocolHash({
+                namespace: 'TrusteeEvaluationKeyProofSetRoot',
+                value: trusteeEvaluationKeyProofsWithoutRoot,
+            }),
+        };
         const privateVssEnvelopeCommitmentRoot = hashFromKernel(
             kernel,
             'package-private-vss-envelope-root',
@@ -1576,6 +1555,7 @@ describe('accepted setup public package API in Node', () => {
             evaluatorKeySchedule,
             relinearizationKeyShareRounds,
             galoisKeyShareBatches,
+            trusteeEvaluationKeyProofs,
             evaluationKeys: publicEvaluationKeys,
             setupCertificateInput: {
                 setupProfile,
@@ -1663,20 +1643,6 @@ describe('accepted setup public package API in Node', () => {
         ).not.toMatch(
             /secretCoefficients|openingRandomness|roundOneAggregateSourceCoefficients|proofGeneration/u,
         );
-        expect(() =>
-            publicSetupApi.createRelinearizationKeyShareRounds({
-                ...commonEvaluationKeyInput,
-                roundOneContributions: [
-                    {
-                        ...roundOneContributions[0],
-                        proofGeneration: {
-                            secretCoefficients: [1],
-                        },
-                    },
-                ],
-                roundTwoContributions,
-            }),
-        ).toThrow(/proofGeneration is not accepted/u);
         expect(() =>
             publicSetupApi.createSetupPackage({
                 ...setupPackageInput,

@@ -57,6 +57,7 @@ use self::evaluation_key_material_transport::{
     transported_evaluation_key_share_component_material_from_request,
     verify_public_evaluation_key_set, verify_required_public_evaluation_key_set,
 };
+use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
     TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
@@ -64,7 +65,6 @@ pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
     round_one_public_aggregate_diagonals_from_package, trustee_evaluation_key_proof_material_root,
     trustee_evaluation_key_statement_from_package,
 };
-use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 use self::evaluation_key_share_rounds::{
     EvaluationKeyProofCommonBinding, evaluation_key_proof_common_binding,
     expected_galois_key_switch_seed, expected_relinearization_key_switch_seed,
@@ -95,13 +95,13 @@ use self::public_key_shares::{
 };
 use self::same_secret_consistency::{
     LnpTboxZ34MetadataExpectation, SameSecretProofBinding, SameSecretStatementBinding,
-    same_secret_consistency_root_from_package, verify_lnp_tbox_z34_metadata_fields,
+    same_secret_consistency_root_from_package,
     same_secret_constant_commitment_values_from_material, same_secret_proof_bindings_from_package,
     same_secret_proof_family_binding_root, same_secret_proof_set_root_from_package,
     same_secret_statement_bindings_from_package, same_secret_statement_records_by_roster_position,
     same_secret_transported_constant_commitments_by_roster_position,
-    verify_optional_same_secret_lnp_proofs, verify_same_secret_consistency,
-    verify_same_secret_context,
+    verify_lnp_tbox_z34_metadata_fields, verify_optional_same_secret_lnp_proofs,
+    verify_same_secret_consistency, verify_same_secret_context,
 };
 use self::setup_context::{q_share_hash, q_share_value, verify_context, verify_q_share};
 use self::threshold_share_commitment_checks::{

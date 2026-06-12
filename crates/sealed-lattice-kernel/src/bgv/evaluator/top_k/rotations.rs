@@ -231,10 +231,11 @@ pub(crate) fn rotate_with_compact_inverse_generator_basis(
 // the aggregate there before packing), and packed-rank-return rotations at
 // the comparison output level. Lower-level consumers use the same keys
 // through truncation.
+#[cfg(test)]
 pub(crate) fn selected_evaluator_rotation_key_schedule(
     option_count: usize,
 ) -> CanonicalResult<Vec<(usize, usize)>> {
-    if SELECTED_EVALUATOR_WORKING_LEVEL >= DATA_PRIMES.len()
+    if SELECTED_EVALUATOR_WORKING_LEVEL >= crate::bgv::profile::DATA_PRIMES.len()
         || DIRECT_COMPARISON_OUTPUT_LEVEL > SELECTED_EVALUATOR_WORKING_LEVEL
     {
         return Err(CanonicalError::new(

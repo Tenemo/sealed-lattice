@@ -1,3 +1,6 @@
+use super::extension_field::{
+    CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
+};
 use super::*;
 #[cfg(test)]
 use crate::bgv::evaluator::key_switch::KEY_SWITCH_ERROR_DOMAIN;
@@ -15,20 +18,18 @@ use evaluation_domain::negacyclic_transpose_product;
 #[cfg(test)]
 use num_bigint::BigInt;
 
+#[cfg(test)]
+use crate::bgv::setup::commitment::compute_setup_big_signed_lifted_commitment;
 use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_MODULE_RANK,
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
     SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentValue,
     StructuralMatrixPolynomial, setup_commitment_matrix_coefficients_cached,
     structural_matrix_polynomial_kind,
 };
-#[cfg(test)]
-use crate::bgv::setup::commitment::compute_setup_big_signed_lifted_commitment;
 
 #[cfg(test)]
-const WITNESS_SECRET_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/witness-secret-v1";
-const STATEMENT_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/statement-v2";
+const WITNESS_SECRET_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/witness-secret-v1";
+const STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/statement-v2";
 
 // Which key family the diagonal source term encodes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -70,9 +71,7 @@ pub(super) fn galois_automorphism_apply(
     let degree = values.len();
     let ring_order = 2 * degree;
     if galois_element.is_multiple_of(2) {
-        return Err(invalid_succinct_setup_proof(
-            "Galois element must be odd",
-        ));
+        return Err(invalid_succinct_setup_proof("Galois element must be odd"));
     }
     let mut rotated = vec![0_u64; degree];
     for (index, value) in values.iter().enumerate() {
@@ -98,9 +97,7 @@ pub(super) fn galois_automorphism_transpose_apply(
     let degree = vector.len();
     let ring_order = 2 * degree;
     if galois_element.is_multiple_of(2) {
-        return Err(invalid_succinct_setup_proof(
-            "Galois element must be odd",
-        ));
+        return Err(invalid_succinct_setup_proof("Galois element must be odd"));
     }
     let mut transposed = Vec::with_capacity(degree);
     for index in 0..degree {
@@ -276,16 +273,35 @@ impl EvaluationKeyShareDescriptor {
             }
         }
     }
+
+    // The same diagonal source action on an extension challenge vector: the
+    // action is base-linear, so it applies to each extension coordinate.
+    pub(super) fn diagonal_source_vector_extension(
+        &self,
+        limb_index: usize,
+        u_powers: &[ChallengeExtensionElement],
+        modulus: u64,
+    ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+        let mut result = vec![ChallengeExtensionTower::zero(); u_powers.len()];
+        let mut coordinate_vector = vec![0_u64; u_powers.len()];
+        for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+            for (slot, element) in coordinate_vector.iter_mut().zip(u_powers.iter()) {
+                *slot = element[coordinate];
+            }
+            let applied = self.diagonal_source_vector(limb_index, &coordinate_vector, modulus)?;
+            for (target, value) in result.iter_mut().zip(applied.iter()) {
+                target[coordinate] = *value;
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl TrusteeEvaluationKeyStatement {
     // The number of active limb fields: one past the highest key level.
     pub(super) fn limb_count(&self) -> usize {
-        self.keys
-            .iter()
-            .map(|key| key.level + 1)
-            .max()
-            .unwrap_or(0)
+        self.keys.iter().map(|key| key.level + 1).max().unwrap_or(0)
     }
 
     pub(super) fn limb_moduli(&self) -> &'static [u64] {
@@ -344,9 +360,8 @@ impl TrusteeEvaluationKeyStatement {
             preimage.extend_from_slice(linkage.public_matrix_seed_hash.as_bytes());
             preimage.extend_from_slice(&(linkage.commitments.len() as u64).to_le_bytes());
             for commitment in &linkage.commitments {
-                preimage.extend_from_slice(
-                    &(commitment.source_rns_limb_index as u64).to_le_bytes(),
-                );
+                preimage
+                    .extend_from_slice(&(commitment.source_rns_limb_index as u64).to_le_bytes());
                 preimage.extend_from_slice(&commitment.source_message_modulus.to_le_bytes());
                 for limb in &commitment.limbs {
                     for row in &limb.rows {
@@ -403,10 +418,7 @@ impl TrusteeEvaluationKeyStatement {
                     if limb.commitment_modulus_index != commitment_field
                         || limb.modulus != DATA_PRIMES[commitment_field]
                         || limb.rows.len() != SETUP_COMMITMENT_ROW_COUNT
-                        || limb
-                            .rows
-                            .iter()
-                            .any(|row| row.len() != self.ring_degree)
+                        || limb.rows.iter().any(|row| row.len() != self.ring_degree)
                     {
                         return Err(invalid_succinct_setup_proof(
                             "same-secret linkage commitment limb shape does not match the profile",
@@ -430,7 +442,6 @@ impl TrusteeEvaluationKeyStatement {
             _ => 0,
         }
     }
-
 }
 
 fn coefficient_vector_hash(coefficients: &[u64]) -> [u8; 64] {
@@ -595,8 +606,7 @@ fn generate_development_key(
                     ],
                 )
                 .uniform_residues(*modulus, ring_degree);
-                let source =
-                    negacyclic_ring_product(&secret_residues, &aggregate, *modulus)?;
+                let source = negacyclic_ring_product(&secret_residues, &aggregate, *modulus)?;
                 round_one_aggregate_diagonal.push(aggregate);
                 source
             }
@@ -697,7 +707,10 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
                 LINKAGE_MATRIX_SEED_DOMAIN,
                 &[key_switch_seed_hex.as_bytes()],
             );
-            digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+            digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
         };
         negative_indicator_coefficients = secret_coefficients
             .iter()
@@ -893,8 +906,7 @@ impl LimbColumnLayout {
 
     pub(super) fn phase_one_physical_count(&self) -> usize {
         TRACE_SPLIT
-            * (1
-                + 2 * self.total_error_columns
+            * (1 + 2 * self.total_error_columns
                 + self.linkage_logical_columns()
                 + self.mask_column_count)
     }
@@ -906,7 +918,11 @@ impl LimbColumnLayout {
 
     // Mask slot of one claim digit: claims are laid out consecutively with
     // CLAIM_MASK_DIGIT_COUNT binary digits each.
-    pub(super) fn mask_slot(&self, claim_index: usize, digit_index: usize) -> (usize, usize, usize) {
+    pub(super) fn mask_slot(
+        &self,
+        claim_index: usize,
+        digit_index: usize,
+    ) -> (usize, usize, usize) {
         let slot = claim_index * CLAIM_MASK_DIGIT_COUNT + digit_index;
         let logical_column = slot / self.ring_degree;
         let position = slot % self.ring_degree;
@@ -923,6 +939,103 @@ pub(super) const QUOTIENT_COLUMN_ROW_CHECK_HIGH: usize = 1;
 pub(super) const QUOTIENT_COLUMN_SUMCHECK_VANISHING: usize = 2;
 pub(super) const QUOTIENT_COLUMN_SUMCHECK_LINEAR: usize = 3;
 
+// Column value domain for the composition functions: the prover evaluates
+// them over base-field committed column values, the verifier re-evaluates the
+// same expressions over extension-valued out-of-domain evaluations. One
+// generic implementation keeps the constraint enumeration identical on both
+// sides; the challenges always live in the extension.
+pub(super) trait CompositionColumnDomain {
+    type Value: Copy;
+
+    fn tower(&self) -> &ChallengeExtensionTower;
+    fn value_mul(&self, left: &Self::Value, right: &Self::Value) -> Self::Value;
+    fn value_sub(&self, left: &Self::Value, right: &Self::Value) -> Self::Value;
+    fn value_sub_base(&self, left: &Self::Value, right: u64) -> Self::Value;
+    // challenge * value, landing in the extension.
+    fn challenge_times(
+        &self,
+        challenge: &ChallengeExtensionElement,
+        value: &Self::Value,
+    ) -> ChallengeExtensionElement;
+}
+
+pub(super) struct BaseColumnDomain {
+    pub(super) tower: ChallengeExtensionTower,
+}
+
+impl CompositionColumnDomain for BaseColumnDomain {
+    type Value = u64;
+
+    fn tower(&self) -> &ChallengeExtensionTower {
+        &self.tower
+    }
+
+    fn value_mul(&self, left: &u64, right: &u64) -> u64 {
+        mul_mod_fast(*left, *right, self.tower.modulus)
+    }
+
+    fn value_sub(&self, left: &u64, right: &u64) -> u64 {
+        sub_mod_fast(*left, *right, self.tower.modulus)
+    }
+
+    fn value_sub_base(&self, left: &u64, right: u64) -> u64 {
+        sub_mod_fast(*left, right % self.tower.modulus, self.tower.modulus)
+    }
+
+    fn challenge_times(
+        &self,
+        challenge: &ChallengeExtensionElement,
+        value: &u64,
+    ) -> ChallengeExtensionElement {
+        self.tower.scale_base(challenge, *value)
+    }
+}
+
+pub(super) struct ExtensionColumnDomain {
+    pub(super) tower: ChallengeExtensionTower,
+}
+
+impl CompositionColumnDomain for ExtensionColumnDomain {
+    type Value = ChallengeExtensionElement;
+
+    fn tower(&self) -> &ChallengeExtensionTower {
+        &self.tower
+    }
+
+    fn value_mul(
+        &self,
+        left: &ChallengeExtensionElement,
+        right: &ChallengeExtensionElement,
+    ) -> ChallengeExtensionElement {
+        self.tower.mul(left, right)
+    }
+
+    fn value_sub(
+        &self,
+        left: &ChallengeExtensionElement,
+        right: &ChallengeExtensionElement,
+    ) -> ChallengeExtensionElement {
+        self.tower.sub(left, right)
+    }
+
+    fn value_sub_base(
+        &self,
+        left: &ChallengeExtensionElement,
+        right: u64,
+    ) -> ChallengeExtensionElement {
+        self.tower
+            .sub(left, &self.tower.embed_base(right % self.tower.modulus))
+    }
+
+    fn challenge_times(
+        &self,
+        challenge: &ChallengeExtensionElement,
+        value: &ChallengeExtensionElement,
+    ) -> ChallengeExtensionElement {
+        self.tower.mul(challenge, value)
+    }
+}
+
 // The batched row-check value sum_k beta_k * C_k at one point, given the
 // phase-one physical column values at that point in layout order. One
 // constraint per physical column:
@@ -930,42 +1043,39 @@ pub(super) const QUOTIENT_COLUMN_SUMCHECK_LINEAR: usize = 3;
 //   error halves:         E (E2 - 1)(E2 - 4) (centered binomial support)
 //   error-square halves:  E2 - E^2           (helper well-formedness)
 //   mask halves:          M^2 - M            (binary digits)
-pub(super) fn batched_row_check_value(
-    column_values: &[u64],
-    beta: &[u64],
+pub(super) fn batched_row_check_value<Domain: CompositionColumnDomain>(
+    domain: &Domain,
+    column_values: &[Domain::Value],
+    beta: &[ChallengeExtensionElement],
     layout: &LimbColumnLayout,
-    modulus: u64,
-) -> u64 {
+) -> ChallengeExtensionElement {
     debug_assert_eq!(column_values.len(), layout.phase_one_physical_count());
     debug_assert_eq!(beta.len(), layout.row_check_constraint_count());
-    let four = 4 % modulus;
-    let one = 1 % modulus;
-    let mut accumulated = 0_u64;
+    let tower = *domain.tower();
+    let mut accumulated = ChallengeExtensionTower::zero();
     let mut constraint_index = 0_usize;
-    let mut absorb = |value: u64, accumulated: &mut u64| {
-        *accumulated = add_mod_fast(
-            *accumulated,
-            mul_mod_fast(beta[constraint_index], value, modulus),
-            modulus,
+    let mut absorb = |value: &Domain::Value, accumulated: &mut ChallengeExtensionElement| {
+        *accumulated = tower.add(
+            accumulated,
+            &domain.challenge_times(&beta[constraint_index], value),
         );
         constraint_index += 1;
     };
     for half in 0..TRACE_SPLIT {
         let secret = column_values[layout.physical_secret(half)];
-        let cube = mul_mod_fast(mul_mod_fast(secret, secret, modulus), secret, modulus);
-        absorb(sub_mod_fast(cube, secret, modulus), &mut accumulated);
+        let cube = domain.value_mul(&domain.value_mul(&secret, &secret), &secret);
+        absorb(&domain.value_sub(&cube, &secret), &mut accumulated);
     }
     for error_position in 0..layout.total_error_columns {
         for half in 0..TRACE_SPLIT {
             let error = column_values[layout.physical_error(error_position, half)];
             let error_square = column_values[layout.physical_error_square(error_position, half)];
-            let range_polynomial = mul_mod_fast(
-                sub_mod_fast(error_square, one, modulus),
-                sub_mod_fast(error_square, four, modulus),
-                modulus,
+            let range_polynomial = domain.value_mul(
+                &domain.value_sub_base(&error_square, 1),
+                &domain.value_sub_base(&error_square, 4),
             );
             absorb(
-                mul_mod_fast(error, range_polynomial, modulus),
+                &domain.value_mul(&error, &range_polynomial),
                 &mut accumulated,
             );
         }
@@ -975,7 +1085,7 @@ pub(super) fn batched_row_check_value(
             let error = column_values[layout.physical_error(error_position, half)];
             let error_square = column_values[layout.physical_error_square(error_position, half)];
             absorb(
-                sub_mod_fast(error_square, mul_mod_fast(error, error, modulus), modulus),
+                &domain.value_sub(&error_square, &domain.value_mul(&error, &error)),
                 &mut accumulated,
             );
         }
@@ -984,11 +1094,7 @@ pub(super) fn batched_row_check_value(
         for half in 0..TRACE_SPLIT {
             let indicator = column_values[layout.physical_negative_indicator(half)];
             absorb(
-                sub_mod_fast(
-                    mul_mod_fast(indicator, indicator, modulus),
-                    indicator,
-                    modulus,
-                ),
+                &domain.value_sub(&domain.value_mul(&indicator, &indicator), &indicator),
                 &mut accumulated,
             );
         }
@@ -996,12 +1102,9 @@ pub(super) fn batched_row_check_value(
             for half in 0..TRACE_SPLIT {
                 let randomness =
                     column_values[layout.physical_linkage_randomness(randomness_position, half)];
-                let cube = mul_mod_fast(
-                    mul_mod_fast(randomness, randomness, modulus),
-                    randomness,
-                    modulus,
-                );
-                absorb(sub_mod_fast(cube, randomness, modulus), &mut accumulated);
+                let cube =
+                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
+                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
             }
         }
     }
@@ -1009,7 +1112,7 @@ pub(super) fn batched_row_check_value(
         for half in 0..TRACE_SPLIT {
             let mask = column_values[layout.physical_mask(mask_column, half)];
             absorb(
-                sub_mod_fast(mul_mod_fast(mask, mask, modulus), mask, modulus),
+                &domain.value_sub(&domain.value_mul(&mask, &mask), &mask),
                 &mut accumulated,
             );
         }
@@ -1022,25 +1125,26 @@ pub(super) fn batched_row_check_value(
 // for each lincheck repetition the per-half combined secret-factor vector and
 // the power vector, for each consistency repetition the per-half coefficient
 // vector, and for each mask column the per-half selector combination.
-pub(super) struct SumcheckPublicEvaluations {
+pub(super) struct SumcheckPublicEvaluations<ColumnValue> {
     // [repetition][half]
-    pub(super) secret_factor: Vec<[u64; 2]>,
-    pub(super) u_power: Vec<[u64; 2]>,
-    // [consistency repetition][half]
-    pub(super) consistency: Vec<[u64; 2]>,
+    pub(super) secret_factor: Vec<[ChallengeExtensionElement; 2]>,
+    pub(super) u_power: Vec<[ChallengeExtensionElement; 2]>,
+    // [consistency repetition][half]; the consistency vectors are public
+    // bounded integers, so their evaluations stay in the column value domain.
+    pub(super) consistency: Vec<[ColumnValue; 2]>,
     // [mask column][half]
-    pub(super) mask_selector: Vec<[u64; 2]>,
+    pub(super) mask_selector: Vec<[ChallengeExtensionElement; 2]>,
     // Linkage pair vectors in fixed order: the secret-link vector, the
     // negative-indicator vector, then one combined vector per opening
     // randomness column. Empty outside the commitment fields.
-    pub(super) linkage: Vec<[u64; 2]>,
+    pub(super) linkage: Vec<[ChallengeExtensionElement; 2]>,
 }
 
 // Scalar weights for the error contribution of the lincheck: weight of error
 // column position p at repetition r is alpha_{key(p), r} * gamma_{key(p)}^j(p).
 pub(super) struct SumcheckErrorWeights {
     // [repetition][error position]
-    pub(super) weights: Vec<Vec<u64>>,
+    pub(super) weights: Vec<Vec<ChallengeExtensionElement>>,
 }
 
 // The batched sumcheck integrand at one point:
@@ -1049,16 +1153,17 @@ pub(super) struct SumcheckErrorWeights {
 // + sum_i CombSel_i * Mask_i
 // with every product summed over both halves.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn batched_sumcheck_value(
-    column_values: &[u64],
-    publics: &SumcheckPublicEvaluations,
+pub(super) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
+    domain: &Domain,
+    column_values: &[Domain::Value],
+    publics: &SumcheckPublicEvaluations<Domain::Value>,
     error_weights: &SumcheckErrorWeights,
-    consistency_alpha: &[u64],
+    consistency_alpha: &[ChallengeExtensionElement],
     layout: &LimbColumnLayout,
-    modulus: u64,
-) -> u64 {
-    let plaintext_modulus = (PLAINTEXT_MODULUS_I64 as u64) % modulus;
-    let mut accumulated = 0_u64;
+) -> ChallengeExtensionElement {
+    let tower = *domain.tower();
+    let plaintext_modulus = (PLAINTEXT_MODULUS_I64 as u64) % tower.modulus;
+    let mut accumulated = ChallengeExtensionTower::zero();
     for (repetition, (secret_factor, u_power)) in publics
         .secret_factor
         .iter()
@@ -1067,38 +1172,33 @@ pub(super) fn batched_sumcheck_value(
     {
         for half in 0..TRACE_SPLIT {
             let secret = column_values[layout.physical_secret(half)];
-            accumulated = add_mod_fast(
-                accumulated,
-                mul_mod_fast(secret_factor[half], secret, modulus),
-                modulus,
+            accumulated = tower.add(
+                &accumulated,
+                &domain.challenge_times(&secret_factor[half], &secret),
             );
-            let mut weighted_error = 0_u64;
+            let mut weighted_error = ChallengeExtensionTower::zero();
             for error_position in 0..layout.total_error_columns {
-                weighted_error = add_mod_fast(
-                    weighted_error,
-                    mul_mod_fast(
-                        error_weights.weights[repetition][error_position],
-                        column_values[layout.physical_error(error_position, half)],
-                        modulus,
+                weighted_error = tower.add(
+                    &weighted_error,
+                    &domain.challenge_times(
+                        &error_weights.weights[repetition][error_position],
+                        &column_values[layout.physical_error(error_position, half)],
                     ),
-                    modulus,
                 );
             }
-            accumulated = sub_mod_fast(
-                accumulated,
-                mul_mod_fast(
+            accumulated = tower.sub(
+                &accumulated,
+                &tower.scale_base(
+                    &tower.mul(&u_power[half], &weighted_error),
                     plaintext_modulus,
-                    mul_mod_fast(u_power[half], weighted_error, modulus),
-                    modulus,
                 ),
-                modulus,
             );
         }
     }
     let mut claim_alpha_index = 0_usize;
     for consistency_vector in 0..layout.consistency_vector_count() {
         for repetition in 0..CONSISTENCY_REPETITIONS {
-            let alpha_value = consistency_alpha[claim_alpha_index];
+            let alpha_value = &consistency_alpha[claim_alpha_index];
             claim_alpha_index += 1;
             for half in 0..TRACE_SPLIT {
                 let witness_value = if consistency_vector == 0 {
@@ -1113,28 +1213,23 @@ pub(super) fn batched_sumcheck_value(
                         half,
                     )]
                 };
-                accumulated = add_mod_fast(
-                    accumulated,
-                    mul_mod_fast(
-                        alpha_value,
-                        mul_mod_fast(publics.consistency[repetition][half], witness_value, modulus),
-                        modulus,
-                    ),
-                    modulus,
+                let consistency_product =
+                    domain.value_mul(&publics.consistency[repetition][half], &witness_value);
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(alpha_value, &consistency_product),
                 );
             }
         }
     }
     for (mask_column, mask_selector) in publics.mask_selector.iter().enumerate() {
         for half in 0..TRACE_SPLIT {
-            accumulated = add_mod_fast(
-                accumulated,
-                mul_mod_fast(
-                    mask_selector[half],
-                    column_values[layout.physical_mask(mask_column, half)],
-                    modulus,
+            accumulated = tower.add(
+                &accumulated,
+                &domain.challenge_times(
+                    &mask_selector[half],
+                    &column_values[layout.physical_mask(mask_column, half)],
                 ),
-                modulus,
             );
         }
     }
@@ -1149,10 +1244,9 @@ pub(super) fn batched_sumcheck_value(
                 } else {
                     column_values[layout.physical_linkage_randomness(linkage_position - 2, half)]
                 };
-                accumulated = add_mod_fast(
-                    accumulated,
-                    mul_mod_fast(linkage_values[half], column_value, modulus),
-                    modulus,
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(&linkage_values[half], &column_value),
                 );
             }
         }
@@ -1172,28 +1266,31 @@ pub(super) fn batched_sumcheck_value(
 pub(super) fn build_linkage_public_vectors(
     linkage: &SameSecretLinkageStatement,
     commitment_field: usize,
-    modulus: u64,
-    u_power_vectors: &[Vec<u64>],
-    linkage_alpha: &[u64],
-) -> CanonicalResult<(u64, Vec<Vec<u64>>)> {
+    tower: &ChallengeExtensionTower,
+    u_power_vectors: &[Vec<ChallengeExtensionElement>],
+    linkage_alpha: &[ChallengeExtensionElement],
+) -> CanonicalResult<(
+    ChallengeExtensionElement,
+    Vec<Vec<ChallengeExtensionElement>>,
+)> {
+    let modulus = tower.modulus;
     let ring_degree = linkage.commitments[0].ring_degree;
     let commitment_count = linkage.commitments.len();
     debug_assert_eq!(
         linkage_alpha.len(),
         commitment_count * SETUP_COMMITMENT_ROW_COUNT * LINCHECK_REPETITIONS
     );
-    let mut linkage_claim = 0_u64;
-    let mut secret_link = vec![0_u64; ring_degree];
-    let mut negative_indicator = vec![0_u64; ring_degree];
+    let mut linkage_claim = ChallengeExtensionTower::zero();
+    let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); ring_degree];
+    let mut secret_link = extension_zero_vector();
+    let mut negative_indicator = extension_zero_vector();
     let mut randomness_vectors =
-        vec![vec![0_u64; ring_degree]; commitment_count * SETUP_COMMITMENT_RANDOMNESS_WIDTH];
-    let add_scaled = |target: &mut [u64], source: &[u64], scale: u64, modulus: u64| {
+        vec![extension_zero_vector(); commitment_count * SETUP_COMMITMENT_RANDOMNESS_WIDTH];
+    let add_base_scaled = |target: &mut [ChallengeExtensionElement],
+                           source: &[ChallengeExtensionElement],
+                           scale: u64| {
         for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
-            *target_value = add_mod_fast(
-                *target_value,
-                mul_mod_fast(scale, *source_value, modulus),
-                modulus,
-            );
+            *target_value = tower.add(target_value, &tower.scale_base(source_value, scale));
         }
     };
     for (commitment_index, commitment) in linkage.commitments.iter().enumerate() {
@@ -1201,41 +1298,33 @@ pub(super) fn build_linkage_public_vectors(
         let limb = &commitment.limbs[commitment_field];
         for row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
             // Repetition-combined challenge vector for this relation.
-            let mut combined_u = vec![0_u64; ring_degree];
+            let mut combined_u = extension_zero_vector();
             for (repetition, u_powers) in u_power_vectors.iter().enumerate() {
-                let alpha_value = linkage_alpha[(commitment_index * SETUP_COMMITMENT_ROW_COUNT
+                let alpha_value = &linkage_alpha[(commitment_index * SETUP_COMMITMENT_ROW_COUNT
                     + row_index)
                     * LINCHECK_REPETITIONS
                     + repetition];
-                add_scaled(&mut combined_u, u_powers, alpha_value, modulus);
+                for (target_value, source_value) in combined_u.iter_mut().zip(u_powers.iter()) {
+                    *target_value = tower.add(target_value, &tower.mul(alpha_value, source_value));
+                }
             }
             // Public side: alpha-weighted lincheck sums of the commitment row.
-            let mut row_sum = 0_u64;
+            let mut row_sum = ChallengeExtensionTower::zero();
             for (u_value, row_value) in combined_u.iter().zip(limb.rows[row_index].iter()) {
-                row_sum = add_mod_fast(
-                    row_sum,
-                    mul_mod_fast(*u_value, *row_value, modulus),
-                    modulus,
-                );
+                row_sum = tower.add(&row_sum, &tower.scale_base(u_value, *row_value));
             }
-            linkage_claim = add_mod_fast(linkage_claim, row_sum, modulus);
+            linkage_claim = tower.add(&linkage_claim, &row_sum);
             // Message row: the lifted secret message s + neg * q_l.
             if row_index == SETUP_COMMITMENT_MODULE_RANK {
-                add_scaled(&mut secret_link, &combined_u, 1, modulus);
-                add_scaled(
-                    &mut negative_indicator,
-                    &combined_u,
-                    source_modulus_residue,
-                    modulus,
-                );
+                add_base_scaled(&mut secret_link, &combined_u, 1);
+                add_base_scaled(&mut negative_indicator, &combined_u, source_modulus_residue);
             }
             for randomness_column in 0..SETUP_COMMITMENT_RANDOMNESS_WIDTH {
-                let target =
-                    &mut randomness_vectors
-                        [commitment_index * SETUP_COMMITMENT_RANDOMNESS_WIDTH + randomness_column];
+                let target = &mut randomness_vectors
+                    [commitment_index * SETUP_COMMITMENT_RANDOMNESS_WIDTH + randomness_column];
                 match structural_matrix_polynomial_kind(row_index, randomness_column) {
                     Some(StructuralMatrixPolynomial::One) => {
-                        add_scaled(target, &combined_u, 1, modulus);
+                        add_base_scaled(target, &combined_u, 1);
                     }
                     Some(StructuralMatrixPolynomial::Zero) => {}
                     None => {
@@ -1248,12 +1337,12 @@ pub(super) fn build_linkage_public_vectors(
                             ring_degree,
                             modulus,
                         )?;
-                        let transposed = negacyclic_transpose_product(
+                        let transposed = negacyclic_transpose_product_extension(
                             &matrix_polynomial,
                             &combined_u,
                             modulus,
                         )?;
-                        add_scaled(target, &transposed, 1, modulus);
+                        add_base_scaled(target, &transposed, 1);
                     }
                 }
             }
@@ -1265,6 +1354,30 @@ pub(super) fn build_linkage_public_vectors(
     vectors.extend(randomness_vectors);
 
     Ok((linkage_claim, vectors))
+}
+
+// Per-coordinate transpose product: the matrix stays in the base field, so a
+// transpose action on an extension vector is the base action on each of the
+// four challenge extension coordinates.
+pub(super) fn negacyclic_transpose_product_extension(
+    matrix_polynomial: &[u64],
+    vector: &[ChallengeExtensionElement],
+    modulus: u64,
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+    let mut result = vec![ChallengeExtensionTower::zero(); vector.len()];
+    let mut coordinate_vector = vec![0_u64; vector.len()];
+    for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+        for (slot, element) in coordinate_vector.iter_mut().zip(vector.iter()) {
+            *slot = element[coordinate];
+        }
+        let transposed =
+            negacyclic_transpose_product(matrix_polynomial, &coordinate_vector, modulus)?;
+        for (target, value) in result.iter_mut().zip(transposed.iter()) {
+            target[coordinate] = *value;
+        }
+    }
+
+    Ok(result)
 }
 
 // Verifier-side public round-one aggregate diagonals: for digit j, the
@@ -1343,13 +1456,11 @@ pub(crate) fn generate_development_trustee_ceremony_slice(
         round_one_aggregate_diagonal_from_components(&round_one_components, level, ring_degree)?;
 
     let mut instances = Vec::with_capacity(trustee_count);
-    for (trustee_index, (mut statement, mut witness)) in
-        round_one_instances.into_iter().enumerate()
+    for (trustee_index, (mut statement, mut witness)) in round_one_instances.into_iter().enumerate()
     {
         // Round-two share: source = trustee secret (*) public aggregate.
         let key_switch_domain = "relinearization-round-two".to_string();
-        let key_switch_seed_hex =
-            format!("{ceremony_seed_hex}-trustee-{trustee_index}-round-two");
+        let key_switch_seed_hex = format!("{ceremony_seed_hex}-trustee-{trustee_index}-round-two");
         let digit_count = level + 1;
         let error_coefficients_by_digit = sample_development_errors(
             &key_switch_domain,

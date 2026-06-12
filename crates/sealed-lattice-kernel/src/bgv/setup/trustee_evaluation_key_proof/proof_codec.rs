@@ -1,3 +1,4 @@
+use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
 use super::low_degree_proof::{LowDegreePairOpening, LowDegreeProof, LowDegreeQueryOpening};
 use super::merkle_commitment::LEAF_SALT_BYTES;
 use super::prover::{LimbProof, PhaseQueryOpening, SuccinctEvaluationKeyProof};
@@ -10,9 +11,7 @@ use super::*;
 // low-degree fold depth, and trailing bytes are refused.
 const PROOF_MAGIC: &[u8; 8] = b"SLTEKP01";
 
-pub(crate) fn encode_trustee_evaluation_key_proof(
-    proof: &SuccinctEvaluationKeyProof,
-) -> Vec<u8> {
+pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyProof) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(PROOF_MAGIC);
     bytes.extend_from_slice(&(proof.limb_proofs.len() as u64).to_le_bytes());
@@ -21,7 +20,7 @@ pub(crate) fn encode_trustee_evaluation_key_proof(
         bytes.extend_from_slice(&limb_proof.quotient_tree_root);
         write_u64_slice(&mut bytes, &limb_proof.masked_consistency_claims);
         for evaluations in &limb_proof.deep_evaluations {
-            write_u64_slice(&mut bytes, evaluations);
+            write_extension_slice(&mut bytes, evaluations);
         }
         encode_low_degree_proof(&mut bytes, &limb_proof.low_degree);
         for opening in &limb_proof.query_openings {
@@ -71,7 +70,7 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
         let masked_consistency_claims = read_u64_vec(bytes, &mut cursor, layout.claim_count())?;
         let mut deep_evaluations = Vec::with_capacity(DEEP_POINT_COUNT);
         for _ in 0..DEEP_POINT_COUNT {
-            deep_evaluations.push(read_u64_vec(bytes, &mut cursor, total_columns)?);
+            deep_evaluations.push(read_extension_vec(bytes, &mut cursor, total_columns)?);
         }
         let low_degree = decode_low_degree_proof(bytes, &mut cursor, extension_size)?;
         let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
@@ -87,7 +86,11 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
                     read_u64_vec(bytes, &mut cursor, layout.phase_one_physical_count())?;
                 phase_one_salts[slot] = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
                 phase_one_paths[slot] = read_hash_vec(bytes, &mut cursor, tree_depth)?;
-                phase_two_rows[slot] = read_u64_vec(bytes, &mut cursor, PHASE_TWO_COLUMN_COUNT)?;
+                phase_two_rows[slot] = read_u64_vec(
+                    bytes,
+                    &mut cursor,
+                    PHASE_TWO_COLUMN_COUNT * CHALLENGE_EXTENSION_DEGREE,
+                )?;
                 phase_two_salts[slot] = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
                 phase_two_paths[slot] = read_hash_vec(bytes, &mut cursor, tree_depth)?;
             }
@@ -118,15 +121,13 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
     Ok(SuccinctEvaluationKeyProof { limb_proofs })
 }
 
-
 fn encode_low_degree_proof(bytes: &mut Vec<u8>, low_degree: &LowDegreeProof) {
     bytes.extend_from_slice(&(low_degree.folded_layer_roots.len() as u64).to_le_bytes());
     write_hash_slice(bytes, &low_degree.folded_layer_roots);
-    write_u64_slice(bytes, &low_degree.final_coefficients);
+    write_extension_slice(bytes, &low_degree.final_coefficients);
     for query_opening in &low_degree.query_openings {
         for pair_opening in &query_opening.folded_layer_pairs {
-            bytes.extend_from_slice(&pair_opening.pair[0].to_le_bytes());
-            bytes.extend_from_slice(&pair_opening.pair[1].to_le_bytes());
+            write_extension_slice(bytes, &pair_opening.pair);
             bytes.extend_from_slice(&(pair_opening.path.len() as u64).to_le_bytes());
             write_hash_slice(bytes, &pair_opening.path);
         }
@@ -138,9 +139,8 @@ fn decode_low_degree_proof(
     cursor: &mut usize,
     initial_domain_size: usize,
 ) -> CanonicalResult<LowDegreeProof> {
-    let fold_count = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
-        invalid_succinct_setup_proof("low-degree fold count does not fit usize")
-    })?;
+    let fold_count = usize::try_from(read_u64(bytes, cursor)?)
+        .map_err(|_| invalid_succinct_setup_proof("low-degree fold count does not fit usize"))?;
     // The fold depth is bounded by the domain size; refuse absurd values
     // before allocating.
     if fold_count > initial_domain_size.trailing_zeros() as usize {
@@ -149,13 +149,13 @@ fn decode_low_degree_proof(
         ));
     }
     let folded_layer_roots = read_hash_vec(bytes, cursor, fold_count)?;
-    let final_coefficients = read_u64_vec(bytes, cursor, LOW_DEGREE_FINAL_COEFFICIENT_COUNT)?;
+    let final_coefficients = read_extension_vec(bytes, cursor, LOW_DEGREE_FINAL_COEFFICIENT_COUNT)?;
     let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
     for _ in 0..LOW_DEGREE_QUERY_COUNT {
         let mut folded_layer_pairs = Vec::with_capacity(fold_count);
         for _ in 0..fold_count {
-            let first = read_u64(bytes, cursor)?;
-            let second = read_u64(bytes, cursor)?;
+            let first = read_extension_element(bytes, cursor)?;
+            let second = read_extension_element(bytes, cursor)?;
             let path_length = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
                 invalid_succinct_setup_proof("low-degree path length does not fit usize")
             })?;
@@ -183,6 +183,12 @@ fn decode_low_degree_proof(
 fn write_u64_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     for value in values {
         bytes.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
+fn write_extension_slice(bytes: &mut Vec<u8>, values: &[ChallengeExtensionElement]) {
+    for value in values {
+        write_u64_slice(bytes, value);
     }
 }
 
@@ -229,10 +235,30 @@ fn read_u64_vec(bytes: &[u8], cursor: &mut usize, count: usize) -> CanonicalResu
     (0..count).map(|_| read_u64(bytes, cursor)).collect()
 }
 
-fn read_hash_vec(
+fn read_extension_element(
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> CanonicalResult<ChallengeExtensionElement> {
+    let mut element = [0_u64; CHALLENGE_EXTENSION_DEGREE];
+    for coordinate in element.iter_mut() {
+        *coordinate = read_u64(bytes, cursor)?;
+    }
+
+    Ok(element)
+}
+
+fn read_extension_vec(
     bytes: &[u8],
     cursor: &mut usize,
     count: usize,
-) -> CanonicalResult<Vec<[u8; 64]>> {
-    (0..count).map(|_| read_array::<64>(bytes, cursor)).collect()
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+    (0..count)
+        .map(|_| read_extension_element(bytes, cursor))
+        .collect()
+}
+
+fn read_hash_vec(bytes: &[u8], cursor: &mut usize, count: usize) -> CanonicalResult<Vec<[u8; 64]>> {
+    (0..count)
+        .map(|_| read_array::<64>(bytes, cursor))
+        .collect()
 }

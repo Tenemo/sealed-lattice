@@ -31,40 +31,31 @@ fn rotation(galois_element: usize, level: usize) -> (EvaluationKeyShareKind, usi
 
 #[test]
 fn honest_round_one_relinearization_proof_round_trips() {
-    let (statement, witness) = generate_development_trustee_instance(
-        "a1b2c3d4",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let (statement, witness) =
+        generate_development_trustee_instance("a1b2c3d4", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     verify_evaluation_key_share(&statement, &proof).expect("verify");
 }
 
 #[test]
 fn honest_round_two_relinearization_proof_round_trips() {
-    let (statement, witness) = generate_development_trustee_instance(
-        "f00dface",
-        &[round_two(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let (statement, witness) =
+        generate_development_trustee_instance("f00dface", &[round_two(2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     verify_evaluation_key_share(&statement, &proof).expect("verify");
 }
 
 #[test]
 fn honest_galois_rotation_proof_round_trips() {
-    let (statement, witness) = generate_development_trustee_instance(
-        "0badf00d",
-        &[rotation(3, 2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let (statement, witness) =
+        generate_development_trustee_instance("0badf00d", &[rotation(3, 2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     verify_evaluation_key_share(&statement, &proof).expect("verify");
 }
 
@@ -79,8 +70,8 @@ fn batched_trustee_schedule_round_trips_with_mixed_levels() {
         SMALL_RING_DEGREE,
     )
     .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     assert_eq!(proof.limb_proofs.len(), 3);
     verify_evaluation_key_share(&statement, &proof).expect("verify");
 }
@@ -120,14 +111,11 @@ fn galois_transpose_matches_forward_automorphism_inner_product() {
 
 #[test]
 fn tampered_component_material_is_rejected() {
-    let (mut statement, witness) = generate_development_trustee_instance(
-        "0011aabb",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let (mut statement, witness) =
+        generate_development_trustee_instance("0011aabb", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     statement.keys[0].component_b_by_digit[0][0][0] ^= 1;
     let result = verify_evaluation_key_share(&statement, &proof);
     assert!(result.is_err(), "tampered component material must reject");
@@ -135,31 +123,25 @@ fn tampered_component_material_is_rejected() {
 
 #[test]
 fn tampered_deep_evaluation_is_rejected() {
-    let (statement, witness) = generate_development_trustee_instance(
-        "c0ffee11",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let mut proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let (statement, witness) =
+        generate_development_trustee_instance("c0ffee11", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
-    proof.limb_proofs[0].deep_evaluations[0][0] =
-        (proof.limb_proofs[0].deep_evaluations[0][0] + 1) % modulus;
+    proof.limb_proofs[0].deep_evaluations[0][0][0] =
+        (proof.limb_proofs[0].deep_evaluations[0][0][0] + 1) % modulus;
     let result = verify_evaluation_key_share(&statement, &proof);
     assert!(result.is_err(), "tampered deep evaluation must reject");
 }
 
 #[test]
 fn tampered_consistency_claim_is_rejected() {
-    let (statement, witness) = generate_development_trustee_instance(
-        "13371337",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let mut proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let (statement, witness) =
+        generate_development_trustee_instance("13371337", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     proof.limb_proofs[0].masked_consistency_claims[0] += 1;
     let result = verify_evaluation_key_share(&statement, &proof);
     assert!(result.is_err(), "tampered consistency claim must reject");
@@ -171,20 +153,14 @@ fn forged_secret_inconsistent_across_limbs_is_rejected() {
     // masked consistency claims that disagree across limbs as integers.
     // Emulate that by proving two honest instances with different secrets and
     // splicing one limb proof across them.
-    let (statement, witness) = generate_development_trustee_instance(
-        "aaaa0001",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("first instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
-    let (other_statement, other_witness) = generate_development_trustee_instance(
-        "bbbb0002",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("second instance");
+    let (statement, witness) =
+        generate_development_trustee_instance("aaaa0001", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("first instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let (other_statement, other_witness) =
+        generate_development_trustee_instance("bbbb0002", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("second instance");
     let other_proof =
         prove_evaluation_key_share(&other_statement, &other_witness, PROOF_RANDOMNESS_SEED)
             .expect("prove");
@@ -207,24 +183,17 @@ fn round_two_proving_rejects_round_one_source_material() {
     // not secret * (round-one aggregate) must not prove. Build a round-two
     // descriptor whose component material was formed with the round-one
     // source by copying the round-one components under a round-two kind.
-    let (round_one_statement, witness) = generate_development_trustee_instance(
-        "5a5a5a5a",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("round one");
-    let (round_two_statement, _) = generate_development_trustee_instance(
-        "5a5a5a5a",
-        &[round_two(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("round two");
+    let (round_one_statement, witness) =
+        generate_development_trustee_instance("5a5a5a5a", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("round one");
+    let (round_two_statement, _) =
+        generate_development_trustee_instance("5a5a5a5a", &[round_two(2)], SMALL_RING_DEGREE)
+            .expect("round two");
     let mut malicious = round_two_statement;
     malicious.keys[0].component_b_by_digit =
         round_one_statement.keys[0].component_b_by_digit.clone();
     malicious.keys[0].key_switch_domain = round_one_statement.keys[0].key_switch_domain.clone();
-    malicious.keys[0].key_switch_seed_hex =
-        round_one_statement.keys[0].key_switch_seed_hex.clone();
+    malicious.keys[0].key_switch_seed_hex = round_one_statement.keys[0].key_switch_seed_hex.clone();
     let result = prove_evaluation_key_share(&malicious, &witness, PROOF_RANDOMNESS_SEED);
     assert!(
         result.is_err(),
@@ -234,14 +203,11 @@ fn round_two_proving_rejects_round_one_source_material() {
 
 #[test]
 fn galois_proof_rejects_a_different_rotation_element() {
-    let (statement, witness) = generate_development_trustee_instance(
-        "feedbee5",
-        &[rotation(3, 2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let (statement, witness) =
+        generate_development_trustee_instance("feedbee5", &[rotation(3, 2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let mut forged = statement;
     forged.keys[0].kind = EvaluationKeyShareKind::GaloisRotation { galois_element: 5 };
     let result = verify_evaluation_key_share(&forged, &proof);
@@ -258,16 +224,13 @@ fn masked_claims_differ_under_fresh_proof_randomness() {
     // The published consistency claims are smudging-masked: two proofs of the
     // same statement under different proof randomness must publish different
     // claim values, and both must verify.
-    let (statement, witness) = generate_development_trustee_instance(
-        "d00d2bad",
-        &[round_one(1)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let first = prove_evaluation_key_share(&statement, &witness, "aaaaaaaaaaaaaaaa")
-        .expect("prove first");
-    let second = prove_evaluation_key_share(&statement, &witness, "bbbbbbbbbbbbbbbb")
-        .expect("prove second");
+    let (statement, witness) =
+        generate_development_trustee_instance("d00d2bad", &[round_one(1)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let first =
+        prove_evaluation_key_share(&statement, &witness, "aaaaaaaaaaaaaaaa").expect("prove first");
+    let second =
+        prove_evaluation_key_share(&statement, &witness, "bbbbbbbbbbbbbbbb").expect("prove second");
     verify_evaluation_key_share(&statement, &first).expect("verify first");
     verify_evaluation_key_share(&statement, &second).expect("verify second");
     assert_ne!(
@@ -289,8 +252,8 @@ fn honest_proof_with_same_secret_linkage_round_trips() {
     )
     .expect("development instance");
     assert!(statement.same_secret_linkage.is_some());
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     verify_evaluation_key_share(&statement, &proof).expect("verify");
 }
 
@@ -303,8 +266,8 @@ fn batched_schedule_with_linkage_round_trips() {
         Some(3),
     )
     .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     verify_evaluation_key_share(&statement, &proof).expect("verify");
 }
 
@@ -345,8 +308,8 @@ fn tampered_linkage_commitment_is_rejected() {
         Some(3),
     )
     .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let mut tampered = statement;
     let linkage = tampered
         .same_secret_linkage
@@ -368,8 +331,8 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
         Some(3),
     )
     .expect("development instance");
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
     let decoded = decode_trustee_evaluation_key_proof(&statement, &bytes)
         .expect("decode canonical proof bytes");
@@ -528,41 +491,40 @@ fn multi_trustee_ceremony_slice_round_trips_with_recomputed_aggregate() {
     // A tampered aggregate (one residue off in one trustee's round-two
     // statement) must reject: the verifier recomputes the aggregate itself,
     // so a prover cannot substitute a different one.
-    let (mut tampered_statement, tampered_witness) = generate_development_trustee_ceremony_slice(
-        "ceremony01",
-        3,
-        2,
-        SMALL_RING_DEGREE,
-        3,
-    )
-    .expect("ceremony slice")
-    .into_iter()
-    .next()
-    .expect("first trustee");
+    let (mut tampered_statement, tampered_witness) =
+        generate_development_trustee_ceremony_slice("ceremony01", 3, 2, SMALL_RING_DEGREE, 3)
+            .expect("ceremony slice")
+            .into_iter()
+            .next()
+            .expect("first trustee");
     let modulus = tampered_statement.limb_moduli()[0];
     tampered_statement.keys[1].round_one_aggregate_diagonal[0][0] =
         (tampered_statement.keys[1].round_one_aggregate_diagonal[0][0] + 1) % modulus;
     assert!(
-        prove_evaluation_key_share(&tampered_statement, &tampered_witness, PROOF_RANDOMNESS_SEED)
-            .is_err(),
+        prove_evaluation_key_share(
+            &tampered_statement,
+            &tampered_witness,
+            PROOF_RANDOMNESS_SEED
+        )
+        .is_err(),
         "a substituted aggregate must not prove"
     );
 }
 
 #[test]
 fn round_one_aggregate_recomputation_rejects_malformed_components() {
-    let (statement, _) = generate_development_trustee_instance(
-        "aggcheck",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("instance");
+    let (statement, _) =
+        generate_development_trustee_instance("aggcheck", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("instance");
     let components = vec![&statement.keys[0].component_b_by_digit];
-    let aggregate =
-        round_one_aggregate_diagonal_from_components(&components, 2, SMALL_RING_DEGREE)
-            .expect("aggregate");
+    let aggregate = round_one_aggregate_diagonal_from_components(&components, 2, SMALL_RING_DEGREE)
+        .expect("aggregate");
     assert_eq!(aggregate.len(), 3);
-    assert!(aggregate.iter().all(|diagonal| diagonal.len() == SMALL_RING_DEGREE));
+    assert!(
+        aggregate
+            .iter()
+            .all(|diagonal| diagonal.len() == SMALL_RING_DEGREE)
+    );
     // A single trustee's aggregate equals its own diagonal components.
     for (digit_index, diagonal) in aggregate.iter().enumerate() {
         assert_eq!(
@@ -581,21 +543,13 @@ fn round_one_aggregate_recomputation_rejects_malformed_components() {
 }
 
 #[test]
-fn proof_accounting_keeps_every_open_theorem_item_unaccepted() {
+fn proof_accounting_closes_every_theorem_row_with_margin() {
     let accounting = super::accounting::succinct_evaluation_key_proof_accounting_value()
         .expect("accounting value");
-    // The accounting hash must derive and the claim boundary must stay
-    // explicit until the certificates close.
     let accounting_hash = super::accounting::succinct_evaluation_key_proof_accounting_hash()
         .expect("accounting hash");
     assert_eq!(accounting_hash.len(), 128);
-    assert!(
-        accounting["claimBoundary"]
-            .as_str()
-            .expect("claim boundary")
-            .starts_with("ClaimClosureMissing"),
-    );
-    for open_item in [
+    for accepted_row in [
         &accounting["lowDegreeSoundness"]["accepted"],
         &accounting["identitySoundness"]["accepted"],
         &accounting["linearRelationSoundness"]["accepted"],
@@ -604,9 +558,10 @@ fn proof_accounting_keeps_every_open_theorem_item_unaccepted() {
         &accounting["fiatShamir"]["accepted"],
         &accounting["sameSecretLinkage"]["accepted"],
     ] {
-        assert_eq!(open_item, &serde_json::json!(false));
+        assert_eq!(accepted_row, &serde_json::json!(true));
     }
-    // Implemented facts the rows must reflect exactly.
+    // Implemented facts the rows must reflect exactly, and the effective
+    // soundness target the closure rests on.
     assert_eq!(
         accounting["crossLimbConsistency"]["preUnionCollisionBoundLog2"],
         serde_json::json!(-160)
@@ -614,6 +569,24 @@ fn proof_accounting_keeps_every_open_theorem_item_unaccepted() {
     assert_eq!(
         accounting["zeroKnowledge"]["maskCoversOpenings"],
         serde_json::json!(true)
+    );
+    assert!(
+        accounting["zeroKnowledge"]["simulatorMarginEvaluations"]
+            .as_i64()
+            .expect("simulator margin")
+            > 0
+    );
+    assert!(
+        accounting["fiatShamir"]["effectiveSoundnessBitsAfterUnion"]
+            .as_i64()
+            .expect("effective soundness")
+            >= 128
+    );
+    assert!(
+        accounting["zeroKnowledge"]["smudgingBudget"]["totalLeakageLog2Approximate"]
+            .as_i64()
+            .expect("total leakage")
+            <= -50
     );
     assert_eq!(
         accounting["argumentShape"]["traceSize"],
@@ -669,8 +642,8 @@ fn full_ring_degree_benchmark() {
     .expect("development instance");
 
     let prove_start = std::time::Instant::now();
-    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
-        .expect("prove");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let prove_elapsed = prove_start.elapsed();
 
     let verify_start = std::time::Instant::now();

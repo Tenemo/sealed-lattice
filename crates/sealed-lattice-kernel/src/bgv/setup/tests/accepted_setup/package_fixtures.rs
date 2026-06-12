@@ -1129,9 +1129,9 @@ fn streamed_vss_coefficient_commitments_object(
 
     let mut source_trustee_records = Vec::new();
     for source_trustee_roster_position in 0..10_u64 {
-        println!(
-            "terminal-accepted-setup-phase streaming VSS source trustee {source_trustee_roster_position}"
-        );
+        terminal_phase(&format!(
+            "streaming VSS source trustee {source_trustee_roster_position}"
+        ));
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
         let mut coefficient_commitments = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {

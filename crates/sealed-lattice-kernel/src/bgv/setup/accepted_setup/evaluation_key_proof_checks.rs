@@ -41,11 +41,7 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     if !rounds_present || !batches_present {
         return match proof_set {
             None => Ok(None),
-            Some(proof_set)
-                if proof_set
-                    .as_object()
-                    .is_some_and(serde_json::Map::is_empty) =>
-            {
+            Some(proof_set) if proof_set.as_object().is_some_and(serde_json::Map::is_empty) => {
                 Ok(None)
             }
             Some(_) => Ok(Some(evaluation_key_material_refusal(
@@ -117,7 +113,10 @@ fn verify_trustee_evaluation_key_proof_set(
             "proofVerificationStatus",
             TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
+        ),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -243,7 +242,10 @@ fn verify_trustee_evaluation_key_proof_set(
     for supplied_batch_root in supplied_batch_roots {
         let trustee_roster_position = value_u64(supplied_batch_root, "trusteeRosterPosition")?;
         if batch_roots_by_roster_position.get(&trustee_roster_position)
-            != Some(&value_string(supplied_batch_root, "galoisKeyShareBatchRoot")?)
+            != Some(&value_string(
+                supplied_batch_root,
+                "galoisKeyShareBatchRoot",
+            )?)
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
@@ -280,15 +282,14 @@ fn verify_trustee_evaluation_key_proof_set(
                 "trustee evaluation-key proof records must be ordered by roster position",
             ));
         }
-        let statement = trustee_evaluation_key_statement_from_package(
-            &TrusteeEvaluationKeyStatementInputs {
+        let statement =
+            trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package,
                 transported_key_switch_component_material,
                 transported_constant_commitments: &transported_constant_commitments,
                 round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,
-            },
-        )?;
+            })?;
         verify_trustee_evaluation_key_proof_record(
             proof_record,
             setup_context,
@@ -354,7 +355,10 @@ fn verify_trustee_evaluation_key_proof_record(
             "proofVerificationStatus",
             TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
+        ),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -406,9 +410,7 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proof statementHash must match the statement rebuilt from the verified share records",
         ));
     }
-    if proof_record.get("keyCount").and_then(Value::as_u64)
-        != Some(statement.keys.len() as u64)
-    {
+    if proof_record.get("keyCount").and_then(Value::as_u64) != Some(statement.keys.len() as u64) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "trustee evaluation-key proof keyCount must match the frozen key schedule",
@@ -486,8 +488,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     let setup_package = inputs.setup_package;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
-    let Some(same_secret_binding) =
-        same_secret_proof_bindings.get(&inputs.trustee_roster_position)
+    let Some(same_secret_binding) = same_secret_proof_bindings.get(&inputs.trustee_roster_position)
     else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
@@ -773,11 +774,8 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
                     )
                 })?;
             for (accumulated, value) in aggregate[digit_index].iter_mut().zip(diagonal.iter()) {
-                *accumulated = crate::bgv::modular_arithmetic::add_mod_fast(
-                    *accumulated,
-                    *value,
-                    modulus,
-                );
+                *accumulated =
+                    crate::bgv::modular_arithmetic::add_mod_fast(*accumulated, *value, modulus);
             }
         }
         *contribution_count += 1;
@@ -1077,7 +1075,8 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
 
 fn verified_trustee_evaluation_key_proof_material_chunks()
 -> &'static Mutex<BTreeMap<String, VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry>> {
-    VERIFIED_TRUSTEE_EVALUATION_KEY_PROOF_MATERIAL_CHUNKS.get_or_init(|| Mutex::new(BTreeMap::new()))
+    VERIFIED_TRUSTEE_EVALUATION_KEY_PROOF_MATERIAL_CHUNKS
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 #[cfg(test)]

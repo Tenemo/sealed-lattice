@@ -2,6 +2,7 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+    acceptedBgvSetupQSharePrimes,
     createEvaluatorKeySchedule,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
@@ -17,10 +18,10 @@ import {
     type SameSecretConsistencyStatementSet,
     type VssOpeningRandomByteSource,
 } from '#packages/protocol/src/index';
+import { selectedEvaluatorWorkingLevel } from '#packages/protocol/src/setup/evaluator-key-schedule';
 
-const qSharePrimes = [
-    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
-] as const;
+// The frozen evaluator working level requires the full accepted Q_share basis.
+const qSharePrimes = acceptedBgvSetupQSharePrimes;
 const ringDegree = 8;
 const participantCount = 2;
 const thresholdDegree = 2;
@@ -211,16 +212,13 @@ describe('evaluator key schedule builder', () => {
                 (entry) => entry.rotation,
             ),
         ).toEqual([3, 7]);
-        expect(evaluatorKeySchedule.relinearizationLevelSchedule).toEqual(
-            Array.from(
-                { length: qSharePrimes.length - 1 },
-                (_unused, levelIndex) => ({
-                    level: levelIndex + 1,
-                    proofFamily: 'relinearization-key-share',
-                    keyShareRounds: ['round-one', 'round-two'],
-                }),
-            ),
-        );
+        expect(evaluatorKeySchedule.relinearizationLevelSchedule).toEqual([
+            {
+                level: selectedEvaluatorWorkingLevel,
+                proofFamily: 'relinearization-key-share',
+                keyShareRounds: ['round-one', 'round-two'],
+            },
+        ]);
         expect(evaluatorKeySchedule.requiredGaloisSetHash).toBe(
             deriveProtocolHash(
                 'RequiredGaloisSetHash',

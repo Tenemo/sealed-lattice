@@ -1,8 +1,7 @@
 use serde_json::{Value, json};
 
 use super::accounting::{
-    succinct_evaluation_key_proof_accounting_hash,
-    succinct_evaluation_key_proof_accounting_value,
+    succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
 };
 use super::proof_codec::{
     decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
@@ -139,9 +138,8 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
             .to_string(),
         same_secret_proof_root: read_string(context_value, "sameSecretProofRoot")?.to_string(),
     };
-    let ring_degree = usize::try_from(read_u64(request, "ringDegree")?).map_err(|_| {
-        invalid_succinct_setup_proof("ringDegree does not fit usize")
-    })?;
+    let ring_degree = usize::try_from(read_u64(request, "ringDegree")?)
+        .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
     let key_values = request
         .get("keys")
         .and_then(Value::as_array)
@@ -157,9 +155,7 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
                 .get("commitments")
                 .and_then(Value::as_array)
                 .ok_or_else(|| {
-                    invalid_succinct_setup_proof(
-                        "sameSecretLinkage.commitments must be an array",
-                    )
+                    invalid_succinct_setup_proof("sameSecretLinkage.commitments must be an array")
                 })?;
             let commitments = commitment_values
                 .iter()
@@ -188,9 +184,8 @@ fn key_descriptor_from_value(key_value: &Value) -> CanonicalResult<EvaluationKey
         "relinearization-round-one" => EvaluationKeyShareKind::RelinearizationRoundOne,
         "relinearization-round-two" => EvaluationKeyShareKind::RelinearizationRoundTwo,
         "galois-rotation" => EvaluationKeyShareKind::GaloisRotation {
-            galois_element: usize::try_from(read_u64(key_value, "rotation")?).map_err(|_| {
-                invalid_succinct_setup_proof("rotation does not fit usize")
-            })?,
+            galois_element: usize::try_from(read_u64(key_value, "rotation")?)
+                .map_err(|_| invalid_succinct_setup_proof("rotation does not fit usize"))?,
         },
         unknown => {
             return Err(invalid_succinct_setup_proof(format!(
@@ -239,20 +234,20 @@ fn decode_component_material_bytes(
     expected_level: usize,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     let read_word = |cursor: &mut usize| -> CanonicalResult<u64> {
-        let end = cursor.checked_add(8).ok_or_else(|| {
-            invalid_succinct_setup_proof("component material cursor overflowed")
-        })?;
-        let slice = material_bytes.get(*cursor..end).ok_or_else(|| {
-            invalid_succinct_setup_proof("component material ended unexpectedly")
-        })?;
+        let end = cursor
+            .checked_add(8)
+            .ok_or_else(|| invalid_succinct_setup_proof("component material cursor overflowed"))?;
+        let slice = material_bytes
+            .get(*cursor..end)
+            .ok_or_else(|| invalid_succinct_setup_proof("component material ended unexpectedly"))?;
         *cursor = end;
         let mut word = [0_u8; 8];
         word.copy_from_slice(slice);
         Ok(u64::from_le_bytes(word))
     };
-    let magic = material_bytes.get(..8).ok_or_else(|| {
-        invalid_succinct_setup_proof("component material ended unexpectedly")
-    })?;
+    let magic = material_bytes
+        .get(..8)
+        .ok_or_else(|| invalid_succinct_setup_proof("component material ended unexpectedly"))?;
     if magic != COMPONENT_MATERIAL_MAGIC {
         return Err(invalid_succinct_setup_proof(
             "component material has the wrong format marker",

@@ -464,7 +464,16 @@ const trusteeWitnesses = (): TrusteeEvaluationKeyWitnessInput[] =>
         }),
     );
 
-const builtRoundsAndBatches = (fixture: EvaluationKeyFixture) => {
+type BuiltRoundsAndBatches = Readonly<{
+    relinearizationKeyShareRounds: ReturnType<
+        typeof createRelinearizationKeyShareRounds
+    >;
+    galoisKeyShareBatches: ReturnType<typeof createGaloisKeyShareBatches>;
+}>;
+
+const builtRoundsAndBatches = (
+    fixture: EvaluationKeyFixture,
+): BuiltRoundsAndBatches => {
     const relinearizationKeyShareRounds = createRelinearizationKeyShareRounds({
         ...fixture.commonInput,
         roundOneContributions: fixture.roundOneContributions,
@@ -481,7 +490,12 @@ const builtRoundsAndBatches = (fixture: EvaluationKeyFixture) => {
 const builtTrusteeProofs = (
     fixture: EvaluationKeyFixture,
     capturedInputs: TrusteeEvaluationKeyProofGeneratorInput[] = [],
-) => {
+): BuiltRoundsAndBatches &
+    Readonly<{
+        trusteeEvaluationKeyProofs: ReturnType<
+            typeof createTrusteeEvaluationKeyProofs
+        >;
+    }> => {
     const { relinearizationKeyShareRounds, galoisKeyShareBatches } =
         builtRoundsAndBatches(fixture);
     const trusteeEvaluationKeyProofs = createTrusteeEvaluationKeyProofs({

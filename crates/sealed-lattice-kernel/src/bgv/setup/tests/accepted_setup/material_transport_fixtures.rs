@@ -703,11 +703,11 @@ const PROOF_TRANSPORT_CERTIFICATE_FIELDS: TransportedMaterialCertificateFields =
 
 pub(super) fn setup_package_with_transported_public_setup_companions()
 -> (serde_json::Value, TransportedPublicSetupCompanions) {
-    println!("terminal-accepted-setup-phase start profile-ring package fixture");
+    terminal_phase("start profile-ring package fixture");
     let terminal_profile_ring_fixture =
         terminal_profile_ring_minimal_collective_setup_package_fixture();
     let mut package = terminal_profile_ring_fixture.package;
-    println!("terminal-accepted-setup-phase built profile-ring package fixture");
+    terminal_phase("built profile-ring package fixture");
     let transported_vss_material =
         terminal_profile_ring_fixture.transported_vss_coefficient_commitment_material;
     let profile = describe_collective_bgv_setup_profile().expect("profile");
@@ -720,7 +720,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
     package["sameSecretProofs"] = same_secret_proofs_object(&package);
-    println!("terminal-accepted-setup-phase generated same-secret proofs");
+    terminal_phase("generated same-secret proofs");
     let same_secret_proof_material = move_same_secret_proof_bytes_to_transport(&mut package);
     append_transport_certificate_entries_from_material_set(
         &mut package,
@@ -735,7 +735,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareLnpProofs"] = public_key_share_lnp_proofs_object(&package);
-    println!("terminal-accepted-setup-phase generated public-key material and proofs");
+    terminal_phase("generated public-key material and proofs");
     let public_key_share_proof_material =
         move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
     append_transport_certificate_entries_from_material_set(
@@ -752,7 +752,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
     let public_key_share_material = move_public_key_share_material_to_transport(&mut package);
-    println!("terminal-accepted-setup-phase transported public-key material");
+    terminal_phase("transported public-key material");
     let public_key_share_material_root =
         package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
             .as_str()
@@ -776,7 +776,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
         &package,
         &mut evaluation_key_transport_sinks,
     );
-    println!("terminal-accepted-setup-phase generated evaluation-key records");
+    terminal_phase("generated evaluation-key records");
     let evaluation_key_share_component_material = serde_json::json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
@@ -790,7 +790,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
             &evaluation_key_share_component_material,
             &mut evaluation_key_transport_sinks,
         );
-    println!("terminal-accepted-setup-phase generated trustee evaluation-key proofs");
+    terminal_phase("generated trustee evaluation-key proofs");
     package["evaluationKeys"] = public_evaluation_key_set_object(&package);
     rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
@@ -823,7 +823,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
     );
 
     let public_evaluation_key_material = add_public_evaluation_key_material_transport(&mut package);
-    println!("terminal-accepted-setup-phase generated public evaluation-key material");
+    terminal_phase("generated public evaluation-key material");
     append_transport_certificate_entries_from_material_set(
         &mut package,
         &public_evaluation_key_material,
@@ -836,7 +836,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
 
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
-    println!("terminal-accepted-setup-phase rebound terminal certificates and package hash");
+    terminal_phase("rebound terminal certificates and package hash");
 
     (
         package,
@@ -1417,11 +1417,9 @@ fn move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(
     proof_record["proofFullObjectHash"] = serde_json::json!(transport_hashes.full_object_hash);
     proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
     proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
-    let proof_material_root = trustee_evaluation_key_proof_material_root(
-        proof_record,
-        &transport_hashes,
-    )
-    .expect("trustee evaluation-key proof material root");
+    let proof_material_root =
+        trustee_evaluation_key_proof_material_root(proof_record, &transport_hashes)
+            .expect("trustee evaluation-key proof material root");
     proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
     proof_record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
         derive_protocol_hash("TrusteeEvaluationKeyProofRoot", proof_record)

@@ -3281,7 +3281,7 @@ describe('setup ceremony assembly', () => {
             verifierClosedStatus:
                 'statement-rebuild-and-argument-checks-verifier-closed',
             accountingStatus:
-                'succinct-trustee-evaluation-key-theorem-accounting-open',
+                'succinct-trustee-evaluation-key-theorem-accounting-accepted',
             claimAccounting: {
                 accountingObject: 'SuccinctEvaluationKeyProofAccounting',
             },
@@ -3568,7 +3568,9 @@ describe('setup ceremony assembly', () => {
         );
         expect(assembly.setupPackage.setupTransportCertificate).toMatchObject({
             totalByteLength: certificateTotalByteLength,
-            transportedObjects: expect.arrayContaining([
+        });
+        expect(transportedObjects).toEqual(
+            expect.arrayContaining([
                 expect.objectContaining({
                     objectName: 'vssCoefficientCommitmentMaterial',
                     objectRole: 'public-vss-coefficient-commitment-material',
@@ -3587,7 +3589,7 @@ describe('setup ceremony assembly', () => {
                     byteLength: fullMaterialCoefficientBytes,
                 }),
             ]),
-        });
+        );
         expect(vssTransportedObject).toBeDefined();
         expect(
             assembly.sameSecretProofs.vssCoefficientCommitmentMaterialRoot,

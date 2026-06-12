@@ -165,12 +165,13 @@ impl EvaluatorContext {
             // The read guard must drop before the write acquisition below, or
             // the first cache miss deadlocks on the same thread.
             {
-                let generated_rotation_keys = self.generated_rotation_keys.read().map_err(|_| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "generated rotation-key cache is poisoned",
-                    )
-                })?;
+                let generated_rotation_keys =
+                    self.generated_rotation_keys.read().map_err(|_| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "generated rotation-key cache is poisoned",
+                        )
+                    })?;
                 if let Some(rotation_key) = generated_rotation_keys.get(&cache_key) {
                     return Ok(rotation_key.clone());
                 }

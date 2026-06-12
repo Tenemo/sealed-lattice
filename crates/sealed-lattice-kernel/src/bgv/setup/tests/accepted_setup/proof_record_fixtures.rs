@@ -1,4 +1,5 @@
 use super::*;
+use rayon::prelude::*;
 
 pub(super) fn setup_proof_binding_for_test_package(
     package: &serde_json::Value,
@@ -311,9 +312,7 @@ pub(super) fn relinearization_key_share_rounds_object_with_terminal_transport(
     relinearization_key_share_rounds_object_inner(package, Some(terminal_transport))
 }
 
-pub(super) fn galois_key_share_batches_object(
-    package: &serde_json::Value,
-) -> serde_json::Value {
+pub(super) fn galois_key_share_batches_object(package: &serde_json::Value) -> serde_json::Value {
     galois_key_share_batches_object_inner(package, None)
 }
 
@@ -946,9 +945,9 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
     let statement_records = package["sameSecretConsistency"]["statementRecords"]
         .as_array()
         .expect("same-secret statement records");
-    let mut proof_records = Vec::new();
-    let mut same_secret_proof_roots = Vec::new();
-    for trustee_roster_position in 0..10_u64 {
+    let per_trustee_records = (0..10_u64)
+        .into_par_iter()
+        .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let statement_record = &statement_records[trustee_roster_position as usize];
         let constant_commitments =
@@ -1054,11 +1053,20 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
             derive_protocol_hash("SameSecretProofRoot", &proof_record)
                 .expect("same-secret proof root")
         );
-        same_secret_proof_roots.push(serde_json::json!({
+        let proof_root_entry = serde_json::json!({
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": trustee_roster_position,
             "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
-        }));
+        });
+        terminal_phase(&format!("generated same-secret proof trustee {trustee_roster_position}"));
+
+        (proof_root_entry, proof_record)
+        })
+        .collect::<Vec<_>>();
+    let mut proof_records = Vec::new();
+    let mut same_secret_proof_roots = Vec::new();
+    for (proof_root_entry, proof_record) in per_trustee_records {
+        same_secret_proof_roots.push(proof_root_entry);
         proof_records.push(proof_record);
     }
     let mut proof_set = serde_json::json!({
@@ -1580,10 +1588,31 @@ pub(super) fn trustee_evaluation_key_proofs_object_with_terminal_transport(
     transported_component_material: &serde_json::Value,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
 ) -> serde_json::Value {
+    // The terminal flow keeps the package VSS material binary-chunked, so the
+    // statement rebuild needs the per-trustee constant commitments through
+    // the transported map, exactly like the package verifier receives them.
+    let transported_constant_commitments = package["sameSecretProofs"]["proofRecords"]
+        .as_array()
+        .expect("same-secret proof records")
+        .iter()
+        .map(|proof_record| {
+            let trustee_roster_position = proof_record["trusteeRosterPosition"]
+                .as_u64()
+                .expect("trustee roster position");
+            (
+                trustee_roster_position,
+                same_secret_constant_commitments_from_fixture_package(
+                    package,
+                    trustee_roster_position,
+                ),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
     trustee_evaluation_key_proofs_object_inner(
         package,
         Some(transported_component_material),
-        &BTreeMap::new(),
+        &transported_constant_commitments,
         Some(terminal_transport),
     )
 }
@@ -1614,9 +1643,9 @@ fn trustee_evaluation_key_proofs_object_inner(
         let trustee_identity = proof_record["trusteeIdentity"]
             .as_str()
             .expect("trustee identity");
-        println!(
-            "terminal-accepted-setup-phase generating trustee evaluation-key proof trustee {trustee_roster_position}"
-        );
+        terminal_phase(&format!(
+            "generating trustee evaluation-key proof trustee {trustee_roster_position}"
+        ));
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package: package,
@@ -1642,10 +1671,10 @@ fn trustee_evaluation_key_proofs_object_inner(
         let proof = prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
             .expect("trustee evaluation-key proof");
         let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
-        println!(
-            "terminal-accepted-setup-phase generated trustee evaluation-key proof trustee {trustee_roster_position} ({} bytes)",
-            proof_bytes.len()
-        );
+        terminal_phase(&format!(
+            "generated trustee evaluation-key proof trustee {trustee_roster_position} ({} bytes)",
+            proof_bytes.len(),
+        ));
         let mut record = serde_json::json!({
             "objectType": "TrusteeEvaluationKeyProof",
             "objectVersion": 1,
@@ -1674,9 +1703,8 @@ fn trustee_evaluation_key_proofs_object_inner(
             "proofBytesHex": to_hex(&proof_bytes),
         });
         if let Some(sinks) = terminal_transport.as_deref_mut() {
-            let proof_material = move_trustee_evaluation_key_proof_record_bytes_to_compact_transport(
-                &mut record,
-            );
+            let proof_material =
+                move_trustee_evaluation_key_proof_record_bytes_to_compact_transport(&mut record);
             sinks.proof_materials.push(proof_material);
         }
         record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
@@ -1845,12 +1873,9 @@ pub(super) fn public_key_share_lnp_proofs_object(package: &serde_json::Value) ->
     let material_records = package["publicKeyShareMaterial"]["shareMaterialRecords"]
         .as_array()
         .expect("public-key material records");
-    let mut proof_records = Vec::new();
-    let mut proof_roots = Vec::new();
-    for trustee_roster_position in 0..10_u64 {
-        println!(
-            "terminal-accepted-setup-phase generating public-key proof trustee {trustee_roster_position}"
-        );
+    let per_trustee_records = (0..10_u64)
+        .into_par_iter()
+        .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let statement_record = &statement_records[trustee_roster_position as usize];
         let same_secret_proof_record = &same_secret_proof_records[trustee_roster_position as usize];
@@ -1975,15 +2000,21 @@ pub(super) fn public_key_share_lnp_proofs_object(package: &serde_json::Value) ->
             derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
                 .expect("public-key LNP proof root")
         );
-        proof_roots.push(serde_json::json!({
+        let proof_root_entry = serde_json::json!({
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": trustee_roster_position,
             "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
-        }));
+        });
+        terminal_phase(&format!("generated public-key proof trustee {trustee_roster_position}"));
+
+        (proof_root_entry, proof_record)
+        })
+        .collect::<Vec<_>>();
+    let mut proof_records = Vec::new();
+    let mut proof_roots = Vec::new();
+    for (proof_root_entry, proof_record) in per_trustee_records {
+        proof_roots.push(proof_root_entry);
         proof_records.push(proof_record);
-        println!(
-            "terminal-accepted-setup-phase generated public-key proof trustee {trustee_roster_position}"
-        );
     }
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareLnpProofSet",

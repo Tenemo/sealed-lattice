@@ -61,7 +61,7 @@ fn passive_setup_public_evaluation_key_material_drives_rotation_without_private_
 }
 
 #[test]
-fn public_evaluation_key_default_rotation_requests_follow_selected_schedule() {
+fn selected_rotation_key_schedule_matches_package_commitment() {
     let package = setup_package();
     let full_schedule = selected_public_evaluation_key_rotation_requests()
         .expect("full selected rotation schedule");
@@ -136,9 +136,8 @@ fn public_evaluation_key_rotation_request_rejects_duplicates_before_generation()
         ]
     });
 
-    let error =
-        read_public_evaluation_key_rotation_requests(&request)
-            .expect_err("duplicate rotation requests must reject");
+    let error = read_public_evaluation_key_rotation_requests(&request)
+        .expect_err("duplicate rotation requests must reject");
 
     assert!(
         error.message.contains("must not repeat"),

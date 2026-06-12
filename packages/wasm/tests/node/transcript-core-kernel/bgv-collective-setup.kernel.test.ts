@@ -35,6 +35,7 @@ import {
     createSetupPhaseParticipantObject,
     createSetupPhaseRecord,
 } from '#packages/protocol/src/setup/setup-phase-records';
+import { binaryVssCoefficientCommitmentMaterialByteLength } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import {
     createVssCoefficientCommitmentBundle,
     createVssSourceTrusteeCoefficientOpeningState,
@@ -90,9 +91,18 @@ const firstProfileParticipantCount = 10;
 const firstProfileDecryptionThreshold = 4;
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const setupTransportChunkSizeBytes = 1_048_576;
-const setupTransportTotalByteLength = 1_604_321_280;
-const setupTransportChunkCount =
-    setupTransportTotalByteLength / setupTransportChunkSizeBytes;
+// The accepted transport certificate must bind the exact first-profile binary
+// VSS coefficient commitment material byte length the kernel recomputes.
+const setupTransportTotalByteLength =
+    binaryVssCoefficientCommitmentMaterialByteLength({
+        participantCount: firstProfileParticipantCount,
+        thresholdDegree: firstProfileDecryptionThreshold,
+        rnsLimbCount: 17,
+        ringDegree: 32_768,
+    });
+const setupTransportChunkCount = Math.ceil(
+    setupTransportTotalByteLength / setupTransportChunkSizeBytes,
+);
 const setupProofFamilies = [
     'vss-opening-carry',
     'same-secret-consistency',
@@ -1485,7 +1495,7 @@ function acceptedSetupTransportCertificate(
     profile: BgvCollectiveSetupProfileDescription,
     vssCoefficientCommitmentMaterial: JsonRecord,
 ): JsonRecord {
-    const fullObjectHash = kernel.deriveProtocolHash({
+    const vssObjectFullObjectHash = kernel.deriveProtocolHash({
         namespace: 'SetupTransportChunkManifestRoot',
         value: {
             fixture: 'setup-transport-full-object-hash',
@@ -1503,6 +1513,57 @@ function acceptedSetupTransportCertificate(
                 },
             }),
     );
+    const vssObjectChunkRoot = kernel.deriveProtocolHash({
+        namespace: 'SetupTransportChunkManifestRoot',
+        value: {
+            fixture: 'setup-transport-vss-object-chunk-root',
+            totalByteLength: setupTransportTotalByteLength,
+        },
+    });
+    const transportedVssObject = {
+        objectType: 'SetupTransportedObject',
+        objectVersion: 1,
+        objectName: 'vssCoefficientCommitmentMaterial',
+        objectRole: 'public-vss-coefficient-commitment-material',
+        objectRoot: String(
+            vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot,
+        ),
+        byteLength: setupTransportTotalByteLength,
+        chunkStartIndex: 0,
+        chunkCount: setupTransportChunkCount,
+        chunkRoot: vssObjectChunkRoot,
+        chunkHashes,
+        fullObjectHash: vssObjectFullObjectHash,
+        encoding: 'binary',
+        loadingPolicy: 'stream-verified-before-object-use',
+    };
+    // The certificate-level hashes are the verifier-recomputed aggregates over
+    // the transported-object set.
+    const fullObjectHash = kernel.deriveProtocolHash({
+        namespace: 'SetupTransportFullObjectSetHash',
+        value: {
+            objectType: 'SetupTransportFullObjectSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            transportProfileId:
+                'sealed-lattice-setup-binary-chunked-transport-v1',
+            transportedObjects: [
+                {
+                    objectName: transportedVssObject.objectName,
+                    objectRole: transportedVssObject.objectRole,
+                    objectRoot: transportedVssObject.objectRoot,
+                    byteLength: transportedVssObject.byteLength,
+                    chunkStartIndex: transportedVssObject.chunkStartIndex,
+                    chunkCount: transportedVssObject.chunkCount,
+                    chunkRoot: transportedVssObject.chunkRoot,
+                    fullObjectHash: transportedVssObject.fullObjectHash,
+                },
+            ],
+            totalByteLength: setupTransportTotalByteLength,
+            chunkCount: setupTransportChunkCount,
+            chunkHashes,
+        },
+    });
     const chunkRoot = kernel.deriveProtocolHash({
         namespace: 'SetupTransportChunkManifestRoot',
         value: {
@@ -1535,24 +1596,7 @@ function acceptedSetupTransportCertificate(
         streamVerificationOrder: 'ascending-chunk-index',
         resumePolicy: 'chunk-index-checkpointed-by-hash',
         lazyLoadingPolicy: 'root-addressed-large-object-loading',
-        transportedObjects: [
-            {
-                objectType: 'SetupTransportedObject',
-                objectVersion: 1,
-                objectName: 'vssCoefficientCommitmentMaterial',
-                objectRole: 'public-vss-coefficient-commitment-material',
-                objectRoot: String(
-                    vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot,
-                ),
-                byteLength: setupTransportTotalByteLength,
-                chunkStartIndex: 0,
-                chunkCount: setupTransportChunkCount,
-                chunkRoot,
-                fullObjectHash,
-                encoding: 'binary',
-                loadingPolicy: 'stream-verified-before-object-use',
-            },
-        ],
+        transportedObjects: [transportedVssObject],
         chunkHashes,
         chunkRoot,
         fullObjectHash,
@@ -2114,7 +2158,7 @@ describe('collective BGV setup kernel commands', () => {
             'forkDetected',
             'outsideProfile',
         ]);
-        expect(profile.phaseOrder).toHaveLength(14);
+        expect(profile.phaseOrder).toHaveLength(15);
         expect(profile.requiredFinalObjects).toContain(
             'setupTransportCertificate',
         );

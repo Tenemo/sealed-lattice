@@ -396,7 +396,6 @@ pub(in crate::bgv::setup) fn append_setup_proof_lnp_tbox_generated_suffix(
     Ok(())
 }
 
-
 pub(super) fn setup_proof_lnp_tbox_generated_suffix_bytes(
     layout: &SetupProofLnpTboxLayout,
     statement_hash_hex: &str,

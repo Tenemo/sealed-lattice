@@ -19,10 +19,10 @@ use self::material_transport_fixtures::{
     encode_transport_material_from_package,
     move_evaluation_key_share_component_vectors_to_compact_transport,
     move_first_galois_key_share_component_vectors_to_transport,
-    move_public_key_share_lnp_proof_bytes_to_transport,
-    move_trustee_evaluation_key_proof_record_bytes_to_compact_transport,
     move_first_trustee_evaluation_key_proof_bytes_to_transport,
+    move_public_key_share_lnp_proof_bytes_to_transport,
     move_public_key_share_material_to_transport, move_same_secret_proof_bytes_to_transport,
+    move_trustee_evaluation_key_proof_record_bytes_to_compact_transport,
     proof_bytes_transport_chunks, rebind_public_evaluation_key_material_transport,
     rebind_setup_transport_certificate, setup_package_with_transported_public_setup_companions,
     stream_verified_vss_material_from_package, transported_material_reference_value,
@@ -42,10 +42,10 @@ use self::package_fixtures::{
 };
 use self::proof_record_fixtures::{
     EvaluationKeyShareFixtureMaterial, add_public_evaluation_key_material_transport,
-    collective_public_key_object, evaluation_key_share_fixture_material, galois_key_share_batches_object,
-    galois_key_share_batches_object_with_terminal_transport, public_evaluation_key_set_object,
-    public_key_share_lnp_proofs_object, public_key_share_material_object,
-    relinearization_key_share_rounds_object,
+    collective_public_key_object, evaluation_key_share_fixture_material,
+    galois_key_share_batches_object, galois_key_share_batches_object_with_terminal_transport,
+    public_evaluation_key_set_object, public_key_share_lnp_proofs_object,
+    public_key_share_material_object, relinearization_key_share_rounds_object,
     relinearization_key_share_rounds_object_with_terminal_transport,
     relinearization_key_switch_seed_for_test,
     relinearization_round_two_source_by_digit_for_fixture,
@@ -69,9 +69,8 @@ use self::record_rebinding::{
     rebind_collective_vss_coefficient_commitment_material_root,
     rebind_collective_vss_commitment_roots, rebind_collective_vss_complaint_root,
     rebind_first_private_vss_encrypted_envelope_hash, rebind_galois_key_share_batch_root,
-    rebind_trustee_evaluation_key_proof_set_bindings,
+    rebind_setup_key_correctness_certificate, rebind_trustee_evaluation_key_proof_set_bindings,
     rebind_trustee_evaluation_key_proof_set_root,
-    rebind_setup_key_correctness_certificate,
 };
 
 use super::super::accepted_setup::{
@@ -108,12 +107,6 @@ use super::super::evaluation_key_share_material::{
     key_switch_component_b_for_evaluation_key_fixture,
     register_verified_evaluation_key_share_component_material_chunks,
 };
-use super::super::trustee_evaluation_key_proof::{
-    EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-    TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS, TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-    TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
-    succinct_evaluation_key_proof_accounting_hash, trustee_evaluation_key_proof_bytes_hash,
-};
 use super::super::public_key_share_proof::{
     PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS, PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
     PublicKeyShareLnpProofGenerationInput, PublicKeyShareLnpProofVerificationInput,
@@ -131,6 +124,12 @@ use super::super::setup_proof::{
     SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     SetupProofMaterialReferenceInput, setup_proof_material_reference_root,
     setup_proof_material_transport_hashes, setup_proof_record_binding_value,
+};
+use super::super::trustee_evaluation_key_proof::{
+    EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+    TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS, TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
+    TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
+    succinct_evaluation_key_proof_accounting_hash, trustee_evaluation_key_proof_bytes_hash,
 };
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
@@ -176,4 +175,15 @@ fn accepted_setup_test_timing(test_name: &'static str) -> AcceptedSetupTestTimin
         started_at: Instant::now(),
         test_name,
     }
+}
+
+// Shared elapsed-clock logger for the terminal accepted-setup fixture phases.
+pub(super) fn terminal_phase(message: &str) {
+    static TERMINAL_PHASE_CLOCK: std::sync::OnceLock<std::time::Instant> =
+        std::sync::OnceLock::new();
+    let started = TERMINAL_PHASE_CLOCK.get_or_init(std::time::Instant::now);
+    println!(
+        "terminal-accepted-setup-phase [+{}s] {message}",
+        started.elapsed().as_secs()
+    );
 }

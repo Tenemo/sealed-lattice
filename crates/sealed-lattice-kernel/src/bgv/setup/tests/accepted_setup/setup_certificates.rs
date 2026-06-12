@@ -119,13 +119,14 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
             .is_some_and(|text| text.contains("Fiat-Shamir reduction accounting is accepted"))
     }));
 
-    // The trustee evaluation-key family stays explicitly open: its row binds
-    // the succinct accounting object and never claims accepted theorem rows.
+    // The trustee evaluation-key family carries its accepted accounting: the
+    // row binds the succinct accounting object with every theorem row closed
+    // under the explicitly named FRI conjecture.
     let trustee_family = &proof_family_accounting[3];
     assert_eq!(trustee_family["proofFamily"], "trustee-evaluation-key");
     assert_eq!(
         trustee_family["accountingStatus"],
-        "succinct-trustee-evaluation-key-theorem-accounting-open"
+        "succinct-trustee-evaluation-key-theorem-accounting-accepted"
     );
     assert_eq!(
         trustee_family["claimAccounting"]["accountingHash"],
@@ -134,7 +135,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     assert!(
         trustee_family["claimAccounting"]["claimBoundary"]
             .as_str()
-            .is_some_and(|text| text.contains("ClaimClosureMissing"))
+            .is_some_and(|text| text.contains("named FRI conjecture"))
     );
     assert_eq!(
         certificate["trusteeEvaluationKeyProofAccounting"]["objectType"],
@@ -142,11 +143,18 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     );
     assert_eq!(
         certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["accepted"],
-        false
+        true
+    );
+    assert!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["fiatShamir"]
+            ["effectiveSoundnessBitsAfterUnion"]
+            .as_i64()
+            .expect("effective soundness bits")
+            >= 128
     );
     assert_eq!(
         certificate["certificateStatus"],
-        "lnp-family-accounting-accepted-and-trustee-evaluation-key-accounting-open"
+        "lnp-and-trustee-evaluation-key-family-accounting-accepted"
     );
 
     let tbox_accounting = certificate["tboxAccounting"]

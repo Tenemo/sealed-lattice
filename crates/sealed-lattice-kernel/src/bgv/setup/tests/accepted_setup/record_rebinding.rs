@@ -416,7 +416,6 @@ pub(super) fn rebind_galois_key_share_batch_root(
     );
 }
 
-
 pub(super) fn rebind_collective_he_security_certificate_hash(package: &mut serde_json::Value) {
     package["heSecurityCertificate"]
         .as_object_mut()
