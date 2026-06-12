@@ -60,8 +60,12 @@ fn private_vss_mailbox_public_key_bytes_hash(roster_position: u64) -> String {
 }
 
 pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
+    // The reduced development ring must stay provable by the trustee
+    // evaluation-key argument: the trace splits each vector in two and the
+    // smallest supported trace is sixty-four, so the development ring is one
+    // hundred twenty-eight.
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(|| build_collective_setup_package_fixture(8, "development-reduced-ring"))
+        .get_or_init(|| build_collective_setup_package_fixture(128, "development-reduced-ring"))
         .clone()
 }
 
@@ -480,6 +484,7 @@ fn build_collective_setup_package_fixture_parts(
         "evaluatorKeySchedule": evaluator_key_schedule,
         "relinearizationKeyShareRounds": {},
         "galoisKeyShareBatches": [],
+        "trusteeEvaluationKeyProofs": {},
         "evaluationKeys": {},
         "setupCommitmentSecurityCertificate": setup_commitment_security_certificate,
         "setupCommitmentSecurityCertificateHash": setup_commitment_security_certificate_hash,
@@ -1588,9 +1593,9 @@ pub(super) fn evaluation_key_proof_container_bearing_collective_setup_package_re
 
 fn build_evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = collective_public_key_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"] =
-        relinearization_key_share_rounds_object(&package, true);
-    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package, true);
+    package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds_object(&package);
+    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);
+    package["trusteeEvaluationKeyProofs"] = trustee_evaluation_key_proofs_object(&package);
     package["evaluationKeys"] = public_evaluation_key_set_object(&package);
     rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
@@ -1915,9 +1920,10 @@ fn private_vss_envelope_commitments_object(
             {"phaseId": "publicKeyShareProofs", "phaseNumber": 9},
             {"phaseId": "relinearizationRoundOne", "phaseNumber": 10},
             {"phaseId": "relinearizationRoundTwo", "phaseNumber": 11},
-            {"phaseId": "galoisKeyBatchProofs", "phaseNumber": 12},
-            {"phaseId": "setupPackageAssembly", "phaseNumber": 13},
-            {"phaseId": "setupPackageVerification", "phaseNumber": 14},
+            {"phaseId": "galoisKeyShareBatches", "phaseNumber": 12},
+            {"phaseId": "trusteeEvaluationKeyProofs", "phaseNumber": 13},
+            {"phaseId": "setupPackageAssembly", "phaseNumber": 14},
+            {"phaseId": "setupPackageVerification", "phaseNumber": 15},
         ]),
     )
     .expect("phase order hash");

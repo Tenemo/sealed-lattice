@@ -138,7 +138,14 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["phaseOrder"].as_array().expect("phase order").len(),
-        14
+        15
+    );
+    assert!(
+        profile["phaseOrder"]
+            .as_array()
+            .expect("phase order")
+            .iter()
+            .any(|phase| phase["phaseId"] == "trusteeEvaluationKeyProofs")
     );
     assert!(profile["setupProfileHash"].as_str().is_some());
     assert!(profile["phaseOrderHash"].as_str().is_some());

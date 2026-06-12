@@ -330,6 +330,9 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     if let Some(response) = verify_galois_key_share_batches(setup_package, request)? {
         return Ok(Some(response));
     }
+    if let Some(response) = verify_trustee_evaluation_key_proofs(setup_package, request)? {
+        return Ok(Some(response));
+    }
 
     if let Some(response) = verify_public_evaluation_key_set(setup_package, request, false)? {
         return Ok(Some(response));

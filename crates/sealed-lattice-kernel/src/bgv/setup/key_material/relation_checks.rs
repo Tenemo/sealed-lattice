@@ -12,15 +12,10 @@ pub(super) fn sampled_evaluation_key_relation_checks(
         participant_identities,
     );
     let mut checks = Vec::new();
-    let mut sampled_relinearization_levels = BTreeSet::new();
-    if let Some(first_level) = relinearization_levels.first() {
-        sampled_relinearization_levels.insert(*first_level);
-    }
-    sampled_relinearization_levels.insert(DIRECT_COMPARISON_OUTPUT_LEVEL);
-    if let Some(last_level) = relinearization_levels.last() {
-        sampled_relinearization_levels.insert(*last_level);
-    }
-    for level in sampled_relinearization_levels {
+    // One relinearization key per schedule level (the consumed schedule holds
+    // a single working-level entry); the sampled digit and limb windows below
+    // also cover the truncated views lower levels consume.
+    for level in relinearization_levels.iter().copied() {
         let seed = evaluation_key_stream_seed(setup_seed_hash, "relinearization", level, None);
         checks.push(sampled_key_switch_relation_check(
             setup_seed_hash,
@@ -100,9 +95,11 @@ pub(super) fn sampled_key_switch_relation_check(
     };
     let mut digit_indexes = BTreeSet::new();
     digit_indexes.insert(0_usize);
+    digit_indexes.insert(DIRECT_COMPARISON_OUTPUT_LEVEL.min(level));
     digit_indexes.insert(level);
     let mut limb_indexes = BTreeSet::new();
     limb_indexes.insert(0_usize);
+    limb_indexes.insert(DIRECT_COMPARISON_OUTPUT_LEVEL.min(level));
     limb_indexes.insert(level);
     let mut samples = Vec::new();
     for digit_index in digit_indexes {

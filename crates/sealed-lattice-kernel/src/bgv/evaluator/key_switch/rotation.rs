@@ -97,10 +97,10 @@ pub(crate) fn rotate(
             "rotation requires a two-component ciphertext",
         ));
     }
-    if galois_key.level != ciphertext.level {
+    if galois_key.level < ciphertext.level {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "rotation key level does not match the ciphertext level",
+            "rotation key level is below the ciphertext level",
         ));
     }
     let rotated = apply_automorphism(ciphertext, galois_element)?;

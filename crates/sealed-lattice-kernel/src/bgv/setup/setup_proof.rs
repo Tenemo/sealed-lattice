@@ -21,19 +21,14 @@ pub(crate) use self::material_transport::{
 pub(super) use self::material_transport::{
     setup_proof_record_binding_value, verify_setup_proof_record_binding,
 };
-pub(super) use self::tbox_generation::{
-    append_setup_proof_lnp_tbox_generated_suffix,
-    append_setup_proof_lnp_tbox_generated_suffix_with_summary,
-};
+pub(super) use self::tbox_generation::append_setup_proof_lnp_tbox_generated_suffix;
 pub(super) use self::tbox_layout::setup_proof_lnp_tbox_byte_layout_profile_value;
 pub(crate) use self::tbox_layout::{
-    SetupProofLnpTboxLayout, galois_key_share_lnp_tbox_layout,
-    galois_key_share_lnp_tbox_parameter_profile_hash, private_vss_share_lnp_tbox_layout,
+    SetupProofLnpTboxLayout, private_vss_share_lnp_tbox_layout,
     private_vss_share_lnp_tbox_parameter_profile_hash,
     private_vss_share_lnp_tbox_parameter_profile_value, public_key_share_lnp_tbox_layout,
     public_key_share_lnp_tbox_parameter_profile_hash,
-    public_key_share_lnp_tbox_parameter_profile_value, relinearization_key_share_lnp_tbox_layout,
-    relinearization_key_share_lnp_tbox_parameter_profile_hash, same_secret_lnp_tbox_layout,
+    public_key_share_lnp_tbox_parameter_profile_value, same_secret_lnp_tbox_layout,
     same_secret_lnp_tbox_parameter_profile_hash, same_secret_lnp_tbox_parameter_profile_value,
 };
 pub(crate) use self::tbox_verification::{
@@ -136,16 +131,19 @@ pub(crate) const PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
     "SealedLattice-LNP-PublicKeyShare-Tbox-v1";
 pub(crate) const PRIVATE_VSS_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
     "SealedLattice-LNP-PrivateVssShare-Tbox-v1";
-pub(crate) const RELINEARIZATION_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
-    "SealedLattice-LNP-RelinearizationKeyShare-Tbox-v1";
-pub(crate) const GALOIS_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
-    "SealedLattice-LNP-GaloisKeyShare-Tbox-v1";
 pub(super) const SETUP_PROOF_FAMILIES: &[&str] = &[
     "vss-opening-carry",
     "same-secret-consistency",
     "public-key-share",
-    "relinearization-key-share",
-    "galois-key-share",
+];
+// Families whose proof bytes ride the chunked setup proof-material transport:
+// the LNP families plus the trustee evaluation-key argument, whose theorem
+// accounting is tracked separately from the LNP profile.
+pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
+    "vss-opening-carry",
+    "same-secret-consistency",
+    "public-key-share",
+    "trustee-evaluation-key",
 ];
 
 fn setup_proof_lnp_tbox_z34_seed_polynomial_count(

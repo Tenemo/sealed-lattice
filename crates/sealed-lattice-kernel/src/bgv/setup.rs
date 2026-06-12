@@ -7,7 +7,7 @@ mod accepted_setup;
 mod certificates;
 mod commitment;
 mod development_fixtures;
-mod evaluation_key_share_proof;
+mod evaluation_key_share_material;
 mod input;
 mod key_material;
 mod local_trustee_state;
@@ -22,6 +22,11 @@ mod sampling;
 mod setup_proof;
 mod sharing;
 mod threshold_share_commitments;
+mod trustee_evaluation_key_proof;
+pub(crate) use trustee_evaluation_key_proof::{
+    generate_trustee_evaluation_key_proof_from_request,
+    verify_trustee_evaluation_key_proof_from_request,
+};
 mod validation;
 mod vss;
 
@@ -33,7 +38,6 @@ pub(crate) use accepted_setup::{
     describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
-pub(crate) use evaluation_key_share_proof::generate_evaluation_key_share_lnp_proof_from_request;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,

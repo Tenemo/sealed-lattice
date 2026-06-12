@@ -1018,6 +1018,82 @@ fn verify_same_secret_lnp_proof_record(
     Ok(())
 }
 
+pub(super) struct LnpTboxZ34MetadataExpectation<'a> {
+    pub(super) z34_seed_material_hash: &'a str,
+    pub(super) z34_challenge_seed_hash: &'a str,
+    pub(super) z34_challenge_tail_hash: &'a str,
+    pub(super) z34_challenge_row_domain_hash: &'a str,
+    pub(super) z34_challenge_z3_row_set_hash: &'a str,
+    pub(super) z34_challenge_z4_row_set_hash: &'a str,
+    pub(super) tbox_lower_protocol_challenge_hash: &'a str,
+    pub(super) z34_z3_check_window_hash: &'a str,
+    pub(super) z34_z4_check_window_hash: &'a str,
+    pub(super) z34_z3_l2_squared_decimal: &'a str,
+    pub(super) z34_z4_infinity_norm_decimal: &'a str,
+    pub(super) proof_label: &'a str,
+}
+
+pub(super) fn verify_lnp_tbox_z34_metadata_fields(
+    proof_record: &Value,
+    expectation: LnpTboxZ34MetadataExpectation<'_>,
+) -> CanonicalResult<()> {
+    for (field_name, expected_hash) in [
+        ("z34SeedMaterialHash", expectation.z34_seed_material_hash),
+        ("z34ChallengeSeedHash", expectation.z34_challenge_seed_hash),
+        ("z34ChallengeTailHash", expectation.z34_challenge_tail_hash),
+        (
+            "z34ChallengeRowDomainHash",
+            expectation.z34_challenge_row_domain_hash,
+        ),
+        (
+            "z34ChallengeZ3RowSetHash",
+            expectation.z34_challenge_z3_row_set_hash,
+        ),
+        (
+            "z34ChallengeZ4RowSetHash",
+            expectation.z34_challenge_z4_row_set_hash,
+        ),
+        (
+            "tboxLowerProtocolChallengeHash",
+            expectation.tbox_lower_protocol_challenge_hash,
+        ),
+        ("z34Z3CheckWindowHash", expectation.z34_z3_check_window_hash),
+        ("z34Z4CheckWindowHash", expectation.z34_z4_check_window_hash),
+    ] {
+        if value_string(proof_record, field_name)? != expected_hash {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{} {field_name} must match verified tbox proof bytes",
+                    expectation.proof_label
+                ),
+            ));
+        }
+    }
+    for (field_name, expected_decimal) in [
+        (
+            "z34Z3L2SquaredDecimal",
+            expectation.z34_z3_l2_squared_decimal,
+        ),
+        (
+            "z34Z4InfinityNormDecimal",
+            expectation.z34_z4_infinity_norm_decimal,
+        ),
+    ] {
+        if value_string(proof_record, field_name)? != expected_decimal {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{} {field_name} must match verified tbox proof bytes",
+                    expectation.proof_label
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn same_secret_proof_bytes_from_record(
     proof_record: &Value,
     request: &Value,

@@ -47,7 +47,7 @@ struct SetupCommitmentMatrixNttKey {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StructuralMatrixPolynomial {
+pub(super) enum StructuralMatrixPolynomial {
     Zero,
     One,
 }
@@ -193,7 +193,7 @@ pub(super) fn setup_signed_coefficient_fits_centered_commitment_modulus_product(
     BigUint::from(coefficient_magnitude) * BigUint::from(2_u8) < setup_commitment_modulus_product()
 }
 
-fn setup_big_signed_coefficient_fits_centered_commitment_modulus_product(
+pub(super) fn setup_big_signed_coefficient_fits_centered_commitment_modulus_product(
     coefficient: &BigInt,
 ) -> bool {
     coefficient.magnitude().clone() * BigUint::from(2_u8) < setup_commitment_modulus_product()
@@ -1120,7 +1120,7 @@ pub(super) fn compute_setup_commitment_for_tests(
     )
 }
 
-fn setup_commitment_matrix_polynomial(
+pub(super) fn setup_commitment_matrix_polynomial(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
     commitment_modulus_index: usize,
@@ -1201,6 +1201,30 @@ fn setup_commitment_matrix_ntt(
     Ok(matrix_ntt)
 }
 
+// Coefficient-form matrix polynomial through the process-wide NTT cache: the
+// expensive hash sampling happens once per coordinate set and seed.
+pub(super) fn setup_commitment_matrix_coefficients_cached(
+    public_matrix_seed_hash: &str,
+    source_rns_limb_index: usize,
+    commitment_modulus_index: usize,
+    matrix_row_index: usize,
+    randomness_column_index: usize,
+    ring_degree: usize,
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    let matrix_ntt = setup_commitment_matrix_ntt(
+        public_matrix_seed_hash,
+        source_rns_limb_index,
+        commitment_modulus_index,
+        matrix_row_index,
+        randomness_column_index,
+        ring_degree,
+        modulus,
+    )?;
+
+    inverse_negacyclic_ntt(&matrix_ntt, modulus)
+}
+
 fn setup_commitment_matrix_coefficient(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -1262,7 +1286,7 @@ fn structural_matrix_coefficient(
     None
 }
 
-fn structural_matrix_polynomial_kind(
+pub(super) fn structural_matrix_polynomial_kind(
     matrix_row_index: usize,
     randomness_column_index: usize,
 ) -> Option<StructuralMatrixPolynomial> {

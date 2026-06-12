@@ -603,6 +603,7 @@ export type BgvAcceptedSetupHandoff = {
         readonly status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule';
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
+        readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     };
@@ -754,35 +755,72 @@ export type BgvPublicKeyShareLnpProofGeneration = {
     };
 } & BgvSetupProofTboxZ34Metadata;
 
-type BgvEvaluationKeyShareLnpProofGenerationBase = {
+// One key share inside a trustee evaluation-key proof statement. The
+// component material is supplied either as embedded coefficient matrices or
+// as canonical binary component-material bytes; round-two keys also carry the
+// recomputed public round-one aggregate diagonals.
+export type BgvTrusteeEvaluationKeyStatementKey = {
+    readonly proofFamily:
+        | 'relinearization-round-one'
+        | 'relinearization-round-two'
+        | 'galois-rotation';
+    readonly rotation?: number;
+    readonly level: number;
+    readonly keySwitchDomain: string;
+    readonly keySwitchSeedHex: string;
+    readonly componentBByDigit?: readonly (readonly (readonly number[])[])[];
+    readonly componentMaterialBytesHex?: string;
+    readonly roundOneAggregateDiagonal?: readonly (readonly number[])[];
+};
+
+export type BgvTrusteeEvaluationKeyStatementContext = {
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly setupEpoch: string;
+    readonly requiredGaloisSetHash: ProtocolHash;
+    readonly evaluatorKeyScheduleRoot: ProtocolHash;
+    readonly keySwitchDecompositionHash: ProtocolHash;
+    readonly sameSecretStatementRoot: ProtocolHash;
+    readonly sameSecretProofRoot: ProtocolHash;
+};
+
+export type BgvTrusteeEvaluationKeySameSecretLinkage = {
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly commitments: readonly unknown[];
+};
+
+export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly ok: true;
-    readonly operation: 'generateEvaluationKeyShareLnpProof';
-    readonly setupProofProfileId: string;
-    readonly proofVerificationStatus: string;
+    readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly proofModelStatus: string;
+    readonly proofAccountingHash: ProtocolHash;
     readonly statementHash: ProtocolHash;
-    readonly relationCommitmentHash: ProtocolHash;
-    readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: BgvSetupProofChallenge;
-    readonly proofSizeBytes: number;
-    readonly proofBytesHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly keyCount: number;
+    readonly sameSecretLinkageIncluded: boolean;
+    readonly proofByteLength: number;
     readonly proofBytesHex: string;
     readonly proofRandomness: {
-        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
-        readonly seedBytes: 64;
+        readonly source: string;
         readonly retention: string;
     };
-} & BgvSetupProofTboxZ34Metadata;
+};
 
-export type BgvEvaluationKeyShareLnpProofGeneration =
-    | (BgvEvaluationKeyShareLnpProofGenerationBase & {
-          readonly proofFamily: 'relinearization-key-share';
-          readonly relinearizationKeyShareTboxParameterProfileHash: ProtocolHash;
-      })
-    | (BgvEvaluationKeyShareLnpProofGenerationBase & {
-          readonly proofFamily: 'galois-key-share';
-          readonly galoisKeyShareTboxParameterProfileHash: ProtocolHash;
-      });
+export type BgvTrusteeEvaluationKeyProofVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyTrusteeEvaluationKeyProof';
+    readonly proofModelStatus: string;
+    readonly proofAccountingHash: ProtocolHash;
+    readonly proofAccounting: Readonly<Record<string, unknown>>;
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly keyCount: number;
+    readonly sameSecretLinkageIncluded: boolean;
+    readonly proofByteLength: number;
+};
 
 export type BgvThresholdShareCommitmentDerivation = {
     readonly ok: true;

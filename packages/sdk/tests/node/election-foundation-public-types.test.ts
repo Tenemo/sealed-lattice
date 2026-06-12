@@ -88,6 +88,7 @@ type PublicSetupTypes = [
     publicTypes.EncryptedLocalTrusteeSetupState,
     publicTypes.EvaluatorKeySchedule,
     publicTypes.EvaluatorKeyScheduleInput,
+    publicTypes.EvaluationKeyShareMaterial,
     publicTypes.EvaluationKeyShareMaterialTransportInput,
     publicTypes.ExportEncryptedLocalTrusteeSetupStateInput,
     publicTypes.ExportEncryptedLocalTrusteeSetupStateResult,
@@ -96,9 +97,8 @@ type PublicSetupTypes = [
     publicTypes.GaloisKeyShareBatchContribution,
     publicTypes.GaloisKeyShareBatchesInput,
     publicTypes.GaloisKeyShareBatchRootReference,
-    publicTypes.GaloisKeyShareProof,
-    publicTypes.GaloisKeyShareProofContribution,
-    publicTypes.GaloisKeyShareProofMaterial,
+    publicTypes.GaloisKeyShareContribution,
+    publicTypes.GaloisKeyShareMaterialRecord,
     publicTypes.GaloisKeyShareRootReference,
     publicTypes.LocalTrusteeSetupStateCommitment,
     publicTypes.LocalTrusteeSetupStateDeletionReceipt,
@@ -129,6 +129,8 @@ type PublicSetupTypes = [
     publicTypes.TransportedEvaluationKeyShareProofMaterialSet,
     publicTypes.TransportedEvaluationKeyShareComponentMaterialSet,
     publicTypes.TransportedPublicEvaluationKeyMaterialSet,
+    publicTypes.TrusteeEvaluationKeyProofRecord,
+    publicTypes.TrusteeEvaluationKeyProofSet,
     publicTypes.PublicKeyShareProofRecord,
     publicTypes.PublicKeyShareProofSet,
     publicTypes.PublicKeyShareProofSetInput,
@@ -136,7 +138,6 @@ type PublicSetupTypes = [
     publicTypes.PublicKeyShareSet,
     publicTypes.PublicKeyShareSetInput,
     publicTypes.RelinearizationKeyRootReference,
-    publicTypes.RelinearizationKeyShareProofMaterial,
     publicTypes.RelinearizationKeyShareRoundOneRecord,
     publicTypes.RelinearizationKeyShareRoundTwoRecord,
     publicTypes.RelinearizationKeyShareRounds,
@@ -322,6 +323,7 @@ const publicSetupTypeNames = [
     'EncryptedLocalTrusteeSetupState',
     'EvaluatorKeySchedule',
     'EvaluatorKeyScheduleInput',
+    'EvaluationKeyShareMaterial',
     'EvaluationKeyShareMaterialTransportInput',
     'ExportEncryptedLocalTrusteeSetupStateInput',
     'ExportEncryptedLocalTrusteeSetupStateResult',
@@ -330,9 +332,8 @@ const publicSetupTypeNames = [
     'GaloisKeyShareBatchContribution',
     'GaloisKeyShareBatchesInput',
     'GaloisKeyShareBatchRootReference',
-    'GaloisKeyShareProof',
-    'GaloisKeyShareProofContribution',
-    'GaloisKeyShareProofMaterial',
+    'GaloisKeyShareContribution',
+    'GaloisKeyShareMaterialRecord',
     'GaloisKeyShareRootReference',
     'LocalTrusteeSetupStateCommitment',
     'LocalTrusteeSetupStateDeletionReceipt',
@@ -363,6 +364,8 @@ const publicSetupTypeNames = [
     'TransportedEvaluationKeyShareProofMaterialSet',
     'TransportedEvaluationKeyShareComponentMaterialSet',
     'TransportedPublicEvaluationKeyMaterialSet',
+    'TrusteeEvaluationKeyProofRecord',
+    'TrusteeEvaluationKeyProofSet',
     'PublicKeyShareProofRecord',
     'PublicKeyShareProofSet',
     'PublicKeyShareProofSetInput',
@@ -370,7 +373,6 @@ const publicSetupTypeNames = [
     'PublicKeyShareSet',
     'PublicKeyShareSetInput',
     'RelinearizationKeyRootReference',
-    'RelinearizationKeyShareProofMaterial',
     'RelinearizationKeyShareRoundOneRecord',
     'RelinearizationKeyShareRoundTwoRecord',
     'RelinearizationKeyShareRounds',
@@ -418,7 +420,7 @@ describe('election foundation public type surface', () => {
     });
 
     it('keeps accepted setup phase, randomness, key-record, and local-state types available', () => {
-        expect(publicSetupTypeNames).toHaveLength(108);
+        expect(publicSetupTypeNames).toHaveLength(109);
     });
 
     it('keeps setup verifier transport companions on concrete public types', () => {

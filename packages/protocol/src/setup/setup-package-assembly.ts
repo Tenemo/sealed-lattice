@@ -9,6 +9,7 @@ import type {
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet,
+    TrusteeEvaluationKeyProofSet,
 } from './evaluation-key-proof-records.js';
 import type {
     EvaluatorKeySchedule,
@@ -143,6 +144,7 @@ export type SetupPackageInput = Readonly<{
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
     readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
+    readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
     readonly transportedEvaluationKeyShareProofMaterial?:
         | TransportedEvaluationKeyShareProofMaterialSet
         | JsonRecord;
@@ -193,6 +195,7 @@ export type SetupPackage = Readonly<
         readonly evaluatorKeySchedule: EvaluatorKeySchedule;
         readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
+        readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
         readonly evaluationKeys: PublicEvaluationKeySet;
         readonly setupCommitmentSecurityCertificate: JsonRecord;
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
@@ -350,9 +353,10 @@ const requiredSetupPhases = [
     ['publicKeyShareProofs', 9],
     ['relinearizationRoundOne', 10],
     ['relinearizationRoundTwo', 11],
-    ['galoisKeyBatchProofs', 12],
-    ['setupPackageAssembly', 13],
-    ['setupPackageVerification', 14],
+    ['galoisKeyShareBatches', 12],
+    ['trusteeEvaluationKeyProofs', 13],
+    ['setupPackageAssembly', 14],
+    ['setupPackageVerification', 15],
 ] as const;
 
 const forbiddenPackageFieldNames = new Set([
@@ -869,6 +873,24 @@ const assertKeyRecordBindings = (input: SetupPackageInput): void => {
         hashField(batch, 'galoisKeyShareBatchRoot', objectPath);
     }
     assertObjectType(
+        input.trusteeEvaluationKeyProofs,
+        'trusteeEvaluationKeyProofs',
+        'TrusteeEvaluationKeyProofSet',
+    );
+    hashField(
+        input.trusteeEvaluationKeyProofs,
+        'trusteeEvaluationKeyProofSetRoot',
+        'trusteeEvaluationKeyProofs',
+    );
+    if (
+        input.trusteeEvaluationKeyProofs.relinearizationKeyShareRoundsRoot !==
+        input.relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot
+    ) {
+        throw new Error(
+            'trusteeEvaluationKeyProofs must bind the supplied relinearization share-record container.',
+        );
+    }
+    assertObjectType(
         input.evaluationKeys,
         'evaluationKeys',
         'PublicEvaluationKeySet',
@@ -1379,8 +1401,9 @@ const assertGaloisScheduleCovered = (input: SetupPackageInput): void => {
     }
     const availableBatchKeys = new Set(
         input.galoisKeyShareBatches.flatMap((batch) =>
-            batch.galoisKeyShareProofs.map(
-                (proof) => `${String(proof.rotation)}:${String(proof.level)}`,
+            batch.galoisKeyShareMaterialRecords.map(
+                (materialRecord) =>
+                    `${String(materialRecord.rotation)}:${String(materialRecord.level)}`,
             ),
         ),
     );
@@ -1972,6 +1995,7 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         evaluatorKeySchedule: input.evaluatorKeySchedule,
         relinearizationKeyShareRounds: input.relinearizationKeyShareRounds,
         galoisKeyShareBatches: input.galoisKeyShareBatches,
+        trusteeEvaluationKeyProofs: input.trusteeEvaluationKeyProofs,
         evaluationKeys: input.evaluationKeys,
         setupCommitmentSecurityCertificate:
             certificates.setupCommitmentSecurityCertificate,

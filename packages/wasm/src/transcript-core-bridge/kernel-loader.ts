@@ -13,7 +13,8 @@ import type {
     BgvCollectiveSetupProfileDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
-    BgvEvaluationKeyShareLnpProofGeneration,
+    BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeyProofVerification,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -446,30 +447,33 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                     }),
-                generateEvaluationKeyShareLnpProof: (
+                generateTrusteeEvaluationKeyProof: (
                     input,
-                ): BgvEvaluationKeyShareLnpProofGeneration =>
-                    executeCommand<BgvEvaluationKeyShareLnpProofGeneration>({
-                        command: 'GenerateEvaluationKeyShareLnpProof',
-                        proofFamily: input.proofFamily,
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        proofRecord: input.proofRecord,
-                        sameSecretStatementRecord:
-                            input.sameSecretStatementRecord,
-                        constantCommitments: input.constantCommitments,
-                        setupProofBinding: input.setupProofBinding,
-                        transportedKeySwitchComponentMaterial:
-                            input.transportedKeySwitchComponentMaterial,
+                ): BgvTrusteeEvaluationKeyProofGeneration =>
+                    executeCommand<BgvTrusteeEvaluationKeyProofGeneration>({
+                        command: 'GenerateTrusteeEvaluationKeyProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        keys: input.keys,
+                        sameSecretLinkage: input.sameSecretLinkage,
                         secretCoefficients: input.secretCoefficients,
+                        errorCoefficientsByKey: input.errorCoefficientsByKey,
+                        negativeIndicatorCoefficients:
+                            input.negativeIndicatorCoefficients,
                         openingRandomnessByLimb: input.openingRandomnessByLimb,
-                        errorCoefficientsByDigit:
-                            input.errorCoefficientsByDigit,
-                        relinearizationSourceCoefficientsByDigit:
-                            input.relinearizationSourceCoefficientsByDigit,
-                        roundOneAggregateSourceCoefficientsByDigit:
-                            input.roundOneAggregateSourceCoefficientsByDigit,
                         proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                    }),
+                verifyTrusteeEvaluationKeyProof: (
+                    input,
+                ): BgvTrusteeEvaluationKeyProofVerification =>
+                    executeCommand<BgvTrusteeEvaluationKeyProofVerification>({
+                        command: 'VerifyTrusteeEvaluationKeyProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        keys: input.keys,
+                        sameSecretLinkage: input.sameSecretLinkage,
+                        proofBytesHex: input.proofBytesHex,
                     }),
                 computeSetupCommitmentFromOpening: (
                     input,

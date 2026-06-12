@@ -51,9 +51,11 @@ import type {
     EvaluatorKeyScheduleInput as ProtocolEvaluatorKeyScheduleInput,
     GaloisKeyRootReference as ProtocolGaloisKeyRootReference,
     GaloisKeyShareBatch as ProtocolGaloisKeyShareBatch,
+    GaloisKeyShareBatchContribution as ProtocolGaloisKeyShareBatchContribution,
     GaloisKeyShareBatchRootReference as ProtocolGaloisKeyShareBatchRootReference,
-    GaloisKeyShareProof as ProtocolGaloisKeyShareProof,
-    GaloisKeyShareProofMaterial as ProtocolGaloisKeyShareProofMaterial,
+    GaloisKeyShareContribution as ProtocolGaloisKeyShareContribution,
+    GaloisKeyShareMaterialRecord as ProtocolGaloisKeyShareMaterialRecord,
+    EvaluationKeyShareMaterial as ProtocolEvaluationKeyShareMaterial,
     EvaluationKeyShareMaterialTransportInput as ProtocolEvaluationKeyShareMaterialTransportInput,
     GaloisKeyShareRootReference as ProtocolGaloisKeyShareRootReference,
     LocalTrusteeSetupStateDecryptionInput,
@@ -89,12 +91,15 @@ import type {
     SetupTransportedVssCoefficientCommitmentMaterialReference as ProtocolSetupTransportedVssCoefficientCommitmentMaterialReference,
     VerifiedVssCoefficientCommitmentMaterial as ProtocolVerifiedVssCoefficientCommitmentMaterial,
     RelinearizationKeyRootReference as ProtocolRelinearizationKeyRootReference,
-    RelinearizationKeyShareProofMaterial as ProtocolRelinearizationKeyShareProofMaterial,
     RelinearizationKeyShareRoundOneRecord as ProtocolRelinearizationKeyShareRoundOneRecord,
     RelinearizationKeyShareRoundTwoRecord as ProtocolRelinearizationKeyShareRoundTwoRecord,
     RelinearizationKeyShareRounds as ProtocolRelinearizationKeyShareRounds,
     RelinearizationKeyShareRoundsInput as ProtocolRelinearizationKeyShareRoundsInput,
     RelinearizationLevelScheduleEntry as ProtocolRelinearizationLevelScheduleEntry,
+    RelinearizationRoundOneContribution as ProtocolRelinearizationRoundOneContribution,
+    RelinearizationRoundTwoContribution as ProtocolRelinearizationRoundTwoContribution,
+    TrusteeEvaluationKeyProofRecord as ProtocolTrusteeEvaluationKeyProofRecord,
+    TrusteeEvaluationKeyProofSet as ProtocolTrusteeEvaluationKeyProofSet,
     RequiredGaloisKeyScheduleEntry as ProtocolRequiredGaloisKeyScheduleEntry,
     RequiredGaloisSet as ProtocolRequiredGaloisSet,
     SameSecretProofMaterial as ProtocolSameSecretProofMaterial,
@@ -774,6 +779,7 @@ export type SetupPackageInput = Readonly<{
     readonly evaluatorKeySchedule: JsonRecord;
     readonly relinearizationKeyShareRounds: JsonRecord;
     readonly galoisKeyShareBatches: readonly JsonRecord[];
+    readonly trusteeEvaluationKeyProofs: JsonRecord;
     readonly evaluationKeys: JsonRecord;
     readonly setupCertificateInput?: Omit<
         SetupCertificatesInput,
@@ -855,20 +861,11 @@ export type SameSecretProofRecord = ProtocolSameSecretProofRecord;
 export type SameSecretProofReference = ProtocolSameSecretProofReference;
 export type SameSecretProofSet = ProtocolSameSecretProofSet;
 export type SameSecretProofSetInput = ProtocolSameSecretProofSetInput;
-export type RelinearizationKeyShareProofMaterial =
-    ProtocolRelinearizationKeyShareProofMaterial;
-export type RelinearizationRoundOneContribution = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly level: number;
-    readonly roundOneShareRoot: ProtocolHash;
-    readonly proofMaterial: RelinearizationKeyShareProofMaterial;
-}>;
-export type RelinearizationRoundTwoContribution = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly level: number;
-    readonly roundTwoShareRoot: ProtocolHash;
-    readonly proofMaterial: RelinearizationKeyShareProofMaterial;
-}>;
+export type EvaluationKeyShareMaterial = ProtocolEvaluationKeyShareMaterial;
+export type RelinearizationRoundOneContribution =
+    ProtocolRelinearizationRoundOneContribution;
+export type RelinearizationRoundTwoContribution =
+    ProtocolRelinearizationRoundTwoContribution;
 export type RelinearizationKeyShareRoundOneRecord =
     ProtocolRelinearizationKeyShareRoundOneRecord;
 export type RelinearizationKeyShareRoundTwoRecord =
@@ -878,40 +875,26 @@ export type RelinearizationKeyShareRounds =
 type PublicEvaluationKeyProofCommonInput = Readonly<
     Omit<
         ProtocolRelinearizationKeyShareRoundsInput,
-        | 'roundOneContributions'
-        | 'roundTwoContributions'
-        | 'evaluationKeyShareProofGenerator'
+        'roundOneContributions' | 'roundTwoContributions'
     >
 >;
 export type RelinearizationKeyShareRoundsInput =
-    PublicEvaluationKeyProofCommonInput &
-        Readonly<{
-            readonly roundOneContributions: readonly RelinearizationRoundOneContribution[];
-            readonly roundTwoContributions: readonly RelinearizationRoundTwoContribution[];
-        }>;
+    ProtocolRelinearizationKeyShareRoundsInput;
 export type GaloisKeyShareRootReference = ProtocolGaloisKeyShareRootReference;
-export type GaloisKeyShareProofMaterial = ProtocolGaloisKeyShareProofMaterial;
-export type GaloisKeyShareProofContribution =
-    ProtocolGaloisKeyShareRootReference &
-        Readonly<{
-            readonly proofMaterial: GaloisKeyShareProofMaterial;
-        }>;
-export type GaloisKeyShareBatchContribution = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly galoisKeyShareProofs: readonly GaloisKeyShareProofContribution[];
-}>;
-export type GaloisKeyShareProof = ProtocolGaloisKeyShareProof;
+export type GaloisKeyShareContribution = ProtocolGaloisKeyShareContribution;
+export type GaloisKeyShareBatchContribution =
+    ProtocolGaloisKeyShareBatchContribution;
+export type GaloisKeyShareMaterialRecord = ProtocolGaloisKeyShareMaterialRecord;
 export type GaloisKeyShareBatch = ProtocolGaloisKeyShareBatch;
 export type GaloisKeyShareBatchesInput = PublicEvaluationKeyProofCommonInput &
     Readonly<{
         readonly batchContributions: readonly GaloisKeyShareBatchContribution[];
     }>;
-export type EvaluationKeyShareMaterialTransportInput = Readonly<{
-    readonly sameSecretProofReferences: ProtocolEvaluationKeyShareMaterialTransportInput['sameSecretProofReferences'];
-    readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
-    readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
-    readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
-}>;
+export type TrusteeEvaluationKeyProofRecord =
+    ProtocolTrusteeEvaluationKeyProofRecord;
+export type TrusteeEvaluationKeyProofSet = ProtocolTrusteeEvaluationKeyProofSet;
+export type EvaluationKeyShareMaterialTransportInput =
+    ProtocolEvaluationKeyShareMaterialTransportInput;
 export type RelinearizationKeyRootReference =
     ProtocolRelinearizationKeyRootReference;
 export type GaloisKeyShareBatchRootReference =
@@ -1053,6 +1036,7 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule';
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
+        readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     }>;
@@ -1390,17 +1374,6 @@ export const createSetupPackageVerificationInput = (
 ): VerifySetupPackageInput =>
     createSetupPackageVerificationInputInternal(input);
 
-const assertNoEvaluationKeyProofGeneration = (
-    contribution: Readonly<Record<string, unknown>>,
-    fieldName: string,
-): void => {
-    if (Object.prototype.hasOwnProperty.call(contribution, 'proofGeneration')) {
-        throw new Error(
-            `${fieldName}.proofGeneration is not accepted by the public setup facade; supply proofMaterial from a proof generator instead.`,
-        );
-    }
-};
-
 /** Creates root-bound public-key share records from public component hashes. */
 export const createPublicKeyShareSet = (
     input: PublicKeyShareSetInput,
@@ -1463,42 +1436,16 @@ export const createEvaluatorKeySchedule = (
     input: EvaluatorKeyScheduleInput,
 ): EvaluatorKeySchedule => createEvaluatorKeyScheduleInternal(input);
 
-/** Creates root-bound relinearization proof records from generated proof material. */
+/** Creates root-bound relinearization share records from public share material. */
 export const createRelinearizationKeyShareRounds = (
     input: RelinearizationKeyShareRoundsInput,
-): RelinearizationKeyShareRounds => {
-    input.roundOneContributions.forEach((contribution, contributionIndex) =>
-        assertNoEvaluationKeyProofGeneration(
-            contribution,
-            `roundOneContributions.${String(contributionIndex)}`,
-        ),
-    );
-    input.roundTwoContributions.forEach((contribution, contributionIndex) =>
-        assertNoEvaluationKeyProofGeneration(
-            contribution,
-            `roundTwoContributions.${String(contributionIndex)}`,
-        ),
-    );
+): RelinearizationKeyShareRounds =>
+    createRelinearizationKeyShareRoundsInternal(input);
 
-    return createRelinearizationKeyShareRoundsInternal(input);
-};
-
-/** Creates root-bound Galois proof batch records from generated proof material. */
+/** Creates root-bound Galois share batch records from public share material. */
 export const createGaloisKeyShareBatches = (
     input: GaloisKeyShareBatchesInput,
-): readonly GaloisKeyShareBatch[] => {
-    input.batchContributions.forEach((batchContribution, batchIndex) =>
-        batchContribution.galoisKeyShareProofs.forEach(
-            (proofContribution, proofIndex) =>
-                assertNoEvaluationKeyProofGeneration(
-                    proofContribution,
-                    `batchContributions.${String(batchIndex)}.galoisKeyShareProofs.${String(proofIndex)}`,
-                ),
-        ),
-    );
-
-    return createGaloisKeyShareBatchesInternal(input);
-};
+): readonly GaloisKeyShareBatch[] => createGaloisKeyShareBatchesInternal(input);
 
 /** Creates public evaluation-key roots from verified relinearization and Galois records. */
 export const createPublicEvaluationKeySet = (

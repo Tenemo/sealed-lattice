@@ -183,7 +183,11 @@ fn setup_proof_challenge_space_audit_covers_all_families_and_invertible_differen
     let sampled_difference_checks = audit["sampledDifferenceChecks"]
         .as_array()
         .expect("sampled difference checks");
-    assert_eq!(sampled_difference_checks.len(), 10);
+    // One pairwise difference per unordered LNP family pair.
+    assert_eq!(
+        sampled_difference_checks.len(),
+        SETUP_PROOF_FAMILIES.len() * (SETUP_PROOF_FAMILIES.len() - 1) / 2
+    );
     assert!(sampled_difference_checks.iter().all(|check| {
         check["invertibleOverProofRing"].as_bool() == Some(true)
             && check["coefficientInfinityNorm"]
@@ -292,8 +296,6 @@ fn setup_proof_lnp_tbox_decoder_accepts_generated_suffix_for_all_setup_families(
         private_vss_share_lnp_tbox_layout(),
         same_secret_lnp_tbox_layout(),
         public_key_share_lnp_tbox_layout(),
-        relinearization_key_share_lnp_tbox_layout(),
-        galois_key_share_lnp_tbox_layout(),
     ] {
         let statement_hash = hash512_hex(
             "test-statement",

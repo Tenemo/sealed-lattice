@@ -86,6 +86,7 @@ export type SetupCertificatesInput = Readonly<{
     readonly bgvProfile: BgvRnsProfileForCertificates | JsonRecord;
     readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
+    readonly trusteeEvaluationKeyProofAccounting?: JsonRecord;
 }>;
 
 export type SetupCommitmentSecurityCertificate = Readonly<
@@ -199,16 +200,15 @@ const setupProofLnpTboxChallengeSpaceBits = 147;
 const setupProofCommitmentRandomnessInfinityBound = 1n;
 const setupProofSecretInfinityBound = 1n;
 const setupProofErrorInfinityBound = 2n;
-const setupProofRoundTwoAggregateSourceParticipantBound = 10n;
 const setupProofBytesAcceptedStatus =
-    'private-vss-same-secret-public-key-share-relinearization-and-galois-proof-bytes-accepted-for-setup-proof-accounting';
+    'private-vss-same-secret-public-key-share-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting';
 const setupProofFamilies = [
     'vss-opening-carry',
     'same-secret-consistency',
     'public-key-share',
-    'relinearization-key-share',
-    'galois-key-share',
 ] as const;
+const succinctEvaluationKeyProofAccountingHashNamespace =
+    'SuccinctEvaluationKeyProofAccountingHash';
 const setupTransportProfileId =
     'sealed-lattice-setup-binary-chunked-transport-v1';
 const setupTransportChunkSizeBytes = 1_048_576;
@@ -1173,16 +1173,6 @@ const setupProofRecordBindingForCertificate = (
             'publicKeyShareTboxParameterProfileHash',
             'setupProfile.setupProofProfile',
         ),
-        relinearizationKeyShareTboxParameterProfileHash: hashField(
-            setupProofProfile,
-            'relinearizationKeyShareTboxParameterProfileHash',
-            'setupProfile.setupProofProfile',
-        ),
-        galoisKeyShareTboxParameterProfileHash: hashField(
-            setupProofProfile,
-            'galoisKeyShareTboxParameterProfileHash',
-            'setupProfile.setupProofProfile',
-        ),
         proofBytesAcceptedStatus: stringField(
             verificationPolicy,
             'proofBytesAcceptedStatus',
@@ -1191,7 +1181,9 @@ const setupProofRecordBindingForCertificate = (
     };
 };
 
-const setupProofFamilyAccounting = (): JsonRecord[] => [
+const setupProofFamilyAccounting = (
+    trusteeEvaluationKeyProofAccountingHash: ProtocolHash,
+): JsonRecord[] => [
     {
         proofFamily: 'vss-opening-carry',
         claimScope:
@@ -1265,52 +1257,29 @@ const setupProofFamilyAccounting = (): JsonRecord[] => [
         },
     },
     {
-        proofFamily: 'relinearization-key-share',
+        proofFamily: 'trustee-evaluation-key',
         claimScope:
-            'relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots',
+            'every scheduled relinearization and Galois key share of one trustee, proven by one batched succinct argument against the committed trustee secret and the recomputed round-one public aggregates',
         verifierClosedStatus:
-            'relation-transcript-and-bound-checks-verifier-closed',
+            'statement-rebuild-and-argument-checks-verifier-closed',
         verifierClosedChecks: [
-            'statement hash binds relinearization proof record roots, same-secret roots, transported key-switch component material when supplied, and setup proof record binding',
-            'relation commitment hash and scalar challenge are recomputed from key-switch, source, carry, and commitment-response commitments',
-            'accepted relinearization tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript',
-            'same-secret opening response is checked against accepted VSS constant commitments',
-            'round-one same-secret source responses and verifier-side round-two source-square aggregate roots are checked before runtime key material is accepted',
-            'deterministic key-switch component vectors, centered-binomial errors, and lifted no-wrap carry responses are checked for scheduled relinearization levels',
-            'secret, opening-randomness, error, source, and carry responses are checked against fixed first-profile bounds',
+            'every statement is rebuilt by the verifier from the transported share records, the recomputed round-one public aggregate diagonals, the accepted same-secret constant commitments, and the ceremony context; no prover-supplied statement field is trusted',
+            'key-switch component material is decoded against record-bound component vector roots and deterministic public sampler seeds shared by schedule entry',
+            'per-limb trace commitments, masked column openings, batched row checks, the digit-and-key-batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every limb field',
+            'arithmetic source relations are enforced inside the argument: round-one sources equal the committed secret, round-two sources equal the secret times the recomputed public aggregate, and Galois sources equal the automorphism image',
+            'the same-secret linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against the shared key-relation secret',
+            'cross-limb consistency claims are checked as masked centered integers inside the joint no-wrap window',
+            'canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package',
         ],
         accountingStatus:
-            'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
+            'succinct-trustee-evaluation-key-theorem-accounting-open',
         claimAccounting: {
-            soundness:
-                'LNP22 commit-and-prove extractor accounting is accepted for the relinearization key-share relation because same-secret openings, source-square aggregate binding, deterministic key-switch components, no-wrap carry responses, and fixed response bounds are verifier-bound',
-            zeroKnowledge:
-                'LNP22 simulator accounting is accepted for centered 80-bit secret, opening, error, source, and carry masks with runtime key-switch witnesses never exported in accepted public artifacts',
-            qrom: 'DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object',
-        },
-    },
-    {
-        proofFamily: 'galois-key-share',
-        claimScope:
-            'Galois key-share relation bound to the required automorphism schedule and key-switch component roots',
-        verifierClosedStatus:
-            'relation-transcript-and-bound-checks-verifier-closed',
-        verifierClosedChecks: [
-            'statement hash binds Galois proof record roots, required schedule roots, same-secret roots, transported key-switch component material when supplied, and setup proof record binding',
-            'relation commitment hash and scalar challenge are recomputed from key-switch, source, carry, and commitment-response commitments',
-            'accepted Galois tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript',
-            'same-secret opening response is checked against accepted VSS constant commitments',
-            'required automorphism source response, deterministic key-switch component vectors, centered-binomial errors, and lifted no-wrap carry responses are checked for scheduled Galois keys',
-            'secret, opening-randomness, error, source, and carry responses are checked against fixed first-profile bounds',
-        ],
-        accountingStatus:
-            'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
-        claimAccounting: {
-            soundness:
-                'LNP22 commit-and-prove extractor accounting is accepted for the Galois key-share relation because same-secret openings, automorphism-source binding, deterministic key-switch components, no-wrap carry responses, and fixed response bounds are verifier-bound',
-            zeroKnowledge:
-                'LNP22 simulator accounting is accepted for centered 80-bit secret, opening, error, source, and carry masks with runtime key-switch witnesses never exported in accepted public artifacts',
-            qrom: 'DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object',
+            accountingObject: 'SuccinctEvaluationKeyProofAccounting',
+            accountingHash: trusteeEvaluationKeyProofAccountingHash,
+            openItems:
+                'the proven low-degree bound, the cross-limb consistency lemma, the simulator argument, the smudging budget, and the multi-round Fiat-Shamir/QROM accounting carry explicit not-accepted status inside the bound accounting object',
+            claimBoundary:
+                'packages remain ClaimClosureMissing for active-malicious evaluation-key claims until every open accounting row is accepted',
         },
     },
 ];
@@ -1396,11 +1365,6 @@ const setupProofResponseMaskingAccounting = (
         setupProfile.participantCount,
     );
     const publicKeyCarryWitnessBound = BigInt(setupProofRingDegree + 3);
-    const evaluationKeyCarryWitnessBound = BigInt(setupProofRingDegree * 2 + 8);
-    const evaluationKeyRoundTwoSourceBound =
-        BigInt(setupProofRingDegree) *
-        setupProofRoundTwoAggregateSourceParticipantBound;
-    const evaluationNonnegativeMaskOffset = setupProofScalarChallengeMaximum;
     const sameSecretResponseBound = setupProofResponseBound(
         setupProofMessageMaskBits,
         setupProofSecretInfinityBound,
@@ -1421,11 +1385,6 @@ const setupProofResponseMaskingAccounting = (
         setupProofSecretInfinityBound,
         0n,
     );
-    const evaluationKeySecretResponseBound = setupProofResponseBound(
-        setupProofMessageMaskBits,
-        setupProofSecretInfinityBound,
-        evaluationNonnegativeMaskOffset,
-    );
 
     return {
         objectType: 'SetupProofResponseMaskingAccounting',
@@ -1438,7 +1397,7 @@ const setupProofResponseMaskingAccounting = (
             committedMessageEncoding:
                 'u128-source-coefficients-and-centered-signed-response-coefficients-with-big-int-no-wrap-before-commitment-modulus-reduction',
             relationCommitmentEncoding:
-                'public-key and evaluation-key lifted relation commitments use fixed-width signed 32-byte little-endian big-integer coefficients; response vectors remain signed i128',
+                'public-key lifted relation commitments use fixed-width signed 32-byte little-endian big-integer coefficients; response vectors remain signed i128',
             commitmentModulusProductDecimal:
                 commitmentModulusProduct.toString(),
             commitmentModulusProductCeilBits: ceilLog2Bigint(
@@ -1559,100 +1518,6 @@ const setupProofResponseMaskingAccounting = (
                     commitmentModulusProduct,
                 ),
             },
-            {
-                proofFamily: 'relinearization-key-share',
-                responseProfiles: [
-                    setupProofResponseMaskProfile(
-                        'secret',
-                        setupProofMessageMaskBits,
-                        setupProofSecretInfinityBound,
-                        evaluationNonnegativeMaskOffset,
-                        'committed-message-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'error',
-                        setupProofWideMaskBits,
-                        setupProofErrorInfinityBound,
-                        0n,
-                        'signed-error-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'round-two-source',
-                        setupProofWideMaskBits,
-                        evaluationKeyRoundTwoSourceBound,
-                        0n,
-                        'signed-source-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'opening-randomness',
-                        setupProofWideMaskBits,
-                        setupProofCommitmentRandomnessInfinityBound,
-                        0n,
-                        'signed-opening-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'lifted-carry',
-                        setupProofCarryMaskBits,
-                        evaluationKeyCarryWitnessBound,
-                        0n,
-                        'signed-carry-response',
-                    ),
-                ],
-                liftedMessageNoWrap: liftedMessageNoWrapAccounting(
-                    'secret-plus-rns-prime-times-negative-indicator',
-                    evaluationKeySecretResponseBound,
-                    evaluationKeySecretResponseBound,
-                    maxSourceMessageModulus,
-                    commitmentModulusProduct,
-                ),
-            },
-            {
-                proofFamily: 'galois-key-share',
-                responseProfiles: [
-                    setupProofResponseMaskProfile(
-                        'secret',
-                        setupProofMessageMaskBits,
-                        setupProofSecretInfinityBound,
-                        evaluationNonnegativeMaskOffset,
-                        'committed-message-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'error',
-                        setupProofWideMaskBits,
-                        setupProofErrorInfinityBound,
-                        0n,
-                        'signed-error-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'automorphism-source',
-                        setupProofMessageMaskBits,
-                        setupProofSecretInfinityBound,
-                        evaluationNonnegativeMaskOffset,
-                        'signed-source-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'opening-randomness',
-                        setupProofWideMaskBits,
-                        setupProofCommitmentRandomnessInfinityBound,
-                        0n,
-                        'signed-opening-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'lifted-carry',
-                        setupProofCarryMaskBits,
-                        evaluationKeyCarryWitnessBound,
-                        0n,
-                        'signed-carry-response',
-                    ),
-                ],
-                liftedMessageNoWrap: liftedMessageNoWrapAccounting(
-                    'secret-plus-rns-prime-times-negative-indicator',
-                    evaluationKeySecretResponseBound,
-                    evaluationKeySecretResponseBound,
-                    maxSourceMessageModulus,
-                    commitmentModulusProduct,
-                ),
-            },
         ],
         zeroKnowledgeAccountingStatus:
             'response masking, witness-dependent support commitments, committed-secret response distributions, fixed-width signed relation commitments, and no-wrap response bounds are accepted by the setup proof theorem accounting object',
@@ -1661,6 +1526,7 @@ const setupProofResponseMaskingAccounting = (
 
 const setupProofAccountingCertificateBody = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
+    trusteeEvaluationKeyProofAccounting: JsonRecord,
 ): SetupProofAccountingCertificateBody => {
     const setupProofProfile = setupProfile.setupProofProfile;
     if (
@@ -1746,6 +1612,10 @@ const setupProofAccountingCertificateBody = (
         'challengeSpaceAudit',
         'setupProfile.setupProofProfile',
     );
+    const trusteeEvaluationKeyProofAccountingHash = deriveProtocolHash(
+        succinctEvaluationKeyProofAccountingHashNamespace,
+        trusteeEvaluationKeyProofAccounting,
+    );
 
     return {
         objectType: 'SetupProofAccountingCertificate',
@@ -1760,7 +1630,11 @@ const setupProofAccountingCertificateBody = (
             setupProofRecordBinding,
         ),
         proofFamilies: setupProofFamilies,
-        proofFamilyAccounting: setupProofFamilyAccounting(),
+        proofFamilyAccounting: setupProofFamilyAccounting(
+            trusteeEvaluationKeyProofAccountingHash,
+        ),
+        trusteeEvaluationKeyProofAccounting,
+        trusteeEvaluationKeyProofAccountingHash,
         responseMaskingAccounting:
             setupProofResponseMaskingAccounting(setupProfile),
         challengeAccounting: {
@@ -1822,16 +1696,6 @@ const setupProofAccountingCertificateBody = (
                     'publicKeyShareTboxParameterProfileHash',
                     'setupProfile.setupProofProfile',
                 ),
-                relinearizationKeyShareTboxParameterProfileHash: hashField(
-                    setupProfile.setupProofProfile,
-                    'relinearizationKeyShareTboxParameterProfileHash',
-                    'setupProfile.setupProofProfile',
-                ),
-                galoisKeyShareTboxParameterProfileHash: hashField(
-                    setupProfile.setupProofProfile,
-                    'galoisKeyShareTboxParameterProfileHash',
-                    'setupProfile.setupProofProfile',
-                ),
             },
             challengeAuditHash: deriveProtocolHash(
                 setupProofChallengeSpaceAuditHashNamespace,
@@ -1863,12 +1727,16 @@ const setupProofAccountingCertificateBody = (
         },
         completionBoundary:
             'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
-        certificateStatus: 'claim-bearing-setup-proof-accounting-accepted',
+        certificateStatus:
+            'lnp-family-accounting-accepted-and-trustee-evaluation-key-accounting-open',
+        claimBoundary:
+            'the bound trustee evaluation-key proof accounting carries open theorem rows, so active-malicious evaluation-key claims remain ClaimClosureMissing until those rows are accepted',
     };
 };
 
 const createSetupProofAccountingCertificate = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
+    trusteeEvaluationKeyProofAccounting: JsonRecord | undefined,
 ): SetupProofAccountingCertificate => {
     const template = acceptedCertificateTemplate(
         setupProfile,
@@ -1880,8 +1748,16 @@ const createSetupProofAccountingCertificate = (
     if (template !== null) {
         return template as SetupProofAccountingCertificate;
     }
+    if (trusteeEvaluationKeyProofAccounting === undefined) {
+        throw new Error(
+            'setup proof accounting certificate requires trusteeEvaluationKeyProofAccounting when no accepted certificate template is supplied.',
+        );
+    }
 
-    const certificateBody = setupProofAccountingCertificateBody(setupProfile);
+    const certificateBody = setupProofAccountingCertificateBody(
+        setupProfile,
+        trusteeEvaluationKeyProofAccounting,
+    );
 
     return {
         ...certificateBody,
@@ -2314,8 +2190,15 @@ export const createSetupCertificates = (
             vssCoefficientCommitmentMaterial,
             transportInput,
         ),
-        setupProofAccountingCertificate:
-            createSetupProofAccountingCertificate(setupProfile),
+        setupProofAccountingCertificate: createSetupProofAccountingCertificate(
+            setupProfile,
+            input.trusteeEvaluationKeyProofAccounting === undefined
+                ? undefined
+                : assertObjectRecord(
+                      input.trusteeEvaluationKeyProofAccounting,
+                      'trusteeEvaluationKeyProofAccounting',
+                  ),
+        ),
         heSecurityCertificate: createBgvHeSecurityCertificate(
             setupProfile,
             bgvProfile,

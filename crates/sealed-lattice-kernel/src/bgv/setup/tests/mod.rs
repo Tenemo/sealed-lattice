@@ -63,7 +63,7 @@ mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "2f636a576b2acd403b953731ef49790fd85e4b1c9cbcfaa7eb14e85c72c4b50533f0b0460f7ce25d3f6934171c50715126a63782c51d92d7cbdc99d413235f1f";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "e35201936f42d2e397cee7e9ca91e25fbe955017e9a794019a0173d56269c7bb4935a9a8b4826202db1df2af3462b86dd42160e5ad17fef72aa24c417a1a6ccd";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -196,12 +196,16 @@ fn level_one_public_context() -> &'static EvaluatorContext {
 }
 
 fn direct_comparison_rotation_request() -> (usize, usize) {
+    // Every scheduled rotation key now sits at the working level; the return
+    // rotation entry exercises truncated use at the comparison output level.
     let rotation_request = setup_package_ref()["evaluationKeys"]["rotationKeyRoots"]
         .as_array()
         .expect("rotation key roots")
         .iter()
-        .find(|entry| entry["level"].as_u64() == Some(DIRECT_COMPARISON_OUTPUT_LEVEL as u64))
-        .expect("direct-comparison return rotation key");
+        .find(|entry| {
+            entry["purpose"].as_str() == Some("generator-ordered-packed-rank-return-basis")
+        })
+        .expect("packed-rank return rotation key");
     let galois_element = rotation_request["rotation"]
         .as_u64()
         .expect("rotation")

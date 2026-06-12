@@ -1967,6 +1967,7 @@ async function buildAcceptedShapedSetupPackage(
         evaluatorKeySchedule,
         relinearizationKeyShareRounds: {},
         galoisKeyShareBatches: [],
+        trusteeEvaluationKeyProofs: {},
         evaluationKeys: {},
         setupCommitmentSecurityCertificate,
         setupCommitmentSecurityCertificateHash:

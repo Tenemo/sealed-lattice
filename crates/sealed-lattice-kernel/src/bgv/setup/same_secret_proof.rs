@@ -1,4 +1,5 @@
 use num_bigint::BigUint;
+use num_bigint::BigInt;
 use serde_json::{Value, json};
 
 use crate::{
@@ -15,10 +16,10 @@ use crate::{
 use super::commitment::{
     SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
     SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentLimb, SetupCommitmentValue,
-    compute_setup_signed_lifted_commitment, linear_combination_setup_commitments,
+    compute_setup_big_signed_lifted_commitment, linear_combination_setup_commitments,
+    setup_big_signed_coefficient_fits_centered_commitment_modulus_product,
     parse_setup_commitment_full_value, setup_commitment_root,
-    setup_signed_coefficient_fits_centered_commitment_modulus_product,
-    verify_setup_signed_lifted_commitment_opening,
+    verify_setup_big_signed_lifted_commitment_opening,
 };
 use super::setup_proof::SETUP_PROOF_PROFILE_ID;
 
@@ -538,7 +539,7 @@ fn verify_same_secret_commitment_responses(
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         let response_randomness_bound = same_secret_randomness_response_bound(challenge)?;
-        verify_setup_signed_lifted_commitment_opening(
+        verify_setup_big_signed_lifted_commitment_opening(
             public_matrix_seed_hash,
             &expected_response_commitment,
             &response_message_coefficients,
@@ -846,23 +847,19 @@ fn signed_i128_residue_u64(value: i128, modulus: u64) -> CanonicalResult<u64> {
     })
 }
 
+// The lifted committed-message response s_z + q_l * b_z can exceed the signed
+// 128-bit range at the top of the centered mask distribution (the mask bound
+// times the largest Q_share prime sits at the 2^127 boundary), so the lift is
+// computed as a big integer; the commitment opening validates the centered
+// no-wrap window against the commitment modulus product.
 fn same_secret_lifted_message_response(
     secret_response: i128,
     negative_indicator_response: i128,
     source_message_modulus: u64,
-) -> CanonicalResult<i128> {
-    let lifted = secret_response
-        .checked_add(
-            i128::from(source_message_modulus)
-                .checked_mul(negative_indicator_response)
-                .ok_or_else(|| {
-                    invalid_same_secret_proof(
-                        "same-secret lifted response multiplication overflowed",
-                    )
-                })?,
-        )
-        .ok_or_else(|| invalid_same_secret_proof("same-secret lifted response overflowed"))?;
-    if !setup_signed_coefficient_fits_centered_commitment_modulus_product(lifted) {
+) -> CanonicalResult<BigInt> {
+    let lifted = BigInt::from(secret_response)
+        + (BigInt::from(source_message_modulus) * BigInt::from(negative_indicator_response));
+    if !setup_big_signed_coefficient_fits_centered_commitment_modulus_product(&lifted) {
         return Err(invalid_same_secret_proof(
             "same-secret lifted response wraps in the centered setup commitment modulus product",
         ));
@@ -1131,30 +1128,14 @@ pub(super) fn generate_same_secret_lnp_relation_proof(
                 .iter()
                 .zip(negative_indicator_masks.iter())
                 .map(|(secret_mask, negative_mask)| {
-                    let lifted_mask = secret_mask
-                        .checked_add(
-                            i128::from(commitment.source_message_modulus)
-                                .checked_mul(*negative_mask)
-                                .ok_or_else(|| {
-                                    invalid_same_secret_proof(
-                                        "same-secret message mask multiplication overflowed",
-                                    )
-                                })?,
-                        )
-                        .ok_or_else(|| {
-                            invalid_same_secret_proof("same-secret message mask overflowed")
-                        })?;
-                    if !setup_signed_coefficient_fits_centered_commitment_modulus_product(
-                        lifted_mask,
-                    ) {
-                        return Err(invalid_same_secret_proof(
-                            "same-secret message mask wraps in the centered commitment modulus product",
-                        ));
-                    }
-                    Ok(lifted_mask)
+                    same_secret_lifted_message_response(
+                        *secret_mask,
+                        *negative_mask,
+                        commitment.source_message_modulus,
+                    )
                 })
                 .collect::<CanonicalResult<Vec<_>>>()?;
-            compute_setup_signed_lifted_commitment(
+            compute_setup_big_signed_lifted_commitment(
                 public_matrix_seed_hash,
                 commitment.source_rns_limb_index,
                 commitment.source_message_modulus,

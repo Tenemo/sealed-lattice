@@ -1,21 +1,6 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SetupProofLnpTboxGeneratedSuffixSummary {
-    pub(crate) z34_seed_material_hash: String,
-    pub(crate) z34_challenge_seed_hash: String,
-    pub(crate) z34_challenge_tail_hash: String,
-    pub(crate) z34_challenge_row_domain_hash: String,
-    pub(crate) z34_challenge_z3_row_set_hash: String,
-    pub(crate) z34_challenge_z4_row_set_hash: String,
-    pub(crate) tbox_lower_protocol_challenge_hash: String,
-    pub(crate) z34_z3_check_window_hash: String,
-    pub(crate) z34_z4_check_window_hash: String,
-    pub(crate) z3_l2_squared: BigUint,
-    pub(crate) z4_infinity_norm: BigUint,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupProofLnpTboxZ34SeedMaterial {
     pub(super) seed_material_hash: String,
     pub(super) challenge_seed_hex: String,
@@ -406,32 +391,11 @@ pub(in crate::bgv::setup) fn append_setup_proof_lnp_tbox_generated_suffix(
         relation_commitment_hash_hex,
         proof_bytes,
     )?;
-    proof_bytes.extend_from_slice(&generated_suffix.bytes);
+    proof_bytes.extend_from_slice(&generated_suffix);
 
     Ok(())
 }
 
-pub(in crate::bgv::setup) fn append_setup_proof_lnp_tbox_generated_suffix_with_summary(
-    proof_bytes: &mut Vec<u8>,
-    layout: &SetupProofLnpTboxLayout,
-    statement_hash_hex: &str,
-    relation_commitment_hash_hex: &str,
-) -> CanonicalResult<SetupProofLnpTboxGeneratedSuffixSummary> {
-    let generated_suffix = setup_proof_lnp_tbox_generated_suffix(
-        layout,
-        statement_hash_hex,
-        relation_commitment_hash_hex,
-        proof_bytes,
-    )?;
-    proof_bytes.extend_from_slice(&generated_suffix.bytes);
-
-    Ok(generated_suffix.summary)
-}
-
-struct SetupProofLnpTboxGeneratedSuffix {
-    bytes: Vec<u8>,
-    summary: SetupProofLnpTboxGeneratedSuffixSummary,
-}
 
 pub(super) fn setup_proof_lnp_tbox_generated_suffix_bytes(
     layout: &SetupProofLnpTboxLayout,
@@ -439,13 +403,12 @@ pub(super) fn setup_proof_lnp_tbox_generated_suffix_bytes(
     relation_commitment_hash_hex: &str,
     prefix_bytes: &[u8],
 ) -> CanonicalResult<Vec<u8>> {
-    Ok(setup_proof_lnp_tbox_generated_suffix(
+    setup_proof_lnp_tbox_generated_suffix(
         layout,
         statement_hash_hex,
         relation_commitment_hash_hex,
         prefix_bytes,
-    )?
-    .bytes)
+    )
 }
 
 fn setup_proof_lnp_tbox_generated_suffix(
@@ -453,7 +416,7 @@ fn setup_proof_lnp_tbox_generated_suffix(
     statement_hash_hex: &str,
     relation_commitment_hash_hex: &str,
     prefix_bytes: &[u8],
-) -> CanonicalResult<SetupProofLnpTboxGeneratedSuffix> {
+) -> CanonicalResult<Vec<u8>> {
     let expected_prefix_byte_count = setup_proof_lnp_tbox_commitment_prefix_byte_count(layout)?;
     if prefix_bytes.len() != expected_prefix_byte_count {
         return Err(CanonicalError::new(
@@ -461,7 +424,7 @@ fn setup_proof_lnp_tbox_generated_suffix(
             "setup proof LNP tbox generated suffix requires exactly the commitment prefix bytes",
         ));
     }
-    let (z34_seed_material, challenge_material) =
+    let (_z34_seed_material, challenge_material) =
         setup_proof_lnp_tbox_z34_seed_and_challenge_from_prefix(
             layout,
             statement_hash_hex,
@@ -539,27 +502,8 @@ fn setup_proof_lnp_tbox_generated_suffix(
     let z3_l2_squared = gaussian_l2_squared(&z3_check_coefficients);
     let z4_infinity_norm = gaussian_infinity_norm(&z4_check_coefficients);
     verify_lnp_tbox_z34_norm_bounds(layout, &z3_l2_squared, &z4_infinity_norm)?;
-    let z34_z3_check_window_hash =
-        setup_proof_lnp_tbox_z34_check_window_hash(layout, "z3", &z3_check_coefficients)?;
-    let z34_z4_check_window_hash =
-        setup_proof_lnp_tbox_z34_check_window_hash(layout, "z4", &z4_check_coefficients)?;
 
-    Ok(SetupProofLnpTboxGeneratedSuffix {
-        bytes: writer.into_bytes(),
-        summary: SetupProofLnpTboxGeneratedSuffixSummary {
-            z34_seed_material_hash: z34_seed_material.seed_material_hash,
-            z34_challenge_seed_hash: z34_seed_material.challenge_seed_hash,
-            z34_challenge_tail_hash: z34_seed_material.challenge_tail_hash,
-            z34_challenge_row_domain_hash: z34_seed_material.challenge_row_domain_hash,
-            z34_challenge_z3_row_set_hash: z34_seed_material.challenge_z3_row_set_hash,
-            z34_challenge_z4_row_set_hash: z34_seed_material.challenge_z4_row_set_hash,
-            tbox_lower_protocol_challenge_hash: challenge_material.lower_protocol_challenge_hash,
-            z34_z3_check_window_hash,
-            z34_z4_check_window_hash,
-            z3_l2_squared,
-            z4_infinity_norm,
-        },
-    })
+    Ok(writer.into_bytes())
 }
 
 fn setup_proof_lnp_tbox_generated_suffix_seed(

@@ -91,7 +91,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
         .as_array()
         .expect("proof family accounting");
 
-    assert_eq!(proof_family_accounting.len(), 5);
+    assert_eq!(proof_family_accounting.len(), 4);
     assert_eq!(
         proof_family_accounting[0]["proofFamily"],
         "vss-opening-carry"
@@ -113,11 +113,41 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
                 .as_str()
                 .is_some_and(|text| text.contains("lifted public-key equality")))
     );
-    assert!(proof_family_accounting.iter().all(|family| {
+    assert!(proof_family_accounting[..3].iter().all(|family| {
         family["claimAccounting"]["qrom"]
             .as_str()
             .is_some_and(|text| text.contains("Fiat-Shamir reduction accounting is accepted"))
     }));
+
+    // The trustee evaluation-key family stays explicitly open: its row binds
+    // the succinct accounting object and never claims accepted theorem rows.
+    let trustee_family = &proof_family_accounting[3];
+    assert_eq!(trustee_family["proofFamily"], "trustee-evaluation-key");
+    assert_eq!(
+        trustee_family["accountingStatus"],
+        "succinct-trustee-evaluation-key-theorem-accounting-open"
+    );
+    assert_eq!(
+        trustee_family["claimAccounting"]["accountingHash"],
+        certificate["trusteeEvaluationKeyProofAccountingHash"]
+    );
+    assert!(
+        trustee_family["claimAccounting"]["claimBoundary"]
+            .as_str()
+            .is_some_and(|text| text.contains("ClaimClosureMissing"))
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["objectType"],
+        "SuccinctEvaluationKeyProofAccounting"
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["accepted"],
+        false
+    );
+    assert_eq!(
+        certificate["certificateStatus"],
+        "lnp-family-accounting-accepted-and-trustee-evaluation-key-accounting-open"
+    );
 
     let tbox_accounting = certificate["tboxAccounting"]
         .as_object()
@@ -131,7 +161,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
             .as_array()
             .expect("closed tbox proof families")
             .len(),
-        5
+        3
     );
     assert!(
         tbox_accounting["closedVerifierChecks"]
@@ -180,12 +210,12 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     );
     assert_eq!(
         response_masking_accounting["encodingConstraints"]["relationCommitmentEncoding"],
-        "public-key and evaluation-key lifted relation commitments use fixed-width signed 32-byte little-endian big-integer coefficients; response vectors remain signed i128"
+        "public-key lifted relation commitments use fixed-width signed 32-byte little-endian big-integer coefficients; response vectors remain signed i128"
     );
     let response_families = response_masking_accounting["families"]
         .as_array()
         .expect("response masking families");
-    assert_eq!(response_families.len(), 5);
+    assert_eq!(response_families.len(), 3);
     assert_eq!(
         response_families[0]["fullWidthCoefficientMaskingStatus"],
         "centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted"
@@ -224,24 +254,6 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
             .expect("public-key secret masking slack")
             > 0
     );
-    assert_eq!(
-        response_families[3]["responseProfiles"][0]["maskRandomBits"],
-        80
-    );
-    assert!(
-        response_families[3]["responseProfiles"][0]["maskingSlackBits"]
-            .as_i64()
-            .expect("relinearization secret masking slack")
-            > 0
-    );
-    assert_eq!(
-        response_families[3]["responseProfiles"][2]["responseKind"],
-        "round-two-source"
-    );
-    assert_eq!(
-        response_families[3]["responseProfiles"][2]["maskRandomBits"],
-        80
-    );
 
     let proof_theorem_accounting = certificate["proofTheoremAccounting"]
         .as_object()
@@ -252,7 +264,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     );
     assert_eq!(
         proof_theorem_accounting["qromReductionAccounting"]["compositionStatus"],
-        "accepted-for-fixed-five-family-two-stage-setup-profile"
+        "accepted-for-fixed-three-family-two-stage-setup-profile"
     );
     assert!(
         proof_theorem_accounting["referenceRows"]

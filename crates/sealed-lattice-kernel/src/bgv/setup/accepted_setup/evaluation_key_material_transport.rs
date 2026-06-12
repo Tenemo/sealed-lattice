@@ -695,8 +695,8 @@ fn expected_public_evaluation_key_component_material_roots(
             )
         })?;
     for batch in batches {
-        for proof_record in array_value(batch, "galoisKeyShareProofs")? {
-            collect_binary_key_switch_component_material_root(proof_record, &mut expected_roots)?;
+        for material_record in array_value(batch, "galoisKeyShareMaterialRecords")? {
+            collect_binary_key_switch_component_material_root(material_record, &mut expected_roots)?;
         }
     }
 
@@ -1109,25 +1109,17 @@ fn relinearization_share_material_manifest(setup_package: &Value) -> CanonicalRe
             )
         })?;
     let mut entries = Vec::new();
-    for (
-        round_label,
-        record_field_name,
-        share_root_field_name,
-        proof_root_field_name,
-        record_root_field_name,
-    ) in [
+    for (round_label, record_field_name, share_root_field_name, record_root_field_name) in [
         (
             "round-one",
             "roundOneRecords",
             "roundOneShareRoot",
-            "roundOneProofRoot",
             "roundOneRecordRoot",
         ),
         (
             "round-two",
             "roundTwoRecords",
             "roundTwoShareRoot",
-            "roundTwoProofRoot",
             "roundTwoRecordRoot",
         ),
     ] {
@@ -1157,7 +1149,6 @@ fn relinearization_share_material_manifest(setup_package: &Value) -> CanonicalRe
                         .cloned()
                         .unwrap_or(Value::Null),
                     "shareRoot": value_string(record, share_root_field_name)?,
-                    "proofRoot": value_string(record, proof_root_field_name)?,
                     "recordRoot": value_string(record, record_root_field_name)?,
                 }),
             ));
@@ -1182,7 +1173,7 @@ fn galois_share_material_manifest(setup_package: &Value) -> CanonicalResult<Vec<
         })?;
     let mut entries = Vec::new();
     for batch in batches {
-        for proof_record in array_value(batch, "galoisKeyShareProofs")? {
+        for proof_record in array_value(batch, "galoisKeyShareMaterialRecords")? {
             entries.push((
                 value_u64(proof_record, "rotation")?,
                 value_u64(proof_record, "level")?,
@@ -1207,10 +1198,6 @@ fn galois_share_material_manifest(setup_package: &Value) -> CanonicalResult<Vec<
                         .cloned()
                         .unwrap_or(Value::Null),
                     "galoisKeyShareRoot": value_string(proof_record, "galoisKeyShareRoot")?,
-                    "galoisKeyShareProofRoot": value_string(
-                        proof_record,
-                        "galoisKeyShareProofRoot",
-                    )?,
                 }),
             ));
         }
@@ -1292,23 +1279,13 @@ fn expected_relinearization_key_roots_for_evaluation_keys(
         "roundOneAggregateRoots",
         "roundOneAggregateRoot",
     )?;
-    let round_one_source_square_aggregate_roots = relinearization_aggregate_roots_by_level(
-        rounds,
-        "roundOneAggregateRoots",
-        "roundOneSourceSquareAggregateRoot",
-    )?;
     let round_two_aggregate_roots = relinearization_aggregate_roots_by_level(
         rounds,
         "roundTwoAggregateRoots",
         "roundTwoAggregateRoot",
     )?;
-    let round_two_source_square_aggregate_roots = relinearization_aggregate_roots_by_level(
-        rounds,
-        "roundTwoAggregateRoots",
-        "roundTwoSourceSquareAggregateRoot",
-    )?;
 
-    expected_relinearization_levels()
+    scheduled_relinearization_levels()?
         .into_iter()
         .map(|level| {
             let round_one_aggregate_root =
@@ -1327,24 +1304,6 @@ fn expected_relinearization_key_roots_for_evaluation_keys(
                         CanonicalError::new(
                             CanonicalErrorCode::InvalidFixture,
                             "relinearization round-two aggregate root was required before evaluation-key assembly",
-                        )
-                    })?;
-            let round_one_source_square_aggregate_root =
-                round_one_source_square_aggregate_roots
-                    .get(&level)
-                    .ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
-                            "relinearization round-one source-square aggregate root was required before evaluation-key assembly",
-                        )
-                    })?;
-            let round_two_source_square_aggregate_root =
-                round_two_source_square_aggregate_roots
-                    .get(&level)
-                    .ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
-                            "relinearization round-two source-square aggregate root was required before evaluation-key assembly",
                         )
                     })?;
             let decomposition_digit_count = level.checked_add(1).ok_or_else(|| {
@@ -1375,9 +1334,7 @@ fn expected_relinearization_key_roots_for_evaluation_keys(
                     "decompositionDigitCount": decomposition_digit_count,
                     "rnsLimbCount": decomposition_digit_count,
                     "roundOneAggregateRoot": round_one_aggregate_root,
-                    "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
                     "roundTwoAggregateRoot": round_two_aggregate_root,
-                    "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
                 }),
             )?;
 
@@ -1386,9 +1343,7 @@ fn expected_relinearization_key_roots_for_evaluation_keys(
                 "decompositionDigitCount": decomposition_digit_count,
                 "rnsLimbCount": decomposition_digit_count,
                 "roundOneAggregateRoot": round_one_aggregate_root,
-                "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
                 "roundTwoAggregateRoot": round_two_aggregate_root,
-                "roundTwoSourceSquareAggregateRoot": round_two_source_square_aggregate_root,
                 "relinearizationKeyRoot": key_root,
             }))
         })
@@ -1474,12 +1429,12 @@ fn expected_galois_key_roots_for_evaluation_keys(
             for (_, batch) in &ordered_batches {
                 let trustee_identity = value_string(batch, "trusteeIdentity")?;
                 let trustee_roster_position = value_u64(batch, "trusteeRosterPosition")?;
-                let proof = galois_key_share_proof_for_schedule(batch, rotation, level)?;
+                let material_record =
+                    galois_key_share_material_for_schedule(batch, rotation, level)?;
                 contributing_share_roots.push(json!({
                     "trusteeIdentity": trustee_identity,
                     "trusteeRosterPosition": trustee_roster_position,
-                    "galoisKeyShareRoot": value_string(proof, "galoisKeyShareRoot")?,
-                    "galoisKeyShareProofRoot": value_string(proof, "galoisKeyShareProofRoot")?,
+                    "galoisKeyShareRoot": value_string(material_record, "galoisKeyShareRoot")?,
                 }));
             }
             let galois_key_root = derive_protocol_hash(
@@ -1541,8 +1496,8 @@ fn accepted_setup_evaluation_key_records_use_profile_ring(
         return Ok(false);
     };
     for batch in galois_batches {
-        for proof_record in array_value(batch, "galoisKeyShareProofs")? {
-            if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+        for material_record in array_value(batch, "galoisKeyShareMaterialRecords")? {
+            if value_u64(material_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
                 return Ok(false);
             }
         }
@@ -1591,7 +1546,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
         }
     }
 
-    let expected_levels = expected_relinearization_levels();
+    let expected_levels = scheduled_relinearization_levels()?;
     let expected_record_count = expected_levels
         .len()
         .checked_mul(FIRST_PROFILE_PARTICIPANT_COUNT as usize)
@@ -1735,7 +1690,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
         let key_switch_seed_hex = expected_galois_key_switch_seed(&binding, rotation, level)?;
         let mut aggregate_component_b = None;
         for (_, batch) in &sorted_batches {
-            let proof_record = galois_key_share_proof_for_schedule(batch, rotation, level)?;
+            let proof_record = galois_key_share_material_for_schedule(batch, rotation, level)?;
             verify_galois_key_switch_sample_binding(proof_record, &binding, rotation, level)?;
             if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
                 return Err(CanonicalError::new(

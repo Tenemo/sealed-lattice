@@ -361,54 +361,42 @@ pub(super) fn rebind_collective_evaluator_key_schedule_root(package: &mut serde_
     );
 }
 
-pub(super) fn rebind_relinearization_key_share_rounds_root(package: &mut serde_json::Value) {
-    package["relinearizationKeyShareRounds"]
+pub(super) fn rebind_trustee_evaluation_key_proof_set_root(package: &mut serde_json::Value) {
+    package["trusteeEvaluationKeyProofs"]
         .as_object_mut()
-        .expect("relinearization key share rounds")
-        .remove("relinearizationKeyShareRoundsRoot");
-    package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"] = serde_json::json!(
+        .expect("trustee evaluation-key proof set")
+        .remove("trusteeEvaluationKeyProofSetRoot");
+    package["trusteeEvaluationKeyProofs"]["trusteeEvaluationKeyProofSetRoot"] = serde_json::json!(
         derive_protocol_hash(
-            "RelinearizationKeyShareRoundsRoot",
-            &package["relinearizationKeyShareRounds"]
+            "TrusteeEvaluationKeyProofSetRoot",
+            &package["trusteeEvaluationKeyProofs"]
         )
-        .expect("relinearization key share rounds root")
+        .expect("trustee evaluation-key proof set root")
     );
 }
 
-pub(super) fn rebind_galois_key_batch_proof_root(
-    package: &mut serde_json::Value,
-    batch_index: usize,
-) {
-    let batch = &mut package["galoisKeyShareBatches"][batch_index];
-    let proof_roots = batch["galoisKeyShareProofs"]
+// Rebind the proof set's record-container bindings after share records were
+// re-rooted; the proofs themselves stay valid because the statements bind the
+// share-record content, not the package roots.
+pub(super) fn rebind_trustee_evaluation_key_proof_set_bindings(package: &mut serde_json::Value) {
+    let rounds_root =
+        package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"].clone();
+    let batch_roots = package["galoisKeyShareBatches"]
         .as_array()
-        .expect("Galois key share proofs")
+        .expect("Galois key share batches")
         .iter()
-        .map(|proof| {
+        .map(|batch| {
             serde_json::json!({
-                "rotation": proof["rotation"],
-                "level": proof["level"],
-                "galoisKeyShareProofRoot": proof["galoisKeyShareProofRoot"],
+                "trusteeIdentity": batch["trusteeIdentity"],
+                "trusteeRosterPosition": batch["trusteeRosterPosition"],
+                "galoisKeyShareBatchRoot": batch["galoisKeyShareBatchRoot"],
             })
         })
         .collect::<Vec<_>>();
-    batch["galoisKeyBatchProofRoot"] = serde_json::json!(
-        derive_protocol_hash(
-            "GaloisKeyBatchProofRoot",
-            &serde_json::json!({
-                "objectType": "GaloisKeyBatchProofAggregate",
-                "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-                "proofFamily": "galois-key-share",
-                "evaluatorKeyScheduleRoot": batch["evaluatorKeyScheduleRoot"],
-                "trusteeRosterPosition": batch["trusteeRosterPosition"],
-                "requiredGaloisSetHash": batch["requiredGaloisSetHash"],
-                "proofRoots": proof_roots,
-            })
-        )
-        .expect("Galois proof root")
-    );
+    package["trusteeEvaluationKeyProofs"]["relinearizationKeyShareRoundsRoot"] = rounds_root;
+    package["trusteeEvaluationKeyProofs"]["galoisKeyShareBatchRoots"] =
+        serde_json::json!(batch_roots);
+    rebind_trustee_evaluation_key_proof_set_root(package);
 }
 
 pub(super) fn rebind_galois_key_share_batch_root(
@@ -428,16 +416,6 @@ pub(super) fn rebind_galois_key_share_batch_root(
     );
 }
 
-pub(super) fn rebind_public_evaluation_key_set_hash(package: &mut serde_json::Value) {
-    package["evaluationKeys"]
-        .as_object_mut()
-        .expect("public evaluation-key set")
-        .remove("evaluationKeySetHash");
-    package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
-            .expect("evaluation key set hash")
-    );
-}
 
 pub(super) fn rebind_collective_he_security_certificate_hash(package: &mut serde_json::Value) {
     package["heSecurityCertificate"]

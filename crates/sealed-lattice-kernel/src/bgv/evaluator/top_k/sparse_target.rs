@@ -81,5 +81,13 @@ pub(crate) fn move_single_slot_value(
     }
     let galois_element = galois_element_moving_slot_to_target(source_slot, target_slot)?;
 
-    context.rotate_ciphertext(&selected, galois_element, selected.level, seed_hex)
+    // Decompose the slot move through the compact generator basis so the
+    // evaluator only ever requests scheduled basis rotation keys.
+    rotate_with_compact_positive_generator_basis(
+        context,
+        &selected,
+        galois_element,
+        selected.level,
+        seed_hex,
+    )
 }

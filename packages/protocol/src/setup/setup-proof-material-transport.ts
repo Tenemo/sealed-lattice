@@ -220,7 +220,7 @@ const splitProofBytesIntoChunks = (
     return chunks;
 };
 
-const setupProofMaterialChunkHash = (
+export const setupProofMaterialChunkHash = (
     proofFamily: string,
     fullObjectHash: ProtocolHash,
     chunkIndex: number,
@@ -233,7 +233,7 @@ const setupProofMaterialChunkHash = (
         chunk,
     ]);
 
-const setupProofChunkManifestRoot = (
+export const setupProofChunkManifestRoot = (
     proofFamily: string,
     chunkHashes: readonly ProtocolHash[],
     fullObjectHash: ProtocolHash,

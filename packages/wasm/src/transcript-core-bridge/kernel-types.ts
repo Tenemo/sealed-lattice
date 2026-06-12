@@ -17,7 +17,11 @@ import type {
     BgvTransportedVssCoefficientCommitmentMaterial,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
-    BgvEvaluationKeyShareLnpProofGeneration,
+    BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeyProofVerification,
+    BgvTrusteeEvaluationKeySameSecretLinkage,
+    BgvTrusteeEvaluationKeyStatementContext,
+    BgvTrusteeEvaluationKeyStatementKey,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -53,7 +57,11 @@ export type {
     BgvCollectiveSetupProfileDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
-    BgvEvaluationKeyShareLnpProofGeneration,
+    BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeyProofVerification,
+    BgvTrusteeEvaluationKeySameSecretLinkage,
+    BgvTrusteeEvaluationKeyStatementContext,
+    BgvTrusteeEvaluationKeyStatementKey,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -247,33 +255,25 @@ export type TranscriptCoreKernel = {
             | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
     }): BgvPublicKeyShareLnpProofGeneration;
-    generateEvaluationKeyShareLnpProof(input: {
-        readonly proofFamily: 'relinearization-key-share' | 'galois-key-share';
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly proofRecord: unknown;
-        readonly sameSecretStatementRecord: unknown;
-        readonly constantCommitments: readonly unknown[];
-        readonly setupProofBinding: unknown;
-        readonly transportedKeySwitchComponentMaterial?: unknown;
+    generateTrusteeEvaluationKeyProof(input: {
+        readonly context: BgvTrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
+        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
         readonly secretCoefficients: readonly number[];
-        readonly openingRandomnessByLimb: readonly (readonly (readonly (
-            | number
-            | string
-        )[])[])[];
-        readonly errorCoefficientsByDigit: readonly (readonly number[])[];
-        readonly relinearizationSourceCoefficientsByDigit?: readonly (readonly (
-            | number
-            | string
-        )[])[];
-        readonly roundOneAggregateSourceCoefficientsByDigit?: readonly (readonly (
-            | number
-            | string
-        )[])[];
-        readonly proofRandomnessSource?:
-            | 'fresh-csprng'
-            | 'development-deterministic-fixture';
+        readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
+        readonly negativeIndicatorCoefficients?: readonly number[];
+        readonly openingRandomnessByLimb?: readonly (readonly (readonly number[])[])[];
+        readonly proofRandomnessSource: string;
         readonly proofRandomnessSeedHex: string;
-    }): BgvEvaluationKeyShareLnpProofGeneration;
+    }): BgvTrusteeEvaluationKeyProofGeneration;
+    verifyTrusteeEvaluationKeyProof(input: {
+        readonly context: BgvTrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
+        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
+        readonly proofBytesHex: string;
+    }): BgvTrusteeEvaluationKeyProofVerification;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
@@ -541,34 +541,25 @@ type TranscriptCoreKernelCommand =
           readonly proofRandomnessSeedHex: string;
       }
     | {
-          readonly command: 'GenerateEvaluationKeyShareLnpProof';
-          readonly proofFamily:
-              | 'relinearization-key-share'
-              | 'galois-key-share';
-          readonly publicMatrixSeedHash: ProtocolHash;
-          readonly proofRecord: unknown;
-          readonly sameSecretStatementRecord: unknown;
-          readonly constantCommitments: readonly unknown[];
-          readonly setupProofBinding: unknown;
-          readonly transportedKeySwitchComponentMaterial?: unknown;
+          readonly command: 'GenerateTrusteeEvaluationKeyProof';
+          readonly context: BgvTrusteeEvaluationKeyStatementContext;
+          readonly ringDegree: number;
+          readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
+          readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
           readonly secretCoefficients: readonly number[];
-          readonly openingRandomnessByLimb: readonly (readonly (readonly (
-              | number
-              | string
-          )[])[])[];
-          readonly errorCoefficientsByDigit: readonly (readonly number[])[];
-          readonly relinearizationSourceCoefficientsByDigit?: readonly (readonly (
-              | number
-              | string
-          )[])[];
-          readonly roundOneAggregateSourceCoefficientsByDigit?: readonly (readonly (
-              | number
-              | string
-          )[])[];
-          readonly proofRandomnessSource?:
-              | 'fresh-csprng'
-              | 'development-deterministic-fixture';
+          readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
+          readonly negativeIndicatorCoefficients?: readonly number[];
+          readonly openingRandomnessByLimb?: readonly (readonly (readonly number[])[])[];
+          readonly proofRandomnessSource: string;
           readonly proofRandomnessSeedHex: string;
+      }
+    | {
+          readonly command: 'VerifyTrusteeEvaluationKeyProof';
+          readonly context: BgvTrusteeEvaluationKeyStatementContext;
+          readonly ringDegree: number;
+          readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
+          readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
+          readonly proofBytesHex: string;
       }
     | {
           readonly command: 'ComputeSetupCommitmentFromOpening';

@@ -161,17 +161,17 @@ pub(super) fn append_unreferenced_evaluation_key_component_transport_sidecar(
     })
 }
 
-struct SetupTransportCertificateObjectFixture {
-    object_name: &'static str,
-    object_role: &'static str,
-    object_root: String,
-    byte_length: u64,
-    full_object_hash: String,
-    chunk_root: String,
-    chunk_hashes: Vec<String>,
+pub(super) struct SetupTransportCertificateObjectFixture {
+    pub(super) object_name: &'static str,
+    pub(super) object_role: &'static str,
+    pub(super) object_root: String,
+    pub(super) byte_length: u64,
+    pub(super) full_object_hash: String,
+    pub(super) chunk_root: String,
+    pub(super) chunk_hashes: Vec<String>,
 }
 
-fn append_setup_transport_certificate_object(
+pub(super) fn append_setup_transport_certificate_object(
     package: &mut serde_json::Value,
     object_fixture: SetupTransportCertificateObjectFixture,
 ) {
@@ -777,16 +777,23 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
         &mut evaluation_key_transport_sinks,
     );
     println!("terminal-accepted-setup-phase generated evaluation-key records");
-    package["evaluationKeys"] = public_evaluation_key_set_object(&package);
-    rebind_setup_key_correctness_certificate(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
     let evaluation_key_share_component_material = serde_json::json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "componentMaterials": evaluation_key_transport_sinks.component_materials,
+        "componentMaterials": evaluation_key_transport_sinks.component_materials.clone(),
     });
+    package["trusteeEvaluationKeyProofs"] =
+        trustee_evaluation_key_proofs_object_with_terminal_transport(
+            &package,
+            &evaluation_key_share_component_material,
+            &mut evaluation_key_transport_sinks,
+        );
+    println!("terminal-accepted-setup-phase generated trustee evaluation-key proofs");
+    package["evaluationKeys"] = public_evaluation_key_set_object(&package);
+    rebind_setup_key_correctness_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
     append_transport_certificate_entries_from_material_set(
         &mut package,
         &evaluation_key_share_component_material,
@@ -802,7 +809,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": "evaluation-key-share",
+        "proofFamily": "trustee-evaluation-key",
         "proofMaterials": evaluation_key_transport_sinks.proof_materials,
     });
     append_transport_certificate_entries_from_material_set(
@@ -1007,21 +1014,37 @@ pub(super) fn rebind_public_evaluation_key_material_transport(
     );
 }
 
-pub(super) fn move_first_galois_key_share_lnp_proof_bytes_to_transport(
+pub(super) fn move_first_trustee_evaluation_key_proof_bytes_to_transport(
     package: &mut serde_json::Value,
 ) -> serde_json::Value {
     let proof_material = {
-        let proof_record = &mut package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0];
-        move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
-            proof_record,
-            "galois-key-share",
-            "galoisKeyShareProofRoot",
-            "GaloisKeyShareProofRoot",
-        )
+        let proof_record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
+        move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(proof_record, true)
     };
-    rebind_galois_key_batch_proof_root(package, 0);
-    rebind_galois_key_share_batch_root(package, 0);
-    package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    rebind_trustee_evaluation_key_proof_set_root(package);
+    append_setup_transport_certificate_object(
+        package,
+        SetupTransportCertificateObjectFixture {
+            object_name: "evaluationKeyShareProofMaterial",
+            object_role: "evaluation-key-share-proof-material",
+            object_root: proof_material["proofMaterialRoot"]
+                .as_str()
+                .expect("transported trustee proof material root")
+                .to_string(),
+            byte_length: proof_material["proofTotalByteLength"]
+                .as_u64()
+                .expect("transported trustee proof byte length"),
+            full_object_hash: proof_material["proofFullObjectHash"]
+                .as_str()
+                .expect("transported trustee proof full object hash")
+                .to_string(),
+            chunk_root: proof_material["proofChunkRoot"]
+                .as_str()
+                .expect("transported trustee proof chunk root")
+                .to_string(),
+            chunk_hashes: transport_certificate_chunk_hashes(&proof_material, "proofChunkHashes"),
+        },
+    );
     rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
@@ -1030,7 +1053,7 @@ pub(super) fn move_first_galois_key_share_lnp_proof_bytes_to_transport(
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": "galois-key-share",
+        "proofFamily": "trustee-evaluation-key",
         "proofMaterials": [proof_material],
     })
 }
@@ -1038,31 +1061,21 @@ pub(super) fn move_first_galois_key_share_lnp_proof_bytes_to_transport(
 pub(super) fn move_first_galois_key_share_component_vectors_to_transport(
     package: &mut serde_json::Value,
 ) -> serde_json::Value {
-    let proof_record_snapshot =
-        package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0].clone();
-    let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
+    let material_record_snapshot =
+        package["galoisKeyShareBatches"][0]["galoisKeyShareMaterialRecords"][0].clone();
+    let trustee_roster_position = material_record_snapshot["trusteeRosterPosition"]
         .as_u64()
         .expect("trustee roster position");
-    let rotation = proof_record_snapshot["rotation"]
+    let rotation = material_record_snapshot["rotation"]
         .as_u64()
         .expect("Galois rotation");
-    let level = proof_record_snapshot["level"].as_u64().expect("level");
-    let ring_degree = proof_record_snapshot["ringDegree"]
+    let level = material_record_snapshot["level"].as_u64().expect("level");
+    let ring_degree = material_record_snapshot["ringDegree"]
         .as_u64()
         .expect("ring degree") as usize;
-    let key_switch_seed_hex = proof_record_snapshot["keySwitchSeedHex"]
+    let key_switch_seed_hex = material_record_snapshot["keySwitchSeedHex"]
         .as_str()
         .expect("key-switch seed")
-        .to_string();
-    let statement_record = package["sameSecretConsistency"]["statementRecords"]
-        [trustee_roster_position as usize]
-        .clone();
-    let constant_commitments =
-        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
-    let setup_proof_binding = setup_proof_binding_for_test_package(package);
-    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
-        .as_str()
-        .expect("public matrix seed hash")
         .to_string();
     let fixture_material = evaluation_key_share_fixture_material(
         EvaluationKeyShareProofFamily::Galois,
@@ -1074,39 +1087,41 @@ pub(super) fn move_first_galois_key_share_component_vectors_to_transport(
         None,
     );
     let transported_component_material_set = {
-        let proof_record = &mut package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0];
+        let material_record =
+            &mut package["galoisKeyShareBatches"][0]["galoisKeyShareMaterialRecords"][0];
         move_evaluation_key_share_component_vectors_to_transport(
-            proof_record,
+            material_record,
             EvaluationKeyShareProofFamily::Galois,
             &fixture_material,
         )
     };
-    {
-        let proof_record = &mut package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0];
-        proof_record
-            .as_object_mut()
-            .expect("Galois proof record object")
-            .remove("galoisKeyShareProofRoot");
-        populate_evaluation_key_share_lnp_proof_fields(
-            proof_record,
-            EvaluationKeyShareProofFamily::Galois,
-            &public_matrix_seed_hash,
-            &statement_record,
-            &constant_commitments,
-            &setup_proof_binding,
-            &fixture_material,
-            trustee_roster_position,
-            Some(&transported_component_material_set),
-            "GaloisKeyShareProofRandomness",
-        );
-        proof_record["galoisKeyShareProofRoot"] = serde_json::json!(
-            derive_protocol_hash("GaloisKeyShareProofRoot", proof_record)
-                .expect("transported Galois proof root")
-        );
-    }
-    rebind_galois_key_batch_proof_root(package, 0);
     rebind_galois_key_share_batch_root(package, 0);
+    rebind_trustee_evaluation_key_proof_set_bindings(package);
     package["evaluationKeys"] = public_evaluation_key_set_object(package);
+    let component_material = transported_component_material_set["componentMaterials"][0].clone();
+    append_setup_transport_certificate_object(
+        package,
+        SetupTransportCertificateObjectFixture {
+            object_name: "evaluationKeyShareComponentMaterial",
+            object_role: "evaluation-key-share-component-material",
+            object_root: component_material["keySwitchComponentMaterialRoot"]
+                .as_str()
+                .expect("transported component material root")
+                .to_string(),
+            byte_length: component_material["totalByteLength"]
+                .as_u64()
+                .expect("transported component material byte length"),
+            full_object_hash: component_material["fullObjectHash"]
+                .as_str()
+                .expect("transported component material full object hash")
+                .to_string(),
+            chunk_root: component_material["chunkRoot"]
+                .as_str()
+                .expect("transported component material chunk root")
+                .to_string(),
+            chunk_hashes: transport_certificate_chunk_hashes(&component_material, "chunkHashes"),
+        },
+    );
     rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
@@ -1366,113 +1381,51 @@ fn key_switch_component_b_by_digit_from_record(
     Ok(component_b_by_digit)
 }
 
-fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport(
+pub(super) fn move_trustee_evaluation_key_proof_record_bytes_to_compact_transport(
     proof_record: &mut serde_json::Value,
-    proof_family: &str,
-    proof_root_field_name: &str,
-    proof_root_namespace: &str,
 ) -> serde_json::Value {
-    move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_policy(
-        proof_record,
-        proof_family,
-        proof_root_field_name,
-        proof_root_namespace,
-        true,
-    )
+    move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(proof_record, false)
 }
 
-pub(super) fn move_evaluation_key_share_lnp_proof_record_bytes_to_compact_transport(
+fn move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(
     proof_record: &mut serde_json::Value,
-    proof_family: &str,
-    proof_root_field_name: &str,
-    proof_root_namespace: &str,
-) -> serde_json::Value {
-    move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_policy(
-        proof_record,
-        proof_family,
-        proof_root_field_name,
-        proof_root_namespace,
-        false,
-    )
-}
-
-fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_policy(
-    proof_record: &mut serde_json::Value,
-    proof_family: &str,
-    proof_root_field_name: &str,
-    proof_root_namespace: &str,
     include_chunks: bool,
 ) -> serde_json::Value {
     let proof_bytes_hex = proof_record["proofBytesHex"]
         .as_str()
-        .expect("embedded evaluation-key proof bytes")
+        .expect("embedded trustee evaluation-key proof bytes")
         .to_string();
-    let proof_bytes = decode_hex(&proof_bytes_hex).expect("evaluation-key proof bytes");
+    let proof_bytes = decode_hex(&proof_bytes_hex).expect("trustee evaluation-key proof bytes");
     let chunks = proof_bytes_transport_chunks(proof_bytes);
     let transport_hashes = setup_proof_material_transport_hashes(
-        proof_family,
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         &chunks,
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )
-    .expect("evaluation-key proof transport hashes");
-    let proof_size_bytes = proof_record["proofSizeBytes"]
-        .as_u64()
-        .expect("proof size bytes");
-    let proof_bytes_hash = proof_record["proofBytesHash"]
-        .as_str()
-        .expect("proof bytes hash")
-        .to_string();
-    let statement_hash = proof_record["statementHash"]
-        .as_str()
-        .expect("statement hash")
-        .to_string();
-    let relation_commitment_hash = proof_record["relationCommitmentHash"]
-        .as_str()
-        .expect("relation commitment hash")
-        .to_string();
-    let tbox_commitment_prefix_hash = proof_record["tboxCommitmentPrefixHash"]
-        .as_str()
-        .expect("tbox commitment prefix hash")
-        .to_string();
-    let trustee_identity = proof_record["trusteeIdentity"]
-        .as_str()
-        .expect("trustee identity")
-        .to_string();
-    let trustee_roster_position = proof_record["trusteeRosterPosition"]
-        .as_u64()
-        .expect("trustee roster position");
-    let proof_material_root =
-        setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
-            setup_profile_id: "CollectiveBgvSetup-v1",
-            proof_family,
-            trustee_identity: &trustee_identity,
-            trustee_roster_position,
-            statement_hash_hex: &statement_hash,
-            relation_commitment_hash_hex: &relation_commitment_hash,
-            tbox_commitment_prefix_hash: &tbox_commitment_prefix_hash,
-            proof_size_bytes,
-            proof_bytes_hash: &proof_bytes_hash,
-            transport_hashes: &transport_hashes,
-        })
-        .expect("evaluation-key proof material root");
+    .expect("trustee evaluation-key proof transport hashes");
     {
         let proof_record_object = proof_record
             .as_object_mut()
-            .expect("evaluation-key proof record object");
+            .expect("trustee evaluation-key proof record object");
         proof_record_object.remove("proofBytesHex");
-        proof_record_object.remove(proof_root_field_name);
+        proof_record_object.remove("trusteeEvaluationKeyProofRoot");
     }
     proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
-    proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
     proof_record["proofChunkSizeBytes"] = serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
     proof_record["proofChunkCount"] = serde_json::json!(transport_hashes.chunk_hashes.len());
     proof_record["proofTotalByteLength"] = serde_json::json!(transport_hashes.total_byte_length);
     proof_record["proofFullObjectHash"] = serde_json::json!(transport_hashes.full_object_hash);
     proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
     proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
-    proof_record[proof_root_field_name] = serde_json::json!(
-        derive_protocol_hash(proof_root_namespace, proof_record)
-            .expect("transported evaluation-key proof root")
+    let proof_material_root = trustee_evaluation_key_proof_material_root(
+        proof_record,
+        &transport_hashes,
+    )
+    .expect("trustee evaluation-key proof material root");
+    proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
+    proof_record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
+        derive_protocol_hash("TrusteeEvaluationKeyProofRoot", proof_record)
+            .expect("transported trustee evaluation-key proof root")
     );
 
     let mut proof_material = serde_json::json!({
@@ -1480,7 +1433,7 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_poli
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": proof_family,
+        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_record["proofMaterialRoot"],
         "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1504,8 +1457,11 @@ fn move_evaluation_key_share_lnp_proof_record_bytes_to_transport_with_chunk_poli
                 .collect::<Vec<_>>(),
         );
     } else {
-        register_verified_evaluation_key_share_proof_material_chunks(&proof_material_root, chunks)
-            .expect("verified evaluation-key proof material chunks");
+        register_verified_trustee_evaluation_key_proof_material_chunks(
+            &proof_material_root,
+            chunks,
+        )
+        .expect("verified trustee evaluation-key proof material chunks");
     }
 
     proof_material

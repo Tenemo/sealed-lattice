@@ -27,8 +27,8 @@ use crate::{
             derive_threshold_share_commitments_from_transport_request,
             describe_collective_bgv_setup_profile, describe_passive_setup_object_model,
             finish_threshold_share_commitment_transport_derivation_stream_request,
-            generate_evaluation_key_share_lnp_proof_from_request,
             generate_passive_setup_package_from_request,
+            generate_trustee_evaluation_key_proof_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
             generate_public_key_share_lnp_proof_from_request,
@@ -37,6 +37,7 @@ use crate::{
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
             verify_private_vss_share_envelope_from_request,
+            verify_trustee_evaluation_key_proof_from_request,
         },
         validation::{
             bgv_profile_rejection, reject_reference_oracle_artifact,
@@ -167,8 +168,12 @@ pub(crate) fn generate_public_key_share_lnp_proof(request: &Value) -> CanonicalR
     generate_public_key_share_lnp_proof_from_request(request)
 }
 
-pub(crate) fn generate_evaluation_key_share_lnp_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_evaluation_key_share_lnp_proof_from_request(request)
+pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_trustee_evaluation_key_proof_from_request(request)
+}
+
+pub(crate) fn verify_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
+    verify_trustee_evaluation_key_proof_from_request(request)
 }
 
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {

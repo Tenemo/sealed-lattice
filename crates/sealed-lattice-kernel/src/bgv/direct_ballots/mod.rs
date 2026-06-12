@@ -42,7 +42,8 @@ use crate::{
             },
             records::target_layout_hash,
             top_k::{
-                TIE_POLICY, evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
+                SELECTED_EVALUATOR_WORKING_LEVEL, TIE_POLICY,
+                evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
                 pack_direct_score_slots, packed_score_slot,
                 project_packed_sparse_target_from_rank_evaluation,
             },
@@ -69,7 +70,7 @@ const DIRECT_BALLOT_MAXIMUM_SCORE: u64 = 10;
 const DIRECT_BALLOT_SCORE_BUCKET_COUNT: usize =
     (DIRECT_BALLOT_MAXIMUM_SCORE - DIRECT_BALLOT_MINIMUM_SCORE + 1) as usize;
 const DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS: usize = 20;
-const DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL: usize = 15;
+const DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL: usize = SELECTED_EVALUATOR_WORKING_LEVEL;
 const DIRECT_BALLOT_SINGLE_BALLOT_FULL_TARGET_WORKING_LEVEL: usize = 8;
 const DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES: usize = 1024 * 1024;
 

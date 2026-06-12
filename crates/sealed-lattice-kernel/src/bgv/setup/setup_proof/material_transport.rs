@@ -54,8 +54,6 @@ pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
         "privateVssShareTboxParameterProfileHash": private_vss_share_lnp_tbox_parameter_profile_hash()?,
         "sameSecretTboxParameterProfileHash": same_secret_lnp_tbox_parameter_profile_hash()?,
         "publicKeyShareTboxParameterProfileHash": public_key_share_lnp_tbox_parameter_profile_hash()?,
-        "relinearizationKeyShareTboxParameterProfileHash": relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
-        "galoisKeyShareTboxParameterProfileHash": galois_key_share_lnp_tbox_parameter_profile_hash()?,
         "proofBytesAcceptedStatus": "private-vss-same-secret-public-key-share-relinearization-and-galois-proof-bytes-accepted-for-setup-proof-accounting",
     }))
 }
@@ -81,7 +79,7 @@ pub(crate) fn setup_proof_material_transport_hashes(
     chunks: &[Vec<u8>],
     chunk_size_bytes: u64,
 ) -> CanonicalResult<SetupProofMaterialTransportHashes> {
-    if !SETUP_PROOF_FAMILIES.contains(&proof_family) {
+    if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
         return Err(setup_proof_error(
             "setup proof material proof family is not in the fixed setup-proof profile",
         ));
