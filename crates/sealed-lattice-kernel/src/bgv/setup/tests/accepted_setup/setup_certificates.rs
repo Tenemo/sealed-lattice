@@ -480,8 +480,8 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
         "publicKeyShareMaterial": {
             "publicKeyShareMaterialSetRoot": valid_hash('a'),
         },
-        "publicKeyShareLnpProofs": {
-            "publicKeyShareLnpProofSetRoot": valid_hash('b'),
+        "publicKeyShareSuccinctProofs": {
+            "publicKeyShareSuccinctProofSetRoot": valid_hash('b'),
         },
         "evaluationKeys": {
             "evaluationKeySetHash": valid_hash('c'),

@@ -44,12 +44,12 @@ fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_lnp_proofs_before_collective_key_material()
+fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_before_collective_key_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_lnp_proofs_before_collective_key_material",
+        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_before_collective_key_material",
     );
-    let package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let package = public_key_share_succinct_proof_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
@@ -66,13 +66,13 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_lnp_pr
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_lnp_proofs_before_missing_terminal_objects()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_succinct_proofs_before_missing_terminal_objects()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_lnp_proofs_before_missing_terminal_objects",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_succinct_proofs_before_missing_terminal_objects",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    package["publicKeyShareLnpProofs"]["proofModelStatus"] =
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["publicKeyShareSuccinctProofs"]["proofModelStatus"] =
         serde_json::json!("weakened-public-key-share-proof-model");
     rebind_collective_setup_package_hash(&mut package);
 
@@ -84,20 +84,20 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_l
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofSetProfileMismatch"
+        "publicKeyShareSuccinctProofSetProfileMismatch"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_lnp_proofs_from_transported_proof_material()
+fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_from_transported_proof_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_lnp_proofs_from_transported_proof_material",
+        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_from_transported_proof_material",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     let transported_proof_material =
-        move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
+        move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -116,14 +116,14 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_lnp_pr
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_lnp_proof_chunk()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_succinct_proof_chunk()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_lnp_proof_chunk",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_succinct_proof_chunk",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     let mut transported_proof_material =
-        move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
+        move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
     transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
         serde_json::json!("00");
     rebind_collective_setup_package_hash(&mut package);
@@ -137,7 +137,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofVerificationFailed"
+        "publicKeyShareSuccinctProofVerificationFailed"
     );
 }
 
@@ -148,7 +148,7 @@ fn heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_pu
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_public_key_share_material",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     move_public_key_share_material_to_transport(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
@@ -172,7 +172,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_materi
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_material_from_transport",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     let transported_public_key_share_material =
         move_public_key_share_material_to_transport(&mut package);
     rebind_collective_setup_package_hash(&mut package);
@@ -198,7 +198,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_material",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     let mut transported_public_key_share_material =
         move_public_key_share_material_to_transport(&mut package);
     transported_public_key_share_material["chunks"][0]["bytesHex"] = serde_json::json!("00");
@@ -219,11 +219,11 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_material() {
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_material() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_material",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_material",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     let coefficients_hex = package["publicKeyShareMaterial"]["shareMaterialRecords"][0]
         ["shareCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
         .as_str()
@@ -252,12 +252,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_proofs() {
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proofs() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_proofs",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proofs",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHash"] =
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHash"] =
         serde_json::json!(valid_hash('a'));
     rebind_collective_setup_package_hash(&mut package);
 
@@ -269,19 +269,19 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofVerificationFailed"
+        "publicKeyShareSuccinctProofVerificationFailed"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_z34_metadata()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_statement_hash()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_z34_metadata",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_statement_hash",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    package["publicKeyShareLnpProofs"]["proofRecords"][0]["z34Z4CheckWindowHash"] =
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["statementHash"] =
         serde_json::json!(valid_hash('f'));
     rebind_collective_setup_package_hash(&mut package);
 
@@ -293,24 +293,24 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofVerificationFailed"
+        "publicKeyShareSuccinctProofVerificationFailed"
     );
     assert!(
         result["refusedObjects"][0]["message"]
             .as_str()
             .expect("refusal message")
-            .contains("z34Z4CheckWindowHash")
+            .contains("statementHash")
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_before_public_key_lnp_proofs()
+fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_before_public_key_succinct_proofs()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_before_public_key_lnp_proofs",
+        "heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_before_public_key_succinct_proofs",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     package
         .as_object_mut()
         .expect("setup package")
@@ -332,15 +332,15 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_set_drift()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_set_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_set_drift",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_set_drift",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    package["publicKeyShareLnpProofs"]["sameSecretProofSetRoot"] =
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["publicKeyShareSuccinctProofs"]["sameSecretProofSetRoot"] =
         serde_json::json!(valid_hash('b'));
-    rebind_collective_public_key_lnp_proof_roots(&mut package);
+    rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -351,21 +351,21 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_se
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofSetBindingMismatch"
+        "publicKeyShareSuccinctProofSetBindingMismatch"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_family_root_drift()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_root_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_family_root_drift",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_root_drift",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    package["publicKeyShareLnpProofs"]["sameSecretProofFamilyBindingRoot"] =
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["publicKeyShareSuccinctProofs"]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('d'));
-    rebind_collective_public_key_lnp_proof_roots(&mut package);
+    rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -376,21 +376,21 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_se
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofSetBindingMismatch"
+        "publicKeyShareSuccinctProofSetBindingMismatch"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_root_drift()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_root_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_proof_root_drift",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_root_drift",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    package["publicKeyShareLnpProofs"]["proofRecords"][0]["sameSecretProofRoot"] =
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["sameSecretProofRoot"] =
         serde_json::json!(valid_hash('c'));
-    rebind_collective_public_key_lnp_proof_roots(&mut package);
+    rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -401,21 +401,21 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_se
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofVerificationFailed"
+        "publicKeyShareSuccinctProofVerificationFailed"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_family_record_drift()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_record_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_secret_family_record_drift",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_record_drift",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    package["publicKeyShareLnpProofs"]["proofRecords"][0]["sameSecretProofFamilyBindingRoot"] =
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["sameSecretProofFamilyBindingRoot"] =
         serde_json::json!(valid_hash('e'));
-    rebind_collective_public_key_lnp_proof_roots(&mut package);
+    rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -426,31 +426,34 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_lnp_same_se
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofVerificationFailed"
+        "publicKeyShareSuccinctProofVerificationFailed"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_carry_response()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_lnp_carry_response",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content",
     );
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
-    let proof_bytes_hex = package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHex"]
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    let proof_bytes_hex = package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHex"]
         .as_str()
         .expect("public-key proof bytes hex");
     let mut proof_bytes = decode_hex(proof_bytes_hex).expect("proof bytes");
     let last_byte = proof_bytes.last_mut().expect("proof bytes are non-empty");
     *last_byte ^= 1;
-    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHex"] =
+    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHex"] =
         serde_json::json!(to_hex(&proof_bytes));
-    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofBytesHash"] =
-        serde_json::json!(public_key_share_lnp_relation_proof_bytes_hash(&proof_bytes));
-    package["publicKeyShareLnpProofs"]["proofRecords"][0]["proofSizeBytes"] =
+    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHash"] = serde_json::json!(
+        crate::bgv::setup::trustee_evaluation_key_proof::public_key_share_succinct_proof_bytes_hash(
+            &proof_bytes
+        )
+    );
+    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofSizeBytes"] =
         serde_json::json!(proof_bytes.len());
-    rebind_collective_public_key_lnp_proof_roots(&mut package);
+    rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -461,16 +464,16 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareLnpProofVerificationFailed"
+        "publicKeyShareSuccinctProofVerificationFailed"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_from_lnp_proof_bearing_shares()
+fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_from_succinct_proof_bearing_shares()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_from_lnp_proof_bearing_shares",
+        "heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_from_succinct_proof_bearing_shares",
     );
     let package = collective_public_key_bearing_collective_setup_package();
 

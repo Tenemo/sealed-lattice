@@ -23,7 +23,6 @@ enum TranscriptCoreCommand {
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
     GeneratePrivateVssShareProof,
-    GeneratePublicKeyShareLnpProof,
     GenerateTrusteeEvaluationKeyProof,
     VerifyTrusteeEvaluationKeyProof,
     ComputeSetupCommitmentFromOpening,
@@ -211,7 +210,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyCollectiveBgvSetup
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GeneratePrivateVssShareProof
-        | TranscriptCoreCommand::GeneratePublicKeyShareLnpProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
@@ -271,9 +269,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::GeneratePrivateVssShareProof => {
             crate::bgv::commands::generate_private_vss_share_proof(request)
-        }
-        TranscriptCoreCommand::GeneratePublicKeyShareLnpProof => {
-            crate::bgv::commands::generate_public_key_share_lnp_proof(request)
         }
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
             crate::bgv::commands::generate_trustee_evaluation_key_proof(request)

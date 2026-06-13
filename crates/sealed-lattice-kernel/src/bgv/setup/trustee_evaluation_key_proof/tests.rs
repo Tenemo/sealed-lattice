@@ -787,7 +787,10 @@ fn honest_public_key_share_proof_round_trips() {
         generate_development_public_key_share_instance("a1b2c3d401", SMALL_RING_DEGREE)
             .expect("public-key share instance");
     assert_eq!(statement.keys.len(), 1);
-    assert_eq!(statement.keys[0].kind, EvaluationKeyShareKind::PublicKeyShare);
+    assert_eq!(
+        statement.keys[0].kind,
+        EvaluationKeyShareKind::PublicKeyShare
+    );
     // The share spans every Q_share limb.
     assert_eq!(statement.limb_count(), DATA_PRIMES.len());
     assert_eq!(statement.context.proof_family, "public-key-share");

@@ -52,8 +52,7 @@ pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER,
         "privateVssShareTboxParameterProfileHash": private_vss_share_lnp_tbox_parameter_profile_hash()?,
-        "publicKeyShareTboxParameterProfileHash": public_key_share_lnp_tbox_parameter_profile_hash()?,
-        "proofBytesAcceptedStatus": "private-vss-public-key-share-relinearization-and-galois-proof-bytes-accepted-for-setup-proof-accounting",
+        "proofBytesAcceptedStatus": "private-vss-relinearization-galois-public-key-share-and-same-secret-proof-bytes-accepted-for-setup-proof-accounting",
     }))
 }
 

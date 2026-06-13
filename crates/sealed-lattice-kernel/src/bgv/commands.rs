@@ -30,7 +30,6 @@ use crate::{
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
-            generate_public_key_share_lnp_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
             verify_collective_bgv_setup_package_from_request,
             verify_local_trustee_setup_state_from_request,
@@ -157,10 +156,6 @@ pub(crate) fn verify_private_vss_share_envelope(request: &Value) -> CanonicalRes
 
 pub(crate) fn generate_private_vss_share_proof(request: &Value) -> CanonicalResult<Value> {
     generate_private_vss_share_proof_from_request(request)
-}
-
-pub(crate) fn generate_public_key_share_lnp_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_public_key_share_lnp_proof_from_request(request)
 }
 
 pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {

@@ -294,10 +294,7 @@ fn setup_proof_lnp_tbox_decoder_accepts_generated_canonical_proof_byte_layout() 
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_accepts_generated_suffix_for_all_setup_families() {
-    for layout in [
-        private_vss_share_lnp_tbox_layout(),
-        public_key_share_lnp_tbox_layout(),
-    ] {
+    for layout in [private_vss_share_lnp_tbox_layout()] {
         let statement_hash = hash512_hex(
             "test-statement",
             &[
@@ -893,9 +890,9 @@ fn setup_proof_lnp_tbox_decoder_rejects_noncanonical_generated_suffix() {
 
 fn small_lnp_tbox_layout_for_test() -> SetupProofLnpTboxLayout {
     SetupProofLnpTboxLayout {
-        proof_family: "public-key-share",
-        tbox_parameter_profile_id: PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
-        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/public-key-share/lnp-tbox-commitment-prefix-v1",
+        proof_family: "vss-opening-carry",
+        tbox_parameter_profile_id: PRIVATE_VSS_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
+        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/private-vss-share/lnp-tbox-commitment-prefix-v1",
         proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
         proof_modulus: BigUint::from(12_289_u64),
         proof_modulus_bit_count: 14,

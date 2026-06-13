@@ -206,7 +206,10 @@ fn migrated_family_accounting(
         Value::String(proof_family.to_string()),
     );
     accounting_fields.insert("familyRelationRows".to_string(), family_relation_rows);
-    accounting_fields.insert("wasmBrowserMeasurement".to_string(), wasm_browser_measurement);
+    accounting_fields.insert(
+        "wasmBrowserMeasurement".to_string(),
+        wasm_browser_measurement,
+    );
 
     Ok(accounting)
 }

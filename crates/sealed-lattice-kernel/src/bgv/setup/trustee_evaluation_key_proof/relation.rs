@@ -1035,7 +1035,8 @@ pub(crate) fn generate_development_public_key_share_instance(
     ring_degree: usize,
 ) -> CanonicalResult<(TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness)> {
     let secret_coefficients =
-        DeterministicSampler::new(WITNESS_SECRET_DOMAIN, &[seed_hex.as_bytes()]).ternary(ring_degree);
+        DeterministicSampler::new(WITNESS_SECRET_DOMAIN, &[seed_hex.as_bytes()])
+            .ternary(ring_degree);
     let error_coefficients = DeterministicSampler::new(
         KEY_SWITCH_ERROR_DOMAIN,
         &[seed_hex.as_bytes(), b"public-key-share-error"],
@@ -1070,7 +1071,11 @@ pub(crate) fn generate_development_public_key_share_instance(
                     error_coefficients[coefficient_index] * PLAINTEXT_MODULUS_I64,
                     modulus,
                 );
-                sub_mod_fast(scaled_error, sample_secret_product[coefficient_index], modulus)
+                sub_mod_fast(
+                    scaled_error,
+                    sample_secret_product[coefficient_index],
+                    modulus,
+                )
             })
             .collect::<Vec<_>>();
         component_b_by_limb.push(component_b);

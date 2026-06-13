@@ -43,7 +43,9 @@ fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResu
         SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
             succinct_same_secret_linkage_anchor_accounting_hash()
         }
-        SuccinctSetupProofFamilyShape::PublicKeyShare => succinct_public_key_share_accounting_hash(),
+        SuccinctSetupProofFamilyShape::PublicKeyShare => {
+            succinct_public_key_share_accounting_hash()
+        }
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             succinct_evaluation_key_proof_accounting_hash()
         }

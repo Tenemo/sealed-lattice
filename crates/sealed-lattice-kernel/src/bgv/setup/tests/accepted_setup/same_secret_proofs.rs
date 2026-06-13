@@ -80,7 +80,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_befo
         result["missingObjects"],
         serde_json::json!([
             "publicKeyShareMaterial",
-            "publicKeyShareLnpProofs",
+            "publicKeyShareSuccinctProofs",
             "collectivePublicKey",
             "collectivePublicKeyRoot"
         ])
@@ -203,7 +203,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_from
         result["missingObjects"],
         serde_json::json!([
             "publicKeyShareMaterial",
-            "publicKeyShareLnpProofs",
+            "publicKeyShareSuccinctProofs",
             "collectivePublicKey",
             "collectivePublicKeyRoot"
         ])

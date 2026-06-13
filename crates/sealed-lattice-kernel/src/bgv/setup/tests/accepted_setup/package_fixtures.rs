@@ -6,7 +6,7 @@ static TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
 > = OnceLock::new();
 static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
     OnceLock::new();
-static PUBLIC_KEY_SHARE_LNP_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     serde_json::Value,
 > = OnceLock::new();
 static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
@@ -1547,17 +1547,17 @@ fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Val
     package
 }
 
-pub(super) fn public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::Value {
-    PUBLIC_KEY_SHARE_LNP_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(build_public_key_share_lnp_proof_bearing_collective_setup_package)
+pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
+    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package)
         .clone()
 }
 
-fn build_public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::Value {
+fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareLnpProofs"] = public_key_share_lnp_proofs_object(&package);
+    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
@@ -1571,7 +1571,7 @@ pub(super) fn collective_public_key_bearing_collective_setup_package() -> serde_
 }
 
 fn build_collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();

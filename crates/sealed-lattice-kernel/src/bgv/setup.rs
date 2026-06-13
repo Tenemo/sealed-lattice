@@ -16,7 +16,6 @@ mod participant_material;
 mod private_vss;
 mod private_vss_share_proof;
 mod public_evaluation_key_material;
-mod public_key_share_proof;
 mod sampling;
 mod setup_proof;
 mod sharing;
@@ -49,7 +48,6 @@ pub(crate) use public_evaluation_key_material::{
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
-pub(crate) use public_key_share_proof::generate_public_key_share_lnp_proof_from_request;
 pub(crate) use threshold_share_commitments::{
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,

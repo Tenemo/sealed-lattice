@@ -87,9 +87,11 @@ use self::public_key_share_material::{
     verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
     verify_public_key_share_material_set,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 use self::public_key_shares::{
     PublicKeyCommonBinding, public_key_common_binding, public_key_share_proof_refusal,
-    public_key_share_records_by_roster_position, verify_optional_public_key_share_lnp_proofs,
+    public_key_share_records_by_roster_position, verify_optional_public_key_share_succinct_proofs,
     verify_public_key_material_acceptance_boundary, verify_public_key_share_proofs,
     verify_public_key_shares,
 };
@@ -156,16 +158,6 @@ use super::{
         PRIVATE_VSS_SHARE_CARRY_MASK_BITS, PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
         PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS, PRIVATE_VSS_SHARE_RANDOMNESS_MASK_BITS,
         PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-    },
-    public_key_share_proof::{
-        PUBLIC_KEY_SHARE_CARRY_MASK_BITS, PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND,
-        PUBLIC_KEY_SHARE_ERROR_MASK_BITS, PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-        PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN, PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND, PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS, PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND,
-        PublicKeyShareLnpProofVerificationInput, public_key_share_coefficient_vector_hash,
-        public_key_share_lnp_relation_proof_bytes_hash, verify_public_key_share_lnp_relation_proof,
     },
     sampling::reduce_unbiased_u64,
     setup_proof::{
@@ -235,8 +227,8 @@ pub(super) const PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT: &str =
     "sealed-lattice-public-key-share-material-binary-v1";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV1";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION: u64 = 1;
-const PUBLIC_KEY_SHARE_LNP_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareLnpProofSet";
-const PUBLIC_KEY_SHARE_LNP_PROOF_OBJECT_TYPE: &str = "PublicKeyShareLnpProof";
+const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProofSet";
+const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProof";
 const COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE: &str = "CollectivePublicKey";
 const EVALUATOR_KEY_SCHEDULE_OBJECT_TYPE: &str = "EvaluatorKeySchedule";
 const REQUIRED_GALOIS_SET_OBJECT_TYPE: &str = "RequiredGaloisSet";
@@ -711,7 +703,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_public_key_share_proofs(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_optional_public_key_share_lnp_proofs(setup_package, request)? {
+    if let Some(response) = verify_optional_public_key_share_succinct_proofs(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
@@ -890,7 +882,7 @@ fn setup_profile_binding() -> CanonicalResult<Value> {
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
         "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-        "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
+        "publicKeyShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
         "setupTransportProfileHash": setup_transport_profile_hash()?,
         "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
     }))
@@ -1148,8 +1140,8 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
         "proofFamilies": setup_proof_family_profiles()?,
         "privateVssShareTboxParameterProfile": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_value()?,
         "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-        "publicKeyShareTboxParameterProfile": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_value()?,
-        "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
+        "publicKeyShareProofAccounting": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
+        "publicKeyShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
         "sameSecretLinkageAnchorProofAccountingHash":
             super::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
         "trusteeEvaluationKeyProofAccountingHash":

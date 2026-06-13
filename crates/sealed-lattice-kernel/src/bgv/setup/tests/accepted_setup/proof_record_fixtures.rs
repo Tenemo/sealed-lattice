@@ -363,7 +363,7 @@ pub(super) fn public_evaluation_key_set_object(package: &serde_json::Value) -> s
                     "materialSource": "verified-relinearization-and-galois-proof-records",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
-                    "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+                    "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                     "relinearizationKeyShareRoundsRoot": relinearization_rounds_root,
                     "level": level,
                     "decompositionDigitCount": decomposition_digit_count,
@@ -443,7 +443,7 @@ pub(super) fn public_evaluation_key_set_object(package: &serde_json::Value) -> s
                     "materialSource": "verified-relinearization-and-galois-proof-records",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
-                    "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+                    "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                     "galoisKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["galoisKeyCrpRoot"],
                     "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
                     "rotation": rotation,
@@ -485,7 +485,7 @@ pub(super) fn public_evaluation_key_set_object(package: &serde_json::Value) -> s
         "rnsLimbCount": DATA_PRIMES.len(),
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
-        "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+        "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "relinearizationKeyShareRoundsRoot": relinearization_rounds_root,
         "relinearizationLevelSchedule": schedule["relinearizationLevelSchedule"],
         "relinearizationKeyRoots": relinearization_key_roots,
@@ -660,9 +660,9 @@ pub(super) fn collective_public_key_object(package: &serde_json::Value) -> serde
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        "aggregationStatus": "lnp-proof-aggregated-with-accepted-setup-proof-accounting",
+        "proofVerificationStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        "aggregationStatus": "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -684,7 +684,7 @@ pub(super) fn collective_public_key_object(package: &serde_json::Value) -> serde
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
-        "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+        "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "sourceShareMaterialRoots": source_roots,
         "aggregateCoefficientVectorsByLimb": aggregate_limbs,
     });
@@ -788,7 +788,7 @@ pub(super) fn public_key_share_material_object(package: &serde_json::Value) -> s
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
             "proofFamily": "public-key-share",
-            "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+            "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
             "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
@@ -825,7 +825,7 @@ pub(super) fn public_key_share_material_object(package: &serde_json::Value) -> s
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+        "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
         "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -857,10 +857,20 @@ pub(super) fn public_key_share_coefficients_and_errors_for_fixture(
     public_matrix_seed_hash: &str,
     trustee_roster_position: u64,
     ring_degree: usize,
-) -> (Vec<Vec<u64>>, Vec<Vec<i64>>) {
+) -> (Vec<Vec<u64>>, Vec<i64>) {
+    // One small centered-binomial error polynomial per trustee, shared across
+    // every Q_share limb, so the public-key share relation b_l = p*e - a_l*s
+    // holds for the single committed error column the succinct argument proves.
+    let error_coefficients = (0..ring_degree)
+        .map(|coefficient_position| {
+            accepted_public_key_error_coefficient_fixture(
+                trustee_roster_position,
+                coefficient_position,
+            )
+        })
+        .collect::<Vec<_>>();
     let mut coefficients_by_limb = Vec::new();
-    let mut error_coefficients_by_limb = Vec::new();
-    for (rns_limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+    for modulus in DATA_PRIMES.iter().copied() {
         let secret_residues = (0..ring_degree)
             .map(|coefficient_position| {
                 signed_i64_residue_for_fixture(
@@ -879,16 +889,7 @@ pub(super) fn public_key_share_coefficients_and_errors_for_fixture(
                 .collect::<Vec<_>>();
         let product = negacyclic_product_mod(&public_a, &secret_residues, modulus)
             .expect("public-key product");
-        let errors = (0..ring_degree)
-            .map(|coefficient_position| {
-                accepted_public_key_error_coefficient_fixture(
-                    trustee_roster_position,
-                    rns_limb_index,
-                    coefficient_position,
-                )
-            })
-            .collect::<Vec<_>>();
-        let coefficients = errors
+        let coefficients = error_coefficients
             .iter()
             .zip(product.iter())
             .map(|(error, product_coefficient)| {
@@ -902,20 +903,16 @@ pub(super) fn public_key_share_coefficients_and_errors_for_fixture(
             })
             .collect::<Vec<_>>();
         coefficients_by_limb.push(coefficients);
-        error_coefficients_by_limb.push(errors);
     }
 
-    (coefficients_by_limb, error_coefficients_by_limb)
+    (coefficients_by_limb, error_coefficients)
 }
 
 fn accepted_public_key_error_coefficient_fixture(
     trustee_roster_position: u64,
-    rns_limb_index: usize,
     coefficient_position: usize,
 ) -> i64 {
-    match (trustee_roster_position as usize * 37 + rns_limb_index * 11 + coefficient_position * 5)
-        % 5
-    {
+    match (trustee_roster_position as usize * 37 + coefficient_position * 5) % 5 {
         0 => -2,
         1 => -1,
         2 => 0,
@@ -1233,7 +1230,7 @@ fn relinearization_key_share_rounds_object_inner(
                 "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
                 "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
                 "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
-                "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+                "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                 "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
                 "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
                 "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
@@ -1363,7 +1360,7 @@ fn relinearization_key_share_rounds_object_inner(
                 "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
                 "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
                 "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
-                "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+                "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                 "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
                 "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
                 "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
@@ -1470,7 +1467,7 @@ fn relinearization_key_share_rounds_object_inner(
         "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+        "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
         "relinearizationLevelSchedule": schedule["relinearizationLevelSchedule"],
         "roundOneAggregateRoots": round_one_aggregate_roots,
@@ -1591,7 +1588,7 @@ fn galois_key_share_batches_object_inner(
                 "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
                 "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
                 "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
-                "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+                "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                 "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
                 "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
                 "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
@@ -1805,7 +1802,7 @@ fn trustee_evaluation_key_proofs_object_inner(
         "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareLnpProofSetRoot": package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"],
+        "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
         "galoisKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["galoisKeyCrpRoot"],
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
@@ -1845,7 +1842,9 @@ pub(super) fn trustee_evaluation_key_witness_for_fixture(
                     Some(u64::try_from(galois_element).expect("rotation fits u64")),
                 ),
                 EvaluationKeyShareKind::PublicKeyShare => {
-                    unreachable!("the evaluation-key witness fixture never carries a public-key share key");
+                    unreachable!(
+                        "the evaluation-key witness fixture never carries a public-key share key"
+                    );
                 }
             };
             (0..=key.level)
@@ -1888,12 +1887,17 @@ pub(super) fn trustee_evaluation_key_witness_for_fixture(
     }
 }
 
-pub(super) fn public_key_share_lnp_proofs_object(package: &serde_json::Value) -> serde_json::Value {
+pub(super) fn public_key_share_succinct_proofs_object(
+    package: &serde_json::Value,
+) -> serde_json::Value {
+    use crate::bgv::setup::trustee_evaluation_key_proof::{
+        EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
+        PUBLIC_KEY_SHARE_PROOF_FAMILY, PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS, SameSecretLinkageStatement,
+        SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+        public_key_share_succinct_proof_bytes_hash, succinct_public_key_share_accounting_hash,
+    };
     let setup_context = &package["setupContext"];
-    let setup_proof_binding = setup_proof_binding_for_test_package(package);
-    let public_key_share_tbox_parameter_profile_hash =
-        crate::bgv::setup::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()
-            .expect("public-key share tbox parameter profile hash");
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -1929,84 +1933,121 @@ pub(super) fn public_key_share_lnp_proofs_object(package: &serde_json::Value) ->
         let share_record = &share_records[trustee_roster_position as usize];
         let proof_statement_record = &proof_statement_records[trustee_roster_position as usize];
         let material_record = &material_records[trustee_roster_position as usize];
-        let constant_commitments =
+        let mut constant_commitments =
             same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
         let ring_degree = constant_commitments
             .first()
             .expect("constant commitment")
             .ring_degree;
-        let (coefficients_by_limb, error_coefficients_by_limb) =
+        let (coefficients_by_limb, error_coefficients) =
             public_key_share_coefficients_and_errors_for_fixture(
                 public_matrix_seed_hash,
                 trustee_roster_position,
                 ring_degree,
             );
-        let witness = PublicKeyShareLnpProofWitness {
-            secret_coefficients: (0..ring_degree)
-                .map(|coefficient_position| {
-                    accepted_vss_secret_coefficient_fixture(
-                        trustee_roster_position,
-                        coefficient_position,
-                    )
+        // The pk relation opens only the limb-zero constant commitment.
+        let limb_zero_commitment = constant_commitments.remove(0);
+        let secret_coefficients = (0..ring_degree)
+            .map(|coefficient_position| {
+                accepted_vss_secret_coefficient_fixture(
+                    trustee_roster_position,
+                    coefficient_position,
+                )
+            })
+            .collect::<Vec<_>>();
+        let negative_indicator_coefficients = secret_coefficients
+            .iter()
+            .map(|coefficient| i64::from(*coefficient < 0))
+            .collect::<Vec<_>>();
+        let limb_zero_opening_randomness =
+            accepted_vss_randomness_fixture(trustee_roster_position, 0, 0, ring_degree)
+                .into_iter()
+                .map(|column| {
+                    column
+                        .into_iter()
+                        .map(|value| i64::try_from(value).expect("ternary randomness fits i64"))
+                        .collect::<Vec<i64>>()
                 })
-                .collect(),
-            opening_randomness_by_limb: (0..DATA_PRIMES.len())
-                .map(|rns_limb_index| {
-                    accepted_vss_randomness_fixture(
-                        trustee_roster_position,
-                        rns_limb_index,
-                        0,
-                        ring_degree,
-                    )
-                })
-                .collect(),
-            error_coefficients_by_limb,
+                .collect::<Vec<Vec<i64>>>();
+        let statement = TrusteeEvaluationKeyStatement {
+            context: SuccinctSetupProofContext {
+                proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
+                ceremony_id: setup_context["ceremonyId"]
+                    .as_str()
+                    .expect("ceremony id")
+                    .to_string(),
+                manifest_hash: setup_context["manifestHash"]
+                    .as_str()
+                    .expect("manifest hash")
+                    .to_string(),
+                roster_hash: setup_context["rosterHash"]
+                    .as_str()
+                    .expect("roster hash")
+                    .to_string(),
+                trustee_identity: trustee_identity.clone(),
+                trustee_roster_position,
+                setup_epoch: setup_context["setupEpoch"]
+                    .as_str()
+                    .expect("setup epoch")
+                    .to_string(),
+                binding_roots: vec![
+                    (
+                        "sameSecretStatementRoot".to_string(),
+                        same_secret_proof_record["sameSecretStatementRoot"]
+                            .as_str()
+                            .expect("same-secret statement root")
+                            .to_string(),
+                    ),
+                    (
+                        "sameSecretProofRoot".to_string(),
+                        same_secret_proof_record["sameSecretProofRoot"]
+                            .as_str()
+                            .expect("same-secret proof root")
+                            .to_string(),
+                    ),
+                ],
+            },
+            ring_degree,
+            keys: vec![EvaluationKeyShareDescriptor {
+                kind: EvaluationKeyShareKind::PublicKeyShare,
+                level: DATA_PRIMES.len() - 1,
+                key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
+                key_switch_seed_hex: public_matrix_seed_hash.to_string(),
+                component_b_by_digit: vec![coefficients_by_limb],
+                round_one_aggregate_diagonal: Vec::new(),
+            }],
+            same_secret_linkage: Some(SameSecretLinkageStatement {
+                public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+                commitments: vec![limb_zero_commitment],
+            }),
+        };
+        let witness = TrusteeEvaluationKeyWitness {
+            secret_coefficients,
+            error_coefficients_by_key: vec![vec![error_coefficients]],
+            negative_indicator_coefficients,
+            opening_randomness_by_limb: vec![limb_zero_opening_randomness],
         };
         let proof_randomness_seed_hex = derive_protocol_hash(
             "PublicKeyShareProofRoot",
             &serde_json::json!({
-                "fixture": "public-key-share-lnp-proof-randomness",
+                "fixture": "public-key-share-succinct-proof-randomness",
                 "trusteeRosterPosition": trustee_roster_position,
             }),
         )
-        .expect("public-key proof randomness seed");
-        let proof_bytes =
-            generate_public_key_share_lnp_relation_proof(PublicKeyShareLnpProofGenerationInput {
-                public_matrix_seed_hash,
-                public_key_share_record: share_record,
-                public_key_share_proof_record: proof_statement_record,
-                same_secret_statement_record: statement_record,
-                constant_commitments: &constant_commitments,
-                public_share_coefficients_by_limb: &coefficients_by_limb,
-                setup_proof_binding: &setup_proof_binding,
-                witness: &witness,
-                proof_randomness_seed_hex: &proof_randomness_seed_hex,
-            })
-            .expect("public-key proof bytes");
-        let verification =
-            verify_public_key_share_lnp_relation_proof(PublicKeyShareLnpProofVerificationInput {
-                public_matrix_seed_hash,
-                public_key_share_record: share_record,
-                public_key_share_proof_record: proof_statement_record,
-                same_secret_statement_record: statement_record,
-                constant_commitments: &constant_commitments,
-                public_share_coefficients_by_limb: &coefficients_by_limb,
-                setup_proof_binding: &setup_proof_binding,
-                proof_bytes: &proof_bytes,
-            })
-            .expect("public-key proof verification");
+        .expect("public-key share succinct proof randomness seed");
+        let proof = prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
+            .expect("public-key share succinct proof");
+        let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
         let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
-        let proof_bytes_hash = public_key_share_lnp_relation_proof_bytes_hash(&proof_bytes);
+        let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
-            "objectType": "PublicKeyShareLnpProof",
+            "objectType": "PublicKeyShareSuccinctProof",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-            "proofFamily": "public-key-share",
-            "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-            "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-            "setupProofBinding": setup_proof_binding.clone(),
-            "publicKeyShareTboxParameterProfileHash": public_key_share_tbox_parameter_profile_hash.clone(),
+            "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
+            "proofVerificationStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
+            "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -2024,35 +2065,23 @@ pub(super) fn public_key_share_lnp_proofs_object(package: &serde_json::Value) ->
             "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
             "sameSecretProofFamilyBindingRoot": same_secret_proof_record["sameSecretProofFamilyBindingRoot"],
             "sameSecretProofRoot": same_secret_proof_record["sameSecretProofRoot"],
-            "statementHash": verification.statement_hash_hex,
-            "relationCommitmentHash": verification.relation_commitment_hash_hex,
-            "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
-            "z34SeedMaterialHash": verification.z34_seed_material_hash,
-            "z34ChallengeSeedHash": verification.z34_challenge_seed_hash,
-            "z34ChallengeTailHash": verification.z34_challenge_tail_hash,
-            "z34ChallengeRowDomainHash": verification.z34_challenge_row_domain_hash,
-            "z34ChallengeZ3RowSetHash": verification.z34_challenge_z3_row_set_hash,
-            "z34ChallengeZ4RowSetHash": verification.z34_challenge_z4_row_set_hash,
-            "tboxLowerProtocolChallengeHash": verification.tbox_lower_protocol_challenge_hash,
-            "z34Z3CheckWindowHash": verification.z34_z3_check_window_hash,
-            "z34Z4CheckWindowHash": verification.z34_z4_check_window_hash,
-            "z34Z3L2SquaredDecimal": verification.z34_z3_l2_squared_decimal,
-            "z34Z4InfinityNormDecimal": verification.z34_z4_infinity_norm_decimal,
-            "challenge": verification.challenge.to_string(),
+            "statementHash": to_hex(&statement.statement_hash()),
             "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
         });
-        proof_record["publicKeyShareLnpProofRoot"] = serde_json::json!(
+        proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
-                .expect("public-key LNP proof root")
+                .expect("public-key share succinct proof root")
         );
         let proof_root_entry = serde_json::json!({
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
+            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
         });
-        terminal_phase(&format!("generated public-key proof trustee {trustee_roster_position}"));
+        terminal_phase(&format!(
+            "generated public-key share succinct proof trustee {trustee_roster_position}"
+        ));
 
         (proof_root_entry, proof_record)
         })
@@ -2064,15 +2093,15 @@ pub(super) fn public_key_share_lnp_proofs_object(package: &serde_json::Value) ->
         proof_records.push(proof_record);
     }
     let mut proof_set = serde_json::json!({
-        "objectType": "PublicKeyShareLnpProofSet",
+        "objectType": "PublicKeyShareSuccinctProofSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": "public-key-share",
-        "proofVerificationStatus": PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        "setupProofBinding": setup_proof_binding,
-        "publicKeyShareTboxParameterProfileHash": public_key_share_tbox_parameter_profile_hash,
+        "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        "proofVerificationStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        "proofAccountingHash": succinct_public_key_share_accounting_hash()
+            .expect("public-key share succinct accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -2092,12 +2121,12 @@ pub(super) fn public_key_share_lnp_proofs_object(package: &serde_json::Value) ->
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
-        "publicKeyShareLnpProofRoots": proof_roots,
+        "publicKeyShareSuccinctProofRoots": proof_roots,
         "proofRecords": proof_records,
     });
-    proof_set["publicKeyShareLnpProofSetRoot"] = serde_json::json!(
+    proof_set["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
         derive_protocol_hash("PublicKeyShareProofRoot", &proof_set)
-            .expect("public-key LNP proof set root")
+            .expect("public-key share succinct proof set root")
     );
 
     proof_set

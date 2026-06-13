@@ -503,10 +503,10 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
     })
 }
 
-pub(super) fn move_public_key_share_lnp_proof_bytes_to_transport(
+pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
     package: &mut serde_json::Value,
 ) -> serde_json::Value {
-    let proof_records = package["publicKeyShareLnpProofs"]["proofRecords"]
+    let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
         .as_array_mut()
         .expect("public-key LNP proof records");
     let mut proof_materials = Vec::new();
@@ -568,7 +568,7 @@ pub(super) fn move_public_key_share_lnp_proof_bytes_to_transport(
             .as_object_mut()
             .expect("public-key LNP proof record object");
         proof_record_object.remove("proofBytesHex");
-        proof_record_object.remove("publicKeyShareLnpProofRoot");
+        proof_record_object.remove("publicKeyShareSuccinctProofRoot");
         proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
         proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
         proof_record["proofChunkSizeBytes"] =
@@ -579,14 +579,14 @@ pub(super) fn move_public_key_share_lnp_proof_bytes_to_transport(
         proof_record["proofFullObjectHash"] = serde_json::json!(transport_hashes.full_object_hash);
         proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
         proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
-        proof_record["publicKeyShareLnpProofRoot"] = serde_json::json!(
+        proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", proof_record)
                 .expect("public-key LNP proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
+            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
         }));
         proof_materials.push(serde_json::json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
@@ -611,9 +611,9 @@ pub(super) fn move_public_key_share_lnp_proof_bytes_to_transport(
                 .collect::<Vec<_>>(),
         }));
     }
-    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofRoots"] =
+    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofRoots"] =
         serde_json::json!(proof_roots);
-    rebind_collective_public_key_lnp_proof_roots(package);
+    rebind_collective_public_key_succinct_proof_roots(package);
 
     serde_json::json!({
         "objectType": "SetupTransportedPublicKeyShareProofMaterialSet",
@@ -704,10 +704,10 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
 
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareLnpProofs"] = public_key_share_lnp_proofs_object(&package);
+    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
     terminal_phase("generated public-key material and proofs");
     let public_key_share_proof_material =
-        move_public_key_share_lnp_proof_bytes_to_transport(&mut package);
+        move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
     append_transport_certificate_entries_from_material_set(
         &mut package,
         &public_key_share_proof_material,
@@ -1474,14 +1474,14 @@ pub(super) fn move_public_key_share_material_to_transport(
             .expect("transported public-key material set root")
     );
     package["publicKeyShareMaterial"] = transported_material_set;
-    package["publicKeyShareLnpProofs"]["publicKeyShareMaterialSetRoot"] =
+    package["publicKeyShareSuccinctProofs"]["publicKeyShareMaterialSetRoot"] =
         package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"].clone();
-    rebind_collective_public_key_lnp_proof_roots(package);
+    rebind_collective_public_key_succinct_proof_roots(package);
     if package["collectivePublicKey"].is_object() {
         package["collectivePublicKey"]["publicKeyShareMaterialSetRoot"] =
             package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"].clone();
-        package["collectivePublicKey"]["publicKeyShareLnpProofSetRoot"] =
-            package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"].clone();
+        package["collectivePublicKey"]["publicKeyShareSuccinctProofSetRoot"] =
+            package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"].clone();
         rebind_collective_public_key_root(package);
     }
 

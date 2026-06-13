@@ -592,11 +592,11 @@ pub(super) fn build_limb_public_vectors(
                     );
                 }
             } else {
-                for coefficient_index in 0..ring_degree {
-                    secret_factor[repetition][coefficient_index] = tower.add(
-                        &secret_factor[repetition][coefficient_index],
-                        &tower.mul(alpha_value, &v_vector[coefficient_index]),
-                    );
+                for (secret_factor_value, v_value) in
+                    secret_factor[repetition].iter_mut().zip(v_vector.iter())
+                {
+                    *secret_factor_value =
+                        tower.add(secret_factor_value, &tower.mul(alpha_value, v_value));
                 }
             }
             let mut component_dot = ChallengeExtensionTower::zero();

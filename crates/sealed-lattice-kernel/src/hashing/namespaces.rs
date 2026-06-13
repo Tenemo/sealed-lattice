@@ -105,6 +105,7 @@ reserved_root_namespaces! {
     PARTICIPANT_BGV_SETUP_RECORD_HASH_NAMESPACE => "sealed-lattice-root/participant-bgv-setup-record-hash-v1",
     PUBLIC_KEY_SHARE_ROOT_NAMESPACE => "sealed-lattice-root/public-key-share-root-v1",
     PUBLIC_KEY_SHARE_PROOF_ROOT_NAMESPACE => "sealed-lattice-root/public-key-share-proof-root-v1",
+    PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROOT_NAMESPACE => "sealed-lattice-root/public-key-share-proof-material-root-v1",
     REQUIRED_GALOIS_SET_HASH_NAMESPACE => "sealed-lattice-root/required-galois-set-hash-v1",
     EVALUATOR_KEY_SCHEDULE_ROOT_NAMESPACE => "sealed-lattice-root/evaluator-key-schedule-root-v1",
     EVALUATOR_KEY_SCHEDULE_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/evaluator-key-schedule-profile-hash-v1",

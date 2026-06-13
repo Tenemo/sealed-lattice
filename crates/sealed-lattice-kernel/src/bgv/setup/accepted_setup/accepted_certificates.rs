@@ -610,7 +610,6 @@ fn setup_proof_tbox_accounting_value() -> CanonicalResult<Value> {
         "challengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
         "profileHashes": {
             "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-            "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
         },
         "challengeAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
             SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
@@ -637,22 +636,7 @@ fn setup_proof_tbox_accounting_value() -> CanonicalResult<Value> {
 }
 
 fn setup_proof_scalar_relation_challenge_bits() -> CanonicalResult<usize> {
-    let challenge_bits = [
-        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-    ];
-    let first_challenge_bits = challenge_bits[0];
-    if challenge_bits
-        .iter()
-        .any(|candidate_bits| *candidate_bits != first_challenge_bits)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "setup proof scalar relation challenge bit counts must match across proof families",
-        ));
-    }
-
-    Ok(first_challenge_bits)
+    Ok(PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS)
 }
 
 fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Value> {
@@ -699,10 +683,6 @@ fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Valu
                     {
                         "proofFamily": "vss-opening-carry",
                         "domain": PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-                    },
-                    {
-                        "proofFamily": "public-key-share",
-                        "domain": PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
                     },
                 ],
             },
@@ -985,33 +965,9 @@ fn setup_proof_response_masking_accounting_value() -> CanonicalResult<Value> {
         )
     })?;
     let commitment_modulus_product = setup_commitment_modulus_product();
-    let profile_ring_degree = u128::try_from(POLYNOMIAL_DEGREE).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting ring degree does not fit u128",
-        )
-    })?;
     let private_vss_carry_witness_bound = scalar_power_sum(
         FIRST_PROFILE_DECRYPTION_THRESHOLD,
         FIRST_PROFILE_PARTICIPANT_COUNT,
-    )?;
-    let public_key_carry_witness_bound = profile_ring_degree.checked_add(3).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting public-key carry bound overflowed",
-        )
-    })?;
-    let public_key_secret_response_bound = response_profile_bound(
-        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-        PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-        0,
-    )?;
-    let public_key_negative_response_bound = response_profile_bound(
-        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-        0,
     )?;
     Ok(json!({
         "objectType": "SetupProofResponseMaskingAccounting",
@@ -1059,58 +1015,6 @@ fn setup_proof_response_masking_accounting_value() -> CanonicalResult<Value> {
                 "fullWidthCoefficientMaskingStatus": "centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted",
                 "commitmentNoWrapStatus": "three-limb-big-int-no-wrap-bound-recorded",
             },
-            {
-                "proofFamily": "public-key-share",
-                "responseProfiles": [
-                    response_mask_profile_value(
-                        "secret",
-                        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "negative-indicator",
-                        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "error",
-                        PUBLIC_KEY_SHARE_ERROR_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND as u128,
-                        0,
-                        "signed-error-response",
-                    )?,
-                    response_mask_profile_value(
-                        "opening-randomness",
-                        PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
-                        0,
-                        "signed-opening-response",
-                    )?,
-                    response_mask_profile_value(
-                        "lifted-carry",
-                        PUBLIC_KEY_SHARE_CARRY_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        public_key_carry_witness_bound,
-                        0,
-                        "signed-carry-response",
-                    )?,
-                ],
-                "liftedMessageNoWrap": lifted_message_no_wrap_value(
-                    "secret-plus-rns-prime-times-negative-indicator",
-                    public_key_secret_response_bound,
-                    public_key_negative_response_bound,
-                    max_source_message_modulus,
-                    &commitment_modulus_product,
-                )?,
-            },
         ],
         "zeroKnowledgeAccountingStatus": "response masking, witness-dependent support commitments, committed-secret response distributions, fixed-width signed relation commitments, and no-wrap response bounds are accepted by the setup proof theorem accounting object",
     }))
@@ -1138,6 +1042,10 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
             crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_value()?,
         "trusteeEvaluationKeyProofAccountingHash":
             crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
+        "publicKeyShareProofAccounting":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
+        "publicKeyShareProofAccountingHash":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
         "tboxAccounting": setup_proof_tbox_accounting_value()?,
         "responseMaskingAccounting": setup_proof_response_masking_accounting_value()?,
         "fiatShamirTranscriptAccounting": setup_proof_fiat_shamir_transcript_accounting_value()?,
@@ -1317,10 +1225,10 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
         "publicKeyShareMaterial",
         "publicKeyShareMaterialSetRoot",
     )?;
-    let public_key_share_lnp_proof_set_root = package_nested_hash(
+    let public_key_share_succinct_proof_set_root = package_nested_hash(
         setup_package,
-        "publicKeyShareLnpProofs",
-        "publicKeyShareLnpProofSetRoot",
+        "publicKeyShareSuccinctProofs",
+        "publicKeyShareSuccinctProofSetRoot",
     )?;
 
     Ok(json!({
@@ -1350,13 +1258,13 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
             "activeMaliciousPrototypeBoundary": "malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading",
         },
         "collectivePublicKey": {
-            "status": "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots",
+            "status": "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots",
             "collectivePublicKeyRoot": collective_public_key_root,
             "sourceRoots": {
                 "publicKeyShareSetRoot": package_nested_hash(setup_package, "publicKeyShares", "publicKeyShareSetRoot")?,
                 "publicKeyShareProofSetRoot": package_nested_hash(setup_package, "publicKeyShareProofs", "publicKeyShareProofSetRoot")?,
                 "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
-                "publicKeyShareLnpProofSetRoot": public_key_share_lnp_proof_set_root,
+                "publicKeyShareSuccinctProofSetRoot": public_key_share_succinct_proof_set_root,
             }
         },
         "publicEvaluationKeys": {

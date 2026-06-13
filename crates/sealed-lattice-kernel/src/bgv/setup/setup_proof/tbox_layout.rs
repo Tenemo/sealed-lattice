@@ -27,30 +27,6 @@ pub(crate) struct SetupProofLnpTboxLayout {
     pub(crate) z4_log2_standard_deviation: usize,
 }
 
-pub(crate) fn public_key_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
-    SetupProofLnpTboxLayout {
-        proof_family: "public-key-share",
-        tbox_parameter_profile_id: PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
-        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/public-key-share/lnp-tbox-commitment-prefix-v1",
-        proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-        proof_modulus: setup_proof_lnp_tbox_proof_modulus(),
-        proof_modulus_bit_count: 255,
-        compression_dropped_bits: 23,
-        t_b_polynomial_count: DATA_PRIMES.len() * 8 + 3,
-        h_polynomial_count: 4,
-        t_a1_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + DATA_PRIMES.len() * 2 + 2,
-        hint_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + DATA_PRIMES.len() * 2 + 2,
-        z1_polynomial_count: 4 + DATA_PRIMES.len() * 2,
-        z21_polynomial_count: 16 + DATA_PRIMES.len() * 8,
-        z3_polynomial_count: 2,
-        z4_polynomial_count: 2,
-        z1_log2_standard_deviation: 24,
-        z21_log2_standard_deviation: 40,
-        z3_log2_standard_deviation: 16,
-        z4_log2_standard_deviation: 16,
-    }
-}
-
 pub(crate) fn private_vss_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
     SetupProofLnpTboxLayout {
         proof_family: "vss-opening-carry",
@@ -73,13 +49,6 @@ pub(crate) fn private_vss_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
         z3_log2_standard_deviation: 16,
         z4_log2_standard_deviation: 16,
     }
-}
-
-pub(crate) fn public_key_share_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupProofLnpTboxParameterProfileHash",
-        &public_key_share_lnp_tbox_parameter_profile_value()?,
-    )
 }
 
 pub(crate) fn private_vss_share_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
@@ -107,31 +76,6 @@ pub(crate) fn private_vss_share_lnp_tbox_parameter_profile_value() -> CanonicalR
         }),
         "SLVSLNP1",
         "private VSS share verifier pins and checks this profile; repo-owned setup proof soundness, zero-knowledge, and QROM accounting is accepted by the setup proof accounting certificate",
-    )
-}
-
-pub(crate) fn public_key_share_lnp_tbox_parameter_profile_value() -> CanonicalResult<Value> {
-    let layout = public_key_share_lnp_tbox_layout();
-    setup_proof_lnp_tbox_parameter_profile_value(
-        &layout,
-        "pinned sealed-lattice first-profile lifted public-key share relation dimensions",
-        json!({
-            "rnsLimbCount": DATA_PRIMES.len(),
-            "commitmentModulusLimbCount": SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
-            "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
-            "openingRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-            "sharedSecretPolynomialCount": 1,
-            "negativeIndicatorPolynomialCount": 1,
-            "publicKeySharePolynomialCountPerLimb": 1,
-            "publicKeyErrorPolynomialCountPerLimb": 1,
-            "publicKeyCarryPolynomialCountPerLimb": 1,
-            "constantCommitmentCount": DATA_PRIMES.len(),
-            "publicKeyLiftedRelationCountPerCoefficientPerLimb": 1,
-            "errorSupportRelationCountPerCoefficientPerLimb": 1,
-            "secretSupportRelationCountPerCoefficient": 2
-        }),
-        "SLPKLNP1",
-        "public-key share verifier pins and checks this profile; repo-owned setup proof soundness, zero-knowledge, and QROM accounting is accepted by the setup proof accounting certificate",
     )
 }
 

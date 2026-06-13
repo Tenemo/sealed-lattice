@@ -69,8 +69,8 @@ pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 #[cfg(test)]
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
+    SameSecretLinkageStatement, SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 

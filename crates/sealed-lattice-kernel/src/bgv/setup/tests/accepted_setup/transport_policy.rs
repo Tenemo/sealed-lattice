@@ -47,7 +47,7 @@ fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
         "publicKeyShareMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
         },
-        "publicKeyShareLnpProofs": {
+        "publicKeyShareSuccinctProofs": {
             "proofRecords": [
                 { "ringDegree": POLYNOMIAL_DEGREE }
             ],
@@ -242,7 +242,7 @@ fn terminal_transport_policy_package_with_material_encodings(
         "publicKeyShareMaterial": {
             "materialEncoding": public_key_share_material_encoding,
         },
-        "publicKeyShareLnpProofs": {
+        "publicKeyShareSuccinctProofs": {
             "proofRecords": [
                 proof_record.clone()
             ],

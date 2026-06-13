@@ -237,38 +237,38 @@ pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_j
     rebind_active_static_setup_theorem_certificate(package);
 }
 
-pub(super) fn rebind_collective_public_key_lnp_proof_roots(package: &mut serde_json::Value) {
-    let proof_records = package["publicKeyShareLnpProofs"]["proofRecords"]
+pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut serde_json::Value) {
+    let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
         .as_array_mut()
-        .expect("public-key LNP proof records");
+        .expect("public-key succinct proof records");
     let mut proof_roots = Vec::new();
     for proof_record in proof_records {
         proof_record
             .as_object_mut()
-            .expect("public-key LNP proof record")
-            .remove("publicKeyShareLnpProofRoot");
-        proof_record["publicKeyShareLnpProofRoot"] = serde_json::json!(
+            .expect("public-key succinct proof record")
+            .remove("publicKeyShareSuccinctProofRoot");
+        proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", proof_record)
-                .expect("public-key LNP proof root")
+                .expect("public-key succinct proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": proof_record["trusteeIdentity"],
             "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
-            "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
+            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
         }));
     }
-    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofRoots"] =
+    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofRoots"] =
         serde_json::json!(proof_roots);
-    package["publicKeyShareLnpProofs"]
+    package["publicKeyShareSuccinctProofs"]
         .as_object_mut()
-        .expect("public-key LNP proof set")
-        .remove("publicKeyShareLnpProofSetRoot");
-    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"] = serde_json::json!(
+        .expect("public-key succinct proof set")
+        .remove("publicKeyShareSuccinctProofSetRoot");
+    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
         derive_protocol_hash(
             "PublicKeyShareProofRoot",
-            &package["publicKeyShareLnpProofs"]
+            &package["publicKeyShareSuccinctProofs"]
         )
-        .expect("public-key LNP proof set root")
+        .expect("public-key succinct proof set root")
     );
     rebind_active_static_setup_theorem_certificate(package);
 }
