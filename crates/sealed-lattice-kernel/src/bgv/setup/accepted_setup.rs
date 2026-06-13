@@ -93,15 +93,15 @@ use self::public_key_shares::{
     verify_public_key_material_acceptance_boundary, verify_public_key_share_proofs,
     verify_public_key_shares,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::same_secret_consistency::same_secret_anchor_proof_material_root;
 use self::same_secret_consistency::{
-    LnpTboxZ34MetadataExpectation, SameSecretProofBinding, SameSecretStatementBinding,
-    same_secret_consistency_root_from_package,
+    SameSecretProofBinding, SameSecretStatementBinding, same_secret_consistency_root_from_package,
     same_secret_constant_commitment_values_from_material, same_secret_proof_bindings_from_package,
     same_secret_proof_family_binding_root, same_secret_proof_set_root_from_package,
     same_secret_statement_bindings_from_package, same_secret_statement_records_by_roster_position,
     same_secret_transported_constant_commitments_by_roster_position,
-    verify_lnp_tbox_z34_metadata_fields, verify_optional_same_secret_lnp_proofs,
-    verify_same_secret_consistency, verify_same_secret_context,
+    verify_optional_same_secret_proofs, verify_same_secret_consistency, verify_same_secret_context,
 };
 use self::setup_context::{q_share_hash, q_share_value, verify_context, verify_q_share};
 use self::threshold_share_commitment_checks::{
@@ -166,13 +166,6 @@ use super::{
         PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS, PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND,
         PublicKeyShareLnpProofVerificationInput, public_key_share_coefficient_vector_hash,
         public_key_share_lnp_relation_proof_bytes_hash, verify_public_key_share_lnp_relation_proof,
-    },
-    same_secret_proof::{
-        SAME_SECRET_LNP_PROOF_MODEL_STATUS, SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
-        SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN, SAME_SECRET_MESSAGE_MASK_BITS,
-        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND, SAME_SECRET_RANDOMNESS_MASK_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS, SAME_SECRET_TERNARY_INFINITY_BOUND,
-        same_secret_lnp_relation_proof_bytes_hash, verify_same_secret_lnp_relation_proof,
     },
     sampling::reduce_unbiased_u64,
     setup_proof::{
@@ -304,7 +297,7 @@ const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE: &str =
     "ActiveStaticSetupTheoremCertificate";
 const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE: &str =
     "ActiveStaticSetupTheoremCertificateHash";
-const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-same-secret-public-key-share-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting";
+const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
 const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
@@ -709,7 +702,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_same_secret_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_optional_same_secret_lnp_proofs(setup_package, request)? {
+    if let Some(response) = verify_optional_same_secret_proofs(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_public_key_shares(setup_package)? {
@@ -897,7 +890,6 @@ fn setup_profile_binding() -> CanonicalResult<Value> {
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
         "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-        "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
         "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
         "setupTransportProfileHash": setup_transport_profile_hash()?,
         "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
@@ -1156,10 +1148,10 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
         "proofFamilies": setup_proof_family_profiles()?,
         "privateVssShareTboxParameterProfile": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_value()?,
         "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-        "sameSecretTboxParameterProfile": super::setup_proof::same_secret_lnp_tbox_parameter_profile_value()?,
-        "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
         "publicKeyShareTboxParameterProfile": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_value()?,
         "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
+        "sameSecretLinkageAnchorProofAccountingHash":
+            super::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
         "trusteeEvaluationKeyProofAccountingHash":
             super::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         "proofSerialization": {
@@ -1218,11 +1210,6 @@ fn setup_proof_family_profiles() -> CanonicalResult<Vec<Value>> {
                     "private VSS share opens the homomorphic coefficient-commitment combination with explicit q_l carry",
                     "private share, coefficient openings, and bounded non-negative carry",
                     "unreduced lifted share relation must hold below the commitment modulus product",
-                ),
-                "same-secret-consistency" => (
-                    "VSS constant commitments across all Q_share limbs encode one short trustee secret",
-                    "one short trustee secret and openings to all accepted VSS constant commitments",
-                    "limb reductions must be reductions of one short secret, not independent limb witnesses",
                 ),
                 "public-key-share" => (
                     "public-key share satisfies PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0",

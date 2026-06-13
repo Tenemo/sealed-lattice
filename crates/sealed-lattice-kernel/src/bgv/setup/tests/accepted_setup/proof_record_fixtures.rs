@@ -956,12 +956,64 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
             .first()
             .expect("constant commitment")
             .ring_degree;
-        let witness = SameSecretLnpProofWitness {
+        let statement = crate::bgv::setup::trustee_evaluation_key_proof::TrusteeEvaluationKeyStatement {
+            context: crate::bgv::setup::trustee_evaluation_key_proof::SuccinctSetupProofContext {
+                proof_family:
+                    crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY
+                        .to_string(),
+                ceremony_id: setup_context["ceremonyId"]
+                    .as_str()
+                    .expect("ceremony id")
+                    .to_string(),
+                manifest_hash: setup_context["manifestHash"]
+                    .as_str()
+                    .expect("manifest hash")
+                    .to_string(),
+                roster_hash: setup_context["rosterHash"]
+                    .as_str()
+                    .expect("roster hash")
+                    .to_string(),
+                trustee_identity: trustee_identity.clone(),
+                trustee_roster_position,
+                setup_epoch: setup_context["setupEpoch"]
+                    .as_str()
+                    .expect("setup epoch")
+                    .to_string(),
+                binding_roots: vec![(
+                    "vssCoefficientCommitmentMaterialRoot".to_string(),
+                    package["vssCoefficientCommitmentMaterial"]
+                        ["vssCoefficientCommitmentMaterialRoot"]
+                        .as_str()
+                        .expect("vss material root")
+                        .to_string(),
+                )],
+            },
+            ring_degree,
+            keys: Vec::new(),
+            same_secret_linkage: Some(
+                crate::bgv::setup::trustee_evaluation_key_proof::SameSecretLinkageStatement {
+                    public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+                    commitments: constant_commitments,
+                },
+            ),
+        };
+        let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients: (0..ring_degree)
                 .map(|coefficient_position| {
                     accepted_vss_secret_coefficient_fixture(
                         trustee_roster_position,
                         coefficient_position,
+                    )
+                })
+                .collect(),
+            error_coefficients_by_key: Vec::new(),
+            negative_indicator_coefficients: (0..ring_degree)
+                .map(|coefficient_position| {
+                    i64::from(
+                        accepted_vss_secret_coefficient_fixture(
+                            trustee_roster_position,
+                            coefficient_position,
+                        ) < 0,
                     )
                 })
                 .collect(),
@@ -973,6 +1025,16 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
                         0,
                         ring_degree,
                     )
+                    .into_iter()
+                    .map(|column| {
+                        column
+                            .into_iter()
+                            .map(|value| {
+                                i64::try_from(value).expect("ternary randomness fits i64")
+                            })
+                            .collect()
+                    })
+                    .collect()
                 })
                 .collect(),
         };
@@ -984,38 +1046,26 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
             }),
         )
         .expect("same-secret proof randomness seed");
-        let proof_bytes = generate_same_secret_lnp_relation_proof(
-            public_matrix_seed_hash,
-            statement_record,
-            &constant_commitments,
-            &setup_proof_binding_for_test_package(package),
-            &witness,
-            &proof_randomness_seed_hex,
-        )
-        .expect("same-secret proof bytes");
-        let verification = verify_same_secret_lnp_relation_proof(
-            public_matrix_seed_hash,
-            statement_record,
-            &constant_commitments,
-            &setup_proof_binding_for_test_package(package),
-            &proof_bytes,
-        )
-        .expect("same-secret proof verification");
+        let proof = prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
+            .expect("same-secret anchor proof");
+        let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
         let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
-        let proof_bytes_hash = same_secret_lnp_relation_proof_bytes_hash(&proof_bytes);
-        let same_secret_tbox_parameter_profile_hash =
-            crate::bgv::setup::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()
-                .expect("same-secret tbox parameter profile hash");
+        let proof_bytes_hash =
+            crate::bgv::setup::trustee_evaluation_key_proof::same_secret_anchor_proof_bytes_hash(
+                &proof_bytes,
+            );
         let mut proof_record = serde_json::json!({
             "objectType": "SameSecretProof",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-            "proofFamily": "same-secret-consistency",
-            "proofVerificationStatus": SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
-            "proofModelStatus": SAME_SECRET_LNP_PROOF_MODEL_STATUS,
-            "sameSecretTboxParameterProfileHash": same_secret_tbox_parameter_profile_hash,
+            "proofFamily":
+                crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+            "proofVerificationStatus":
+                crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
+            "proofModelStatus":
+                crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -1029,22 +1079,7 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
             "sameSecretStatementRoot": statement_record["sameSecretStatementRoot"],
             "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
             "sameSecretProofFamilyBindingRoot": statement_record["sameSecretProofFamilyBindingRoot"],
-            "setupProofBinding": setup_proof_binding_for_test_package(package),
-            "statementHash": verification.statement_hash_hex,
-            "relationCommitmentHash": verification.relation_commitment_hash_hex,
-            "tboxCommitmentPrefixHash": verification.tbox_commitment_prefix_hash,
-            "z34SeedMaterialHash": verification.z34_seed_material_hash,
-            "z34ChallengeSeedHash": verification.z34_challenge_seed_hash,
-            "z34ChallengeTailHash": verification.z34_challenge_tail_hash,
-            "z34ChallengeRowDomainHash": verification.z34_challenge_row_domain_hash,
-            "z34ChallengeZ3RowSetHash": verification.z34_challenge_z3_row_set_hash,
-            "z34ChallengeZ4RowSetHash": verification.z34_challenge_z4_row_set_hash,
-            "tboxLowerProtocolChallengeHash": verification.tbox_lower_protocol_challenge_hash,
-            "z34Z3CheckWindowHash": verification.z34_z3_check_window_hash,
-            "z34Z4CheckWindowHash": verification.z34_z4_check_window_hash,
-            "z34Z3L2SquaredDecimal": verification.z34_z3_l2_squared_decimal,
-            "z34Z4InfinityNormDecimal": verification.z34_z4_infinity_norm_decimal,
-            "challenge": verification.challenge.to_string(),
+            "statementHash": to_hex(&statement.statement_hash()),
             "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
@@ -1075,11 +1110,15 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
         "setupProfileId": "CollectiveBgvSetup-v1",
         "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": "same-secret-consistency",
-        "proofVerificationStatus": SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": SAME_SECRET_LNP_PROOF_MODEL_STATUS,
-        "sameSecretTboxParameterProfileHash": crate::bgv::setup::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()
-            .expect("same-secret tbox parameter profile hash"),
+        "proofFamily":
+            crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+        "proofVerificationStatus":
+            crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
+        "proofModelStatus":
+            crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
+        "proofAccountingHash":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()
+                .expect("same-secret anchor accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -1093,7 +1132,6 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
         "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "vssCoefficientCommitmentMaterialRoot": package["vssCoefficientCommitmentMaterial"]["vssCoefficientCommitmentMaterialRoot"],
-        "setupProofBinding": setup_proof_binding_for_test_package(package),
         "sameSecretProofRoots": same_secret_proof_roots,
         "proofRecords": proof_records,
     });
@@ -1635,8 +1673,9 @@ fn trustee_evaluation_key_proofs_object_inner(
         round_one_aggregate_diagonals_from_fixture_package(package, transported_component_material);
     let ring_degree =
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
-    let mut proof_records = Vec::new();
-    for proof_record in same_secret_proofs {
+    let built_records = same_secret_proofs
+        .par_iter()
+        .map(|proof_record| {
         let trustee_roster_position = proof_record["trusteeRosterPosition"]
             .as_u64()
             .expect("trustee roster position");
@@ -1675,7 +1714,7 @@ fn trustee_evaluation_key_proofs_object_inner(
             "generated trustee evaluation-key proof trustee {trustee_roster_position} ({} bytes)",
             proof_bytes.len(),
         ));
-        let mut record = serde_json::json!({
+        let record = serde_json::json!({
             "objectType": "TrusteeEvaluationKeyProof",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
@@ -1702,6 +1741,11 @@ fn trustee_evaluation_key_proofs_object_inner(
             "proofBytesHash": trustee_evaluation_key_proof_bytes_hash(&proof_bytes),
             "proofBytesHex": to_hex(&proof_bytes),
         });
+            record
+        })
+        .collect::<Vec<_>>();
+    let mut proof_records = Vec::new();
+    for mut record in built_records {
         if let Some(sinks) = terminal_transport.as_deref_mut() {
             let proof_material =
                 move_trustee_evaluation_key_proof_record_bytes_to_compact_transport(&mut record);
@@ -1800,6 +1844,9 @@ pub(super) fn trustee_evaluation_key_witness_for_fixture(
                     EvaluationKeyShareProofFamily::Galois,
                     Some(u64::try_from(galois_element).expect("rotation fits u64")),
                 ),
+                EvaluationKeyShareKind::PublicKeyShare => {
+                    unreachable!("the evaluation-key witness fixture never carries a public-key share key");
+                }
             };
             (0..=key.level)
                 .map(|digit_index| {

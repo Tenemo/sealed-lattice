@@ -113,11 +113,40 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
                 .as_str()
                 .is_some_and(|text| text.contains("lifted public-key equality")))
     );
-    assert!(proof_family_accounting[..3].iter().all(|family| {
-        family["claimAccounting"]["qrom"]
+    assert!(
+        [&proof_family_accounting[0], &proof_family_accounting[2]]
+            .iter()
+            .all(|family| {
+                family["claimAccounting"]["qrom"]
+                    .as_str()
+                    .is_some_and(|text| {
+                        text.contains("Fiat-Shamir reduction accounting is accepted")
+                    })
+            })
+    );
+
+    // The same-secret linkage anchor carries its accepted succinct accounting:
+    // the row binds the anchor accounting object with every theorem row closed
+    // under the explicitly named FRI conjecture.
+    let anchor_family = &proof_family_accounting[1];
+    assert_eq!(anchor_family["proofFamily"], "same-secret-linkage-anchor");
+    assert_eq!(
+        anchor_family["accountingStatus"],
+        "succinct-same-secret-linkage-anchor-theorem-accounting-accepted"
+    );
+    assert_eq!(
+        anchor_family["claimAccounting"]["accountingHash"],
+        certificate["sameSecretLinkageAnchorProofAccountingHash"]
+    );
+    assert!(
+        anchor_family["claimAccounting"]["claimBoundary"]
             .as_str()
-            .is_some_and(|text| text.contains("Fiat-Shamir reduction accounting is accepted"))
-    }));
+            .is_some_and(|text| text.contains("named FRI conjecture"))
+    );
+    assert_eq!(
+        certificate["sameSecretLinkageAnchorProofAccounting"]["objectType"],
+        "SuccinctSameSecretLinkageAnchorAccounting"
+    );
 
     // The trustee evaluation-key family carries its accepted accounting: the
     // row binds the succinct accounting object with every theorem row closed
@@ -154,7 +183,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     );
     assert_eq!(
         certificate["certificateStatus"],
-        "lnp-and-trustee-evaluation-key-family-accounting-accepted"
+        "lnp-same-secret-linkage-anchor-and-trustee-evaluation-key-family-accounting-accepted"
     );
 
     let tbox_accounting = certificate["tboxAccounting"]
@@ -169,7 +198,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
             .as_array()
             .expect("closed tbox proof families")
             .len(),
-        3
+        2
     );
     assert!(
         tbox_accounting["closedVerifierChecks"]
@@ -223,7 +252,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     let response_families = response_masking_accounting["families"]
         .as_array()
         .expect("response masking families");
-    assert_eq!(response_families.len(), 3);
+    assert_eq!(response_families.len(), 2);
     assert_eq!(
         response_families[0]["fullWidthCoefficientMaskingStatus"],
         "centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted"
@@ -249,16 +278,6 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     assert!(
         response_families[1]["responseProfiles"][0]["maskingSlackBits"]
             .as_i64()
-            .expect("same-secret secret masking slack")
-            > 0
-    );
-    assert_eq!(
-        response_families[2]["responseProfiles"][0]["maskRandomBits"],
-        80
-    );
-    assert!(
-        response_families[2]["responseProfiles"][0]["maskingSlackBits"]
-            .as_i64()
             .expect("public-key secret masking slack")
             > 0
     );
@@ -272,7 +291,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     );
     assert_eq!(
         proof_theorem_accounting["qromReductionAccounting"]["compositionStatus"],
-        "accepted-for-fixed-three-family-two-stage-setup-profile"
+        "accepted-for-fixed-two-family-two-stage-setup-profile"
     );
     assert!(
         proof_theorem_accounting["referenceRows"]

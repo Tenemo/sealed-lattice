@@ -182,3 +182,121 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_hash() -> CanonicalResult
         &succinct_evaluation_key_proof_accounting_value()?,
     )
 }
+
+// One migrated family's accounting: the closed evaluation-key accounting with
+// the object type, proof family, family relation rows, and per-family mobile
+// measurement row overridden. The argument machinery, parameters, and theorem
+// rows stay the shared closed accounting; only the family-specific rows change.
+fn migrated_family_accounting(
+    object_type: &str,
+    proof_family: &str,
+    family_relation_rows: Value,
+    wasm_browser_measurement: Value,
+) -> CanonicalResult<Value> {
+    let mut accounting = succinct_evaluation_key_proof_accounting_value()?;
+    let accounting_fields = accounting
+        .as_object_mut()
+        .expect("succinct accounting is an object");
+    accounting_fields.insert(
+        "objectType".to_string(),
+        Value::String(object_type.to_string()),
+    );
+    accounting_fields.insert(
+        "proofFamily".to_string(),
+        Value::String(proof_family.to_string()),
+    );
+    accounting_fields.insert("familyRelationRows".to_string(), family_relation_rows);
+    accounting_fields.insert("wasmBrowserMeasurement".to_string(), wasm_browser_measurement);
+
+    Ok(accounting)
+}
+
+// A measurement row whose desktop browser lane has not yet recorded its
+// numbers; the family does not close until the lane runs and the row flips to
+// the recorded shape.
+fn pending_desktop_browser_measurement() -> Value {
+    json!({
+        "status": "wasm-browser-measurement-pending",
+        "requiredRows": [
+            "maximum per-trustee prove time",
+            "full setup-package verify time",
+            "peak WASM memory",
+            "persistent storage footprint",
+            "largest copied buffer",
+            "resume behavior across interruption",
+        ],
+    })
+}
+
+// A measurement row recorded on a desktop browser lane with every
+// supported-phone row left open. The canonical object never carries
+// machine-specific numbers, so the recorded lane is described by what it
+// measures, not by one machine's results.
+fn recorded_desktop_browser_measurement(family_label: &str) -> Value {
+    json!({
+        "status": "desktop-browser-wasm-measurement-recorded-supported-phone-rows-open",
+        "recordedLane": format!("manual desktop Chromium vitest lane over the published WASM kernel artifact: one first-profile {family_label} prove and verify per run, logging per-trustee prove time, verify time, proof byte length, peak WASM linear memory, largest copied buffer, persistent storage footprint, and resume behavior"),
+        "recordedRows": [
+            "per-trustee prove time in desktop browser WASM",
+            "proof verify time in desktop browser WASM",
+            "proof byte length",
+            "peak WASM linear memory after prove and verify",
+            "largest copied buffer at the WASM boundary",
+            "persistent storage footprint",
+            "resume behavior across interruption",
+        ],
+        "openRows": [
+            "maximum per-trustee prove time on a supported phone",
+            "full setup-package verify time on a supported phone",
+            "peak WASM memory on a supported phone",
+            "persistent storage footprint on a supported phone",
+            "largest copied buffer on a supported phone",
+            "resume behavior across interruption on a supported phone",
+        ],
+        "evidenceBoundary": "desktop Chromium development evidence only; the recorded lane does not certify supported-phone behavior, and the supported-phone rows stay open",
+    })
+}
+
+// Accounting for the keyless same-secret linkage anchor family.
+pub(crate) fn succinct_same_secret_linkage_anchor_accounting_value() -> CanonicalResult<Value> {
+    migrated_family_accounting(
+        "SuccinctSameSecretLinkageAnchorAccounting",
+        super::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+        json!({
+            "statementShape": "keyless statement over the commitment fields: no key relations, the linkage opening rows, ternary secret support, binary negative-indicator support, ternary opening-randomness support, and the masked cross-limb consistency claims",
+            "anchorRole": "one anchor proof per trustee; every other setup proof family carries the anchor root in its hashed context and keeps its own commitment-opening rows against the same commitment values",
+            "linkageSoundness": "congruence modulo the commitment modulus product (three commitment fields) plus ternary support makes every family witness secret equal to the anchored secret as integers",
+        }),
+        recorded_desktop_browser_measurement("keyless anchor"),
+    )
+}
+
+pub(crate) fn succinct_same_secret_linkage_anchor_accounting_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SuccinctSameSecretLinkageAnchorAccountingHash",
+        &succinct_same_secret_linkage_anchor_accounting_value()?,
+    )
+}
+
+// Accounting for the public-key share family: one share-correctness relation
+// per Q_share limb plus the single constant-commitment opening that links the
+// share secret to the anchor.
+pub(crate) fn succinct_public_key_share_accounting_value() -> CanonicalResult<Value> {
+    migrated_family_accounting(
+        "SuccinctPublicKeyShareAccounting",
+        super::PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        json!({
+            "statementShape": "one share-correctness relation b_l + a_l (*) s - p * e = 0 over every Q_share limb with no diagonal source, ternary secret support, centered-binomial error support, the masked cross-limb consistency claims for the shared secret and error, and one constant-commitment opening (limb zero) with the linkage opening rows",
+            "commonReferenceBinding": "the public sample a_l is the accepted common reference polynomial recomputed per limb from the accepted public matrix seed under the accepted-bgv-public-a label, never transported, so the relation cannot be proven against an arbitrary reference polynomial",
+            "anchorReference": "the statement carries the same-secret anchor statement and proof roots in its hashed context, and the single constant-commitment opening makes the share secret congruent to the anchored secret modulo the commitment modulus product, which with ternary support makes them equal as integers",
+        }),
+        pending_desktop_browser_measurement(),
+    )
+}
+
+pub(crate) fn succinct_public_key_share_accounting_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SuccinctPublicKeyShareAccountingHash",
+        &succinct_public_key_share_accounting_value()?,
+    )
+}

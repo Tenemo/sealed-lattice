@@ -181,7 +181,7 @@ describe('transcript-core kernel in Node', () => {
             objectVersion: 1,
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-            proofFamily: 'same-secret',
+            proofFamily: 'same-secret-linkage-anchor',
             proofMaterials: [],
             marker: 'same-secret-proof',
         } as const;

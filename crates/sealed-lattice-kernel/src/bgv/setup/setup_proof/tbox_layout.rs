@@ -27,30 +27,6 @@ pub(crate) struct SetupProofLnpTboxLayout {
     pub(crate) z4_log2_standard_deviation: usize,
 }
 
-pub(crate) fn same_secret_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
-    SetupProofLnpTboxLayout {
-        proof_family: "same-secret-consistency",
-        tbox_parameter_profile_id: SAME_SECRET_LNP_TBOX_PARAMETER_PROFILE_ID,
-        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/same-secret/lnp-tbox-commitment-prefix-v1",
-        proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-        proof_modulus: setup_proof_lnp_tbox_proof_modulus(),
-        proof_modulus_bit_count: 255,
-        compression_dropped_bits: 23,
-        t_b_polynomial_count: 11,
-        h_polynomial_count: 4,
-        t_a1_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 2,
-        hint_polynomial_count: SETUP_COMMITMENT_RANDOMNESS_WIDTH + 2,
-        z1_polynomial_count: 4,
-        z21_polynomial_count: 16,
-        z3_polynomial_count: 2,
-        z4_polynomial_count: 2,
-        z1_log2_standard_deviation: 24,
-        z21_log2_standard_deviation: 40,
-        z3_log2_standard_deviation: 16,
-        z4_log2_standard_deviation: 16,
-    }
-}
-
 pub(crate) fn public_key_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
     SetupProofLnpTboxLayout {
         proof_family: "public-key-share",
@@ -99,13 +75,6 @@ pub(crate) fn private_vss_share_lnp_tbox_layout() -> SetupProofLnpTboxLayout {
     }
 }
 
-pub(crate) fn same_secret_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupProofLnpTboxParameterProfileHash",
-        &same_secret_lnp_tbox_parameter_profile_value()?,
-    )
-}
-
 pub(crate) fn public_key_share_lnp_tbox_parameter_profile_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "SetupProofLnpTboxParameterProfileHash",
@@ -117,26 +86,6 @@ pub(crate) fn private_vss_share_lnp_tbox_parameter_profile_hash() -> CanonicalRe
     derive_protocol_hash(
         "SetupProofLnpTboxParameterProfileHash",
         &private_vss_share_lnp_tbox_parameter_profile_value()?,
-    )
-}
-
-pub(crate) fn same_secret_lnp_tbox_parameter_profile_value() -> CanonicalResult<Value> {
-    let layout = same_secret_lnp_tbox_layout();
-    setup_proof_lnp_tbox_parameter_profile_value(
-        &layout,
-        "pinned sealed-lattice first-profile same-secret relation dimensions",
-        json!({
-            "rnsLimbCount": DATA_PRIMES.len(),
-            "commitmentModulusLimbCount": SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
-            "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
-            "openingRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-            "sharedSecretPolynomialCount": 1,
-            "negativeIndicatorPolynomialCount": 1,
-            "constantCommitmentCount": DATA_PRIMES.len(),
-            "supportRelationCountPerCoefficient": 2
-        }),
-        "SLSSLNP1",
-        "same-secret verifier pins and checks this profile; repo-owned setup proof soundness, zero-knowledge, and QROM accounting is accepted by the setup proof accounting certificate",
     )
 }
 

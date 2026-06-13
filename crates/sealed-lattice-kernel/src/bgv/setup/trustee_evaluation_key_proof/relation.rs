@@ -26,10 +26,16 @@ use crate::bgv::setup::commitment::{
     StructuralMatrixPolynomial, setup_commitment_matrix_coefficients_cached,
     structural_matrix_polynomial_kind,
 };
+use crate::bgv::setup::sampling::dense_public_residues_with_degree;
 
 #[cfg(test)]
 const WITNESS_SECRET_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/witness-secret-v1";
 const STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/statement-v2";
+
+// The seed label of the accepted BGV common reference polynomial; the
+// public-key share descriptor pins it as its sample domain so the family
+// cannot prove against an arbitrary reference polynomial.
+pub(crate) const PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL: &str = "accepted-bgv-public-a";
 
 // Which key family the diagonal source term encodes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -42,6 +48,10 @@ pub(crate) enum EvaluationKeyShareKind {
     // source = phi_g(s), the Galois automorphism s(X) -> s(X^g) applied to
     // the shared trustee secret: rotation key for the odd element g.
     GaloisRotation { galois_element: usize },
+    // No diagonal source: the public-key share relation b_l + a_l (*) s -
+    // p * e = 0 over every Q_share limb, with one error vector and the
+    // seed-derived common reference polynomial as the public sample.
+    PublicKeyShare,
 }
 
 impl EvaluationKeyShareKind {
@@ -54,9 +64,15 @@ impl EvaluationKeyShareKind {
                 bytes[0] = 3;
                 bytes[1..].copy_from_slice(&(galois_element as u64).to_le_bytes());
             }
+            Self::PublicKeyShare => bytes[0] = 4,
         }
 
         bytes
+    }
+
+    // Whether the relation carries the [l == j] diagonal source term.
+    pub(super) fn has_diagonal_source(self) -> bool {
+        !matches!(self, Self::PublicKeyShare)
     }
 }
 
@@ -142,29 +158,117 @@ pub(crate) struct SameSecretLinkageStatement {
     pub(crate) commitments: Vec<SetupCommitmentValue>,
 }
 
-// Ceremony context the proof is bound to: every field enters the statement
-// hash, so a proof transplanted to another ceremony, roster position, epoch,
-// schedule, or same-secret anchor fails the transcript rebinding.
+// Ceremony context the proof is bound to: the shared base fields, the proof
+// family label, and the family's ordered labeled binding roots. Every field
+// enters the statement hash, so a proof transplanted to another ceremony,
+// roster position, epoch, family, or binding object fails the transcript
+// rebinding. The binding label list is fixed per family: the keyless
+// same-secret linkage anchor binds the VSS coefficient commitment material
+// root it bridges, and the key-bearing evaluation-key family binds the
+// frozen schedule and its same-secret anchor references.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct TrusteeEvaluationKeyContext {
+pub(crate) struct SuccinctSetupProofContext {
+    pub(crate) proof_family: String,
     pub(crate) ceremony_id: String,
     pub(crate) manifest_hash: String,
     pub(crate) roster_hash: String,
     pub(crate) trustee_identity: String,
     pub(crate) trustee_roster_position: u64,
     pub(crate) setup_epoch: String,
-    pub(crate) required_galois_set_hash: String,
-    pub(crate) evaluator_key_schedule_root: String,
-    pub(crate) key_switch_decomposition_hash: String,
-    pub(crate) same_secret_statement_root: String,
-    pub(crate) same_secret_proof_root: String,
+    pub(crate) binding_roots: Vec<(String, String)>,
+}
+
+pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS: [&str; 1] =
+    ["vssCoefficientCommitmentMaterialRoot"];
+pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS: [&str; 2] =
+    ["sameSecretStatementRoot", "sameSecretProofRoot"];
+pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 5] = [
+    "requiredGaloisSetHash",
+    "evaluatorKeyScheduleRoot",
+    "keySwitchDecompositionHash",
+    "sameSecretStatementRoot",
+    "sameSecretProofRoot",
+];
+
+// The statement family shape, decided by the key list: keyless statements are
+// the same-secret linkage anchor, a single public-key share descriptor is the
+// public-key share family, and key-switch descriptors are the trustee
+// evaluation-key family. A public-key share descriptor mixed with key-switch
+// descriptors is refused.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SuccinctSetupProofFamilyShape {
+    SameSecretLinkageAnchor,
+    PublicKeyShare,
+    TrusteeEvaluationKey,
+}
+
+impl SuccinctSetupProofFamilyShape {
+    pub(crate) fn from_key_kinds(kinds: &[EvaluationKeyShareKind]) -> CanonicalResult<Self> {
+        if kinds.is_empty() {
+            return Ok(Self::SameSecretLinkageAnchor);
+        }
+        let public_key_share_count = kinds
+            .iter()
+            .filter(|kind| matches!(kind, EvaluationKeyShareKind::PublicKeyShare))
+            .count();
+        if public_key_share_count == 0 {
+            return Ok(Self::TrusteeEvaluationKey);
+        }
+        if kinds.len() == 1 {
+            return Ok(Self::PublicKeyShare);
+        }
+
+        Err(invalid_succinct_setup_proof(
+            "the public-key share descriptor must be the only statement key",
+        ))
+    }
+
+    pub(crate) fn proof_family(self) -> &'static str {
+        match self {
+            Self::SameSecretLinkageAnchor => super::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+            Self::PublicKeyShare => super::PUBLIC_KEY_SHARE_PROOF_FAMILY,
+            Self::TrusteeEvaluationKey => super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        }
+    }
+
+    pub(crate) fn binding_labels(self) -> &'static [&'static str] {
+        match self {
+            Self::SameSecretLinkageAnchor => &SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS,
+            Self::PublicKeyShare => &PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS,
+            Self::TrusteeEvaluationKey => &TRUSTEE_EVALUATION_KEY_BINDING_LABELS,
+        }
+    }
+}
+
+impl SuccinctSetupProofContext {
+    fn validate_for_statement(&self, shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<()> {
+        if self.proof_family != shape.proof_family() {
+            return Err(invalid_succinct_setup_proof(
+                "statement family does not match its key and linkage shape",
+            ));
+        }
+        let expected_labels = shape.binding_labels();
+        if self.binding_roots.len() != expected_labels.len()
+            || self
+                .binding_roots
+                .iter()
+                .zip(expected_labels.iter())
+                .any(|((label, root), expected)| label != expected || root.is_empty())
+        {
+            return Err(invalid_succinct_setup_proof(
+                "statement binding roots do not match the family binding labels",
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 // A trustee's batched statement: every listed key share is proven against the
 // same committed secret, with one trace commitment and one batched FRI
 // instance per active limb field covering all listed keys.
 pub(crate) struct TrusteeEvaluationKeyStatement {
-    pub(crate) context: TrusteeEvaluationKeyContext,
+    pub(crate) context: SuccinctSetupProofContext,
     pub(crate) ring_degree: usize,
     pub(crate) keys: Vec<EvaluationKeyShareDescriptor>,
     pub(crate) same_secret_linkage: Option<SameSecretLinkageStatement>,
@@ -182,7 +286,17 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
 }
 
 impl EvaluationKeyShareDescriptor {
+    // Error vectors carried by this key: one per gadget digit for key-switch
+    // kinds, one in total for the public-key share relation.
     pub(super) fn digit_count(&self) -> usize {
+        match self.kind {
+            EvaluationKeyShareKind::PublicKeyShare => 1,
+            _ => self.level + 1,
+        }
+    }
+
+    // Limb width of every component_b_by_digit row: the key's active limbs.
+    fn limb_width(&self) -> usize {
         self.level + 1
     }
 
@@ -194,7 +308,7 @@ impl EvaluationKeyShareDescriptor {
         }
         if self.component_b_by_digit.len() != self.digit_count()
             || self.component_b_by_digit.iter().any(|by_limb| {
-                by_limb.len() != self.digit_count()
+                by_limb.len() != self.limb_width()
                     || by_limb
                         .iter()
                         .any(|component| component.len() != ring_degree)
@@ -247,14 +361,60 @@ impl EvaluationKeyShareDescriptor {
                     ));
                 }
             }
+            EvaluationKeyShareKind::PublicKeyShare => {
+                if !self.round_one_aggregate_diagonal.is_empty() {
+                    return Err(invalid_succinct_setup_proof(
+                        "public-key share must not carry a round-one aggregate diagonal",
+                    ));
+                }
+                // The share spans the whole data basis and the sample domain
+                // is pinned to the accepted common reference polynomial.
+                if self.level + 1 != DATA_PRIMES.len() {
+                    return Err(invalid_succinct_setup_proof(
+                        "public-key share must span every Q_share limb",
+                    ));
+                }
+                if self.key_switch_domain != PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL {
+                    return Err(invalid_succinct_setup_proof(
+                        "public-key share sample domain must be the accepted common reference label",
+                    ));
+                }
+            }
         }
 
         Ok(())
     }
 
+    // The public sample a_{j,l} of one digit at one limb: the deterministic
+    // key-switch sample for key-switch kinds, the seed-derived common
+    // reference polynomial for the public-key share relation.
+    pub(super) fn public_sample(
+        &self,
+        digit_index: usize,
+        modulus: u64,
+        ring_degree: usize,
+    ) -> Vec<u64> {
+        match self.kind {
+            EvaluationKeyShareKind::PublicKeyShare => dense_public_residues_with_degree(
+                &self.key_switch_seed_hex,
+                &self.key_switch_domain,
+                modulus,
+                ring_degree,
+            ),
+            _ => public_key_switch_sample(
+                &self.key_switch_domain,
+                &self.key_switch_seed_hex,
+                digit_index,
+                modulus,
+                ring_degree,
+            ),
+        }
+    }
+
     // The diagonal source vector D tested against the secret in limb l, chosen
     // so that <U, source> = <D, s>: U for round one, Neg(A_l)^T U for round
-    // two, and M_phi^T U for a Galois rotation.
+    // two, and M_phi^T U for a Galois rotation. The public-key share relation
+    // has no diagonal source.
     pub(super) fn diagonal_source_vector(
         &self,
         limb_index: usize,
@@ -271,6 +431,9 @@ impl EvaluationKeyShareDescriptor {
             EvaluationKeyShareKind::GaloisRotation { galois_element } => {
                 galois_automorphism_transpose_apply(u_powers, galois_element, modulus)
             }
+            EvaluationKeyShareKind::PublicKeyShare => Err(invalid_succinct_setup_proof(
+                "the public-key share relation has no diagonal source",
+            )),
         }
     }
 
@@ -299,9 +462,17 @@ impl EvaluationKeyShareDescriptor {
 }
 
 impl TrusteeEvaluationKeyStatement {
-    // The number of active limb fields: one past the highest key level.
+    // The number of active limb fields: one past the highest key level. The
+    // keyless same-secret linkage anchor statement is active exactly on the
+    // commitment fields, where its opening relations live.
     pub(super) fn limb_count(&self) -> usize {
-        self.keys.iter().map(|key| key.level + 1).max().unwrap_or(0)
+        self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
+            if self.same_secret_linkage.is_some() {
+                SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+            } else {
+                0
+            },
+        )
     }
 
     pub(super) fn limb_moduli(&self) -> &'static [u64] {
@@ -321,18 +492,21 @@ impl TrusteeEvaluationKeyStatement {
     pub(in crate::bgv::setup) fn statement_hash(&self) -> [u8; 64] {
         let mut preimage = Vec::new();
         for context_field in [
+            self.context.proof_family.as_str(),
             self.context.ceremony_id.as_str(),
             self.context.manifest_hash.as_str(),
             self.context.roster_hash.as_str(),
             self.context.trustee_identity.as_str(),
-            self.context.required_galois_set_hash.as_str(),
-            self.context.evaluator_key_schedule_root.as_str(),
-            self.context.key_switch_decomposition_hash.as_str(),
-            self.context.same_secret_statement_root.as_str(),
-            self.context.same_secret_proof_root.as_str(),
         ] {
             preimage.extend_from_slice(&(context_field.len() as u64).to_le_bytes());
             preimage.extend_from_slice(context_field.as_bytes());
+        }
+        preimage.extend_from_slice(&(self.context.binding_roots.len() as u64).to_le_bytes());
+        for (binding_label, binding_root) in &self.context.binding_roots {
+            for binding_field in [binding_label.as_str(), binding_root.as_str()] {
+                preimage.extend_from_slice(&(binding_field.len() as u64).to_le_bytes());
+                preimage.extend_from_slice(binding_field.as_bytes());
+            }
         }
         preimage.extend_from_slice(&self.context.trustee_roster_position.to_le_bytes());
         preimage.extend_from_slice(self.context.setup_epoch.as_bytes());
@@ -376,12 +550,50 @@ impl TrusteeEvaluationKeyStatement {
         hash512(STATEMENT_HASH_DOMAIN, &[&preimage])
     }
 
+    pub(in crate::bgv::setup) fn family_shape(
+        &self,
+    ) -> CanonicalResult<SuccinctSetupProofFamilyShape> {
+        let kinds = self.keys.iter().map(|key| key.kind).collect::<Vec<_>>();
+
+        SuccinctSetupProofFamilyShape::from_key_kinds(&kinds)
+    }
+
     pub(in crate::bgv::setup) fn validate_shape(&self) -> CanonicalResult<()> {
-        if self.keys.is_empty() {
+        if self.keys.is_empty() && self.same_secret_linkage.is_none() {
             return Err(invalid_succinct_setup_proof(
-                "trustee statement requires at least one key share",
+                "trustee statement requires key shares or the same-secret linkage anchor",
             ));
         }
+        let shape = self.family_shape()?;
+        let linkage_commitment_count = self
+            .same_secret_linkage
+            .as_ref()
+            .map(|linkage| linkage.commitments.len());
+        match shape {
+            SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
+                // The anchor opens every commitment over the commitment
+                // fields; the linkage block must cover at least those fields.
+                if linkage_commitment_count.unwrap_or(0)
+                    < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+                {
+                    return Err(invalid_succinct_setup_proof(
+                        "the linkage anchor requires a commitment for every commitment field",
+                    ));
+                }
+            }
+            SuccinctSetupProofFamilyShape::PublicKeyShare => {
+                // One constant-commitment opening links the share secret to
+                // the anchored secret by congruence over the commitment
+                // modulus product plus ternary support.
+                if linkage_commitment_count != Some(1) {
+                    return Err(invalid_succinct_setup_proof(
+                        "the public-key share statement requires exactly one constant-commitment opening",
+                    ));
+                }
+            }
+            SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {}
+        }
+        self.context.validate_for_statement(shape)?;
         if !self.ring_degree.is_power_of_two()
             || self.ring_degree < TRACE_SPLIT * MINIMUM_TRACE_SIZE
         {
@@ -578,6 +790,11 @@ fn generate_development_key(
         EvaluationKeyShareKind::GaloisRotation { galois_element } => {
             format!("rotation-{galois_element}")
         }
+        EvaluationKeyShareKind::PublicKeyShare => {
+            return Err(invalid_succinct_setup_proof(
+                "the public-key share family uses its own development generator",
+            ));
+        }
     };
     let digit_count = level + 1;
     let error_coefficients_by_digit = sample_development_errors(
@@ -612,6 +829,11 @@ fn generate_development_key(
             }
             EvaluationKeyShareKind::GaloisRotation { galois_element } => {
                 galois_automorphism_apply(&secret_residues, galois_element, *modulus)?
+            }
+            EvaluationKeyShareKind::PublicKeyShare => {
+                // The key_switch_domain match above already returned an error
+                // for the public-key share, so this arm is never reached.
+                unreachable!("public-key share uses its own development generator");
             }
         };
         diagonal_source_by_digit.push(source);
@@ -653,7 +875,7 @@ const LINKAGE_MATRIX_SEED_DOMAIN: &str =
 // commitments to the lifted secret message per Q_share limb, with fresh
 // ternary opening randomness.
 #[cfg(test)]
-fn development_context(key_switch_seed_hex: &str) -> TrusteeEvaluationKeyContext {
+fn development_context(key_switch_seed_hex: &str, keyless: bool) -> SuccinctSetupProofContext {
     let derived = |label: &str| -> String {
         hash512(
             "sealed-lattice/setup/trustee-evaluation-key/development-context-v1",
@@ -663,19 +885,30 @@ fn development_context(key_switch_seed_hex: &str) -> TrusteeEvaluationKeyContext
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>()
     };
+    let (proof_family, binding_labels): (&str, &[&str]) = if keyless {
+        (
+            super::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+            &SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS,
+        )
+    } else {
+        (
+            super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+            &TRUSTEE_EVALUATION_KEY_BINDING_LABELS,
+        )
+    };
 
-    TrusteeEvaluationKeyContext {
+    SuccinctSetupProofContext {
+        proof_family: proof_family.to_string(),
         ceremony_id: format!("development-ceremony-{key_switch_seed_hex}"),
         manifest_hash: derived("manifest"),
         roster_hash: derived("roster"),
         trustee_identity: format!("development-trustee-{key_switch_seed_hex}"),
         trustee_roster_position: 1,
         setup_epoch: "development-epoch-1".to_string(),
-        required_galois_set_hash: derived("required-galois-set"),
-        evaluator_key_schedule_root: derived("evaluator-key-schedule"),
-        key_switch_decomposition_hash: derived("key-switch-decomposition"),
-        same_secret_statement_root: derived("same-secret-statement"),
-        same_secret_proof_root: derived("same-secret-proof"),
+        binding_roots: binding_labels
+            .iter()
+            .map(|label| ((*label).to_string(), derived(label)))
+            .collect(),
     }
 }
 
@@ -763,7 +996,7 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
 
     Ok((
         TrusteeEvaluationKeyStatement {
-            context: development_context(key_switch_seed_hex),
+            context: development_context(key_switch_seed_hex, key_requests.is_empty()),
             ring_degree,
             keys,
             same_secret_linkage,
@@ -789,6 +1022,149 @@ pub(crate) fn generate_development_trustee_instance(
         ring_degree,
         None,
     )
+}
+
+// Development public-key share instance: one ternary secret s and one
+// centered-binomial error e produce the published share b_l = p*e - a_l (*) s
+// over every Q_share limb against the seed-derived common reference
+// polynomial, plus one constant commitment (limb zero) opening s for the
+// anchor link.
+#[cfg(test)]
+pub(crate) fn generate_development_public_key_share_instance(
+    seed_hex: &str,
+    ring_degree: usize,
+) -> CanonicalResult<(TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness)> {
+    let secret_coefficients =
+        DeterministicSampler::new(WITNESS_SECRET_DOMAIN, &[seed_hex.as_bytes()]).ternary(ring_degree);
+    let error_coefficients = DeterministicSampler::new(
+        KEY_SWITCH_ERROR_DOMAIN,
+        &[seed_hex.as_bytes(), b"public-key-share-error"],
+    )
+    .centered_binomial_eta2(ring_degree);
+    let public_matrix_seed_hash = {
+        let digest = hash512(LINKAGE_MATRIX_SEED_DOMAIN, &[seed_hex.as_bytes()]);
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    // b_l = p * e - a_l (*) s over every Q_share limb.
+    let level = DATA_PRIMES.len() - 1;
+    let mut component_b_by_limb = Vec::with_capacity(DATA_PRIMES.len());
+    for modulus in DATA_PRIMES.iter().copied() {
+        let public_sample = dense_public_residues_with_degree(
+            &public_matrix_seed_hash,
+            PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
+            modulus,
+            ring_degree,
+        );
+        let secret_residues = secret_coefficients
+            .iter()
+            .map(|coefficient| signed_value_residue(*coefficient, modulus))
+            .collect::<Vec<_>>();
+        let sample_secret_product =
+            negacyclic_ring_product(&public_sample, &secret_residues, modulus)?;
+        let component_b = (0..ring_degree)
+            .map(|coefficient_index| {
+                let scaled_error = signed_value_residue(
+                    error_coefficients[coefficient_index] * PLAINTEXT_MODULUS_I64,
+                    modulus,
+                );
+                sub_mod_fast(scaled_error, sample_secret_product[coefficient_index], modulus)
+            })
+            .collect::<Vec<_>>();
+        component_b_by_limb.push(component_b);
+    }
+    let descriptor = EvaluationKeyShareDescriptor {
+        kind: EvaluationKeyShareKind::PublicKeyShare,
+        level,
+        key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
+        key_switch_seed_hex: public_matrix_seed_hash.clone(),
+        component_b_by_digit: vec![component_b_by_limb],
+        round_one_aggregate_diagonal: Vec::new(),
+    };
+    // One constant commitment (limb zero) linking s to the anchor.
+    let negative_indicator_coefficients = secret_coefficients
+        .iter()
+        .map(|coefficient| i64::from(*coefficient < 0))
+        .collect::<Vec<_>>();
+    let source_modulus = DATA_PRIMES[0];
+    let randomness = (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+        .map(|column| {
+            DeterministicSampler::new(
+                LINKAGE_RANDOMNESS_DOMAIN,
+                &[seed_hex.as_bytes(), &(column as u64).to_le_bytes()],
+            )
+            .ternary(ring_degree)
+        })
+        .collect::<Vec<_>>();
+    let message = secret_coefficients
+        .iter()
+        .zip(negative_indicator_coefficients.iter())
+        .map(|(secret, indicator)| {
+            BigInt::from(*secret) + BigInt::from(*indicator) * BigInt::from(source_modulus)
+        })
+        .collect::<Vec<_>>();
+    let randomness_i128 = randomness
+        .iter()
+        .map(|column| column.iter().map(|value| i128::from(*value)).collect())
+        .collect::<Vec<Vec<i128>>>();
+    let commitment = compute_setup_big_signed_lifted_commitment(
+        &public_matrix_seed_hash,
+        0,
+        source_modulus,
+        0,
+        &message,
+        &randomness_i128,
+        ring_degree,
+    )?;
+    let same_secret_linkage = Some(SameSecretLinkageStatement {
+        public_matrix_seed_hash,
+        commitments: vec![commitment],
+    });
+    let context = development_public_key_share_context(seed_hex);
+
+    Ok((
+        TrusteeEvaluationKeyStatement {
+            context,
+            ring_degree,
+            keys: vec![descriptor],
+            same_secret_linkage,
+        },
+        TrusteeEvaluationKeyWitness {
+            secret_coefficients,
+            error_coefficients_by_key: vec![vec![error_coefficients]],
+            negative_indicator_coefficients,
+            opening_randomness_by_limb: vec![randomness],
+        },
+    ))
+}
+
+#[cfg(test)]
+fn development_public_key_share_context(seed_hex: &str) -> SuccinctSetupProofContext {
+    let derived = |label: &str| -> String {
+        hash512(
+            "sealed-lattice/setup/public-key-share/development-context-v1",
+            &[seed_hex.as_bytes(), label.as_bytes()],
+        )
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+    };
+
+    SuccinctSetupProofContext {
+        proof_family: super::PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
+        ceremony_id: format!("development-ceremony-{seed_hex}"),
+        manifest_hash: derived("manifest"),
+        roster_hash: derived("roster"),
+        trustee_identity: format!("development-trustee-{seed_hex}"),
+        trustee_roster_position: 1,
+        setup_epoch: "development-epoch-1".to_string(),
+        binding_roots: PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS
+            .iter()
+            .map(|label| ((*label).to_string(), derived(label)))
+            .collect(),
+    }
 }
 
 // Per-limb physical column layout. Every logical length-N vector occupies
@@ -818,9 +1194,9 @@ impl LimbColumnLayout {
             .into_iter()
             .map(|key_index| (key_index, statement.keys[key_index].digit_count()))
             .collect::<Vec<_>>();
-        if active_keys.is_empty() {
+        if active_keys.is_empty() && statement.linkage_randomness_count(limb_index) == 0 {
             return Err(invalid_succinct_setup_proof(
-                "limb layout requires at least one active key",
+                "limb layout requires an active key or active linkage relations",
             ));
         }
         let total_error_columns = active_keys.iter().map(|(_, digits)| *digits).sum::<usize>();

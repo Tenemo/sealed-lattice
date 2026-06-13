@@ -11,8 +11,10 @@ mod transport_policy;
 mod vss_material;
 
 use self::material_transport_fixtures::{
-    SetupTransportCertificateObjectFixture, StreamingVssMaterialFixtureWriter,
-    TerminalEvaluationKeyTransportSinks, append_setup_transport_certificate_object,
+    DIRECT_TRANSPORT_CERTIFICATE_FIELDS, SetupTransportCertificateObjectFixture,
+    StreamingVssMaterialFixtureWriter, TerminalEvaluationKeyTransportSinks,
+    append_setup_transport_certificate_object,
+    append_transport_certificate_entries_from_material_set,
     append_unreferenced_evaluation_key_component_transport_sidecar,
     append_unreferenced_same_secret_transport_sidecar, append_unrequested_setup_transport_object,
     append_vss_material_binary_header, append_vss_material_binary_record,
@@ -52,7 +54,7 @@ use self::proof_record_fixtures::{
     replace_public_key_share_hashes_with_material_hashes,
     round_one_aggregate_diagonals_from_fixture_package,
     same_secret_constant_commitments_from_fixture_package, same_secret_proofs_object,
-    setup_proof_binding_for_test_package, trustee_evaluation_key_proofs_object,
+    trustee_evaluation_key_proofs_object,
     trustee_evaluation_key_proofs_object_with_terminal_transport,
     trustee_evaluation_key_witness_for_fixture,
 };
@@ -89,11 +91,11 @@ use super::super::accepted_setup::{
     public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
     public_key_share_material_transport_hashes,
     register_verified_trustee_evaluation_key_proof_material_chunks,
-    round_one_public_aggregate_diagonals_from_package, setup_key_correctness_certificate_hash,
-    setup_key_correctness_certificate_value, setup_proof_accounting_certificate_hash,
-    setup_proof_accounting_certificate_value, trustee_evaluation_key_proof_material_root,
-    trustee_evaluation_key_statement_from_package, verify_profile_ring_material,
-    verify_terminal_setup_transport_policy,
+    round_one_public_aggregate_diagonals_from_package, same_secret_anchor_proof_material_root,
+    setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
+    setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
+    trustee_evaluation_key_proof_material_root, trustee_evaluation_key_statement_from_package,
+    verify_profile_ring_material, verify_terminal_setup_transport_policy,
 };
 use super::super::evaluation_key_share_material::{
     EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -113,11 +115,6 @@ use super::super::public_key_share_proof::{
     PublicKeyShareLnpProofWitness, generate_public_key_share_lnp_relation_proof,
     public_key_share_coefficient_vector_hash, public_key_share_lnp_relation_proof_bytes_hash,
     verify_public_key_share_lnp_relation_proof,
-};
-use super::super::same_secret_proof::{
-    SAME_SECRET_LNP_PROOF_MODEL_STATUS, SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
-    SameSecretLnpProofWitness, generate_same_secret_lnp_relation_proof,
-    same_secret_lnp_relation_proof_bytes_hash, verify_same_secret_lnp_relation_proof,
 };
 use super::super::sampling::{dense_public_residues, negacyclic_product_mod};
 use super::super::setup_proof::{

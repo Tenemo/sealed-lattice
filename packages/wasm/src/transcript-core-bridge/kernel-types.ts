@@ -34,7 +34,6 @@ import type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
-    BgvSameSecretLnpProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionResult,
@@ -74,7 +73,6 @@ export type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
-    BgvSameSecretLnpProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionResult,
@@ -100,6 +98,7 @@ export type TranscriptCorePlaintextComparison = {
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
+    wasmMemoryByteLength(): number;
     analyzeCanonicalObject(input: {
         readonly canonicalBytesHex: string;
         readonly chunkSize: number;
@@ -221,21 +220,6 @@ export type TranscriptCoreKernel = {
             | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
     }): BgvPrivateVssShareProofGeneration;
-    generateSameSecretLnpProof(input: {
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly statementRecord: unknown;
-        readonly constantCommitments: readonly unknown[];
-        readonly setupProofBinding: unknown;
-        readonly secretCoefficients: readonly number[];
-        readonly openingRandomnessByLimb: readonly (readonly (readonly (
-            | number
-            | string
-        )[])[])[];
-        readonly proofRandomnessSource?:
-            | 'fresh-csprng'
-            | 'development-deterministic-fixture';
-        readonly proofRandomnessSeedHex: string;
-    }): BgvSameSecretLnpProofGeneration;
     generatePublicKeyShareLnpProof(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyShareRecord: unknown;
@@ -499,22 +483,6 @@ type TranscriptCoreKernelCommand =
           readonly coefficientCommitmentRoots: readonly ProtocolHash[];
           readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
           readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-          readonly proofRandomnessSource?:
-              | 'fresh-csprng'
-              | 'development-deterministic-fixture';
-          readonly proofRandomnessSeedHex: string;
-      }
-    | {
-          readonly command: 'GenerateSameSecretLnpProof';
-          readonly publicMatrixSeedHash: ProtocolHash;
-          readonly statementRecord: unknown;
-          readonly constantCommitments: readonly unknown[];
-          readonly setupProofBinding: unknown;
-          readonly secretCoefficients: readonly number[];
-          readonly openingRandomnessByLimb: readonly (readonly (readonly (
-              | number
-              | string
-          )[])[])[];
           readonly proofRandomnessSource?:
               | 'fresh-csprng'
               | 'development-deterministic-fixture';

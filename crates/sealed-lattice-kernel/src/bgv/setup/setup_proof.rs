@@ -28,8 +28,7 @@ pub(crate) use self::tbox_layout::{
     private_vss_share_lnp_tbox_parameter_profile_hash,
     private_vss_share_lnp_tbox_parameter_profile_value, public_key_share_lnp_tbox_layout,
     public_key_share_lnp_tbox_parameter_profile_hash,
-    public_key_share_lnp_tbox_parameter_profile_value, same_secret_lnp_tbox_layout,
-    same_secret_lnp_tbox_parameter_profile_hash, same_secret_lnp_tbox_parameter_profile_value,
+    public_key_share_lnp_tbox_parameter_profile_value,
 };
 pub(crate) use self::tbox_verification::{
     setup_proof_lnp_tbox_commitment_prefix_byte_count, setup_proof_lnp_tbox_commitment_prefix_hash,
@@ -125,24 +124,19 @@ pub(crate) const SETUP_PROOF_MATERIAL_ENCODING: &str = "binary-chunked-proof-byt
 const SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupProofMaterialChunkManifest";
 const SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER: &str =
     "sealed-lattice-lnp-tbox-proof-byte-decoder-v1";
-pub(crate) const SAME_SECRET_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
-    "SealedLattice-LNP-SameSecretConsistency-Tbox-v1";
 pub(crate) const PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
     "SealedLattice-LNP-PublicKeyShare-Tbox-v1";
 pub(crate) const PRIVATE_VSS_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
     "SealedLattice-LNP-PrivateVssShare-Tbox-v1";
-pub(super) const SETUP_PROOF_FAMILIES: &[&str] = &[
-    "vss-opening-carry",
-    "same-secret-consistency",
-    "public-key-share",
-];
+pub(super) const SETUP_PROOF_FAMILIES: &[&str] = &["vss-opening-carry", "public-key-share"];
 // Families whose proof bytes ride the chunked setup proof-material transport:
-// the LNP families plus the trustee evaluation-key argument, whose theorem
+// the LNP families plus the succinct argument families (the same-secret
+// linkage anchor and the trustee evaluation-key argument), whose theorem
 // accounting is tracked separately from the LNP profile.
 pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
     "vss-opening-carry",
-    "same-secret-consistency",
     "public-key-share",
+    "same-secret-linkage-anchor",
     "trustee-evaluation-key",
 ];
 

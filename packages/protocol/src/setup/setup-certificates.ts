@@ -86,6 +86,7 @@ export type SetupCertificatesInput = Readonly<{
     readonly bgvProfile: BgvRnsProfileForCertificates | JsonRecord;
     readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
+    readonly sameSecretLinkageAnchorProofAccounting?: JsonRecord;
     readonly trusteeEvaluationKeyProofAccounting?: JsonRecord;
 }>;
 
@@ -201,12 +202,10 @@ const setupProofCommitmentRandomnessInfinityBound = 1n;
 const setupProofSecretInfinityBound = 1n;
 const setupProofErrorInfinityBound = 2n;
 const setupProofBytesAcceptedStatus =
-    'private-vss-same-secret-public-key-share-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting';
-const setupProofFamilies = [
-    'vss-opening-carry',
-    'same-secret-consistency',
-    'public-key-share',
-] as const;
+    'private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting';
+const setupProofFamilies = ['vss-opening-carry', 'public-key-share'] as const;
+const succinctSameSecretLinkageAnchorAccountingHashNamespace =
+    'SuccinctSameSecretLinkageAnchorAccountingHash';
 const succinctEvaluationKeyProofAccountingHashNamespace =
     'SuccinctEvaluationKeyProofAccountingHash';
 const setupTransportProfileId =
@@ -1163,11 +1162,6 @@ const setupProofRecordBindingForCertificate = (
             'privateVssShareTboxParameterProfileHash',
             'setupProfile.setupProofProfile',
         ),
-        sameSecretTboxParameterProfileHash: hashField(
-            setupProofProfile,
-            'sameSecretTboxParameterProfileHash',
-            'setupProfile.setupProofProfile',
-        ),
         publicKeyShareTboxParameterProfileHash: hashField(
             setupProofProfile,
             'publicKeyShareTboxParameterProfileHash',
@@ -1182,6 +1176,7 @@ const setupProofRecordBindingForCertificate = (
 };
 
 const setupProofFamilyAccounting = (
+    sameSecretLinkageAnchorProofAccountingHash: ProtocolHash,
     trusteeEvaluationKeyProofAccountingHash: ProtocolHash,
 ): JsonRecord[] => [
     {
@@ -1208,27 +1203,27 @@ const setupProofFamilyAccounting = (
         },
     },
     {
-        proofFamily: 'same-secret-consistency',
+        proofFamily: 'same-secret-linkage-anchor',
         claimScope:
-            'same trustee secret across accepted VSS constant commitments',
+            'one short trustee secret behind every accepted VSS constant commitment, proven once per trustee by a keyless succinct linkage argument over the commitment-modulus fields',
         verifierClosedStatus:
-            'relation-transcript-and-bound-checks-verifier-closed',
+            'statement-rebuild-and-argument-checks-verifier-closed',
         verifierClosedChecks: [
-            'statement hash binds setup proof record binding, trustee statement roots, accepted constant commitment roots, and tbox profile hash',
-            'relation commitment hash and scalar challenge are recomputed from proof commitments and canonical transcript fields',
-            'accepted same-secret tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript',
-            'ternary secret support is checked through Boolean negative-indicator and shifted-secret support equations',
-            'all accepted Q_share constant commitments are checked against one shared secret response and opening randomness response',
-            'secret, negative-indicator, and randomness responses are checked against fixed first-profile bounds',
+            'every anchor statement is rebuilt by the verifier from the accepted VSS constant commitments, the accepted public VSS material root, and the ceremony context; no prover-supplied statement field is trusted',
+            'the linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against one committed ternary secret with Boolean negative-indicator support',
+            'per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every commitment-modulus field',
+            'cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb',
+            'canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package',
         ],
         accountingStatus:
-            'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
+            'succinct-same-secret-linkage-anchor-theorem-accounting-accepted',
         claimAccounting: {
-            soundness:
-                'LNP22 commit-and-prove extractor accounting is accepted for the same-secret relation because the verifier binds one shared secret response to every accepted constant commitment and support equation',
-            zeroKnowledge:
-                'LNP22 simulator accounting is accepted for centered 80-bit same-secret and support-response masks with witness-dependent support commitments treated as simulated first messages under the fixed relation and no-wrap response accounting',
-            qrom: 'DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object',
+            accountingObject: 'SuccinctSameSecretLinkageAnchorAccounting',
+            accountingHash: sameSecretLinkageAnchorProofAccountingHash,
+            closedItems:
+                'the explicitly conjectured low-degree bound with its proven fallback, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the certified smudging leakage budget, and the round-by-round Fiat-Shamir accounting with referenced QROM reductions are accepted rows inside the bound accounting object',
+            claimBoundary:
+                'active-malicious same-secret linkage accounting is accepted under the named FRI conjecture; secret-dependent setup families reference this anchor through the accepted family binding root',
         },
     },
     {
@@ -1365,16 +1360,6 @@ const setupProofResponseMaskingAccounting = (
         setupProfile.participantCount,
     );
     const publicKeyCarryWitnessBound = BigInt(setupProofRingDegree + 3);
-    const sameSecretResponseBound = setupProofResponseBound(
-        setupProofMessageMaskBits,
-        setupProofSecretInfinityBound,
-        0n,
-    );
-    const sameSecretNegativeResponseBound = setupProofResponseBound(
-        setupProofMessageMaskBits,
-        setupProofSecretInfinityBound,
-        0n,
-    );
     const publicKeySecretResponseBound = setupProofResponseBound(
         setupProofMessageMaskBits,
         setupProofSecretInfinityBound,
@@ -1439,39 +1424,6 @@ const setupProofResponseMaskingAccounting = (
                     'three-limb-big-int-no-wrap-bound-recorded',
             },
             {
-                proofFamily: 'same-secret-consistency',
-                responseProfiles: [
-                    setupProofResponseMaskProfile(
-                        'secret',
-                        setupProofMessageMaskBits,
-                        setupProofSecretInfinityBound,
-                        0n,
-                        'committed-message-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'negative-indicator',
-                        setupProofMessageMaskBits,
-                        setupProofSecretInfinityBound,
-                        0n,
-                        'committed-message-response',
-                    ),
-                    setupProofResponseMaskProfile(
-                        'opening-randomness',
-                        setupProofWideMaskBits,
-                        setupProofCommitmentRandomnessInfinityBound,
-                        0n,
-                        'signed-opening-response',
-                    ),
-                ],
-                liftedMessageNoWrap: liftedMessageNoWrapAccounting(
-                    'secret-plus-rns-prime-times-negative-indicator',
-                    sameSecretResponseBound,
-                    sameSecretNegativeResponseBound,
-                    maxSourceMessageModulus,
-                    commitmentModulusProduct,
-                ),
-            },
-            {
                 proofFamily: 'public-key-share',
                 responseProfiles: [
                     setupProofResponseMaskProfile(
@@ -1526,6 +1478,7 @@ const setupProofResponseMaskingAccounting = (
 
 const setupProofAccountingCertificateBody = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
+    sameSecretLinkageAnchorProofAccounting: JsonRecord,
     trusteeEvaluationKeyProofAccounting: JsonRecord,
 ): SetupProofAccountingCertificateBody => {
     const setupProofProfile = setupProfile.setupProofProfile;
@@ -1612,6 +1565,10 @@ const setupProofAccountingCertificateBody = (
         'challengeSpaceAudit',
         'setupProfile.setupProofProfile',
     );
+    const sameSecretLinkageAnchorProofAccountingHash = deriveProtocolHash(
+        succinctSameSecretLinkageAnchorAccountingHashNamespace,
+        sameSecretLinkageAnchorProofAccounting,
+    );
     const trusteeEvaluationKeyProofAccountingHash = deriveProtocolHash(
         succinctEvaluationKeyProofAccountingHashNamespace,
         trusteeEvaluationKeyProofAccounting,
@@ -1631,8 +1588,11 @@ const setupProofAccountingCertificateBody = (
         ),
         proofFamilies: setupProofFamilies,
         proofFamilyAccounting: setupProofFamilyAccounting(
+            sameSecretLinkageAnchorProofAccountingHash,
             trusteeEvaluationKeyProofAccountingHash,
         ),
+        sameSecretLinkageAnchorProofAccounting,
+        sameSecretLinkageAnchorProofAccountingHash,
         trusteeEvaluationKeyProofAccounting,
         trusteeEvaluationKeyProofAccountingHash,
         responseMaskingAccounting:
@@ -1686,11 +1646,6 @@ const setupProofAccountingCertificateBody = (
                     'privateVssShareTboxParameterProfileHash',
                     'setupProfile.setupProofProfile',
                 ),
-                sameSecretTboxParameterProfileHash: hashField(
-                    setupProfile.setupProofProfile,
-                    'sameSecretTboxParameterProfileHash',
-                    'setupProfile.setupProofProfile',
-                ),
                 publicKeyShareTboxParameterProfileHash: hashField(
                     setupProfile.setupProofProfile,
                     'publicKeyShareTboxParameterProfileHash',
@@ -1728,14 +1683,15 @@ const setupProofAccountingCertificateBody = (
         completionBoundary:
             'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
         certificateStatus:
-            'lnp-and-trustee-evaluation-key-family-accounting-accepted',
+            'lnp-same-secret-linkage-anchor-and-trustee-evaluation-key-family-accounting-accepted',
         claimBoundary:
-            'every bound setup proof family carries accepted accounting: the LNP families under their closed tbox and challenge accounting, and the trustee evaluation-key family under the named FRI conjecture with referenced QROM reductions',
+            'every bound setup proof family carries accepted accounting: the LNP families under their closed tbox and challenge accounting, and the same-secret linkage anchor and trustee evaluation-key families under the named FRI conjecture with referenced QROM reductions',
     };
 };
 
 const createSetupProofAccountingCertificate = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
+    sameSecretLinkageAnchorProofAccounting: JsonRecord | undefined,
     trusteeEvaluationKeyProofAccounting: JsonRecord | undefined,
 ): SetupProofAccountingCertificate => {
     const template = acceptedCertificateTemplate(
@@ -1748,6 +1704,11 @@ const createSetupProofAccountingCertificate = (
     if (template !== null) {
         return template as SetupProofAccountingCertificate;
     }
+    if (sameSecretLinkageAnchorProofAccounting === undefined) {
+        throw new Error(
+            'setup proof accounting certificate requires sameSecretLinkageAnchorProofAccounting when no accepted certificate template is supplied.',
+        );
+    }
     if (trusteeEvaluationKeyProofAccounting === undefined) {
         throw new Error(
             'setup proof accounting certificate requires trusteeEvaluationKeyProofAccounting when no accepted certificate template is supplied.',
@@ -1756,6 +1717,7 @@ const createSetupProofAccountingCertificate = (
 
     const certificateBody = setupProofAccountingCertificateBody(
         setupProfile,
+        sameSecretLinkageAnchorProofAccounting,
         trusteeEvaluationKeyProofAccounting,
     );
 
@@ -2192,6 +2154,12 @@ export const createSetupCertificates = (
         ),
         setupProofAccountingCertificate: createSetupProofAccountingCertificate(
             setupProfile,
+            input.sameSecretLinkageAnchorProofAccounting === undefined
+                ? undefined
+                : assertObjectRecord(
+                      input.sameSecretLinkageAnchorProofAccounting,
+                      'sameSecretLinkageAnchorProofAccounting',
+                  ),
             input.trusteeEvaluationKeyProofAccounting === undefined
                 ? undefined
                 : assertObjectRecord(

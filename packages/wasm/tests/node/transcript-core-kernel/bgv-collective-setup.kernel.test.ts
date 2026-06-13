@@ -62,7 +62,6 @@ import {
 } from '#packages/wasm/src/index';
 import type {
     BgvCollectiveSetupProfileDescription,
-    BgvRnsProfileDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
@@ -75,12 +74,6 @@ const jsonRecord = (value: unknown, label: string): JsonRecord => {
 
     return value as JsonRecord;
 };
-
-const optionalJsonRecord = (
-    value: unknown,
-    label: string,
-): JsonRecord | undefined =>
-    value === undefined ? undefined : jsonRecord(value, label);
 
 const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
     JSON.parse(JSON.stringify(value)) as JsonRecord;
@@ -103,29 +96,6 @@ const setupTransportTotalByteLength =
 const setupTransportChunkCount = Math.ceil(
     setupTransportTotalByteLength / setupTransportChunkSizeBytes,
 );
-const setupProofFamilies = [
-    'vss-opening-carry',
-    'same-secret-consistency',
-    'public-key-share',
-    'relinearization-key-share',
-    'galois-key-share',
-] as const;
-const setupProofChallengeDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-challenge-v1';
-const setupProofChallengeSampler =
-    'sealed-lattice-shake256-lazer-autostable-rejection-v1';
-const setupProofChallengeSpace =
-    'fixed-lnp-small-coefficient-polynomial-challenge-set';
-const setupProofChallengeSeedDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-challenge-seed-v1';
-const setupProofChallengeStreamDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-challenge-stream-v1';
-const setupProofBytesDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-proof-bytes-v1';
-const setupProofSerialization = 'binary';
-const setupProofByteDecoder = 'sealed-lattice-lnp-tbox-proof-byte-decoder-v1';
-const setupProofChallengeSpaceAuditHashNamespace =
-    'SetupProofChallengeSpaceAuditHash';
 
 const hexToBytes = (hexValue: string): Uint8Array =>
     Uint8Array.from(
@@ -810,683 +780,51 @@ function rebindCollectiveSetupPackageHash(
     });
 }
 
-function scalarPowerSum(
-    coefficientCount: number,
-    trusteePoint: number,
-): bigint {
-    let scalarSum = 0n;
-    let trusteePower = 1n;
-    const trusteePointWide = BigInt(trusteePoint);
-    for (
-        let coefficientIndex = 0;
-        coefficientIndex < coefficientCount;
-        coefficientIndex += 1
-    ) {
-        scalarSum += trusteePower;
-        if (coefficientIndex + 1 < coefficientCount) {
-            trusteePower *= trusteePointWide;
-        }
-    }
-
-    return scalarSum;
-}
-
-function ceilLog2Bigint(value: bigint): number {
-    if (value <= 1n) {
-        return 0;
-    }
-
-    return (value - 1n).toString(2).length;
-}
-
-function moduliProductDecimal(moduli: readonly number[]): string {
-    return moduli
-        .reduce((product, modulus) => product * BigInt(modulus), 1n)
-        .toString();
-}
-
-function moduliBitLengthSum(moduli: readonly number[]): number {
-    return moduli.reduce(
-        (bitLengthSum, modulus) => bitLengthSum + modulus.toString(2).length,
-        0,
-    );
-}
-
-function keySwitchComponentPolynomialCount(
-    entries: readonly { readonly level: number }[],
-): number {
-    return entries.reduce((total, entry) => {
-        const digitCount = entry.level + 1;
-
-        return total + digitCount * digitCount;
-    }, 0);
-}
-
-function fallbackAcceptedSetupCommitmentSecurityCertificate(
-    kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
-): JsonRecord {
-    const sourceRnsPrimes = profile.qShare.primes;
-    const maxSourceMessageModulus = Math.max(...sourceRnsPrimes);
-    const recipientScalarSum = scalarPowerSum(
-        firstProfileDecryptionThreshold,
-        10,
-    );
-    const thresholdScalarSum =
-        recipientScalarSum * BigInt(firstProfileParticipantCount);
-    const commitmentModulusLimbs = (
-        profile.commitmentProfile.messageEncoding as JsonRecord
-    ).commitmentModulusLimbs as readonly unknown[];
-    const commitmentModulusProduct = commitmentModulusLimbs.reduce<bigint>(
-        (product, limb, limbIndex) => {
-            if (typeof limb === 'number') {
-                return product * BigInt(limb);
-            }
-            const limbRecord = limb as JsonRecord;
-            const modulus = limbRecord.modulus;
-            if (typeof modulus !== 'number' || !Number.isSafeInteger(modulus)) {
-                throw new TypeError(
-                    `commitmentModulusLimbs.${String(limbIndex)}.modulus must be a safe integer.`,
-                );
-            }
-
-            return product * BigInt(modulus);
-        },
-        1n,
-    );
-    const maxRecipientLiftedCoefficient =
-        BigInt(maxSourceMessageModulus - 1) * recipientScalarSum;
-    const maxThresholdLiftedCoefficient =
-        BigInt(maxSourceMessageModulus - 1) * thresholdScalarSum;
-    const commitmentModulusProductBits = ceilLog2Bigint(
-        commitmentModulusProduct,
-    );
-    const certificate = {
-        objectType: 'SetupCommitmentSecurityCertificate',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProfileHash: profile.setupProfileHash,
-        commitmentProfileId: 'SealedLattice-BDLOP-LNP-Commitment-v1',
-        commitmentProfileHash: profile.commitmentProfileHash,
-        qShareHash: profile.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            profile.carryAwareVssShareRelationProfileHash,
-        certificateScope:
-            'first-profile-BDLOP-LNP-commitment-parameters-and-opening-bounds',
-        acceptedUse: [
-            'VSS coefficient commitment records',
-            'recipient-local private VSS proof witness checks',
-            'verifier-derived threshold-share commitment roots',
-            'same-secret trustee commitment roots',
-        ],
-        nonClosure: [
-            'public evaluation-key assembly and setup-package terminal acceptance remain separate from this commitment parameter certificate',
-            'profile-scale binary streaming evidence remains separate from this commitment parameter certificate',
-            'future target-decryption readiness remains outside this commitment parameter certificate',
-        ],
-        ringAndMatrixParameters: {
-            coefficientRing: 'Z_q[X]/(X^N+1)',
-            ringDegree: 32_768,
-            sourceRnsLimbCount: sourceRnsPrimes.length,
-            sourceRnsPrimes,
-            commitmentModulusLimbs,
-            commitmentModulusProductDecimal:
-                commitmentModulusProduct.toString(),
-            commitmentModulusProductCeilBits: commitmentModulusProductBits,
-            moduleRank: 2,
-            randomnessWidth: 5,
-            commitmentRowCount: 3,
-            publicMatrixSource:
-                'full-roster-common-randomness-XOF-unbiased-residue-stream',
-            matrixHashBound: true,
-        },
-        freshOpeningDistribution: {
-            distribution: 'coefficientwise-centered-ternary',
-            coefficientSet: [-1, 0, 1],
-            infinityNormBound: 1,
-            randomnessWidth: 5,
-            rawOpeningExported: false,
-            perCoefficientOpeningExported: false,
-        },
-        fullWidthMessageBound: {
-            messageSource: 'per-RNS-prime-Shamir-coefficient-ring-element',
-            maxSourceMessageModulus,
-            maxFreshMessageCoefficientDecimal: String(
-                maxSourceMessageModulus - 1,
-            ),
-            commitmentModulusProductDecimal:
-                commitmentModulusProduct.toString(),
-            freshMessageNoWrap:
-                BigInt(maxSourceMessageModulus - 1) < commitmentModulusProduct,
-            status: 'claim-accounting-full-width-per-rns-message-bound-recorded',
-        },
-        aggregateOpeningBounds: {
-            shamirCoefficientCount: firstProfileDecryptionThreshold,
-            maximumTrusteePoint: 10,
-            recipientScalarPowerSumDecimal: recipientScalarSum.toString(),
-            recipientAggregateOpeningInfinityBound: Number(recipientScalarSum),
-            maxRecipientLiftedCoefficientDecimal:
-                maxRecipientLiftedCoefficient.toString(),
-            sourceTrusteeCountForThresholdAggregation:
-                firstProfileParticipantCount,
-            thresholdScalarPowerSumDecimal: thresholdScalarSum.toString(),
-            thresholdShareOpeningInfinityBound: Number(thresholdScalarSum),
-            maxThresholdLiftedCoefficientDecimal:
-                maxThresholdLiftedCoefficient.toString(),
-            commitmentModulusProductDecimal:
-                commitmentModulusProduct.toString(),
-            recipientAndThresholdNoWrap: true,
-            boundStatus:
-                'claim-accounting-first-profile-homomorphic-opening-bounds-recorded',
-        },
-        multiOpeningLeakage: {
-            recipientAggregateOpeningsArePublic: false,
-            recipientAggregateOpeningsAreMailboxPlaintext: false,
-            maxCorruptRecipientsBeforeThreshold:
-                firstProfileDecryptionThreshold - 1,
-            shamirPolynomialDegree: firstProfileDecryptionThreshold - 1,
-            rawCoefficientOpeningsExported: false,
-            perCoefficientRandomnessExported: false,
-            thresholdBoundary:
-                'recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses',
-            status: 'claim-accounting-active-static-threshold-leakage-bound-recorded',
-        },
-        bindingAssumption: {
-            assumption: 'Module-SIS',
-            boundTarget:
-                'two-valid-openings-to-one-commitment-yield-short-module-SIS-solution',
-            moduleRank: 2,
-            randomnessWidth: 5,
-            commitmentModulusProductCeilBits: commitmentModulusProductBits,
-            extractedOpeningInfinityBound: Number(thresholdScalarSum),
-            referenceRows: [
-                {
-                    document:
-                        'LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General',
-                    localReferencePath:
-                        'reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt',
-                    sections: [
-                        'Commitment schemes',
-                        'Module-SIS and Module-LWE problems',
-                        'ABDLOP commitment scheme and proofs of linear relations',
-                    ],
-                },
-                {
-                    document:
-                        'FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting',
-                    localReferencePath:
-                        'reference-documents/FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting.txt',
-                    sections: [
-                        'BDLOP commitment background',
-                        'Module-LWE and Module-SIS definitions',
-                    ],
-                },
-            ],
-            estimatorStatus:
-                'repo-owned-module-sis-parameter-accounting-accepted',
-        },
-        hidingAssumption: {
-            assumption:
-                'Module-LWE with recipient-hidden proof-witness opening leakage boundary',
-            openingDistribution: 'coefficientwise-centered-ternary',
-            publicMatrixDistribution: 'hash-derived-uniform-residue-stream',
-            lowEntropySecretHiding: true,
-            statisticalLeakageStatus:
-                'repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-accepted',
-            estimatorStatus:
-                'repo-owned-module-lwe-parameter-accounting-accepted',
-        },
-        estimatorRows: [
-            {
-                rowId: 'first-profile-module-sis-binding-row',
-                problem: 'Module-SIS',
-                targetSecurityBits: 128,
-                ringDegree: 32_768,
-                moduleRank: 2,
-                modulusCeilBits: commitmentModulusProductBits,
-                shortVectorInfinityBoundDecimal: thresholdScalarSum.toString(),
-                status: 'claim-accounting-accepted',
-                accountingBasis:
-                    'accepted Module-SIS binding row under LNP22/FPS25 commitment references and no-wrap threshold-opening bounds',
-            },
-            {
-                rowId: 'first-profile-module-lwe-hiding-row',
-                problem: 'Module-LWE',
-                targetSecurityBits: 128,
-                ringDegree: 32_768,
-                moduleRank: 2,
-                secretDistribution: 'centered-ternary-opening',
-                modulusCeilBits: commitmentModulusProductBits,
-                status: 'claim-accounting-accepted',
-                accountingBasis:
-                    'accepted Module-LWE hiding row under LNP22/FPS25/ACC18 references and recipient-hidden opening leakage boundary',
-            },
-        ],
-        certificateStatus:
-            'claim-bearing-setup-commitment-parameter-accounting-accepted',
-    };
-
-    return {
-        ...certificate,
-        setupCommitmentSecurityCertificateHash: kernel.deriveProtocolHash({
-            namespace: 'SetupCommitmentSecurityCertificateHash',
-            value: certificate,
-        }),
-    };
-}
-
 function acceptedSetupCommitmentSecurityCertificate(
-    kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): JsonRecord {
-    const acceptedCertificateTemplates = optionalJsonRecord(
+    const acceptedCertificateTemplates = jsonRecord(
         (profile as unknown as JsonRecord).acceptedCertificateTemplates,
         'profile.acceptedCertificateTemplates',
     );
-    const template =
-        acceptedCertificateTemplates?.setupCommitmentSecurityCertificate;
-    if (template !== undefined) {
-        return cloneJsonRecord(
-            jsonRecord(
-                template,
-                'profile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
-            ),
-        );
-    }
 
-    return fallbackAcceptedSetupCommitmentSecurityCertificate(kernel, profile);
-}
-
-function setupProofRecordBindingForCertificate(
-    profile: BgvCollectiveSetupProfileDescription,
-): JsonRecord {
-    const setupProofProfile = profile.setupProofProfile as JsonRecord;
-    const challengeBinding = setupProofProfile.challengeBinding as JsonRecord;
-    const relationModel = setupProofProfile.relationModel as JsonRecord;
-    const verificationPolicy =
-        setupProofProfile.verificationPolicy as JsonRecord;
-
-    return {
-        objectType: 'SetupProofRecordBinding',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId: setupProofProfile.profileId,
-        setupProofProfileHash: profile.setupProofProfileHash,
-        proofSystem: setupProofProfile.proofSystem,
-        challengeDomain: challengeBinding.challengeDomain,
-        challengeDomainHash: challengeBinding.challengeDomainHash,
-        challengeBits: challengeBinding.challengeBits,
-        challengeCount: challengeBinding.challengeCount,
-        challengeCoefficientBound: challengeBinding.challengeCoefficientBound,
-        applicationRingDegree: relationModel.applicationRingDegree,
-        lnpTboxProofRingDegree: challengeBinding.lnpTboxProofRingDegree,
-        lnpTboxChallengeLog2Range: challengeBinding.lnpTboxChallengeLog2Range,
-        lnpTboxChallengeEncodedBits:
-            challengeBinding.lnpTboxChallengeEncodedBits,
-        lnpTboxChallengeSpaceBits: challengeBinding.lnpTboxChallengeSpaceBits,
-        challengeSpace: challengeBinding.challengeSpace,
-        challengeSampler: challengeBinding.challengeSampler,
-        challengeSeedDomain: setupProofChallengeSeedDomain,
-        challengeStreamDomain: setupProofChallengeStreamDomain,
-        challengeDifferenceInvertibilityStatus:
-            challengeBinding.challengeDifferenceInvertibilityStatus,
-        challengeDifferenceInvertibilityAccounting:
-            challengeBinding.challengeDifferenceInvertibilityAccounting,
-        proofBytesDomain: setupProofBytesDomain,
-        proofSerialization: setupProofSerialization,
-        proofByteDecoder: setupProofByteDecoder,
-        privateVssShareTboxParameterProfileHash:
-            setupProofProfile.privateVssShareTboxParameterProfileHash,
-        sameSecretTboxParameterProfileHash:
-            setupProofProfile.sameSecretTboxParameterProfileHash,
-        publicKeyShareTboxParameterProfileHash:
-            setupProofProfile.publicKeyShareTboxParameterProfileHash,
-        relinearizationKeyShareTboxParameterProfileHash:
-            setupProofProfile.relinearizationKeyShareTboxParameterProfileHash,
-        galoisKeyShareTboxParameterProfileHash:
-            setupProofProfile.galoisKeyShareTboxParameterProfileHash,
-        proofBytesAcceptedStatus: verificationPolicy.proofBytesAcceptedStatus,
-    };
-}
-
-function fallbackAcceptedSetupProofAccountingCertificate(
-    kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
-): JsonRecord {
-    const setupProofRecordBinding =
-        setupProofRecordBindingForCertificate(profile);
-    const setupProofProfile = profile.setupProofProfile as JsonRecord;
-    const challengeBinding = setupProofProfile.challengeBinding as JsonRecord;
-    const challengeSpaceAudit =
-        setupProofProfile.challengeSpaceAudit as JsonRecord;
-    const certificate = {
-        objectType: 'SetupProofAccountingCertificate',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProfileHash: profile.setupProfileHash,
-        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-        setupProofProfileHash: profile.setupProofProfileHash,
-        setupProofRecordBinding,
-        setupProofRecordBindingHash: kernel.deriveProtocolHash({
-            namespace: 'SetupProofRecordBindingHash',
-            value: setupProofRecordBinding,
-        }),
-        proofFamilies: setupProofFamilies,
-        proofFamilyAccounting: [
-            {
-                proofFamily: 'vss-opening-carry',
-                claimScope:
-                    'recipient-local private VSS share proof relation over accepted Q_share limbs',
-                verifierClosedStatus:
-                    'relation-transcript-and-bound-checks-verifier-closed',
-                accountingStatus:
-                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
-            },
-            {
-                proofFamily: 'same-secret-consistency',
-                claimScope:
-                    'same trustee secret across accepted VSS constant commitments',
-                verifierClosedStatus:
-                    'relation-transcript-and-bound-checks-verifier-closed',
-                accountingStatus:
-                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
-            },
-            {
-                proofFamily: 'public-key-share',
-                claimScope:
-                    'public-key share relation bound to the accepted same-secret proof and public-key material roots',
-                verifierClosedStatus:
-                    'relation-transcript-and-bound-checks-verifier-closed',
-                accountingStatus:
-                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
-            },
-            {
-                proofFamily: 'relinearization-key-share',
-                claimScope:
-                    'relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots',
-                verifierClosedStatus:
-                    'relation-transcript-and-bound-checks-verifier-closed',
-                accountingStatus:
-                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
-            },
-            {
-                proofFamily: 'galois-key-share',
-                claimScope:
-                    'Galois key-share relation bound to the required automorphism schedule and key-switch component roots',
-                verifierClosedStatus:
-                    'relation-transcript-and-bound-checks-verifier-closed',
-                accountingStatus:
-                    'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
-            },
-        ],
-        challengeAccounting: {
-            transform: 'Fiat-Shamir',
-            challengeDomain: setupProofChallengeDomain,
-            challengeDomainHash: challengeBinding.challengeDomainHash,
-            challengeSampler: setupProofChallengeSampler,
-            challengeSpace: setupProofChallengeSpace,
-            challengeDifferenceInvertibilityStatus:
-                challengeBinding.challengeDifferenceInvertibilityStatus,
-            challengeDifferenceInvertibilityAccounting:
-                challengeBinding.challengeDifferenceInvertibilityAccounting,
-            challengeSpaceAudit,
-            challengeSpaceAuditHash: kernel.deriveProtocolHash({
-                namespace: setupProofChallengeSpaceAuditHashNamespace,
-                value: challengeSpaceAudit,
-            }),
-            randomOracleModel:
-                'repo-owned Fiat-Shamir/QROM accounting accepted for claim-bearing proof acceptance',
-            qromStatus: 'qrom-reduction-theorem-accepted-for-setup-proof-claim',
-            transcriptBinding: challengeBinding.transcriptBinding,
-        },
-        tboxAccounting: {
-            tboxProfileHashBinding:
-                'all-required-setup-proof-tbox-profile-hashes-bound',
-            requiredFamilies: setupProofFamilies,
-            accountingStatus:
-                'generated-lower-protocol-tbox-profile-verifier-and-prover-closed',
-            status: 'generated lower-protocol tbox suffix is verifier-enforced across quadratic, range, z3/z4 challenge-equation, norm-proof, hint, and Gaussian checks',
-        },
-        completionBoundary:
-            'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
-        certificateStatus: 'claim-bearing-setup-proof-accounting-accepted',
-    };
-
-    return {
-        ...certificate,
-        setupProofAccountingCertificateHash: kernel.deriveProtocolHash({
-            namespace: 'SetupProofAccountingCertificateHash',
-            value: certificate,
-        }),
-    };
+    return cloneJsonRecord(
+        jsonRecord(
+            acceptedCertificateTemplates.setupCommitmentSecurityCertificate,
+            'profile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
+        ),
+    );
 }
 
 function acceptedSetupProofAccountingCertificate(
-    kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): JsonRecord {
-    const acceptedCertificateTemplates = optionalJsonRecord(
+    const acceptedCertificateTemplates = jsonRecord(
         (profile as unknown as JsonRecord).acceptedCertificateTemplates,
         'profile.acceptedCertificateTemplates',
     );
-    const template =
-        acceptedCertificateTemplates?.setupProofAccountingCertificate;
-    if (template !== undefined) {
-        return cloneJsonRecord(
-            jsonRecord(
-                template,
-                'profile.acceptedCertificateTemplates.setupProofAccountingCertificate',
-            ),
-        );
-    }
 
-    return fallbackAcceptedSetupProofAccountingCertificate(kernel, profile);
-}
-
-function fallbackAcceptedHeSecurityCertificate(
-    kernel: TranscriptCoreKernel,
-    setupProfile: BgvCollectiveSetupProfileDescription,
-    bgvProfile: BgvRnsProfileDescription,
-): JsonRecord {
-    const dataPrimes = bgvProfile.profile.dataPrimes;
-    const dataPrimeProductDecimal = moduliProductDecimal(dataPrimes);
-    const largestExposedModulusBits = moduliBitLengthSum(dataPrimes);
-    const extendedUtilityCeilLog2Product = moduliBitLengthSum([
-        ...dataPrimes,
-        bgvProfile.profile.specialPrime,
-    ]);
-    const postQuantumMaximumLogQ = 827;
-    const classicalMaximumLogQ = 881;
-    const postQuantumAccepted =
-        largestExposedModulusBits <= postQuantumMaximumLogQ;
-    const classicalAccepted = largestExposedModulusBits <= classicalMaximumLogQ;
-    const acceptedForDirectEvaluatorReplay =
-        postQuantumAccepted && classicalAccepted;
-    const acceptedRelinearizationKeyPolynomials =
-        keySwitchComponentPolynomialCount(
-            setupProfile.evaluatorKeyScheduleProfile
-                .relinearizationLevelSchedule,
-        );
-    const acceptedGaloisKeyPolynomials = keySwitchComponentPolynomialCount(
-        setupProfile.evaluatorKeyScheduleProfile.requiredGaloisKeySchedule,
+    return cloneJsonRecord(
+        jsonRecord(
+            acceptedCertificateTemplates.setupProofAccountingCertificate,
+            'profile.acceptedCertificateTemplates.setupProofAccountingCertificate',
+        ),
     );
-    const certificate = {
-        objectType: 'BgvHeSecurityCertificate',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        profileId: bgvProfile.profile.profileId,
-        backendProfileId: bgvProfile.profile.backendProfileId,
-        setupProfileHash: setupProfile.setupProfileHash,
-        qShareHash: setupProfile.qShareHash,
-        setupProofProfileHash: setupProfile.setupProofProfileHash,
-        evaluatorKeyScheduleProfileHash:
-            setupProfile.evaluatorKeyScheduleProfileHash,
-        certificateScope:
-            'first-profile-accepted-setup-direct-evaluator-replay-Q-data-boundary',
-        reference: {
-            document: 'ACC18 Homomorphic Encryption Standard',
-            localReferencePath:
-                'reference-documents/ACC18_Homomorphic Encryption Standard.txt',
-            sections: [
-                'Section 2.1.3 secret key distribution',
-                'Table 1 BKZ.sieve ternary n=32768 row',
-                'Table 2 BKZ.qsieve ternary n=32768 row',
-            ],
-            tableScope: 'power-of-two cyclotomic RLWE parameter table',
-        },
-        assessedRing: {
-            polynomialDegree: bgvProfile.profile.polynomialDegree,
-            plaintextModulus: bgvProfile.profile.plaintextModulus,
-            dataBasisId: bgvProfile.profile.dataBasisId,
-            dataPrimeCount: dataPrimes.length,
-            dataPrimeProductDecimal,
-            dataPrimeCeilLog2Product: largestExposedModulusBits,
-            qSharePrimeCount: dataPrimes.length,
-            qSharePrimeProductDecimal: dataPrimeProductDecimal,
-            qShareCeilLog2Product: largestExposedModulusBits,
-            specialPrime: bgvProfile.profile.specialPrime,
-            extendedUtilityCeilLog2Product,
-            extendedUtilityExposureStatus:
-                'not-exposed-by-current-accepted-direct-evaluator-replay-material',
-            largestExposedBasisClass: 'Q_data',
-            largestExposedModulusBits,
-        },
-        secretDistribution: {
-            distributionKind: 'standard-ternary-collective-secret',
-            support: [-1, 0, 1],
-            isPlainDenseTernary: true,
-            estimatorModel: 'HE-standard-ternary',
-            source: 'recipient-verified-VSS same-secret commitments',
-        },
-        errorDistribution: {
-            distributionKind: 'centered-binomial-eta2',
-            support: [-2, -1, 0, 1, 2],
-            keySwitchNoiseDistribution: 'centered-binomial-eta2',
-            certificateStatus:
-                'accepted-support-recorded-proof-family-checks-still-required',
-        },
-        publicSampleAccounting: {
-            publicKeyCrpPolynomials: 1,
-            publicKeyShareCount: firstProfileParticipantCount,
-            acceptedRelinearizationKeyPolynomials,
-            acceptedGaloisKeyPolynomials,
-            scheduledRelinearizationLevelCount:
-                setupProfile.evaluatorKeyScheduleProfile
-                    .relinearizationLevelSchedule.length,
-            scheduledGaloisKeyCount:
-                setupProfile.evaluatorKeyScheduleProfile
-                    .requiredGaloisKeySchedule.length,
-            evaluationKeyExposureStatus:
-                'root-bound-relinearization-and-galois-key-material-counted-for-direct-evaluator-replay-HE-boundary',
-            commitmentAndSetupProofPublicMatrices:
-                'covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples',
-        },
-        standardRows: {
-            postQuantumTernary128: {
-                status: postQuantumAccepted
-                    ? 'accepted'
-                    : 'rejected-largest-exposed-modulus-exceeds-row',
-                costModel: 'BKZ.qsieve',
-                secretDistribution: 'ternary',
-                polynomialDegree: 32_768,
-                securityLevelBits: 128,
-                maximumLogQ: postQuantumMaximumLogQ,
-                largestExposedModulusBits,
-                marginBits: Math.max(
-                    postQuantumMaximumLogQ - largestExposedModulusBits,
-                    0,
-                ),
-                uSVPBits: '128.1',
-                decodingBits: '128.7',
-                dualBits: '128.4',
-            },
-            classicalTernary128: {
-                status: classicalAccepted
-                    ? 'accepted'
-                    : 'rejected-largest-exposed-modulus-exceeds-row',
-                costModel: 'BKZ.sieve',
-                secretDistribution: 'ternary',
-                polynomialDegree: 32_768,
-                securityLevelBits: 128,
-                maximumLogQ: classicalMaximumLogQ,
-                largestExposedModulusBits,
-                marginBits: Math.max(
-                    classicalMaximumLogQ - largestExposedModulusBits,
-                    0,
-                ),
-                uSVPBits: '128.5',
-                decodingBits: '129.1',
-                dualBits: '128.5',
-            },
-        },
-        estimatorBinding: {
-            status: acceptedForDirectEvaluatorReplay
-                ? 'accepted-by-local-HE-standard-table-row'
-                : 'rejected-by-local-HE-standard-table-row',
-            tool: 'HE-standard published parameter table',
-            toolVersion: 'ACC18 local text reference',
-            securityEstimatorInputHash: bgvProfile.securityEstimatorInputHash,
-            secretModel: 'standard-ternary',
-            errorModel: 'centered-binomial-eta2',
-            largestExposedModulusBits,
-            publicSamplesBound: true,
-        },
-        targetDecryptionStatus: {
-            targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
-            qTargetKnown: false,
-            qTargetCoveredByCertificate: false,
-            targetC1ThroughC4Covered: false,
-            targetDecryptionReadiness:
-                'refused-until-q-target-certificate-closes',
-        },
-        acceptedForDirectEvaluatorReplay,
-        acceptedForTargetDecryption: false,
-        statusLabels: acceptedForDirectEvaluatorReplay
-            ? [
-                  'HEStandardPostQuantum128Accepted',
-                  'HEStandardClassical128Accepted',
-                  'DataBasisLargestExposedModulusAccepted',
-                  'SpecialPrimeNotPubliclyExposedOnAcceptedPath',
-                  'TargetDecryptionReadinessRefusedUntilQTargetCertificate',
-              ]
-            : [
-                  'HEStandardSecurityRejected',
-                  'DataBasisLargestExposedModulusRejected',
-              ],
-    };
-
-    return {
-        ...certificate,
-        heSecurityCertificateHash: kernel.deriveProtocolHash({
-            namespace: 'BGVHeSecurityCertificateHash',
-            value: certificate,
-        }),
-    };
 }
 
 function acceptedHeSecurityCertificate(
-    kernel: TranscriptCoreKernel,
     setupProfile: BgvCollectiveSetupProfileDescription,
-    bgvProfile: BgvRnsProfileDescription,
 ): JsonRecord {
-    const acceptedCertificateTemplates = optionalJsonRecord(
+    const acceptedCertificateTemplates = jsonRecord(
         (setupProfile as unknown as JsonRecord).acceptedCertificateTemplates,
         'setupProfile.acceptedCertificateTemplates',
     );
-    const template = acceptedCertificateTemplates?.heSecurityCertificate;
-    if (template !== undefined) {
-        return cloneJsonRecord(
-            jsonRecord(
-                template,
-                'setupProfile.acceptedCertificateTemplates.heSecurityCertificate',
-            ),
-        );
-    }
 
-    return fallbackAcceptedHeSecurityCertificate(
-        kernel,
-        setupProfile,
-        bgvProfile,
+    return cloneJsonRecord(
+        jsonRecord(
+            acceptedCertificateTemplates.heSecurityCertificate,
+            'setupProfile.acceptedCertificateTemplates.heSecurityCertificate',
+        ),
     );
 }
 
@@ -1840,7 +1178,6 @@ async function buildAcceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): Promise<JsonRecord> {
-    const bgvProfile = kernel.describeBgvRnsProfile();
     let previousPhaseRoot: string | null = null;
     const setupContext = {
         ceremonyId: setupRequest.ceremonyId,
@@ -1978,14 +1315,10 @@ async function buildAcceptedShapedSetupPackage(
         publicKeyShareProofs,
     );
     const setupCommitmentSecurityCertificate =
-        acceptedSetupCommitmentSecurityCertificate(kernel, profile);
+        acceptedSetupCommitmentSecurityCertificate(profile);
     const setupProofAccountingCertificate =
-        acceptedSetupProofAccountingCertificate(kernel, profile);
-    const heSecurityCertificate = acceptedHeSecurityCertificate(
-        kernel,
-        profile,
-        bgvProfile,
-    );
+        acceptedSetupProofAccountingCertificate(profile);
+    const heSecurityCertificate = acceptedHeSecurityCertificate(profile);
     const setupTransportCertificate = acceptedSetupTransportCertificate(
         kernel,
         profile,

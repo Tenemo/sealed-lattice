@@ -2,9 +2,9 @@ use super::*;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
-    TrusteeEvaluationKeyContext, TrusteeEvaluationKeyStatement,
-    decode_trustee_evaluation_key_proof, succinct_evaluation_key_proof_accounting_hash,
-    trustee_evaluation_key_proof_bytes_hash, verify_evaluation_key_share,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
+    succinct_evaluation_key_proof_accounting_hash, trustee_evaluation_key_proof_bytes_hash,
+    verify_evaluation_key_share,
 };
 use crate::hashing::to_hex;
 
@@ -501,18 +501,36 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             "setupContext was required for trustee evaluation-key statement assembly",
         )
     })?;
-    let context = TrusteeEvaluationKeyContext {
+    let context = SuccinctSetupProofContext {
+        proof_family: TRUSTEE_EVALUATION_KEY_PROOF_FAMILY.to_string(),
         ceremony_id: value_string(setup_context, "ceremonyId")?.to_string(),
         manifest_hash: value_string(setup_context, "manifestHash")?.to_string(),
         roster_hash: value_string(setup_context, "rosterHash")?.to_string(),
         trustee_identity: same_secret_binding.trustee_identity.clone(),
         trustee_roster_position: inputs.trustee_roster_position,
         setup_epoch: value_string(setup_context, "setupEpoch")?.to_string(),
-        required_galois_set_hash: binding.required_galois_set_hash.clone(),
-        evaluator_key_schedule_root: binding.evaluator_key_schedule_root.clone(),
-        key_switch_decomposition_hash: accepted_key_switch_decomposition_hash()?,
-        same_secret_statement_root: same_secret_binding.same_secret_statement_root.clone(),
-        same_secret_proof_root: same_secret_binding.same_secret_proof_root.clone(),
+        binding_roots: vec![
+            (
+                "requiredGaloisSetHash".to_string(),
+                binding.required_galois_set_hash.clone(),
+            ),
+            (
+                "evaluatorKeyScheduleRoot".to_string(),
+                binding.evaluator_key_schedule_root.clone(),
+            ),
+            (
+                "keySwitchDecompositionHash".to_string(),
+                accepted_key_switch_decomposition_hash()?,
+            ),
+            (
+                "sameSecretStatementRoot".to_string(),
+                same_secret_binding.same_secret_statement_root.clone(),
+            ),
+            (
+                "sameSecretProofRoot".to_string(),
+                same_secret_binding.same_secret_proof_root.clone(),
+            ),
+        ],
     };
 
     let rounds = setup_package

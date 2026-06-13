@@ -9,7 +9,6 @@ use super::relation::{
     BaseColumnDomain, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, SumcheckErrorWeights,
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
     batched_row_check_value, batched_sumcheck_value, build_linkage_public_vectors,
-    public_key_switch_sample,
 };
 use super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
@@ -556,13 +555,7 @@ pub(super) fn build_limb_public_vectors(
         let mut combined_public_sample = extension_zero_vector();
         let mut combined_component = extension_zero_vector();
         for (digit_index, gamma_power) in gamma_powers.iter().enumerate() {
-            let public_sample = public_key_switch_sample(
-                &key.key_switch_domain,
-                &key.key_switch_seed_hex,
-                digit_index,
-                modulus,
-                ring_degree,
-            );
+            let public_sample = key.public_sample(digit_index, modulus, ring_degree);
             let component = &key.component_b_by_digit[digit_index][limb_index];
             for coefficient_index in 0..ring_degree {
                 combined_public_sample[coefficient_index] = tower.add(
@@ -584,18 +577,27 @@ pub(super) fn build_limb_public_vectors(
                 u_power_vector,
                 modulus,
             )?;
-            let diagonal_vector =
-                key.diagonal_source_vector_extension(limb_index, u_power_vector, modulus)?;
-            let gamma_limb_power = &gamma_powers[limb_index];
-            for coefficient_index in 0..ring_degree {
-                let factor = tower.sub(
-                    &v_vector[coefficient_index],
-                    &tower.mul(gamma_limb_power, &diagonal_vector[coefficient_index]),
-                );
-                secret_factor[repetition][coefficient_index] = tower.add(
-                    &secret_factor[repetition][coefficient_index],
-                    &tower.mul(alpha_value, &factor),
-                );
+            if key.kind.has_diagonal_source() {
+                let diagonal_vector =
+                    key.diagonal_source_vector_extension(limb_index, u_power_vector, modulus)?;
+                let gamma_limb_power = &gamma_powers[limb_index];
+                for coefficient_index in 0..ring_degree {
+                    let factor = tower.sub(
+                        &v_vector[coefficient_index],
+                        &tower.mul(gamma_limb_power, &diagonal_vector[coefficient_index]),
+                    );
+                    secret_factor[repetition][coefficient_index] = tower.add(
+                        &secret_factor[repetition][coefficient_index],
+                        &tower.mul(alpha_value, &factor),
+                    );
+                }
+            } else {
+                for coefficient_index in 0..ring_degree {
+                    secret_factor[repetition][coefficient_index] = tower.add(
+                        &secret_factor[repetition][coefficient_index],
+                        &tower.mul(alpha_value, &v_vector[coefficient_index]),
+                    );
+                }
             }
             let mut component_dot = ChallengeExtensionTower::zero();
             for (u_value, component_value) in u_power_vector.iter().zip(combined_component.iter()) {

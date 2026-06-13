@@ -1,5 +1,13 @@
 use super::*;
 
+use crate::bgv::setup::trustee_evaluation_key_proof::{
+    SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY, SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
+    SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS, SameSecretLinkageStatement,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
+    same_secret_anchor_proof_bytes_hash, succinct_same_secret_linkage_anchor_accounting_hash,
+    verify_evaluation_key_share,
+};
+
 struct SameSecretTrusteeBinding {
     trustee_identity: String,
     trustee_roster_position: u64,
@@ -81,8 +89,11 @@ pub(super) fn verify_same_secret_consistency(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "same-secret-consistency"),
-        ("proofVerificationStatus", "lnp-proof-verification-pending"),
+        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
+        (
+            "proofVerificationStatus",
+            "anchor-proof-verification-pending",
+        ),
     ] {
         if statement_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
@@ -280,8 +291,11 @@ fn verify_same_secret_statement_record(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "same-secret-consistency"),
-        ("proofVerificationStatus", "lnp-proof-verification-pending"),
+        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
+        (
+            "proofVerificationStatus",
+            "anchor-proof-verification-pending",
+        ),
         (
             "sameSecretRelation",
             "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
@@ -566,7 +580,7 @@ fn trustee_secret_commitment_payload(
     }))
 }
 
-pub(super) fn verify_optional_same_secret_lnp_proofs(
+pub(super) fn verify_optional_same_secret_proofs(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
@@ -614,16 +628,21 @@ pub(super) fn verify_optional_same_secret_lnp_proofs(
             "setupPackage.sameSecretProofs",
         )?));
     }
+    let anchor_accounting_hash = succinct_same_secret_linkage_anchor_accounting_hash()?;
     for (field_name, expected_value) in [
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "same-secret-consistency"),
+        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
         (
             "proofVerificationStatus",
-            SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+            SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", SAME_SECRET_LNP_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
+        ),
+        ("proofAccountingHash", anchor_accounting_hash.as_str()),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_proof_refusal(
@@ -644,37 +663,6 @@ pub(super) fn verify_optional_same_secret_lnp_proofs(
                 format!("setupPackage.sameSecretProofs.{field_name}"),
             )?));
         }
-    }
-    let Some(actual_setup_proof_binding) = proof_set.get("setupProofBinding") else {
-        return Ok(Some(same_secret_proof_refusal(
-            "sameSecretProofSetProfileMismatch",
-            "sameSecretProofs.setupProofBinding must bind the fixed setup-proof profile",
-            "setupPackage.sameSecretProofs.setupProofBinding",
-        )?));
-    };
-    if let Err(error) = super::setup_proof::verify_setup_proof_record_binding(
-        actual_setup_proof_binding,
-        COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        &setup_proof_profile_hash()?,
-    ) {
-        return Ok(Some(same_secret_proof_refusal(
-            "sameSecretProofSetProfileMismatch",
-            error.message,
-            "setupPackage.sameSecretProofs.setupProofBinding",
-        )?));
-    }
-    let expected_tbox_parameter_profile_hash =
-        super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
-    if proof_set
-        .get("sameSecretTboxParameterProfileHash")
-        .and_then(Value::as_str)
-        != Some(expected_tbox_parameter_profile_hash.as_str())
-    {
-        return Ok(Some(same_secret_proof_refusal(
-            "sameSecretProofSetProfileMismatch",
-            "sameSecretProofs.sameSecretTboxParameterProfileHash must match the accepted same-secret LNP tbox profile",
-            "setupPackage.sameSecretProofs.sameSecretTboxParameterProfileHash",
-        )?));
     }
     let expected_same_secret_proof_family_binding_root = same_secret_proof_family_binding_root()?;
     let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
@@ -746,16 +734,17 @@ pub(super) fn verify_optional_same_secret_lnp_proofs(
         })?;
     let mut seen_roster_positions = BTreeSet::new();
     let mut proof_roots = Vec::new();
-    let verification_context = SameSecretLnpProofVerificationContext {
+    let verification_context = SameSecretAnchorProofVerificationContext {
         setup_package,
         request,
         setup_context,
         public_matrix_seed_hash,
+        vss_coefficient_commitment_material_root: material_root,
         statement_records: &statement_records,
         transported_constant_commitments: &transported_constant_commitments,
     };
     for proof_record in proof_records {
-        if let Err(error) = verify_same_secret_lnp_proof_record(
+        if let Err(error) = verify_same_secret_anchor_proof_record(
             &verification_context,
             proof_record,
             &mut seen_roster_positions,
@@ -810,18 +799,19 @@ pub(super) fn verify_optional_same_secret_lnp_proofs(
     Ok(None)
 }
 
-struct SameSecretLnpProofVerificationContext<'a> {
+struct SameSecretAnchorProofVerificationContext<'a> {
     setup_package: &'a Value,
     request: &'a Value,
     setup_context: &'a Value,
     public_matrix_seed_hash: &'a str,
+    vss_coefficient_commitment_material_root: &'a str,
     statement_records: &'a BTreeMap<u64, Value>,
     transported_constant_commitments:
         &'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>,
 }
 
-fn verify_same_secret_lnp_proof_record(
-    context: &SameSecretLnpProofVerificationContext<'_>,
+fn verify_same_secret_anchor_proof_record(
+    context: &SameSecretAnchorProofVerificationContext<'_>,
     proof_record: &Value,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<()> {
@@ -854,12 +844,15 @@ fn verify_same_secret_lnp_proof_record(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "same-secret-consistency"),
+        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
         (
             "proofVerificationStatus",
-            SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
+            SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", SAME_SECRET_LNP_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
+        ),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -867,36 +860,6 @@ fn verify_same_secret_lnp_proof_record(
                 format!("same-secret proof {field_name} must be {expected_value}"),
             ));
         }
-    }
-    let expected_setup_proof_binding = setup_proof_record_binding_value()?;
-    let actual_setup_proof_binding = proof_record.get("setupProofBinding").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proof setupProofBinding must bind the fixed setup-proof profile",
-        )
-    })?;
-    if actual_setup_proof_binding != &expected_setup_proof_binding {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "same-secret proof setupProofBinding must match the fixed setup-proof profile",
-        ));
-    }
-    super::setup_proof::verify_setup_proof_record_binding(
-        actual_setup_proof_binding,
-        COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        &setup_proof_profile_hash()?,
-    )?;
-    let expected_tbox_parameter_profile_hash =
-        super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?;
-    if proof_record
-        .get("sameSecretTboxParameterProfileHash")
-        .and_then(Value::as_str)
-        != Some(expected_tbox_parameter_profile_hash.as_str())
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proof sameSecretTboxParameterProfileHash must match the accepted same-secret LNP tbox profile",
-        ));
     }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     if !seen_roster_positions.insert(trustee_roster_position) {
@@ -942,7 +905,7 @@ fn verify_same_secret_lnp_proof_record(
         ));
     }
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
-    if proof_bytes_hash != same_secret_lnp_relation_proof_bytes_hash(&proof_bytes) {
+    if proof_bytes_hash != same_secret_anchor_proof_bytes_hash(&proof_bytes) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "same-secret proofBytesHash must match proofBytesHex",
@@ -953,54 +916,51 @@ fn verify_same_secret_lnp_proof_record(
         trustee_roster_position,
         context.transported_constant_commitments,
     )?;
-    let verification = verify_same_secret_lnp_relation_proof(
-        context.public_matrix_seed_hash,
-        statement_record,
-        &constant_commitments,
-        actual_setup_proof_binding,
-        &proof_bytes,
-    )?;
-    let verified_proof_size = u64::try_from(verification.proof_size_bytes).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "same-secret verified proof byte length does not fit u64",
-        )
-    })?;
+    let ring_degree = constant_commitments
+        .first()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "same-secret proof verification requires constant commitments",
+            )
+        })?
+        .ring_degree;
+    let statement = TrusteeEvaluationKeyStatement {
+        context: SuccinctSetupProofContext {
+            proof_family: SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY.to_string(),
+            ceremony_id: value_string(context.setup_context, "ceremonyId")?.to_string(),
+            manifest_hash: value_string(context.setup_context, "manifestHash")?.to_string(),
+            roster_hash: value_string(context.setup_context, "rosterHash")?.to_string(),
+            trustee_identity: value_string(proof_record, "trusteeIdentity")?.to_string(),
+            trustee_roster_position,
+            setup_epoch: value_string(context.setup_context, "setupEpoch")?.to_string(),
+            binding_roots: vec![(
+                "vssCoefficientCommitmentMaterialRoot".to_string(),
+                context.vss_coefficient_commitment_material_root.to_string(),
+            )],
+        },
+        ring_degree,
+        keys: Vec::new(),
+        same_secret_linkage: Some(SameSecretLinkageStatement {
+            public_matrix_seed_hash: context.public_matrix_seed_hash.to_string(),
+            commitments: constant_commitments,
+        }),
+    };
+    let statement_hash_hex = statement
+        .statement_hash()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     if proof_record.get("statementHash").and_then(Value::as_str)
-        != Some(verification.statement_hash_hex.as_str())
-        || proof_record
-            .get("relationCommitmentHash")
-            .and_then(Value::as_str)
-            != Some(verification.relation_commitment_hash_hex.as_str())
-        || proof_record
-            .get("tboxCommitmentPrefixHash")
-            .and_then(Value::as_str)
-            != Some(verification.tbox_commitment_prefix_hash.as_str())
-        || value_decimal_u64(proof_record, "challenge")? != verification.challenge
-        || proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(verified_proof_size)
+        != Some(statement_hash_hex.as_str())
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "same-secret proof transcript metadata must match verified proof bytes",
+            "same-secret proof statementHash must match the rebuilt anchor statement",
         ));
     }
-    verify_lnp_tbox_z34_metadata_fields(
-        proof_record,
-        LnpTboxZ34MetadataExpectation {
-            z34_seed_material_hash: &verification.z34_seed_material_hash,
-            z34_challenge_seed_hash: &verification.z34_challenge_seed_hash,
-            z34_challenge_tail_hash: &verification.z34_challenge_tail_hash,
-            z34_challenge_row_domain_hash: &verification.z34_challenge_row_domain_hash,
-            z34_challenge_z3_row_set_hash: &verification.z34_challenge_z3_row_set_hash,
-            z34_challenge_z4_row_set_hash: &verification.z34_challenge_z4_row_set_hash,
-            tbox_lower_protocol_challenge_hash: &verification.tbox_lower_protocol_challenge_hash,
-            z34_z3_check_window_hash: &verification.z34_z3_check_window_hash,
-            z34_z4_check_window_hash: &verification.z34_z4_check_window_hash,
-            z34_z3_l2_squared_decimal: &verification.z34_z3_l2_squared_decimal,
-            z34_z4_infinity_norm_decimal: &verification.z34_z4_infinity_norm_decimal,
-            proof_label: "same-secret proof",
-        },
-    )?;
+    let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
+    verify_evaluation_key_share(&statement, &proof)?;
     let proof_root = value_string(proof_record, "sameSecretProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
@@ -1013,82 +973,6 @@ fn verify_same_secret_lnp_proof_record(
             CanonicalErrorCode::InvalidFixture,
             "sameSecretProofRoot does not match the canonical same-secret proof record",
         ));
-    }
-
-    Ok(())
-}
-
-pub(super) struct LnpTboxZ34MetadataExpectation<'a> {
-    pub(super) z34_seed_material_hash: &'a str,
-    pub(super) z34_challenge_seed_hash: &'a str,
-    pub(super) z34_challenge_tail_hash: &'a str,
-    pub(super) z34_challenge_row_domain_hash: &'a str,
-    pub(super) z34_challenge_z3_row_set_hash: &'a str,
-    pub(super) z34_challenge_z4_row_set_hash: &'a str,
-    pub(super) tbox_lower_protocol_challenge_hash: &'a str,
-    pub(super) z34_z3_check_window_hash: &'a str,
-    pub(super) z34_z4_check_window_hash: &'a str,
-    pub(super) z34_z3_l2_squared_decimal: &'a str,
-    pub(super) z34_z4_infinity_norm_decimal: &'a str,
-    pub(super) proof_label: &'a str,
-}
-
-pub(super) fn verify_lnp_tbox_z34_metadata_fields(
-    proof_record: &Value,
-    expectation: LnpTboxZ34MetadataExpectation<'_>,
-) -> CanonicalResult<()> {
-    for (field_name, expected_hash) in [
-        ("z34SeedMaterialHash", expectation.z34_seed_material_hash),
-        ("z34ChallengeSeedHash", expectation.z34_challenge_seed_hash),
-        ("z34ChallengeTailHash", expectation.z34_challenge_tail_hash),
-        (
-            "z34ChallengeRowDomainHash",
-            expectation.z34_challenge_row_domain_hash,
-        ),
-        (
-            "z34ChallengeZ3RowSetHash",
-            expectation.z34_challenge_z3_row_set_hash,
-        ),
-        (
-            "z34ChallengeZ4RowSetHash",
-            expectation.z34_challenge_z4_row_set_hash,
-        ),
-        (
-            "tboxLowerProtocolChallengeHash",
-            expectation.tbox_lower_protocol_challenge_hash,
-        ),
-        ("z34Z3CheckWindowHash", expectation.z34_z3_check_window_hash),
-        ("z34Z4CheckWindowHash", expectation.z34_z4_check_window_hash),
-    ] {
-        if value_string(proof_record, field_name)? != expected_hash {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{} {field_name} must match verified tbox proof bytes",
-                    expectation.proof_label
-                ),
-            ));
-        }
-    }
-    for (field_name, expected_decimal) in [
-        (
-            "z34Z3L2SquaredDecimal",
-            expectation.z34_z3_l2_squared_decimal,
-        ),
-        (
-            "z34Z4InfinityNormDecimal",
-            expectation.z34_z4_infinity_norm_decimal,
-        ),
-    ] {
-        if value_string(proof_record, field_name)? != expected_decimal {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{} {field_name} must match verified tbox proof bytes",
-                    expectation.proof_label
-                ),
-            ));
-        }
     }
 
     Ok(())
@@ -1139,24 +1023,13 @@ fn same_secret_proof_bytes_from_record(
     validate_hash_string(proof_material_root, "sameSecretProof.proofMaterialRoot")?;
     let chunks = transported_same_secret_proof_material_chunks(request, proof_material_root)?;
     let transport_hashes = setup_proof_material_transport_hashes(
-        "same-secret-consistency",
+        SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
         &chunks,
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     verify_same_secret_proof_transport_reference(proof_record, &transport_hashes)?;
     let expected_material_root =
-        setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
-            setup_profile_id: COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            proof_family: "same-secret-consistency",
-            trustee_identity: value_string(proof_record, "trusteeIdentity")?,
-            trustee_roster_position: value_u64(proof_record, "trusteeRosterPosition")?,
-            statement_hash_hex: value_string(proof_record, "statementHash")?,
-            relation_commitment_hash_hex: value_string(proof_record, "relationCommitmentHash")?,
-            tbox_commitment_prefix_hash: value_string(proof_record, "tboxCommitmentPrefixHash")?,
-            proof_size_bytes: value_u64(proof_record, "proofSizeBytes")?,
-            proof_bytes_hash: value_string(proof_record, "proofBytesHash")?,
-            transport_hashes: &transport_hashes,
-        })?;
+        same_secret_anchor_proof_material_root(proof_record, &transport_hashes)?;
     if proof_material_root != expected_material_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -1177,6 +1050,33 @@ fn same_secret_proof_bytes_from_record(
     }
 
     Ok(proof_bytes)
+}
+
+pub(in crate::bgv::setup) fn same_secret_anchor_proof_material_root(
+    proof_record: &Value,
+    transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SameSecretLinkageAnchorProofMaterialRoot",
+        &json!({
+            "objectType": "SameSecretLinkageAnchorProofMaterialReference",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
+            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+            "statementHash": value_string(proof_record, "statementHash")?,
+            "proofSizeBytes": value_u64(proof_record, "proofSizeBytes")?,
+            "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
+            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": transport_hashes.chunk_hashes.len(),
+            "totalByteLength": transport_hashes.total_byte_length,
+            "fullObjectHash": transport_hashes.full_object_hash,
+            "chunkRoot": transport_hashes.chunk_root,
+            "chunkHashes": transport_hashes.chunk_hashes,
+        }),
+    )
 }
 
 fn verify_same_secret_proof_transport_reference(
@@ -1303,7 +1203,7 @@ fn transported_same_secret_proof_material_chunks(
         }
         let chunks = transported_same_secret_proof_chunks(proof_material)?;
         let transport_hashes = setup_proof_material_transport_hashes(
-            "same-secret-consistency",
+            SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             &chunks,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
@@ -1334,7 +1234,7 @@ fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> Ca
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE),
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "same-secret-consistency"),
+        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1366,7 +1266,7 @@ fn verify_transported_same_secret_proof_material_header(value: &Value) -> Canoni
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE),
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "same-secret-consistency"),
+        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1737,7 +1637,7 @@ pub(super) fn same_secret_constant_commitment_values_from_material(
     if material_encoding != "full-public-setup-commitment-values" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "same-secret LNP proof verification requires embedded or binary-transported public VSS commitment material",
+            "same-secret anchor proof verification requires embedded or binary-transported public VSS commitment material",
         ));
     }
     let material_records = material_set
@@ -1845,8 +1745,9 @@ fn same_secret_proof_family_binding_value() -> Value {
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "proofFamily": "same-secret-consistency",
+        "proofFamily": "same-secret-linkage-anchor",
         "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
+        "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",
         "boundSecretDependentProofFamilies": expected_same_secret_bound_proof_families_value(),
         "genericKeySwitchBindingPolicy": "absent-unless-frozen-schedule-requires-proof-family",
         "targetDecryptionBindingPolicy": "later-target-share-must-bind-threshold-share-commitment",
@@ -1887,6 +1788,7 @@ fn unexpected_same_secret_set_field(value: &Value) -> Option<String> {
             "trusteeSecretCommitmentRoots",
             "statementRecords",
             "sameSecretConsistencyRoot",
+            "proofAccountingHash",
         ],
     )
 }
@@ -1937,7 +1839,7 @@ fn unexpected_same_secret_proof_set_field(value: &Value) -> Option<String> {
             "proofFamily",
             "proofVerificationStatus",
             "proofModelStatus",
-            "sameSecretTboxParameterProfileHash",
+            "proofAccountingHash",
             "ceremonyId",
             "manifestHash",
             "rosterHash",
@@ -1951,7 +1853,6 @@ fn unexpected_same_secret_proof_set_field(value: &Value) -> Option<String> {
             "sameSecretConsistencyRoot",
             "sameSecretProofFamilyBindingRoot",
             "vssCoefficientCommitmentMaterialRoot",
-            "setupProofBinding",
             "sameSecretProofRoots",
             "proofRecords",
             "sameSecretProofSetRoot",
@@ -1971,7 +1872,6 @@ fn unexpected_same_secret_proof_record_field(value: &Value) -> Option<String> {
             "proofFamily",
             "proofVerificationStatus",
             "proofModelStatus",
-            "sameSecretTboxParameterProfileHash",
             "ceremonyId",
             "manifestHash",
             "rosterHash",
@@ -1985,22 +1885,7 @@ fn unexpected_same_secret_proof_record_field(value: &Value) -> Option<String> {
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofFamilyBindingRoot",
-            "setupProofBinding",
             "statementHash",
-            "relationCommitmentHash",
-            "tboxCommitmentPrefixHash",
-            "z34SeedMaterialHash",
-            "z34ChallengeSeedHash",
-            "z34ChallengeTailHash",
-            "z34ChallengeRowDomainHash",
-            "z34ChallengeZ3RowSetHash",
-            "z34ChallengeZ4RowSetHash",
-            "tboxLowerProtocolChallengeHash",
-            "z34Z3CheckWindowHash",
-            "z34Z4CheckWindowHash",
-            "z34Z3L2SquaredDecimal",
-            "z34Z4InfinityNormDecimal",
-            "challenge",
             "proofSizeBytes",
             "proofBytesHash",
             "proofBytesEncoding",

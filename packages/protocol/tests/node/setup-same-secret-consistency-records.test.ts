@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
+    sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
     sameSecretGenericKeySwitchBindingPolicy,
     sameSecretProofFamily,
@@ -190,6 +191,7 @@ describe('same-secret consistency statement builders', () => {
                 setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
                 sameSecretRelation,
+                anchorArgument: sameSecretAnchorArgument,
                 boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
                 genericKeySwitchBindingPolicy:
                     sameSecretGenericKeySwitchBindingPolicy,

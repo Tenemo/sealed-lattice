@@ -60,8 +60,8 @@ import {
     publicKeyShareLnpProofModelStatus,
     publicKeyShareLnpProofVerificationStatus,
     publicKeyShareMaterialTransportEncoding,
-    sameSecretLnpProofModelStatus,
-    sameSecretLnpProofVerificationStatus,
+    sameSecretAnchorProofModelStatus,
+    sameSecretAnchorProofVerificationStatus,
 } from '#packages/protocol/src/index';
 import {
     privateVssShareLnpProofModelStatus,
@@ -176,18 +176,16 @@ const setupProofBindingFixture = (
     setupEpoch: context.setupEpoch,
 });
 
-const sameSecretTboxParameterProfileHash = fixtureHash('same-secret-tbox');
+const sameSecretLinkageAnchorProofAccountingHash = fixtureHash(
+    'same-secret-linkage-anchor-proof-accounting',
+);
 const publicKeyShareTboxParameterProfileHash = fixtureHash(
     'public-key-share-tbox',
 );
 const privateVssShareTboxParameterProfileHash = fixtureHash(
     'private-vss-share-tbox',
 );
-const setupProofFamilies = [
-    'vss-opening-carry',
-    'same-secret-consistency',
-    'public-key-share',
-] as const;
+const setupProofFamilies = ['vss-opening-carry', 'public-key-share'] as const;
 const setupProofChallengeDifferenceInvertibilityStatus =
     'repo-owned-lnp22-small-coefficient-challenge-differences-invertible';
 const setupProofLnpTboxProofRingDegree = 128;
@@ -402,25 +400,14 @@ const sameSecretProofMaterial = (
 
     return {
         setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-        proofFamily: 'same-secret-consistency',
-        proofVerificationStatus: sameSecretLnpProofVerificationStatus,
-        proofModelStatus: sameSecretLnpProofModelStatus,
-        sameSecretTboxParameterProfileHash,
+        proofFamily: 'same-secret-linkage-anchor',
+        proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
+        proofModelStatus: sameSecretAnchorProofModelStatus,
         trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
         trusteeRosterPosition,
         statementHash: fixtureHash(
             `same-secret-statement-${String(trusteeRosterPosition)}`,
         ),
-        relationCommitmentHash: fixtureHash(
-            `same-secret-relation-${String(trusteeRosterPosition)}`,
-        ),
-        tboxCommitmentPrefixHash: fixtureHash(
-            `same-secret-tbox-prefix-${String(trusteeRosterPosition)}`,
-        ),
-        ...setupProofTboxZ34Metadata(
-            `same-secret-${String(trusteeRosterPosition)}`,
-        ),
-        challenge: String(17 + trusteeRosterPosition),
         proofSizeBytes: proofMaterialBytesHex.length / 2,
         proofBytesHash: fixtureHash(
             `same-secret-proof-bytes-${String(trusteeRosterPosition)}`,
@@ -483,7 +470,7 @@ const hashBoundSameSecretProofMaterial = (
     return {
         ...material,
         proofBytesHash: hash512Hex(
-            'sealed-lattice/setup/same-secret/lnp-proof-bytes-v1',
+            'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1',
             [proofBytes(bytesHex)],
         ),
     };
@@ -1543,11 +1530,11 @@ const setupCertificateInputFixture = (
             proofFamily,
         })),
         privateVssShareTboxParameterProfileHash,
-        sameSecretTboxParameterProfileHash,
         publicKeyShareTboxParameterProfileHash,
+        sameSecretLinkageAnchorProofAccountingHash,
         verificationPolicy: {
             proofBytesAcceptedStatus:
-                'private-vss-same-secret-public-key-share-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting',
+                'private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting',
         },
     };
     const setupTransportProfile = {
@@ -1616,6 +1603,11 @@ const setupCertificateInputFixture = (
         transport: {
             fullObjectHash: fixtureHash('transport-full-object'),
             chunkHashes: [fixtureHash('transport-chunk-0')],
+        },
+        sameSecretLinkageAnchorProofAccounting: {
+            objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+            objectVersion: 1,
+            fixture: 'succinct-same-secret-linkage-anchor-accounting',
         },
         trusteeEvaluationKeyProofAccounting: {
             objectType: 'SuccinctEvaluationKeyProofAccounting',
@@ -1752,7 +1744,7 @@ const createAssemblyInput = (
         publicKeyCrpRoot: fixtureHash('public-key-crp'),
         publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
         setupProofBinding: fixtureSetupProofBinding,
-        sameSecretTboxParameterProfileHash,
+        sameSecretLinkageAnchorProofAccountingHash,
         sameSecretProofMaterials: Array.from(
             { length: participantCount },
             (_unused, position) => sameSecretProofMaterial(position),
@@ -1875,7 +1867,7 @@ describe('setup ceremony assembly', () => {
             objectVersion: 1,
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-            proofFamily: 'same-secret-consistency',
+            proofFamily: 'same-secret-linkage-anchor',
         });
         expect(
             publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
@@ -3103,16 +3095,17 @@ describe('setup ceremony assembly', () => {
         );
         expect(assembly.sameSecretProofs).toMatchObject({
             objectType: 'SameSecretProofSet',
-            proofVerificationStatus: sameSecretLnpProofVerificationStatus,
+            proofFamily: 'same-secret-linkage-anchor',
+            proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
+            proofModelStatus: sameSecretAnchorProofModelStatus,
+            proofAccountingHash: sameSecretLinkageAnchorProofAccountingHash,
         });
         expect(assembly.sameSecretProofs.proofRecords).toHaveLength(
             participantCount,
         );
         expect(assembly.sameSecretProofs.proofRecords[0]).toMatchObject({
-            challenge: '17',
-            z34SeedMaterialHash: fixtureHash('same-secret-0-z34-seed-material'),
-            z34Z3L2SquaredDecimal: '64',
-            z34Z4InfinityNormDecimal: '1',
+            proofFamily: 'same-secret-linkage-anchor',
+            statementHash: fixtureHash('same-secret-statement-0'),
         });
         expect(assembly.publicKeyShares.shareRecords).toHaveLength(
             participantCount,
@@ -3255,7 +3248,7 @@ describe('setup ceremony assembly', () => {
                 unknown
             >[];
         expect(proofFamilyAccounting).toHaveLength(
-            setupProofFamilies.length + 1,
+            setupProofFamilies.length + 2,
         );
         expect(proofFamilyAccounting[0]).toMatchObject({
             proofFamily: 'vss-opening-carry',
@@ -3275,8 +3268,25 @@ describe('setup ceremony assembly', () => {
         );
         expect(
             proofFamilyAccounting.map((entry) => entry.proofFamily),
-        ).toStrictEqual([...setupProofFamilies, 'trustee-evaluation-key']);
-        expect(proofFamilyAccounting[setupProofFamilies.length]).toMatchObject({
+        ).toStrictEqual([
+            'vss-opening-carry',
+            'same-secret-linkage-anchor',
+            'public-key-share',
+            'trustee-evaluation-key',
+        ]);
+        expect(proofFamilyAccounting[1]).toMatchObject({
+            proofFamily: 'same-secret-linkage-anchor',
+            verifierClosedStatus:
+                'statement-rebuild-and-argument-checks-verifier-closed',
+            accountingStatus:
+                'succinct-same-secret-linkage-anchor-theorem-accounting-accepted',
+            claimAccounting: {
+                accountingObject: 'SuccinctSameSecretLinkageAnchorAccounting',
+                accountingHash:
+                    setupProofAccountingCertificate.sameSecretLinkageAnchorProofAccountingHash,
+            },
+        });
+        expect(proofFamilyAccounting[3]).toMatchObject({
             proofFamily: 'trustee-evaluation-key',
             verifierClosedStatus:
                 'statement-rebuild-and-argument-checks-verifier-closed',

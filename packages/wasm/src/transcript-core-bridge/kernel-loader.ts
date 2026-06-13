@@ -26,7 +26,6 @@ import type {
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
-    BgvSameSecretLnpProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
@@ -156,6 +155,9 @@ export const createTranscriptCoreKernelLoader = (
 
             return {
                 exportedFunctionNames,
+                // WASM linear memory only grows, so the byte length after a
+                // sequence of commands is that sequence's peak footprint.
+                wasmMemoryByteLength: (): number => memory.buffer.byteLength,
                 analyzeCanonicalObject: (input): TranscriptCoreAnalysis =>
                     executeCommand<TranscriptCoreAnalysis>({
                         command: 'AnalyzeCanonicalObject',
@@ -409,20 +411,6 @@ export const createTranscriptCoreKernelLoader = (
                             input.coefficientMessagesByShamirIndex,
                         openingRandomnessByShamirIndex:
                             input.openingRandomnessByShamirIndex,
-                        proofRandomnessSource: input.proofRandomnessSource,
-                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                    }),
-                generateSameSecretLnpProof: (
-                    input,
-                ): BgvSameSecretLnpProofGeneration =>
-                    executeCommand<BgvSameSecretLnpProofGeneration>({
-                        command: 'GenerateSameSecretLnpProof',
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        statementRecord: input.statementRecord,
-                        constantCommitments: input.constantCommitments,
-                        setupProofBinding: input.setupProofBinding,
-                        secretCoefficients: input.secretCoefficients,
-                        openingRandomnessByLimb: input.openingRandomnessByLimb,
                         proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                     }),

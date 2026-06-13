@@ -4,8 +4,8 @@ use super::proof_codec::{
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
     EvaluationKeyShareKind, galois_automorphism_apply, galois_automorphism_transpose_apply,
-    generate_development_trustee_ceremony_slice, generate_development_trustee_instance,
-    generate_development_trustee_instance_with_linkage,
+    generate_development_public_key_share_instance, generate_development_trustee_ceremony_slice,
+    generate_development_trustee_instance, generate_development_trustee_instance_with_linkage,
     round_one_aggregate_diagonal_from_components,
 };
 use super::verifier::verify_evaluation_key_share;
@@ -272,6 +272,69 @@ fn batched_schedule_with_linkage_round_trips() {
 }
 
 #[test]
+fn same_secret_linkage_anchor_proof_round_trips_without_keys() {
+    // The keyless statement is the per-trustee same-secret linkage anchor:
+    // only the commitment-opening, support, and cross-limb consistency
+    // relations are active, over the three commitment fields.
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "99ffeedd",
+        &[],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("anchor instance");
+    assert!(statement.keys.is_empty());
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    verify_evaluation_key_share(&statement, &proof).expect("verify");
+
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    let decoded =
+        decode_trustee_evaluation_key_proof(&statement, &encoded).expect("decode anchor proof");
+    verify_evaluation_key_share(&statement, &decoded).expect("verify decoded");
+}
+
+#[test]
+fn keyless_statement_without_linkage_is_refused() {
+    let (mut statement, witness) = generate_development_trustee_instance_with_linkage(
+        "aa00bb11",
+        &[],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("anchor instance");
+    statement.same_secret_linkage = None;
+    assert!(
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
+        "a statement with neither keys nor the linkage anchor must be refused"
+    );
+}
+
+#[test]
+fn anchor_rejects_commitments_to_a_different_secret() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "cc22dd33",
+        &[],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("anchor instance");
+    let (other_statement, _) = generate_development_trustee_instance_with_linkage(
+        "ee44ff55",
+        &[],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("second anchor instance");
+    let mut forged = statement;
+    forged.same_secret_linkage = other_statement.same_secret_linkage;
+    assert!(
+        prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED).is_err(),
+        "anchor proving must reject commitments that open to a different secret"
+    );
+}
+
+#[test]
 fn linkage_rejects_commitments_to_a_different_secret() {
     // A trustee whose key-relation secret differs from the committed secret
     // must not be able to produce a proof: the commitment-opening relations
@@ -374,6 +437,7 @@ fn statement_request_value(
                     EvaluationKeyShareKind::RelinearizationRoundOne => "relinearization-round-one",
                     EvaluationKeyShareKind::RelinearizationRoundTwo => "relinearization-round-two",
                     EvaluationKeyShareKind::GaloisRotation { .. } => "galois-rotation",
+                    EvaluationKeyShareKind::PublicKeyShare => "public-key-share",
                 },
                 "level": key.level,
                 "keySwitchDomain": key.key_switch_domain,
@@ -390,20 +454,19 @@ fn statement_request_value(
             entry
         })
         .collect::<Vec<_>>();
+    let mut context_value = serde_json::json!({
+        "ceremonyId": statement.context.ceremony_id,
+        "manifestHash": statement.context.manifest_hash,
+        "rosterHash": statement.context.roster_hash,
+        "trusteeIdentity": statement.context.trustee_identity,
+        "trusteeRosterPosition": statement.context.trustee_roster_position,
+        "setupEpoch": statement.context.setup_epoch,
+    });
+    for (binding_label, binding_root) in &statement.context.binding_roots {
+        context_value[binding_label] = serde_json::json!(binding_root);
+    }
     let mut request = serde_json::json!({
-        "context": {
-            "ceremonyId": statement.context.ceremony_id,
-            "manifestHash": statement.context.manifest_hash,
-            "rosterHash": statement.context.roster_hash,
-            "trusteeIdentity": statement.context.trustee_identity,
-            "trusteeRosterPosition": statement.context.trustee_roster_position,
-            "setupEpoch": statement.context.setup_epoch,
-            "requiredGaloisSetHash": statement.context.required_galois_set_hash,
-            "evaluatorKeyScheduleRoot": statement.context.evaluator_key_schedule_root,
-            "keySwitchDecompositionHash": statement.context.key_switch_decomposition_hash,
-            "sameSecretStatementRoot": statement.context.same_secret_statement_root,
-            "sameSecretProofRoot": statement.context.same_secret_proof_root,
-        },
+        "context": context_value,
         "ringDegree": statement.ring_degree,
         "keys": keys,
     });
@@ -464,6 +527,49 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
     assert!(
         super::verify_trustee_evaluation_key_proof_from_request(&tampered_request).is_err(),
         "tampered proof bytes must reject"
+    );
+}
+
+#[test]
+fn anchor_proof_commands_round_trip_with_family_label() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "fafa0101",
+        &[],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("anchor instance");
+    let mut generate_request = statement_request_value(&statement);
+    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
+    generate_request["negativeIndicatorCoefficients"] =
+        serde_json::json!(witness.negative_indicator_coefficients);
+    generate_request["openingRandomnessByLimb"] =
+        serde_json::json!(witness.opening_randomness_by_limb);
+    generate_request["proofRandomnessSource"] = serde_json::json!("test-fixed-seed");
+    generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+
+    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
+        .expect("generate anchor command");
+    assert_eq!(generated["ok"], true);
+    assert_eq!(generated["proofFamily"], "same-secret-linkage-anchor");
+    assert_eq!(generated["keyCount"], 0);
+
+    let mut verify_request = statement_request_value(&statement);
+    verify_request["proofBytesHex"] = generated["proofBytesHex"].clone();
+    let verified = super::verify_trustee_evaluation_key_proof_from_request(&verify_request)
+        .expect("verify anchor command");
+    assert_eq!(verified["ok"], true);
+    assert_eq!(verified["proofFamily"], "same-secret-linkage-anchor");
+    assert_eq!(verified["statementHash"], generated["statementHash"]);
+
+    // A keyless request whose context carries the evaluation-key binding
+    // labels must be refused: the family decides the expected label list.
+    let mut mislabeled_request = statement_request_value(&statement);
+    mislabeled_request["context"]["vssCoefficientCommitmentMaterialRoot"] = serde_json::Value::Null;
+    mislabeled_request["proofBytesHex"] = generated["proofBytesHex"].clone();
+    assert!(
+        super::verify_trustee_evaluation_key_proof_from_request(&mislabeled_request).is_err(),
+        "a keyless statement without the anchor binding root must be refused"
     );
 }
 
@@ -672,5 +778,143 @@ fn full_ring_degree_benchmark() {
         proof_bytes as f64 / (1024.0 * 1024.0),
         proof_bytes as f64 / 1024.0 / limb_count as f64,
         proof_bytes as f64 / (1024.0 * 1024.0) / key_count as f64
+    );
+}
+
+#[test]
+fn honest_public_key_share_proof_round_trips() {
+    let (statement, witness) =
+        generate_development_public_key_share_instance("a1b2c3d401", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
+    assert_eq!(statement.keys.len(), 1);
+    assert_eq!(statement.keys[0].kind, EvaluationKeyShareKind::PublicKeyShare);
+    // The share spans every Q_share limb.
+    assert_eq!(statement.limb_count(), DATA_PRIMES.len());
+    assert_eq!(statement.context.proof_family, "public-key-share");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    assert_eq!(proof.limb_proofs.len(), DATA_PRIMES.len());
+    verify_evaluation_key_share(&statement, &proof).expect("verify");
+
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    let decoded = decode_trustee_evaluation_key_proof(&statement, &encoded)
+        .expect("decode public-key share proof");
+    verify_evaluation_key_share(&statement, &decoded).expect("verify decoded");
+}
+
+#[test]
+fn public_key_share_rejects_tampered_share_component() {
+    let (statement, witness) =
+        generate_development_public_key_share_instance("bb22cc33", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    // Flip one published share coefficient: the share relation no longer holds
+    // in that limb field, so the verifier rebuilds a different statement.
+    let mut tampered = statement;
+    tampered.keys[0].component_b_by_digit[0][0][0] ^= 1;
+    let result = verify_evaluation_key_share(&tampered, &proof);
+    assert!(result.is_err(), "a tampered share component must reject");
+}
+
+#[test]
+fn public_key_share_rejects_a_secret_outside_the_committed_one() {
+    // A trustee whose share secret differs from the anchored committed secret
+    // cannot prove: splicing another instance's commitment makes the linkage
+    // opening relation fail at proving time.
+    let (statement, witness) =
+        generate_development_public_key_share_instance("dd44ee55", SMALL_RING_DEGREE)
+            .expect("first instance");
+    let (other_statement, _) =
+        generate_development_public_key_share_instance("ff66aa77", SMALL_RING_DEGREE)
+            .expect("second instance");
+    let mut forged = statement;
+    forged.same_secret_linkage = other_statement.same_secret_linkage;
+    assert!(
+        prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED).is_err(),
+        "a share secret that does not open the committed value must not prove"
+    );
+}
+
+#[test]
+fn public_key_share_rejects_a_foreign_common_reference_polynomial() {
+    // The public sample is the seed-derived common reference polynomial. A
+    // statement whose seed (key_switch_seed_hex) is swapped recomputes a
+    // different a_l, so the honest proof no longer verifies.
+    let (statement, witness) =
+        generate_development_public_key_share_instance("aa11bb2201", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let mut forged = statement;
+    forged.keys[0].key_switch_seed_hex = "00".repeat(64);
+    let result = verify_evaluation_key_share(&forged, &proof);
+    assert!(
+        result.is_err(),
+        "a foreign common reference polynomial must reject"
+    );
+}
+
+#[test]
+fn public_key_share_commands_round_trip_with_family_label() {
+    let (statement, witness) =
+        generate_development_public_key_share_instance("cdcd010201", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
+    let mut generate_request = statement_request_value(&statement);
+    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
+    generate_request["errorCoefficientsByKey"] =
+        serde_json::json!(witness.error_coefficients_by_key);
+    generate_request["negativeIndicatorCoefficients"] =
+        serde_json::json!(witness.negative_indicator_coefficients);
+    generate_request["openingRandomnessByLimb"] =
+        serde_json::json!(witness.opening_randomness_by_limb);
+    generate_request["proofRandomnessSource"] = serde_json::json!("test-fixed-seed");
+    generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+
+    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
+        .expect("generate public-key share command");
+    assert_eq!(generated["ok"], true);
+    assert_eq!(generated["proofFamily"], "public-key-share");
+    assert_eq!(generated["keyCount"], 1);
+    assert_eq!(generated["sameSecretLinkageIncluded"], true);
+    let expected_accounting_hash =
+        super::accounting::succinct_public_key_share_accounting_hash().expect("accounting hash");
+    assert_eq!(generated["proofAccountingHash"], expected_accounting_hash);
+
+    let mut verify_request = statement_request_value(&statement);
+    verify_request["proofBytesHex"] = generated["proofBytesHex"].clone();
+    let verified = super::verify_trustee_evaluation_key_proof_from_request(&verify_request)
+        .expect("verify public-key share command");
+    assert_eq!(verified["ok"], true);
+    assert_eq!(verified["proofFamily"], "public-key-share");
+    assert_eq!(verified["statementHash"], generated["statementHash"]);
+    assert_eq!(
+        verified["proofAccounting"]["proofFamily"],
+        "public-key-share"
+    );
+
+    // A public-key share request whose context carries the wrong binding
+    // labels (the anchor's) must be refused.
+    let mut mislabeled = statement_request_value(&statement);
+    mislabeled["context"]["sameSecretStatementRoot"] = serde_json::Value::Null;
+    mislabeled["proofBytesHex"] = generated["proofBytesHex"].clone();
+    assert!(
+        super::verify_trustee_evaluation_key_proof_from_request(&mislabeled).is_err(),
+        "a public-key share statement without its binding roots must be refused"
+    );
+}
+
+#[test]
+fn public_key_share_accounting_carries_family_rows() {
+    let accounting = super::accounting::succinct_public_key_share_accounting_value()
+        .expect("public-key share accounting");
+    assert_eq!(accounting["proofFamily"], "public-key-share");
+    assert_eq!(accounting["objectType"], "SuccinctPublicKeyShareAccounting");
+    // The shared theorem rows stay accepted.
+    assert_eq!(accounting["lowDegreeSoundness"]["accepted"], true);
+    assert_eq!(accounting["fiatShamir"]["accepted"], true);
+    assert!(
+        accounting["familyRelationRows"]["commonReferenceBinding"].is_string(),
+        "the family rows must record the common reference binding"
     );
 }

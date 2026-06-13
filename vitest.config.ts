@@ -7,6 +7,8 @@ import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
 import {
+    browserProofBenchmarkLaneDefinition,
+    browserProofBenchmarkTestTimeoutMs,
     browserTestLaneDefinitions,
     nodeHookTimeoutMs,
     nodeTestProjectDefinitions,
@@ -224,6 +226,13 @@ export default defineConfig({
             makeBrowserProject({
                 ...browserTestLaneDefinitions.mobile,
                 instances: mobileBrowserInstances,
+            }),
+            makeBrowserProject({
+                ...browserProofBenchmarkLaneDefinition,
+                fileParallelism: false,
+                hookTimeout: browserProofBenchmarkTestTimeoutMs,
+                instances: [{ browser: 'chromium', name: 'chromium-desktop' }],
+                testTimeout: browserProofBenchmarkTestTimeoutMs,
             }),
         ],
     },

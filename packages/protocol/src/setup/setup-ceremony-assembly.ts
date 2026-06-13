@@ -175,7 +175,7 @@ export type SetupCeremonyAssemblyInput = Readonly<{
     readonly publicKeyCrpRoot: ProtocolHash;
     readonly publicAPolynomialRoot: ProtocolHash;
     readonly setupProofBinding: JsonRecord;
-    readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+    readonly sameSecretLinkageAnchorProofAccountingHash: ProtocolHash;
     readonly sameSecretProofMaterials: readonly SameSecretProofMaterial[];
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly publicKeyShareMaterialContributions: readonly PublicKeyShareMaterialContributionInput[];
@@ -920,7 +920,7 @@ const assertProfileRingUsesTerminalMaterialTransport = (
         'transportedSameSecretProofMaterial',
         sameSecretProofMaterialTransportSetObjectType,
         sameSecretProofMaterialTransportObjectType,
-        'same-secret-consistency',
+        'same-secret-linkage-anchor',
         input.sameSecretProofMaterials,
         'sameSecretProofMaterials',
     );
@@ -2167,9 +2167,7 @@ export const createSetupCeremonyAssembly = async (
         sameSecretConsistency,
         vssCoefficientCommitmentMaterial:
             setupPackageVssCoefficientCommitmentMaterial,
-        setupProofBinding: input.setupProofBinding,
-        sameSecretTboxParameterProfileHash:
-            input.sameSecretTboxParameterProfileHash,
+        proofAccountingHash: input.sameSecretLinkageAnchorProofAccountingHash,
         proofMaterials: input.sameSecretProofMaterials,
     });
     const publicKeyShares = createPublicKeyShareSet({

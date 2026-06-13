@@ -57,6 +57,9 @@ pub(crate) use commands::{
 
 pub(in crate::bgv::setup) use accounting::{
     succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
+    succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
+    succinct_same_secret_linkage_anchor_accounting_hash,
+    succinct_same_secret_linkage_anchor_accounting_value,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 #[cfg(test)]
@@ -67,7 +70,7 @@ pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
-    TrusteeEvaluationKeyContext, TrusteeEvaluationKeyStatement,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -90,6 +93,37 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes
 }
 
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str = "trustee-evaluation-key";
+pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
+pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
+// The anchor family runs the same closed argument; its accounting object
+// carries the family relation rows and the WASM browser measurement row.
+pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS: &str =
+    "succinct-same-secret-linkage-anchor-argument-accounting-accepted";
+pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS: &str =
+    "succinct-same-secret-linkage-anchor-argument-verified-with-accepted-proof-accounting";
+// The public-key share family runs the same closed argument with one
+// share-correctness relation per Q_share limb and the single constant
+// commitment opening that links its secret to the anchor.
+pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS: &str =
+    "succinct-public-key-share-argument-accounting-accepted";
+pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS: &str =
+    "succinct-public-key-share-argument-verified-with-accepted-proof-accounting";
+
+// Canonical hash of transported same-secret linkage anchor proof bytes.
+pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
+    hash512_hex(
+        "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1",
+        &[proof_bytes],
+    )
+}
+
+// Canonical hash of transported public-key share succinct proof bytes.
+pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(proof_bytes: &[u8]) -> String {
+    hash512_hex(
+        "sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1",
+        &[proof_bytes],
+    )
+}
 // The model status states the closed accounting on every record: the argument
 // is verified and every accounting row is accepted under the explicitly named
 // FRI conjecture and referenced QROM reductions.

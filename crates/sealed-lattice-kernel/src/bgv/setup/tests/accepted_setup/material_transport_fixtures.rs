@@ -428,30 +428,11 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         let proof_bytes = decode_hex(&proof_bytes_hex).expect("proof bytes");
         let chunks = proof_bytes_transport_chunks(proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
-            "same-secret-consistency",
+            "same-secret-linkage-anchor",
             &chunks,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("same-secret proof transport hashes");
-        let proof_size_bytes = proof_record["proofSizeBytes"]
-            .as_u64()
-            .expect("proof size bytes");
-        let proof_bytes_hash = proof_record["proofBytesHash"]
-            .as_str()
-            .expect("proof bytes hash")
-            .to_string();
-        let statement_hash = proof_record["statementHash"]
-            .as_str()
-            .expect("statement hash")
-            .to_string();
-        let relation_commitment_hash = proof_record["relationCommitmentHash"]
-            .as_str()
-            .expect("relation commitment hash")
-            .to_string();
-        let tbox_commitment_prefix_hash = proof_record["tboxCommitmentPrefixHash"]
-            .as_str()
-            .expect("tbox commitment prefix hash")
-            .to_string();
         let trustee_identity = proof_record["trusteeIdentity"]
             .as_str()
             .expect("trustee identity")
@@ -459,27 +440,12 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         let trustee_roster_position = proof_record["trusteeRosterPosition"]
             .as_u64()
             .expect("trustee roster position");
-        let proof_material_root =
-            setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
-                setup_profile_id: "CollectiveBgvSetup-v1",
-                proof_family: "same-secret-consistency",
-                trustee_identity: &trustee_identity,
-                trustee_roster_position,
-                statement_hash_hex: &statement_hash,
-                relation_commitment_hash_hex: &relation_commitment_hash,
-                tbox_commitment_prefix_hash: &tbox_commitment_prefix_hash,
-                proof_size_bytes,
-                proof_bytes_hash: &proof_bytes_hash,
-                transport_hashes: &transport_hashes,
-            })
-            .expect("same-secret proof material root");
         let proof_record_object = proof_record
             .as_object_mut()
             .expect("same-secret proof record object");
         proof_record_object.remove("proofBytesHex");
         proof_record_object.remove("sameSecretProofRoot");
         proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
-        proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
         proof_record["proofChunkSizeBytes"] =
             serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
         proof_record["proofChunkCount"] = serde_json::json!(transport_hashes.chunk_hashes.len());
@@ -488,6 +454,10 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         proof_record["proofFullObjectHash"] = serde_json::json!(transport_hashes.full_object_hash);
         proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
         proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
+        let proof_material_root =
+            same_secret_anchor_proof_material_root(proof_record, &transport_hashes)
+                .expect("same-secret anchor proof material root");
+        proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
         proof_record["sameSecretProofRoot"] = serde_json::json!(
             derive_protocol_hash("SameSecretProofRoot", proof_record)
                 .expect("same-secret proof root")
@@ -502,7 +472,7 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-            "proofFamily": "same-secret-consistency",
+            "proofFamily": "same-secret-linkage-anchor",
             "proofMaterialRoot": proof_record["proofMaterialRoot"],
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": transport_hashes.chunk_hashes.len(),
@@ -528,7 +498,7 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": "same-secret-consistency",
+        "proofFamily": "same-secret-linkage-anchor",
         "proofMaterials": proof_materials,
     })
 }
@@ -678,14 +648,14 @@ pub(super) struct TerminalEvaluationKeyTransportSinks {
     pub(super) proof_materials: Vec<serde_json::Value>,
 }
 
-struct TransportedMaterialCertificateFields {
+pub(super) struct TransportedMaterialCertificateFields {
     byte_length: &'static str,
     full_object_hash: &'static str,
     chunk_root: &'static str,
     chunk_hashes: &'static str,
 }
 
-const DIRECT_TRANSPORT_CERTIFICATE_FIELDS: TransportedMaterialCertificateFields =
+pub(super) const DIRECT_TRANSPORT_CERTIFICATE_FIELDS: TransportedMaterialCertificateFields =
     TransportedMaterialCertificateFields {
         byte_length: "totalByteLength",
         full_object_hash: "fullObjectHash",
@@ -885,7 +855,7 @@ fn append_direct_transport_certificate_entry(
     );
 }
 
-fn append_transport_certificate_entries_from_material_set(
+pub(super) fn append_transport_certificate_entries_from_material_set(
     package: &mut serde_json::Value,
     material_set: &serde_json::Value,
     materials_field_name: &'static str,

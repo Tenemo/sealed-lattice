@@ -3,11 +3,11 @@ use crate::hashing::hash512_hex;
 
 #[test]
 fn setup_proof_challenge_sampler_derives_autostable_bounded_coefficients() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
 
     let coefficients = derive_setup_proof_challenge_coefficients(
-        "same-secret-consistency",
+        "public-key-share",
         &statement_hash,
         &relation_commitment_hash,
         16,
@@ -34,19 +34,19 @@ fn setup_proof_challenge_sampler_derives_autostable_bounded_coefficients() {
 
 #[test]
 fn setup_proof_challenge_sampler_binds_statement_and_relation() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let other_statement_hash = hash512_hex("test-statement", &[b"same-secret-drift"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let other_statement_hash = hash512_hex("test-statement", &[b"setup-proof-test-drift"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
 
     let first = derive_setup_proof_challenge_coefficients(
-        "same-secret-consistency",
+        "public-key-share",
         &statement_hash,
         &relation_commitment_hash,
         32,
     )
     .expect("challenge coefficients");
     let second = derive_setup_proof_challenge_coefficients(
-        "same-secret-consistency",
+        "public-key-share",
         &other_statement_hash,
         &relation_commitment_hash,
         32,
@@ -58,11 +58,11 @@ fn setup_proof_challenge_sampler_binds_statement_and_relation() {
 
 #[test]
 fn setup_proof_challenge_sampler_rejects_wrong_profile_shape() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
 
     let odd_ring_error = derive_setup_proof_challenge_coefficients(
-        "same-secret-consistency",
+        "public-key-share",
         &statement_hash,
         &relation_commitment_hash,
         15,
@@ -120,16 +120,18 @@ fn setup_proof_lnp_tbox_uniform_sampler_uses_full_declared_width() {
 
 #[test]
 fn setup_proof_scalar_challenge_sampler_uses_declared_width() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
     let mut observed_above_old_word = false;
     let challenge_maximum = (1_u64 << 45) - 1;
 
     for relation_index in 0..64_u64 {
         let relation_index_bytes = relation_index.to_le_bytes();
-        let relation_commitment_hash =
-            hash512_hex("test-relation", &[b"same-secret", &relation_index_bytes]);
+        let relation_commitment_hash = hash512_hex(
+            "test-relation",
+            &[b"setup-proof-test", &relation_index_bytes],
+        );
         let challenge = derive_setup_proof_scalar_challenge(
-            "same-secret-consistency",
+            "public-key-share",
             "sealed-lattice/setup/test/scalar-challenge-v1",
             &statement_hash,
             &relation_commitment_hash,
@@ -198,8 +200,8 @@ fn setup_proof_challenge_space_audit_covers_all_families_and_invertible_differen
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_accepts_generated_canonical_proof_byte_layout() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
     let proof_bytes = encode_lnp_tbox_proof_for_test(
         &layout,
@@ -294,7 +296,6 @@ fn setup_proof_lnp_tbox_decoder_accepts_generated_canonical_proof_byte_layout() 
 fn setup_proof_lnp_tbox_decoder_accepts_generated_suffix_for_all_setup_families() {
     for layout in [
         private_vss_share_lnp_tbox_layout(),
-        same_secret_lnp_tbox_layout(),
         public_key_share_lnp_tbox_layout(),
     ] {
         let statement_hash = hash512_hex(
@@ -457,8 +458,8 @@ fn setup_proof_lnp_tbox_z34_check_window_hash_binds_signed_values() {
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_rejects_z34_norm_bound_overflow() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
 
     let high_z3_proof_bytes = encode_lnp_tbox_proof_for_test(
@@ -502,8 +503,8 @@ fn setup_proof_lnp_tbox_decoder_rejects_z34_norm_bound_overflow() {
 
 #[test]
 fn setup_proof_lnp_tbox_z34_seed_material_tracks_t_b_seed_components() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
     let proof_bytes = encode_lnp_tbox_proof_for_test(
         &layout,
@@ -574,8 +575,8 @@ fn setup_proof_lnp_tbox_z34_seed_material_tracks_t_b_seed_components() {
 
 #[test]
 fn setup_proof_lnp_tbox_z34_tail_hash_tracks_t_b_tail_components() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
     let proof_bytes = encode_lnp_tbox_proof_for_test(
         &layout,
@@ -714,8 +715,8 @@ fn setup_proof_lnp_gaussian_decoder_matches_lazer_signed_values() {
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_rejects_noncanonical_uniform_residue() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
     let dummy_challenge = vec![0_i64; layout.proof_ring_degree];
     let proof_bytes = encode_lnp_tbox_proof_for_test(
@@ -742,8 +743,8 @@ fn setup_proof_lnp_tbox_decoder_rejects_noncanonical_uniform_residue() {
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_rejects_nonzero_h_forced_zero_position() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
     let mut proof_bytes = encode_lnp_tbox_proof_for_test(
         &layout,
@@ -772,8 +773,8 @@ fn setup_proof_lnp_tbox_decoder_rejects_nonzero_h_forced_zero_position() {
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_rejects_challenge_drift_and_trailing_bytes() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
     let valid_proof_bytes = encode_lnp_tbox_proof_for_test(
         &layout,
@@ -844,8 +845,8 @@ fn setup_proof_lnp_tbox_decoder_rejects_challenge_drift_and_trailing_bytes() {
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_rejects_noncanonical_generated_suffix() {
-    let statement_hash = hash512_hex("test-statement", &[b"same-secret"]);
-    let relation_commitment_hash = hash512_hex("test-relation", &[b"same-secret"]);
+    let statement_hash = hash512_hex("test-statement", &[b"setup-proof-test"]);
+    let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
     let layout = small_lnp_tbox_layout_for_test();
 
     let nonzero_hint_proof_bytes = encode_lnp_tbox_proof_for_test(
@@ -892,9 +893,9 @@ fn setup_proof_lnp_tbox_decoder_rejects_noncanonical_generated_suffix() {
 
 fn small_lnp_tbox_layout_for_test() -> SetupProofLnpTboxLayout {
     SetupProofLnpTboxLayout {
-        proof_family: "same-secret-consistency",
-        tbox_parameter_profile_id: SAME_SECRET_LNP_TBOX_PARAMETER_PROFILE_ID,
-        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/same-secret/lnp-tbox-commitment-prefix-v1",
+        proof_family: "public-key-share",
+        tbox_parameter_profile_id: PUBLIC_KEY_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID,
+        tbox_commitment_prefix_hash_domain: "sealed-lattice/setup/public-key-share/lnp-tbox-commitment-prefix-v1",
         proof_ring_degree: SETUP_PROOF_LNP_PROOF_RING_DEGREE,
         proof_modulus: BigUint::from(12_289_u64),
         proof_modulus_bit_count: 14,

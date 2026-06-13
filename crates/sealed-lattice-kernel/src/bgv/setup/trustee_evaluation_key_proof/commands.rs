@@ -2,6 +2,9 @@ use serde_json::{Value, json};
 
 use super::accounting::{
     succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
+    succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
+    succinct_same_secret_linkage_anchor_accounting_hash,
+    succinct_same_secret_linkage_anchor_accounting_value,
 };
 use super::proof_codec::{
     decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
@@ -9,7 +12,8 @@ use super::proof_codec::{
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
-    TrusteeEvaluationKeyContext, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+    SuccinctSetupProofContext, SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyStatement,
+    TrusteeEvaluationKeyWitness,
 };
 use super::verifier::verify_evaluation_key_share;
 use super::*;
@@ -17,7 +21,48 @@ use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
 use crate::bgv::validation::reject_unexpected_bgv_request_fields;
 use crate::hashing::to_hex;
 
-use super::TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS as PROOF_MODEL_STATUS;
+// The model status and accounting object each migrated family carries on its
+// command responses. The argument machinery is shared, so only the family
+// label, model status, and accounting object differ.
+fn family_proof_model_status(shape: SuccinctSetupProofFamilyShape) -> &'static str {
+    match shape {
+        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
+            SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS
+        }
+        SuccinctSetupProofFamilyShape::PublicKeyShare => {
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS
+        }
+        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
+            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS
+        }
+    }
+}
+
+fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<String> {
+    match shape {
+        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
+            succinct_same_secret_linkage_anchor_accounting_hash()
+        }
+        SuccinctSetupProofFamilyShape::PublicKeyShare => succinct_public_key_share_accounting_hash(),
+        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
+            succinct_evaluation_key_proof_accounting_hash()
+        }
+    }
+}
+
+fn family_accounting_value(shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<Value> {
+    match shape {
+        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
+            succinct_same_secret_linkage_anchor_accounting_value()
+        }
+        SuccinctSetupProofFamilyShape::PublicKeyShare => {
+            succinct_public_key_share_accounting_value()
+        }
+        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
+            succinct_evaluation_key_proof_accounting_value()
+        }
+    }
+}
 
 // Generate one trustee-batched evaluation-key proof from a JSON request. The
 // statement carries the ceremony context, the key descriptors with embedded
@@ -46,7 +91,10 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     )?;
     let statement = statement_from_request(request)?;
     let secret_coefficients = read_i64_array(request, "secretCoefficients")?;
-    let error_coefficients_by_key = read_i64_matrix(request, "errorCoefficientsByKey")?;
+    let error_coefficients_by_key = match request.get("errorCoefficientsByKey") {
+        Some(_) => read_i64_matrix(request, "errorCoefficientsByKey")?,
+        None => Vec::new(),
+    };
     let negative_indicator_coefficients = match request.get("negativeIndicatorCoefficients") {
         Some(_) => read_i64_array(request, "negativeIndicatorCoefficients")?,
         None => Vec::new(),
@@ -66,12 +114,14 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
 
     let proof = prove_evaluation_key_share(&statement, &witness, proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+    let shape = statement.family_shape()?;
 
     Ok(json!({
         "ok": true,
         "operation": "generateTrusteeEvaluationKeyProof",
-        "proofModelStatus": PROOF_MODEL_STATUS,
-        "proofAccountingHash": succinct_evaluation_key_proof_accounting_hash()?,
+        "proofFamily": statement.context.proof_family,
+        "proofModelStatus": family_proof_model_status(shape),
+        "proofAccountingHash": family_accounting_hash(shape)?,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "keyCount": statement.keys.len(),
@@ -103,13 +153,15 @@ pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
     let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
+    let shape = statement.family_shape()?;
 
     Ok(json!({
         "ok": true,
         "operation": "verifyTrusteeEvaluationKeyProof",
-        "proofModelStatus": PROOF_MODEL_STATUS,
-        "proofAccountingHash": succinct_evaluation_key_proof_accounting_hash()?,
-        "proofAccounting": succinct_evaluation_key_proof_accounting_value()?,
+        "proofFamily": statement.context.proof_family,
+        "proofModelStatus": family_proof_model_status(shape),
+        "proofAccountingHash": family_accounting_hash(shape)?,
+        "proofAccounting": family_accounting_value(shape)?,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "keyCount": statement.keys.len(),
@@ -122,22 +174,6 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
     let context_value = request
         .get("context")
         .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
-    let context = TrusteeEvaluationKeyContext {
-        ceremony_id: read_string(context_value, "ceremonyId")?.to_string(),
-        manifest_hash: read_string(context_value, "manifestHash")?.to_string(),
-        roster_hash: read_string(context_value, "rosterHash")?.to_string(),
-        trustee_identity: read_string(context_value, "trusteeIdentity")?.to_string(),
-        trustee_roster_position: read_u64(context_value, "trusteeRosterPosition")?,
-        setup_epoch: read_string(context_value, "setupEpoch")?.to_string(),
-        required_galois_set_hash: read_string(context_value, "requiredGaloisSetHash")?.to_string(),
-        evaluator_key_schedule_root: read_string(context_value, "evaluatorKeyScheduleRoot")?
-            .to_string(),
-        key_switch_decomposition_hash: read_string(context_value, "keySwitchDecompositionHash")?
-            .to_string(),
-        same_secret_statement_root: read_string(context_value, "sameSecretStatementRoot")?
-            .to_string(),
-        same_secret_proof_root: read_string(context_value, "sameSecretProofRoot")?.to_string(),
-    };
     let ring_degree = usize::try_from(read_u64(request, "ringDegree")?)
         .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
     let key_values = request
@@ -148,6 +184,30 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
         .iter()
         .map(key_descriptor_from_value)
         .collect::<CanonicalResult<Vec<_>>>()?;
+    // The key kinds decide the family, and the family decides which labeled
+    // binding roots the context must carry.
+    let shape = SuccinctSetupProofFamilyShape::from_key_kinds(
+        &keys.iter().map(|key| key.kind).collect::<Vec<_>>(),
+    )?;
+    let context = SuccinctSetupProofContext {
+        proof_family: shape.proof_family().to_string(),
+        ceremony_id: read_string(context_value, "ceremonyId")?.to_string(),
+        manifest_hash: read_string(context_value, "manifestHash")?.to_string(),
+        roster_hash: read_string(context_value, "rosterHash")?.to_string(),
+        trustee_identity: read_string(context_value, "trusteeIdentity")?.to_string(),
+        trustee_roster_position: read_u64(context_value, "trusteeRosterPosition")?,
+        setup_epoch: read_string(context_value, "setupEpoch")?.to_string(),
+        binding_roots: shape
+            .binding_labels()
+            .iter()
+            .map(|label| {
+                Ok((
+                    (*label).to_string(),
+                    read_string(context_value, label)?.to_string(),
+                ))
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?,
+    };
     let same_secret_linkage = match request.get("sameSecretLinkage") {
         None | Some(Value::Null) => None,
         Some(linkage_value) => {
@@ -187,6 +247,7 @@ fn key_descriptor_from_value(key_value: &Value) -> CanonicalResult<EvaluationKey
             galois_element: usize::try_from(read_u64(key_value, "rotation")?)
                 .map_err(|_| invalid_succinct_setup_proof("rotation does not fit usize"))?,
         },
+        "public-key-share" => EvaluationKeyShareKind::PublicKeyShare,
         unknown => {
             return Err(invalid_succinct_setup_proof(format!(
                 "unknown evaluation-key proof family {unknown}"

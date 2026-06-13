@@ -15,8 +15,8 @@ import {
     publicKeyShareCoefficientVectorHashDomain,
     publicKeyShareLnpProofModelStatus,
     publicKeyShareLnpProofVerificationStatus,
-    sameSecretLnpProofModelStatus,
-    sameSecretLnpProofVerificationStatus,
+    sameSecretAnchorProofModelStatus,
+    sameSecretAnchorProofVerificationStatus,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
@@ -330,32 +330,21 @@ const vssSourceTrusteeOpeningState = (
 const sameSecretProofMaterial = (
     kernel: TranscriptCoreKernel,
     statementRecord: Record<string, unknown>,
-    sameSecretTboxParameterProfileHash: string,
 ): Record<string, unknown> => {
     const proofRosterPosition = Number(statementRecord.trusteeRosterPosition);
     const proofBytesHex = `aa55${proofRosterPosition.toString(16).padStart(4, '0')}`;
 
     return {
         setupProofProfileId,
-        proofFamily: 'same-secret-consistency',
-        proofVerificationStatus: sameSecretLnpProofVerificationStatus,
-        proofModelStatus: sameSecretLnpProofModelStatus,
-        sameSecretTboxParameterProfileHash,
+        proofFamily: 'same-secret-linkage-anchor',
+        proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
+        proofModelStatus: sameSecretAnchorProofModelStatus,
         trusteeIdentity: statementRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
         statementHash: hashFromKernel(
             kernel,
             `same-secret-proof-statement-${String(proofRosterPosition)}`,
         ),
-        relationCommitmentHash: hashFromKernel(
-            kernel,
-            `same-secret-proof-relation-${String(proofRosterPosition)}`,
-        ),
-        tboxCommitmentPrefixHash: hashFromKernel(
-            kernel,
-            `same-secret-proof-tbox-${String(proofRosterPosition)}`,
-        ),
-        challenge: 17 + proofRosterPosition,
         proofSizeBytes: proofBytesHex.length / 2,
         proofBytesHash: hashFromKernel(
             kernel,
@@ -1214,9 +1203,9 @@ describe('accepted setup public package API in Node', () => {
                 sameSecretConsistency,
                 publicKeyShares,
             });
-        const sameSecretTboxParameterProfileHash = hashFromKernel(
+        const sameSecretLinkageAnchorProofAccountingHash = hashFromKernel(
             kernel,
-            'same-secret-tbox',
+            'same-secret-linkage-anchor-proof-accounting',
         );
         const setupProofBinding = {
             objectType: 'SetupProofBindingFixture',
@@ -1228,19 +1217,14 @@ describe('accepted setup public package API in Node', () => {
             participantCount,
             sameSecretConsistency,
             vssCoefficientCommitmentMaterial,
-            setupProofBinding,
-            sameSecretTboxParameterProfileHash,
+            proofAccountingHash: sameSecretLinkageAnchorProofAccountingHash,
             proofMaterials: (
                 sameSecretConsistency.statementRecords as readonly Record<
                     string,
                     unknown
                 >[]
             ).map((statementRecord) =>
-                sameSecretProofMaterial(
-                    kernel,
-                    statementRecord,
-                    sameSecretTboxParameterProfileHash,
-                ),
+                sameSecretProofMaterial(kernel, statementRecord),
             ),
         });
         const publicKeyShareMaterial =

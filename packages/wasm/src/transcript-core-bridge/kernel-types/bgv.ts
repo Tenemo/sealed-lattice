@@ -711,28 +711,6 @@ type BgvSetupProofTboxZ34Metadata = {
     readonly z34Z4InfinityNormDecimal: string;
 };
 
-export type BgvSameSecretLnpProofGeneration = {
-    readonly ok: true;
-    readonly operation: 'generateSameSecretLnpProof';
-    readonly setupProofProfileId: string;
-    readonly proofFamily: 'same-secret-consistency';
-    readonly proofVerificationStatus: string;
-    readonly proofModelStatus: string;
-    readonly sameSecretTboxParameterProfileHash: ProtocolHash;
-    readonly statementHash: ProtocolHash;
-    readonly relationCommitmentHash: ProtocolHash;
-    readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: BgvSetupProofChallenge;
-    readonly proofSizeBytes: number;
-    readonly proofBytesHash: ProtocolHash;
-    readonly proofBytesHex: string;
-    readonly proofRandomness: {
-        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
-        readonly seedBytes: 64;
-        readonly retention: string;
-    };
-} & BgvSetupProofTboxZ34Metadata;
-
 export type BgvPublicKeyShareLnpProofGeneration = {
     readonly ok: true;
     readonly operation: 'generatePublicKeyShareLnpProof';
@@ -773,6 +751,10 @@ export type BgvTrusteeEvaluationKeyStatementKey = {
     readonly roundOneAggregateDiagonal?: readonly (readonly number[])[];
 };
 
+// The kernel derives the proof family from the key list: a populated key
+// list is the trustee evaluation-key family and binds the schedule roots; an
+// empty key list is the keyless same-secret linkage anchor family and binds
+// the accepted public VSS material root.
 export type BgvTrusteeEvaluationKeyStatementContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
@@ -780,12 +762,18 @@ export type BgvTrusteeEvaluationKeyStatementContext = {
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly setupEpoch: string;
-    readonly requiredGaloisSetHash: ProtocolHash;
-    readonly evaluatorKeyScheduleRoot: ProtocolHash;
-    readonly keySwitchDecompositionHash: ProtocolHash;
-    readonly sameSecretStatementRoot: ProtocolHash;
-    readonly sameSecretProofRoot: ProtocolHash;
-};
+} & (
+    | {
+          readonly requiredGaloisSetHash: ProtocolHash;
+          readonly evaluatorKeyScheduleRoot: ProtocolHash;
+          readonly keySwitchDecompositionHash: ProtocolHash;
+          readonly sameSecretStatementRoot: ProtocolHash;
+          readonly sameSecretProofRoot: ProtocolHash;
+      }
+    | {
+          readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+      }
+);
 
 export type BgvTrusteeEvaluationKeySameSecretLinkage = {
     readonly publicMatrixSeedHash: ProtocolHash;
@@ -795,6 +783,9 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
 export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly ok: true;
     readonly operation: 'generateTrusteeEvaluationKeyProof';
+    readonly proofFamily:
+        | 'trustee-evaluation-key'
+        | 'same-secret-linkage-anchor';
     readonly proofModelStatus: string;
     readonly proofAccountingHash: ProtocolHash;
     readonly statementHash: ProtocolHash;
@@ -812,6 +803,9 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
 export type BgvTrusteeEvaluationKeyProofVerification = {
     readonly ok: true;
     readonly operation: 'verifyTrusteeEvaluationKeyProof';
+    readonly proofFamily:
+        | 'trustee-evaluation-key'
+        | 'same-secret-linkage-anchor';
     readonly proofModelStatus: string;
     readonly proofAccountingHash: ProtocolHash;
     readonly proofAccounting: Readonly<Record<string, unknown>>;

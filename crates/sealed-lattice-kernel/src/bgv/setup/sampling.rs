@@ -254,16 +254,28 @@ pub(super) fn sample_centered_binomial_eta2(
 }
 
 pub(super) fn dense_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<u64> {
+    dense_public_residues_with_degree(seed_hash, label, modulus, POLYNOMIAL_DEGREE)
+}
+
+// Same per-position framing as `dense_public_residues` over an explicit
+// degree, so reduced development rings derive a prefix of the profile-ring
+// residues instead of a differently framed vector.
+pub(super) fn dense_public_residues_with_degree(
+    seed_hash: &str,
+    label: &str,
+    modulus: u64,
+    ring_degree: usize,
+) -> Vec<u64> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        (0..POLYNOMIAL_DEGREE)
+        (0..ring_degree)
             .into_par_iter()
             .map(|position| sample_residue(seed_hash, label, position, modulus))
             .collect()
     }
     #[cfg(target_arch = "wasm32")]
     {
-        (0..POLYNOMIAL_DEGREE)
+        (0..ring_degree)
             .map(|position| sample_residue(seed_hash, label, position, modulus))
             .collect()
     }

@@ -510,7 +510,10 @@ pub(super) fn setup_proof_accounting_certificate_with_hash_value() -> CanonicalR
 }
 
 fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
-    use crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash;
+    use crate::bgv::setup::trustee_evaluation_key_proof::{
+        succinct_evaluation_key_proof_accounting_hash,
+        succinct_same_secret_linkage_anchor_accounting_hash,
+    };
 
     Ok(json!([
         {
@@ -532,22 +535,22 @@ fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
             },
         },
         {
-            "proofFamily": "same-secret-consistency",
-            "claimScope": "same trustee secret across accepted VSS constant commitments",
-            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "proofFamily": "same-secret-linkage-anchor",
+            "claimScope": "one short trustee secret behind every accepted VSS constant commitment, proven once per trustee by a keyless succinct linkage argument over the commitment-modulus fields",
+            "verifierClosedStatus": "statement-rebuild-and-argument-checks-verifier-closed",
             "verifierClosedChecks": [
-                "statement hash binds setup proof record binding, trustee statement roots, accepted constant commitment roots, and tbox profile hash",
-                "relation commitment hash and scalar challenge are recomputed from proof commitments and canonical transcript fields",
-                "accepted same-secret tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
-                "ternary secret support is checked through Boolean negative-indicator and shifted-secret support equations",
-                "all accepted Q_share constant commitments are checked against one shared secret response and opening randomness response",
-                "secret, negative-indicator, and randomness responses are checked against fixed first-profile bounds",
+                "every anchor statement is rebuilt by the verifier from the accepted VSS constant commitments, the accepted public VSS material root, and the ceremony context; no prover-supplied statement field is trusted",
+                "the linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against one committed ternary secret with Boolean negative-indicator support",
+                "per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every commitment-modulus field",
+                "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",
+                "canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package",
             ],
-            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "accountingStatus": "succinct-same-secret-linkage-anchor-theorem-accounting-accepted",
             "claimAccounting": {
-                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the same-secret relation because the verifier binds one shared secret response to every accepted constant commitment and support equation",
-                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit same-secret and support-response masks with witness-dependent support commitments treated as simulated first messages under the fixed relation and no-wrap response accounting",
-                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+                "accountingObject": "SuccinctSameSecretLinkageAnchorAccounting",
+                "accountingHash": succinct_same_secret_linkage_anchor_accounting_hash()?,
+                "closedItems": "the explicitly conjectured low-degree bound with its proven fallback, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the certified smudging leakage budget, and the round-by-round Fiat-Shamir accounting with referenced QROM reductions are accepted rows inside the bound accounting object",
+                "claimBoundary": "active-malicious same-secret linkage accounting is accepted under the named FRI conjecture; secret-dependent setup families reference this anchor through the accepted family binding root",
             },
         },
         {
@@ -607,7 +610,6 @@ fn setup_proof_tbox_accounting_value() -> CanonicalResult<Value> {
         "challengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
         "profileHashes": {
             "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-            "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
             "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
         },
         "challengeAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
@@ -637,7 +639,6 @@ fn setup_proof_tbox_accounting_value() -> CanonicalResult<Value> {
 fn setup_proof_scalar_relation_challenge_bits() -> CanonicalResult<usize> {
     let challenge_bits = [
         PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS,
         PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
     ];
     let first_challenge_bits = challenge_bits[0];
@@ -700,10 +701,6 @@ fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Valu
                         "domain": PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
                     },
                     {
-                        "proofFamily": "same-secret-consistency",
-                        "domain": SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN,
-                    },
-                    {
                         "proofFamily": "public-key-share",
                         "domain": PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
                     },
@@ -761,10 +758,9 @@ fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
         "accountingStatus": "repo-owned-setup-proof-soundness-zero-knowledge-and-qrom-accounting-accepted",
         "acceptedClaimScope": [
             "private VSS share opening and carry proof relation",
-            "same-secret consistency proof relation",
             "public-key share proof relation",
         ],
-        "claimScopeBoundary": "the trustee evaluation-key argument is accounted by the bound SuccinctEvaluationKeyProofAccounting object and is outside this accepted LNP theorem scope until its open rows close",
+        "claimScopeBoundary": "the same-secret linkage anchor and the trustee evaluation-key argument are accounted by their bound succinct accounting objects and are outside this accepted LNP theorem scope",
         "soundnessAccounting": {
             "baseProtocol": "LNP22 AB-DLOP/LNP commit-and-prove linear-relation proof profile",
             "extractorModel": "repo-owned extractor mapping over verifier-closed statement roots, relation commitments, generated tbox bytes, response bounds, no-wrap lifted relations, and support equations",
@@ -793,7 +789,7 @@ fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
             "challengeStageCount": 2,
             "lnpPolynomialChallengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
             "scalarRelationChallengeBits": scalar_relation_challenge_bits,
-            "compositionStatus": "accepted-for-fixed-three-family-two-stage-setup-profile",
+            "compositionStatus": "accepted-for-fixed-two-family-two-stage-setup-profile",
             "duplicateFreeInputStatus": "accepted-by-family-specific-domain-separation-and-stage-specific-transcript-inputs",
             "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
         },
@@ -1005,18 +1001,6 @@ fn setup_proof_response_masking_accounting_value() -> CanonicalResult<Value> {
             "setup proof response accounting public-key carry bound overflowed",
         )
     })?;
-    let same_secret_response_bound = response_profile_bound(
-        SAME_SECRET_MESSAGE_MASK_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-        SAME_SECRET_TERNARY_INFINITY_BOUND as u128,
-        0,
-    )?;
-    let same_secret_negative_response_bound = response_profile_bound(
-        SAME_SECRET_MESSAGE_MASK_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-        0,
-    )?;
     let public_key_secret_response_bound = response_profile_bound(
         PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
         PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
@@ -1074,42 +1058,6 @@ fn setup_proof_response_masking_accounting_value() -> CanonicalResult<Value> {
                 ],
                 "fullWidthCoefficientMaskingStatus": "centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted",
                 "commitmentNoWrapStatus": "three-limb-big-int-no-wrap-bound-recorded",
-            },
-            {
-                "proofFamily": "same-secret-consistency",
-                "responseProfiles": [
-                    response_mask_profile_value(
-                        "secret",
-                        SAME_SECRET_MESSAGE_MASK_BITS,
-                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-                        SAME_SECRET_TERNARY_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "negative-indicator",
-                        SAME_SECRET_MESSAGE_MASK_BITS,
-                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-                        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "opening-randomness",
-                        SAME_SECRET_RANDOMNESS_MASK_BITS,
-                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
-                        0,
-                        "signed-opening-response",
-                    )?,
-                ],
-                "liftedMessageNoWrap": lifted_message_no_wrap_value(
-                    "secret-plus-rns-prime-times-negative-indicator",
-                    same_secret_response_bound,
-                    same_secret_negative_response_bound,
-                    max_source_message_modulus,
-                    &commitment_modulus_product,
-                )?,
             },
             {
                 "proofFamily": "public-key-share",
@@ -1182,6 +1130,10 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
         "setupProofRecordBindingHash": setup_proof_record_binding_hash()?,
         "proofFamilies": SETUP_PROOF_FAMILIES,
         "proofFamilyAccounting": setup_proof_family_accounting_value()?,
+        "sameSecretLinkageAnchorProofAccounting":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_value()?,
+        "sameSecretLinkageAnchorProofAccountingHash":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
         "trusteeEvaluationKeyProofAccounting":
             crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_value()?,
         "trusteeEvaluationKeyProofAccountingHash":
@@ -1218,8 +1170,8 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
             ],
         },
         "completionBoundary": "claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate",
-        "certificateStatus": "lnp-and-trustee-evaluation-key-family-accounting-accepted",
-        "claimBoundary": "every bound setup proof family carries accepted accounting: the LNP families under their closed tbox and challenge accounting, and the trustee evaluation-key family under the named FRI conjecture with referenced QROM reductions",
+        "certificateStatus": "lnp-same-secret-linkage-anchor-and-trustee-evaluation-key-family-accounting-accepted",
+        "claimBoundary": "every bound setup proof family carries accepted accounting: the LNP families under their closed tbox and challenge accounting, and the same-secret linkage anchor and trustee evaluation-key families under the named FRI conjecture with referenced QROM reductions",
     }))
 }
 
