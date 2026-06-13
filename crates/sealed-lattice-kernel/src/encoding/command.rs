@@ -31,6 +31,9 @@ enum TranscriptCoreCommand {
     BeginThresholdShareCommitmentsFromTransportStream,
     AbsorbThresholdShareCommitmentsFromTransportStreamChunk,
     FinishThresholdShareCommitmentsFromTransportStream,
+    BeginSetupProofMaterialTransportStream,
+    AbsorbSetupProofMaterialTransportStreamChunk,
+    FinishSetupProofMaterialTransportStream,
     VerifyLocalTrusteeSetupState,
     GenerateBgvEvaluationKeyMaterial,
     EncodeBgvBatchPlaintext,
@@ -218,6 +221,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
         | TranscriptCoreCommand::AbsorbThresholdShareCommitmentsFromTransportStreamChunk
         | TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream
+        | TranscriptCoreCommand::BeginSetupProofMaterialTransportStream
+        | TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk
+        | TranscriptCoreCommand::FinishSetupProofMaterialTransportStream
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
         | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
@@ -295,6 +301,15 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream => {
             crate::bgv::commands::finish_threshold_share_commitments_from_transport_stream(request)
+        }
+        TranscriptCoreCommand::BeginSetupProofMaterialTransportStream => {
+            crate::bgv::commands::begin_setup_proof_material_transport_stream(request)
+        }
+        TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk => {
+            crate::bgv::commands::absorb_setup_proof_material_transport_stream_chunk(request)
+        }
+        TranscriptCoreCommand::FinishSetupProofMaterialTransportStream => {
+            crate::bgv::commands::finish_setup_proof_material_transport_stream(request)
         }
         TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
             crate::bgv::commands::verify_local_trustee_setup_state(request)

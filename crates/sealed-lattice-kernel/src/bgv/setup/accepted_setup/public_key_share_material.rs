@@ -14,7 +14,10 @@ const PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
 pub(in crate::bgv::setup) fn public_key_share_coefficient_vector_hash(
     coefficients: &[u64],
 ) -> String {
-    coefficient_vector_hash512(coefficients, PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN)
+    coefficient_vector_hash512(
+        coefficients,
+        PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN,
+    )
 }
 
 #[derive(Clone)]
@@ -118,7 +121,10 @@ pub(super) fn verify_collective_public_key_material(
             "proofVerificationStatus",
             PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        ),
         (
             "aggregationStatus",
             "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
@@ -1332,7 +1338,10 @@ pub(super) fn verify_public_key_share_material_set(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        ("proofModelStatus", PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        ),
     ] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1486,7 +1495,10 @@ fn verify_public_key_share_material_record(
             "materialEncoding",
             "embedded-full-public-key-share-coefficients",
         ),
-        ("proofModelStatus", PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        ),
     ] {
         if material_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1740,7 +1752,7 @@ fn unexpected_collective_public_key_field(value: &Value) -> Option<String> {
             "publicKeyShareSetRoot",
             "publicKeyShareProofSetRoot",
             "publicKeyShareMaterialSetRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sourceShareMaterialRoots",
             "aggregateCoefficientVectorsByLimb",
             "collectivePublicKeyRoot",

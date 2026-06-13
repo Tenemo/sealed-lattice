@@ -80,6 +80,8 @@ type PublicSetupTypes = [
     publicTypes.SetupTransportedVssCoefficientCommitmentMaterialReference,
     publicTypes.SetupTransportedVssCoefficientCommitmentMaterialLike,
     publicTypes.VerifiedVssCoefficientCommitmentMaterial,
+    publicTypes.VerifiedSetupProofMaterial,
+    publicTypes.VerifiedSetupProofMaterialSet,
     publicTypes.CommonRandomnessCommit,
     publicTypes.CommonRandomnessCommitInput,
     publicTypes.CommonRandomnessReveal,
@@ -114,10 +116,10 @@ type PublicSetupTypes = [
     publicTypes.PublicKeyShareCoefficientVectorHash,
     publicTypes.PublicKeyShareCoefficientVectorMaterial,
     publicTypes.PublicKeyShareContributionInput,
-    publicTypes.PublicKeyShareLnpProofMaterial,
-    publicTypes.PublicKeyShareLnpProofRecord,
-    publicTypes.PublicKeyShareLnpProofSet,
-    publicTypes.PublicKeyShareLnpProofSetInput,
+    publicTypes.PublicKeyShareSuccinctProofMaterial,
+    publicTypes.PublicKeyShareSuccinctProofRecord,
+    publicTypes.PublicKeyShareSuccinctProofSet,
+    publicTypes.PublicKeyShareSuccinctProofSetInput,
     publicTypes.PublicKeyShareMaterialContributionInput,
     publicTypes.PublicKeyShareMaterialRecord,
     publicTypes.PublicKeyShareMaterialSet,
@@ -208,6 +210,12 @@ type VerifySetupPackageTransportFieldProbe = [
         : false,
     OptionalInputField<
         publicTypes.VerifySetupPackageInput,
+        'verifiedSetupProofMaterials'
+    > extends publicTypes.VerifiedSetupProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
         'transportedSameSecretProofMaterial'
     > extends publicTypes.TransportedSameSecretProofMaterialSet
         ? true
@@ -245,6 +253,7 @@ type VerifySetupPackageTransportFieldProbe = [
 ];
 
 const verifySetupPackageTransportFieldProbe = [
+    true,
     true,
     true,
     true,
@@ -315,6 +324,8 @@ const publicSetupTypeNames = [
     'SetupTransportedVssCoefficientCommitmentMaterialReference',
     'SetupTransportedVssCoefficientCommitmentMaterialLike',
     'VerifiedVssCoefficientCommitmentMaterial',
+    'VerifiedSetupProofMaterial',
+    'VerifiedSetupProofMaterialSet',
     'CommonRandomnessCommit',
     'CommonRandomnessCommitInput',
     'CommonRandomnessReveal',
@@ -349,10 +360,10 @@ const publicSetupTypeNames = [
     'PublicKeyShareCoefficientVectorHash',
     'PublicKeyShareCoefficientVectorMaterial',
     'PublicKeyShareContributionInput',
-    'PublicKeyShareLnpProofMaterial',
-    'PublicKeyShareLnpProofRecord',
-    'PublicKeyShareLnpProofSet',
-    'PublicKeyShareLnpProofSetInput',
+    'PublicKeyShareSuccinctProofMaterial',
+    'PublicKeyShareSuccinctProofRecord',
+    'PublicKeyShareSuccinctProofSet',
+    'PublicKeyShareSuccinctProofSetInput',
     'PublicKeyShareMaterialContributionInput',
     'PublicKeyShareMaterialRecord',
     'PublicKeyShareMaterialSet',
@@ -420,11 +431,11 @@ describe('election foundation public type surface', () => {
     });
 
     it('keeps accepted setup phase, randomness, key-record, and local-state types available', () => {
-        expect(publicSetupTypeNames).toHaveLength(109);
+        expect(publicSetupTypeNames).toHaveLength(111);
     });
 
     it('keeps setup verifier transport companions on concrete public types', () => {
-        expect(verifySetupPackageTransportFieldProbe).toHaveLength(8);
+        expect(verifySetupPackageTransportFieldProbe).toHaveLength(9);
     });
 
     it('keeps setup package transport companions on concrete public types', () => {

@@ -61,6 +61,74 @@ fn collective_setup_verifier_refuses_malformed_same_secret_statements() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_rebound_malformed_same_secret_anchor_commitment_sets() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_rebound_malformed_same_secret_anchor_commitment_sets",
+    );
+
+    let mut missing_commitment_package = minimal_collective_setup_package();
+    missing_commitment_package["sameSecretConsistency"]["statementRecords"][0]
+        ["constantCoefficientCommitmentRoots"]
+        .as_array_mut()
+        .expect("same-secret constant commitment roots")
+        .pop();
+    assert_same_secret_anchor_commitment_set_mismatch(missing_commitment_package);
+
+    let mut extra_commitment_package = minimal_collective_setup_package();
+    let extra_commitment = extra_commitment_package["sameSecretConsistency"]["statementRecords"][0]
+        ["constantCoefficientCommitmentRoots"][0]
+        .clone();
+    extra_commitment_package["sameSecretConsistency"]["statementRecords"][0]
+        ["constantCoefficientCommitmentRoots"]
+        .as_array_mut()
+        .expect("same-secret constant commitment roots")
+        .push(extra_commitment);
+    assert_same_secret_anchor_commitment_set_mismatch(extra_commitment_package);
+
+    let mut reordered_commitment_package = minimal_collective_setup_package();
+    reordered_commitment_package["sameSecretConsistency"]["statementRecords"][0]
+        ["constantCoefficientCommitmentRoots"]
+        .as_array_mut()
+        .expect("same-secret constant commitment roots")
+        .swap(0, 1);
+    assert_same_secret_anchor_commitment_set_mismatch(reordered_commitment_package);
+
+    let mut duplicated_commitment_package = minimal_collective_setup_package();
+    let duplicated_commitment =
+        duplicated_commitment_package["sameSecretConsistency"]["statementRecords"][0]
+            ["constantCoefficientCommitmentRoots"][0]
+            .clone();
+    duplicated_commitment_package["sameSecretConsistency"]["statementRecords"][0]["constantCoefficientCommitmentRoots"]
+        [1] = duplicated_commitment;
+    assert_same_secret_anchor_commitment_set_mismatch(duplicated_commitment_package);
+
+    let mut wrong_limb_commitment_package = minimal_collective_setup_package();
+    wrong_limb_commitment_package["sameSecretConsistency"]["statementRecords"][0]["constantCoefficientCommitmentRoots"]
+        [0]["rnsLimbIndex"] = serde_json::json!(1);
+    assert_same_secret_anchor_commitment_set_mismatch(wrong_limb_commitment_package);
+}
+
+fn assert_same_secret_anchor_commitment_set_mismatch(mut package: serde_json::Value) {
+    rebind_collective_same_secret_statement_roots(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "sameSecretConstantCommitmentRootMismatch"
+    );
+    assert!(
+        result.get("acceptedSetupHandoff").is_none(),
+        "refused same-secret anchor packages must not return an accepted setup handoff"
+    );
+}
+
+#[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_before_public_key_material()
  {
@@ -296,8 +364,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_byte
             .expect("embedded proof bytes"),
     )
     .expect("proof bytes");
-    let last_byte_index = proof_bytes.len() - 1;
-    proof_bytes[last_byte_index] ^= 1;
+    set_first_masked_consistency_claim_to_noncanonical_modulus(&mut proof_bytes);
     // Keep the cheap size and hash checks satisfied so the refusal must come
     // from the succinct argument verification itself.
     proof_record["proofBytesHex"] = serde_json::json!(to_hex(&proof_bytes));
@@ -306,6 +373,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_byte
             &proof_bytes
         )
     );
+    rebind_collective_same_secret_proof_set_root(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({

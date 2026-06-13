@@ -144,8 +144,8 @@ pub(super) fn verify_public_evaluation_key_set(
             binding.same_secret_proof_family_binding_root.as_str(),
         ),
         (
-            "publicKeyShareLnpProofSetRoot",
-            binding.public_key_share_lnp_proof_set_root.as_str(),
+            "publicKeyShareSuccinctProofSetRoot",
+            binding.public_key_share_succinct_proof_set_root.as_str(),
         ),
         (
             "relinearizationKeyShareRoundsRoot",
@@ -1029,9 +1029,9 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
                 evaluation_keys,
                 "sameSecretProofFamilyBindingRoot",
             )?,
-            "publicKeyShareLnpProofSetRoot": value_string(
+            "publicKeyShareSuccinctProofSetRoot": value_string(
                 evaluation_keys,
-                "publicKeyShareLnpProofSetRoot",
+                "publicKeyShareSuccinctProofSetRoot",
             )?,
             "relinearizationKeyShareRoundsRoot": value_string(
                 evaluation_keys,
@@ -1080,9 +1080,9 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
             evaluation_keys,
             "sameSecretProofFamilyBindingRoot",
         )?,
-        "publicKeyShareLnpProofSetRoot": value_string(
+        "publicKeyShareSuccinctProofSetRoot": value_string(
             evaluation_keys,
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
         )?,
         "relinearizationKeyShareRoundsRoot": value_string(
             evaluation_keys,
@@ -1329,8 +1329,8 @@ fn expected_relinearization_key_roots_for_evaluation_keys(
                     "sameSecretProofFamilyBindingRoot": binding
                         .same_secret_proof_family_binding_root
                         .as_str(),
-                    "publicKeyShareLnpProofSetRoot": binding
-                        .public_key_share_lnp_proof_set_root
+                    "publicKeyShareSuccinctProofSetRoot": binding
+                        .public_key_share_succinct_proof_set_root
                         .as_str(),
                     "relinearizationKeyShareRoundsRoot": relinearization_key_share_rounds_root,
                     "level": level,
@@ -1454,8 +1454,8 @@ fn expected_galois_key_roots_for_evaluation_keys(
                     "sameSecretProofFamilyBindingRoot": binding
                         .same_secret_proof_family_binding_root
                         .as_str(),
-                    "publicKeyShareLnpProofSetRoot": binding
-                        .public_key_share_lnp_proof_set_root
+                    "publicKeyShareSuccinctProofSetRoot": binding
+                        .public_key_share_succinct_proof_set_root
                         .as_str(),
                     "galoisKeyCrpRoot": binding.galois_key_crp_root.as_str(),
                     "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
@@ -1863,7 +1863,7 @@ fn unexpected_public_evaluation_key_set_field(value: &Value) -> Option<String> {
             "rnsLimbCount",
             "evaluatorKeyScheduleRoot",
             "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "relinearizationKeyShareRoundsRoot",
             "relinearizationLevelSchedule",
             "relinearizationKeyRoots",

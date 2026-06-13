@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
 import {
-    privateVssShareLnpProofModelStatus,
-    privateVssShareLnpProofVerificationStatus,
+    privateVssShareSuccinctProofModelStatus,
+    privateVssShareSuccinctProofVerificationStatus,
 } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
 
 const fixtureHash = (label: string): string =>
@@ -88,7 +88,7 @@ describe('private VSS mailbox delivery', () => {
         const proofBytesHex = '0001020304050607';
         const proofBytes = Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7]);
         const proofBytesHash = hash512Hex(
-            'sealed-lattice/setup/private-vss-share/lnp-proof-bytes-v1',
+            'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1',
             [proofBytes],
         );
         let observedPrivateEnvelope: Record<string, unknown> | undefined;
@@ -140,20 +140,16 @@ describe('private VSS mailbox delivery', () => {
             privateVssShareProofFactory: () => ({
                 objectType: 'PrivateVssShareProof',
                 objectVersion: 1,
-                proofProfileId: 'sealed-lattice-private-vss-share-proof-lnp-v1',
+                proofProfileId:
+                    'sealed-lattice-private-vss-share-proof-succinct-v1',
                 setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-                privateVssShareTboxParameterProfileHash:
-                    fixtureHash('private-vss-tbox'),
                 proofVerificationStatus:
-                    privateVssShareLnpProofVerificationStatus,
-                proofModelStatus: privateVssShareLnpProofModelStatus,
+                    privateVssShareSuccinctProofVerificationStatus,
+                proofModelStatus: privateVssShareSuccinctProofModelStatus,
                 proofStatementRoot: fixtureHash('statement-root'),
                 statementHash: fixtureHash('statement-hash'),
-                relationCommitmentHash: fixtureHash('relation-commitment'),
-                tboxCommitmentPrefixHash: fixtureHash('tbox-prefix'),
-                challenge: 17,
                 proofSizeBytes: proofBytes.byteLength,
                 proofBytesHash,
                 proofMaterialRoot: fixtureHash('embedded-material-root'),

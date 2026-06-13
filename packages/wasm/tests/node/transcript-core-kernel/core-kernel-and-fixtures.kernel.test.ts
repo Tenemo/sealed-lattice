@@ -9,7 +9,16 @@ import {
     wasmHeader,
 } from './shared.js';
 
-import { canonicalJson, deriveProtocolHash } from '#packages/crypto/src/index';
+import {
+    canonicalJson,
+    deriveProtocolHash,
+    setupProofMaterialFullObjectHashHex,
+} from '#packages/crypto/src/index';
+import {
+    setupProofChunkManifestRoot,
+    setupProofMaterialChunkHash,
+    setupProofTransportChunkSizeBytes,
+} from '#packages/protocol/src/setup/setup-proof-material-transport';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     normalizeTranscriptCoreKernelBytesForHash,
@@ -59,6 +68,9 @@ type ThresholdShareTransportStreamKernel = Readonly<{
         readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
     }) => unknown;
 }>;
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 describe('transcript-core kernel in Node', () => {
     it('normalizes host-specific Rust source paths before hashing', () => {
@@ -406,6 +418,93 @@ describe('transcript-core kernel in Node', () => {
                 sourceTrusteeCoefficientCommitmentRecords: [],
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('exposes chunk-fed setup proof material stream commands through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const proofFamily = 'same-secret-linkage-anchor';
+        const proofChunk = textEncoder.encode('setup proof material stream');
+        const proofChunks = [proofChunk] as const;
+        const fullObjectHash = setupProofMaterialFullObjectHashHex(
+            proofFamily,
+            proofChunk.byteLength,
+            proofChunks,
+        );
+        const chunkHashes = [
+            setupProofMaterialChunkHash(
+                proofFamily,
+                fullObjectHash,
+                0,
+                proofChunk,
+            ),
+        ];
+        const chunkRoot = setupProofChunkManifestRoot(
+            proofFamily,
+            chunkHashes,
+            fullObjectHash,
+            proofChunk.byteLength,
+        );
+        const proofMaterialRoot = fullObjectHash;
+        const verificationId = 'wasm-setup-proof-material-stream-smoke';
+
+        const beginResult = kernel.beginSetupProofMaterialTransportStream({
+            verificationId,
+            transportedSetupProofMaterial: {
+                objectType: 'SetupTransportedSameSecretProofMaterial',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                proofFamily,
+                proofMaterialRoot,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: 1,
+                totalByteLength: proofChunk.byteLength,
+                fullObjectHash,
+                chunkRoot,
+                chunkHashes,
+            },
+        });
+
+        expect(beginResult).toMatchObject({
+            operation: 'beginSetupProofMaterialTransportStream',
+            verificationId,
+            proofFamily,
+            proofMaterialRoot,
+        });
+
+        const absorbResult =
+            kernel.absorbSetupProofMaterialTransportStreamChunk({
+                verificationId,
+                chunkIndex: 0,
+                bytesHex: bytesToHex(proofChunk),
+            });
+
+        expect(absorbResult).toMatchObject({
+            operation: 'absorbSetupProofMaterialTransportStreamChunk',
+            absorbedChunkIndex: 0,
+            nextChunkIndex: 1,
+            observedTotalByteLength: proofChunk.byteLength,
+        });
+
+        const finishResult = kernel.finishSetupProofMaterialTransportStream({
+            verificationId,
+        });
+
+        expect(finishResult).toMatchObject({
+            operation: 'finishSetupProofMaterialTransportStream',
+            verificationId,
+            proofFamily,
+            proofMaterialRoot,
+            verifiedSetupProofMaterial: {
+                objectType: 'VerifiedSetupProofMaterial',
+                verificationId,
+                proofFamily,
+                proofMaterialRoot,
+                proofFullObjectHash: fullObjectHash,
+                proofChunkRoot: chunkRoot,
+                proofChunkHashes: chunkHashes,
+            },
+        });
     });
 
     it('verifies golden and malformed fixtures with stable outputs', async () => {

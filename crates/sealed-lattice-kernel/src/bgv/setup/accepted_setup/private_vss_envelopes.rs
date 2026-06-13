@@ -765,6 +765,35 @@ fn private_vss_envelope_binding_from_reference(
         )));
     }
 
+    for forbidden_field_name in [
+        "transportedPrivateVssShareProofMaterial",
+        "transportedPrivateVssShareProofMaterialForRecipientTransport",
+        "privateVssShareLnpProof",
+        "privateVssShareLnpProofs",
+        "privateVssLnpProof",
+        "privateVssLnpProofs",
+        "relationCommitmentHash",
+        "relationCommitmentHashes",
+        "relationCommitments",
+        "tboxCommitmentPrefixHash",
+        "tboxCommitmentPrefixHashes",
+        "tboxCommitmentPrefixes",
+        "responseMask",
+        "responseMasks",
+    ] {
+        if envelope_reference.get(forbidden_field_name).is_some() {
+            return Ok(Err(Refusal::new(
+                "privateVssEnvelopeForbiddenProofSidecar",
+                format!(
+                    "private VSS envelope commitments must carry only recipient-local verification roots and hashes; {forbidden_field_name} is not terminal public setup evidence"
+                ),
+                format!(
+                    "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.{forbidden_field_name}"
+                ),
+            )));
+        }
+    }
+
     let expected_aad = private_vss_envelope_aad_value(
         setup_context,
         public_matrix_seed_hash,
@@ -850,10 +879,6 @@ fn private_vss_envelope_binding_from_reference(
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")
         .remove("encryptedEnvelope");
-    record_root_input
-        .as_object_mut()
-        .expect("private VSS envelope commitment reference object was checked")
-        .remove("transportedPrivateVssShareProofMaterial");
     let expected_record_root =
         derive_protocol_hash("PrivateVssEnvelopeCommitmentRoot", &record_root_input)?;
     if private_envelope_commitment_root != expected_record_root {

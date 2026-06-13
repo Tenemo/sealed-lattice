@@ -9,6 +9,7 @@ use super::relation::{
     BaseColumnDomain, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, SumcheckErrorWeights,
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
     batched_row_check_value, batched_sumcheck_value, build_linkage_public_vectors,
+    build_private_vss_public_vectors, private_vss_share_lifted_carry_bound,
 };
 use super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
@@ -229,6 +230,10 @@ pub(super) fn global_claim_id(
 ) -> u64 {
     let repetition = local_claim_index % CONSISTENCY_REPETITIONS;
     let vector_index = local_claim_index / CONSISTENCY_REPETITIONS;
+    if layout.private_vss_active() {
+        debug_assert!(statement.private_vss_share.is_some());
+        return (vector_index * CONSISTENCY_REPETITIONS + repetition) as u64;
+    }
     if vector_index == 0 {
         return repetition as u64;
     }
@@ -267,6 +272,35 @@ fn logical_witness_residues(
     modulus: u64,
 ) -> Vec<Vec<u64>> {
     let mut vectors = Vec::with_capacity(layout.consistency_vector_count());
+    if layout.private_vss_active() {
+        for coefficient_messages in &witness.private_vss_coefficient_messages_by_shamir_index {
+            vectors.push(
+                coefficient_messages
+                    .iter()
+                    .map(|coefficient| signed_value_residue(*coefficient, modulus))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        vectors.push(
+            witness
+                .private_vss_carry_witnesses
+                .iter()
+                .map(|coefficient| signed_value_residue(*coefficient, modulus))
+                .collect::<Vec<_>>(),
+        );
+        for randomness_columns in &witness.private_vss_opening_randomness_by_shamir_index {
+            for column in randomness_columns {
+                vectors.push(
+                    column
+                        .iter()
+                        .map(|coefficient| signed_value_residue(*coefficient, modulus))
+                        .collect::<Vec<_>>(),
+                );
+            }
+        }
+
+        return vectors;
+    }
     vectors.push(
         witness
             .secret_coefficients
@@ -379,33 +413,43 @@ fn build_limb_witness_commitment(
     // the mask digit halves. The grouped push order below matches the layout's
     // physical index functions exactly.
     let trace_size = layout.trace_size;
-    let error_squares = (0..layout.total_error_columns)
-        .map(|error_position| {
-            logical_witness[1 + error_position]
-                .iter()
-                .map(|value| mul_mod_fast(*value, *value, modulus))
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
     let mut physical_halves: Vec<&[u64]> = Vec::with_capacity(layout.phase_one_physical_count());
-    for half in 0..TRACE_SPLIT {
-        physical_halves.push(&logical_witness[0][half * trace_size..(half + 1) * trace_size]);
-    }
-    for error_position in 0..layout.total_error_columns {
-        let error = &logical_witness[1 + error_position];
-        for half in 0..TRACE_SPLIT {
-            physical_halves.push(&error[half * trace_size..(half + 1) * trace_size]);
-        }
-    }
-    for error_square in &error_squares {
-        for half in 0..TRACE_SPLIT {
-            physical_halves.push(&error_square[half * trace_size..(half + 1) * trace_size]);
-        }
-    }
-    if layout.linkage_active() {
-        for linkage_vector in &logical_witness[1 + layout.total_error_columns..] {
+    let error_squares_storage: Vec<Vec<u64>>;
+    if layout.private_vss_active() {
+        for logical_vector in &logical_witness {
             for half in 0..TRACE_SPLIT {
-                physical_halves.push(&linkage_vector[half * trace_size..(half + 1) * trace_size]);
+                physical_halves.push(&logical_vector[half * trace_size..(half + 1) * trace_size]);
+            }
+        }
+    } else {
+        error_squares_storage = (0..layout.total_error_columns)
+            .map(|error_position| {
+                logical_witness[1 + error_position]
+                    .iter()
+                    .map(|value| mul_mod_fast(*value, *value, modulus))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        for half in 0..TRACE_SPLIT {
+            physical_halves.push(&logical_witness[0][half * trace_size..(half + 1) * trace_size]);
+        }
+        for error_position in 0..layout.total_error_columns {
+            let error = &logical_witness[1 + error_position];
+            for half in 0..TRACE_SPLIT {
+                physical_halves.push(&error[half * trace_size..(half + 1) * trace_size]);
+            }
+        }
+        for error_square in &error_squares_storage {
+            for half in 0..TRACE_SPLIT {
+                physical_halves.push(&error_square[half * trace_size..(half + 1) * trace_size]);
+            }
+        }
+        if layout.linkage_active() {
+            for linkage_vector in &logical_witness[1 + layout.total_error_columns..] {
+                for half in 0..TRACE_SPLIT {
+                    physical_halves
+                        .push(&linkage_vector[half * trace_size..(half + 1) * trace_size]);
+                }
             }
         }
     }
@@ -494,7 +538,13 @@ pub(super) fn draw_limb_challenges(
         modulus,
         layout.active_keys.len() * LINCHECK_REPETITIONS,
     );
-    let linkage_alpha = if layout.linkage_active() {
+    let linkage_alpha = if layout.private_vss_active() {
+        transcript.challenge_extension_elements(
+            "private-vss-relation-alpha",
+            modulus,
+            layout.private_vss_relation_count() * LINCHECK_REPETITIONS,
+        )
+    } else if layout.linkage_active() {
         let commitment_count =
             layout.linkage_randomness_columns / SETUP_COMMITMENT_RANDOMNESS_WIDTH;
         transcript.challenge_extension_elements(
@@ -539,6 +589,46 @@ pub(super) fn build_limb_public_vectors(
         .map(|challenge| extension_powers(&tower, challenge, ring_degree))
         .collect::<Vec<_>>();
     let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); ring_degree];
+    if layout.private_vss_active() {
+        let private_vss_share = statement.private_vss_share.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof("private VSS layout requires a private VSS statement")
+        })?;
+        let mut combined_claim = ChallengeExtensionTower::zero();
+        let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
+        for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
+            combined_claim = tower.add(
+                &combined_claim,
+                &tower.scale_base(alpha_value, masked_claims[local_claim]),
+            );
+            for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+                let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
+                let position = half * layout.trace_size + half_position;
+                let digit_weight =
+                    tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+                mask_selectors[column][position] =
+                    tower.add(&mask_selectors[column][position], &digit_weight);
+            }
+        }
+        let (private_vss_claim, relation_vectors) = build_private_vss_public_vectors(
+            private_vss_share,
+            limb_index,
+            &tower,
+            &u_powers,
+            &challenges.linkage_alpha,
+        )?;
+        combined_claim = tower.add(&combined_claim, &private_vss_claim);
+
+        return Ok(LimbPublicVectors {
+            secret_factor: Vec::new(),
+            u_powers,
+            mask_selectors,
+            linkage_vectors: relation_vectors,
+            error_weights: SumcheckErrorWeights {
+                weights: vec![Vec::new(); LINCHECK_REPETITIONS],
+            },
+            lincheck_claim: combined_claim,
+        });
+    }
     let mut secret_factor = vec![extension_zero_vector(); LINCHECK_REPETITIONS];
     let mut error_weights = vec![
         vec![ChallengeExtensionTower::zero(); layout.total_error_columns];
@@ -1155,6 +1245,18 @@ fn validate_witness_support(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
 ) -> CanonicalResult<()> {
+    if let Some(private_vss_share) = &statement.private_vss_share {
+        if !witness.secret_coefficients.is_empty()
+            || !witness.error_coefficients_by_key.is_empty()
+            || !witness.negative_indicator_coefficients.is_empty()
+            || !witness.opening_randomness_by_limb.is_empty()
+        {
+            return Err(invalid_succinct_setup_proof(
+                "private VSS witness must not include key or same-secret linkage material",
+            ));
+        }
+        return validate_private_vss_witness(private_vss_share, witness, statement.ring_degree);
+    }
     if witness.secret_coefficients.len() != statement.ring_degree
         || witness.error_coefficients_by_key.len() != statement.keys.len()
     {
@@ -1238,6 +1340,120 @@ fn validate_witness_support(
     Ok(())
 }
 
+fn validate_private_vss_witness(
+    statement: &super::relation::PrivateVssShareStatement,
+    witness: &TrusteeEvaluationKeyWitness,
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    let coefficient_count = statement.coefficient_commitments.len();
+    if witness
+        .private_vss_coefficient_messages_by_shamir_index
+        .len()
+        != coefficient_count
+        || witness.private_vss_opening_randomness_by_shamir_index.len() != coefficient_count
+        || witness.private_vss_carry_witnesses.len() != ring_degree
+    {
+        return Err(invalid_succinct_setup_proof(
+            "private VSS witness shape does not match the statement",
+        ));
+    }
+    let source_modulus_i64 = i64::try_from(statement.source_message_modulus)
+        .map_err(|_| invalid_succinct_setup_proof("private VSS source modulus does not fit i64"))?;
+    for (coefficient_index, (messages, randomness_columns)) in witness
+        .private_vss_coefficient_messages_by_shamir_index
+        .iter()
+        .zip(
+            witness
+                .private_vss_opening_randomness_by_shamir_index
+                .iter(),
+        )
+        .enumerate()
+    {
+        if messages.len() != ring_degree
+            || messages
+                .iter()
+                .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
+            || randomness_columns.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH
+            || randomness_columns.iter().any(|column| {
+                column.len() != ring_degree
+                    || column
+                        .iter()
+                        .any(|coefficient| !(-1..=1).contains(coefficient))
+            })
+        {
+            return Err(invalid_succinct_setup_proof(format!(
+                "private VSS witness for Shamir coefficient {coefficient_index} has the wrong shape"
+            )));
+        }
+    }
+    let carry_bound = private_vss_share_lifted_carry_bound(
+        statement.recipient_roster_position,
+        coefficient_count,
+    )?;
+    for carry in &witness.private_vss_carry_witnesses {
+        let carry_i128 = i128::from(*carry);
+        if carry_i128 < 0 || carry_i128 > carry_bound {
+            return Err(invalid_succinct_setup_proof(
+                "private VSS carry witness is outside the accepted bound",
+            ));
+        }
+    }
+    let trustee_point = i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
+        usize::try_from(statement.recipient_roster_position).map_err(|_| {
+            invalid_succinct_setup_proof("private VSS recipient roster position does not fit usize")
+        })?,
+        statement.source_message_modulus,
+    )?);
+    let mut powers = Vec::with_capacity(coefficient_count);
+    let mut power = 1_i128;
+    for _ in 0..coefficient_count {
+        powers.push(power);
+        power = power
+            .checked_mul(trustee_point)
+            .ok_or_else(|| invalid_succinct_setup_proof("private VSS point power overflowed"))?;
+    }
+    for coefficient_position in 0..ring_degree {
+        let mut left = 0_i128;
+        for (messages, trustee_point_power) in witness
+            .private_vss_coefficient_messages_by_shamir_index
+            .iter()
+            .zip(powers.iter())
+        {
+            left = left
+                .checked_add(
+                    trustee_point_power
+                        .checked_mul(i128::from(messages[coefficient_position]))
+                        .ok_or_else(|| {
+                            invalid_succinct_setup_proof(
+                                "private VSS lifted message product overflowed",
+                            )
+                        })?,
+                )
+                .ok_or_else(|| invalid_succinct_setup_proof("private VSS lifted sum overflowed"))?;
+        }
+        left = left
+            .checked_sub(
+                i128::from(statement.source_message_modulus)
+                    .checked_mul(i128::from(
+                        witness.private_vss_carry_witnesses[coefficient_position],
+                    ))
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof("private VSS lifted carry overflowed")
+                    })?,
+            )
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof("private VSS lifted relation overflowed")
+            })?;
+        if left != i128::from(statement.share_values[coefficient_position]) {
+            return Err(invalid_succinct_setup_proof(format!(
+                "private VSS lifted relation failed at coefficient {coefficient_position}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 // The shared global claim integers: for every statement-global witness
 // vector and consistency repetition, the clear integer combination of the
 // signed witness plus the shared smudging mask. Every limb publishes the
@@ -1250,17 +1466,29 @@ fn global_claim_integers(
     proof_randomness_seed_hex: &str,
 ) -> Vec<i128> {
     let mut signed_vectors: Vec<&[i64]> = Vec::new();
-    signed_vectors.push(&witness.secret_coefficients);
-    for error_vectors in &witness.error_coefficients_by_key {
-        for error_vector in error_vectors {
-            signed_vectors.push(error_vector);
+    if statement.private_vss_share.is_some() {
+        for messages in &witness.private_vss_coefficient_messages_by_shamir_index {
+            signed_vectors.push(messages);
         }
-    }
-    if statement.same_secret_linkage.is_some() {
-        signed_vectors.push(&witness.negative_indicator_coefficients);
-        for randomness_columns in &witness.opening_randomness_by_limb {
+        signed_vectors.push(&witness.private_vss_carry_witnesses);
+        for randomness_columns in &witness.private_vss_opening_randomness_by_shamir_index {
             for column in randomness_columns {
                 signed_vectors.push(column);
+            }
+        }
+    } else {
+        signed_vectors.push(&witness.secret_coefficients);
+        for error_vectors in &witness.error_coefficients_by_key {
+            for error_vector in error_vectors {
+                signed_vectors.push(error_vector);
+            }
+        }
+        if statement.same_secret_linkage.is_some() {
+            signed_vectors.push(&witness.negative_indicator_coefficients);
+            for randomness_columns in &witness.opening_randomness_by_limb {
+                for column in randomness_columns {
+                    signed_vectors.push(column);
+                }
             }
         }
     }

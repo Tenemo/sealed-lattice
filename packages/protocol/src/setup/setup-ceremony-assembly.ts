@@ -43,23 +43,22 @@ import {
     type PrivateVssMailboxDeliveryKernel,
     type PrivateVssMailboxDeliverySet,
     type PrivateVssShareProofFactory,
-    type PrivateVssShareProofRandomnessFactory,
 } from './private-vss-mailbox-delivery.js';
 import {
     createBinaryChunkedPublicKeyShareMaterialBundle,
-    createPublicKeyShareLnpProofSet,
+    createPublicKeyShareSuccinctProofSet,
     createPublicKeyShareMaterialSet,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     publicKeyShareMaterialEncoding,
     publicKeyShareMaterialTransportEncoding,
     type CollectivePublicKey,
-    type PublicKeyShareLnpProofMaterial,
-    type PublicKeyShareLnpProofSet,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
     type SetupPackagePublicKeyShareMaterialSet,
     type SetupTransportedPublicKeyShareMaterial,
+    type PublicKeyShareSuccinctProofMaterial,
+    type PublicKeyShareSuccinctProofSet,
     type TransportedPublicKeyShareProofMaterialSet,
     type PublicKeyShareProofSet,
     type PublicKeyShareSet,
@@ -174,13 +173,12 @@ export type SetupCeremonyAssemblyInput = Readonly<{
     readonly thresholdDegree: number;
     readonly publicKeyCrpRoot: ProtocolHash;
     readonly publicAPolynomialRoot: ProtocolHash;
-    readonly setupProofBinding: JsonRecord;
     readonly sameSecretLinkageAnchorProofAccountingHash: ProtocolHash;
     readonly sameSecretProofMaterials: readonly SameSecretProofMaterial[];
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly publicKeyShareMaterialContributions: readonly PublicKeyShareMaterialContributionInput[];
-    readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
-    readonly publicKeyShareLnpProofMaterials: readonly PublicKeyShareLnpProofMaterial[];
+    readonly publicKeyShareProofAccountingHash: ProtocolHash;
+    readonly publicKeyShareSuccinctProofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly relinearizationCrpRoot: ProtocolHash;
     readonly galoisKeyCrpRoot: ProtocolHash;
@@ -212,7 +210,6 @@ export type SetupCeremonyAssemblyInput = Readonly<{
         | typeof publicKeyShareMaterialEncoding
         | typeof publicKeyShareMaterialTransportEncoding;
     readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
-    readonly privateVssShareProofRandomnessFactory?: PrivateVssShareProofRandomnessFactory;
 }>;
 
 export type SetupCeremonyLocalTrusteeState = Omit<
@@ -243,7 +240,7 @@ export type SetupCeremonyAssembly = Readonly<{
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
-    readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet;
+    readonly publicKeyShareSuccinctProofs: PublicKeyShareSuccinctProofSet;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly collectivePublicKey: CollectivePublicKey;
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
@@ -283,10 +280,38 @@ const assertNonEmptyString = (value: string, fieldName: string): void => {
 };
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
+const setupContextTokenPattern = /^[A-Za-z0-9._:/@+-]{1,128}$/u;
+const setupContextHashFieldNames = [
+    'manifestHash',
+    'rosterHash',
+    'setupProfileHash',
+    'qShareHash',
+    'carryAwareVssShareRelationProfileHash',
+    'commitmentProfileHash',
+] as const;
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
+    }
+};
+
+const assertSetupContextToken = (value: string, fieldName: string): void => {
+    if (!setupContextTokenPattern.test(value)) {
+        throw new TypeError(
+            `${fieldName} must be a bounded setup context token.`,
+        );
+    }
+};
+
+const assertSetupContext = (setupContext: CollectiveBgvSetupContext): void => {
+    assertSetupContextToken(setupContext.ceremonyId, 'setupContext.ceremonyId');
+    assertSetupContextToken(setupContext.setupEpoch, 'setupContext.setupEpoch');
+    for (const fieldName of setupContextHashFieldNames) {
+        assertProtocolHash(
+            setupContext[fieldName],
+            `setupContext.${fieldName}`,
+        );
     }
 };
 
@@ -924,7 +949,7 @@ const assertProfileRingUsesTerminalMaterialTransport = (
         input.sameSecretProofMaterials,
         'sameSecretProofMaterials',
     );
-    input.publicKeyShareLnpProofMaterials.forEach((proofMaterial) =>
+    input.publicKeyShareSuccinctProofMaterials.forEach((proofMaterial) =>
         assertTransportedSetupProofMaterial(proofMaterial, 'public-key share'),
     );
     assertTransportedSetupProofMaterialSetCovers(
@@ -933,8 +958,8 @@ const assertProfileRingUsesTerminalMaterialTransport = (
         publicKeyShareProofMaterialTransportSetObjectType,
         publicKeyShareProofMaterialTransportObjectType,
         'public-key-share',
-        input.publicKeyShareLnpProofMaterials,
-        'publicKeyShareLnpProofMaterials',
+        input.publicKeyShareSuccinctProofMaterials,
+        'publicKeyShareSuccinctProofMaterials',
     );
     const generatedTrusteeEvaluationKeyProofs =
         usesGeneratedTrusteeEvaluationKeyProofs(input);
@@ -1580,8 +1605,14 @@ const decryptAndVerifyRecipientEnvelopes = async (
         VssSourceTrusteeOpeningMaterial
     >();
     for (const envelopeReference of envelopeReferences) {
+        const encryptedEnvelope = envelopeReference.encryptedEnvelope;
+        if (encryptedEnvelope === undefined) {
+            throw new Error(
+                'private VSS envelope commitments must include encrypted envelopes for recipient-local decryption.',
+            );
+        }
         if (
-            envelopeReference.encryptedEnvelope.encryptedEnvelopeHash !==
+            encryptedEnvelope.encryptedEnvelopeHash !==
             envelopeReference.encryptedEnvelopeHash
         ) {
             throw new Error(
@@ -1589,7 +1620,7 @@ const decryptAndVerifyRecipientEnvelopes = async (
             );
         }
         const decryptedEnvelope = await decryptPrivateVssMailboxEnvelope({
-            encryptedEnvelope: envelopeReference.encryptedEnvelope,
+            encryptedEnvelope,
             recipientMailboxSecretKeyBytesHex:
                 input.trustee.mailboxSecretKeyBytesHex,
         });
@@ -1670,7 +1701,6 @@ const createBinaryVssPrivateDeliveryAndVerification = async (
         | 'verificationPhaseNumber'
         | 'privateVssShareProofMaterialEncoding'
         | 'privateVssShareProofFactory'
-        | 'privateVssShareProofRandomnessFactory'
     > & {
         readonly trustees: readonly SetupCeremonyTrusteeInput[];
         readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
@@ -1723,8 +1753,6 @@ const createBinaryVssPrivateDeliveryAndVerification = async (
                 privateVssShareProofMaterialEncoding:
                     input.privateVssShareProofMaterialEncoding,
                 privateVssShareProofFactory: input.privateVssShareProofFactory,
-                privateVssShareProofRandomnessFactory:
-                    input.privateVssShareProofRandomnessFactory,
                 sourceTrusteeContributionState:
                     sourceTrusteeOpeningMaterialWithRecords,
                 recipients,
@@ -1778,7 +1806,6 @@ const createPrivateVssDeliveryAndVerification = async (
         | 'verificationPhaseNumber'
         | 'privateVssShareProofMaterialEncoding'
         | 'privateVssShareProofFactory'
-        | 'privateVssShareProofRandomnessFactory'
     > & {
         readonly trustees: readonly SetupCeremonyTrusteeInput[];
         readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
@@ -1806,8 +1833,6 @@ const createPrivateVssDeliveryAndVerification = async (
             privateVssShareProofMaterialEncoding:
                 input.privateVssShareProofMaterialEncoding,
             privateVssShareProofFactory: input.privateVssShareProofFactory,
-            privateVssShareProofRandomnessFactory:
-                input.privateVssShareProofRandomnessFactory,
             sourceTrusteeContributionStates:
                 input.sourceTrusteeOpeningMaterialSource.sourceTrusteeReferences.map(
                     (sourceTrusteeReference) =>
@@ -2005,6 +2030,7 @@ const createSetupContributions = (
 export const createSetupCeremonyAssembly = async (
     input: SetupCeremonyAssemblyInput,
 ): Promise<SetupCeremonyAssembly> => {
+    assertSetupContext(input.setupContext);
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
     assertProfileRingUsesTerminalMaterialTransport(input);
@@ -2226,7 +2252,7 @@ export const createSetupCeremonyAssembly = async (
     const setupPackagePublicKeyShareMaterial =
         binaryPublicKeyShareMaterialTransport?.materialSet ??
         publicKeyShareMaterial;
-    const publicKeyShareLnpProofs = createPublicKeyShareLnpProofSet({
+    const publicKeyShareSuccinctProofs = createPublicKeyShareSuccinctProofSet({
         setupContext: input.setupContext,
         qSharePrimes: input.qSharePrimes,
         participantCount: trustees.length,
@@ -2237,11 +2263,9 @@ export const createSetupCeremonyAssembly = async (
         sameSecretProofs,
         publicKeyShares,
         publicKeyShareProofs,
-        publicKeyShareMaterial,
-        setupProofBinding: input.setupProofBinding,
-        publicKeyShareTboxParameterProfileHash:
-            input.publicKeyShareTboxParameterProfileHash,
-        proofMaterials: input.publicKeyShareLnpProofMaterials,
+        publicKeyShareMaterial: setupPackagePublicKeyShareMaterial,
+        proofAccountingHash: input.publicKeyShareProofAccountingHash,
+        proofMaterials: input.publicKeyShareSuccinctProofMaterials,
     });
     const sameSecretProofReferences = sameSecretProofReferencesForConsistency(
         sameSecretConsistency,
@@ -2267,8 +2291,8 @@ export const createSetupCeremonyAssembly = async (
         sameSecretProofSetRoot: sameSecretProofs.sameSecretProofSetRoot,
         sameSecretProofFamilyBindingRoot:
             sameSecretConsistency.sameSecretProofFamilyBindingRoot,
-        publicKeyShareLnpProofSetRoot:
-            publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot,
         sameSecretProofReferences,
     } as const;
     const generateTrusteeEvaluationKeyProofs =
@@ -2397,8 +2421,6 @@ export const createSetupCeremonyAssembly = async (
         privateVssShareProofMaterialEncoding:
             input.privateVssShareProofMaterialEncoding,
         privateVssShareProofFactory: input.privateVssShareProofFactory,
-        privateVssShareProofRandomnessFactory:
-            input.privateVssShareProofRandomnessFactory,
         useSourceMajorMaterialRebuild: binaryVssMaterialTransport !== undefined,
     });
     const acceptanceRecords = await createAcceptanceRecords(
@@ -2539,7 +2561,7 @@ export const createSetupCeremonyAssembly = async (
                   transportedPublicKeyShareMaterial:
                       binaryPublicKeyShareMaterialTransport.transportedPublicKeyShareMaterial,
               }),
-        publicKeyShareLnpProofs,
+        publicKeyShareSuccinctProofs,
         ...(input.transportedPublicKeyShareProofMaterial === undefined
             ? {}
             : {
@@ -2619,7 +2641,7 @@ export const createSetupCeremonyAssembly = async (
                   transportedPublicKeyShareMaterial:
                       binaryPublicKeyShareMaterialTransport.transportedPublicKeyShareMaterial,
               }),
-        publicKeyShareLnpProofs,
+        publicKeyShareSuccinctProofs,
         ...(input.transportedPublicKeyShareProofMaterial === undefined
             ? {}
             : {

@@ -3,16 +3,28 @@ use super::proof_codec::{
 };
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
-    EvaluationKeyShareKind, galois_automorphism_apply, galois_automorphism_transpose_apply,
+    EvaluationKeyShareKind, PrivateVssShareStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement, galois_automorphism_apply, galois_automorphism_transpose_apply,
     generate_development_public_key_share_instance, generate_development_trustee_ceremony_slice,
     generate_development_trustee_instance, generate_development_trustee_instance_with_linkage,
     round_one_aggregate_diagonal_from_components,
 };
 use super::verifier::verify_evaluation_key_share;
 use crate::bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE};
+use crate::bgv::setup::accepted_setup::describe_collective_bgv_setup_profile;
+use crate::bgv::setup::commitment::{
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb,
+    SetupCommitmentValue, setup_commitment_full_value, setup_commitment_root,
+};
+use crate::hashing::derive_protocol_hash;
 
 const SMALL_RING_DEGREE: usize = 128;
-const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff";
+const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+const PROOF_RANDOMNESS_NONCE: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
+const SAME_SECRET_STATEMENT_HASH_VECTOR: &str = "c300200cb9bde4e95f2129ad4c07ca6fa22a2c236278be5f0be474095f604d3afd0613c791e807dc4e4d942f202ea4f5cac20d5a93745eab3d87abf05a3cf4ee";
+const PUBLIC_KEY_SHARE_STATEMENT_HASH_VECTOR: &str = "108d59c7677c2007c43910828650f4a93d7555c63041e5865dcc906ca3b6e114456c85fc963165929bc676aac063307b69ecc18c3abcfa6f0f91a6bbcdff861e";
+const PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR: &str = "abbdce8f903d61471ddfd952470f3e10b059b09f33188c27adad663b86347dee54aa7f23ed607527318d9a6ed7b1df98d2f44a4cb35be129a222f36b813135b1";
+const TRUSTEE_EVALUATION_KEY_STATEMENT_HASH_VECTOR: &str = "11fce9a48c01d57c8b08e2816a9a7704623775fcfdf5afca029ec4d2c32f5c2f070e567c2042e6554f6bbb3f46fe75a4711b8b52ab6626509e0ecd10f307bef0";
 
 fn round_one(level: usize) -> (EvaluationKeyShareKind, usize) {
     (EvaluationKeyShareKind::RelinearizationRoundOne, level)
@@ -27,6 +39,85 @@ fn rotation(galois_element: usize, level: usize) -> (EvaluationKeyShareKind, usi
         EvaluationKeyShareKind::GaloisRotation { galois_element },
         level,
     )
+}
+
+fn repeated_hash(byte_pair: &str) -> String {
+    byte_pair.repeat(64)
+}
+
+fn zero_setup_commitment_for_tests(
+    source_rns_limb_index: usize,
+    source_message_modulus: u64,
+    shamir_coefficient_index: u64,
+) -> SetupCommitmentValue {
+    SetupCommitmentValue {
+        source_rns_limb_index,
+        source_message_modulus,
+        shamir_coefficient_index,
+        ring_degree: SMALL_RING_DEGREE,
+        limbs: (0..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
+            .map(|commitment_modulus_index| SetupCommitmentLimb {
+                commitment_modulus_index,
+                modulus: DATA_PRIMES[commitment_modulus_index],
+                rows: vec![vec![0_u64; SMALL_RING_DEGREE]; SETUP_COMMITMENT_ROW_COUNT],
+            })
+            .collect(),
+    }
+}
+
+fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
+    let source_trustee_commitment_root = repeated_hash("33");
+    let private_envelope_aad_hash = repeated_hash("44");
+    let share_values_hash = repeated_hash("55");
+    TrusteeEvaluationKeyStatement {
+        context: SuccinctSetupProofContext {
+            proof_family: super::PRIVATE_VSS_SHARE_PROOF_FAMILY.to_string(),
+            ceremony_id: "ceremony-1".to_string(),
+            manifest_hash: repeated_hash("11"),
+            roster_hash: repeated_hash("22"),
+            trustee_identity: "trustee-0".to_string(),
+            trustee_roster_position: 0,
+            setup_epoch: "setup-epoch-1".to_string(),
+            binding_roots: vec![
+                (
+                    "sourceTrusteeCommitmentRoot".to_string(),
+                    source_trustee_commitment_root.clone(),
+                ),
+                (
+                    "privateEnvelopeAadHash".to_string(),
+                    private_envelope_aad_hash.clone(),
+                ),
+                ("shareValuesHash".to_string(), share_values_hash.clone()),
+            ],
+        },
+        ring_degree: SMALL_RING_DEGREE,
+        keys: Vec::new(),
+        same_secret_linkage: None,
+        private_vss_share: Some(PrivateVssShareStatement {
+            public_matrix_seed_hash: repeated_hash("66"),
+            private_envelope_aad_hash,
+            source_trustee_identity: "trustee-0".to_string(),
+            source_trustee_roster_position: 0,
+            recipient_identity: "trustee-2".to_string(),
+            recipient_roster_position: 2,
+            source_trustee_commitment_root,
+            source_rns_limb_index: 0,
+            source_message_modulus: DATA_PRIMES[0],
+            share_values_hash,
+            share_values: vec![0_u64; SMALL_RING_DEGREE],
+            coefficient_commitment_roots: vec![
+                repeated_hash("77"),
+                repeated_hash("88"),
+                repeated_hash("99"),
+                repeated_hash("aa"),
+            ],
+            coefficient_commitments: (0..4_u64)
+                .map(|shamir_coefficient_index| {
+                    zero_setup_commitment_for_tests(0, DATA_PRIMES[0], shamir_coefficient_index)
+                })
+                .collect(),
+        }),
+    }
 }
 
 #[test]
@@ -242,19 +333,39 @@ fn masked_claims_differ_under_fresh_proof_randomness() {
 
 #[test]
 fn honest_proof_with_same_secret_linkage_round_trips() {
-    // Level two keeps all three commitment fields active; four Q_share
-    // commitments exercise the linkage relations without the full profile.
+    // Level two keeps all three commitment fields active and must carry
+    // exactly one same-secret commitment for each active Q_share limb.
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "11aa22bb",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(4),
+        Some(3),
     )
     .expect("development instance");
     assert!(statement.same_secret_linkage.is_some());
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     verify_evaluation_key_share(&statement, &proof).expect("verify");
+}
+
+#[test]
+fn same_secret_linkage_rejects_commitments_outside_active_limb_set() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "11aa22cc",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(4),
+    )
+    .expect("development instance");
+
+    assert!(
+        statement.validate_shape().is_err(),
+        "extra same-secret linkage commitments must not be accepted outside the active Q_share limb set"
+    );
+    assert!(
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
+        "proving must refuse a statement whose linkage commitment count does not match the theorem shape"
+    );
 }
 
 #[test]
@@ -274,13 +385,13 @@ fn batched_schedule_with_linkage_round_trips() {
 #[test]
 fn same_secret_linkage_anchor_proof_round_trips_without_keys() {
     // The keyless statement is the per-trustee same-secret linkage anchor:
-    // only the commitment-opening, support, and cross-limb consistency
-    // relations are active, over the three commitment fields.
+    // it opens one constant commitment per Q_share limb while the committed
+    // rows are checked over the three setup commitment fields.
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "99ffeedd",
         &[],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
     .expect("anchor instance");
     assert!(statement.keys.is_empty());
@@ -295,12 +406,32 @@ fn same_secret_linkage_anchor_proof_round_trips_without_keys() {
 }
 
 #[test]
+fn same_secret_anchor_rejects_partial_q_share_commitment_set() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "77aaccee",
+        &[],
+        SMALL_RING_DEGREE,
+        Some(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()),
+    )
+    .expect("partial anchor instance");
+
+    assert!(
+        statement.validate_shape().is_err(),
+        "the keyless same-secret anchor must not accept only the setup commitment-field count"
+    );
+    assert!(
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
+        "proving must refuse a partial same-secret anchor commitment set"
+    );
+}
+
+#[test]
 fn keyless_statement_without_linkage_is_refused() {
     let (mut statement, witness) = generate_development_trustee_instance_with_linkage(
         "aa00bb11",
         &[],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
     .expect("anchor instance");
     statement.same_secret_linkage = None;
@@ -316,14 +447,14 @@ fn anchor_rejects_commitments_to_a_different_secret() {
         "cc22dd33",
         &[],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
     .expect("anchor instance");
     let (other_statement, _) = generate_development_trustee_instance_with_linkage(
         "ee44ff55",
         &[],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
     .expect("second anchor instance");
     let mut forged = statement;
@@ -424,10 +555,89 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
     }
 }
 
+fn assert_noncanonical_encoded_proof_rejects(
+    label: &str,
+    mutate_proof: impl FnOnce(&mut super::prover::SuccinctEvaluationKeyProof, u64),
+) {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "c0decafe",
+        &[round_one(2), rotation(3, 1)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let modulus = statement.limb_moduli()[0];
+    mutate_proof(&mut proof, modulus);
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+
+    assert!(
+        decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
+        "{label} with a noncanonical residue must be rejected by the decoder"
+    );
+}
+
+#[test]
+fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
+    assert_noncanonical_encoded_proof_rejects("masked consistency claim", |proof, modulus| {
+        proof.limb_proofs[0].masked_consistency_claims[0] = modulus;
+    });
+    assert_noncanonical_encoded_proof_rejects("deep evaluation coordinate", |proof, modulus| {
+        proof.limb_proofs[0].deep_evaluations[0][0][0] = modulus;
+    });
+    assert_noncanonical_encoded_proof_rejects("phase-one query row", |proof, modulus| {
+        proof.limb_proofs[0].query_openings[0].phase_one_rows[0][0] = modulus;
+    });
+    assert_noncanonical_encoded_proof_rejects("phase-two coordinate row", |proof, modulus| {
+        proof.limb_proofs[0].query_openings[0].phase_two_rows[0][0] = modulus;
+    });
+    assert_noncanonical_encoded_proof_rejects("low-degree final coefficient", |proof, modulus| {
+        proof.limb_proofs[0].low_degree.final_coefficients[0][0] = modulus;
+    });
+    assert_noncanonical_encoded_proof_rejects("low-degree folded opening", |proof, modulus| {
+        proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_pairs[0].pair[0][0] =
+            modulus;
+    });
+}
+
+#[test]
+fn proof_codec_rejects_noncanonical_values_for_each_succinct_family_shape() {
+    let family_cases = [
+        generate_development_trustee_instance_with_linkage(
+            "1111aaaa",
+            &[],
+            SMALL_RING_DEGREE,
+            Some(DATA_PRIMES.len()),
+        )
+        .expect("same-secret anchor instance"),
+        generate_development_public_key_share_instance("2222bbbb", SMALL_RING_DEGREE)
+            .expect("public-key share instance"),
+        generate_development_trustee_instance_with_linkage(
+            "3333cccc",
+            &[round_one(2), round_two(2), rotation(3, 1)],
+            SMALL_RING_DEGREE,
+            Some(3),
+        )
+        .expect("trustee evaluation-key instance"),
+    ];
+
+    for (statement, witness) in family_cases {
+        let mut proof =
+            prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+        proof.limb_proofs[0].masked_consistency_claims[0] = statement.limb_moduli()[0];
+        let encoded = encode_trustee_evaluation_key_proof(&proof);
+        assert!(
+            decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
+            "noncanonical proof bytes must reject for {}",
+            statement.context.proof_family
+        );
+    }
+}
+
 fn statement_request_value(
     statement: &super::relation::TrusteeEvaluationKeyStatement,
 ) -> serde_json::Value {
-    use crate::bgv::setup::commitment::setup_commitment_full_value;
     let keys = statement
         .keys
         .iter()
@@ -484,6 +694,332 @@ fn statement_request_value(
     request
 }
 
+fn zero_i64_vector() -> Vec<i64> {
+    vec![0_i64; SMALL_RING_DEGREE]
+}
+
+fn zero_u64_vector() -> Vec<u64> {
+    vec![0_u64; SMALL_RING_DEGREE]
+}
+
+fn zero_opening_randomness() -> Vec<Vec<i64>> {
+    vec![zero_i64_vector(); 5]
+}
+
+fn zero_setup_commitment_value(
+    source_rns_limb_index: usize,
+    source_message_modulus: u64,
+    shamir_coefficient_index: u64,
+) -> SetupCommitmentValue {
+    zero_setup_commitment_for_tests(
+        source_rns_limb_index,
+        source_message_modulus,
+        shamir_coefficient_index,
+    )
+}
+
+fn vector_context_base(binding_roots: serde_json::Value) -> serde_json::Value {
+    let mut context = serde_json::json!({
+        "ceremonyId": "statement-vector-ceremony",
+        "manifestHash": repeated_hash("10"),
+        "rosterHash": repeated_hash("20"),
+        "trusteeIdentity": "statement-vector-trustee",
+        "trusteeRosterPosition": 0,
+        "setupEpoch": "statement-vector-epoch",
+    });
+    for (key, value) in binding_roots
+        .as_object()
+        .expect("binding roots object")
+        .iter()
+    {
+        context[key] = value.clone();
+    }
+    context
+}
+
+fn proof_randomness_fields(request: &mut serde_json::Value) {
+    request["proofRandomnessSource"] = serde_json::json!("development-deterministic-fixture");
+    request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+    request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
+}
+
+fn same_secret_statement_hash_vector_request() -> serde_json::Value {
+    let commitments = DATA_PRIMES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(rns_limb_index, rns_prime)| {
+            setup_commitment_full_value(&zero_setup_commitment_value(rns_limb_index, rns_prime, 0))
+        })
+        .collect::<Vec<_>>();
+    let mut request = serde_json::json!({
+        "context": vector_context_base(serde_json::json!({
+            "vssCoefficientCommitmentMaterialRoot": repeated_hash("30"),
+        })),
+        "ringDegree": SMALL_RING_DEGREE,
+        "keys": [],
+        "sameSecretLinkage": {
+            "publicMatrixSeedHash": repeated_hash("40"),
+            "commitments": commitments,
+        },
+        "secretCoefficients": zero_i64_vector(),
+        "errorCoefficientsByKey": [],
+        "negativeIndicatorCoefficients": zero_i64_vector(),
+        "openingRandomnessByLimb": vec![zero_opening_randomness(); DATA_PRIMES.len()],
+    });
+    proof_randomness_fields(&mut request);
+    request
+}
+
+fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
+    let component_b_by_limb = DATA_PRIMES
+        .iter()
+        .map(|_| zero_u64_vector())
+        .collect::<Vec<_>>();
+    let linkage_commitment =
+        setup_commitment_full_value(&zero_setup_commitment_value(0, DATA_PRIMES[0], 0));
+    let mut request = serde_json::json!({
+        "context": vector_context_base(serde_json::json!({
+            "sameSecretStatementRoot": repeated_hash("31"),
+            "sameSecretProofRoot": repeated_hash("32"),
+        })),
+        "ringDegree": SMALL_RING_DEGREE,
+        "keys": [{
+            "proofFamily": "public-key-share",
+            "level": DATA_PRIMES.len() - 1,
+            "keySwitchDomain": "accepted-bgv-public-a",
+            "keySwitchSeedHex": repeated_hash("41"),
+            "componentBByDigit": [component_b_by_limb],
+        }],
+        "sameSecretLinkage": {
+            "publicMatrixSeedHash": repeated_hash("41"),
+            "commitments": [linkage_commitment],
+        },
+        "secretCoefficients": zero_i64_vector(),
+        "errorCoefficientsByKey": [[zero_i64_vector()]],
+        "negativeIndicatorCoefficients": zero_i64_vector(),
+        "openingRandomnessByLimb": [zero_opening_randomness()],
+    });
+    proof_randomness_fields(&mut request);
+    request
+}
+
+fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
+    let mut request = serde_json::json!({
+        "context": vector_context_base(serde_json::json!({
+            "requiredGaloisSetHash": repeated_hash("33"),
+            "evaluatorKeyScheduleRoot": repeated_hash("34"),
+            "keySwitchDecompositionHash": repeated_hash("35"),
+            "sameSecretStatementRoot": repeated_hash("36"),
+            "sameSecretProofRoot": repeated_hash("37"),
+        })),
+        "ringDegree": SMALL_RING_DEGREE,
+        "keys": [{
+            "proofFamily": "relinearization-round-one",
+            "level": 0,
+            "keySwitchDomain": "relinearization-round-one",
+            "keySwitchSeedHex": repeated_hash("42"),
+            "componentBByDigit": [[zero_u64_vector()]],
+        }],
+        "secretCoefficients": zero_i64_vector(),
+        "errorCoefficientsByKey": [[zero_i64_vector()]],
+    });
+    proof_randomness_fields(&mut request);
+    request
+}
+
+fn private_vss_setup_context_vector() -> serde_json::Value {
+    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    serde_json::json!({
+        "ceremonyId": "statement-vector-ceremony",
+        "manifestHash": repeated_hash("10"),
+        "rosterHash": repeated_hash("20"),
+        "setupProfileHash": profile["setupProfileHash"],
+        "qShareHash": profile["qShareHash"],
+        "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
+        "commitmentProfileHash": profile["commitmentProfileHash"],
+        "setupEpoch": "statement-vector-epoch",
+    })
+}
+
+fn private_vss_statement_hash_vector_request() -> serde_json::Value {
+    let setup_context = private_vss_setup_context_vector();
+    let public_matrix_seed_hash = repeated_hash("40");
+    let private_envelope_aad_hash = repeated_hash("44");
+    let mut coefficient_commitments = Vec::new();
+    let mut material_records = Vec::new();
+    let mut requested_commitment_roots = Vec::new();
+    for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
+        for shamir_coefficient_index in 0..4_u64 {
+            let commitment =
+                zero_setup_commitment_value(rns_limb_index, rns_prime, shamir_coefficient_index);
+            let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
+            if rns_limb_index == 0 {
+                requested_commitment_roots.push(commitment_root.clone());
+            }
+            coefficient_commitments.push(serde_json::json!({
+                "objectType": "VssCoefficientCommitment",
+                "objectVersion": 1,
+                "ceremonyId": "statement-vector-ceremony",
+                "manifestHash": repeated_hash("10"),
+                "rosterHash": repeated_hash("20"),
+                "setupProfileHash": setup_context["setupProfileHash"],
+                "qShareHash": setup_context["qShareHash"],
+                "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
+                "commitmentProfileHash": setup_context["commitmentProfileHash"],
+                "setupEpoch": "statement-vector-epoch",
+                "sourceTrusteeIdentity": "statement-vector-trustee",
+                "sourceTrusteeRosterPosition": 0,
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": rns_prime,
+                "shamirCoefficientIndex": shamir_coefficient_index,
+                "commitmentRoot": commitment_root,
+            }));
+            material_records.push(serde_json::json!({
+                "objectType": "VssCoefficientCommitmentMaterial",
+                "objectVersion": 1,
+                "ceremonyId": "statement-vector-ceremony",
+                "manifestHash": repeated_hash("10"),
+                "rosterHash": repeated_hash("20"),
+                "setupProfileHash": setup_context["setupProfileHash"],
+                "qShareHash": setup_context["qShareHash"],
+                "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
+                "commitmentProfileHash": setup_context["commitmentProfileHash"],
+                "setupEpoch": "statement-vector-epoch",
+                "sourceTrusteeIdentity": "statement-vector-trustee",
+                "sourceTrusteeRosterPosition": 0,
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": rns_prime,
+                "shamirCoefficientIndex": shamir_coefficient_index,
+                "commitmentRoot": commitment_root,
+                "commitment": setup_commitment_full_value(&commitment),
+            }));
+        }
+    }
+    let mut source_record = serde_json::json!({
+        "objectType": "VssSourceTrusteeCoefficientCommitments",
+        "objectVersion": 1,
+        "ceremonyId": "statement-vector-ceremony",
+        "manifestHash": repeated_hash("10"),
+        "rosterHash": repeated_hash("20"),
+        "setupProfileHash": setup_context["setupProfileHash"],
+        "qShareHash": setup_context["qShareHash"],
+        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
+        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupEpoch": "statement-vector-epoch",
+        "sourceTrusteeIdentity": "statement-vector-trustee",
+        "sourceTrusteeRosterPosition": 0,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "coefficientCommitments": coefficient_commitments,
+    });
+    let source_root = derive_protocol_hash("VssCoefficientCommitmentRoot", &source_record)
+        .expect("source trustee commitment root");
+    source_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(source_root);
+    let mut request = serde_json::json!({
+        "setupContext": setup_context,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "privateEnvelopeAadHash": private_envelope_aad_hash,
+        "sourceTrusteeCoefficientCommitmentRecord": source_record,
+        "sourceTrusteeCoefficientCommitmentMaterialRecords": material_records,
+        "recipientIdentity": "statement-vector-recipient",
+        "recipientRosterPosition": 2,
+        "rnsLimbIndex": 0,
+        "rnsPrime": DATA_PRIMES[0],
+        "ringDegree": SMALL_RING_DEGREE,
+        "shareValues": zero_u64_vector(),
+        "coefficientCommitmentRoots": requested_commitment_roots,
+        "coefficientMessagesByShamirIndex": vec![zero_u64_vector(); 4],
+        "openingRandomnessByShamirIndex": vec![vec![zero_i64_vector(); 5]; 4],
+    });
+    proof_randomness_fields(&mut request);
+    request
+}
+
+#[test]
+fn succinct_setup_statement_hash_vectors_cover_current_families() {
+    let same_secret = super::generate_trustee_evaluation_key_proof_from_request(
+        &same_secret_statement_hash_vector_request(),
+    )
+    .expect("same-secret statement vector");
+    let public_key = super::generate_trustee_evaluation_key_proof_from_request(
+        &public_key_share_statement_hash_vector_request(),
+    )
+    .expect("public-key statement vector");
+    let private_vss =
+        crate::bgv::setup::private_vss::generate_private_vss_share_proof_from_request(
+            &private_vss_statement_hash_vector_request(),
+        )
+        .expect("private VSS statement vector");
+    let trustee_evaluation_key = super::generate_trustee_evaluation_key_proof_from_request(
+        &trustee_evaluation_key_statement_hash_vector_request(),
+    )
+    .expect("trustee evaluation-key statement vector");
+
+    println!(
+        "statement hash vectors: same-secret={}, public-key-share={}, private-vss-share={}, trustee-evaluation-key={}",
+        same_secret["statementHash"]
+            .as_str()
+            .expect("same-secret hash"),
+        public_key["statementHash"]
+            .as_str()
+            .expect("public-key hash"),
+        private_vss["privateVssShareProof"]["statementHash"]
+            .as_str()
+            .expect("private VSS hash"),
+        trustee_evaluation_key["statementHash"]
+            .as_str()
+            .expect("trustee evaluation-key hash"),
+    );
+    assert_eq!(same_secret["proofFamily"], "same-secret-linkage-anchor");
+    assert_eq!(
+        same_secret["statementHash"],
+        SAME_SECRET_STATEMENT_HASH_VECTOR
+    );
+    assert_eq!(public_key["proofFamily"], "public-key-share");
+    assert_eq!(
+        public_key["statementHash"],
+        PUBLIC_KEY_SHARE_STATEMENT_HASH_VECTOR
+    );
+    assert_eq!(
+        private_vss["privateVssShareProof"]["proofFamily"],
+        "vss-opening-carry"
+    );
+    assert_eq!(
+        private_vss["privateVssShareProof"]["statementHash"],
+        PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR
+    );
+    assert_eq!(
+        trustee_evaluation_key["proofFamily"],
+        "trustee-evaluation-key"
+    );
+    assert_eq!(
+        trustee_evaluation_key["statementHash"],
+        TRUSTEE_EVALUATION_KEY_STATEMENT_HASH_VECTOR
+    );
+}
+
+fn component_material_bytes_for_request_key(
+    key: &super::relation::EvaluationKeyShareDescriptor,
+    ring_degree: usize,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"SLEKCMV1");
+    for value in [key.level, ring_degree, key.level + 1, key.level + 1] {
+        bytes.extend_from_slice(&(value as u64).to_le_bytes());
+    }
+    for component_b_by_limb in &key.component_b_by_digit {
+        for component_b in component_b_by_limb {
+            for coefficient in component_b {
+                bytes.extend_from_slice(&coefficient.to_le_bytes());
+            }
+        }
+    }
+
+    bytes
+}
+
 #[test]
 fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
@@ -501,8 +1037,10 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
         serde_json::json!(witness.negative_indicator_coefficients);
     generate_request["openingRandomnessByLimb"] =
         serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSource"] = serde_json::json!("test-fixed-seed");
+    generate_request["proofRandomnessSource"] =
+        serde_json::json!("development-deterministic-fixture");
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+    generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate command");
@@ -531,12 +1069,238 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
 }
 
 #[test]
+fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
+    let (round_two_statement, round_two_witness) =
+        generate_development_trustee_instance("feed0102", &[round_two(2)], SMALL_RING_DEGREE)
+            .expect("round-two instance");
+    let round_two_proof = prove_evaluation_key_share(
+        &round_two_statement,
+        &round_two_witness,
+        PROOF_RANDOMNESS_SEED,
+    )
+    .expect("round-two proof");
+    let round_two_proof_bytes = encode_trustee_evaluation_key_proof(&round_two_proof);
+
+    let mut component_request = statement_request_value(&round_two_statement);
+    component_request["proofBytesHex"] =
+        serde_json::json!(crate::hashing::to_hex(&round_two_proof_bytes));
+    component_request["keys"][0]["componentBByDigit"][0][0][0] = serde_json::json!(DATA_PRIMES[0]);
+    assert!(
+        super::verify_trustee_evaluation_key_proof_from_request(&component_request).is_err(),
+        "out-of-range componentBByDigit values must reject before verification"
+    );
+
+    let mut aggregate_request = statement_request_value(&round_two_statement);
+    aggregate_request["proofBytesHex"] =
+        serde_json::json!(crate::hashing::to_hex(&round_two_proof_bytes));
+    aggregate_request["keys"][0]["roundOneAggregateDiagonal"][0][0] =
+        serde_json::json!(DATA_PRIMES[0]);
+    assert!(
+        super::verify_trustee_evaluation_key_proof_from_request(&aggregate_request).is_err(),
+        "out-of-range aggregate statement values must reject before verification"
+    );
+
+    let (statement, witness) =
+        generate_development_trustee_instance("feed0304", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("round-one instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("proof");
+    let mut material_bytes =
+        component_material_bytes_for_request_key(&statement.keys[0], SMALL_RING_DEGREE);
+    let coefficient_offset = 8 + (4 * 8);
+    material_bytes[coefficient_offset..coefficient_offset + 8]
+        .copy_from_slice(&DATA_PRIMES[0].to_le_bytes());
+    let mut material_request = statement_request_value(&statement);
+    material_request["proofBytesHex"] = serde_json::json!(crate::hashing::to_hex(
+        &encode_trustee_evaluation_key_proof(&proof)
+    ));
+    material_request["keys"][0]
+        .as_object_mut()
+        .expect("key object")
+        .remove("componentBByDigit");
+    material_request["keys"][0]["componentMaterialBytesHex"] =
+        serde_json::json!(crate::hashing::to_hex(&material_bytes));
+    assert!(
+        super::verify_trustee_evaluation_key_proof_from_request(&material_request).is_err(),
+        "out-of-range binary component material must reject before verification"
+    );
+}
+
+#[test]
+fn trustee_proof_statements_reject_noncanonical_context_and_hash_fields() {
+    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
+        "ctxbad01",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    statement.context.setup_epoch = "setup epoch 1".to_string();
+    assert!(
+        statement.validate_shape().is_err(),
+        "setupEpoch with whitespace must be rejected before statement hashing"
+    );
+
+    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
+        "ctxbad02",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    statement.context.setup_epoch = "setup-epoch-\0-1".to_string();
+    assert!(
+        statement.validate_shape().is_err(),
+        "setupEpoch with a control character must be rejected before statement hashing"
+    );
+
+    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
+        "ctxbad03",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    statement.context.manifest_hash = "00".repeat(63);
+    assert!(
+        statement.validate_shape().is_err(),
+        "manifestHash must be a complete lowercase 512-bit protocol hash"
+    );
+
+    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
+        "ctxbad04",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    statement.context.binding_roots[0].1 = "aa".repeat(63);
+    assert!(
+        statement.validate_shape().is_err(),
+        "binding roots must be complete lowercase 512-bit protocol hashes"
+    );
+
+    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
+        "ctxbad05",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    statement.keys[0].key_switch_domain = "relinearization round one".to_string();
+    assert!(
+        statement.validate_shape().is_err(),
+        "key-switch context tokens must reject whitespace"
+    );
+
+    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
+        "ctxbad06",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    statement
+        .same_secret_linkage
+        .as_mut()
+        .expect("same-secret linkage")
+        .public_matrix_seed_hash = "bb".repeat(63);
+    assert!(
+        statement.validate_shape().is_err(),
+        "same-secret linkage public matrix seed hash must be canonical"
+    );
+}
+
+#[test]
+fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
+    let statement = private_vss_statement_for_context_tests();
+    statement
+        .validate_shape()
+        .expect("canonical private VSS statement");
+
+    let mut statement = private_vss_statement_for_context_tests();
+    statement.context.setup_epoch = "setup epoch 1".to_string();
+    assert!(
+        statement.validate_shape().is_err(),
+        "private VSS setupEpoch with whitespace must be rejected before statement hashing"
+    );
+
+    let mut statement = private_vss_statement_for_context_tests();
+    statement
+        .private_vss_share
+        .as_mut()
+        .expect("private VSS statement")
+        .public_matrix_seed_hash = "66".repeat(63);
+    assert!(
+        statement.validate_shape().is_err(),
+        "private VSS public matrix seed hash must be canonical"
+    );
+
+    let mut statement = private_vss_statement_for_context_tests();
+    statement
+        .private_vss_share
+        .as_mut()
+        .expect("private VSS statement")
+        .coefficient_commitment_roots[0] = "77".repeat(63);
+    assert!(
+        statement.validate_shape().is_err(),
+        "private VSS coefficient commitment roots must be canonical"
+    );
+}
+
+#[test]
+fn statement_hash_length_delimits_setup_epoch_and_linkage_seed() {
+    let (mut first_statement, _) = generate_development_trustee_instance_with_linkage(
+        "hashctx01",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("first development instance");
+    let (mut second_statement, _) = generate_development_trustee_instance_with_linkage(
+        "hashctx01",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("second development instance");
+
+    first_statement.context.setup_epoch = "epoch-a".to_string();
+    second_statement.context.setup_epoch = "epoch-aa".to_string();
+    first_statement.validate_shape().expect("first statement");
+    second_statement.validate_shape().expect("second statement");
+    let first_epoch_hash = first_statement.statement_hash();
+    assert_ne!(
+        first_epoch_hash,
+        second_statement.statement_hash(),
+        "setupEpoch changes must rebind the canonical statement hash"
+    );
+
+    let first_linkage = first_statement
+        .same_secret_linkage
+        .as_mut()
+        .expect("first same-secret linkage");
+    let mut seed_bytes = first_linkage.public_matrix_seed_hash.clone().into_bytes();
+    seed_bytes[0] = if seed_bytes[0] == b'a' { b'b' } else { b'a' };
+    first_linkage.public_matrix_seed_hash =
+        String::from_utf8(seed_bytes).expect("valid hex seed mutation");
+    first_statement
+        .validate_shape()
+        .expect("mutated statement stays canonical");
+    assert_ne!(
+        first_epoch_hash,
+        first_statement.statement_hash(),
+        "same-secret public matrix seed changes must rebind the canonical statement hash"
+    );
+}
+
+#[test]
 fn anchor_proof_commands_round_trip_with_family_label() {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "fafa0101",
         &[],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
     .expect("anchor instance");
     let mut generate_request = statement_request_value(&statement);
@@ -545,8 +1309,10 @@ fn anchor_proof_commands_round_trip_with_family_label() {
         serde_json::json!(witness.negative_indicator_coefficients);
     generate_request["openingRandomnessByLimb"] =
         serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSource"] = serde_json::json!("test-fixed-seed");
+    generate_request["proofRandomnessSource"] =
+        serde_json::json!("development-deterministic-fixture");
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+    generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate anchor command");
@@ -660,12 +1426,28 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
         &accounting["identitySoundness"]["accepted"],
         &accounting["linearRelationSoundness"]["accepted"],
         &accounting["crossLimbConsistency"]["accepted"],
-        &accounting["zeroKnowledge"]["smudgingBudget"]["accepted"],
-        &accounting["fiatShamir"]["accepted"],
+        &accounting["zeroKnowledge"]["smudgingBudget"]["acceptedForBoundedLeakagePrototype"],
+        &accounting["fiatShamir"]["classicalRoundByRoundAccepted"],
         &accounting["sameSecretLinkage"]["accepted"],
     ] {
         assert_eq!(accepted_row, &serde_json::json!(true));
     }
+    assert_eq!(
+        accounting["lowDegreeSoundness"]["acceptedUnderNamedFriConjecture"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        accounting["lowDegreeSoundness"]["acceptedUnderProvenFallback"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        accounting["fiatShamir"]["qromAccepted"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        accounting["zeroKnowledge"]["smudgingBudget"]["acceptedFor128BitZeroKnowledge"],
+        serde_json::json!(false)
+    );
     // Implemented facts the rows must reflect exactly, and the effective
     // soundness target the closure rests on.
     assert_eq!(
@@ -735,7 +1517,7 @@ fn full_ring_degree_benchmark() {
         _ => vec![round_one(level)],
     };
     let linkage_commitments = if schedule_label == "trustee" {
-        Some(crate::bgv::profile::DATA_PRIMES.len())
+        Some(level + 1)
     } else {
         None
     };
@@ -871,8 +1653,10 @@ fn public_key_share_commands_round_trip_with_family_label() {
         serde_json::json!(witness.negative_indicator_coefficients);
     generate_request["openingRandomnessByLimb"] =
         serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSource"] = serde_json::json!("test-fixed-seed");
+    generate_request["proofRandomnessSource"] =
+        serde_json::json!("development-deterministic-fixture");
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+    generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate public-key share command");
@@ -908,16 +1692,89 @@ fn public_key_share_commands_round_trip_with_family_label() {
 }
 
 #[test]
+fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
+    let (statement, witness) =
+        generate_development_public_key_share_instance("ab12cd34", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
+    let mut generate_request = statement_request_value(&statement);
+    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
+    generate_request["errorCoefficientsByKey"] =
+        serde_json::json!(witness.error_coefficients_by_key);
+    generate_request["negativeIndicatorCoefficients"] =
+        serde_json::json!(witness.negative_indicator_coefficients);
+    generate_request["openingRandomnessByLimb"] =
+        serde_json::json!(witness.opening_randomness_by_limb);
+    generate_request["proofRandomnessSource"] =
+        serde_json::json!("development-deterministic-fixture");
+    generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+    generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
+
+    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
+        .expect("generate with nonce");
+    assert_eq!(
+        generated["proofRandomness"]["binding"],
+        "seed and nonce are bound to statement hash, proof family, trustee identity, roster position, and setup epoch before proof masking"
+    );
+
+    let mut changed_nonce_request = generate_request.clone();
+    changed_nonce_request["proofRandomnessNonceHex"] = serde_json::json!("11".repeat(64));
+    let changed_nonce_generated =
+        super::generate_trustee_evaluation_key_proof_from_request(&changed_nonce_request)
+            .expect("generate with changed nonce");
+    assert_ne!(
+        generated["proofBytesHex"], changed_nonce_generated["proofBytesHex"],
+        "the same seed and statement must not reuse proof masks when the nonce changes"
+    );
+
+    let mut short_seed_request = generate_request.clone();
+    short_seed_request["proofRandomnessSeedHex"] = serde_json::json!("00".repeat(63));
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&short_seed_request).is_err(),
+        "short proof randomness seed material must reject"
+    );
+
+    let mut missing_nonce_request = generate_request;
+    missing_nonce_request
+        .as_object_mut()
+        .expect("request object")
+        .remove("proofRandomnessNonceHex");
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&missing_nonce_request).is_err(),
+        "proof generation without an explicit nonce must reject"
+    );
+}
+
+#[test]
 fn public_key_share_accounting_carries_family_rows() {
     let accounting = super::accounting::succinct_public_key_share_accounting_value()
         .expect("public-key share accounting");
     assert_eq!(accounting["proofFamily"], "public-key-share");
     assert_eq!(accounting["objectType"], "SuccinctPublicKeyShareAccounting");
-    // The shared theorem rows stay accepted.
+    // The shared theorem rows stay accepted only in the scoped classical model.
     assert_eq!(accounting["lowDegreeSoundness"]["accepted"], true);
-    assert_eq!(accounting["fiatShamir"]["accepted"], true);
+    assert_eq!(
+        accounting["lowDegreeSoundness"]["acceptedUnderNamedFriConjecture"],
+        true
+    );
+    assert_eq!(
+        accounting["fiatShamir"]["classicalRoundByRoundAccepted"],
+        true
+    );
+    assert_eq!(accounting["fiatShamir"]["qromAccepted"], false);
     assert!(
         accounting["familyRelationRows"]["commonReferenceBinding"].is_string(),
         "the family rows must record the common reference binding"
+    );
+    assert!(
+        accounting["familyRelationRows"]["singleCommitmentLinkageRationale"]
+            .as_str()
+            .is_some_and(|text| text.contains("limb-zero")),
+        "the public-key share accounting must document why the one-commitment linkage opens limb zero"
+    );
+    assert!(
+        accounting["familyRelationRows"]["anchorReference"]
+            .as_str()
+            .is_some_and(|text| text.contains("opens every Q_share constant commitment")),
+        "the public-key share accounting must distinguish its narrower linkage from the same-secret anchor"
     );
 }

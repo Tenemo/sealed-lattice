@@ -187,8 +187,8 @@ fn verify_trustee_evaluation_key_proof_set(
             binding.public_key_share_set_root.as_str(),
         ),
         (
-            "publicKeyShareLnpProofSetRoot",
-            binding.public_key_share_lnp_proof_set_root.as_str(),
+            "publicKeyShareSuccinctProofSetRoot",
+            binding.public_key_share_succinct_proof_set_root.as_str(),
         ),
         (
             "relinearizationCrpRoot",
@@ -647,11 +647,20 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
                 "commonRandomness.publicMatrixSeedHash was required for trustee evaluation-key statement assembly",
             )
         })?;
-    let constant_commitments = same_secret_constant_commitment_values_from_material(
+    let mut constant_commitments = same_secret_constant_commitment_values_from_material(
         setup_package,
         inputs.trustee_roster_position,
         inputs.transported_constant_commitments,
     )?;
+    // The trustee evaluation-key linkage binds one commitment per active
+    // key-switch limb (the working-level RNS limbs the relinearization and
+    // Galois keys operate over), not every Q_share limb. The keyless
+    // same-secret anchor separately opens every Q_share constant commitment, so
+    // the shared material source returns the full Q_share commitment set and
+    // this evaluation-key statement selects the active key-switch prefix that
+    // the per-limb prover and verifier iterate over.
+    let active_key_switch_limb_count = keys.iter().map(|key| key.level + 1).max().unwrap_or(0);
+    constant_commitments.truncate(active_key_switch_limb_count);
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
@@ -660,6 +669,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
             commitments: constant_commitments,
         }),
+        private_vss_share: None,
     };
     statement.validate_shape()?;
 
@@ -1050,6 +1060,14 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                     decode_hex(bytes_hex)
                 })
                 .collect::<CanonicalResult<Vec<_>>>()?
+        } else if request.get("verifiedSetupProofMaterials").is_some() {
+            verified_setup_proof_material_chunks_from_request(
+                request,
+                TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+                expected_proof_material_root,
+                proof_material,
+                "transportedEvaluationKeyShareProofMaterial.proofMaterials",
+            )?
         } else {
             stored_verified_trustee_evaluation_key_proof_material_chunks(
                 expected_proof_material_root,
@@ -1315,7 +1333,7 @@ fn unexpected_trustee_evaluation_key_proof_set_field(value: &Value) -> Option<St
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
             "publicKeyShareSetRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "relinearizationCrpRoot",
             "galoisKeyCrpRoot",
             "publicMatrixSeedHash",

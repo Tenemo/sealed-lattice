@@ -27,10 +27,13 @@ use crate::bgv::setup::commitment::{
     structural_matrix_polynomial_kind,
 };
 use crate::bgv::setup::sampling::dense_public_residues_with_degree;
+use crate::bgv::setup::sharing::canonical_trustee_point;
 
 #[cfg(test)]
 const WITNESS_SECRET_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/witness-secret-v1";
 const STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/statement-v2";
+const PROTOCOL_HASH_HEX_LENGTH: usize = 128;
+const MAX_CONTEXT_TOKEN_BYTES: usize = 512;
 
 // The seed label of the accepted BGV common reference polynomial; the
 // public-key share descriptor pins it as its sample domain so the family
@@ -158,6 +161,29 @@ pub(crate) struct SameSecretLinkageStatement {
     pub(crate) commitments: Vec<SetupCommitmentValue>,
 }
 
+// Recipient-private VSS opening statement. The proof opens the source
+// trustee's committed Shamir coefficient polynomials to hidden coefficient
+// vectors and proves the recipient share vector is their lifted evaluation at
+// the recipient trustee point, with a hidden carry vector:
+//   sum_k alpha_j^k F_k - q_l * carry = share_j
+// over the integers. The linear relation is checked over the setup commitment
+// fields; bounded cross-field consistency gives the integer lift.
+pub(crate) struct PrivateVssShareStatement {
+    pub(crate) public_matrix_seed_hash: String,
+    pub(crate) private_envelope_aad_hash: String,
+    pub(crate) source_trustee_identity: String,
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) recipient_identity: String,
+    pub(crate) recipient_roster_position: u64,
+    pub(crate) source_trustee_commitment_root: String,
+    pub(crate) source_rns_limb_index: usize,
+    pub(crate) source_message_modulus: u64,
+    pub(crate) share_values_hash: String,
+    pub(crate) share_values: Vec<u64>,
+    pub(crate) coefficient_commitment_roots: Vec<String>,
+    pub(crate) coefficient_commitments: Vec<SetupCommitmentValue>,
+}
+
 // Ceremony context the proof is bound to: the shared base fields, the proof
 // family label, and the family's ordered labeled binding roots. Every field
 // enters the statement hash, so a proof transplanted to another ceremony,
@@ -182,6 +208,11 @@ pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS: [&str; 1] =
     ["vssCoefficientCommitmentMaterialRoot"];
 pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS: [&str; 2] =
     ["sameSecretStatementRoot", "sameSecretProofRoot"];
+pub(crate) const PRIVATE_VSS_SHARE_BINDING_LABELS: [&str; 3] = [
+    "sourceTrusteeCommitmentRoot",
+    "privateEnvelopeAadHash",
+    "shareValuesHash",
+];
 pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 5] = [
     "requiredGaloisSetHash",
     "evaluatorKeyScheduleRoot",
@@ -199,6 +230,7 @@ pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 5] = [
 pub(crate) enum SuccinctSetupProofFamilyShape {
     SameSecretLinkageAnchor,
     PublicKeyShare,
+    PrivateVssShare,
     TrusteeEvaluationKey,
 }
 
@@ -227,6 +259,7 @@ impl SuccinctSetupProofFamilyShape {
         match self {
             Self::SameSecretLinkageAnchor => super::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             Self::PublicKeyShare => super::PUBLIC_KEY_SHARE_PROOF_FAMILY,
+            Self::PrivateVssShare => super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
             Self::TrusteeEvaluationKey => super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         }
     }
@@ -235,13 +268,65 @@ impl SuccinctSetupProofFamilyShape {
         match self {
             Self::SameSecretLinkageAnchor => &SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS,
             Self::PublicKeyShare => &PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS,
+            Self::PrivateVssShare => &PRIVATE_VSS_SHARE_BINDING_LABELS,
             Self::TrusteeEvaluationKey => &TRUSTEE_EVALUATION_KEY_BINDING_LABELS,
         }
     }
 }
 
+fn append_u64(preimage: &mut Vec<u8>, value: u64) {
+    preimage.extend_from_slice(&value.to_le_bytes());
+}
+
+fn append_usize(preimage: &mut Vec<u8>, value: usize) {
+    append_u64(preimage, value as u64);
+}
+
+fn append_len_prefixed_str(preimage: &mut Vec<u8>, value: &str) {
+    append_usize(preimage, value.len());
+    preimage.extend_from_slice(value.as_bytes());
+}
+
+fn validate_context_token(field_name: &str, value: &str) -> CanonicalResult<()> {
+    if value.is_empty() || value.len() > MAX_CONTEXT_TOKEN_BYTES {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{field_name} must be a non-empty bounded setup context token",
+        )));
+    }
+    if !value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/' | b'@' | b'+')
+    }) {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{field_name} contains a character outside the setup context token alphabet",
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_protocol_hash_hex(field_name: &str, value: &str) -> CanonicalResult<()> {
+    if value.len() == PROTOCOL_HASH_HEX_LENGTH
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+
+    Err(invalid_succinct_setup_proof(format!(
+        "{field_name} must be a lowercase 512-bit protocol hash",
+    )))
+}
+
 impl SuccinctSetupProofContext {
     fn validate_for_statement(&self, shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<()> {
+        validate_context_token("proofFamily", &self.proof_family)?;
+        validate_context_token("ceremonyId", &self.ceremony_id)?;
+        validate_protocol_hash_hex("manifestHash", &self.manifest_hash)?;
+        validate_protocol_hash_hex("rosterHash", &self.roster_hash)?;
+        validate_context_token("trusteeIdentity", &self.trustee_identity)?;
+        validate_context_token("setupEpoch", &self.setup_epoch)?;
         if self.proof_family != shape.proof_family() {
             return Err(invalid_succinct_setup_proof(
                 "statement family does not match its key and linkage shape",
@@ -253,11 +338,15 @@ impl SuccinctSetupProofContext {
                 .binding_roots
                 .iter()
                 .zip(expected_labels.iter())
-                .any(|((label, root), expected)| label != expected || root.is_empty())
+                .any(|((label, _), expected)| label != expected)
         {
             return Err(invalid_succinct_setup_proof(
                 "statement binding roots do not match the family binding labels",
             ));
+        }
+        for (binding_label, binding_root) in &self.binding_roots {
+            validate_context_token("bindingRootLabel", binding_label)?;
+            validate_protocol_hash_hex("bindingRoot", binding_root)?;
         }
 
         Ok(())
@@ -272,6 +361,7 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
     pub(crate) ring_degree: usize,
     pub(crate) keys: Vec<EvaluationKeyShareDescriptor>,
     pub(crate) same_secret_linkage: Option<SameSecretLinkageStatement>,
+    pub(crate) private_vss_share: Option<PrivateVssShareStatement>,
 }
 
 pub(crate) struct TrusteeEvaluationKeyWitness {
@@ -283,6 +373,12 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     // ternary opening randomness per Q_share limb and column.
     pub(crate) negative_indicator_coefficients: Vec<i64>,
     pub(crate) opening_randomness_by_limb: Vec<Vec<Vec<i64>>>,
+    // Private VSS witnesses, present exactly for the recipient-private VSS
+    // family. Coefficient messages are canonical non-negative residues stored
+    // as signed integers for shared residue conversion.
+    pub(crate) private_vss_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
+    pub(crate) private_vss_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
+    pub(crate) private_vss_carry_witnesses: Vec<i64>,
 }
 
 impl EvaluationKeyShareDescriptor {
@@ -301,6 +397,8 @@ impl EvaluationKeyShareDescriptor {
     }
 
     fn validate_shape(&self, ring_degree: usize) -> CanonicalResult<()> {
+        validate_context_token("keySwitchDomain", &self.key_switch_domain)?;
+        validate_context_token("keySwitchSeedHex", &self.key_switch_seed_hex)?;
         if self.level + 1 > DATA_PRIMES.len() {
             return Err(invalid_succinct_setup_proof(
                 "key level is outside the selected data basis",
@@ -317,6 +415,19 @@ impl EvaluationKeyShareDescriptor {
             return Err(invalid_succinct_setup_proof(
                 "key component material shape does not match its level and ring degree",
             ));
+        }
+        for component_b_by_limb in &self.component_b_by_digit {
+            for (rns_limb_index, component_b) in component_b_by_limb.iter().enumerate() {
+                let modulus = DATA_PRIMES[rns_limb_index];
+                if component_b
+                    .iter()
+                    .any(|coefficient| *coefficient >= modulus)
+                {
+                    return Err(invalid_succinct_setup_proof(
+                        "key component material contains noncanonical Q_share residues",
+                    ));
+                }
+            }
         }
         match self.kind {
             EvaluationKeyShareKind::RelinearizationRoundOne => {
@@ -466,6 +577,9 @@ impl TrusteeEvaluationKeyStatement {
     // keyless same-secret linkage anchor statement is active exactly on the
     // commitment fields, where its opening relations live.
     pub(super) fn limb_count(&self) -> usize {
+        if self.private_vss_share.is_some() {
+            return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
+        }
         self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
             if self.same_secret_linkage.is_some() {
                 SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
@@ -498,28 +612,24 @@ impl TrusteeEvaluationKeyStatement {
             self.context.roster_hash.as_str(),
             self.context.trustee_identity.as_str(),
         ] {
-            preimage.extend_from_slice(&(context_field.len() as u64).to_le_bytes());
-            preimage.extend_from_slice(context_field.as_bytes());
+            append_len_prefixed_str(&mut preimage, context_field);
         }
-        preimage.extend_from_slice(&(self.context.binding_roots.len() as u64).to_le_bytes());
+        append_usize(&mut preimage, self.context.binding_roots.len());
         for (binding_label, binding_root) in &self.context.binding_roots {
             for binding_field in [binding_label.as_str(), binding_root.as_str()] {
-                preimage.extend_from_slice(&(binding_field.len() as u64).to_le_bytes());
-                preimage.extend_from_slice(binding_field.as_bytes());
+                append_len_prefixed_str(&mut preimage, binding_field);
             }
         }
-        preimage.extend_from_slice(&self.context.trustee_roster_position.to_le_bytes());
-        preimage.extend_from_slice(self.context.setup_epoch.as_bytes());
+        append_u64(&mut preimage, self.context.trustee_roster_position);
+        append_len_prefixed_str(&mut preimage, &self.context.setup_epoch);
         preimage.push(0);
-        preimage.extend_from_slice(&(self.ring_degree as u64).to_le_bytes());
-        preimage.extend_from_slice(&(self.keys.len() as u64).to_le_bytes());
+        append_usize(&mut preimage, self.ring_degree);
+        append_usize(&mut preimage, self.keys.len());
         for key in &self.keys {
             preimage.extend_from_slice(&key.kind.tag_bytes());
-            preimage.extend_from_slice(&(key.level as u64).to_le_bytes());
-            preimage.extend_from_slice(&(key.key_switch_domain.len() as u64).to_le_bytes());
-            preimage.extend_from_slice(key.key_switch_domain.as_bytes());
-            preimage.extend_from_slice(&(key.key_switch_seed_hex.len() as u64).to_le_bytes());
-            preimage.extend_from_slice(key.key_switch_seed_hex.as_bytes());
+            append_usize(&mut preimage, key.level);
+            append_len_prefixed_str(&mut preimage, &key.key_switch_domain);
+            append_len_prefixed_str(&mut preimage, &key.key_switch_seed_hex);
             for component_b_by_limb in &key.component_b_by_digit {
                 for component_b in component_b_by_limb {
                     preimage.extend_from_slice(&coefficient_vector_hash(component_b));
@@ -531,12 +641,57 @@ impl TrusteeEvaluationKeyStatement {
         }
         if let Some(linkage) = &self.same_secret_linkage {
             preimage.push(1);
-            preimage.extend_from_slice(linkage.public_matrix_seed_hash.as_bytes());
-            preimage.extend_from_slice(&(linkage.commitments.len() as u64).to_le_bytes());
+            append_len_prefixed_str(&mut preimage, &linkage.public_matrix_seed_hash);
+            append_usize(&mut preimage, linkage.commitments.len());
             for commitment in &linkage.commitments {
-                preimage
-                    .extend_from_slice(&(commitment.source_rns_limb_index as u64).to_le_bytes());
+                append_usize(&mut preimage, commitment.source_rns_limb_index);
                 preimage.extend_from_slice(&commitment.source_message_modulus.to_le_bytes());
+                for limb in &commitment.limbs {
+                    for row in &limb.rows {
+                        preimage.extend_from_slice(&coefficient_vector_hash(row));
+                    }
+                }
+            }
+        } else {
+            preimage.push(0);
+        }
+        if let Some(private_vss_share) = &self.private_vss_share {
+            preimage.push(1);
+            for field in [
+                private_vss_share.public_matrix_seed_hash.as_str(),
+                private_vss_share.private_envelope_aad_hash.as_str(),
+                private_vss_share.source_trustee_identity.as_str(),
+                private_vss_share.recipient_identity.as_str(),
+                private_vss_share.source_trustee_commitment_root.as_str(),
+                private_vss_share.share_values_hash.as_str(),
+            ] {
+                append_len_prefixed_str(&mut preimage, field);
+            }
+            preimage.extend_from_slice(
+                &private_vss_share
+                    .source_trustee_roster_position
+                    .to_le_bytes(),
+            );
+            preimage.extend_from_slice(&private_vss_share.recipient_roster_position.to_le_bytes());
+            append_usize(&mut preimage, private_vss_share.source_rns_limb_index);
+            preimage.extend_from_slice(&private_vss_share.source_message_modulus.to_le_bytes());
+            append_usize(&mut preimage, private_vss_share.share_values.len());
+            preimage.extend_from_slice(&coefficient_vector_hash(&private_vss_share.share_values));
+            append_usize(
+                &mut preimage,
+                private_vss_share.coefficient_commitment_roots.len(),
+            );
+            for root in &private_vss_share.coefficient_commitment_roots {
+                append_len_prefixed_str(&mut preimage, root);
+            }
+            append_usize(
+                &mut preimage,
+                private_vss_share.coefficient_commitments.len(),
+            );
+            for commitment in &private_vss_share.coefficient_commitments {
+                append_usize(&mut preimage, commitment.source_rns_limb_index);
+                preimage.extend_from_slice(&commitment.source_message_modulus.to_le_bytes());
+                preimage.extend_from_slice(&commitment.shamir_coefficient_index.to_le_bytes());
                 for limb in &commitment.limbs {
                     for row in &limb.rows {
                         preimage.extend_from_slice(&coefficient_vector_hash(row));
@@ -553,13 +708,24 @@ impl TrusteeEvaluationKeyStatement {
     pub(in crate::bgv::setup) fn family_shape(
         &self,
     ) -> CanonicalResult<SuccinctSetupProofFamilyShape> {
+        if self.private_vss_share.is_some() {
+            if !self.keys.is_empty() || self.same_secret_linkage.is_some() {
+                return Err(invalid_succinct_setup_proof(
+                    "private VSS statement must not include key descriptors or same-secret linkage",
+                ));
+            }
+            return Ok(SuccinctSetupProofFamilyShape::PrivateVssShare);
+        }
         let kinds = self.keys.iter().map(|key| key.kind).collect::<Vec<_>>();
 
         SuccinctSetupProofFamilyShape::from_key_kinds(&kinds)
     }
 
     pub(in crate::bgv::setup) fn validate_shape(&self) -> CanonicalResult<()> {
-        if self.keys.is_empty() && self.same_secret_linkage.is_none() {
+        if self.keys.is_empty()
+            && self.same_secret_linkage.is_none()
+            && self.private_vss_share.is_none()
+        {
             return Err(invalid_succinct_setup_proof(
                 "trustee statement requires key shares or the same-secret linkage anchor",
             ));
@@ -571,13 +737,13 @@ impl TrusteeEvaluationKeyStatement {
             .map(|linkage| linkage.commitments.len());
         match shape {
             SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
-                // The anchor opens every commitment over the commitment
-                // fields; the linkage block must cover at least those fields.
-                if linkage_commitment_count.unwrap_or(0)
-                    < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-                {
+                // The anchor proves the whole constant-commitment set, one
+                // commitment per Q_share limb, over the setup commitment
+                // fields. Subsets leave later families without a canonical
+                // anchor target, and supersets sit outside the theorem shape.
+                if linkage_commitment_count != Some(DATA_PRIMES.len()) {
                     return Err(invalid_succinct_setup_proof(
-                        "the linkage anchor requires a commitment for every commitment field",
+                        "the linkage anchor requires exactly one commitment for every Q_share limb",
                     ));
                 }
             }
@@ -588,6 +754,19 @@ impl TrusteeEvaluationKeyStatement {
                 if linkage_commitment_count != Some(1) {
                     return Err(invalid_succinct_setup_proof(
                         "the public-key share statement requires exactly one constant-commitment opening",
+                    ));
+                }
+            }
+            SuccinctSetupProofFamilyShape::PrivateVssShare => {
+                if self.keys.is_empty()
+                    && self.same_secret_linkage.is_none()
+                    && self.private_vss_share.is_some()
+                {
+                    // The detailed statement check below validates the
+                    // recipient-private VSS material.
+                } else {
+                    return Err(invalid_succinct_setup_proof(
+                        "private VSS statement must not mix proof families",
                     ));
                 }
             }
@@ -605,10 +784,23 @@ impl TrusteeEvaluationKeyStatement {
             key.validate_shape(self.ring_degree)?;
         }
         if let Some(linkage) = &self.same_secret_linkage {
+            validate_protocol_hash_hex(
+                "sameSecretLinkage.publicMatrixSeedHash",
+                &linkage.public_matrix_seed_hash,
+            )?;
             if self.limb_count() < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
                 return Err(invalid_succinct_setup_proof(
                     "same-secret linkage requires every commitment field to be an active limb",
                 ));
+            }
+            if shape == SuccinctSetupProofFamilyShape::TrusteeEvaluationKey
+                && linkage.commitments.len() != self.limb_count()
+            {
+                return Err(invalid_succinct_setup_proof(format!(
+                    "same-secret linkage requires exactly one commitment per active Q_share limb: expected {}, got {}",
+                    self.limb_count(),
+                    linkage.commitments.len()
+                )));
             }
             if linkage.commitments.is_empty() || linkage.commitments.len() > DATA_PRIMES.len() {
                 return Err(invalid_succinct_setup_proof(
@@ -639,6 +831,9 @@ impl TrusteeEvaluationKeyStatement {
                 }
             }
         }
+        if let Some(private_vss_share) = &self.private_vss_share {
+            validate_private_vss_share_statement(private_vss_share, self.ring_degree)?;
+        }
 
         Ok(())
     }
@@ -654,6 +849,97 @@ impl TrusteeEvaluationKeyStatement {
             _ => 0,
         }
     }
+
+    pub(super) fn private_vss_randomness_count(&self, limb_index: usize) -> usize {
+        match &self.private_vss_share {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.coefficient_commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH
+            }
+            _ => 0,
+        }
+    }
+}
+
+fn validate_private_vss_share_statement(
+    statement: &PrivateVssShareStatement,
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    validate_protocol_hash_hex(
+        "privateVssShare.publicMatrixSeedHash",
+        &statement.public_matrix_seed_hash,
+    )?;
+    validate_protocol_hash_hex(
+        "privateVssShare.privateEnvelopeAadHash",
+        &statement.private_envelope_aad_hash,
+    )?;
+    validate_context_token(
+        "privateVssShare.sourceTrusteeIdentity",
+        &statement.source_trustee_identity,
+    )?;
+    validate_context_token(
+        "privateVssShare.recipientIdentity",
+        &statement.recipient_identity,
+    )?;
+    validate_protocol_hash_hex(
+        "privateVssShare.sourceTrusteeCommitmentRoot",
+        &statement.source_trustee_commitment_root,
+    )?;
+    validate_protocol_hash_hex(
+        "privateVssShare.shareValuesHash",
+        &statement.share_values_hash,
+    )?;
+    if statement.source_rns_limb_index >= DATA_PRIMES.len()
+        || DATA_PRIMES[statement.source_rns_limb_index] != statement.source_message_modulus
+    {
+        return Err(invalid_succinct_setup_proof(
+            "private VSS source limb does not match the selected data basis",
+        ));
+    }
+    if statement.share_values.len() != ring_degree
+        || statement
+            .share_values
+            .iter()
+            .any(|value| *value >= statement.source_message_modulus)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "private VSS share values are not canonical for the source limb",
+        ));
+    }
+    if statement.coefficient_commitments.is_empty()
+        || statement.coefficient_commitments.len() != statement.coefficient_commitment_roots.len()
+    {
+        return Err(invalid_succinct_setup_proof(
+            "private VSS coefficient commitments and roots must be non-empty and aligned",
+        ));
+    }
+    for commitment_root in &statement.coefficient_commitment_roots {
+        validate_protocol_hash_hex("privateVssShare.coefficientCommitmentRoot", commitment_root)?;
+    }
+    for (coefficient_index, commitment) in statement.coefficient_commitments.iter().enumerate() {
+        if commitment.source_rns_limb_index != statement.source_rns_limb_index
+            || commitment.source_message_modulus != statement.source_message_modulus
+            || commitment.shamir_coefficient_index != coefficient_index as u64
+            || commitment.ring_degree != ring_degree
+            || commitment.limbs.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+        {
+            return Err(invalid_succinct_setup_proof(
+                "private VSS coefficient commitment shape does not match the statement",
+            ));
+        }
+        for (commitment_field, limb) in commitment.limbs.iter().enumerate() {
+            if limb.commitment_modulus_index != commitment_field
+                || limb.modulus != DATA_PRIMES[commitment_field]
+                || limb.rows.len() != SETUP_COMMITMENT_ROW_COUNT
+                || limb.rows.iter().any(|row| row.len() != ring_degree)
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "private VSS coefficient commitment limb shape does not match the profile",
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn coefficient_vector_hash(coefficients: &[u64]) -> [u8; 64] {
@@ -1000,12 +1286,16 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
             ring_degree,
             keys,
             same_secret_linkage,
+            private_vss_share: None,
         },
         TrusteeEvaluationKeyWitness {
             secret_coefficients,
             error_coefficients_by_key,
             negative_indicator_coefficients,
             opening_randomness_by_limb,
+            private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            private_vss_opening_randomness_by_shamir_index: Vec::new(),
+            private_vss_carry_witnesses: Vec::new(),
         },
     ))
 }
@@ -1135,12 +1425,16 @@ pub(crate) fn generate_development_public_key_share_instance(
             ring_degree,
             keys: vec![descriptor],
             same_secret_linkage,
+            private_vss_share: None,
         },
         TrusteeEvaluationKeyWitness {
             secret_coefficients,
             error_coefficients_by_key: vec![vec![error_coefficients]],
             negative_indicator_coefficients,
             opening_randomness_by_limb: vec![randomness],
+            private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            private_vss_opening_randomness_by_shamir_index: Vec::new(),
+            private_vss_carry_witnesses: Vec::new(),
         },
     ))
 }
@@ -1179,13 +1473,16 @@ fn development_public_key_share_context(seed_hex: &str) -> SuccinctSetupProofCon
 pub(super) struct LimbColumnLayout {
     pub(super) ring_degree: usize,
     pub(super) trace_size: usize,
+    pub(super) family_shape: SuccinctSetupProofFamilyShape,
     // (key index, digit count) per active key, in key order.
     pub(super) active_keys: Vec<(usize, usize)>,
     pub(super) total_error_columns: usize,
+    pub(super) private_vss_coefficient_columns: usize,
     // Linkage logical columns active in this limb: the binary negative
     // indicator plus the per-commitment opening-randomness columns, or zero
     // outside the commitment fields.
     pub(super) linkage_randomness_columns: usize,
+    pub(super) private_vss_randomness_columns: usize,
     pub(super) mask_column_count: usize,
 }
 
@@ -1194,26 +1491,43 @@ impl LimbColumnLayout {
         statement: &TrusteeEvaluationKeyStatement,
         limb_index: usize,
     ) -> CanonicalResult<Self> {
+        let family_shape = statement.family_shape()?;
         let active_keys = statement
             .active_key_indices(limb_index)
             .into_iter()
             .map(|key_index| (key_index, statement.keys[key_index].digit_count()))
             .collect::<Vec<_>>();
-        if active_keys.is_empty() && statement.linkage_randomness_count(limb_index) == 0 {
+        let private_vss_coefficient_columns = statement
+            .private_vss_share
+            .as_ref()
+            .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
+            .map(|statement| statement.coefficient_commitments.len())
+            .unwrap_or(0);
+        if active_keys.is_empty()
+            && statement.linkage_randomness_count(limb_index) == 0
+            && private_vss_coefficient_columns == 0
+        {
             return Err(invalid_succinct_setup_proof(
                 "limb layout requires an active key or active linkage relations",
             ));
         }
         let total_error_columns = active_keys.iter().map(|(_, digits)| *digits).sum::<usize>();
         let linkage_randomness_columns = statement.linkage_randomness_count(limb_index);
+        let private_vss_randomness_columns = statement.private_vss_randomness_count(limb_index);
         let ring_degree = statement.ring_degree;
-        let consistency_vector_count = 1
-            + total_error_columns
-            + if linkage_randomness_columns > 0 {
-                1 + linkage_randomness_columns
-            } else {
-                0
-            };
+        let consistency_vector_count = match family_shape {
+            SuccinctSetupProofFamilyShape::PrivateVssShare => {
+                private_vss_coefficient_columns + 1 + private_vss_randomness_columns
+            }
+            _ => {
+                1 + total_error_columns
+                    + if linkage_randomness_columns > 0 {
+                        1 + linkage_randomness_columns
+                    } else {
+                        0
+                    }
+            }
+        };
         let claim_count = consistency_vector_count * CONSISTENCY_REPETITIONS;
         let mask_slot_count = claim_count * CLAIM_MASK_DIGIT_COUNT;
         let mask_column_count = mask_slot_count.div_ceil(ring_degree);
@@ -1221,9 +1535,12 @@ impl LimbColumnLayout {
         Ok(Self {
             ring_degree,
             trace_size: ring_degree / TRACE_SPLIT,
+            family_shape,
             active_keys,
             total_error_columns,
+            private_vss_coefficient_columns,
             linkage_randomness_columns,
+            private_vss_randomness_columns,
             mask_column_count,
         })
     }
@@ -1241,11 +1558,35 @@ impl LimbColumnLayout {
         }
     }
 
+    pub(super) fn private_vss_active(&self) -> bool {
+        self.family_shape == SuccinctSetupProofFamilyShape::PrivateVssShare
+    }
+
+    fn private_vss_logical_columns(&self) -> usize {
+        if self.private_vss_active() {
+            self.private_vss_coefficient_columns + 1 + self.private_vss_randomness_columns
+        } else {
+            0
+        }
+    }
+
+    pub(super) fn private_vss_relation_count(&self) -> usize {
+        if self.private_vss_active() {
+            self.private_vss_coefficient_columns * SETUP_COMMITMENT_ROW_COUNT + 1
+        } else {
+            0
+        }
+    }
+
     // Logical witness vectors carrying cross-limb consistency claims: the
     // shared secret first, then every active key's error vectors in order,
     // then the linkage negative indicator and opening-randomness vectors.
     pub(super) fn consistency_vector_count(&self) -> usize {
-        1 + self.total_error_columns + self.linkage_logical_columns()
+        if self.private_vss_active() {
+            self.private_vss_logical_columns()
+        } else {
+            1 + self.total_error_columns + self.linkage_logical_columns()
+        }
     }
 
     pub(super) fn claim_count(&self) -> usize {
@@ -1253,20 +1594,24 @@ impl LimbColumnLayout {
     }
 
     pub(super) fn physical_secret(&self, half: usize) -> usize {
+        debug_assert!(!self.private_vss_active());
         half
     }
 
     // error_position counts error vectors across active keys in layout order.
     pub(super) fn physical_error(&self, error_position: usize, half: usize) -> usize {
+        debug_assert!(!self.private_vss_active());
         TRACE_SPLIT * (1 + error_position) + half
     }
 
     pub(super) fn physical_error_square(&self, error_position: usize, half: usize) -> usize {
+        debug_assert!(!self.private_vss_active());
         TRACE_SPLIT * (1 + self.total_error_columns + error_position) + half
     }
 
     pub(super) fn physical_negative_indicator(&self, half: usize) -> usize {
         debug_assert!(self.linkage_active());
+        debug_assert!(!self.private_vss_active());
         TRACE_SPLIT * (1 + 2 * self.total_error_columns) + half
     }
 
@@ -1276,25 +1621,60 @@ impl LimbColumnLayout {
         half: usize,
     ) -> usize {
         debug_assert!(self.linkage_active());
+        debug_assert!(!self.private_vss_active());
         TRACE_SPLIT * (1 + 2 * self.total_error_columns + 1 + randomness_position) + half
     }
 
+    pub(super) fn physical_private_vss_message(
+        &self,
+        coefficient_index: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.private_vss_active());
+        TRACE_SPLIT * coefficient_index + half
+    }
+
+    pub(super) fn physical_private_vss_carry(&self, half: usize) -> usize {
+        debug_assert!(self.private_vss_active());
+        TRACE_SPLIT * self.private_vss_coefficient_columns + half
+    }
+
+    pub(super) fn physical_private_vss_randomness(
+        &self,
+        randomness_position: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.private_vss_active());
+        TRACE_SPLIT * (self.private_vss_coefficient_columns + 1 + randomness_position) + half
+    }
+
     pub(super) fn physical_mask(&self, mask_column: usize, half: usize) -> usize {
-        TRACE_SPLIT
-            * (1 + 2 * self.total_error_columns + self.linkage_logical_columns() + mask_column)
-            + half
+        let logical_prefix = if self.private_vss_active() {
+            self.private_vss_logical_columns()
+        } else {
+            1 + 2 * self.total_error_columns + self.linkage_logical_columns()
+        };
+        TRACE_SPLIT * (logical_prefix + mask_column) + half
     }
 
     pub(super) fn phase_one_physical_count(&self) -> usize {
-        TRACE_SPLIT
-            * (1 + 2 * self.total_error_columns
-                + self.linkage_logical_columns()
-                + self.mask_column_count)
+        let logical_prefix = if self.private_vss_active() {
+            self.private_vss_logical_columns()
+        } else {
+            1 + 2 * self.total_error_columns + self.linkage_logical_columns()
+        };
+        TRACE_SPLIT * (logical_prefix + self.mask_column_count)
     }
 
-    // One row-check constraint per physical column.
+    // Row-check constraints are present for restricted witness columns and
+    // mask digits. Private VSS message and carry columns are unrestricted
+    // field columns; their integer lift is checked by masked consistency.
     pub(super) fn row_check_constraint_count(&self) -> usize {
-        self.phase_one_physical_count()
+        if self.private_vss_active() {
+            TRACE_SPLIT * (self.private_vss_randomness_columns + self.mask_column_count)
+        } else {
+            self.phase_one_physical_count()
+        }
     }
 
     // Mask slot of one claim digit: claims are laid out consecutively with
@@ -1442,6 +1822,28 @@ pub(super) fn batched_row_check_value<Domain: CompositionColumnDomain>(
         );
         constraint_index += 1;
     };
+    if layout.private_vss_active() {
+        for randomness_position in 0..layout.private_vss_randomness_columns {
+            for half in 0..TRACE_SPLIT {
+                let randomness = column_values
+                    [layout.physical_private_vss_randomness(randomness_position, half)];
+                let cube =
+                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
+                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+            }
+        }
+        for mask_column in 0..layout.mask_column_count {
+            for half in 0..TRACE_SPLIT {
+                let mask = column_values[layout.physical_mask(mask_column, half)];
+                absorb(
+                    &domain.value_sub(&domain.value_mul(&mask, &mask), &mask),
+                    &mut accumulated,
+                );
+            }
+        }
+
+        return accumulated;
+    }
     for half in 0..TRACE_SPLIT {
         let secret = column_values[layout.physical_secret(half)];
         let cube = domain.value_mul(&domain.value_mul(&secret, &secret), &secret);
@@ -1545,6 +1947,53 @@ pub(super) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
     let tower = *domain.tower();
     let plaintext_modulus = (PLAINTEXT_MODULUS_I64 as u64) % tower.modulus;
     let mut accumulated = ChallengeExtensionTower::zero();
+    if layout.private_vss_active() {
+        let mut claim_alpha_index = 0_usize;
+        for consistency_vector in 0..layout.consistency_vector_count() {
+            for repetition in 0..CONSISTENCY_REPETITIONS {
+                let alpha_value = &consistency_alpha[claim_alpha_index];
+                claim_alpha_index += 1;
+                for half in 0..TRACE_SPLIT {
+                    let witness_value = private_vss_column_value::<Domain>(
+                        column_values,
+                        layout,
+                        consistency_vector,
+                        half,
+                    );
+                    let consistency_product =
+                        domain.value_mul(&publics.consistency[repetition][half], &witness_value);
+                    accumulated = tower.add(
+                        &accumulated,
+                        &domain.challenge_times(alpha_value, &consistency_product),
+                    );
+                }
+            }
+        }
+        for (mask_column, mask_selector) in publics.mask_selector.iter().enumerate() {
+            for half in 0..TRACE_SPLIT {
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(
+                        &mask_selector[half],
+                        &column_values[layout.physical_mask(mask_column, half)],
+                    ),
+                );
+            }
+        }
+        debug_assert_eq!(publics.linkage.len(), layout.private_vss_logical_columns());
+        for (column_index, relation_values) in publics.linkage.iter().enumerate() {
+            for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
+                let column_value =
+                    private_vss_column_value::<Domain>(column_values, layout, column_index, half);
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(relation_value, &column_value),
+                );
+            }
+        }
+
+        return accumulated;
+    }
     for (repetition, (secret_factor, u_power)) in publics
         .secret_factor
         .iter()
@@ -1634,6 +2083,24 @@ pub(super) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
     }
 
     accumulated
+}
+
+fn private_vss_column_value<Domain: CompositionColumnDomain>(
+    column_values: &[Domain::Value],
+    layout: &LimbColumnLayout,
+    vector_index: usize,
+    half: usize,
+) -> Domain::Value {
+    if vector_index < layout.private_vss_coefficient_columns {
+        column_values[layout.physical_private_vss_message(vector_index, half)]
+    } else if vector_index == layout.private_vss_coefficient_columns {
+        column_values[layout.physical_private_vss_carry(half)]
+    } else {
+        column_values[layout.physical_private_vss_randomness(
+            vector_index - layout.private_vss_coefficient_columns - 1,
+            half,
+        )]
+    }
 }
 
 // Combined linkage lincheck vectors for one commitment field. For every
@@ -1735,6 +2202,140 @@ pub(super) fn build_linkage_public_vectors(
     vectors.extend(randomness_vectors);
 
     Ok((linkage_claim, vectors))
+}
+
+// Combined private VSS lincheck vectors for one commitment field. The vector
+// order matches the private VSS logical witness columns: every hidden Shamir
+// coefficient message, the hidden carry vector, then every opening-randomness
+// column by coefficient and randomness-column index.
+pub(super) fn build_private_vss_public_vectors(
+    statement: &PrivateVssShareStatement,
+    commitment_field: usize,
+    tower: &ChallengeExtensionTower,
+    u_power_vectors: &[Vec<ChallengeExtensionElement>],
+    relation_alpha: &[ChallengeExtensionElement],
+) -> CanonicalResult<(
+    ChallengeExtensionElement,
+    Vec<Vec<ChallengeExtensionElement>>,
+)> {
+    let modulus = tower.modulus;
+    let ring_degree = statement.share_values.len();
+    let coefficient_count = statement.coefficient_commitments.len();
+    debug_assert_eq!(
+        relation_alpha.len(),
+        (coefficient_count * SETUP_COMMITMENT_ROW_COUNT + 1) * LINCHECK_REPETITIONS
+    );
+    let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); ring_degree];
+    let mut relation_claim = ChallengeExtensionTower::zero();
+    let mut message_vectors = vec![extension_zero_vector(); coefficient_count];
+    let mut carry_vector = extension_zero_vector();
+    let mut randomness_vectors =
+        vec![extension_zero_vector(); coefficient_count * SETUP_COMMITMENT_RANDOMNESS_WIDTH];
+    let add_base_scaled = |target: &mut [ChallengeExtensionElement],
+                           source: &[ChallengeExtensionElement],
+                           scale: u64| {
+        for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
+            *target_value = tower.add(target_value, &tower.scale_base(source_value, scale));
+        }
+    };
+
+    for (coefficient_index, commitment) in statement.coefficient_commitments.iter().enumerate() {
+        let limb = &commitment.limbs[commitment_field];
+        for row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
+            let relation_index = coefficient_index * SETUP_COMMITMENT_ROW_COUNT + row_index;
+            let mut combined_u = extension_zero_vector();
+            for (repetition, u_powers) in u_power_vectors.iter().enumerate() {
+                let alpha_value =
+                    &relation_alpha[relation_index * LINCHECK_REPETITIONS + repetition];
+                for (target_value, source_value) in combined_u.iter_mut().zip(u_powers.iter()) {
+                    *target_value = tower.add(target_value, &tower.mul(alpha_value, source_value));
+                }
+            }
+            let mut row_sum = ChallengeExtensionTower::zero();
+            for (u_value, row_value) in combined_u.iter().zip(limb.rows[row_index].iter()) {
+                row_sum = tower.add(&row_sum, &tower.scale_base(u_value, *row_value));
+            }
+            relation_claim = tower.add(&relation_claim, &row_sum);
+            if row_index == SETUP_COMMITMENT_MODULE_RANK {
+                add_base_scaled(&mut message_vectors[coefficient_index], &combined_u, 1);
+            }
+            for randomness_column in 0..SETUP_COMMITMENT_RANDOMNESS_WIDTH {
+                let target = &mut randomness_vectors
+                    [coefficient_index * SETUP_COMMITMENT_RANDOMNESS_WIDTH + randomness_column];
+                match structural_matrix_polynomial_kind(row_index, randomness_column) {
+                    Some(StructuralMatrixPolynomial::One) => {
+                        add_base_scaled(target, &combined_u, 1);
+                    }
+                    Some(StructuralMatrixPolynomial::Zero) => {}
+                    None => {
+                        let matrix_polynomial = setup_commitment_matrix_coefficients_cached(
+                            &statement.public_matrix_seed_hash,
+                            statement.source_rns_limb_index,
+                            commitment_field,
+                            row_index,
+                            randomness_column,
+                            ring_degree,
+                            modulus,
+                        )?;
+                        let transposed = negacyclic_transpose_product_extension(
+                            &matrix_polynomial,
+                            &combined_u,
+                            modulus,
+                        )?;
+                        add_base_scaled(target, &transposed, 1);
+                    }
+                }
+            }
+        }
+    }
+
+    let share_relation_index = coefficient_count * SETUP_COMMITMENT_ROW_COUNT;
+    let trustee_point = canonical_trustee_point(
+        usize::try_from(statement.recipient_roster_position).map_err(|_| {
+            invalid_succinct_setup_proof("private VSS recipient roster position does not fit usize")
+        })?,
+        statement.source_message_modulus,
+    )?;
+    let mut trustee_point_powers = Vec::with_capacity(coefficient_count);
+    let mut trustee_point_power = 1_u128;
+    for _ in 0..coefficient_count {
+        trustee_point_powers.push((trustee_point_power % u128::from(modulus)) as u64);
+        trustee_point_power = trustee_point_power
+            .checked_mul(u128::from(trustee_point))
+            .ok_or_else(|| invalid_succinct_setup_proof("private VSS trustee point overflowed"))?;
+    }
+    let source_modulus_residue = statement.source_message_modulus % modulus;
+    let negated_source_modulus = if source_modulus_residue == 0 {
+        0
+    } else {
+        modulus - source_modulus_residue
+    };
+    for (repetition, u_powers) in u_power_vectors.iter().enumerate() {
+        let alpha_value = &relation_alpha[share_relation_index * LINCHECK_REPETITIONS + repetition];
+        let mut combined_u = extension_zero_vector();
+        for (target_value, source_value) in combined_u.iter_mut().zip(u_powers.iter()) {
+            *target_value = tower.add(target_value, &tower.mul(alpha_value, source_value));
+        }
+        let mut share_sum = ChallengeExtensionTower::zero();
+        for (u_value, share_value) in combined_u.iter().zip(statement.share_values.iter()) {
+            share_sum = tower.add(
+                &share_sum,
+                &tower.scale_base(u_value, *share_value % modulus),
+            );
+        }
+        relation_claim = tower.add(&relation_claim, &share_sum);
+        for (coefficient_index, power) in trustee_point_powers.iter().enumerate() {
+            add_base_scaled(&mut message_vectors[coefficient_index], &combined_u, *power);
+        }
+        add_base_scaled(&mut carry_vector, &combined_u, negated_source_modulus);
+    }
+
+    let mut vectors = Vec::with_capacity(coefficient_count + 1 + randomness_vectors.len());
+    vectors.extend(message_vectors);
+    vectors.push(carry_vector);
+    vectors.extend(randomness_vectors);
+
+    Ok((relation_claim, vectors))
 }
 
 // Per-coordinate transpose product: the matrix stays in the base field, so a
@@ -1891,10 +2492,52 @@ pub(crate) fn generate_development_trustee_ceremony_slice(
 // Centered bound for a published masked consistency claim: the clear sum is
 // bounded by max witness magnitude * ring degree * (2^bits - 1), and the
 // smudging mask lies in [0, 2^CLAIM_MASK_DIGIT_COUNT).
-pub(super) fn masked_claim_bounds(ring_degree: usize) -> (i128, i128) {
+pub(super) fn masked_claim_bounds(
+    statement: &TrusteeEvaluationKeyStatement,
+) -> CanonicalResult<(i128, i128)> {
+    let ring_degree = statement.ring_degree;
     let coefficient_bound = (1_i128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
-    let clear_bound = 2 * coefficient_bound * ring_degree as i128;
+    let witness_bound = match &statement.private_vss_share {
+        Some(private_vss_share) => {
+            let message_bound = i128::from(private_vss_share.source_message_modulus)
+                .checked_sub(1)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof("private VSS source modulus underflowed")
+                })?;
+            let carry_bound = private_vss_share_lifted_carry_bound(
+                private_vss_share.recipient_roster_position,
+                private_vss_share.coefficient_commitments.len(),
+            )?;
+            message_bound.max(carry_bound).max(1)
+        }
+        None => 2,
+    };
+    let clear_bound = witness_bound
+        .checked_mul(coefficient_bound)
+        .and_then(|bound| bound.checked_mul(ring_degree as i128))
+        .ok_or_else(|| invalid_succinct_setup_proof("masked claim bound overflowed"))?;
     let mask_bound = 1_i128 << CLAIM_MASK_DIGIT_COUNT;
 
-    (-clear_bound, mask_bound + clear_bound)
+    Ok((-clear_bound, mask_bound + clear_bound))
+}
+
+pub(super) fn private_vss_share_lifted_carry_bound(
+    recipient_roster_position: u64,
+    coefficient_count: usize,
+) -> CanonicalResult<i128> {
+    let trustee_point = recipient_roster_position
+        .checked_add(1)
+        .ok_or_else(|| invalid_succinct_setup_proof("private VSS trustee point overflowed"))?;
+    let mut power = 1_i128;
+    let mut bound = 0_i128;
+    for _ in 0..coefficient_count {
+        bound = bound
+            .checked_add(power)
+            .ok_or_else(|| invalid_succinct_setup_proof("private VSS carry bound overflowed"))?;
+        power = power
+            .checked_mul(i128::from(trustee_point))
+            .ok_or_else(|| invalid_succinct_setup_proof("private VSS carry bound overflowed"))?;
+    }
+
+    Ok(bound)
 }

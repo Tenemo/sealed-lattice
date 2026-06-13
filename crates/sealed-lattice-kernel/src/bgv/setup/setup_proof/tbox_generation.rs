@@ -379,23 +379,6 @@ fn encode_setup_proof_lnp_tbox_z34_seed_material(
     Ok(writer.into_bytes())
 }
 
-pub(in crate::bgv::setup) fn append_setup_proof_lnp_tbox_generated_suffix(
-    proof_bytes: &mut Vec<u8>,
-    layout: &SetupProofLnpTboxLayout,
-    statement_hash_hex: &str,
-    relation_commitment_hash_hex: &str,
-) -> CanonicalResult<()> {
-    let generated_suffix = setup_proof_lnp_tbox_generated_suffix(
-        layout,
-        statement_hash_hex,
-        relation_commitment_hash_hex,
-        proof_bytes,
-    )?;
-    proof_bytes.extend_from_slice(&generated_suffix);
-
-    Ok(())
-}
-
 pub(super) fn setup_proof_lnp_tbox_generated_suffix_bytes(
     layout: &SetupProofLnpTboxLayout,
     statement_hash_hex: &str,

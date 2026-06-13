@@ -22,7 +22,9 @@
 // degree-four challenge extension of the limb field, the masked claims are
 // integer-bound across limb fields by a two-prime lift, and every theorem row
 // carries its closure argument with one explicitly named conjecture (the
-// rate-per-query FRI bound) and referenced QROM reductions.
+// rate-per-query FRI bound), classical Fiat-Shamir accounting, reference-only
+// QROM rows, and a bounded-leakage smudging scope rather than 128-bit
+// zero-knowledge.
 //
 // Argument shape per limb field F_{q_l} (one trace commitment and one batched
 // FRI instance per limb, shared by every listed key):
@@ -57,20 +59,19 @@ pub(crate) use commands::{
 
 pub(in crate::bgv::setup) use accounting::{
     succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
+    succinct_private_vss_share_accounting_hash, succinct_private_vss_share_accounting_value,
     succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
     succinct_same_secret_linkage_anchor_accounting_hash,
     succinct_same_secret_linkage_anchor_accounting_value,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
-#[cfg(test)]
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
-#[cfg(test)]
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
-#[cfg(test)]
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    SameSecretLinkageStatement, SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    PrivateVssShareStatement, SameSecretLinkageStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -95,6 +96,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str = "trustee-evaluation-key";
 pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
+pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 // The anchor family runs the same closed argument; its accounting object
 // carries the family relation rows and the WASM browser measurement row.
 pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS: &str =
@@ -108,6 +110,10 @@ pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS: &str =
     "succinct-public-key-share-argument-accounting-accepted";
 pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS: &str =
     "succinct-public-key-share-argument-verified-with-accepted-proof-accounting";
+pub(crate) const PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS: &str =
+    "succinct-private-vss-share-argument-accounting-accepted";
+pub(crate) const PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS: &str =
+    "succinct-private-vss-share-argument-verified-with-accepted-proof-accounting";
 
 // Canonical hash of transported same-secret linkage anchor proof bytes.
 pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
@@ -118,15 +124,28 @@ pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[
 }
 
 // Canonical hash of transported public-key share succinct proof bytes.
-pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(proof_bytes: &[u8]) -> String {
+pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
+    proof_bytes: &[u8],
+) -> String {
     hash512_hex(
         "sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1",
         &[proof_bytes],
     )
 }
-// The model status states the closed accounting on every record: the argument
-// is verified and every accounting row is accepted under the explicitly named
-// FRI conjecture and referenced QROM reductions.
+
+// Canonical hash of transported private VSS succinct proof bytes.
+pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
+    proof_bytes: &[u8],
+) -> String {
+    hash512_hex(
+        "sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1",
+        &[proof_bytes],
+    )
+}
+// The model status states the closed accounting on every record. The bound
+// accounting is classical and accepted under the explicitly named FRI
+// conjecture, while QROM loss and 128-bit zero-knowledge remain outside this
+// status until separately closed.
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS: &str =
     "succinct-trustee-evaluation-key-argument-accounting-accepted";
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS: &str =
@@ -161,9 +180,9 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // Cross-limb witness-consistency repetitions and the bit width of the public
 // integer coefficients. Narrow eight-bit coefficients keep the clear sums
 // small (at most 2 * N * 255, about 2^24) so the ninety-two-bit smudging
-// masks dominate them; twenty repetitions put the per-difference collision
-// bound at 2^-160 before union and Fiat-Shamir losses, the pre-union margin
-// the accounting certificate requires.
+// masks dominate them only as a bounded-leakage row; twenty repetitions put
+// the per-difference collision bound at 2^-160 before union and Fiat-Shamir
+// losses, the pre-union margin the accounting certificate requires.
 pub(super) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // Each consistency claim is one shared integer (clear bounded combination
@@ -171,7 +190,7 @@ pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // published as its residue in every limb field. The product of the two
 // smallest profile primes exceeds twice the claim bound, so the verifier's
 // centered two-prime lift is unique and per-claim leakage is the clear bound
-// over the mask bound, about 2^-68.
+// over the mask bound, about 2^-68. This is not a 128-bit zero-knowledge row.
 pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 92;
 // FRI query count at rate 1/2 under the explicitly conjectured per-query
 // soundness of one half: 2^-168. No grinding is applied.

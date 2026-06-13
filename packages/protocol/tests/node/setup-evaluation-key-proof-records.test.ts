@@ -293,7 +293,7 @@ const evaluationKeyFixture = (): EvaluationKeyFixture => {
         sameSecretProofFamilyBindingRoot: fixtureHash(
             'same-secret-proof-family-binding',
         ),
-        publicKeyShareLnpProofSetRoot: fixtureHash(
+        publicKeyShareSuccinctProofSetRoot: fixtureHash(
             'public-key-share-lnp-proof-set',
         ),
         sameSecretProofReferences: sameSecretProofReferences(),
@@ -457,10 +457,6 @@ const trusteeWitnesses = (): TrusteeEvaluationKeyWitnessInput[] =>
                     trusteeRosterPosition,
                 },
             ],
-            proofRandomnessSource: 'development-deterministic-fixture',
-            proofRandomnessSeedHex: fixtureHash(
-                `proof-randomness-${String(trusteeRosterPosition)}`,
-            ),
         }),
     );
 
@@ -1413,7 +1409,7 @@ describe('createPublicEvaluationKeySet', () => {
             builtRoundsAndBatches(fixture);
         const tamperedBatch = {
             ...galoisKeyShareBatches[0],
-            publicKeyShareLnpProofSetRoot: fixtureHash('other-proof-set'),
+            publicKeyShareSuccinctProofSetRoot: fixtureHash('other-proof-set'),
         };
         expect(() =>
             createPublicEvaluationKeySet({

@@ -48,6 +48,11 @@ pub(crate) use public_evaluation_key_material::{
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
+pub(crate) use setup_proof::{
+    absorb_setup_proof_material_transport_stream_chunk_request,
+    begin_setup_proof_material_transport_stream_request,
+    finish_setup_proof_material_transport_stream_request,
+};
 pub(crate) use threshold_share_commitments::{
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,

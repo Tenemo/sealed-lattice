@@ -329,7 +329,7 @@ fn verify_cross_limb_consistency(
     proof: &SuccinctEvaluationKeyProof,
 ) -> CanonicalResult<()> {
     let limb_moduli = statement.limb_moduli();
-    let (lower_bound, upper_bound) = masked_claim_bounds(statement.ring_degree);
+    let (lower_bound, upper_bound) = masked_claim_bounds(statement)?;
     let mut residues_by_global_id: std::collections::BTreeMap<u64, Vec<(u64, u64)>> =
         std::collections::BTreeMap::new();
     for (limb_index, modulus) in limb_moduli.iter().enumerate() {
@@ -363,6 +363,11 @@ fn verify_cross_limb_consistency(
         };
         // Centered two-prime lift of the claim integer.
         let product = i128::from(first_modulus) * i128::from(second_modulus);
+        if product <= 2 * lower_bound.abs().max(upper_bound) {
+            return Err(invalid_succinct_setup_proof(
+                "masked consistency claim range is too wide for two-prime lifting",
+            ));
+        }
         let step = i128::from(mul_mod_fast(
             (second_residue + second_modulus - (first_residue % second_modulus) % second_modulus)
                 % second_modulus,

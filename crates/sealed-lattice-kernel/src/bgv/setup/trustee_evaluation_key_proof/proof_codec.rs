@@ -67,12 +67,19 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
         let tree_depth = extension_size.trailing_zeros() as usize;
         let witness_tree_root = read_array::<64>(bytes, &mut cursor)?;
         let quotient_tree_root = read_array::<64>(bytes, &mut cursor)?;
-        let masked_consistency_claims = read_u64_vec(bytes, &mut cursor, layout.claim_count())?;
+        let modulus = statement.limb_moduli()[limb_index];
+        let masked_consistency_claims =
+            read_base_field_vec(bytes, &mut cursor, layout.claim_count(), modulus)?;
         let mut deep_evaluations = Vec::with_capacity(DEEP_POINT_COUNT);
         for _ in 0..DEEP_POINT_COUNT {
-            deep_evaluations.push(read_extension_vec(bytes, &mut cursor, total_columns)?);
+            deep_evaluations.push(read_extension_vec(
+                bytes,
+                &mut cursor,
+                total_columns,
+                modulus,
+            )?);
         }
-        let low_degree = decode_low_degree_proof(bytes, &mut cursor, extension_size)?;
+        let low_degree = decode_low_degree_proof(bytes, &mut cursor, extension_size, modulus)?;
         let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
         for _ in 0..LOW_DEGREE_QUERY_COUNT {
             let mut phase_one_rows = [Vec::new(), Vec::new()];
@@ -82,14 +89,19 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
             let mut phase_two_salts = [Vec::new(), Vec::new()];
             let mut phase_two_paths = [Vec::new(), Vec::new()];
             for slot in 0..2 {
-                phase_one_rows[slot] =
-                    read_u64_vec(bytes, &mut cursor, layout.phase_one_physical_count())?;
+                phase_one_rows[slot] = read_base_field_vec(
+                    bytes,
+                    &mut cursor,
+                    layout.phase_one_physical_count(),
+                    modulus,
+                )?;
                 phase_one_salts[slot] = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
                 phase_one_paths[slot] = read_hash_vec(bytes, &mut cursor, tree_depth)?;
-                phase_two_rows[slot] = read_u64_vec(
+                phase_two_rows[slot] = read_base_field_vec(
                     bytes,
                     &mut cursor,
                     PHASE_TWO_COLUMN_COUNT * CHALLENGE_EXTENSION_DEGREE,
+                    modulus,
                 )?;
                 phase_two_salts[slot] = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
                 phase_two_paths[slot] = read_hash_vec(bytes, &mut cursor, tree_depth)?;
@@ -138,6 +150,7 @@ fn decode_low_degree_proof(
     bytes: &[u8],
     cursor: &mut usize,
     initial_domain_size: usize,
+    modulus: u64,
 ) -> CanonicalResult<LowDegreeProof> {
     let fold_count = usize::try_from(read_u64(bytes, cursor)?)
         .map_err(|_| invalid_succinct_setup_proof("low-degree fold count does not fit usize"))?;
@@ -149,13 +162,14 @@ fn decode_low_degree_proof(
         ));
     }
     let folded_layer_roots = read_hash_vec(bytes, cursor, fold_count)?;
-    let final_coefficients = read_extension_vec(bytes, cursor, LOW_DEGREE_FINAL_COEFFICIENT_COUNT)?;
+    let final_coefficients =
+        read_extension_vec(bytes, cursor, LOW_DEGREE_FINAL_COEFFICIENT_COUNT, modulus)?;
     let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
     for _ in 0..LOW_DEGREE_QUERY_COUNT {
         let mut folded_layer_pairs = Vec::with_capacity(fold_count);
         for _ in 0..fold_count {
-            let first = read_extension_element(bytes, cursor)?;
-            let second = read_extension_element(bytes, cursor)?;
+            let first = read_extension_element(bytes, cursor, modulus)?;
+            let second = read_extension_element(bytes, cursor, modulus)?;
             let path_length = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
                 invalid_succinct_setup_proof("low-degree path length does not fit usize")
             })?;
@@ -231,17 +245,36 @@ fn read_u64(bytes: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
     Ok(u64::from_le_bytes(read_array::<8>(bytes, cursor)?))
 }
 
-fn read_u64_vec(bytes: &[u8], cursor: &mut usize, count: usize) -> CanonicalResult<Vec<u64>> {
-    (0..count).map(|_| read_u64(bytes, cursor)).collect()
+fn read_base_field_value(bytes: &[u8], cursor: &mut usize, modulus: u64) -> CanonicalResult<u64> {
+    let value = read_u64(bytes, cursor)?;
+    if value >= modulus {
+        return Err(invalid_succinct_setup_proof(
+            "trustee evaluation-key proof contains a noncanonical field residue",
+        ));
+    }
+
+    Ok(value)
+}
+
+fn read_base_field_vec(
+    bytes: &[u8],
+    cursor: &mut usize,
+    count: usize,
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    (0..count)
+        .map(|_| read_base_field_value(bytes, cursor, modulus))
+        .collect()
 }
 
 fn read_extension_element(
     bytes: &[u8],
     cursor: &mut usize,
+    modulus: u64,
 ) -> CanonicalResult<ChallengeExtensionElement> {
     let mut element = [0_u64; CHALLENGE_EXTENSION_DEGREE];
     for coordinate in element.iter_mut() {
-        *coordinate = read_u64(bytes, cursor)?;
+        *coordinate = read_base_field_value(bytes, cursor, modulus)?;
     }
 
     Ok(element)
@@ -251,9 +284,10 @@ fn read_extension_vec(
     bytes: &[u8],
     cursor: &mut usize,
     count: usize,
+    modulus: u64,
 ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
     (0..count)
-        .map(|_| read_extension_element(bytes, cursor))
+        .map(|_| read_extension_element(bytes, cursor, modulus))
         .collect()
 }
 

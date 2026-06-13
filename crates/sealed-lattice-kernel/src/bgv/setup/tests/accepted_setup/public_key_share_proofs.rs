@@ -98,6 +98,16 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     let transported_proof_material =
         move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
+    append_transport_certificate_entries_from_material_set(
+        &mut package,
+        &transported_proof_material,
+        "proofMaterials",
+        "proofMaterialRoot",
+        "publicKeyShareProofMaterial",
+        "public-key-share-proof-material",
+        DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -175,6 +185,42 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_materi
     let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     let transported_public_key_share_material =
         move_public_key_share_material_to_transport(&mut package);
+    let public_key_share_material_set_root =
+        package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
+            .as_str()
+            .expect("public-key share material set root")
+            .to_string();
+    append_setup_transport_certificate_object(
+        &mut package,
+        SetupTransportCertificateObjectFixture {
+            object_name: "publicKeyShareMaterial",
+            object_role: "public-key-share-material",
+            object_root: public_key_share_material_set_root,
+            byte_length: transported_public_key_share_material["totalByteLength"]
+                .as_u64()
+                .expect("transported material byte length"),
+            full_object_hash: transported_public_key_share_material["fullObjectHash"]
+                .as_str()
+                .expect("transported material full object hash")
+                .to_string(),
+            chunk_root: transported_public_key_share_material["chunkRoot"]
+                .as_str()
+                .expect("transported material chunk root")
+                .to_string(),
+            chunk_hashes: transported_public_key_share_material["chunkHashes"]
+                .as_array()
+                .expect("transported material chunk hashes")
+                .iter()
+                .map(|chunk_hash| {
+                    chunk_hash
+                        .as_str()
+                        .expect("transported material chunk hash")
+                        .to_string()
+                })
+                .collect(),
+        },
+    );
+    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -219,7 +265,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_material() {
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_material()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_material",
     );
@@ -252,7 +299,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proofs() {
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proofs()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proofs",
     );
@@ -438,12 +486,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content",
     );
     let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    let proof_bytes_hex = package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHex"]
-        .as_str()
-        .expect("public-key proof bytes hex");
+    let proof_bytes_hex =
+        package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHex"]
+            .as_str()
+            .expect("public-key proof bytes hex");
     let mut proof_bytes = decode_hex(proof_bytes_hex).expect("proof bytes");
-    let last_byte = proof_bytes.last_mut().expect("proof bytes are non-empty");
-    *last_byte ^= 1;
+    set_first_masked_consistency_claim_to_noncanonical_modulus(&mut proof_bytes);
     package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHex"] =
         serde_json::json!(to_hex(&proof_bytes));
     package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHash"] = serde_json::json!(

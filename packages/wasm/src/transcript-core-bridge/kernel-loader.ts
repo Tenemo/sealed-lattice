@@ -22,11 +22,13 @@ import type {
     BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
-    BgvPublicKeyShareLnpProofGeneration,
     BgvProfileRejection,
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvSetupCommitmentOpeningComputation,
+    BgvSetupProofMaterialTransportStreamBegin,
+    BgvSetupProofMaterialTransportStreamChunkAbsorption,
+    BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
@@ -366,6 +368,8 @@ export const createTranscriptCoreKernelLoader = (
                                 input.transportedEvaluationKeyShareComponentMaterial,
                             transportedPublicEvaluationKeyMaterial:
                                 input.transportedPublicEvaluationKeyMaterial,
+                            verifiedSetupProofMaterials:
+                                input.verifiedSetupProofMaterials,
                         },
                     ),
                 verifyPrivateVssShareEnvelope: (
@@ -413,27 +417,7 @@ export const createTranscriptCoreKernelLoader = (
                             input.openingRandomnessByShamirIndex,
                         proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                    }),
-                generatePublicKeyShareLnpProof: (
-                    input,
-                ): BgvPublicKeyShareLnpProofGeneration =>
-                    executeCommand<BgvPublicKeyShareLnpProofGeneration>({
-                        command: 'GeneratePublicKeyShareLnpProof',
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        publicKeyShareRecord: input.publicKeyShareRecord,
-                        publicKeyShareProofRecord:
-                            input.publicKeyShareProofRecord,
-                        sameSecretStatementRecord:
-                            input.sameSecretStatementRecord,
-                        constantCommitments: input.constantCommitments,
-                        publicShareCoefficientsByLimb:
-                            input.publicShareCoefficientsByLimb,
-                        setupProofBinding: input.setupProofBinding,
-                        secretCoefficients: input.secretCoefficients,
-                        openingRandomnessByLimb: input.openingRandomnessByLimb,
-                        errorCoefficientsByLimb: input.errorCoefficientsByLimb,
-                        proofRandomnessSource: input.proofRandomnessSource,
-                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
                 generateTrusteeEvaluationKeyProof: (
                     input,
@@ -451,6 +435,7 @@ export const createTranscriptCoreKernelLoader = (
                         openingRandomnessByLimb: input.openingRandomnessByLimb,
                         proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
                 verifyTrusteeEvaluationKeyProof: (
                     input,
@@ -542,6 +527,36 @@ export const createTranscriptCoreKernelLoader = (
                                 input.vssCoefficientCommitmentRoot,
                             sourceTrusteeCoefficientCommitmentRecords:
                                 input.sourceTrusteeCoefficientCommitmentRecords,
+                        },
+                    ),
+                beginSetupProofMaterialTransportStream: (
+                    input,
+                ): BgvSetupProofMaterialTransportStreamBegin =>
+                    executeCommand<BgvSetupProofMaterialTransportStreamBegin>({
+                        command: 'BeginSetupProofMaterialTransportStream',
+                        verificationId: input.verificationId,
+                        transportedSetupProofMaterial:
+                            input.transportedSetupProofMaterial,
+                    }),
+                absorbSetupProofMaterialTransportStreamChunk: (
+                    input,
+                ): BgvSetupProofMaterialTransportStreamChunkAbsorption =>
+                    executeCommand<BgvSetupProofMaterialTransportStreamChunkAbsorption>(
+                        {
+                            command:
+                                'AbsorbSetupProofMaterialTransportStreamChunk',
+                            verificationId: input.verificationId,
+                            chunkIndex: input.chunkIndex,
+                            bytesHex: input.bytesHex,
+                        },
+                    ),
+                finishSetupProofMaterialTransportStream: (
+                    input,
+                ): BgvSetupProofMaterialTransportStreamVerification =>
+                    executeCommand<BgvSetupProofMaterialTransportStreamVerification>(
+                        {
+                            command: 'FinishSetupProofMaterialTransportStream',
+                            verificationId: input.verificationId,
                         },
                     ),
                 verifyLocalTrusteeSetupState: (

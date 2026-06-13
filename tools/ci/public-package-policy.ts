@@ -232,10 +232,10 @@ export const vendoredProtocolRuntimeEntryExports = [
         exports: [
             'createBinaryChunkedPublicKeyShareMaterialTransport',
             'createBinaryChunkedPublicKeyShareProofMaterialTransport',
-            'createPublicKeyShareLnpProofSet',
             'createPublicKeyShareMaterialSet',
             'createPublicKeyShareProofSet',
             'createPublicKeyShareSet',
+            'createPublicKeyShareSuccinctProofSet',
         ],
     },
     {

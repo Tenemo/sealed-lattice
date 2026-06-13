@@ -157,7 +157,7 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly sameSecretProofRoot: ProtocolHash;
@@ -187,7 +187,7 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly sameSecretProofRoot: ProtocolHash;
@@ -220,7 +220,7 @@ export type RelinearizationKeyShareRounds = Readonly<
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly roundOneAggregateRoots: readonly {
@@ -277,7 +277,7 @@ export type GaloisKeyShareBatch = Readonly<
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly sameSecretProofRoot: ProtocolHash;
@@ -349,7 +349,7 @@ export type TrusteeEvaluationKeyProofSet = Readonly<
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly galoisKeyCrpRoot: ProtocolHash;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -408,6 +408,8 @@ export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly proofBytesHex: string;
     readonly proofRandomness: Readonly<{
         readonly source: string;
+        readonly binding?: string;
+        readonly nonceHash?: ProtocolHash;
         readonly retention: string;
     }>;
 }>;
@@ -427,6 +429,7 @@ export type TrusteeEvaluationKeyProofGenerator = (
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
         readonly proofRandomnessSource: string;
         readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
     }>,
 ) => TrusteeEvaluationKeyProofGenerationOutput;
 
@@ -443,10 +446,6 @@ export type TrusteeEvaluationKeyWitnessInput = Readonly<{
     readonly negativeIndicatorCoefficients: readonly number[];
     readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
     readonly constantCommitments: readonly JsonRecord[];
-    readonly proofRandomnessSource:
-        | 'fresh-csprng'
-        | 'development-deterministic-fixture';
-    readonly proofRandomnessSeedHex: string;
 }>;
 
 export type RelinearizationKeyRootReference = Readonly<{
@@ -492,7 +491,7 @@ export type PublicEvaluationKeySet = Readonly<
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly relinearizationKeyRoots: readonly RelinearizationKeyRootReference[];
@@ -619,7 +618,7 @@ export type EvaluationKeyProofCommonInput = Readonly<{
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly sameSecretProofSetRoot: ProtocolHash;
     readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-    readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+    readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     readonly sameSecretProofReferences: readonly SameSecretProofReference[];
 }>;
 
@@ -764,6 +763,32 @@ const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
 
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const proofRandomnessByteLength = 64;
+
+const defaultProofRandomBytes = (byteLength: number): Uint8Array => {
+    const cryptoProvider = globalThis.crypto;
+    if (cryptoProvider === undefined) {
+        throw new Error(
+            'Trustee evaluation-key proof generation requires Web Crypto getRandomValues.',
+        );
+    }
+    const bytes = new Uint8Array(byteLength);
+    cryptoProvider.getRandomValues(bytes);
+
+    return bytes;
+};
+
+const freshProofRandomnessHex = (): string => {
+    const bytes = defaultProofRandomBytes(proofRandomnessByteLength);
+    if (bytes.byteLength !== proofRandomnessByteLength) {
+        throw new Error(
+            'proof randomness byte source must return exactly 64 bytes.',
+        );
+    }
+
+    return bytesToHex(bytes);
+};
 
 const appendVaruint = (outputBytes: number[], value: number): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -1365,7 +1390,10 @@ const validateCommonInput = (
             'publicKeyShareSetRoot',
             input.evaluatorKeySchedule.publicKeyShareSetRoot,
         ],
-        ['publicKeyShareLnpProofSetRoot', input.publicKeyShareLnpProofSetRoot],
+        [
+            'publicKeyShareSuccinctProofSetRoot',
+            input.publicKeyShareSuccinctProofSetRoot,
+        ],
         [
             'relinearizationCrpRoot',
             input.evaluatorKeySchedule.relinearizationCrpRoot,
@@ -1481,8 +1509,8 @@ export const createRelinearizationKeyShareRounds = (
                     sameSecretProofSetRoot: input.sameSecretProofSetRoot,
                     sameSecretProofFamilyBindingRoot:
                         input.sameSecretProofFamilyBindingRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        input.publicKeyShareLnpProofSetRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        input.publicKeyShareSuccinctProofSetRoot,
                     sameSecretStatementRoot:
                         proofReference.sameSecretStatementRoot,
                     trusteeSecretCommitmentRoot:
@@ -1591,8 +1619,8 @@ export const createRelinearizationKeyShareRounds = (
                     sameSecretProofSetRoot: input.sameSecretProofSetRoot,
                     sameSecretProofFamilyBindingRoot:
                         input.sameSecretProofFamilyBindingRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        input.publicKeyShareLnpProofSetRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        input.publicKeyShareSuccinctProofSetRoot,
                     sameSecretStatementRoot:
                         proofReference.sameSecretStatementRoot,
                     trusteeSecretCommitmentRoot:
@@ -1668,7 +1696,8 @@ export const createRelinearizationKeyShareRounds = (
         sameSecretProofFamilyBindingRoot:
             input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
-        publicKeyShareLnpProofSetRoot: input.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            input.publicKeyShareSuccinctProofSetRoot,
         relinearizationCrpRoot:
             input.evaluatorKeySchedule.relinearizationCrpRoot,
         relinearizationLevelSchedule:
@@ -1808,7 +1837,8 @@ export const createGaloisKeyShareBatches = (
             sameSecretProofSetRoot: input.sameSecretProofSetRoot,
             sameSecretProofFamilyBindingRoot:
                 input.sameSecretProofFamilyBindingRoot,
-            publicKeyShareLnpProofSetRoot: input.publicKeyShareLnpProofSetRoot,
+            publicKeyShareSuccinctProofSetRoot:
+                input.publicKeyShareSuccinctProofSetRoot,
             sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
             trusteeSecretCommitmentRoot:
                 proofReference.trusteeSecretCommitmentRoot,
@@ -2248,8 +2278,9 @@ export const createTrusteeEvaluationKeyProofs = (
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
         input.relinearizationKeyShareRounds.sameSecretProofSetRoot !==
             input.sameSecretProofSetRoot ||
-        input.relinearizationKeyShareRounds.publicKeyShareLnpProofSetRoot !==
-            input.publicKeyShareLnpProofSetRoot
+        input.relinearizationKeyShareRounds
+            .publicKeyShareSuccinctProofSetRoot !==
+            input.publicKeyShareSuccinctProofSetRoot
     ) {
         throw new Error(
             'relinearizationKeyShareRounds must match the accepted evaluation-key binding.',
@@ -2447,19 +2478,8 @@ export const createTrusteeEvaluationKeyProofs = (
                 `trusteeWitnesses.constantCommitments.${String(commitmentIndex)}`,
             ),
         );
-        if (
-            witness.proofRandomnessSource !== 'fresh-csprng' &&
-            witness.proofRandomnessSource !==
-                'development-deterministic-fixture'
-        ) {
-            throw new TypeError(
-                'trusteeWitnesses.proofRandomnessSource must be fresh-csprng or development-deterministic-fixture.',
-            );
-        }
-        assertProtocolHash(
-            witness.proofRandomnessSeedHex,
-            'trusteeWitnesses.proofRandomnessSeedHex',
-        );
+        const proofRandomnessSeedHex = freshProofRandomnessHex();
+        const proofRandomnessNonceHex = freshProofRandomnessHex();
         const generatedProof = input.trusteeEvaluationKeyProofGenerator({
             context: {
                 ceremonyId: input.setupContext.ceremonyId,
@@ -2488,8 +2508,9 @@ export const createTrusteeEvaluationKeyProofs = (
             negativeIndicatorCoefficients:
                 witness.negativeIndicatorCoefficients,
             openingRandomnessByLimb: witness.openingRandomnessByLimb,
-            proofRandomnessSource: witness.proofRandomnessSource,
-            proofRandomnessSeedHex: witness.proofRandomnessSeedHex,
+            proofRandomnessSource: 'fresh-csprng',
+            proofRandomnessSeedHex,
+            proofRandomnessNonceHex,
         });
         if (
             generatedProof.ok !== true ||
@@ -2619,7 +2640,8 @@ export const createTrusteeEvaluationKeyProofs = (
         sameSecretProofFamilyBindingRoot:
             input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
-        publicKeyShareLnpProofSetRoot: input.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            input.publicKeyShareSuccinctProofSetRoot,
         relinearizationCrpRoot:
             input.evaluatorKeySchedule.relinearizationCrpRoot,
         galoisKeyCrpRoot: input.evaluatorKeySchedule.galoisKeyCrpRoot,
@@ -3233,8 +3255,9 @@ export function createPublicEvaluationKeySet(
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
         input.relinearizationKeyShareRounds.sameSecretProofFamilyBindingRoot !==
             input.sameSecretProofFamilyBindingRoot ||
-        input.relinearizationKeyShareRounds.publicKeyShareLnpProofSetRoot !==
-            input.publicKeyShareLnpProofSetRoot
+        input.relinearizationKeyShareRounds
+            .publicKeyShareSuccinctProofSetRoot !==
+            input.publicKeyShareSuccinctProofSetRoot
     ) {
         throw new Error(
             'relinearizationKeyShareRounds must match the accepted evaluation-key binding.',
@@ -3281,8 +3304,8 @@ export function createPublicEvaluationKeySet(
                             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                         sameSecretProofFamilyBindingRoot:
                             input.sameSecretProofFamilyBindingRoot,
-                        publicKeyShareLnpProofSetRoot:
-                            input.publicKeyShareLnpProofSetRoot,
+                        publicKeyShareSuccinctProofSetRoot:
+                            input.publicKeyShareSuccinctProofSetRoot,
                         relinearizationKeyShareRoundsRoot:
                             input.relinearizationKeyShareRounds
                                 .relinearizationKeyShareRoundsRoot,
@@ -3326,8 +3349,8 @@ export function createPublicEvaluationKeySet(
                 input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
             batch.sameSecretProofFamilyBindingRoot !==
                 input.sameSecretProofFamilyBindingRoot ||
-            batch.publicKeyShareLnpProofSetRoot !==
-                input.publicKeyShareLnpProofSetRoot ||
+            batch.publicKeyShareSuccinctProofSetRoot !==
+                input.publicKeyShareSuccinctProofSetRoot ||
             batch.requiredGaloisSetHash !==
                 input.evaluatorKeySchedule.requiredGaloisSetHash
         ) {
@@ -3374,8 +3397,8 @@ export function createPublicEvaluationKeySet(
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                     sameSecretProofFamilyBindingRoot:
                         input.sameSecretProofFamilyBindingRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        input.publicKeyShareLnpProofSetRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        input.publicKeyShareSuccinctProofSetRoot,
                     galoisKeyCrpRoot:
                         input.evaluatorKeySchedule.galoisKeyCrpRoot,
                     requiredGaloisSetHash:
@@ -3464,7 +3487,8 @@ export function createPublicEvaluationKeySet(
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         sameSecretProofFamilyBindingRoot:
             input.sameSecretProofFamilyBindingRoot,
-        publicKeyShareLnpProofSetRoot: input.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            input.publicKeyShareSuccinctProofSetRoot,
         relinearizationKeyShareRoundsRoot:
             input.relinearizationKeyShareRounds
                 .relinearizationKeyShareRoundsRoot,
@@ -3616,7 +3640,8 @@ const publicEvaluationKeyMaterialManifest = (
     evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
     sameSecretProofFamilyBindingRoot:
         evaluationKeys.sameSecretProofFamilyBindingRoot,
-    publicKeyShareLnpProofSetRoot: evaluationKeys.publicKeyShareLnpProofSetRoot,
+    publicKeyShareSuccinctProofSetRoot:
+        evaluationKeys.publicKeyShareSuccinctProofSetRoot,
     relinearizationKeyShareRoundsRoot:
         evaluationKeys.relinearizationKeyShareRoundsRoot,
     relinearizationLevelSchedule: evaluationKeys.relinearizationLevelSchedule,
@@ -3787,8 +3812,8 @@ const publicEvaluationKeyMaterialReferenceRoot = (
         evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
         sameSecretProofFamilyBindingRoot:
             evaluationKeys.sameSecretProofFamilyBindingRoot,
-        publicKeyShareLnpProofSetRoot:
-            evaluationKeys.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            evaluationKeys.publicKeyShareSuccinctProofSetRoot,
         relinearizationKeyShareRoundsRoot:
             evaluationKeys.relinearizationKeyShareRoundsRoot,
         requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,

@@ -38,12 +38,12 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
     {
         return Ok(Some(response));
     }
-    if let Some(proof_set) = setup_package.get("publicKeyShareLnpProofs")
+    if let Some(proof_set) = setup_package.get("publicKeyShareSuccinctProofs")
         && let Some(response) = verify_profile_ring_records(
             proof_set,
             "proofRecords",
-            "public-key LNP proof records must use the accepted profile ring degree before terminal setup acceptance",
-            "setupPackage.publicKeyShareLnpProofs.proofRecords.ringDegree",
+            "public-key succinct proof records must use the accepted profile ring degree before terminal setup acceptance",
+            "setupPackage.publicKeyShareSuccinctProofs.proofRecords.ringDegree",
         )?
     {
         return Ok(Some(response));
@@ -123,9 +123,9 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.sameSecretProofs.proofRecords",
         ),
         (
-            "publicKeyShareLnpProofs",
+            "publicKeyShareSuccinctProofs",
             "proofRecords",
-            "setupPackage.publicKeyShareLnpProofs.proofRecords",
+            "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
         ),
         (
             "trusteeEvaluationKeyProofs",
@@ -1192,7 +1192,7 @@ fn verify_setup_transport_request_bindings(
     if let Some(material_set) = request.get("transportedPublicKeyShareProofMaterial") {
         let referenced_material_roots = setup_transport_referenced_proof_material_roots(
             setup_package,
-            "publicKeyShareLnpProofs",
+            "publicKeyShareSuccinctProofs",
             "proofRecords",
             "proofMaterialRoot",
         )?;

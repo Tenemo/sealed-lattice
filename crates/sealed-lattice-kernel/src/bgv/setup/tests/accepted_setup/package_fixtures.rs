@@ -1547,7 +1547,8 @@ fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Val
     package
 }
 
-pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
+pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value
+{
     PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package)
         .clone()
@@ -1765,7 +1766,7 @@ fn public_key_share_proofs_object(
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
             "proofFamily": "public-key-share",
-            "proofVerificationStatus": "lnp-proof-verification-pending",
+            "proofVerificationStatus": "succinct-proof-verification-pending",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -1783,10 +1784,8 @@ fn public_key_share_proofs_object(
             "sameSecretStatementRoot": same_secret_statement["sameSecretStatementRoot"],
             "trusteeSecretCommitmentRoot": same_secret_statement["trusteeSecretCommitmentRoot"],
             "rnsLimbCount": DATA_PRIMES.len(),
-            "noWrapRelation": "PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 over lifted integers",
-            "errorSupport": "checked-by-public-key-share-lnp-proof-set",
-            "carryWitnessStatus": "checked-by-public-key-share-lnp-proof-set",
-            "proofBytesStatus": "supplied-by-public-key-share-lnp-proof-set",
+            "errorSupport": "checked-by-public-key-share-succinct-proof-set",
+            "proofBytesStatus": "supplied-by-public-key-share-succinct-proof-set",
         });
         proof_record["publicKeyShareProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
@@ -1805,7 +1804,7 @@ fn public_key_share_proofs_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofVerificationStatus": "lnp-proof-verification-pending",
+        "proofVerificationStatus": "succinct-proof-verification-pending",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -2542,7 +2541,19 @@ fn common_randomness_object(
     );
     assert_eq!(
         public_derivations["publicMatrices"]["setupProofMatrix"]["profileStatus"],
-        "setup-proof-profile-bound"
+        "legacy-lnp-tbox-proof-matrix-audit-bound"
+    );
+    assert_eq!(
+        public_derivations["publicMatrices"]["setupProofMatrix"]["challengeDomainScope"],
+        "legacy-lnp-tbox-private-vss-challenge-domain-only"
+    );
+    assert_eq!(
+        public_derivations["publicMatrices"]["setupProofMatrix"]["matrixScope"],
+        "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only; accepted succinct-family matrix and transcript claims are bound by the per-family accounting objects"
+    );
+    assert_eq!(
+        public_derivations["publicMatrices"]["setupProofMatrix"]["legacyLnpTboxProofFamilies"],
+        serde_json::json!(["vss-opening-carry"])
     );
     assert!(
         public_derivations["publicMatrices"]["setupProofMatrix"]["setupProofProfileHash"]

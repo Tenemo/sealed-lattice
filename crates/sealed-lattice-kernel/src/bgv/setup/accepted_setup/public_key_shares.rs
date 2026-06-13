@@ -203,7 +203,9 @@ fn verify_public_key_share_succinct_proof_transport_reference(
         let Some(chunk_hash) = chunk_hash_value.as_str() else {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                format!("public-key share succinct proofChunkHashes[{chunk_index}] must be a hash string"),
+                format!(
+                    "public-key share succinct proofChunkHashes[{chunk_index}] must be a hash string"
+                ),
             ));
         };
         validate_hash_string(
@@ -253,9 +255,19 @@ fn transported_public_key_share_proof_material_chunks(
                 "transportedPublicKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        let chunks = transported_public_key_share_proof_chunks(proof_material)?;
+        let chunks = if proof_material.get("chunks").is_some() {
+            transported_public_key_share_proof_chunks(proof_material)?
+        } else {
+            verified_setup_proof_material_chunks_from_request(
+                request,
+                PUBLIC_KEY_SHARE_PROOF_FAMILY,
+                expected_proof_material_root,
+                proof_material,
+                "transportedPublicKeyShareProofMaterial.proofMaterials",
+            )?
+        };
         let transport_hashes = setup_proof_material_transport_hashes(
-            "public-key-share",
+            PUBLIC_KEY_SHARE_PROOF_FAMILY,
             &chunks,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
@@ -898,7 +910,10 @@ pub(super) fn verify_public_key_share_proofs(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        ("proofVerificationStatus", "succinct-proof-verification-pending"),
+        (
+            "proofVerificationStatus",
+            "succinct-proof-verification-pending",
+        ),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
@@ -1161,7 +1176,8 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_public_key_share_succinct_proof_set_field(proof_set) {
+    if let Some(unexpected_field) = unexpected_public_key_share_succinct_proof_set_field(proof_set)
+    {
         return Ok(Some(public_key_share_succinct_proof_refusal(
             "publicKeyShareSuccinctProofSetUnexpectedField",
             format!("publicKeyShareSuccinctProofs contains unexpected field {unexpected_field}"),
@@ -1451,12 +1467,15 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof records must have distinct trustee roster positions",
         ));
     }
-    let share_record = context.share_records.get(&trustee_roster_position).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proof must reference an accepted share record",
-        )
-    })?;
+    let share_record = context
+        .share_records
+        .get(&trustee_roster_position)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key share succinct proof must reference an accepted share record",
+            )
+        })?;
     let public_key_share_proof_record = context
         .public_key_share_proof_records
         .get(&trustee_roster_position)
@@ -1502,7 +1521,9 @@ fn verify_public_key_share_succinct_proof_record(
         if proof_record.get(field_name) != public_key_share_proof_record.get(field_name) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                format!("public-key share succinct proof {field_name} must match the proof statement"),
+                format!(
+                    "public-key share succinct proof {field_name} must match the proof statement"
+                ),
             ));
         }
     }
@@ -1634,13 +1655,15 @@ fn verify_public_key_share_succinct_proof_record(
             public_matrix_seed_hash: context.public_matrix_seed_hash.to_string(),
             commitments: vec![limb_zero_commitment],
         }),
+        private_vss_share: None,
     };
     let statement_hash_hex = statement
         .statement_hash()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    if proof_record.get("statementHash").and_then(Value::as_str) != Some(statement_hash_hex.as_str())
+    if proof_record.get("statementHash").and_then(Value::as_str)
+        != Some(statement_hash_hex.as_str())
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -1775,14 +1798,12 @@ fn verify_public_key_share_proof_record(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        ("proofVerificationStatus", "succinct-proof-verification-pending"),
         (
-            "noWrapRelation",
-            "PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 over lifted integers",
+            "proofVerificationStatus",
+            "succinct-proof-verification-pending",
         ),
-        ("errorSupport", "checked-by-public-key-share-succinct-proof-set"),
         (
-            "carryWitnessStatus",
+            "errorSupport",
             "checked-by-public-key-share-succinct-proof-set",
         ),
         (
@@ -2221,9 +2242,7 @@ fn unexpected_public_key_share_proof_field(value: &Value) -> Option<String> {
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "rnsLimbCount",
-            "noWrapRelation",
             "errorSupport",
-            "carryWitnessStatus",
             "proofBytesStatus",
             "publicKeyShareProofRoot",
         ],

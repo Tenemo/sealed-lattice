@@ -945,6 +945,7 @@ fn verify_same_secret_anchor_proof_record(
             public_matrix_seed_hash: context.public_matrix_seed_hash.to_string(),
             commitments: constant_commitments,
         }),
+        private_vss_share: None,
     };
     let statement_hash_hex = statement
         .statement_hash()
@@ -1201,7 +1202,17 @@ fn transported_same_secret_proof_material_chunks(
                 "transportedSameSecretProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        let chunks = transported_same_secret_proof_chunks(proof_material)?;
+        let chunks = if proof_material.get("chunks").is_some() {
+            transported_same_secret_proof_chunks(proof_material)?
+        } else {
+            verified_setup_proof_material_chunks_from_request(
+                request,
+                SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+                expected_proof_material_root,
+                proof_material,
+                "transportedSameSecretProofMaterial.proofMaterials",
+            )?
+        };
         let transport_hashes = setup_proof_material_transport_hashes(
             SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             &chunks,

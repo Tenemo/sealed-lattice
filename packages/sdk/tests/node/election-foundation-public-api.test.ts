@@ -107,8 +107,8 @@ const requiredPublicFunctions = [
         publicApiRuntimeRecord.createBinaryChunkedPublicEvaluationKeyMaterialTransport,
     ],
     [
-        'createPublicKeyShareLnpProofSet',
-        publicApiRuntimeRecord.createPublicKeyShareLnpProofSet,
+        'createPublicKeyShareSuccinctProofSet',
+        publicApiRuntimeRecord.createPublicKeyShareSuccinctProofSet,
     ],
     ['createPublicKeyShareSet', publicApiRuntimeRecord.createPublicKeyShareSet],
     [

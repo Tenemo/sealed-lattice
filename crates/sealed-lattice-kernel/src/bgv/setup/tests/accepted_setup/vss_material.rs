@@ -419,6 +419,61 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
 }
 
 #[test]
+fn collective_setup_verifier_refuses_private_vss_proof_sidecars_in_public_package() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_private_vss_proof_sidecars_in_public_package",
+    );
+    let mut transported_private_proof_package = minimal_collective_setup_package();
+    transported_private_proof_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["transportedPrivateVssShareProofMaterial"] = serde_json::json!({
+        "objectType": "SetupTransportedPrivateVssShareProofMaterialSet",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "proofFamily": "vss-opening-carry",
+        "proofMaterials": [],
+    });
+    rebind_collective_setup_package_hash(&mut transported_private_proof_package);
+
+    let transported_private_proof_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": transported_private_proof_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(
+        transported_private_proof_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        transported_private_proof_result["refusedObjects"][0]["reasonCode"],
+        "privateVssEnvelopeForbiddenProofSidecar"
+    );
+    assert!(transported_private_proof_result["acceptedSetupHandoff"].is_null());
+
+    let mut legacy_private_proof_package = minimal_collective_setup_package();
+    legacy_private_proof_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["tboxCommitmentPrefixHash"] =
+        serde_json::json!(valid_hash('7'));
+    rebind_collective_setup_package_hash(&mut legacy_private_proof_package);
+
+    let legacy_private_proof_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": legacy_private_proof_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(legacy_private_proof_result["verifierStatus"], "refused");
+    assert_eq!(
+        legacy_private_proof_result["refusedObjects"][0]["reasonCode"],
+        "privateVssEnvelopeForbiddenProofSidecar"
+    );
+    assert!(
+        legacy_private_proof_result["refusedObjects"][0]["objectPath"]
+            .as_str()
+            .expect("object path")
+            .contains("tboxCommitmentPrefixHash")
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_vss_share_acceptance_records",
@@ -459,6 +514,33 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch"
     );
 
+    let mut envelope_local_verification_drift_package = minimal_collective_setup_package();
+    envelope_local_verification_drift_package["privateVssEnvelopeCommitments"]["envelopeReferences"]
+        [0]["localVerificationRoot"] = serde_json::json!(valid_hash('9'));
+    rebind_first_private_vss_envelope_commitment_record_root(
+        &mut envelope_local_verification_drift_package,
+    );
+    rebind_collective_private_vss_envelope_commitment_root(
+        &mut envelope_local_verification_drift_package,
+    );
+    rebind_collective_setup_package_hash(&mut envelope_local_verification_drift_package);
+
+    let envelope_local_verification_drift_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": envelope_local_verification_drift_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(
+        envelope_local_verification_drift_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        envelope_local_verification_drift_result["refusedObjects"][0]["reasonCode"],
+        "vssShareAcceptancePrivateEnvelopeRootMismatch"
+    );
+    assert!(envelope_local_verification_drift_result["acceptedSetupHandoff"].is_null());
+
     let mut wrong_local_verification_package = minimal_collective_setup_package();
     wrong_local_verification_package["vssShareAcceptances"]["acceptanceRecords"][0]["localVerificationRoot"] =
         serde_json::json!(valid_hash('4'));
@@ -476,6 +558,51 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         wrong_local_verification_result["refusedObjects"][0]["reasonCode"],
         "vssShareAcceptanceLocalVerificationRootMismatch"
     );
+    assert!(wrong_local_verification_result["acceptedSetupHandoff"].is_null());
+
+    let mut wrong_private_envelope_hash_package = minimal_collective_setup_package();
+    wrong_private_envelope_hash_package["vssShareAcceptances"]["acceptanceRecords"][0]["privateEnvelopeHash"] =
+        serde_json::json!(valid_hash('8'));
+    rebind_collective_vss_acceptance_root(&mut wrong_private_envelope_hash_package);
+    rebind_collective_setup_package_hash(&mut wrong_private_envelope_hash_package);
+
+    let wrong_private_envelope_hash_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": wrong_private_envelope_hash_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(
+        wrong_private_envelope_hash_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        wrong_private_envelope_hash_result["refusedObjects"][0]["reasonCode"],
+        "vssShareAcceptancePrivateEnvelopeHashMismatch"
+    );
+    assert!(wrong_private_envelope_hash_result["acceptedSetupHandoff"].is_null());
+
+    let mut wrong_verification_status_package = minimal_collective_setup_package();
+    wrong_verification_status_package["vssShareAcceptances"]["acceptanceRecords"][0]["verificationStatus"] =
+        serde_json::json!("pending-local-private-vss-opening");
+    rebind_collective_vss_acceptance_root(&mut wrong_verification_status_package);
+    rebind_collective_setup_package_hash(&mut wrong_verification_status_package);
+
+    let wrong_verification_status_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": wrong_verification_status_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(
+        wrong_verification_status_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        wrong_verification_status_result["refusedObjects"][0]["reasonCode"],
+        "vssShareAcceptanceStatusMismatch"
+    );
+    assert!(wrong_verification_status_result["acceptedSetupHandoff"].is_null());
 
     let mut tampered_signature_package = minimal_collective_setup_package();
     let acceptance_record =

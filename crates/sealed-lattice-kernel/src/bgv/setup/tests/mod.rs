@@ -32,9 +32,14 @@ use super::{
         setup_commitment_full_value, setup_commitment_root,
     },
     private_vss_share_proof::{
-        PrivateVssShareLnpProofGenerationInput, PrivateVssShareLnpProofVerificationInput,
-        PrivateVssShareLnpProofWitness, private_vss_share_lnp_proof_record,
-        verify_private_vss_share_lnp_relation_proof,
+        PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
+        PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
+        verify_private_vss_share_succinct_relation_proof,
+    },
+    trustee_evaluation_key_proof::{
+        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
+        succinct_private_vss_share_accounting_hash,
     },
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };

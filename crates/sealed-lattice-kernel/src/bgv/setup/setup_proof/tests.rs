@@ -7,7 +7,7 @@ fn setup_proof_challenge_sampler_derives_autostable_bounded_coefficients() {
     let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
 
     let coefficients = derive_setup_proof_challenge_coefficients(
-        "public-key-share",
+        "vss-opening-carry",
         &statement_hash,
         &relation_commitment_hash,
         16,
@@ -39,14 +39,14 @@ fn setup_proof_challenge_sampler_binds_statement_and_relation() {
     let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
 
     let first = derive_setup_proof_challenge_coefficients(
-        "public-key-share",
+        "vss-opening-carry",
         &statement_hash,
         &relation_commitment_hash,
         32,
     )
     .expect("challenge coefficients");
     let second = derive_setup_proof_challenge_coefficients(
-        "public-key-share",
+        "vss-opening-carry",
         &other_statement_hash,
         &relation_commitment_hash,
         32,
@@ -62,7 +62,7 @@ fn setup_proof_challenge_sampler_rejects_wrong_profile_shape() {
     let relation_commitment_hash = hash512_hex("test-relation", &[b"setup-proof-test"]);
 
     let odd_ring_error = derive_setup_proof_challenge_coefficients(
-        "public-key-share",
+        "vss-opening-carry",
         &statement_hash,
         &relation_commitment_hash,
         15,
@@ -131,7 +131,7 @@ fn setup_proof_scalar_challenge_sampler_uses_declared_width() {
             &[b"setup-proof-test", &relation_index_bytes],
         );
         let challenge = derive_setup_proof_scalar_challenge(
-            "public-key-share",
+            "vss-opening-carry",
             "sealed-lattice/setup/test/scalar-challenge-v1",
             &statement_hash,
             &relation_commitment_hash,
@@ -153,6 +153,16 @@ fn setup_proof_scalar_challenge_sampler_uses_declared_width() {
 
 #[test]
 fn setup_proof_challenge_space_audit_covers_all_families_and_invertible_differences() {
+    let challenge_domain = setup_proof_challenge_domain_value_for_test("CollectiveBgvSetup-v1");
+    assert_eq!(
+        challenge_domain["legacyLnpTboxProofFamilies"],
+        serde_json::json!(["vss-opening-carry"])
+    );
+    assert_eq!(
+        challenge_domain["challengeScope"],
+        "legacy-lnp-tbox-private-vss-challenge-domain-only; accepted same-secret, public-key-share, and trustee-evaluation-key succinct families bind their challenge transcript rows through their own accounting objects"
+    );
+
     let accounting = challenge_difference_invertibility_accounting_value()
         .expect("challenge difference accounting");
     assert_eq!(
@@ -163,6 +173,14 @@ fn setup_proof_challenge_space_audit_covers_all_families_and_invertible_differen
 
     let audit = setup_proof_challenge_space_audit_value(SETUP_PROOF_LNP_PROOF_RING_DEGREE)
         .expect("challenge audit");
+    assert_eq!(
+        audit["legacyLnpTboxProofFamilies"],
+        serde_json::json!(["vss-opening-carry"])
+    );
+    assert_eq!(
+        audit["auditScope"],
+        "legacy-lnp-tbox-private-vss-challenge-space-audit-only; current accepted succinct families carry their low-degree and transcript accounting in per-family objects"
+    );
     let family_samples = audit["familySamples"].as_array().expect("family samples");
     assert_eq!(family_samples.len(), SETUP_PROOF_FAMILIES.len());
     for proof_family in SETUP_PROOF_FAMILIES {
@@ -294,61 +312,60 @@ fn setup_proof_lnp_tbox_decoder_accepts_generated_canonical_proof_byte_layout() 
 
 #[test]
 fn setup_proof_lnp_tbox_decoder_accepts_generated_suffix_for_all_setup_families() {
-    for layout in [private_vss_share_lnp_tbox_layout()] {
-        let statement_hash = hash512_hex(
-            "test-statement",
-            &[
-                layout.proof_family.as_bytes(),
-                layout.tbox_parameter_profile_id.as_bytes(),
-            ],
-        );
-        let relation_commitment_hash = hash512_hex(
-            "test-relation",
-            &[
-                layout.proof_family.as_bytes(),
-                layout.tbox_parameter_profile_id.as_bytes(),
-            ],
-        );
-        let proof_bytes = encode_lnp_tbox_proof_for_test(
-            &layout,
-            &statement_hash,
-            &relation_commitment_hash,
-            None,
-            None,
-            TboxSuffixProfileForTest::Generated,
-        )
-        .expect("proof bytes");
-        let prefix_byte_count =
-            setup_proof_lnp_tbox_commitment_prefix_byte_count(&layout).expect("prefix byte count");
-        assert!(
-            proof_bytes[prefix_byte_count..]
-                .iter()
-                .any(|byte| *byte != 0),
-            "generated suffix for {} must not collapse to a zero placeholder",
-            layout.proof_family
-        );
+    let layout = private_vss_share_lnp_tbox_layout();
+    let statement_hash = hash512_hex(
+        "test-statement",
+        &[
+            layout.proof_family.as_bytes(),
+            layout.tbox_parameter_profile_id.as_bytes(),
+        ],
+    );
+    let relation_commitment_hash = hash512_hex(
+        "test-relation",
+        &[
+            layout.proof_family.as_bytes(),
+            layout.tbox_parameter_profile_id.as_bytes(),
+        ],
+    );
+    let proof_bytes = encode_lnp_tbox_proof_for_test(
+        &layout,
+        &statement_hash,
+        &relation_commitment_hash,
+        None,
+        None,
+        TboxSuffixProfileForTest::Generated,
+    )
+    .expect("proof bytes");
+    let prefix_byte_count =
+        setup_proof_lnp_tbox_commitment_prefix_byte_count(&layout).expect("prefix byte count");
+    assert!(
+        proof_bytes[prefix_byte_count..]
+            .iter()
+            .any(|byte| *byte != 0),
+        "generated suffix for {} must not collapse to a zero placeholder",
+        layout.proof_family
+    );
 
-        let decoded = verify_setup_proof_lnp_tbox_proof_bytes(
-            &layout,
-            &statement_hash,
-            &relation_commitment_hash,
-            &proof_bytes,
-        )
-        .expect("generated suffix verifies");
+    let decoded = verify_setup_proof_lnp_tbox_proof_bytes(
+        &layout,
+        &statement_hash,
+        &relation_commitment_hash,
+        &proof_bytes,
+    )
+    .expect("generated suffix verifies");
 
-        assert_eq!(decoded.decoded_size_bytes, proof_bytes.len());
-        assert_eq!(decoded.z34_seed_material_hash.len(), 128);
-        assert_eq!(decoded.z34_challenge_seed_hash.len(), 128);
-        assert_eq!(decoded.z34_challenge_tail_hash.len(), 128);
-        assert_eq!(decoded.z34_challenge_row_domain_hash.len(), 128);
-        assert_eq!(decoded.z34_challenge_z3_row_set_hash.len(), 128);
-        assert_eq!(decoded.z34_challenge_z4_row_set_hash.len(), 128);
-        assert_eq!(decoded.tbox_lower_protocol_challenge_hash.len(), 128);
-        assert_eq!(decoded.z34_z3_check_window_hash.len(), 128);
-        assert_eq!(decoded.z34_z4_check_window_hash.len(), 128);
-        assert!(!decoded.z3_l2_squared.is_zero());
-        assert!(!decoded.z4_infinity_norm.is_zero());
-    }
+    assert_eq!(decoded.decoded_size_bytes, proof_bytes.len());
+    assert_eq!(decoded.z34_seed_material_hash.len(), 128);
+    assert_eq!(decoded.z34_challenge_seed_hash.len(), 128);
+    assert_eq!(decoded.z34_challenge_tail_hash.len(), 128);
+    assert_eq!(decoded.z34_challenge_row_domain_hash.len(), 128);
+    assert_eq!(decoded.z34_challenge_z3_row_set_hash.len(), 128);
+    assert_eq!(decoded.z34_challenge_z4_row_set_hash.len(), 128);
+    assert_eq!(decoded.tbox_lower_protocol_challenge_hash.len(), 128);
+    assert_eq!(decoded.z34_z3_check_window_hash.len(), 128);
+    assert_eq!(decoded.z34_z4_check_window_hash.len(), 128);
+    assert!(!decoded.z3_l2_squared.is_zero());
+    assert!(!decoded.z4_infinity_norm.is_zero());
 }
 
 #[test]

@@ -245,13 +245,17 @@ fn verified_evaluation_key_share_component_material_chunks()
 pub(in crate::bgv::setup) fn register_verified_evaluation_key_share_component_material_chunks(
     material_root: &str,
     chunks: Vec<Vec<u8>>,
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
 ) -> CanonicalResult<()> {
     validate_lowercase_hash(
         material_root,
         "verifiedEvaluationKeyShareComponentMaterial.keySwitchComponentMaterialRoot",
     )?;
-    let store_entry =
-        write_verified_evaluation_key_share_component_material_chunks(material_root, &chunks)?;
+    let store_entry = write_verified_evaluation_key_share_component_material_chunks(
+        material_root,
+        &chunks,
+        transport_hashes,
+    )?;
     let mut stored_chunks = verified_evaluation_key_share_component_material_chunks()
         .lock()
         .map_err(|_| {
@@ -304,6 +308,7 @@ fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf
 fn write_verified_evaluation_key_share_component_material_chunks(
     material_root: &str,
     chunks: &[Vec<u8>],
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
 ) -> CanonicalResult<VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry> {
     let total_byte_length = chunks.iter().try_fold(0_u64, |total, chunk| {
         total
@@ -325,20 +330,26 @@ fn write_verified_evaluation_key_share_component_material_chunks(
         ))
     })?;
     let path = directory.join(format!("{material_root}.bin"));
-    if path.exists() {
-        let observed_byte_length = fs::metadata(&path)
-            .map_err(|error| {
+    let metadata_path = path.with_extension("metadata.json");
+    let metadata = verified_evaluation_key_share_component_material_store_metadata(
+        material_root,
+        transport_hashes,
+    );
+    let cache_entry_matches =
+        verified_evaluation_key_share_component_material_store_metadata_matches(
+            &path,
+            &metadata_path,
+            total_byte_length,
+            &metadata,
+        )?;
+    if !cache_entry_matches {
+        if metadata_path.exists() {
+            fs::remove_file(&metadata_path).map_err(|error| {
                 invalid_evaluation_key_share_material(format!(
-                    "verified evaluation-key component material store entry could not be read: {error}",
+                    "verified evaluation-key component material store metadata could not be refreshed: {error}",
                 ))
-            })?
-            .len();
-        if observed_byte_length != total_byte_length {
-            return Err(invalid_evaluation_key_share_material(
-                "verified evaluation-key component material store entry length does not match the registered chunks",
-            ));
+            })?;
         }
-    } else {
         let mut file = File::create(&path).map_err(|error| {
             invalid_evaluation_key_share_material(format!(
                 "verified evaluation-key component material store entry could not be created: {error}",
@@ -351,12 +362,76 @@ fn write_verified_evaluation_key_share_component_material_chunks(
                 ))
             })?;
         }
+        drop(file);
+        let metadata_bytes = serde_json::to_vec(&metadata).map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "verified evaluation-key component material store metadata could not be encoded: {error}",
+            ))
+        })?;
+        fs::write(&metadata_path, metadata_bytes).map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "verified evaluation-key component material store metadata could not be written: {error}",
+            ))
+        })?;
     }
 
     Ok(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
         path,
         total_byte_length,
     })
+}
+
+#[cfg(test)]
+fn verified_evaluation_key_share_component_material_store_metadata(
+    material_root: &str,
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
+) -> Value {
+    json!({
+        "objectType": "VerifiedEvaluationKeyShareComponentMaterialStoreEntry",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+        "keySwitchComponentMaterialRoot": material_root,
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    })
+}
+
+#[cfg(test)]
+fn verified_evaluation_key_share_component_material_store_metadata_matches(
+    path: &PathBuf,
+    metadata_path: &PathBuf,
+    total_byte_length: u64,
+    expected_metadata: &Value,
+) -> CanonicalResult<bool> {
+    if !path.exists() || !metadata_path.exists() {
+        return Ok(false);
+    }
+    let observed_byte_length = fs::metadata(path)
+        .map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "verified evaluation-key component material store entry could not be read: {error}",
+            ))
+        })?
+        .len();
+    if observed_byte_length != total_byte_length {
+        return Ok(false);
+    }
+    let metadata_bytes = fs::read(metadata_path).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata could not be read: {error}",
+        ))
+    })?;
+    let observed_metadata = serde_json::from_slice::<Value>(&metadata_bytes).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata is invalid: {error}",
+        ))
+    })?;
+
+    Ok(&observed_metadata == expected_metadata)
 }
 
 fn read_verified_evaluation_key_share_component_material_chunks(
@@ -1053,32 +1128,38 @@ pub(in crate::bgv::setup) fn key_switch_component_b_for_evaluation_key_fixture(
         input.modulus,
         input.ring_degree,
     );
+    let secret_residues = secret_i128
+        .iter()
+        .map(|coefficient| signed_i128_residue_u64(*coefficient, input.modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
     let public_sample_secret_product =
-        negacyclic_public_sample_secret_product_lifted(&public_sample, &secret_i128)?;
+        negacyclic_product_mod(&public_sample, &secret_residues, input.modulus)?;
+    let plaintext_modulus = u64::try_from(PLAINTEXT_MODULUS_I64)
+        .expect("plaintext modulus is positive")
+        % input.modulus;
     (0..input.ring_degree)
         .map(|coefficient_index| {
-            let mut lifted_value = i128::from(PLAINTEXT_MODULUS_I64)
-                .checked_mul(i128::from(input.error_coefficients[coefficient_index]))
-                .ok_or_else(|| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key fixture error scaling overflowed",
-                    )
-                })?;
-            lifted_value = lifted_value
-                .checked_sub(public_sample_secret_product[coefficient_index])
-                .ok_or_else(|| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key fixture public-sample subtraction overflowed",
-                    )
-                })?;
-            lifted_value = lifted_value
-                .checked_add(input.source_coefficients[coefficient_index])
-                .ok_or_else(|| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key fixture source addition overflowed",
-                    )
-                })?;
-            signed_i128_residue_u64(lifted_value, input.modulus)
+            let scaled_error = mul_mod(
+                plaintext_modulus,
+                signed_i128_residue_u64(
+                    i128::from(input.error_coefficients[coefficient_index]),
+                    input.modulus,
+                )?,
+                input.modulus,
+            )?;
+            let without_sample = sub_mod(
+                scaled_error,
+                public_sample_secret_product[coefficient_index],
+                input.modulus,
+            )?;
+            add_mod(
+                without_sample,
+                signed_i128_residue_u64(
+                    input.source_coefficients[coefficient_index],
+                    input.modulus,
+                )?,
+                input.modulus,
+            )
         })
         .collect()
 }

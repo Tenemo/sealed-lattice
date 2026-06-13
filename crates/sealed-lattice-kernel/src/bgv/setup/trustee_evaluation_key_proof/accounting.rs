@@ -8,13 +8,15 @@ use crate::hashing::derive_protocol_hash;
 // Repo-owned accounting for the trustee-batched succinct evaluation-key
 // argument. Every row states what is implemented and measured against the
 // fixed parameters in this module, and every theorem row carries its closure
-// argument inline: the soundness model is round-by-round, every
+// argument inline. The soundness model is classical round-by-round, every
 // post-commitment challenge is drawn from the degree-four challenge extension
-// of the limb field, and the one explicitly conjectured input (the per-query
-// FRI bound at rate one half) is named as a conjecture with its proven
-// fallback. The accounting hash is bound into the generate and verify command
-// responses, and package integration binds it into the setup proof accounting
-// certificate.
+// of the limb field, and the explicitly conjectured input (the per-query FRI
+// bound at rate one half) is named with its insufficient proven fallback at the
+// current query count. QROM rows are reference rows only until a concrete
+// reduction-loss calculation is implemented, and the smudging row is a
+// bounded-leakage statement rather than a 128-bit zero-knowledge claim. The
+// accounting hash is bound into the generate and verify command responses, and
+// package integration binds it into the setup proof accounting certificate.
 pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResult<Value> {
     let trace_size = POLYNOMIAL_DEGREE / TRACE_SPLIT;
     let extension_size = trace_size * DOMAIN_BLOWUP;
@@ -50,6 +52,9 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     let consistency_round_bits =
         CONSISTENCY_COEFFICIENT_BITS as i64 * CONSISTENCY_REPETITIONS as i64;
     let query_round_bits = LOW_DEGREE_QUERY_COUNT as i64;
+    let proven_fallback_query_bits = query_round_bits / 2;
+    let proven_fallback_effective_soundness_bits = proven_fallback_query_bits - union_budget_bits;
+    let proven_fallback_query_count_for_128_bits = 2 * (128 + union_budget_bits);
     let weakest_round_bits = [
         fold_round_bits,
         out_of_domain_round_bits,
@@ -83,16 +88,21 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
         "lowDegreeSoundness": {
             "queryCount": LOW_DEGREE_QUERY_COUNT,
             "foldedFinalCoefficientCount": LOW_DEGREE_FINAL_COEFFICIENT_COUNT,
-            "perQueryBoundModel": "explicitly conjectured one-half per query at rate one half",
+            "perQueryBoundModel": "accepted only under the explicitly named one-half per-query FRI conjecture at rate one half",
             "conjecturedQueryBoundLog2": -(LOW_DEGREE_QUERY_COUNT as i64),
             "conjectureStatement": "the accepted bound is the standard rate-per-query FRI conjecture; the proven proximity-gap bound (Johnson radius, square root of the rate per query) gives half the bits per query and is the documented fallback at double the query count",
             "provenBoundReference": "Ben-Sasson, Carmon, Ishai, Kopparty, Saraf, Proximity gaps for Reed-Solomon codes (BCIKS20)",
+            "provenFallbackQueryBoundLog2": -proven_fallback_query_bits,
+            "provenFallbackEffectiveSoundnessBitsAfterUnion": proven_fallback_effective_soundness_bits,
+            "provenFallbackQueryCountFor128BitsAfterUnion": proven_fallback_query_count_for_128_bits,
             "foldRoundSoundnessLog2": -fold_round_bits,
             "foldChallengeDomain": "each fold challenge is one degree-four extension element, so a fold round's round-by-round error is the extension domain size over the challenge field size",
             "grinding": "none-applied: every round bound already clears the target with margin",
             "unionBudgetLog2": union_budget_bits,
             "effectiveSoundnessBitsAfterUnion": effective_soundness_bits,
-            "acceptanceBar": "explicitly conjectured bound with grinding allowance and union bounds over limbs, keys, trustees, and ceremony objects, at least 128-bit effective soundness after every loss",
+            "acceptanceBar": "the conjectured rate-per-query FRI row clears 128 bits after the fixed union allowance; the proven fallback does not clear 128 bits at the current query count and would require the recorded larger query count or a redesigned low-degree check",
+            "acceptedUnderNamedFriConjecture": true,
+            "acceptedUnderProvenFallback": false,
             "accepted": true,
         },
         "identitySoundness": {
@@ -123,6 +133,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "accepted": true,
         },
         "zeroKnowledge": {
+            "zeroKnowledgeClaimStatus": "bounded-statistical-leakage-scope-recorded-not-128-bit-zero-knowledge",
             "columnMaskDegree": mask_degree,
             "openedEvaluationsPerColumn": opened_evaluations_per_column,
             "maskCoversOpenings": mask_degree >= opened_evaluations_per_column,
@@ -135,12 +146,13 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
                 "leakageStatement": "each published claim integer is a clear bounded combination plus a uniform mask of CLAIM_MASK_DIGIT_COUNT bits, so the per-claim statistical distance from a witness-independent distribution is at most the clear bound over the mask bound, about two to the minus sixty-eight; across every claim, trustee, and ceremony object of the first profile (about two to the seventeen claims) the total leakage stays below two to the minus fifty, and the bound says nothing about quantities outside the published claims",
                 "claimBudgetLog2Approximate": 17,
                 "totalLeakageLog2Approximate": clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64 + 17,
-                "accepted": true,
+                "acceptedForBoundedLeakagePrototype": true,
+                "acceptedFor128BitZeroKnowledge": false,
             },
         },
         "fiatShamir": {
             "transform": "multi-round Fiat-Shamir over the shared transcript hash",
-            "soundnessModel": "round-by-round: every interactive round's error is bounded above, and the non-interactive bound is the adversary's query budget times the weakest round error (BCS16-style compilation); the stated security level counts one hash query per grinding attempt on the weakest round",
+            "soundnessModel": "classical round-by-round: every interactive round's error is bounded above, and the non-interactive bound is the adversary's query budget times the weakest round error (BCS16-style compilation); the stated security level counts one hash query per grinding attempt on the weakest round",
             "transcriptOrder": [
                 "statement hash",
                 "per-limb witness tree roots",
@@ -153,13 +165,15 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "domainSeparation": "labelled absorb and challenge domains with per-limb forks",
             "weakestRoundSoundnessLog2": -weakest_round_bits,
             "effectiveSoundnessBitsAfterUnion": effective_soundness_bits,
-            "qromAccounting": "quantum random-oracle reductions for multi-round Fiat-Shamir are referenced, not re-proven here: the measure-and-reprogram bound of DFM20 with the DFMS19 sigma-protocol predecessor and the DFMS22 commit-and-open treatment; the certified level is stated in the classical round-by-round model, and the QROM reduction loss is an explicit open caveat carried by this row's references rather than a silent assumption",
+            "qromAccounting": "quantum random-oracle reductions for multi-round Fiat-Shamir are referenced, not accepted as claim-bearing evidence here: the measure-and-reprogram bound of DFM20 with the DFMS19 sigma-protocol predecessor and the DFMS22 commit-and-open treatment must still be instantiated with a concrete reduction-loss calculation before any QROM label is accepted",
             "qromReferences": [
                 "DFM20, The measure-and-reprogram technique 2.0: multi-round Fiat-Shamir and more",
                 "DFMS19, Security of the Fiat-Shamir transformation in the quantum random-oracle model",
                 "DFMS22, Efficient NIZKs and signatures from commit-and-open protocols in the QROM",
             ],
-            "accepted": true,
+            "classicalRoundByRoundAccepted": true,
+            "qromAccepted": false,
+            "qromReductionLossStatus": "not-computed-open-caveat",
         },
         "sameSecretLinkage": {
             "mechanism": "BDLOP constant commitments opened natively over the commitment-modulus fields, bound to the shared secret by the joint cross-limb consistency",
@@ -172,7 +186,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "soundnessInheritance": "the opening relations are rows of the same batched lincheck and row checks, so their soundness is the linear-relation and consistency rows above",
             "accepted": true,
         },
-        "claimBoundary": "accounting closed for the succinct trustee evaluation-key argument: every theorem row above is accepted under one explicitly named conjecture (the rate-per-query FRI bound) and classical round-by-round Fiat-Shamir accounting with referenced QROM reductions; rows outside this argument (ceremony transport, roster binding, target decryption) keep their own gates",
+        "claimBoundary": "accounting closed for classical succinct-family soundness under the explicitly named rate-per-query FRI conjecture; the proven FRI fallback, QROM reduction loss, and 128-bit zero-knowledge are not accepted by this row, and the smudging statement is scoped to its recorded bounded leakage; rows outside this argument (ceremony transport, roster binding, target decryption) keep their own gates",
     }))
 }
 
@@ -291,7 +305,8 @@ pub(crate) fn succinct_public_key_share_accounting_value() -> CanonicalResult<Va
         json!({
             "statementShape": "one share-correctness relation b_l + a_l (*) s - p * e = 0 over every Q_share limb with no diagonal source, ternary secret support, centered-binomial error support, the masked cross-limb consistency claims for the shared secret and error, and one constant-commitment opening (limb zero) with the linkage opening rows",
             "commonReferenceBinding": "the public sample a_l is the accepted common reference polynomial recomputed per limb from the accepted public matrix seed under the accepted-bgv-public-a label, never transported, so the relation cannot be proven against an arbitrary reference polynomial",
-            "anchorReference": "the statement carries the same-secret anchor statement and proof roots in its hashed context, and the single constant-commitment opening makes the share secret congruent to the anchored secret modulo the commitment modulus product, which with ternary support makes them equal as integers",
+            "singleCommitmentLinkageRationale": "the same-secret anchor has already verified that every accepted Q_share constant commitment opens to one ternary trustee secret; the public-key share proof therefore opens the selected limb-zero constant commitment, carries the accepted anchor statement and proof roots in its statement context, and proves ternary support for the public-key witness secret",
+            "anchorReference": "the limb-zero constant-commitment opening makes the public-key share secret congruent to the anchored secret modulo the commitment modulus product, which with ternary support makes them equal as integers; this is intentionally narrower than the same-secret anchor, which opens every Q_share constant commitment",
         }),
         pending_desktop_browser_measurement(),
     )
@@ -301,5 +316,47 @@ pub(crate) fn succinct_public_key_share_accounting_hash() -> CanonicalResult<Str
     derive_protocol_hash(
         "SuccinctPublicKeyShareAccountingHash",
         &succinct_public_key_share_accounting_value()?,
+    )
+}
+
+// Accounting for the recipient-private VSS share family: hidden Shamir
+// coefficient openings plus the lifted recipient-share relation with hidden
+// carry columns over the setup commitment fields.
+pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<Value> {
+    let mut accounting = migrated_family_accounting(
+        "SuccinctPrivateVssShareAccounting",
+        super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        json!({
+            "statementShape": "recipient-private statement over the setup commitment fields: one hidden message column per Shamir coefficient, one hidden carry column, ternary opening-randomness columns for every coefficient commitment, masked cross-field consistency claims, coefficient commitment opening rows, and one lifted share-evaluation row",
+            "commitmentOpeningRows": "for every hidden Shamir coefficient polynomial F_k and every setup commitment row, the proof checks the published BDLOP commitment row against F_k and its ternary opening randomness over each commitment field",
+            "liftedShareRelation": "for recipient trustee point alpha_j, the proof checks sum_k alpha_j^k F_k - q_l * carry = share_j over the commitment fields; the term q_l * carry is not dropped except in fields where q_l is the field modulus, and the other commitment fields bind the integer carry",
+            "privacyBoundary": "coefficient messages, opening randomness, and carry vectors stay witness-private; the envelope publishes only share values, commitment roots, statement and proof hashes, proof bytes or chunk roots, and verification status",
+            "integerBinding": "full-size message residues use the shared masked-claim two-prime lift with a statement-specific bound based on the source limb modulus; carry columns use the explicit first-profile carry bound",
+        }),
+        pending_desktop_browser_measurement(),
+    )?;
+    let accounting_fields = accounting
+        .as_object_mut()
+        .expect("succinct accounting is an object");
+    if let Some(argument_shape) = accounting_fields
+        .get_mut("argumentShape")
+        .and_then(Value::as_object_mut)
+    {
+        argument_shape.insert(
+            "limbFields".to_string(),
+            Value::String(
+                "one instance per setup commitment field; the lifted carry relation is checked over the commitment-field CRT window"
+                    .to_string(),
+            ),
+        );
+    }
+
+    Ok(accounting)
+}
+
+pub(crate) fn succinct_private_vss_share_accounting_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SuccinctPrivateVssShareAccountingHash",
+        &succinct_private_vss_share_accounting_value()?,
     )
 }

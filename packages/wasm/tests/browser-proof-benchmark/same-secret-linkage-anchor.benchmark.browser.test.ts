@@ -137,6 +137,7 @@ describe('same-secret linkage anchor browser measurement', () => {
             openingRandomnessByLimb,
             proofRandomnessSource: 'development-deterministic-fixture',
             proofRandomnessSeedHex: fixtureHash('proof-randomness-seed'),
+            proofRandomnessNonceHex: fixtureHash('proof-randomness-nonce'),
         } as const;
         const proveRequestByteLength = new TextEncoder().encode(
             JSON.stringify(generateInput),

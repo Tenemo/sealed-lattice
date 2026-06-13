@@ -719,12 +719,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
         .expect("embedded trustee proof bytes")
         .to_string();
     let mut tampered_bytes = decode_hex(&proof_bytes_hex).expect("trustee proof bytes");
-    let tamper_position = tampered_bytes.len() / 2;
-    tampered_bytes[tamper_position] ^= 0x01;
+    set_first_masked_consistency_claim_to_noncanonical_modulus(&mut tampered_bytes);
     package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHex"] =
         serde_json::json!(to_hex(&tampered_bytes));
     package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHash"] =
         serde_json::json!(trustee_evaluation_key_proof_bytes_hash(&tampered_bytes));
+    rebind_trustee_evaluation_key_proof_set_root(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({

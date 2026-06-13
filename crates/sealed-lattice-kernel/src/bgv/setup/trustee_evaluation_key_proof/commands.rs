@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 
 use super::accounting::{
     succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
+    succinct_private_vss_share_accounting_hash, succinct_private_vss_share_accounting_value,
     succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
     succinct_same_secret_linkage_anchor_accounting_hash,
     succinct_same_secret_linkage_anchor_accounting_value,
@@ -17,9 +18,14 @@ use super::relation::{
 };
 use super::verifier::verify_evaluation_key_share;
 use super::*;
+use crate::bgv::profile::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
+use crate::bgv::setup::setup_proof::SETUP_PROOF_PROFILE_ID;
 use crate::bgv::validation::reject_unexpected_bgv_request_fields;
-use crate::hashing::to_hex;
+use crate::hashing::{derive_protocol_hash, to_hex};
+
+const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
+const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 
 // The model status and accounting object each migrated family carries on its
 // command responses. The argument machinery is shared, so only the family
@@ -31,6 +37,9 @@ fn family_proof_model_status(shape: SuccinctSetupProofFamilyShape) -> &'static s
         }
         SuccinctSetupProofFamilyShape::PublicKeyShare => {
             PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS
+        }
+        SuccinctSetupProofFamilyShape::PrivateVssShare => {
+            PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS
         }
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS
@@ -46,6 +55,9 @@ fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResu
         SuccinctSetupProofFamilyShape::PublicKeyShare => {
             succinct_public_key_share_accounting_hash()
         }
+        SuccinctSetupProofFamilyShape::PrivateVssShare => {
+            succinct_private_vss_share_accounting_hash()
+        }
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             succinct_evaluation_key_proof_accounting_hash()
         }
@@ -59,6 +71,9 @@ fn family_accounting_value(shape: SuccinctSetupProofFamilyShape) -> CanonicalRes
         }
         SuccinctSetupProofFamilyShape::PublicKeyShare => {
             succinct_public_key_share_accounting_value()
+        }
+        SuccinctSetupProofFamilyShape::PrivateVssShare => {
+            succinct_private_vss_share_accounting_value()
         }
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             succinct_evaluation_key_proof_accounting_value()
@@ -88,6 +103,7 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
             "openingRandomnessByLimb",
             "proofRandomnessSource",
             "proofRandomnessSeedHex",
+            "proofRandomnessNonceHex",
         ],
         "generateTrusteeEvaluationKeyProof",
     )?;
@@ -110,11 +126,28 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         error_coefficients_by_key,
         negative_indicator_coefficients,
         opening_randomness_by_limb,
+        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        private_vss_opening_randomness_by_shamir_index: Vec::new(),
+        private_vss_carry_witnesses: Vec::new(),
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
+    let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
     let proof_randomness_source = read_string(request, "proofRandomnessSource")?;
+    if !matches!(
+        proof_randomness_source,
+        "fresh-csprng" | "development-deterministic-fixture"
+    ) {
+        return Err(invalid_succinct_setup_proof(
+            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
+        ));
+    }
+    let bound_proof_randomness_seed_hex = statement_bound_proof_randomness_seed_hex(
+        &statement,
+        proof_randomness_seed_hex,
+        proof_randomness_nonce_hex,
+    )?;
 
-    let proof = prove_evaluation_key_share(&statement, &witness, proof_randomness_seed_hex)?;
+    let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
     let shape = statement.family_shape()?;
 
@@ -132,9 +165,63 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         "proofBytesHex": to_hex(&proof_bytes),
         "proofRandomness": {
             "source": proof_randomness_source,
+            "binding": "seed and nonce are bound to statement hash, proof family, trustee identity, roster position, and setup epoch before proof masking",
+            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
             "retention": "proof randomness seed material is consumed for proof generation and is not returned"
         },
     }))
+}
+
+fn statement_bound_proof_randomness_seed_hex(
+    statement: &TrusteeEvaluationKeyStatement,
+    proof_randomness_seed_hex: &str,
+    proof_randomness_nonce_hex: &str,
+) -> CanonicalResult<String> {
+    let seed_bytes = decode_exact_hex_bytes(
+        proof_randomness_seed_hex,
+        PROOF_RANDOMNESS_SEED_BYTES,
+        "proofRandomnessSeedHex",
+    )?;
+    decode_exact_hex_bytes(
+        proof_randomness_nonce_hex,
+        PROOF_RANDOMNESS_NONCE_BYTES,
+        "proofRandomnessNonceHex",
+    )?;
+    let statement_hash = to_hex(&statement.statement_hash());
+
+    derive_protocol_hash(
+        "TrusteeEvaluationKeyProofRandomness",
+        &json!({
+            "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": &statement.context.proof_family,
+            "statementHash": statement_hash,
+            "trusteeIdentity": &statement.context.trustee_identity,
+            "trusteeRosterPosition": statement.context.trustee_roster_position,
+            "setupEpoch": &statement.context.setup_epoch,
+            "proofRandomnessNonceHex": proof_randomness_nonce_hex,
+            "proofRandomnessSeedHex": to_hex(&seed_bytes),
+        }),
+    )
+}
+
+fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
+    let nonce_bytes = decode_exact_hex_bytes(
+        proof_randomness_nonce_hex,
+        PROOF_RANDOMNESS_NONCE_BYTES,
+        "proofRandomnessNonceHex",
+    )?;
+
+    derive_protocol_hash(
+        "TrusteeEvaluationKeyProofRandomness",
+        &json!({
+            "objectType": "TrusteeEvaluationKeyProofRandomnessNonceHash",
+            "objectVersion": 1,
+            "nonceBytesHex": to_hex(&nonce_bytes),
+        }),
+    )
 }
 
 pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
@@ -235,6 +322,7 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
         ring_degree,
         keys,
         same_secret_linkage,
+        private_vss_share: None,
     };
     statement.validate_shape()?;
 
@@ -328,7 +416,11 @@ fn decode_component_material_bytes(
     let limb_count = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
         invalid_succinct_setup_proof("component material limb count does not fit usize")
     })?;
-    if level != expected_level || digit_count != level + 1 || limb_count != level + 1 {
+    if level != expected_level
+        || digit_count != level + 1
+        || limb_count != level + 1
+        || limb_count > DATA_PRIMES.len()
+    {
         return Err(invalid_succinct_setup_proof(
             "component material shape does not match the key descriptor level",
         ));
@@ -336,10 +428,16 @@ fn decode_component_material_bytes(
     let mut component_b_by_digit = Vec::with_capacity(digit_count);
     for _ in 0..digit_count {
         let mut by_limb = Vec::with_capacity(limb_count);
-        for _ in 0..limb_count {
+        for &limb_prime in DATA_PRIMES.iter().take(limb_count) {
             let mut coefficients = Vec::with_capacity(ring_degree);
             for _ in 0..ring_degree {
-                coefficients.push(read_word(&mut cursor)?);
+                let coefficient = read_word(&mut cursor)?;
+                if coefficient >= limb_prime {
+                    return Err(invalid_succinct_setup_proof(
+                        "component material contains noncanonical Q_share residues",
+                    ));
+                }
+                coefficients.push(coefficient);
             }
             by_limb.push(coefficients);
         }
@@ -372,6 +470,25 @@ fn read_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
 
 fn read_hex_bytes(value: &Value, field_name: &str) -> CanonicalResult<Vec<u8>> {
     let text = read_string(value, field_name)?;
+    decode_hex_bytes(text, field_name)
+}
+
+fn decode_exact_hex_bytes(
+    text: &str,
+    expected_byte_length: usize,
+    field_name: &str,
+) -> CanonicalResult<Vec<u8>> {
+    let bytes = decode_hex_bytes(text, field_name)?;
+    if bytes.len() != expected_byte_length {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{field_name} must be {expected_byte_length} bytes of lowercase hex"
+        )));
+    }
+
+    Ok(bytes)
+}
+
+fn decode_hex_bytes(text: &str, field_name: &str) -> CanonicalResult<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return Err(invalid_succinct_setup_proof(format!(
             "{field_name} must contain whole bytes"

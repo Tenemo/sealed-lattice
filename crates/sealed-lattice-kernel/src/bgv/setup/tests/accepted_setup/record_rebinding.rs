@@ -139,6 +139,22 @@ pub(super) fn private_vss_envelope_commitment_record_root_input(
     root_input
 }
 
+pub(super) fn rebind_first_private_vss_envelope_commitment_record_root(
+    package: &mut serde_json::Value,
+) {
+    let envelope_reference = &mut package["privateVssEnvelopeCommitments"]["envelopeReferences"][0];
+    envelope_reference
+        .as_object_mut()
+        .expect("private VSS envelope commitment reference")
+        .remove("privateEnvelopeCommitmentRoot");
+    let record_root = derive_protocol_hash(
+        "PrivateVssEnvelopeCommitmentRoot",
+        &private_vss_envelope_commitment_record_root_input(envelope_reference),
+    )
+    .expect("private VSS envelope commitment record root");
+    envelope_reference["privateEnvelopeCommitmentRoot"] = serde_json::json!(record_root);
+}
+
 pub(super) fn private_vss_envelope_commitment_set_root_input(
     commitment_set: &serde_json::Value,
 ) -> serde_json::Value {

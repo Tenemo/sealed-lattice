@@ -3,7 +3,10 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use num_bigint::{BigInt, BigUint};
+#[cfg(test)]
+use num_bigint::BigInt;
+use num_bigint::BigUint;
+#[cfg(test)]
 use num_traits::ToPrimitive;
 use serde_json::{Value, json};
 
@@ -68,6 +71,7 @@ pub(super) struct SetupCommitmentValue {
     pub(super) limbs: Vec<SetupCommitmentLimb>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupCommitmentOpeningVerification {
     pub(super) commitment_root: String,
@@ -181,6 +185,7 @@ pub(super) fn setup_coefficients_fit_commitment_modulus_product(coefficients: &[
         .all(|coefficient| BigUint::from(*coefficient) < commitment_modulus_product)
 }
 
+#[cfg(test)]
 pub(super) fn setup_signed_coefficient_fits_centered_commitment_modulus_product(
     coefficient: i128,
 ) -> bool {
@@ -193,6 +198,7 @@ pub(super) fn setup_signed_coefficient_fits_centered_commitment_modulus_product(
     BigUint::from(coefficient_magnitude) * BigUint::from(2_u8) < setup_commitment_modulus_product()
 }
 
+#[cfg(test)]
 pub(super) fn setup_big_signed_coefficient_fits_centered_commitment_modulus_product(
     coefficient: &BigInt,
 ) -> bool {
@@ -284,6 +290,7 @@ pub(super) fn verify_setup_lifted_commitment_opening(
     )
 }
 
+#[cfg(test)]
 pub(super) fn verify_setup_signed_lifted_commitment_opening(
     public_matrix_seed_hash: &str,
     expected_commitment: &SetupCommitmentValue,
@@ -332,60 +339,6 @@ pub(super) fn verify_setup_signed_lifted_commitment_opening(
         commitment_root: setup_commitment_root(&computed_commitment)?,
         randomness_infinity_bound,
         message_coefficient_bound,
-        commitment_modulus_product_decimal: setup_commitment_modulus_product_decimal(),
-        commitment_modulus_product_ceil_bits: setup_commitment_modulus_product_ceil_bits(),
-    })
-}
-
-pub(super) fn verify_setup_big_signed_lifted_commitment_opening(
-    public_matrix_seed_hash: &str,
-    expected_commitment: &SetupCommitmentValue,
-    message_coefficients: &[BigInt],
-    randomness_by_column: &[Vec<i128>],
-    randomness_infinity_bound: i128,
-) -> CanonicalResult<SetupCommitmentOpeningVerification> {
-    validate_big_signed_message_coefficients(
-        message_coefficients,
-        expected_commitment.ring_degree,
-    )?;
-    validate_randomness_by_column(
-        randomness_by_column,
-        randomness_infinity_bound,
-        expected_commitment.ring_degree,
-    )?;
-    let message_coefficient_bound =
-        big_signed_message_coefficient_magnitude_bound(message_coefficients)?;
-    if !setup_big_signed_coefficient_fits_centered_commitment_modulus_product(&BigInt::from(
-        message_coefficient_bound.clone(),
-    )) {
-        return Err(invalid_commitment_input(
-            "signed commitment message coefficient would wrap in the centered CRT commitment modulus",
-        ));
-    }
-
-    let computed_commitment = compute_setup_big_signed_lifted_commitment_for_degree(
-        public_matrix_seed_hash,
-        expected_commitment.source_rns_limb_index,
-        expected_commitment.source_message_modulus,
-        expected_commitment.shamir_coefficient_index,
-        message_coefficients,
-        randomness_by_column,
-        expected_commitment.ring_degree,
-    )?;
-    if &computed_commitment != expected_commitment {
-        return Err(invalid_commitment_input(
-            "signed commitment opening does not reproduce the published commitment",
-        ));
-    }
-
-    Ok(SetupCommitmentOpeningVerification {
-        commitment_root: setup_commitment_root(&computed_commitment)?,
-        randomness_infinity_bound,
-        message_coefficient_bound: message_coefficient_bound.to_u128().ok_or_else(|| {
-            invalid_commitment_input(
-                "signed commitment message coefficient magnitude does not fit u128",
-            )
-        })?,
         commitment_modulus_product_decimal: setup_commitment_modulus_product_decimal(),
         commitment_modulus_product_ceil_bits: setup_commitment_modulus_product_ceil_bits(),
     })
@@ -847,6 +800,7 @@ fn compute_setup_commitment_for_degree(
     })
 }
 
+#[cfg(test)]
 fn compute_setup_signed_lifted_commitment_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -880,6 +834,7 @@ fn compute_setup_signed_lifted_commitment_for_degree(
     })
 }
 
+#[cfg(test)]
 fn compute_setup_big_signed_lifted_commitment_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -913,26 +868,7 @@ fn compute_setup_big_signed_lifted_commitment_for_degree(
     })
 }
 
-pub(super) fn compute_setup_signed_lifted_commitment(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
-    source_message_modulus: u64,
-    shamir_coefficient_index: u64,
-    message_coefficients: &[i128],
-    randomness_by_column: &[Vec<i128>],
-    ring_degree: usize,
-) -> CanonicalResult<SetupCommitmentValue> {
-    compute_setup_signed_lifted_commitment_for_degree(
-        public_matrix_seed_hash,
-        source_rns_limb_index,
-        source_message_modulus,
-        shamir_coefficient_index,
-        message_coefficients,
-        randomness_by_column,
-        ring_degree,
-    )
-}
-
+#[cfg(test)]
 pub(super) fn compute_setup_big_signed_lifted_commitment(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -1383,6 +1319,7 @@ fn centered_integer_to_residue(value: i128, modulus: u64) -> CanonicalResult<u64
         .map_err(|_| invalid_commitment_input("centered residue does not fit u64"))
 }
 
+#[cfg(test)]
 fn centered_big_integer_to_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
     let modulus_big = BigInt::from(modulus);
     let residue = ((value % &modulus_big) + &modulus_big) % &modulus_big;
@@ -1420,6 +1357,7 @@ fn validate_message_coefficients(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_signed_message_coefficients(
     message_coefficients: &[i128],
     ring_degree: usize,
@@ -1441,6 +1379,7 @@ fn validate_signed_message_coefficients(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_big_signed_message_coefficients(
     message_coefficients: &[BigInt],
     ring_degree: usize,
@@ -1463,6 +1402,7 @@ fn validate_big_signed_message_coefficients(
     Ok(())
 }
 
+#[cfg(test)]
 fn signed_message_coefficient_magnitude_bound(
     message_coefficients: &[i128],
 ) -> CanonicalResult<u128> {
@@ -1485,17 +1425,6 @@ fn signed_message_coefficient_magnitude_bound(
         })
 }
 
-fn big_signed_message_coefficient_magnitude_bound(
-    message_coefficients: &[BigInt],
-) -> CanonicalResult<BigUint> {
-    Ok(message_coefficients
-        .iter()
-        .map(BigInt::magnitude)
-        .cloned()
-        .max()
-        .unwrap_or_default())
-}
-
 fn ceil_log2_big_uint(value: &BigUint) -> u32 {
     if value <= &BigUint::from(1_u8) {
         return 0;
@@ -1504,6 +1433,7 @@ fn ceil_log2_big_uint(value: &BigUint) -> u32 {
     u32::try_from(previous.bits()).expect("setup commitment modulus bit length fits u32")
 }
 
+#[cfg(test)]
 fn validate_randomness_by_column(
     randomness_by_column: &[Vec<i128>],
     infinity_bound: i128,

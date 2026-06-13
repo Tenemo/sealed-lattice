@@ -21,10 +21,7 @@ pub(super) use self::component_material::{
 #[cfg(test)]
 pub(super) use self::ring_algebra::automorphism_i128_for_evaluation_key_fixture;
 #[cfg(test)]
-use self::ring_algebra::{
-    deterministic_key_switch_public_sample, negacyclic_public_sample_secret_product_lifted,
-    signed_i128_residue_u64,
-};
+use self::ring_algebra::{deterministic_key_switch_public_sample, signed_i128_residue_u64};
 
 use std::{
     collections::BTreeMap,
@@ -39,16 +36,11 @@ use std::{fs, io::Write};
 use serde_json::{Value, json};
 
 #[cfg(test)]
-use num_bigint::BigInt;
-#[cfg(test)]
-use num_traits::ToPrimitive;
-
-#[cfg(test)]
 use crate::bgv::evaluator::key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64};
 #[cfg(test)]
 use crate::bgv::evaluator::prg::DeterministicSampler;
 #[cfg(test)]
-use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod};
+use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
 use crate::{
     bgv::coefficient_codec::{
         coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
@@ -62,11 +54,6 @@ use super::accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID;
 #[cfg(test)]
 use super::sampling::negacyclic_product_mod;
 use super::setup_proof::{SETUP_PROOF_PROFILE_ID, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES};
-
-// CRT limb count for lifted integer products in the fixture algebra: four
-// data primes bound the exact integer coefficients of fixture sources.
-#[cfg(test)]
-const EVALUATION_KEY_SHARE_LIFTED_PRODUCT_CRT_LIMB_COUNT: usize = 4;
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1";

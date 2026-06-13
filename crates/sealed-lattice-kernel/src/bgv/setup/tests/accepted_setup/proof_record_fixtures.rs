@@ -1,28 +1,38 @@
 use super::*;
 use rayon::prelude::*;
 
-pub(super) fn setup_proof_binding_for_test_package(
-    package: &serde_json::Value,
-) -> serde_json::Value {
-    let profile = describe_collective_bgv_setup_profile().expect("setup profile");
-    assert_eq!(
-        package["setupContext"]["setupProfileHash"],
-        profile["setupProfileHash"]
-    );
-    setup_proof_record_binding_value(
-        "CollectiveBgvSetup-v1",
-        profile["setupProofProfileHash"]
-            .as_str()
-            .expect("setup proof profile hash"),
-    )
-    .expect("setup proof record binding")
-}
-
 pub(super) struct EvaluationKeyShareFixtureMaterial {
     pub(super) component_b_by_digit: Vec<Vec<Vec<u64>>>,
     pub(super) component_vector_entries: Vec<serde_json::Value>,
     pub(super) component_vector_root: String,
 }
+
+pub(super) struct RelinearizationKeyShareRoundsFixture {
+    pub(super) rounds: serde_json::Value,
+    pub(super) round_one_aggregate_diagonals_by_level: BTreeMap<u64, Vec<Vec<u64>>>,
+}
+
+struct TrusteeEvaluationKeyProofWorkItem {
+    trustee_roster_position: u64,
+    statement: crate::bgv::setup::trustee_evaluation_key_proof::TrusteeEvaluationKeyStatement,
+    record: serde_json::Value,
+}
+
+#[derive(Clone)]
+struct BuiltTrusteeEvaluationKeyProofRecord {
+    record: serde_json::Value,
+    transported_proof_material: Option<serde_json::Value>,
+}
+
+// Maximum number of trustee evaluation-key provers that run concurrently while
+// assembling the first-profile package fixture. Each first-profile prover holds
+// its statement, witness, and proof working set, which is several gigabytes, so
+// proving all ten trustees at once needs far more than physical memory and
+// forces heavy paging. Generating the proofs in batches of this size keeps
+// per-trustee proving parallel (each batch member still uses the shared work
+// pool for its internal parallelism) while capping concurrent prover memory to
+// fit a workstation-class machine.
+const TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE: usize = 3;
 
 // Build one key share's public component material so the trustee
 // evaluation-key relation holds: for digit j and limb l,
@@ -302,13 +312,13 @@ pub(super) fn galois_key_switch_seed_for_test(
 pub(super) fn relinearization_key_share_rounds_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
-    relinearization_key_share_rounds_object_inner(package, None)
+    relinearization_key_share_rounds_object_inner(package, None).rounds
 }
 
-pub(super) fn relinearization_key_share_rounds_object_with_terminal_transport(
+pub(super) fn relinearization_key_share_rounds_fixture_with_terminal_transport(
     package: &serde_json::Value,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
-) -> serde_json::Value {
+) -> RelinearizationKeyShareRoundsFixture {
     relinearization_key_share_rounds_object_inner(package, Some(terminal_transport))
 }
 
@@ -993,6 +1003,7 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
                     commitments: constant_commitments,
                 },
             ),
+            private_vss_share: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients: (0..ring_degree)
@@ -1034,6 +1045,9 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
                     .collect()
                 })
                 .collect(),
+            private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            private_vss_opening_randomness_by_shamir_index: Vec::new(),
+            private_vss_carry_witnesses: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_protocol_hash(
             "SameSecretProofRoot",
@@ -1143,7 +1157,7 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
 fn relinearization_key_share_rounds_object_inner(
     package: &serde_json::Value,
     mut terminal_transport: Option<&mut TerminalEvaluationKeyTransportSinks>,
-) -> serde_json::Value {
+) -> RelinearizationKeyShareRoundsFixture {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
     let same_secret_proofs = package["sameSecretProofs"]["proofRecords"]
@@ -1162,33 +1176,45 @@ fn relinearization_key_share_rounds_object_inner(
     let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
+    let ring_degree =
+        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     for level in &scheduled_levels {
         let level = *level;
-        for proof_record in same_secret_proofs {
+        let key_switch_seed_hex =
+            relinearization_key_switch_seed_for_test(schedule, "round-one", level);
+        // Generate every trustee's key-switch component material for this level
+        // in parallel; the deterministic material is then consumed in roster
+        // order by the sequential aggregate-accumulation and record-building
+        // pass below, so the emitted records and roots are byte-identical.
+        let level_materials: Vec<EvaluationKeyShareFixtureMaterial> = same_secret_proofs
+            .par_iter()
+            .map(|proof_record| {
+                let trustee_roster_position = proof_record["trusteeRosterPosition"]
+                    .as_u64()
+                    .expect("trustee roster position");
+                let relinearization_source = relinearization_round_one_source_by_digit_for_fixture(
+                    trustee_roster_position,
+                    ring_degree,
+                    usize::try_from(level).expect("level fits usize") + 1,
+                );
+                evaluation_key_share_fixture_material(
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    trustee_roster_position,
+                    level,
+                    None,
+                    ring_degree,
+                    &key_switch_seed_hex,
+                    Some(&relinearization_source),
+                )
+            })
+            .collect();
+        for (proof_record, fixture_material) in same_secret_proofs.iter().zip(level_materials) {
             let trustee_roster_position = proof_record["trusteeRosterPosition"]
                 .as_u64()
                 .expect("trustee roster position");
             let trustee_identity = proof_record["trusteeIdentity"]
                 .as_str()
                 .expect("trustee identity");
-            let ring_degree =
-                same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
-            let key_switch_seed_hex =
-                relinearization_key_switch_seed_for_test(schedule, "round-one", level);
-            let relinearization_source = relinearization_round_one_source_by_digit_for_fixture(
-                trustee_roster_position,
-                ring_degree,
-                usize::try_from(level).expect("level fits usize") + 1,
-            );
-            let fixture_material = evaluation_key_share_fixture_material(
-                EvaluationKeyShareProofFamily::Relinearization,
-                trustee_roster_position,
-                level,
-                None,
-                ring_degree,
-                &key_switch_seed_hex,
-                Some(&relinearization_source),
-            );
             let aggregate_diagonals = round_one_aggregate_diagonals_by_level
                 .entry(level)
                 .or_insert_with(|| {
@@ -1241,8 +1267,11 @@ fn relinearization_key_share_rounds_object_inner(
                 "keySwitchSeedHex": key_switch_seed_hex,
                 "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                "keySwitchComponentVectors": fixture_material.component_vector_entries,
             });
+            if terminal_transport.is_none() {
+                record["keySwitchComponentVectors"] =
+                    serde_json::Value::Array(fixture_material.component_vector_entries.clone());
+            }
             if let Some(sinks) = terminal_transport.as_deref_mut() {
                 let transported_component_material_set =
                     move_evaluation_key_share_component_vectors_to_compact_transport(
@@ -1309,33 +1338,40 @@ fn relinearization_key_share_rounds_object_inner(
     let mut round_two_roots_by_level = BTreeMap::<u64, Vec<serde_json::Value>>::new();
     for level in &scheduled_levels {
         let level = *level;
-        for proof_record in same_secret_proofs {
+        let key_switch_seed_hex =
+            relinearization_key_switch_seed_for_test(schedule, "round-two", level);
+        let round_one_aggregate_diagonals = round_one_aggregate_diagonals_by_level
+            .get(&level)
+            .expect("round-one aggregate diagonals");
+        let level_materials: Vec<EvaluationKeyShareFixtureMaterial> = same_secret_proofs
+            .par_iter()
+            .map(|proof_record| {
+                let trustee_roster_position = proof_record["trusteeRosterPosition"]
+                    .as_u64()
+                    .expect("trustee roster position");
+                let relinearization_source = relinearization_round_two_source_by_digit_for_fixture(
+                    trustee_roster_position,
+                    ring_degree,
+                    round_one_aggregate_diagonals,
+                );
+                evaluation_key_share_fixture_material(
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    trustee_roster_position,
+                    level,
+                    None,
+                    ring_degree,
+                    &key_switch_seed_hex,
+                    Some(&relinearization_source),
+                )
+            })
+            .collect();
+        for (proof_record, fixture_material) in same_secret_proofs.iter().zip(level_materials) {
             let trustee_roster_position = proof_record["trusteeRosterPosition"]
                 .as_u64()
                 .expect("trustee roster position");
             let trustee_identity = proof_record["trusteeIdentity"]
                 .as_str()
                 .expect("trustee identity");
-            let ring_degree =
-                same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
-            let key_switch_seed_hex =
-                relinearization_key_switch_seed_for_test(schedule, "round-two", level);
-            let relinearization_source = relinearization_round_two_source_by_digit_for_fixture(
-                trustee_roster_position,
-                ring_degree,
-                round_one_aggregate_diagonals_by_level
-                    .get(&level)
-                    .expect("round-one aggregate diagonals"),
-            );
-            let fixture_material = evaluation_key_share_fixture_material(
-                EvaluationKeyShareProofFamily::Relinearization,
-                trustee_roster_position,
-                level,
-                None,
-                ring_degree,
-                &key_switch_seed_hex,
-                Some(&relinearization_source),
-            );
             let round_two_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundTwo",
@@ -1380,8 +1416,11 @@ fn relinearization_key_share_rounds_object_inner(
                 "keySwitchSeedHex": key_switch_seed_hex,
                 "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                "keySwitchComponentVectors": fixture_material.component_vector_entries,
             });
+            if terminal_transport.is_none() {
+                record["keySwitchComponentVectors"] =
+                    serde_json::Value::Array(fixture_material.component_vector_entries.clone());
+            }
             if let Some(sinks) = terminal_transport.as_deref_mut() {
                 let transported_component_material_set =
                     move_evaluation_key_share_component_vectors_to_compact_transport(
@@ -1480,7 +1519,10 @@ fn relinearization_key_share_rounds_object_inner(
             .expect("relinearization rounds root")
     );
 
-    rounds
+    RelinearizationKeyShareRoundsFixture {
+        rounds,
+        round_one_aggregate_diagonals_by_level,
+    }
 }
 
 fn galois_key_share_batches_object_inner(
@@ -1495,6 +1537,15 @@ fn galois_key_share_batches_object_inner(
     let required_schedule = schedule["requiredGaloisKeySchedule"]
         .as_array()
         .expect("Galois key schedule");
+    let ring_degree =
+        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    // Generate each trustee's Galois key-switch component material across the
+    // scheduled rotations in parallel, then consume that trustee's material in
+    // schedule order before moving to the next trustee, so peak memory stays
+    // bounded to one trustee's rotation materials instead of the full
+    // trustee-by-rotation matrix. The per-trustee outer order and per-rotation
+    // inner order are preserved, so the emitted batches, roots, and transported
+    // component-material order stay byte-identical to sequential generation.
     let batches = same_secret_proofs
         .iter()
         .map(|proof_record| {
@@ -1504,18 +1555,14 @@ fn galois_key_share_batches_object_inner(
             let trustee_identity = proof_record["trusteeIdentity"]
                 .as_str()
                 .expect("trustee identity");
-            let mut galois_key_share_material_records = Vec::new();
-            let galois_key_share_roots = required_schedule
-                .iter()
+            let trustee_materials: Vec<EvaluationKeyShareFixtureMaterial> = required_schedule
+                .par_iter()
                 .map(|schedule_entry| {
                     let rotation = schedule_entry["rotation"].as_u64().expect("rotation");
                     let level = schedule_entry["level"].as_u64().expect("level");
-                    let ring_degree =
-                        same_secret_constant_commitments_from_fixture_package(package, 0)[0]
-                            .ring_degree;
                     let key_switch_seed_hex =
                         galois_key_switch_seed_for_test(schedule, rotation, level);
-                    let fixture_material = evaluation_key_share_fixture_material(
+                    evaluation_key_share_fixture_material(
                         EvaluationKeyShareProofFamily::Galois,
                         trustee_roster_position,
                         level,
@@ -1523,7 +1570,18 @@ fn galois_key_share_batches_object_inner(
                         ring_degree,
                         &key_switch_seed_hex,
                         None,
-                    );
+                    )
+                })
+                .collect();
+            let mut galois_key_share_material_records = Vec::new();
+            let galois_key_share_roots = required_schedule
+                .iter()
+                .zip(trustee_materials)
+                .map(|(schedule_entry, fixture_material)| {
+                    let rotation = schedule_entry["rotation"].as_u64().expect("rotation");
+                    let level = schedule_entry["level"].as_u64().expect("level");
+                    let key_switch_seed_hex =
+                        galois_key_switch_seed_for_test(schedule, rotation, level);
                     let root = fixture_material.component_vector_root.clone();
                     let mut material_record = serde_json::json!({
                         "objectType": "GaloisKeyShareMaterial",
@@ -1541,8 +1599,11 @@ fn galois_key_share_batches_object_inner(
                         "keySwitchSeedHex": key_switch_seed_hex,
                         "ringDegree": ring_degree,
                         "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                        "keySwitchComponentVectors": fixture_material.component_vector_entries,
                     });
+                    if terminal_transport.is_none() {
+                        material_record["keySwitchComponentVectors"] =
+                            serde_json::Value::Array(fixture_material.component_vector_entries.clone());
+                    }
                     if let Some(sinks) = terminal_transport.as_deref_mut() {
                         let transported_component_material_set =
                             move_evaluation_key_share_component_vectors_to_compact_transport(
@@ -1615,12 +1676,13 @@ fn galois_key_share_batches_object_inner(
 pub(super) fn trustee_evaluation_key_proofs_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
-    trustee_evaluation_key_proofs_object_inner(package, None, &BTreeMap::new(), None)
+    trustee_evaluation_key_proofs_object_inner(package, None, &BTreeMap::new(), None, None)
 }
 
 pub(super) fn trustee_evaluation_key_proofs_object_with_terminal_transport(
     package: &serde_json::Value,
     transported_component_material: &serde_json::Value,
+    round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
 ) -> serde_json::Value {
     // The terminal flow keeps the package VSS material binary-chunked, so the
@@ -1648,6 +1710,7 @@ pub(super) fn trustee_evaluation_key_proofs_object_with_terminal_transport(
         package,
         Some(transported_component_material),
         &transported_constant_commitments,
+        Some(round_one_aggregate_diagonals_by_level),
         Some(terminal_transport),
     )
 }
@@ -1659,6 +1722,7 @@ fn trustee_evaluation_key_proofs_object_inner(
         u64,
         Vec<crate::bgv::setup::commitment::SetupCommitmentValue>,
     >,
+    precomputed_round_one_aggregate_diagonals_by_level: Option<&BTreeMap<u64, Vec<Vec<u64>>>>,
     mut terminal_transport: Option<&mut TerminalEvaluationKeyTransportSinks>,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
@@ -1666,87 +1730,107 @@ fn trustee_evaluation_key_proofs_object_inner(
     let same_secret_proofs = package["sameSecretProofs"]["proofRecords"]
         .as_array()
         .expect("same-secret proof records");
+    let computed_round_one_aggregate_diagonals_by_level;
     let round_one_aggregate_diagonals_by_level =
-        round_one_aggregate_diagonals_from_fixture_package(package, transported_component_material);
+        if let Some(precomputed_aggregates) = precomputed_round_one_aggregate_diagonals_by_level {
+            precomputed_aggregates
+        } else {
+            computed_round_one_aggregate_diagonals_by_level =
+                round_one_aggregate_diagonals_from_fixture_package(
+                    package,
+                    transported_component_material,
+                );
+            &computed_round_one_aggregate_diagonals_by_level
+        };
     let ring_degree =
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
-    let built_records = same_secret_proofs
-        .par_iter()
-        .map(|proof_record| {
-        let trustee_roster_position = proof_record["trusteeRosterPosition"]
-            .as_u64()
-            .expect("trustee roster position");
-        let trustee_identity = proof_record["trusteeIdentity"]
-            .as_str()
-            .expect("trustee identity");
-        terminal_phase(&format!(
-            "generating trustee evaluation-key proof trustee {trustee_roster_position}"
-        ));
-        let statement =
-            trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
-                setup_package: package,
-                transported_key_switch_component_material: transported_component_material,
-                transported_constant_commitments,
-                round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
-                trustee_roster_position,
+    let checkpoint_resume_enabled =
+        terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
+    let trustee_proof_batch_size = if terminal_transport.is_some() {
+        1
+    } else {
+        TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+    };
+    let mut built_records: Vec<BuiltTrusteeEvaluationKeyProofRecord> =
+        Vec::with_capacity(same_secret_proofs.len());
+    for proof_record_batch in same_secret_proofs.chunks(trustee_proof_batch_size) {
+        let work_item_batch = proof_record_batch
+            .iter()
+            .map(|proof_record| {
+                let trustee_roster_position = proof_record["trusteeRosterPosition"]
+                    .as_u64()
+                    .expect("trustee roster position");
+                let trustee_identity = proof_record["trusteeIdentity"]
+                    .as_str()
+                    .expect("trustee identity");
+                let statement = trustee_evaluation_key_statement_from_package(
+                    &TrusteeEvaluationKeyStatementInputs {
+                        setup_package: package,
+                        transported_key_switch_component_material: transported_component_material,
+                        transported_constant_commitments,
+                        round_one_aggregate_diagonals_by_level,
+                        trustee_roster_position,
+                    },
+                )
+                .expect("trustee evaluation-key statement");
+                let record = serde_json::json!({
+                    "objectType": "TrusteeEvaluationKeyProof",
+                    "objectVersion": 1,
+                    "setupProfileId": "CollectiveBgvSetup-v1",
+                    "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+                    "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+                    "proofVerificationStatus": TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
+                    "proofModelStatus": TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
+                    "ceremonyId": setup_context["ceremonyId"],
+                    "manifestHash": setup_context["manifestHash"],
+                    "rosterHash": setup_context["rosterHash"],
+                    "setupProfileHash": setup_context["setupProfileHash"],
+                    "qShareHash": setup_context["qShareHash"],
+                    "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
+                    "commitmentProfileHash": setup_context["commitmentProfileHash"],
+                    "setupEpoch": setup_context["setupEpoch"],
+                    "trusteeIdentity": trustee_identity,
+                    "trusteeRosterPosition": trustee_roster_position,
+                    "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
+                    "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
+                    "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
+                    "statementHash": to_hex(&statement.statement_hash()),
+                    "keyCount": statement.keys.len(),
+                });
+
+                TrusteeEvaluationKeyProofWorkItem {
+                    trustee_roster_position,
+                    statement,
+                    record,
+                }
             })
-            .expect("trustee evaluation-key statement");
-        let witness = trustee_evaluation_key_witness_for_fixture(
-            trustee_roster_position,
-            ring_degree,
-            &statement,
-        );
-        let proof_randomness_seed_hex = derive_protocol_hash(
-            "TrusteeEvaluationKeyProofRandomness",
-            &serde_json::json!({
-                "fixture": "trustee-evaluation-key-proof-randomness",
-                "trusteeRosterPosition": trustee_roster_position,
-            }),
-        )
-        .expect("trustee proof randomness seed");
-        let proof = prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
-            .expect("trustee evaluation-key proof");
-        let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
-        terminal_phase(&format!(
-            "generated trustee evaluation-key proof trustee {trustee_roster_position} ({} bytes)",
-            proof_bytes.len(),
-        ));
-        let record = serde_json::json!({
-            "objectType": "TrusteeEvaluationKeyProof",
-            "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            "proofVerificationStatus": TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-            "proofModelStatus": TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
-            "ceremonyId": setup_context["ceremonyId"],
-            "manifestHash": setup_context["manifestHash"],
-            "rosterHash": setup_context["rosterHash"],
-            "setupProfileHash": setup_context["setupProfileHash"],
-            "qShareHash": setup_context["qShareHash"],
-            "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-            "commitmentProfileHash": setup_context["commitmentProfileHash"],
-            "setupEpoch": setup_context["setupEpoch"],
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
-            "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
-            "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
-            "statementHash": to_hex(&statement.statement_hash()),
-            "keyCount": statement.keys.len(),
-            "proofSizeBytes": proof_bytes.len(),
-            "proofBytesHash": trustee_evaluation_key_proof_bytes_hash(&proof_bytes),
-            "proofBytesHex": to_hex(&proof_bytes),
-        });
-            record
-        })
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>();
+        let resumed_records = if checkpoint_resume_enabled {
+            terminal_trustee_evaluation_key_proof_records_from_checkpoints(&work_item_batch)
+        } else {
+            BTreeMap::new()
+        };
+        let built_record_batch: Vec<BuiltTrusteeEvaluationKeyProofRecord> = work_item_batch
+            .into_par_iter()
+            .map(|work_item| {
+                build_trustee_evaluation_key_proof_record(work_item, &resumed_records, ring_degree)
+            })
+            .collect();
+        built_records.extend(built_record_batch);
+    }
     let mut proof_records = Vec::new();
-    for mut record in built_records {
+    for built_record in built_records {
+        let mut record = built_record.record;
         if let Some(sinks) = terminal_transport.as_deref_mut() {
-            let proof_material =
-                move_trustee_evaluation_key_proof_record_bytes_to_compact_transport(&mut record);
-            sinks.proof_materials.push(proof_material);
+            if let Some(proof_material) = built_record.transported_proof_material {
+                sinks.proof_materials.push(proof_material);
+            } else {
+                let proof_material =
+                    move_trustee_evaluation_key_proof_record_bytes_to_compact_transport(
+                        &mut record,
+                    );
+                sinks.proof_materials.push(proof_material);
+            }
         }
         record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
             derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
@@ -1818,6 +1902,198 @@ fn trustee_evaluation_key_proofs_object_inner(
     proof_set
 }
 
+fn build_trustee_evaluation_key_proof_record(
+    work_item: TrusteeEvaluationKeyProofWorkItem,
+    resumed_records: &BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord>,
+    ring_degree: usize,
+) -> BuiltTrusteeEvaluationKeyProofRecord {
+    if let Some(resumed_record) = resumed_records.get(&work_item.trustee_roster_position) {
+        terminal_phase(&format!(
+            "resumed trustee evaluation-key proof trustee {} from checkpoint",
+            work_item.trustee_roster_position
+        ));
+        return resumed_record.clone();
+    }
+
+    terminal_phase(&format!(
+        "generating trustee evaluation-key proof trustee {}",
+        work_item.trustee_roster_position
+    ));
+    let witness = trustee_evaluation_key_witness_for_fixture(
+        work_item.trustee_roster_position,
+        ring_degree,
+        &work_item.statement,
+    );
+    let proof_randomness_seed_hex = derive_protocol_hash(
+        "TrusteeEvaluationKeyProofRandomness",
+        &serde_json::json!({
+            "fixture": "trustee-evaluation-key-proof-randomness",
+            "trusteeRosterPosition": work_item.trustee_roster_position,
+        }),
+    )
+    .expect("trustee proof randomness seed");
+    let proof =
+        prove_evaluation_key_share(&work_item.statement, &witness, &proof_randomness_seed_hex)
+            .expect("trustee evaluation-key proof");
+    let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+    terminal_phase(&format!(
+        "generated trustee evaluation-key proof trustee {} ({} bytes)",
+        work_item.trustee_roster_position,
+        proof_bytes.len(),
+    ));
+    let record =
+        trustee_evaluation_key_record_with_embedded_proof_bytes(work_item.record, &proof_bytes);
+    BuiltTrusteeEvaluationKeyProofRecord {
+        record,
+        transported_proof_material: None,
+    }
+}
+
+fn terminal_accepted_setup_checkpoint_resume_enabled() -> bool {
+    matches!(
+        std::env::var("SEALED_LATTICE_RESUME_TEST_CHECKPOINTS").as_deref(),
+        Ok("1")
+    )
+}
+
+fn trustee_evaluation_key_record_with_embedded_proof_bytes(
+    mut record: serde_json::Value,
+    proof_bytes: &[u8],
+) -> serde_json::Value {
+    let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
+    record["proofSizeBytes"] = serde_json::json!(proof_size_bytes);
+    record["proofBytesHash"] =
+        serde_json::json!(trustee_evaluation_key_proof_bytes_hash(proof_bytes));
+    record["proofBytesHex"] = serde_json::json!(to_hex(proof_bytes));
+
+    record
+}
+
+fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
+    work_items: &[TrusteeEvaluationKeyProofWorkItem],
+) -> BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord> {
+    let directory = std::path::PathBuf::from("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store")
+        .join("trustee-evaluation-key-proof-material");
+    let Ok(entries) = std::fs::read_dir(&directory) else {
+        return BTreeMap::new();
+    };
+    let mut resumed_records = BTreeMap::new();
+    for entry in entries {
+        let entry = entry.expect("terminal proof checkpoint directory entry");
+        let path = entry.path();
+        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("bin") {
+            continue;
+        }
+        let Some(stored_material_root) = path.file_stem().and_then(std::ffi::OsStr::to_str) else {
+            continue;
+        };
+        if stored_material_root.len() != 128
+            || !stored_material_root
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            continue;
+        }
+        let proof_bytes = std::fs::read(&path).expect("terminal trustee proof checkpoint bytes");
+        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
+        let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
+        let chunks = proof_bytes_transport_chunks(proof_bytes);
+        let transport_hashes = setup_proof_material_transport_hashes(
+            TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+            &chunks,
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )
+        .expect("checkpointed trustee proof transport hashes");
+        let mut matched_trustee = None;
+        for work_item in work_items {
+            if resumed_records.contains_key(&work_item.trustee_roster_position) {
+                continue;
+            }
+            let mut record = work_item.record.clone();
+            apply_trustee_evaluation_key_proof_transport_fields(
+                &mut record,
+                proof_size_bytes,
+                &proof_bytes_hash,
+                &transport_hashes,
+            );
+            let proof_material_root =
+                trustee_evaluation_key_proof_material_root(&record, &transport_hashes)
+                    .expect("checkpointed trustee proof material root");
+            if proof_material_root != stored_material_root {
+                continue;
+            }
+            record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
+            record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
+                derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
+                    .expect("transported trustee evaluation-key proof root")
+            );
+            let proof_material =
+                transported_trustee_evaluation_key_proof_material(&record, &transport_hashes);
+            register_verified_trustee_evaluation_key_proof_material_chunks(
+                &proof_material_root,
+                chunks,
+            )
+            .expect("verified trustee evaluation-key proof material chunks");
+            resumed_records.insert(
+                work_item.trustee_roster_position,
+                BuiltTrusteeEvaluationKeyProofRecord {
+                    record,
+                    transported_proof_material: Some(proof_material),
+                },
+            );
+            matched_trustee = Some(work_item.trustee_roster_position);
+            break;
+        }
+        if let Some(trustee_roster_position) = matched_trustee {
+            terminal_phase(&format!(
+                "matched trustee evaluation-key proof checkpoint for trustee {trustee_roster_position}"
+            ));
+        }
+    }
+
+    resumed_records
+}
+
+fn apply_trustee_evaluation_key_proof_transport_fields(
+    record: &mut serde_json::Value,
+    proof_size_bytes: u64,
+    proof_bytes_hash: &str,
+    transport_hashes: &crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes,
+) {
+    record["proofSizeBytes"] = serde_json::json!(proof_size_bytes);
+    record["proofBytesHash"] = serde_json::json!(proof_bytes_hash);
+    record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
+    record["proofChunkSizeBytes"] = serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
+    record["proofChunkCount"] = serde_json::json!(transport_hashes.chunk_hashes.len());
+    record["proofTotalByteLength"] = serde_json::json!(transport_hashes.total_byte_length);
+    record["proofFullObjectHash"] = serde_json::json!(transport_hashes.full_object_hash);
+    record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
+    record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
+}
+
+fn transported_trustee_evaluation_key_proof_material(
+    proof_record: &serde_json::Value,
+    transport_hashes: &crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes,
+) -> serde_json::Value {
+    serde_json::json!({
+        "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "proofMaterialRoot": proof_record["proofMaterialRoot"],
+        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "proofChunkCount": transport_hashes.chunk_hashes.len(),
+        "proofTotalByteLength": transport_hashes.total_byte_length,
+        "proofFullObjectHash": proof_record["proofFullObjectHash"],
+        "proofChunkRoot": proof_record["proofChunkRoot"],
+        "proofChunkHashes": proof_record["proofChunkHashes"],
+    })
+}
+
 // The deterministic fixture witness for one trustee's batched statement: the
 // shared VSS secret, per-key fixture errors in statement order, and the
 // same-secret linkage openings.
@@ -1865,7 +2141,16 @@ pub(super) fn trustee_evaluation_key_witness_for_fixture(
         .iter()
         .map(|coefficient| i64::from(*coefficient < 0))
         .collect();
-    let opening_randomness_by_limb = (0..DATA_PRIMES.len())
+    // The same-secret linkage openings cover one commitment per active
+    // key-switch limb, matching the truncated linkage commitment set on the
+    // statement rather than every Q_share limb.
+    let active_key_switch_limb_count = statement
+        .keys
+        .iter()
+        .map(|key| key.level + 1)
+        .max()
+        .unwrap_or(0);
+    let opening_randomness_by_limb = (0..active_key_switch_limb_count)
         .map(|rns_limb_index| {
             accepted_vss_randomness_fixture(trustee_roster_position, rns_limb_index, 0, ring_degree)
                 .into_iter()
@@ -1884,6 +2169,9 @@ pub(super) fn trustee_evaluation_key_witness_for_fixture(
         error_coefficients_by_key,
         negative_indicator_coefficients,
         opening_randomness_by_limb,
+        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        private_vss_opening_randomness_by_shamir_index: Vec::new(),
+        private_vss_carry_witnesses: Vec::new(),
     }
 }
 
@@ -2020,12 +2308,16 @@ pub(super) fn public_key_share_succinct_proofs_object(
                 public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
                 commitments: vec![limb_zero_commitment],
             }),
+            private_vss_share: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients,
             error_coefficients_by_key: vec![vec![error_coefficients]],
             negative_indicator_coefficients,
             opening_randomness_by_limb: vec![limb_zero_opening_randomness],
+            private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            private_vss_opening_randomness_by_shamir_index: Vec::new(),
+            private_vss_carry_witnesses: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_protocol_hash(
             "PublicKeyShareProofRoot",

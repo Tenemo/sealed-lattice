@@ -124,8 +124,8 @@ pub(super) fn verify_relinearization_key_share_rounds(
             binding.public_key_share_set_root.as_str(),
         ),
         (
-            "publicKeyShareLnpProofSetRoot",
-            binding.public_key_share_lnp_proof_set_root.as_str(),
+            "publicKeyShareSuccinctProofSetRoot",
+            binding.public_key_share_succinct_proof_set_root.as_str(),
         ),
         (
             "relinearizationCrpRoot",
@@ -444,7 +444,7 @@ pub(super) struct EvaluationKeyProofCommonBinding {
     pub(super) same_secret_proof_set_root: String,
     pub(super) same_secret_proof_family_binding_root: String,
     pub(super) public_key_share_set_root: String,
-    pub(super) public_key_share_lnp_proof_set_root: String,
+    pub(super) public_key_share_succinct_proof_set_root: String,
     pub(super) relinearization_crp_root: String,
     pub(super) galois_key_crp_root: String,
     pub(super) required_galois_set_hash: String,
@@ -501,14 +501,14 @@ pub(super) fn evaluation_key_proof_common_binding(
                 )
             })?
             .to_string(),
-        public_key_share_lnp_proof_set_root: setup_package
-            .get("publicKeyShareLnpProofs")
-            .and_then(|proof_set| proof_set.get("publicKeyShareLnpProofSetRoot"))
+        public_key_share_succinct_proof_set_root: setup_package
+            .get("publicKeyShareSuccinctProofs")
+            .and_then(|proof_set| proof_set.get("publicKeyShareSuccinctProofSetRoot"))
             .and_then(Value::as_str)
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "publicKeyShareLnpProofSetRoot was required before evaluation-key share verification",
+                    "publicKeyShareSuccinctProofSetRoot was required before evaluation-key share verification",
                 )
             })?
             .to_string(),
@@ -1125,8 +1125,8 @@ fn verify_evaluation_key_record_common_bindings(
             binding.same_secret_proof_family_binding_root.as_str(),
         ),
         (
-            "publicKeyShareLnpProofSetRoot",
-            binding.public_key_share_lnp_proof_set_root.as_str(),
+            "publicKeyShareSuccinctProofSetRoot",
+            binding.public_key_share_succinct_proof_set_root.as_str(),
         ),
         (crp_root_field_name, expected_crp_root),
     ] {
@@ -1232,7 +1232,7 @@ fn unexpected_relinearization_key_share_rounds_field(value: &Value) -> Option<St
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
             "publicKeyShareSetRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "relinearizationCrpRoot",
             "relinearizationLevelSchedule",
             "roundOneAggregateRoots",
@@ -1270,7 +1270,7 @@ fn unexpected_relinearization_round_one_record_field(value: &Value) -> Option<St
             "sameSecretConsistencyRoot",
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofRoot",
@@ -1308,7 +1308,7 @@ fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<St
             "sameSecretConsistencyRoot",
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofRoot",
@@ -1348,7 +1348,7 @@ fn unexpected_galois_key_share_batch_field(value: &Value) -> Option<String> {
             "sameSecretConsistencyRoot",
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofRoot",

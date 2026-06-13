@@ -508,7 +508,7 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
 ) -> serde_json::Value {
     let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
         .as_array_mut()
-        .expect("public-key LNP proof records");
+        .expect("public-key share succinct proof records");
     let mut proof_materials = Vec::new();
     let mut proof_roots = Vec::new();
     for proof_record in proof_records {
@@ -524,25 +524,6 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("public-key proof transport hashes");
-        let proof_size_bytes = proof_record["proofSizeBytes"]
-            .as_u64()
-            .expect("proof size bytes");
-        let proof_bytes_hash = proof_record["proofBytesHash"]
-            .as_str()
-            .expect("proof bytes hash")
-            .to_string();
-        let statement_hash = proof_record["statementHash"]
-            .as_str()
-            .expect("statement hash")
-            .to_string();
-        let relation_commitment_hash = proof_record["relationCommitmentHash"]
-            .as_str()
-            .expect("relation commitment hash")
-            .to_string();
-        let tbox_commitment_prefix_hash = proof_record["tboxCommitmentPrefixHash"]
-            .as_str()
-            .expect("tbox commitment prefix hash")
-            .to_string();
         let trustee_identity = proof_record["trusteeIdentity"]
             .as_str()
             .expect("trustee identity")
@@ -551,22 +532,11 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
             .as_u64()
             .expect("trustee roster position");
         let proof_material_root =
-            setup_proof_material_reference_root(SetupProofMaterialReferenceInput {
-                setup_profile_id: "CollectiveBgvSetup-v1",
-                proof_family: "public-key-share",
-                trustee_identity: &trustee_identity,
-                trustee_roster_position,
-                statement_hash_hex: &statement_hash,
-                relation_commitment_hash_hex: &relation_commitment_hash,
-                tbox_commitment_prefix_hash: &tbox_commitment_prefix_hash,
-                proof_size_bytes,
-                proof_bytes_hash: &proof_bytes_hash,
-                transport_hashes: &transport_hashes,
-            })
-            .expect("public-key proof material root");
+            public_key_share_succinct_proof_material_root(proof_record, &transport_hashes)
+                .expect("public-key share succinct proof material root");
         let proof_record_object = proof_record
             .as_object_mut()
-            .expect("public-key LNP proof record object");
+            .expect("public-key share succinct proof record object");
         proof_record_object.remove("proofBytesHex");
         proof_record_object.remove("publicKeyShareSuccinctProofRoot");
         proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
@@ -581,7 +551,7 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
         proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
         proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", proof_record)
-                .expect("public-key LNP proof root")
+                .expect("public-key succinct proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -737,11 +707,14 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
     );
 
     let mut evaluation_key_transport_sinks = TerminalEvaluationKeyTransportSinks::default();
-    package["relinearizationKeyShareRounds"] =
-        relinearization_key_share_rounds_object_with_terminal_transport(
-            &package,
-            &mut evaluation_key_transport_sinks,
-        );
+    let RelinearizationKeyShareRoundsFixture {
+        rounds: relinearization_key_share_rounds,
+        round_one_aggregate_diagonals_by_level,
+    } = relinearization_key_share_rounds_fixture_with_terminal_transport(
+        &package,
+        &mut evaluation_key_transport_sinks,
+    );
+    package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds;
     package["galoisKeyShareBatches"] = galois_key_share_batches_object_with_terminal_transport(
         &package,
         &mut evaluation_key_transport_sinks,
@@ -758,6 +731,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
         trustee_evaluation_key_proofs_object_with_terminal_transport(
             &package,
             &evaluation_key_share_component_material,
+            &round_one_aggregate_diagonals_by_level,
             &mut evaluation_key_transport_sinks,
         );
     terminal_phase("generated trustee evaluation-key proofs");
@@ -1137,12 +1111,12 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
         Some(fixture_material.component_vector_root.as_str()),
         "record component vector root must match the proof witness material"
     );
-    let component_b_by_digit =
-        key_switch_component_b_by_digit_from_record(proof_record, level, ring_degree)
-            .expect("record component vectors");
-    let material_bytes =
-        encode_evaluation_key_share_component_vectors(level, ring_degree, &component_b_by_digit)
-            .expect("evaluation-key component material bytes");
+    let material_bytes = encode_evaluation_key_share_component_vectors(
+        level,
+        ring_degree,
+        &fixture_material.component_b_by_digit,
+    )
+    .expect("evaluation-key component material bytes");
     let chunks = proof_bytes_transport_chunks(material_bytes);
     let transport_hashes = evaluation_key_share_component_material_transport_hashes(
         proof_family,
@@ -1222,8 +1196,12 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
                 .collect::<Vec<_>>(),
         );
     } else {
-        register_verified_evaluation_key_share_component_material_chunks(&material_root, chunks)
-            .expect("verified evaluation-key component material chunks");
+        register_verified_evaluation_key_share_component_material_chunks(
+            &material_root,
+            chunks,
+            &transport_hashes,
+        )
+        .expect("verified evaluation-key component material chunks");
     }
 
     serde_json::json!({
@@ -1233,122 +1211,6 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "componentMaterials": [component_material],
     })
-}
-
-fn key_switch_component_b_by_digit_from_record(
-    proof_record: &serde_json::Value,
-    level: usize,
-    ring_degree: usize,
-) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
-    let digit_count = level + 1;
-    let component_entries = proof_record["keySwitchComponentVectors"]
-        .as_array()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key record must include embedded component vectors before transport",
-            )
-        })?;
-    let expected_entry_count = digit_count.checked_mul(digit_count).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluation-key component vector entry count overflowed",
-        )
-    })?;
-    if component_entries.len() != expected_entry_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluation-key component vector entry count does not match the level schedule",
-        ));
-    }
-    let mut component_b_by_digit = vec![vec![Vec::new(); digit_count]; digit_count];
-    let mut seen_entries = vec![vec![false; digit_count]; digit_count];
-    for entry in component_entries {
-        if entry["component"].as_str() != Some("b") {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key component vector entry must be component b",
-            ));
-        }
-        let digit_index = entry["digitIndex"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "evaluation-key component vector digitIndex is invalid",
-                )
-            })?;
-        let rns_limb_index = entry["rnsLimbIndex"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "evaluation-key component vector rnsLimbIndex is invalid",
-                )
-            })?;
-        if digit_index >= digit_count || rns_limb_index >= digit_count {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key component vector coordinate is outside the level schedule",
-            ));
-        }
-        if seen_entries[digit_index][rns_limb_index] {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key component vector coordinate is duplicated",
-            ));
-        }
-        let coefficients_hex = entry["coefficientsLeHex"].as_str().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key component vector coefficientsLeHex is missing",
-            )
-        })?;
-        let coefficients = coefficient_vector_from_le_hex(
-            coefficients_hex,
-            ring_degree,
-            "evaluation-key component vector width does not match ringDegree",
-        )
-        .map_err(|error| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "evaluation-key component vector coefficients are malformed: {}",
-                    error.message
-                ),
-            )
-        })?;
-        if coefficients.len() != ring_degree {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key component vector width does not match ringDegree",
-            ));
-        }
-        let expected_hash = entry["coefficientVectorHash512"].as_str().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key component vector hash is missing",
-            )
-        })?;
-        if evaluation_key_share_component_vector_hash(&coefficients) != expected_hash {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluation-key component vector hash does not match coefficients",
-            ));
-        }
-        seen_entries[digit_index][rns_limb_index] = true;
-        component_b_by_digit[digit_index][rns_limb_index] = coefficients;
-    }
-    if seen_entries.iter().flatten().any(|seen| !*seen) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluation-key component vector entries are incomplete",
-        ));
-    }
-
-    Ok(component_b_by_digit)
 }
 
 pub(super) fn move_trustee_evaluation_key_proof_record_bytes_to_compact_transport(

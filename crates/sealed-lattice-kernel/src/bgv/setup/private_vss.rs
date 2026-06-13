@@ -21,10 +21,11 @@ use super::{
         setup_commitment_root,
     },
     private_vss_share_proof::{
-        PrivateVssShareLnpProofGenerationInput, PrivateVssShareLnpProofVerificationInput,
-        PrivateVssShareLnpProofWitness, private_vss_share_lnp_proof_record,
-        verify_private_vss_share_lnp_relation_proof,
+        PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
+        PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
+        verify_private_vss_share_succinct_relation_proof,
     },
+    setup_proof::SETUP_PROOF_PROFILE_ID,
     sharing::canonical_trustee_point,
     vss::carry_aware_vss_share_relation_profile_hash,
 };
@@ -34,6 +35,8 @@ const PRIVATE_VSS_LIMB_OPENING_OBJECT_TYPE: &str = "PrivateVssShareLimbOpening";
 const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
 const FIRST_PROFILE_DECRYPTION_THRESHOLD: usize = 4;
+const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
+const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PrivateVssRefusal {
@@ -153,6 +156,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             "openingRandomnessByShamirIndex",
             "proofRandomnessSource",
             "proofRandomnessSeedHex",
+            "proofRandomnessNonceHex",
         ],
         "generatePrivateVssShareProof",
     )?;
@@ -365,6 +369,14 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "proofRandomnessSeedHex must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
+    let proof_randomness_nonce_hex = string_field(
+        request,
+        "proofRandomnessNonceHex",
+        "proofRandomnessNonceHex",
+        "proofRandomnessNonceMissing",
+        "proofRandomnessNonceHex must be provided for private VSS proof generation",
+    )
+    .map_err(private_vss_refusal_to_error)?;
     let proof_randomness_source = request
         .get("proofRandomnessSource")
         .and_then(Value::as_str)
@@ -388,8 +400,25 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             "shareValues": share_values,
         }),
     )?;
+    let bound_proof_randomness_seed_hex = statement_bound_private_vss_proof_randomness_seed_hex(
+        setup_context,
+        public_matrix_seed_hash,
+        private_envelope_aad_hash,
+        &source_trustee_binding.source_trustee_identity,
+        source_trustee_binding.source_trustee_roster_position,
+        &source_trustee_binding.source_trustee_commitment_root,
+        recipient_identity,
+        recipient_roster_position,
+        rns_limb_index,
+        rns_prime,
+        ring_degree,
+        &coefficient_commitment_roots,
+        &share_values_hash,
+        proof_randomness_seed_hex,
+        proof_randomness_nonce_hex,
+    )?;
     let proof_record =
-        private_vss_share_lnp_proof_record(PrivateVssShareLnpProofGenerationInput {
+        private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
             setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash,
@@ -405,12 +434,12 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             share_values: &share_values,
             share_values_hash: &share_values_hash,
             coefficient_commitments: &coefficient_commitment_values,
-            witness: &PrivateVssShareLnpProofWitness {
+            witness: &PrivateVssShareSuccinctProofWitness {
                 coefficient_messages_by_shamir_index,
                 opening_randomness_by_shamir_index,
                 carry_witnesses,
             },
-            proof_randomness_seed_hex,
+            proof_randomness_seed_hex: &bound_proof_randomness_seed_hex,
         })?;
 
     Ok(json!({
@@ -428,10 +457,85 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "privateVssShareProof": proof_record,
         "proofRandomness": {
             "source": proof_randomness_source,
+            "binding": "seed and nonce are bound to the private VSS share statement before proof masking",
+            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
             "seedBytes": 64,
             "retention": "proof randomness seed material is consumed for proof generation and is not returned"
         }
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn statement_bound_private_vss_proof_randomness_seed_hex(
+    setup_context: &Value,
+    public_matrix_seed_hash: &str,
+    private_envelope_aad_hash: &str,
+    source_trustee_identity: &str,
+    source_trustee_roster_position: u64,
+    source_trustee_commitment_root: &str,
+    recipient_identity: &str,
+    recipient_roster_position: u64,
+    rns_limb_index: usize,
+    rns_prime: u64,
+    ring_degree: usize,
+    coefficient_commitment_roots: &[String],
+    share_values_hash: &str,
+    proof_randomness_seed_hex: &str,
+    proof_randomness_nonce_hex: &str,
+) -> CanonicalResult<String> {
+    validate_exact_randomness_hex(
+        proof_randomness_seed_hex,
+        PROOF_RANDOMNESS_SEED_BYTES,
+        "proofRandomnessSeedHex",
+    )?;
+    validate_exact_randomness_hex(
+        proof_randomness_nonce_hex,
+        PROOF_RANDOMNESS_NONCE_BYTES,
+        "proofRandomnessNonceHex",
+    )?;
+
+    derive_protocol_hash(
+        "PrivateVssShareProofRandomness",
+        &json!({
+            "objectType": "PrivateVssShareProofRandomnessBinding",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+            "proofFamily": "vss-opening-carry",
+            "setupContext": setup_context,
+            "publicMatrixSeedHash": public_matrix_seed_hash,
+            "privateEnvelopeAadHash": private_envelope_aad_hash,
+            "sourceTrusteeIdentity": source_trustee_identity,
+            "sourceTrusteeRosterPosition": source_trustee_roster_position,
+            "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
+            "recipientIdentity": recipient_identity,
+            "recipientRosterPosition": recipient_roster_position,
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "ringDegree": ring_degree,
+            "shareValuesHash": share_values_hash,
+            "coefficientCommitmentRoots": coefficient_commitment_roots,
+            "proofRandomnessNonceHex": proof_randomness_nonce_hex,
+            "proofRandomnessSeedHex": proof_randomness_seed_hex,
+        }),
+    )
+}
+
+fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
+    validate_exact_randomness_hex(
+        proof_randomness_nonce_hex,
+        PROOF_RANDOMNESS_NONCE_BYTES,
+        "proofRandomnessNonceHex",
+    )?;
+
+    derive_protocol_hash(
+        "PrivateVssShareProofRandomness",
+        &json!({
+            "objectType": "PrivateVssShareProofRandomnessNonceHash",
+            "objectVersion": 1,
+            "nonceBytesHex": proof_randomness_nonce_hex,
+        }),
+    )
 }
 
 fn verify_private_vss_share_envelope_inner(
@@ -1536,8 +1640,8 @@ fn verify_private_envelope_limb(
             "shareValues": share_values,
         }),
     )?;
-    let proof_verification = match verify_private_vss_share_lnp_relation_proof(
-        PrivateVssShareLnpProofVerificationInput {
+    let proof_verification = match verify_private_vss_share_succinct_relation_proof(
+        PrivateVssShareSuccinctProofVerificationInput {
             setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash: &envelope_binding.private_envelope_aad_hash,
@@ -1578,20 +1682,7 @@ fn verify_private_envelope_limb(
         "proofStatementRoot": proof_verification.proof_statement_root,
         "proofMaterialRoot": proof_verification.proof_material_root,
         "statementHash": proof_verification.statement_hash_hex,
-        "relationCommitmentHash": proof_verification.relation_commitment_hash_hex,
-        "tboxCommitmentPrefixHash": proof_verification.tbox_commitment_prefix_hash,
-        "z34SeedMaterialHash": proof_verification.z34_seed_material_hash,
-        "z34ChallengeSeedHash": proof_verification.z34_challenge_seed_hash,
-        "z34ChallengeTailHash": proof_verification.z34_challenge_tail_hash,
-        "z34ChallengeRowDomainHash": proof_verification.z34_challenge_row_domain_hash,
-        "z34ChallengeZ3RowSetHash": proof_verification.z34_challenge_z3_row_set_hash,
-        "z34ChallengeZ4RowSetHash": proof_verification.z34_challenge_z4_row_set_hash,
-        "tboxLowerProtocolChallengeHash": proof_verification.tbox_lower_protocol_challenge_hash,
-        "z34Z3CheckWindowHash": proof_verification.z34_z3_check_window_hash,
-        "z34Z4CheckWindowHash": proof_verification.z34_z4_check_window_hash,
-        "z34Z3L2SquaredDecimal": proof_verification.z34_z3_l2_squared_decimal,
-        "z34Z4InfinityNormDecimal": proof_verification.z34_z4_infinity_norm_decimal,
-        "challenge": proof_verification.challenge.to_string(),
+        "proofAccountingHash": proof_verification.proof_accounting_hash,
         "proofSizeBytes": proof_verification.proof_size_bytes,
     });
     let limb_verification_root =
@@ -2210,6 +2301,25 @@ fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
     Err(CanonicalError::new(
         CanonicalErrorCode::InvalidFixture,
         format!("{field_name} must be a lowercase 512-bit hex protocol hash"),
+    ))
+}
+
+fn validate_exact_randomness_hex(
+    value: &str,
+    expected_byte_length: usize,
+    field_name: &str,
+) -> CanonicalResult<()> {
+    if value.len() == expected_byte_length * 2
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+
+    Err(CanonicalError::new(
+        CanonicalErrorCode::InvalidFixture,
+        format!("{field_name} must be {expected_byte_length} bytes of lowercase hex"),
     ))
 }
 

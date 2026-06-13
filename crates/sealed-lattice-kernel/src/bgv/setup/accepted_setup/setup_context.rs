@@ -1,5 +1,40 @@
 use super::*;
 
+const MAX_SETUP_CONTEXT_TOKEN_BYTES: usize = 128;
+
+fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal> {
+    if value.is_empty() {
+        return Some(Refusal::new(
+            "setupContextTokenMissing",
+            format!("setupContext.{field_name} must be a non-empty setup context token"),
+            format!("setupPackage.setupContext.{field_name}"),
+        ));
+    }
+    if value.len() > MAX_SETUP_CONTEXT_TOKEN_BYTES {
+        return Some(Refusal::new(
+            "setupContextTokenMalformed",
+            format!(
+                "setupContext.{field_name} must be at most {MAX_SETUP_CONTEXT_TOKEN_BYTES} bytes"
+            ),
+            format!("setupPackage.setupContext.{field_name}"),
+        ));
+    }
+    if !value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/' | b'@' | b'+')
+    }) {
+        return Some(Refusal::new(
+            "setupContextTokenMalformed",
+            format!(
+                "setupContext.{field_name} contains a character outside the setup context token alphabet"
+            ),
+            format!("setupPackage.setupContext.{field_name}"),
+        ));
+    }
+
+    None
+}
+
 pub(super) fn verify_context(
     setup_package: &Value,
     request: &Value,
@@ -69,39 +104,29 @@ pub(super) fn verify_context(
         };
         validate_hash_string(field_value, &format!("setupContext.{field_name}"))?;
     }
-    if setup_context
-        .get("ceremonyId")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-    {
-        return Ok(Some(verification_response(
-            VerifierStatus::Refused,
-            Some("setupIntent"),
-            Vec::new(),
-            vec![Refusal::new(
-                "setupContextCeremonyMissing",
-                "setupContext.ceremonyId must be a non-empty string",
-                "setupPackage.setupContext.ceremonyId".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-    if setup_context
-        .get("setupEpoch")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-    {
-        return Ok(Some(verification_response(
-            VerifierStatus::Refused,
-            Some("setupIntent"),
-            Vec::new(),
-            vec![Refusal::new(
-                "setupContextEpochMissing",
-                "setupContext.setupEpoch must be a non-empty string",
-                "setupPackage.setupContext.setupEpoch".to_string(),
-            )],
-            Vec::new(),
-        )?));
+    for field_name in ["ceremonyId", "setupEpoch"] {
+        let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
+            return Ok(Some(verification_response(
+                VerifierStatus::Refused,
+                Some("setupIntent"),
+                Vec::new(),
+                vec![Refusal::new(
+                    "setupContextTokenMalformed",
+                    format!("setupContext.{field_name} must be a setup context token"),
+                    format!("setupPackage.setupContext.{field_name}"),
+                )],
+                Vec::new(),
+            )?));
+        };
+        if let Some(refusal) = validate_setup_context_token(field_name, field_value) {
+            return Ok(Some(verification_response(
+                VerifierStatus::Refused,
+                Some("setupIntent"),
+                Vec::new(),
+                vec![refusal],
+                Vec::new(),
+            )?));
+        }
     }
 
     let expected_setup_profile_hash = setup_profile_hash()?;
