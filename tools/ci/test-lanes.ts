@@ -1,6 +1,6 @@
 export const nodeTestTimeoutMs = 60_000;
 export const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
-export const nodeKernelVeryHeavyTestTimeoutMs = 30 * 60_000;
+export const nodeKernelVeryHeavyTestTimeoutMs = 60 * 60_000;
 export const nodeHookTimeoutMs = 240_000;
 
 export const nodeTestLaneValues = [

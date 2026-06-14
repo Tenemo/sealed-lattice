@@ -4,7 +4,7 @@ This directory stores deterministic test vectors and the manifest used to verify
 
 ## Files
 
-- `manifest.json`: canonical file list and SHA-256 Hashes for committed vector files
+- `manifest.json`: canonical file list and SHA-256 hashes for committed vector files
 - `README.md`: usage notes for contributors
 
 ## Commands
@@ -16,4 +16,4 @@ pnpm run vectors:generate
 
 `pnpm run vectors` verifies that the committed files match `manifest.json`. `pnpm run vectors:generate` rewrites the manifest from the current contents of the directory.
 
-The repository includes tracked transcript-core golden, malformed-object, and transcript replay fixtures plus election-foundation threshold, poll-spec, lifecycle, capability, board/finality, first-valid, recovery, full signed deterministic fixture, and plaintext oracle vectors so the manifest always exercises real file hashing and verification.
+The repository currently includes tracked plaintext oracle vectors for comparator polynomials, field arithmetic, Shamir recovery, sparse targets, and top-k derivation so the manifest always exercises real file hashing and verification.

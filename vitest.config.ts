@@ -193,17 +193,6 @@ export default defineConfig({
     resolve: publicPackageTestResolve,
     test: {
         alias: [publicPackageAlias, ...rootPrivateAliases],
-        coverage: {
-            provider: 'v8',
-            reporter: ['text', 'json-summary', 'lcov'],
-            reportsDirectory: './coverage',
-            include: [
-                'packages/*/src/**/*.ts',
-                'tools/**/*.ts',
-                'tools/**/*.mjs',
-            ],
-            exclude: ['packages/*/src/**/*.d.ts'],
-        },
         projects: [
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),

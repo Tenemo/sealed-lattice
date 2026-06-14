@@ -227,6 +227,16 @@ fn threshold_share_commitment_derivation_consumes_streamed_binary_material() {
         stream_result["verifiedVssCoefficientCommitmentMaterial"]["thresholdShareCommitmentRoot"],
         stream_result["thresholdShareCommitmentRoot"]
     );
+
+    let release_result = release_verified_transported_vss_material_request(&serde_json::json!({
+        "verificationId": derivation_id,
+    }))
+    .expect("release stream-verified material");
+    assert_eq!(
+        release_result["operation"],
+        "releaseVerifiedTransportedVssMaterial"
+    );
+    assert_eq!(release_result["released"], true);
 }
 
 #[test]
@@ -266,6 +276,89 @@ fn threshold_share_commitment_stream_refuses_tampered_chunk_bytes() {
         error
             .message
             .contains("transport stream chunk bytes do not match the declared chunk hash")
+    );
+}
+
+#[test]
+fn threshold_share_commitment_stream_abort_releases_derivation_id() {
+    let request = threshold_share_commitment_derivation_request(8);
+    let material_bytes = encode_transport_material_from_request(&request);
+    let transported_material = transported_material_value(&material_bytes);
+    let stream_template = transported_material_stream_template_value(&transported_material);
+    let derivation_id = "threshold-share-stream-abort-test";
+
+    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+        "derivationId": derivation_id,
+        "setupContext": request["setupContext"],
+        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
+        "transportedVssCoefficientCommitmentMaterial": stream_template,
+    }))
+    .expect("begin stream threshold derivation");
+
+    let abort_result =
+        abort_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+            "derivationId": derivation_id,
+        }))
+        .expect("abort stream threshold derivation");
+    assert_eq!(
+        abort_result["operation"],
+        "abortThresholdShareCommitmentsFromTransportStream"
+    );
+    assert_eq!(abort_result["aborted"], true);
+
+    let error = absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
+        &serde_json::json!({
+            "derivationId": derivation_id,
+            "chunkIndex": 0,
+            "bytesHex": transported_material["chunks"][0]["bytesHex"],
+        }),
+    )
+    .expect_err("aborted stream must not accept chunks");
+    assert!(
+        error
+            .message
+            .contains("transport derivationId is not active")
+    );
+
+    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+        "derivationId": derivation_id,
+        "setupContext": request["setupContext"],
+        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
+        "transportedVssCoefficientCommitmentMaterial": transported_material_stream_template_value(&transported_material),
+    }))
+    .expect("derivation id can be reused after abort");
+
+    abort_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+        "derivationId": derivation_id,
+    }))
+    .expect("cleanup reused stream threshold derivation");
+}
+
+#[test]
+fn threshold_share_commitment_stream_refuses_chunk_count_that_does_not_match_total_length() {
+    let request = threshold_share_commitment_derivation_request(8);
+    let material_bytes = encode_transport_material_from_request(&request);
+    let transported_material = transported_material_value(&material_bytes);
+    let mut stream_template = transported_material_stream_template_value(&transported_material);
+    stream_template["chunkCount"] = serde_json::json!(usize::MAX);
+
+    let error =
+        begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
+            "derivationId": "threshold-share-stream-large-count-test",
+            "setupContext": request["setupContext"],
+            "publicMatrixSeedHash": request["publicMatrixSeedHash"],
+            "transportedVssCoefficientCommitmentMaterial": stream_template,
+        }))
+        .expect_err("stream header with impossible chunk count must reject");
+
+    assert_eq!(
+        error.code,
+        crate::encoding::CanonicalErrorCode::InvalidFixture
+    );
+    assert!(
+        error
+            .message
+            .contains("transport chunkCount must match totalByteLength")
     );
 }
 

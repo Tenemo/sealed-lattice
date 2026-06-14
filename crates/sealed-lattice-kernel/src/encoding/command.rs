@@ -29,8 +29,10 @@ enum TranscriptCoreCommand {
     DeriveThresholdShareCommitments,
     DeriveThresholdShareCommitmentsFromTransport,
     BeginThresholdShareCommitmentsFromTransportStream,
+    AbortThresholdShareCommitmentsFromTransportStream,
     AbsorbThresholdShareCommitmentsFromTransportStreamChunk,
     FinishThresholdShareCommitmentsFromTransportStream,
+    ReleaseVerifiedTransportedVssMaterial,
     BeginSetupProofMaterialTransportStream,
     AbsorbSetupProofMaterialTransportStreamChunk,
     FinishSetupProofMaterialTransportStream,
@@ -219,8 +221,10 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
         | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
         | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
+        | TranscriptCoreCommand::AbortThresholdShareCommitmentsFromTransportStream
         | TranscriptCoreCommand::AbsorbThresholdShareCommitmentsFromTransportStreamChunk
         | TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream
+        | TranscriptCoreCommand::ReleaseVerifiedTransportedVssMaterial
         | TranscriptCoreCommand::BeginSetupProofMaterialTransportStream
         | TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk
         | TranscriptCoreCommand::FinishSetupProofMaterialTransportStream
@@ -299,8 +303,14 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
                 request,
             )
         }
+        TranscriptCoreCommand::AbortThresholdShareCommitmentsFromTransportStream => {
+            crate::bgv::commands::abort_threshold_share_commitments_from_transport_stream(request)
+        }
         TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream => {
             crate::bgv::commands::finish_threshold_share_commitments_from_transport_stream(request)
+        }
+        TranscriptCoreCommand::ReleaseVerifiedTransportedVssMaterial => {
+            crate::bgv::commands::release_verified_transported_vss_material(request)
         }
         TranscriptCoreCommand::BeginSetupProofMaterialTransportStream => {
             crate::bgv::commands::begin_setup_proof_material_transport_stream(request)

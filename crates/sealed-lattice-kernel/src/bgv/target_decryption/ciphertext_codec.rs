@@ -110,7 +110,7 @@ pub(super) fn parse_target_ciphertext(
     })
 }
 
-pub(super) fn direct_target_ciphertext_hash(
+pub(crate) fn direct_target_ciphertext_hash(
     aggregate_ciphertext_root: &str,
     top_count: usize,
     target_layout_hash: &str,

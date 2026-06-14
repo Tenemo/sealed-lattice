@@ -33,9 +33,11 @@ import type {
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
+    BgvThresholdShareCommitmentTransportStreamAbort,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
+    BgvVerifiedTransportedVssMaterialRelease,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -503,6 +505,16 @@ export const createTranscriptCoreKernelLoader = (
                                 input.transportedVssCoefficientCommitmentMaterial,
                         },
                     ),
+                abortThresholdShareCommitmentsFromTransportStream: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamAbort =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamAbort>(
+                        {
+                            command:
+                                'AbortThresholdShareCommitmentsFromTransportStream',
+                            derivationId: input.derivationId,
+                        },
+                    ),
                 absorbThresholdShareCommitmentsFromTransportStreamChunk: (
                     input,
                 ): BgvThresholdShareCommitmentTransportStreamChunkAbsorption =>
@@ -529,6 +541,13 @@ export const createTranscriptCoreKernelLoader = (
                                 input.sourceTrusteeCoefficientCommitmentRecords,
                         },
                     ),
+                releaseVerifiedTransportedVssMaterial: (
+                    input,
+                ): BgvVerifiedTransportedVssMaterialRelease =>
+                    executeCommand<BgvVerifiedTransportedVssMaterialRelease>({
+                        command: 'ReleaseVerifiedTransportedVssMaterial',
+                        verificationId: input.verificationId,
+                    }),
                 beginSetupProofMaterialTransportStream: (
                     input,
                 ): BgvSetupProofMaterialTransportStreamBegin =>

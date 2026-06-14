@@ -8,13 +8,13 @@ head:
       content: sealed-lattice
 hero:
     title: sealed-lattice
-    tagline: Active-static direct BGV ballot direction for mobile verification.
+    tagline: Active-static direct encrypted ballot direction for mobile verification.
     image:
         html: |
             <div class="landing-hero-panel">
               <div class="landing-hero-panel__card">
                 <p class="landing-hero-panel__eyebrow">Selected direction</p>
-                <h2 class="landing-hero-panel__title">verify direct encrypted ballots</h2>
+                <h2 class="landing-hero-panel__title">Verify direct encrypted ballots</h2>
                 <ol class="landing-hero-panel__list">
                   <li>Install <code>sealed-lattice</code>.</li>
                   <li>Use the current verification helpers for development and integration work.</li>
@@ -31,7 +31,7 @@ hero:
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Current direction</span>
                   <strong>active-static setup</strong>
-                  <small>Direct BGV ballots and bounded-domain replay</small>
+                  <small>Direct encrypted ballots and bounded-domain replay</small>
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Package</span>
@@ -53,7 +53,7 @@ hero:
         - text: Browse the API reference
           link: ./api/
           variant: secondary
-        - text: Read safety boundaries
+        - text: Read security and non-goals
           link: ./guides/security-and-non-goals/
           variant: minimal
 ---
@@ -65,7 +65,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <h2>Selected direction</h2>
     <p>
       The active construction is active-static secure-with-abort collective BGV
-      setup, direct BGV-encrypted ballots, LaZer/LNP-derived no-wrap ballot
+      setup, direct encrypted ballots, LaZer/LNP-derived no-wrap ballot
       validity proofs, public ciphertext aggregation, bounded-domain mobile
       evaluator replay, unanimous target finality, and one-shot target-bound
       decryption of <code>C_target</code> only.
@@ -103,6 +103,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
         </p>
       </div>
     </Card>
+
   </div>
 </section>
 

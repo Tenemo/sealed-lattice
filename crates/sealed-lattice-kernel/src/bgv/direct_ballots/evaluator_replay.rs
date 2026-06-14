@@ -1,3 +1,5 @@
+use crate::bgv::target_decryption::direct_target_ciphertext_hash;
+
 use super::*;
 
 pub(super) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
@@ -100,7 +102,7 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         let replay_time_milliseconds = replay_started.elapsed_milliseconds();
         let target_id_root = ciphertext_object_root(&target.target_id)?;
         let target_order_root = ciphertext_object_root(&target.target_order)?;
-        let target_ciphertext_hash = direct_ballot_target_ciphertext_hash(
+        let target_ciphertext_hash = direct_target_ciphertext_hash(
             &aggregate_ciphertext_root,
             *top_count,
             &target_layout_root,
@@ -247,29 +249,6 @@ pub(super) fn direct_ballot_plaintext_target_slots(
     }
 
     Ok((target_ids, target_orders))
-}
-
-pub(super) fn direct_ballot_target_ciphertext_hash(
-    aggregate_ciphertext_root: &str,
-    top_count: usize,
-    target_layout_hash: &str,
-    target_id_root: &str,
-    target_order_root: &str,
-) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "EncryptedSparseTargetProjectionHash",
-        &json!({
-            "objectType": "EncryptedSparseTargetCiphertext",
-            "objectVersion": 1,
-            "aggregateCiphertextRoot": aggregate_ciphertext_root,
-            "topCount": top_count,
-            "tiePolicy": TIE_POLICY,
-            "targetLayoutHash": target_layout_hash,
-            "targetIdRoot": target_id_root,
-            "targetOrderRoot": target_order_root,
-            "openedIntermediates": [],
-        }),
-    )
 }
 
 pub(super) struct DirectBallotEvaluatorReplayContextHashInput<'a> {

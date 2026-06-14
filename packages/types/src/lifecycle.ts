@@ -368,9 +368,7 @@ export type CapabilityContext = {
     readonly targetFinalityAccepted?: boolean;
     readonly targetAccepted?: boolean;
     readonly targetDecryptionProfileVerified?: boolean;
-    readonly browserSupported?: boolean;
     readonly runtimeProfileSupported?: boolean;
-    readonly storageQuotaSufficient?: boolean;
     readonly directProofTransportPresent?: boolean;
     readonly mobileReplayEvidencePresent?: boolean;
     readonly targetDecryptionCertificatePresent?: boolean;
@@ -389,9 +387,7 @@ export type RefusalReason =
     | 'RosterExternalAcceptanceHashMissing'
     | 'RosterExternalAcceptanceHashMismatch'
     | 'setupIncomplete'
-    | 'SetupIncomplete'
     | 'turnoutFloorNotReached'
-    | 'TurnoutBelowReleaseFloor'
     | 'BallotProofsMissing'
     | 'EncryptedBallotAggregateMissing'
     | 'EvaluatorReplayMissing'
@@ -399,10 +395,7 @@ export type RefusalReason =
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'
     | 'TargetDecryptionProfileNotCertified'
-    | 'UnsupportedBrowserContext'
     | 'OutsideMeasuredRuntimeProfile'
-    | 'UnsupportedMobileProfile'
-    | 'InsufficientStorageQuota'
     | 'MissingDirectProofTransport'
     | 'MissingMobileReplayEvidence'
     | 'MissingTargetDecryptionCertificate'

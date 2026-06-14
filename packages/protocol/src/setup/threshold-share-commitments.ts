@@ -106,7 +106,7 @@ export type ThresholdShareCommitmentSet = Readonly<
     }
 >;
 
-export type ThresholdShareCommitmentsInput = Readonly<{
+type ThresholdShareCommitmentsInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
     readonly vssCoefficientCommitmentMaterial:

@@ -311,6 +311,11 @@ const buildParallelLanes = (
             'tsx',
             './tools/ci/verify-public-package-policy.ts',
         ]),
+        lane('Verify test lane coverage', 'test-lane-coverage', [
+            'exec',
+            'tsx',
+            './tools/ci/verify-test-lane-coverage.ts',
+        ]),
         lane('Check package boundaries', 'package-boundaries', [
             'exec',
             'tsx',

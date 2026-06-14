@@ -54,11 +54,13 @@ pub(crate) use setup_proof::{
     finish_setup_proof_material_transport_stream_request,
 };
 pub(crate) use threshold_share_commitments::{
+    abort_threshold_share_commitment_transport_derivation_stream_request,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,
     derive_threshold_share_commitments_from_request,
     derive_threshold_share_commitments_from_transport_request,
     finish_threshold_share_commitment_transport_derivation_stream_request,
+    release_verified_transported_vss_material_request,
 };
 
 use sampling::{
@@ -82,7 +84,7 @@ use crate::{
             records::MAXIMUM_OPTION_COUNT,
         },
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
-        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
+        ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
         profile::{
             BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS,
             POLYNOMIAL_DEGREE, PROFILE_ID, allowed_operation_registry_hash, backend_profile_hash,

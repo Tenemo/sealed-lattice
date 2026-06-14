@@ -7,6 +7,7 @@ export type VendoredProtocolRuntimeEntryExport = {
 export type PublicPackagePolicy = {
     readonly forbiddenRuntimeExports: readonly string[];
     readonly forbiddenTypeExports: readonly string[];
+    readonly vendoredCryptoRuntimeModules: readonly string[];
     readonly vendoredProtocolRuntimeEntryExports: readonly VendoredProtocolRuntimeEntryExport[];
     readonly vendoredProtocolRuntimeModules: readonly string[];
 };
@@ -137,6 +138,7 @@ export const vendoredProtocolRuntimeModules = [
     'setup/evaluation-key-proof-records.ts',
     'setup/evaluator-key-schedule.ts',
     'setup/local-trustee-setup-state.ts',
+    'setup/private-vss-mailbox-delivery.ts',
     'setup/public-key-share-records.ts',
     'setup/same-secret-consistency-records.ts',
     'setup/setup-proof-material-transport.ts',
@@ -147,6 +149,15 @@ export const vendoredProtocolRuntimeModules = [
     'setup/threshold-share-commitments.ts',
     'setup/vss-coefficient-commitments.ts',
     'setup/vss-share-verification-records.ts',
+] as const;
+
+export const vendoredCryptoRuntimeModules = [
+    'canonical-json.ts',
+    'hashes.ts',
+    'index.ts',
+    'local-trustee-state-storage.ts',
+    'private-vss-mailbox.ts',
+    'signatures.ts',
 ] as const;
 
 export const vendoredProtocolRuntimeEntryExports = [
@@ -296,6 +307,7 @@ export const vendoredProtocolRuntimeEntryExports = [
 export const publicPackagePolicy = {
     forbiddenTypeExports,
     forbiddenRuntimeExports,
+    vendoredCryptoRuntimeModules,
     vendoredProtocolRuntimeEntryExports,
     vendoredProtocolRuntimeModules,
 } satisfies PublicPackagePolicy;

@@ -4,13 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
     computeRelativeTypesSpecifier,
+    sdkCryptoRuntimeSourceRelativePaths,
     rewriteTypesImports,
     sdkProtocolRuntimeSourceRelativePaths,
     stripSdkExcludedTypesPackageExports,
     transpileBridgeSource,
     transpileSdkInternalSource,
 } from '#tools/ci/build-sdk-bridge';
-import { vendoredProtocolRuntimeModules } from '#tools/ci/public-package-policy';
 
 const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
 const typesRuntime = path.resolve(distRoot, 'internal/types.js');
@@ -89,8 +89,8 @@ describe('SDK bridge build helpers', () => {
     });
 
     it('vendors only SDK-safe protocol runtime modules', () => {
-        expect(sdkProtocolRuntimeSourceRelativePaths).toEqual(
-            vendoredProtocolRuntimeModules,
+        expect(new Set(sdkProtocolRuntimeSourceRelativePaths).size).toBe(
+            sdkProtocolRuntimeSourceRelativePaths.length,
         );
         expect(sdkProtocolRuntimeSourceRelativePaths).toContain(
             'board/consistency.ts',
@@ -106,6 +106,22 @@ describe('SDK bridge build helpers', () => {
         );
         expect(sdkProtocolRuntimeSourceRelativePaths).not.toContain(
             'plaintext-oracle/top-k.ts',
+        );
+    });
+
+    it('vendors only reviewed crypto runtime modules', () => {
+        expect(new Set(sdkCryptoRuntimeSourceRelativePaths).size).toBe(
+            sdkCryptoRuntimeSourceRelativePaths.length,
+        );
+        expect(sdkCryptoRuntimeSourceRelativePaths).toContain('index.ts');
+        expect(sdkCryptoRuntimeSourceRelativePaths).toContain(
+            'canonical-json.ts',
+        );
+        expect(sdkCryptoRuntimeSourceRelativePaths).toContain(
+            'private-vss-mailbox.ts',
+        );
+        expect(sdkCryptoRuntimeSourceRelativePaths).not.toContain(
+            'tests/support/protocol-signature-fixtures.ts',
         );
     });
 });

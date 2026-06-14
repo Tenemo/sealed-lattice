@@ -54,6 +54,8 @@ const VSS_MATERIAL_BINARY_FORMAT: &str =
 const VSS_MATERIAL_BINARY_MAGIC: &[u8] = b"SLVSSMAT";
 const VSS_MATERIAL_BINARY_VERSION: u64 = 1;
 const VSS_TRANSPORT_STREAM_DERIVATION_ID_MAX_BYTES: usize = 128;
+const VSS_TRANSPORT_MAX_ACTIVE_DERIVATION_SESSIONS: usize = 64;
+const VSS_TRANSPORT_MAX_VERIFIED_MATERIALS: usize = 128;
 
 static VSS_TRANSPORT_THRESHOLD_DERIVATION_SESSIONS: OnceLock<
     Mutex<BTreeMap<String, VssTransportThresholdDerivationSession>>,
@@ -298,6 +300,11 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
             "transport derivationId is already active",
         ));
     }
+    if sessions.len() >= VSS_TRANSPORT_MAX_ACTIVE_DERIVATION_SESSIONS {
+        return Err(invalid_threshold_commitment_input(
+            "transport derivation session store is full; finish or abort an active stream before beginning another",
+        ));
+    }
     if vss_transport_verified_materials()
         .lock()
         .map_err(|_| invalid_threshold_commitment_input("verified material store is unavailable"))?
@@ -338,6 +345,30 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
             "chunkCount": transport_header.chunk_count,
             "totalByteLength": transport_header.total_byte_length,
         },
+    }))
+}
+
+pub(crate) fn abort_threshold_share_commitment_transport_derivation_stream_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &["derivationId"],
+        "abortThresholdShareCommitmentsFromTransportStream",
+    )?;
+    let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
+    let sessions = vss_transport_derivation_sessions();
+    let mut sessions = sessions.lock().map_err(|_| {
+        invalid_threshold_commitment_input("transport derivation session store is unavailable")
+    })?;
+    let aborted = sessions.remove(&derivation_id).is_some();
+
+    Ok(json!({
+        "ok": true,
+        "operation": "abortThresholdShareCommitmentsFromTransportStream",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "derivationId": derivation_id,
+        "aborted": aborted,
     }))
 }
 
@@ -496,6 +527,30 @@ pub(crate) fn with_verified_transported_vss_material<T>(
     }
 
     callback(verified_material)
+}
+
+pub(crate) fn release_verified_transported_vss_material_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    reject_unexpected_bgv_request_fields(
+        request,
+        &["verificationId"],
+        "releaseVerifiedTransportedVssMaterial",
+    )?;
+    let verification_id = derivation_stream_id_field(request, "verificationId")?.to_string();
+    let verified_materials = vss_transport_verified_materials();
+    let mut verified_materials = verified_materials.lock().map_err(|_| {
+        invalid_threshold_commitment_input("verified material store is unavailable")
+    })?;
+    let released = verified_materials.remove(&verification_id).is_some();
+
+    Ok(json!({
+        "ok": true,
+        "operation": "releaseVerifiedTransportedVssMaterial",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "verificationId": verification_id,
+        "released": released,
+    }))
 }
 
 fn verified_transported_vss_material_reference_value(
@@ -772,21 +827,29 @@ fn finish_threshold_share_commitment_transport_stream(
     );
     let constant_commitments_by_source_trustee =
         Arc::new(derivation.constant_commitments_by_source_trustee);
-    vss_transport_verified_materials()
-        .lock()
-        .map_err(|_| invalid_threshold_commitment_input("verified material store is unavailable"))?
-        .insert(
-            derivation_id.to_string(),
-            VerifiedTransportedVssMaterial {
-                reference: verified_material_reference.clone(),
-                setup_context: session.setup_context.clone(),
-                public_matrix_seed_hash: session.public_matrix_seed_hash.clone(),
-                vss_coefficient_commitment_root: vss_coefficient_commitment_root.to_string(),
-                material_set: material_set.clone(),
-                threshold_share_commitments: derivation.threshold_share_commitments.clone(),
-                constant_commitments_by_source_trustee,
-            },
-        );
+    let verified_materials = vss_transport_verified_materials();
+    let mut verified_materials = verified_materials.lock().map_err(|_| {
+        invalid_threshold_commitment_input("verified material store is unavailable")
+    })?;
+    if !verified_materials.contains_key(derivation_id)
+        && verified_materials.len() >= VSS_TRANSPORT_MAX_VERIFIED_MATERIALS
+    {
+        return Err(invalid_threshold_commitment_input(
+            "verified material store is full; release older verified material handles before finishing another stream",
+        ));
+    }
+    verified_materials.insert(
+        derivation_id.to_string(),
+        VerifiedTransportedVssMaterial {
+            reference: verified_material_reference.clone(),
+            setup_context: session.setup_context.clone(),
+            public_matrix_seed_hash: session.public_matrix_seed_hash.clone(),
+            vss_coefficient_commitment_root: vss_coefficient_commitment_root.to_string(),
+            material_set: material_set.clone(),
+            threshold_share_commitments: derivation.threshold_share_commitments.clone(),
+            constant_commitments_by_source_trustee,
+        },
+    );
 
     Ok(json!({
         "ok": true,
@@ -1774,6 +1837,7 @@ fn read_transport_material_stream_header(
         ));
     }
     let total_byte_length = u64_field(value, "totalByteLength")?;
+    validate_transport_chunk_count_matches_total_byte_length(chunk_count, total_byte_length)?;
     let has_full_object_hash = value.get("fullObjectHash").is_some();
     let has_chunk_hashes = value.get("chunkHashes").is_some();
     let has_chunk_root = value.get("chunkRoot").is_some();
@@ -1880,6 +1944,7 @@ fn validate_transport_manifest_shape(
             "transport chunkHashes length must match chunkCount",
         ));
     }
+    validate_transport_chunk_count_matches_total_byte_length(chunk_count, total_byte_length)?;
     validate_hash_string(full_object_hash, "fullObjectHash")?;
     validate_hash_string(chunk_root, "chunkRoot")?;
     let expected_chunk_root = setup_transport_chunk_manifest_root(
@@ -1894,6 +1959,30 @@ fn validate_transport_manifest_shape(
     if expected_chunk_root != chunk_root {
         return Err(invalid_threshold_commitment_input(
             "transport chunkRoot does not match the canonical chunk manifest",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_transport_chunk_count_matches_total_byte_length(
+    chunk_count: usize,
+    total_byte_length: u64,
+) -> CanonicalResult<()> {
+    if total_byte_length == 0 {
+        return Err(invalid_threshold_commitment_input(
+            "setup transport totalByteLength must be positive",
+        ));
+    }
+    let expected_chunk_count_u64 = ((total_byte_length - 1) / SETUP_TRANSPORT_CHUNK_SIZE_BYTES) + 1;
+    let expected_chunk_count = usize::try_from(expected_chunk_count_u64).map_err(|_| {
+        invalid_threshold_commitment_input(
+            "setup transport expected chunk count does not fit usize",
+        )
+    })?;
+    if chunk_count != expected_chunk_count {
+        return Err(invalid_threshold_commitment_input(
+            "transport chunkCount must match totalByteLength and the accepted chunk size",
         ));
     }
 

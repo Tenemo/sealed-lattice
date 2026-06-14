@@ -289,19 +289,14 @@ const verifyFoundationTranscriptUnchecked = (
         recoveryEpochUpdates.every((result) => result.ok) &&
         firstValidOrdering.ok &&
         targetFinality.ok;
-    const statusLabels: readonly ProtocolVerificationStatusLabel[] = accepted
-        ? uniqueStrings([
-              ...rosterManifest.statusLabels,
-              ...rosterExternalAcceptance.statusLabels,
-              ...firstValidOrdering.statusLabels,
-              ...targetFinality.statusLabels,
-          ])
-        : uniqueStrings([
-              ...rosterManifest.statusLabels,
-              ...rosterExternalAcceptance.statusLabels,
-              ...firstValidOrdering.statusLabels,
-              ...targetFinality.statusLabels,
-          ]);
+    const statusLabels: readonly ProtocolVerificationStatusLabel[] =
+        uniqueStrings([
+            ...rosterManifest.statusLabels,
+            ...rosterExternalAcceptance.statusLabels,
+            ...recoveryEpochUpdates.flatMap((result) => result.statusLabels),
+            ...firstValidOrdering.statusLabels,
+            ...targetFinality.statusLabels,
+        ]);
 
     if (!accepted) {
         return {

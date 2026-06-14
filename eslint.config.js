@@ -124,8 +124,6 @@ export default defineConfig(
         'dist/**',
         '**/dist',
         '**/dist/**',
-        'coverage',
-        'coverage/**',
         'target',
         'target/**',
         'docs/.astro',

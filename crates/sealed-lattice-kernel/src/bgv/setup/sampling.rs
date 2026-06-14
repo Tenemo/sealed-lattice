@@ -409,15 +409,16 @@ pub(super) fn negacyclic_product_mod(
     right: &[u64],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let left_ntt = forward_negacyclic_ntt(left, modulus)?;
-    let right_ntt = forward_negacyclic_ntt(right, modulus)?;
-    let product_ntt = left_ntt
-        .iter()
-        .zip(right_ntt.iter())
-        .map(|(left_value, right_value)| mul_mod(*left_value, *right_value, modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut left_ntt = left.to_vec();
+    let mut right_ntt = right.to_vec();
+    forward_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
+    forward_negacyclic_ntt_in_place(&mut right_ntt, modulus)?;
+    for (left_value, right_value) in left_ntt.iter_mut().zip(right_ntt.iter()) {
+        *left_value = mul_mod(*left_value, *right_value, modulus)?;
+    }
+    inverse_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
 
-    inverse_negacyclic_ntt(&product_ntt, modulus)
+    Ok(left_ntt)
 }
 
 pub(super) fn sample_values(values: &[u64]) -> Vec<Value> {

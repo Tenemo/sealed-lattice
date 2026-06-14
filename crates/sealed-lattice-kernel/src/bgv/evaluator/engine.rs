@@ -5,7 +5,10 @@ use crate::{
     bgv::{
         evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
-        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
+        ntt::{
+            forward_negacyclic_ntt, forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt,
+            inverse_negacyclic_ntt_in_place,
+        },
         profile::{
             BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
             encrypted_ballot_aggregate_layout_hash,
@@ -53,15 +56,16 @@ pub(crate) fn negacyclic_mul(
     right: &[u64],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let left_ntt = forward_negacyclic_ntt(left, modulus)?;
-    let right_ntt = forward_negacyclic_ntt(right, modulus)?;
-    let product = left_ntt
-        .iter()
-        .zip(right_ntt.iter())
-        .map(|(left_value, right_value)| mul_mod_fast(*left_value, *right_value, modulus))
-        .collect::<Vec<_>>();
+    let mut left_ntt = left.to_vec();
+    let mut right_ntt = right.to_vec();
+    forward_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
+    forward_negacyclic_ntt_in_place(&mut right_ntt, modulus)?;
+    for (left_value, right_value) in left_ntt.iter_mut().zip(right_ntt.iter()) {
+        *left_value = mul_mod_fast(*left_value, *right_value, modulus);
+    }
+    inverse_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
 
-    inverse_negacyclic_ntt(&product, modulus)
+    Ok(left_ntt)
 }
 
 // A leveled BGV-RNS ciphertext in the coefficient domain. `components` holds the

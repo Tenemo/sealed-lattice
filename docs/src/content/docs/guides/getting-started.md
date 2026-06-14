@@ -7,7 +7,7 @@ sidebar:
 
 `sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting prototype.
 
-The selected direction is active-static secure-with-abort collective BGV setup, direct BGV-encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
+The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
 
 The package is under active implementation and has not been independently audited. Use it for development, integration experiments, and verification tooling, not production elections.
 
@@ -50,9 +50,15 @@ const thresholdProfile = deriveThresholdProfile({
 
 ```typescript
 import {
+    createSetupContribution,
+    createSetupPackageVerificationInput,
+    createVssShareAcceptance,
     deriveThresholdProfile,
     validatePollSpec,
     verifyBoardConsistency,
+    verifyFoundationTranscript,
+    verifyPrivateVssShare,
+    verifySetupPackage,
     verifyTargetFinality,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
@@ -66,12 +72,13 @@ These helpers are useful for current development verification and package integr
 - threshold and frozen roster profile derivation
 - lifecycle label, lifecycle transition, and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
+- narrow accepted-setup helpers for setup intent records, setup phase records, common-randomness records, private VSS share verification, signed VSS acceptance and complaint records, roots-only setup contributions, proof-material records, binary setup-material transports, public-only setup package verification input construction, setup package verification, encrypted local trustee setup state export, and restore-after-restart validation
 - transcript-core fixture verification through the bundled Rust/WASM kernel
 - package-boundary and public API smoke coverage
 
 ## What is not available yet
 
-- production setup contribution, VSS, ballot generation, or casting APIs
+- production setup ceremony, ballot generation, or casting APIs
 - public direct ballot proof construction APIs
 - public encrypted ballot aggregation APIs
 - public bounded-domain mobile evaluator replay APIs

@@ -10,9 +10,15 @@ Use the root package name for every supported public import.
 
 ```typescript
 import {
+    createSetupContribution,
+    createSetupPackageVerificationInput,
+    createVssShareAcceptance,
     deriveThresholdProfile,
     validatePollSpec,
     verifyBoardConsistency,
+    verifyFoundationTranscript,
+    verifyPrivateVssShare,
+    verifySetupPackage,
     verifyTargetFinality,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
@@ -24,6 +30,7 @@ import {
 - threshold and frozen roster profile derivation
 - lifecycle label, lifecycle transition, and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
+- narrow accepted-setup helpers for setup intent records, setup phase records, common-randomness records, private VSS share verification, signed VSS acceptance and complaint records, roots-only setup contributions, proof-material records, binary setup-material transports, public-only setup package verification input construction, setup package verification, encrypted local trustee setup state export, and restore-after-restart validation
 - transcript-core fixture verification through the bundled Rust/WASM kernel
 - generated reference pages for the exported runtime functions and public types
 
@@ -31,7 +38,6 @@ import {
 
 - no public subpaths are supported
 - no complete active-static direct encrypted ballot voting API is available yet
-- no public setup contribution or VSS API is available yet
 - no production ballot generation or casting API is available yet
 - no public proof construction API is available yet
 - no public aggregation or bounded-domain evaluator replay API is available yet

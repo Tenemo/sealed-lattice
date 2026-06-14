@@ -865,6 +865,14 @@ export type BgvThresholdShareCommitmentTransportStreamBegin = {
     readonly transport: Readonly<Record<string, unknown>>;
 };
 
+export type BgvThresholdShareCommitmentTransportStreamAbort = {
+    readonly ok: true;
+    readonly operation: 'abortThresholdShareCommitmentsFromTransportStream';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly derivationId: string;
+    readonly aborted: boolean;
+};
+
 export type BgvThresholdShareCommitmentTransportStreamChunkAbsorption = {
     readonly ok: true;
     readonly operation: 'absorbThresholdShareCommitmentsFromTransportStreamChunk';
@@ -917,6 +925,14 @@ export type BgvSetupProofMaterialTransportStreamVerification = {
     readonly proofBytesEncoding: string;
     readonly transport: Readonly<Record<string, unknown>>;
     readonly verifiedSetupProofMaterial: BgvVerifiedSetupProofMaterial;
+};
+
+export type BgvVerifiedTransportedVssMaterialRelease = {
+    readonly ok: true;
+    readonly operation: 'releaseVerifiedTransportedVssMaterial';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly verificationId: string;
+    readonly released: boolean;
 };
 
 export type BgvLocalTrusteeSetupStateVerification = {

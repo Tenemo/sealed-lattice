@@ -35,13 +35,12 @@ pnpm run smoke:pack:npm
 
 - `pnpm run build`: every package builds, the private crypto/runtime facade is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
 - `pnpm run api-surface:generate`: runs the full build and regenerates the compact public API surface summary for manual PR review
-- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public package policy, package-boundary checks, vector manifest verification, dead-code analysis, and the fast Node tests in parallel against the built output before running Rust formatting, Rust clippy, and Rust tests in an isolated lane
+- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public package policy, test-lane coverage verification, package-boundary checks, vector manifest verification, dead-code analysis, the fast Node tests, and the non-heavy kernel Node tests in parallel against the built output while Rust formatting, Rust clippy, and fast Rust tests run in their own lane
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests
 - `pnpm run test:node:protocol`: slower protocol and relation tests that remain useful for the selected direct path and shared substrate
 - `pnpm run test:node:kernel`: transcript-core WASM loader, parity, fixture, proof, and kernel integration tests
 - `pnpm run test`: runs the Node lanes and browser lanes through the package scripts
-- `pnpm run coverage:badge`: runs the fast Node coverage lane and writes the Shields-compatible badge and summary JSON that GitHub Pages publishes for the README badge
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
 - `pnpm run docs:build`: builds the docs site without the surrounding verification checks when that narrower target is needed
 - `pnpm run smoke:pack:npm`: the published package tarball installs cleanly through npm and exposes the current safe public boundary
@@ -50,7 +49,7 @@ pnpm run smoke:pack:npm
 
 The pre-commit hook runs `pnpm run check`.
 
-Protocol, kernel, and browser lanes remain explicit commands so they can use targeted reruns instead of slowing every local commit. The coverage badge is generated locally in the Pages workflow, not by Codecov.
+Protocol, kernel-heavy, and browser lanes remain explicit commands so they can use targeted reruns instead of slowing every local commit.
 
 ## Local run logs
 

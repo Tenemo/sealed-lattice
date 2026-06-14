@@ -18,6 +18,7 @@ concurrency:
 jobs:
     build:
         runs-on: ubuntu-latest
+        timeout-minutes: 35
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
             - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d
@@ -26,7 +27,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
-            - run: pnpm run coverage:badge
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
             - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
@@ -36,6 +37,7 @@ jobs:
     deploy:
         needs: build
         runs-on: ubuntu-latest
+        timeout-minutes: 10
         environment:
             name: github-pages
             url: ${{ steps.deployment.outputs.page_url }}

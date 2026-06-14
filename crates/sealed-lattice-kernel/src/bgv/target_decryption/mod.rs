@@ -7,6 +7,7 @@ mod recombination;
 mod share_generation;
 mod share_records;
 use bindings::*;
+pub(crate) use ciphertext_codec::direct_target_ciphertext_hash;
 use ciphertext_codec::*;
 pub(crate) use command::{
     generate_bgv_target_decryption_share_from_request,

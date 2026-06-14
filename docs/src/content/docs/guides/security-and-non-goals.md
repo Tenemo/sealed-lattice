@@ -5,7 +5,7 @@ sidebar:
     order: 4
 ---
 
-`sealed-lattice` currently ships a development verification package, not a published voting workflow. The selected direction is active-static secure-with-abort collective BGV setup, direct BGV-encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
+`sealed-lattice` currently ships a development verification package, not a published voting workflow. The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
 
 ## What the current release guarantees
 
@@ -19,7 +19,7 @@ sidebar:
 ## What it does not guarantee yet
 
 - no complete threshold voting workflow is published yet
-- no production setup contribution, VSS, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, or result release API is public yet
+- no production setup ceremony, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, or result release API is public yet
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
 - active-static setup is not claim-bearing until the `CollectiveBgvSetup-v1` public verifier accepts a full-profile setup with repo-owned setup proof accounting, per-RNS-prime VSS package integration, same-secret proof verification, public-key proofs, evaluation-key proofs, key transport, and downstream integration bindings
 - independent external validation is not a prerequisite for the active-static setup prototype claim, but production use would still require separate production hardening and review

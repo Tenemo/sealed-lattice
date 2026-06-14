@@ -12,6 +12,8 @@ import {
 const emptyPackagePolicy = {
     forbiddenRuntimeExports: [],
     forbiddenTypeExports: [],
+    vendoredCryptoRuntimeModules:
+        publicPackagePolicy.vendoredCryptoRuntimeModules,
     vendoredProtocolRuntimeEntryExports: [],
     vendoredProtocolRuntimeModules: [],
 } as const satisfies Parameters<typeof validatePublicPackagePolicy>[0];
@@ -98,6 +100,25 @@ describe('public package policy', () => {
         expect(failures).toEqual([
             'Forbidden runtime export is public: verifyTargetAcceptedRecord',
             'Forbidden runtime export is public: verifyTopKDecryptionShareShell',
+        ]);
+    });
+
+    it('rejects missing transitive crypto runtime modules', async () => {
+        const failures = await validatePublicPackagePolicy(
+            {
+                ...emptyPackagePolicy,
+                vendoredCryptoRuntimeModules: ['index.ts'],
+            },
+            [],
+            [],
+        );
+
+        expect(failures).toEqual([
+            'vendoredCryptoRuntimeModules is missing reachable source "canonical-json.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "hashes.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "private-vss-mailbox.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "signatures.ts"',
         ]);
     });
 });

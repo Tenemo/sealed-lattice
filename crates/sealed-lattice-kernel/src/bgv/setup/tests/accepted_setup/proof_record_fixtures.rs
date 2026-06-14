@@ -1950,19 +1950,22 @@ fn build_trustee_evaluation_key_proof_record(
         TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY,
         &statement_hash_hex,
         || {
-            let proof =
-                prove_evaluation_key_share(&work_item.statement, &witness, &proof_randomness_seed_hex)
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "trustee evaluation-key proof generation failed for trustee {}: {error}; {}",
-                            work_item.trustee_roster_position,
-                            trustee_evaluation_key_fixture_material_mismatch_summary(
-                                work_item.trustee_roster_position,
-                                ring_degree,
-                                &work_item.statement,
-                            )
-                        )
-                    });
+            let proof = prove_evaluation_key_share(
+                &work_item.statement,
+                &witness,
+                &proof_randomness_seed_hex,
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "trustee evaluation-key proof generation failed for trustee {}: {error}; {}",
+                    work_item.trustee_roster_position,
+                    trustee_evaluation_key_fixture_material_mismatch_summary(
+                        work_item.trustee_roster_position,
+                        ring_degree,
+                        &work_item.statement,
+                    )
+                )
+            });
             encode_trustee_evaluation_key_proof(&proof)
         },
     );

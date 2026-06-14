@@ -19,6 +19,7 @@ use crate::{
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
         setup::{
+            abort_threshold_share_commitment_transport_derivation_stream_request,
             absorb_setup_proof_material_transport_stream_chunk_request,
             absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
             begin_setup_proof_material_transport_stream_request,
@@ -34,6 +35,7 @@ use crate::{
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
+            release_verified_transported_vss_material_request,
             verify_collective_bgv_setup_package_from_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
@@ -199,6 +201,16 @@ pub(crate) fn finish_threshold_share_commitments_from_transport_stream(
     request: &Value,
 ) -> CanonicalResult<Value> {
     finish_threshold_share_commitment_transport_derivation_stream_request(request)
+}
+
+pub(crate) fn abort_threshold_share_commitments_from_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    abort_threshold_share_commitment_transport_derivation_stream_request(request)
+}
+
+pub(crate) fn release_verified_transported_vss_material(request: &Value) -> CanonicalResult<Value> {
+    release_verified_transported_vss_material_request(request)
 }
 
 pub(crate) fn begin_setup_proof_material_transport_stream(

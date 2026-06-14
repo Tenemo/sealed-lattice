@@ -12,7 +12,7 @@ The repo is a private workspace with one published package, four private TypeScr
 - `packages/sdk`: the only published package directory, with the public package name `sealed-lattice`
 - `packages/types`: canonical shared type definitions inlined into the published package during SDK builds
 - `packages/protocol`: deterministic election model and transcript verification helpers
-- `packages/crypto`: internal Hash512, hash, ML-DSA-65 profile, fixture signing, and signed-root verification wrappers
+- `packages/crypto`: internal hash-512 framing, protocol hash, ML-DSA-65 profile, fixture signing, and signed-root verification wrappers
 - `packages/wasm`: typed Rust/WASM loader for transcript-core analysis, protocol hash derivation, direct ballot proof work, and kernel checks
 - `crates/sealed-lattice-kernel`: Rust transcript-core, proof, and BGV kernel crate that exports the WASM command path for transcript fixtures, reserved hash derivation, setup/proof experiments, direct ballot proof experiments, and field checks
 

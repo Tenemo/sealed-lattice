@@ -42,11 +42,13 @@ import type {
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
+    BgvThresholdShareCommitmentTransportStreamAbort,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
     BgvTransportedVssCoefficientCommitmentMaterialReference,
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
+    BgvVerifiedTransportedVssMaterialRelease,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -83,11 +85,13 @@ export type {
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
+    BgvThresholdShareCommitmentTransportStreamAbort,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
     BgvTransportedVssCoefficientCommitmentMaterialReference,
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
+    BgvVerifiedTransportedVssMaterialRelease,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -275,6 +279,9 @@ export type TranscriptCoreKernel = {
             | BgvTransportedVssCoefficientCommitmentMaterialReference
             | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
     }): BgvThresholdShareCommitmentTransportStreamBegin;
+    abortThresholdShareCommitmentsFromTransportStream(input: {
+        readonly derivationId: string;
+    }): BgvThresholdShareCommitmentTransportStreamAbort;
     absorbThresholdShareCommitmentsFromTransportStreamChunk(input: {
         readonly derivationId: string;
         readonly chunkIndex: number;
@@ -285,6 +292,9 @@ export type TranscriptCoreKernel = {
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
     }): BgvThresholdShareCommitmentTransportStreamDerivation;
+    releaseVerifiedTransportedVssMaterial(input: {
+        readonly verificationId: string;
+    }): BgvVerifiedTransportedVssMaterialRelease;
     beginSetupProofMaterialTransportStream(input: {
         readonly verificationId: string;
         readonly transportedSetupProofMaterial: unknown;
@@ -545,6 +555,10 @@ type TranscriptCoreKernelCommand =
               | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
       }
     | {
+          readonly command: 'AbortThresholdShareCommitmentsFromTransportStream';
+          readonly derivationId: string;
+      }
+    | {
           readonly command: 'AbsorbThresholdShareCommitmentsFromTransportStreamChunk';
           readonly derivationId: string;
           readonly chunkIndex: number;
@@ -555,6 +569,10 @@ type TranscriptCoreKernelCommand =
           readonly derivationId: string;
           readonly vssCoefficientCommitmentRoot: ProtocolHash;
           readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+      }
+    | {
+          readonly command: 'ReleaseVerifiedTransportedVssMaterial';
+          readonly verificationId: string;
       }
     | {
           readonly command: 'BeginSetupProofMaterialTransportStream';

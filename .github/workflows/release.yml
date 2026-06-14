@@ -57,6 +57,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo fmt --check -p sealed-lattice-kernel
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
             - run: cargo test --workspace
@@ -75,6 +76,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo test -p sealed-lattice-kernel heavy_accepted_setup -- --ignored --show-output
 
     wasm:
@@ -91,6 +93,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo build --workspace --lib --target wasm32-unknown-unknown --release
 
     verify-static:
@@ -104,12 +107,18 @@ jobs:
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: |
                   pnpm run build
                   pnpm run lint
                   pnpm run tsc
                   pnpm exec tsx ./tools/ci/generate-api-surface-summary.ts
                   pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
+                  pnpm exec tsx ./tools/ci/verify-test-lane-coverage.ts
                   pnpm exec tsx ./tools/ci/check-package-boundaries.ts
                   pnpm run vectors
                   pnpm exec knip
@@ -129,6 +138,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run test:node:fast -- --no-run-log
 
     node-protocol:
@@ -146,6 +156,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run test:node:protocol -- --no-run-log
 
     node-kernel:
@@ -163,6 +174,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run test:node:kernel -- --no-run-log
 
     node-kernel-heavy:
@@ -180,6 +192,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run test:node:kernel:heavy -- --no-run-log
 
     verify:
@@ -187,11 +200,17 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 5
         needs:
+            - rust
+            - rust-kernel-heavy
+            - wasm
             - verify-static
             - node-fast
             - node-protocol
             - node-kernel
             - node-kernel-heavy
+            - browser
+            - docs
+            - release-smoke
         if: ${{ always() }}
         steps:
             - name: Check verify jobs
@@ -212,23 +231,6 @@ jobs:
                   console.log('Verify jobs passed.');
                   NODE
 
-    coverage:
-        name: coverage
-        needs:
-            - validate-dispatch
-        runs-on: ubuntu-latest
-        timeout-minutes: 25
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - run: pnpm run coverage:node
-
     browser:
         name: browser
         needs:
@@ -244,9 +246,9 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - run: pnpm run build
-            - run: pnpm exec vitest --project browser-desktop --project browser-mobile --run
+            - run: pnpm run test:browser -- --no-run-log
 
     docs:
         name: docs
@@ -263,6 +265,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium
             - run: pnpm run verify:docs
 
@@ -281,9 +284,8 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run build
-            - run: pnpm exec playwright install --with-deps chromium
-            - run: pnpm run verify:docs
             - run: pnpm run smoke:pack:npm
             - run: |
                   PUBLIC_PACKAGE_DIR="$(mktemp -d)"
@@ -294,14 +296,7 @@ jobs:
     prepare-release:
         needs:
             - validate-dispatch
-            - rust
-            - rust-kernel-heavy
-            - wasm
             - verify
-            - coverage
-            - browser
-            - docs
-            - release-smoke
         runs-on: ubuntu-latest
         timeout-minutes: 35
         outputs:
@@ -329,6 +324,7 @@ jobs:
               with:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
 
             - name: bump release version
               id: metadata
@@ -420,8 +416,6 @@ jobs:
                   echo "prerelease=${PRERELEASE}" >> "${GITHUB_OUTPUT}"
 
             - run: pnpm run build
-            - run: pnpm exec playwright install --with-deps chromium
-            - run: pnpm run verify:docs
             - run: pnpm run smoke:pack:npm
             - run: |
                   PUBLIC_PACKAGE_DIR="$(mktemp -d)"
