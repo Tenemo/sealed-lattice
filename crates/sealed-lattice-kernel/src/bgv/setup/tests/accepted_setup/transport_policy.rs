@@ -47,7 +47,7 @@ fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
         "publicKeyShareMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
         },
-        "publicKeyShareLnpProofs": {
+        "publicKeyShareSuccinctProofs": {
             "proofRecords": [
                 { "ringDegree": POLYNOMIAL_DEGREE }
             ],
@@ -65,7 +65,7 @@ fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
         },
         "galoisKeyShareBatches": [
             {
-                "galoisKeyShareProofs": [
+                "galoisKeyShareMaterialRecords": [
                     { "ringDegree": POLYNOMIAL_DEGREE }
                 ]
             }
@@ -227,7 +227,6 @@ fn terminal_transport_policy_package_with_material_encodings(
         "proofBytesEncoding": proof_material_encoding,
     });
     let key_switch_record = serde_json::json!({
-        "proofBytesEncoding": proof_material_encoding,
         "keySwitchMaterialEncoding": key_switch_material_encoding,
     });
 
@@ -243,7 +242,12 @@ fn terminal_transport_policy_package_with_material_encodings(
         "publicKeyShareMaterial": {
             "materialEncoding": public_key_share_material_encoding,
         },
-        "publicKeyShareLnpProofs": {
+        "publicKeyShareSuccinctProofs": {
+            "proofRecords": [
+                proof_record.clone()
+            ],
+        },
+        "trusteeEvaluationKeyProofs": {
             "proofRecords": [
                 proof_record
             ],
@@ -258,7 +262,7 @@ fn terminal_transport_policy_package_with_material_encodings(
         },
         "galoisKeyShareBatches": [
             {
-                "galoisKeyShareProofs": [
+                "galoisKeyShareMaterialRecords": [
                     key_switch_record
                 ],
             }

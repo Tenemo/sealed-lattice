@@ -1,8 +1,15 @@
 use super::*;
 
+// Share-record containers for the trustee evaluation-key proof path. The
+// records carry the public key-switch component material (the runtime key
+// shares), the ceremony context, and the same-secret anchors; the per-trustee
+// succinct argument over every record is verified by
+// verify_trustee_evaluation_key_proofs, which rebuilds each statement from
+// these records, so the records themselves carry no proof fields.
+
 pub(super) fn verify_relinearization_key_share_rounds(
     setup_package: &Value,
-    request: &Value,
+    _request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") else {
         return Ok(Some(verification_response(
@@ -49,7 +56,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "setupContext was required before relinearization proof verification",
+            "setupContext was required before relinearization share-record verification",
         )
     })?;
     if let Err(error) =
@@ -67,9 +74,12 @@ pub(super) fn verify_relinearization_key_share_rounds(
         ("proofFamily", "relinearization-key-share"),
         (
             "proofVerificationStatus",
-            RELINEARIZATION_PROOF_VERIFICATION_STATUS,
+            EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", RELINEARIZATION_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
+        ),
     ] {
         if rounds.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluation_key_material_refusal(
@@ -114,8 +124,8 @@ pub(super) fn verify_relinearization_key_share_rounds(
             binding.public_key_share_set_root.as_str(),
         ),
         (
-            "publicKeyShareLnpProofSetRoot",
-            binding.public_key_share_lnp_proof_set_root.as_str(),
+            "publicKeyShareSuccinctProofSetRoot",
+            binding.public_key_share_succinct_proof_set_root.as_str(),
         ),
         (
             "relinearizationCrpRoot",
@@ -140,23 +150,8 @@ pub(super) fn verify_relinearization_key_share_rounds(
             "setupPackage.relinearizationKeyShareRounds.relinearizationLevelSchedule",
         )?));
     }
-    let expected_levels = expected_relinearization_levels();
+    let expected_levels = scheduled_relinearization_levels()?;
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
-    let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
-    let transported_constant_commitments =
-        same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
-    let transported_key_switch_component_material =
-        transported_evaluation_key_share_component_material_from_request(request)?;
-    let proof_context = EvaluationKeyProofVerificationContext {
-        setup_package,
-        request,
-        same_secret_proof_bindings: &same_secret_proof_bindings,
-        same_secret_records: &same_secret_records,
-        transported_constant_commitments: &transported_constant_commitments,
-        transported_key_switch_component_material: request
-            .get("transportedEvaluationKeyShareComponentMaterial")
-            .or(transported_key_switch_component_material.as_ref()),
-    };
     let round_one_records = array_value(rounds, "roundOneRecords")?;
     let round_two_records = array_value(rounds, "roundTwoRecords")?;
     let expected_record_count = expected_levels.len() * FIRST_PROFILE_PARTICIPANT_COUNT as usize;
@@ -171,13 +166,15 @@ pub(super) fn verify_relinearization_key_share_rounds(
     }
 
     let mut round_one_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
-    let mut round_one_source_square_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
     let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
-    let mut round_one_source_square_binding_roots = BTreeMap::<(u64, u64), String>::new();
     for record in round_one_records {
-        let (level, trustee_roster_position, record_root, share_root, source_square_binding_root) =
-            match verify_relinearization_round_one_record(record, &binding, &proof_context) {
+        let (level, trustee_roster_position, record_root, share_root) =
+            match verify_relinearization_round_one_record(
+                record,
+                &binding,
+                &same_secret_proof_bindings,
+            ) {
                 Ok(verified_record) => verified_record,
                 Err(error) => {
                     return Ok(Some(evaluation_key_material_refusal(
@@ -205,10 +202,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
             )?));
         }
         round_one_share_roots.insert((level, trustee_roster_position), share_root);
-        round_one_source_square_binding_roots.insert(
-            (level, trustee_roster_position),
-            source_square_binding_root.clone(),
-        );
         let trustee_identity = same_secret_proof_bindings
             .get(&trustee_roster_position)
             .expect("same-secret proof binding exists after record verification")
@@ -218,17 +211,9 @@ pub(super) fn verify_relinearization_key_share_rounds(
             .entry(level)
             .or_default()
             .push(json!({
-                "trusteeIdentity": trustee_identity.clone(),
-                "trusteeRosterPosition": trustee_roster_position,
-                "roundOneRecordRoot": record_root,
-            }));
-        round_one_source_square_roots_by_level
-            .entry(level)
-            .or_default()
-            .push(json!({
                 "trusteeIdentity": trustee_identity,
                 "trusteeRosterPosition": trustee_roster_position,
-                "sourceSquareBindingRoot": source_square_binding_root,
+                "roundOneRecordRoot": record_root,
             }));
     }
 
@@ -237,12 +222,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
         "roundOneAggregateRoots",
         "roundOneAggregateRoot",
     )?;
-    let supplied_round_one_source_square_aggregate_roots =
-        relinearization_aggregate_roots_by_level(
-            rounds,
-            "roundOneAggregateRoots",
-            "roundOneSourceSquareAggregateRoot",
-        )?;
     for level in &expected_levels {
         let Some(record_roots) = round_one_roots_by_level.get(level) else {
             return Ok(Some(evaluation_key_material_refusal(
@@ -251,31 +230,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "setupPackage.relinearizationKeyShareRounds.roundOneRecords",
             )?));
         };
-        let Some(source_square_roots) = round_one_source_square_roots_by_level.get(level) else {
-            return Ok(Some(evaluation_key_material_refusal(
-                "relinearizationRoundOneSourceSquareLevelMissing",
-                "relinearization round-one records must cover source-square roots for every scheduled level",
-                "setupPackage.relinearizationKeyShareRounds.roundOneRecords",
-            )?));
-        };
-        let expected_source_square_aggregate_root = relinearization_source_square_aggregate_root(
-            "round-one",
-            binding.evaluator_key_schedule_root.as_str(),
-            *level,
-            source_square_roots,
-            None,
-        )?;
-        if supplied_round_one_source_square_aggregate_roots
-            .get(level)
-            .map(String::as_str)
-            != Some(expected_source_square_aggregate_root.as_str())
-        {
-            return Ok(Some(evaluation_key_material_refusal(
-                "relinearizationRoundOneSourceSquareAggregateRootMismatch",
-                "relinearization round-one source-square aggregate root must be derived from the ordered round-one source-square bindings",
-                "setupPackage.relinearizationKeyShareRounds.roundOneAggregateRoots",
-            )?));
-        }
         let expected_root = derive_protocol_hash(
             "RelinearizationRoundOneAggregateRoot",
             &json!({
@@ -285,7 +239,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                 "level": level,
-                "roundOneSourceSquareAggregateRoot": expected_source_square_aggregate_root,
                 "roundOneRecordRoots": record_roots,
             }),
         )?;
@@ -303,21 +256,18 @@ pub(super) fn verify_relinearization_key_share_rounds(
     }
 
     let mut round_two_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
-    let mut round_two_source_square_roots_by_level = BTreeMap::<u64, Vec<Value>>::new();
     let mut seen_round_two_records = BTreeSet::new();
     let round_one_state = RelinearizationRoundOneVerificationState {
         record_roots: &round_one_record_roots,
         share_roots: &round_one_share_roots,
-        source_square_binding_roots: &round_one_source_square_binding_roots,
         aggregate_roots: &supplied_round_one_aggregate_roots,
-        source_square_aggregate_roots: &supplied_round_one_source_square_aggregate_roots,
     };
     for record in round_two_records {
-        let (level, trustee_roster_position, record_root, source_square_binding_root) =
+        let (level, trustee_roster_position, record_root) =
             match verify_relinearization_round_two_record(
                 record,
                 &binding,
-                &proof_context,
+                &same_secret_proof_bindings,
                 &round_one_state,
             ) {
                 Ok(verified_record) => verified_record,
@@ -352,17 +302,9 @@ pub(super) fn verify_relinearization_key_share_rounds(
             .entry(level)
             .or_default()
             .push(json!({
-                "trusteeIdentity": trustee_identity.clone(),
-                "trusteeRosterPosition": trustee_roster_position,
-                "roundTwoRecordRoot": record_root,
-            }));
-        round_two_source_square_roots_by_level
-            .entry(level)
-            .or_default()
-            .push(json!({
                 "trusteeIdentity": trustee_identity,
                 "trusteeRosterPosition": trustee_roster_position,
-                "sourceSquareBindingRoot": source_square_binding_root,
+                "roundTwoRecordRoot": record_root,
             }));
     }
     let supplied_round_two_aggregate_roots = relinearization_aggregate_roots_by_level(
@@ -370,12 +312,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
         "roundTwoAggregateRoots",
         "roundTwoAggregateRoot",
     )?;
-    let supplied_round_two_source_square_aggregate_roots =
-        relinearization_aggregate_roots_by_level(
-            rounds,
-            "roundTwoAggregateRoots",
-            "roundTwoSourceSquareAggregateRoot",
-        )?;
     for level in &expected_levels {
         let Some(record_roots) = round_two_roots_by_level.get(level) else {
             return Ok(Some(evaluation_key_material_refusal(
@@ -384,39 +320,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
             )?));
         };
-        let Some(source_square_roots) = round_two_source_square_roots_by_level.get(level) else {
-            return Ok(Some(evaluation_key_material_refusal(
-                "relinearizationRoundTwoSourceSquareLevelMissing",
-                "relinearization round-two records must cover source-square roots for every scheduled level",
-                "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
-            )?));
-        };
-        let round_one_source_square_aggregate_root = supplied_round_one_source_square_aggregate_roots
-            .get(level)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "round-one source-square aggregate root was required before round-two verification",
-                )
-            })?;
-        let expected_source_square_aggregate_root = relinearization_source_square_aggregate_root(
-            "round-two",
-            binding.evaluator_key_schedule_root.as_str(),
-            *level,
-            source_square_roots,
-            Some(round_one_source_square_aggregate_root),
-        )?;
-        if supplied_round_two_source_square_aggregate_roots
-            .get(level)
-            .map(String::as_str)
-            != Some(expected_source_square_aggregate_root.as_str())
-        {
-            return Ok(Some(evaluation_key_material_refusal(
-                "relinearizationRoundTwoSourceSquareAggregateRootMismatch",
-                "relinearization round-two source-square aggregate root must bind the ordered round-two bindings and the round-one source-square aggregate root",
-                "setupPackage.relinearizationKeyShareRounds.roundTwoAggregateRoots",
-            )?));
-        }
         let expected_root = derive_protocol_hash(
             "RelinearizationRoundTwoAggregateRoot",
             &json!({
@@ -429,8 +332,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "roundOneAggregateRoot": supplied_round_one_aggregate_roots
                     .get(level)
                     .expect("round-one aggregate root exists after verification"),
-                "roundOneSourceSquareAggregateRoot": round_one_source_square_aggregate_root,
-                "roundTwoSourceSquareAggregateRoot": expected_source_square_aggregate_root,
                 "roundTwoRecordRoots": record_roots,
             }),
         )?;
@@ -457,7 +358,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
     if supplied_root != expected_root {
         return Ok(Some(evaluation_key_material_refusal(
             "relinearizationKeyShareRoundsRootMismatch",
-            "relinearizationKeyShareRoundsRoot does not match the canonical relinearization proof container",
+            "relinearizationKeyShareRoundsRoot does not match the canonical relinearization share-record container",
             "setupPackage.relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot",
         )?));
     }
@@ -467,12 +368,12 @@ pub(super) fn verify_relinearization_key_share_rounds(
 
 pub(super) fn verify_galois_key_share_batches(
     setup_package: &Value,
-    request: &Value,
+    _request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let Some(batches) = setup_package.get("galoisKeyShareBatches") else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
-            Some("galoisKeyBatchProofs"),
+            Some("galoisKeyShareBatches"),
             vec!["galoisKeyShareBatches".to_string()],
             Vec::new(),
             Vec::new(),
@@ -497,28 +398,13 @@ pub(super) fn verify_galois_key_share_batches(
     }
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
-    let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
-    let transported_constant_commitments =
-        same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
-    let transported_key_switch_component_material =
-        transported_evaluation_key_share_component_material_from_request(request)?;
-    let proof_context = EvaluationKeyProofVerificationContext {
-        setup_package,
-        request,
-        same_secret_proof_bindings: &same_secret_proof_bindings,
-        same_secret_records: &same_secret_records,
-        transported_constant_commitments: &transported_constant_commitments,
-        transported_key_switch_component_material: request
-            .get("transportedEvaluationKeyShareComponentMaterial")
-            .or(transported_key_switch_component_material.as_ref()),
-    };
     let expected_schedule = expected_required_galois_key_schedule()?;
     let mut seen_roster_positions = BTreeSet::new();
     for batch in batches {
         if let Err(error) = verify_galois_key_share_batch(
             batch,
             &binding,
-            &proof_context,
+            &same_secret_proof_bindings,
             &expected_schedule,
             &mut seen_roster_positions,
         ) {
@@ -533,53 +419,41 @@ pub(super) fn verify_galois_key_share_batches(
     Ok(None)
 }
 
-pub(super) fn galois_key_share_proof_for_schedule(
+pub(super) fn galois_key_share_material_for_schedule(
     batch: &Value,
     rotation: u64,
     level: u64,
 ) -> CanonicalResult<&Value> {
-    array_value(batch, "galoisKeyShareProofs")?
+    array_value(batch, "galoisKeyShareMaterialRecords")?
         .iter()
-        .find(|proof| {
-            proof.get("rotation").and_then(Value::as_u64) == Some(rotation)
-                && proof.get("level").and_then(Value::as_u64) == Some(level)
+        .find(|material_record| {
+            material_record.get("rotation").and_then(Value::as_u64) == Some(rotation)
+                && material_record.get("level").and_then(Value::as_u64) == Some(level)
         })
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "Galois key share batch does not contain a required scheduled proof",
+                "Galois key share batch does not contain a required scheduled material record",
             )
         })
 }
 
 pub(super) struct EvaluationKeyProofCommonBinding {
     pub(super) evaluator_key_schedule_root: String,
-    same_secret_consistency_root: String,
-    same_secret_proof_set_root: String,
+    pub(super) same_secret_consistency_root: String,
+    pub(super) same_secret_proof_set_root: String,
     pub(super) same_secret_proof_family_binding_root: String,
-    public_key_share_set_root: String,
-    pub(super) public_key_share_lnp_proof_set_root: String,
-    relinearization_crp_root: String,
+    pub(super) public_key_share_set_root: String,
+    pub(super) public_key_share_succinct_proof_set_root: String,
+    pub(super) relinearization_crp_root: String,
     pub(super) galois_key_crp_root: String,
     pub(super) required_galois_set_hash: String,
-}
-
-pub(super) struct EvaluationKeyProofVerificationContext<'a> {
-    pub(super) setup_package: &'a Value,
-    pub(super) request: &'a Value,
-    same_secret_proof_bindings: &'a BTreeMap<u64, SameSecretProofBinding>,
-    pub(super) same_secret_records: &'a BTreeMap<u64, Value>,
-    pub(super) transported_constant_commitments:
-        &'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>,
-    pub(super) transported_key_switch_component_material: Option<&'a Value>,
 }
 
 struct RelinearizationRoundOneVerificationState<'a> {
     record_roots: &'a BTreeMap<(u64, u64), String>,
     share_roots: &'a BTreeMap<(u64, u64), String>,
-    source_square_binding_roots: &'a BTreeMap<(u64, u64), String>,
     aggregate_roots: &'a BTreeMap<u64, String>,
-    source_square_aggregate_roots: &'a BTreeMap<u64, String>,
 }
 
 pub(super) fn evaluation_key_proof_common_binding(
@@ -588,7 +462,7 @@ pub(super) fn evaluation_key_proof_common_binding(
     let evaluator_key_schedule = setup_package.get("evaluatorKeySchedule").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "evaluatorKeySchedule was required before evaluation-key proof verification",
+            "evaluatorKeySchedule was required before evaluation-key share verification",
         )
     })?;
     let public_derivations = setup_package
@@ -597,13 +471,13 @@ pub(super) fn evaluation_key_proof_common_binding(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "commonRandomness.publicDerivations was required before evaluation-key proof verification",
+                "commonRandomness.publicDerivations was required before evaluation-key share verification",
             )
         })?;
     let crp_roots = public_derivations.get("crpRoots").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "commonRandomness.publicDerivations.crpRoots was required before evaluation-key proof verification",
+            "commonRandomness.publicDerivations.crpRoots was required before evaluation-key share verification",
         )
     })?;
 
@@ -623,18 +497,18 @@ pub(super) fn evaluation_key_proof_common_binding(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "publicKeyShareSetRoot was required before evaluation-key proof verification",
+                    "publicKeyShareSetRoot was required before evaluation-key share verification",
                 )
             })?
             .to_string(),
-        public_key_share_lnp_proof_set_root: setup_package
-            .get("publicKeyShareLnpProofs")
-            .and_then(|proof_set| proof_set.get("publicKeyShareLnpProofSetRoot"))
+        public_key_share_succinct_proof_set_root: setup_package
+            .get("publicKeyShareSuccinctProofs")
+            .and_then(|proof_set| proof_set.get("publicKeyShareSuccinctProofSetRoot"))
             .and_then(Value::as_str)
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "publicKeyShareLnpProofSetRoot was required before evaluation-key proof verification",
+                    "publicKeyShareSuccinctProofSetRoot was required before evaluation-key share verification",
                 )
             })?
             .to_string(),
@@ -645,8 +519,22 @@ pub(super) fn evaluation_key_proof_common_binding(
     })
 }
 
-pub(super) fn expected_relinearization_levels() -> Vec<u64> {
-    (1..DATA_PRIMES.len()).map(|level| level as u64).collect()
+// The scheduled relinearization key levels, read from the frozen evaluator
+// schedule: one truncated key per round at the selected working level.
+pub(super) fn scheduled_relinearization_levels() -> CanonicalResult<Vec<u64>> {
+    expected_relinearization_level_schedule()
+        .as_array()
+        .expect("relinearization level schedule is an array")
+        .iter()
+        .map(|entry| {
+            entry.get("level").and_then(Value::as_u64).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "relinearization level schedule entry is missing its level",
+                )
+            })
+        })
+        .collect()
 }
 
 pub(super) fn relinearization_aggregate_roots_by_level(
@@ -762,17 +650,95 @@ pub(super) fn verify_galois_key_switch_sample_binding(
     Ok(())
 }
 
+// Structural checks for the public key-switch component material carried by a
+// share record: exactly one of the embedded and the transported encodings,
+// with a valid component vector root. The full material content is decoded
+// and verified against these roots when the trustee evaluation-key proof
+// statements are rebuilt.
+fn verify_evaluation_key_component_material_encoding(record: &Value) -> CanonicalResult<()> {
+    let material_encoding = record
+        .get("keySwitchMaterialEncoding")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "evaluation-key share record keySwitchMaterialEncoding is required",
+            )
+        })?;
+    match material_encoding {
+        "embedded-full-key-switch-component-vectors" => {
+            if record.get("keySwitchComponentVectors").is_none()
+                || record.get("keySwitchComponentMaterialRoot").is_some()
+                || record.get("keySwitchComponentChunkSizeBytes").is_some()
+                || record.get("keySwitchComponentChunkCount").is_some()
+                || record.get("keySwitchComponentTotalByteLength").is_some()
+                || record.get("keySwitchComponentFullObjectHash").is_some()
+                || record.get("keySwitchComponentChunkRoot").is_some()
+                || record.get("keySwitchComponentChunkHashes").is_some()
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "embedded evaluation-key share material must include component vectors and no component transport reference",
+                ));
+            }
+        }
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING => {
+            if record.get("keySwitchComponentVectors").is_some() {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "binary evaluation-key share material must not embed keySwitchComponentVectors",
+                ));
+            }
+            for field_name in [
+                "keySwitchComponentMaterialRoot",
+                "keySwitchComponentChunkSizeBytes",
+                "keySwitchComponentChunkCount",
+                "keySwitchComponentTotalByteLength",
+                "keySwitchComponentFullObjectHash",
+                "keySwitchComponentChunkRoot",
+                "keySwitchComponentChunkHashes",
+            ] {
+                if record.get(field_name).is_none() {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ProfileComponentMismatch,
+                        format!("binary evaluation-key share material requires {field_name}"),
+                    ));
+                }
+            }
+        }
+        _ => {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "evaluation-key share keySwitchMaterialEncoding is not accepted",
+            ));
+        }
+    }
+    validate_hash_string(
+        value_string(record, "keySwitchComponentVectorRoot")?,
+        "evaluationKeyShareRecord.keySwitchComponentVectorRoot",
+    )?;
+    if let Some(material_root) = record
+        .get("keySwitchComponentMaterialRoot")
+        .and_then(Value::as_str)
+    {
+        validate_hash_string(
+            material_root,
+            "evaluationKeyShareRecord.keySwitchComponentMaterialRoot",
+        )?;
+    }
+
+    Ok(())
+}
+
 fn verify_relinearization_round_one_record(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    proof_context: &EvaluationKeyProofVerificationContext<'_>,
-) -> CanonicalResult<(u64, u64, String, String, String)> {
+    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
+) -> CanonicalResult<(u64, u64, String, String)> {
     verify_evaluation_key_record_object(
         record,
         RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE,
         "relinearization-key-share",
-        RELINEARIZATION_PROOF_VERIFICATION_STATUS,
-        RELINEARIZATION_PROOF_MODEL_STATUS,
     )?;
     if let Some(unexpected_field) = unexpected_relinearization_round_one_record_field(record) {
         return Err(CanonicalError::new(
@@ -787,30 +753,23 @@ fn verify_relinearization_round_one_record(
     verify_evaluation_key_record_common_bindings(
         record,
         binding,
-        proof_context.same_secret_proof_bindings,
+        same_secret_proof_bindings,
         trustee_roster_position,
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
     )?;
     verify_relinearization_key_switch_sample_binding(record, binding, "round-one", level)?;
+    verify_evaluation_key_component_material_encoding(record)?;
     let round_one_share_root = value_string(record, "roundOneShareRoot")?;
     validate_hash_string(round_one_share_root, "roundOneShareRoot")?;
-    let source_square_binding_root = value_string(record, "sourceSquareBindingRoot")?;
-    validate_hash_string(source_square_binding_root, "sourceSquareBindingRoot")?;
-    let round_one_proof_root = value_string(record, "roundOneProofRoot")?;
-    validate_hash_string(round_one_proof_root, "roundOneProofRoot")?;
-    verify_relinearization_key_share_lnp_proof_record(
-        record,
-        proof_context,
-        "roundOneProofRoot",
-        round_one_proof_root,
-    )?;
-    let expected_source_square_binding_root =
-        relinearization_source_square_binding_root(record, "round-one", round_one_share_root)?;
-    if source_square_binding_root != expected_source_square_binding_root {
+    if record
+        .get("keySwitchComponentVectorRoot")
+        .and_then(Value::as_str)
+        != Some(round_one_share_root)
+    {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "sourceSquareBindingRoot does not match the canonical relinearization source-square binding",
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "relinearization round-one share root must match the key-switch component vector root",
         ));
     }
     let supplied_root = value_string(record, "roundOneRecordRoot")?;
@@ -832,22 +791,19 @@ fn verify_relinearization_round_one_record(
         trustee_roster_position,
         supplied_root.to_string(),
         round_one_share_root.to_string(),
-        source_square_binding_root.to_string(),
     ))
 }
 
 fn verify_relinearization_round_two_record(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    proof_context: &EvaluationKeyProofVerificationContext<'_>,
+    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
     round_one_state: &RelinearizationRoundOneVerificationState<'_>,
-) -> CanonicalResult<(u64, u64, String, String)> {
+) -> CanonicalResult<(u64, u64, String)> {
     verify_evaluation_key_record_object(
         record,
         RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE,
         "relinearization-key-share",
-        RELINEARIZATION_PROOF_VERIFICATION_STATUS,
-        RELINEARIZATION_PROOF_MODEL_STATUS,
     )?;
     if let Some(unexpected_field) = unexpected_relinearization_round_two_record_field(record) {
         return Err(CanonicalError::new(
@@ -862,21 +818,18 @@ fn verify_relinearization_round_two_record(
     verify_evaluation_key_record_common_bindings(
         record,
         binding,
-        proof_context.same_secret_proof_bindings,
+        same_secret_proof_bindings,
         trustee_roster_position,
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
     )?;
     verify_relinearization_key_switch_sample_binding(record, binding, "round-two", level)?;
+    verify_evaluation_key_component_material_encoding(record)?;
     for field_name in [
         "roundOneShareRoot",
         "roundOneRecordRoot",
         "roundOneAggregateRoot",
-        "roundOneSourceSquareBindingRoot",
-        "roundOneSourceSquareAggregateRoot",
         "roundTwoShareRoot",
-        "sourceSquareBindingRoot",
-        "roundTwoProofRoot",
     ] {
         validate_hash_string(value_string(record, field_name)?, field_name)?;
     }
@@ -890,39 +843,20 @@ fn verify_relinearization_round_two_record(
             .get(&level)
             .map(String::as_str)
             != Some(value_string(record, "roundOneAggregateRoot")?)
-        || round_one_state
-            .source_square_binding_roots
-            .get(&key)
-            .map(String::as_str)
-            != Some(value_string(record, "roundOneSourceSquareBindingRoot")?)
-        || round_one_state
-            .source_square_aggregate_roots
-            .get(&level)
-            .map(String::as_str)
-            != Some(value_string(record, "roundOneSourceSquareAggregateRoot")?)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "relinearization round-two record must bind the accepted round-one record, share, aggregate, and source-square roots",
+            "relinearization round-two record must bind the accepted round-one record, share, and aggregate roots",
         ));
     }
-    let round_two_proof_root = value_string(record, "roundTwoProofRoot")?;
-    verify_relinearization_key_share_lnp_proof_record(
-        record,
-        proof_context,
-        "roundTwoProofRoot",
-        round_two_proof_root,
-    )?;
-    let source_square_binding_root = value_string(record, "sourceSquareBindingRoot")?;
-    let expected_source_square_binding_root = relinearization_source_square_binding_root(
-        record,
-        "round-two",
-        value_string(record, "roundTwoShareRoot")?,
-    )?;
-    if source_square_binding_root != expected_source_square_binding_root {
+    if record
+        .get("keySwitchComponentVectorRoot")
+        .and_then(Value::as_str)
+        != Some(value_string(record, "roundTwoShareRoot")?)
+    {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "sourceSquareBindingRoot does not match the canonical relinearization source-square binding",
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "relinearization round-two share root must match the key-switch component vector root",
         ));
     }
     let supplied_root = value_string(record, "roundTwoRecordRoot")?;
@@ -939,18 +873,13 @@ fn verify_relinearization_round_two_record(
         ));
     }
 
-    Ok((
-        level,
-        trustee_roster_position,
-        supplied_root.to_string(),
-        source_square_binding_root.to_string(),
-    ))
+    Ok((level, trustee_roster_position, supplied_root.to_string()))
 }
 
 fn verify_galois_key_share_batch(
     batch: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    proof_context: &EvaluationKeyProofVerificationContext<'_>,
+    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
     expected_schedule: &Value,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<()> {
@@ -958,8 +887,6 @@ fn verify_galois_key_share_batch(
         batch,
         GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE,
         "galois-key-share",
-        GALOIS_PROOF_VERIFICATION_STATUS,
-        GALOIS_PROOF_MODEL_STATUS,
     )?;
     if let Some(unexpected_field) = unexpected_galois_key_share_batch_field(batch) {
         return Err(CanonicalError::new(
@@ -977,7 +904,7 @@ fn verify_galois_key_share_batch(
     verify_evaluation_key_record_common_bindings(
         batch,
         binding,
-        proof_context.same_secret_proof_bindings,
+        same_secret_proof_bindings,
         trustee_roster_position,
         "galoisKeyCrpRoot",
         binding.galois_key_crp_root.as_str(),
@@ -1018,55 +945,25 @@ fn verify_galois_key_share_batch(
             "galoisKeyShareRoot",
         )?;
     }
-    let proof_records = array_value(batch, "galoisKeyShareProofs")?;
-    if proof_records.len() != expected_entries.len() {
+    let material_records = array_value(batch, "galoisKeyShareMaterialRecords")?;
+    if material_records.len() != expected_entries.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "Galois key share batch must contain one proof record per required schedule entry",
+            "Galois key share batch must contain one material record per required schedule entry",
         ));
     }
-    let mut proof_roots = Vec::new();
-    for ((proof_record, root_entry), expected_entry) in proof_records
+    for ((material_record, root_entry), expected_entry) in material_records
         .iter()
         .zip(key_roots.iter())
         .zip(expected_entries)
     {
-        let rotation = value_u64(expected_entry, "rotation")?;
-        let level = value_u64(expected_entry, "level")?;
-        verify_galois_key_switch_sample_binding(proof_record, binding, rotation, level)?;
-        let proof_root = verify_galois_key_share_lnp_proof_record(
-            proof_record,
+        verify_galois_key_share_material_record(
+            material_record,
             batch,
-            proof_context,
+            binding,
             root_entry,
             expected_entry,
         )?;
-        proof_roots.push(json!({
-            "rotation": value_u64(proof_record, "rotation")?,
-            "level": value_u64(proof_record, "level")?,
-            "galoisKeyShareProofRoot": proof_root,
-        }));
-    }
-    let supplied_batch_proof_root = value_string(batch, "galoisKeyBatchProofRoot")?;
-    let expected_batch_proof_root = derive_protocol_hash(
-        "GaloisKeyBatchProofRoot",
-        &json!({
-            "objectType": "GaloisKeyBatchProofAggregate",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": "galois-key-share",
-            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-            "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
-            "trusteeRosterPosition": trustee_roster_position,
-            "proofRoots": proof_roots,
-        }),
-    )?;
-    if supplied_batch_proof_root != expected_batch_proof_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "galoisKeyBatchProofRoot must be derived from the verified Galois proof records",
-        ));
     }
     let supplied_root = value_string(batch, "galoisKeyShareBatchRoot")?;
     let mut root_input = batch.clone();
@@ -1085,29 +982,97 @@ fn verify_galois_key_share_batch(
     Ok(())
 }
 
+fn verify_galois_key_share_material_record(
+    material_record: &Value,
+    batch: &Value,
+    binding: &EvaluationKeyProofCommonBinding,
+    root_entry: &Value,
+    expected_schedule_entry: &Value,
+) -> CanonicalResult<()> {
+    if !material_record.is_object() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois key share material record must be an object",
+        ));
+    }
+    if let Some(unexpected_field) = unexpected_galois_key_share_material_field(material_record) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "Galois key share material record contains unexpected field {unexpected_field}"
+            ),
+        ));
+    }
+    if material_record.get("objectType").and_then(Value::as_str)
+        != Some(GALOIS_KEY_SHARE_MATERIAL_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois key share material objectType must be GaloisKeyShareMaterial",
+        ));
+    }
+    if material_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois key share material objectVersion must be 1",
+        ));
+    }
+    for field_name in [
+        "setupProfileId",
+        "setupProofProfileId",
+        "proofFamily",
+        "trusteeIdentity",
+        "trusteeRosterPosition",
+    ] {
+        if material_record.get(field_name) != batch.get(field_name) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                format!("Galois key share material {field_name} must match the parent batch"),
+            ));
+        }
+    }
+    if material_record.get("rotation") != expected_schedule_entry.get("rotation")
+        || material_record.get("level") != expected_schedule_entry.get("level")
+        || material_record.get("rotation") != root_entry.get("rotation")
+        || material_record.get("level") != root_entry.get("level")
+        || material_record.get("galoisKeyShareRoot") != root_entry.get("galoisKeyShareRoot")
+        || material_record.get("keySwitchComponentVectorRoot")
+            != root_entry.get("galoisKeyShareRoot")
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "Galois key share material must bind the scheduled rotation, level, and share root",
+        ));
+    }
+    let rotation = value_u64(material_record, "rotation")?;
+    let level = value_u64(material_record, "level")?;
+    verify_galois_key_switch_sample_binding(material_record, binding, rotation, level)?;
+    verify_evaluation_key_component_material_encoding(material_record)?;
+
+    Ok(())
+}
+
 fn verify_evaluation_key_record_object(
     record: &Value,
     expected_object_type: &str,
     expected_proof_family: &str,
-    expected_proof_verification_status: &str,
-    expected_proof_model_status: &str,
 ) -> CanonicalResult<()> {
     if !record.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "evaluation-key proof record must be an object",
+            "evaluation-key share record must be an object",
         ));
     }
     if record.get("objectType").and_then(Value::as_str) != Some(expected_object_type) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("evaluation-key proof objectType must be {expected_object_type}"),
+            format!("evaluation-key share objectType must be {expected_object_type}"),
         ));
     }
     if record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "evaluation-key proof objectVersion must be 1",
+            "evaluation-key share objectVersion must be 1",
         ));
     }
     for (field_name, expected_value) in [
@@ -1116,14 +1081,17 @@ fn verify_evaluation_key_record_object(
         ("proofFamily", expected_proof_family),
         (
             "proofVerificationStatus",
-            expected_proof_verification_status,
+            EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", expected_proof_model_status),
+        (
+            "proofModelStatus",
+            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
+        ),
     ] {
         if record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                format!("evaluation-key proof {field_name} must be {expected_value}"),
+                format!("evaluation-key share {field_name} must be {expected_value}"),
             ));
         }
     }
@@ -1157,22 +1125,22 @@ fn verify_evaluation_key_record_common_bindings(
             binding.same_secret_proof_family_binding_root.as_str(),
         ),
         (
-            "publicKeyShareLnpProofSetRoot",
-            binding.public_key_share_lnp_proof_set_root.as_str(),
+            "publicKeyShareSuccinctProofSetRoot",
+            binding.public_key_share_succinct_proof_set_root.as_str(),
         ),
         (crp_root_field_name, expected_crp_root),
     ] {
         if record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                format!("evaluation-key proof {field_name} must match the accepted setup binding"),
+                format!("evaluation-key share {field_name} must match the accepted setup binding"),
             ));
         }
     }
     let Some(same_secret_binding) = same_secret_proof_bindings.get(&trustee_roster_position) else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "evaluation-key proof trusteeRosterPosition must reference an accepted same-secret proof",
+            "evaluation-key share trusteeRosterPosition must reference an accepted same-secret proof",
         ));
     };
     for (field_name, expected_value) in [
@@ -1203,13 +1171,39 @@ fn verify_evaluation_key_record_common_bindings(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 format!(
-                    "evaluation-key proof {field_name} must match the accepted trustee secret binding"
+                    "evaluation-key share {field_name} must match the accepted trustee secret binding"
                 ),
             ));
         }
     }
 
     Ok(())
+}
+
+const EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES: &[&str] = &[
+    "keySwitchMaterialEncoding",
+    "keySwitchDomain",
+    "keySwitchSeedHex",
+    "ringDegree",
+    "keySwitchComponentVectorRoot",
+    "keySwitchComponentVectors",
+    "keySwitchComponentMaterialRoot",
+    "keySwitchComponentChunkSizeBytes",
+    "keySwitchComponentChunkCount",
+    "keySwitchComponentTotalByteLength",
+    "keySwitchComponentFullObjectHash",
+    "keySwitchComponentChunkRoot",
+    "keySwitchComponentChunkHashes",
+];
+
+fn unexpected_field_outside(
+    value: &Value,
+    base_field_names: &[&str],
+    extra_field_names: &[&str],
+) -> Option<String> {
+    let mut allowed = base_field_names.to_vec();
+    allowed.extend_from_slice(extra_field_names);
+    unexpected_field(value, &allowed)
 }
 
 fn unexpected_relinearization_key_share_rounds_field(value: &Value) -> Option<String> {
@@ -1238,7 +1232,7 @@ fn unexpected_relinearization_key_share_rounds_field(value: &Value) -> Option<St
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
             "publicKeyShareSetRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "relinearizationCrpRoot",
             "relinearizationLevelSchedule",
             "roundOneAggregateRoots",
@@ -1251,7 +1245,7 @@ fn unexpected_relinearization_key_share_rounds_field(value: &Value) -> Option<St
 }
 
 fn unexpected_relinearization_round_one_record_field(value: &Value) -> Option<String> {
-    unexpected_field(
+    unexpected_field_outside(
         value,
         &[
             "objectType",
@@ -1276,63 +1270,20 @@ fn unexpected_relinearization_round_one_record_field(value: &Value) -> Option<St
             "sameSecretConsistencyRoot",
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofRoot",
             "relinearizationCrpRoot",
             "roundOneShareRoot",
-            "sourceSquareBindingRoot",
-            "roundOneProofRoot",
-            "proofProfileId",
-            "setupProofBinding",
-            "keySwitchMaterialEncoding",
-            "keySwitchDomain",
-            "keySwitchSeedHex",
-            "ringDegree",
-            "keySwitchComponentVectorRoot",
-            "keySwitchComponentVectors",
-            "keySwitchComponentMaterialRoot",
-            "keySwitchComponentChunkSizeBytes",
-            "keySwitchComponentChunkCount",
-            "keySwitchComponentTotalByteLength",
-            "keySwitchComponentFullObjectHash",
-            "keySwitchComponentChunkRoot",
-            "keySwitchComponentChunkHashes",
-            "relinearizationKeyShareTboxParameterProfileHash",
-            "statementHash",
-            "relationCommitmentHash",
-            "tboxCommitmentPrefixHash",
-            "z34SeedMaterialHash",
-            "z34ChallengeSeedHash",
-            "z34ChallengeTailHash",
-            "z34ChallengeRowDomainHash",
-            "z34ChallengeZ3RowSetHash",
-            "z34ChallengeZ4RowSetHash",
-            "tboxLowerProtocolChallengeHash",
-            "z34Z3CheckWindowHash",
-            "z34Z4CheckWindowHash",
-            "z34Z3L2SquaredDecimal",
-            "z34Z4InfinityNormDecimal",
-            "challenge",
-            "proofSizeBytes",
-            "proofBytesHash",
-            "proofBytesHex",
-            "proofBytesEncoding",
-            "proofMaterialRoot",
-            "proofChunkSizeBytes",
-            "proofChunkCount",
-            "proofTotalByteLength",
-            "proofFullObjectHash",
-            "proofChunkRoot",
-            "proofChunkHashes",
             "roundOneRecordRoot",
         ],
+        EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES,
     )
 }
 
 fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<String> {
-    unexpected_field(
+    unexpected_field_outside(
         value,
         &[
             "objectType",
@@ -1357,7 +1308,7 @@ fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<St
             "sameSecretConsistencyRoot",
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofRoot",
@@ -1365,55 +1316,10 @@ fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<St
             "roundOneShareRoot",
             "roundOneRecordRoot",
             "roundOneAggregateRoot",
-            "roundOneSourceSquareBindingRoot",
-            "roundOneSourceSquareAggregateRoot",
             "roundTwoShareRoot",
-            "sourceSquareBindingRoot",
-            "roundTwoProofRoot",
-            "proofProfileId",
-            "setupProofBinding",
-            "keySwitchMaterialEncoding",
-            "keySwitchDomain",
-            "keySwitchSeedHex",
-            "ringDegree",
-            "keySwitchComponentVectorRoot",
-            "keySwitchComponentVectors",
-            "keySwitchComponentMaterialRoot",
-            "keySwitchComponentChunkSizeBytes",
-            "keySwitchComponentChunkCount",
-            "keySwitchComponentTotalByteLength",
-            "keySwitchComponentFullObjectHash",
-            "keySwitchComponentChunkRoot",
-            "keySwitchComponentChunkHashes",
-            "relinearizationKeyShareTboxParameterProfileHash",
-            "statementHash",
-            "relationCommitmentHash",
-            "tboxCommitmentPrefixHash",
-            "z34SeedMaterialHash",
-            "z34ChallengeSeedHash",
-            "z34ChallengeTailHash",
-            "z34ChallengeRowDomainHash",
-            "z34ChallengeZ3RowSetHash",
-            "z34ChallengeZ4RowSetHash",
-            "tboxLowerProtocolChallengeHash",
-            "z34Z3CheckWindowHash",
-            "z34Z4CheckWindowHash",
-            "z34Z3L2SquaredDecimal",
-            "z34Z4InfinityNormDecimal",
-            "challenge",
-            "proofSizeBytes",
-            "proofBytesHash",
-            "proofBytesHex",
-            "proofBytesEncoding",
-            "proofMaterialRoot",
-            "proofChunkSizeBytes",
-            "proofChunkCount",
-            "proofTotalByteLength",
-            "proofFullObjectHash",
-            "proofChunkRoot",
-            "proofChunkHashes",
             "roundTwoRecordRoot",
         ],
+        EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES,
     )
 }
 
@@ -1442,7 +1348,7 @@ fn unexpected_galois_key_share_batch_field(value: &Value) -> Option<String> {
             "sameSecretConsistencyRoot",
             "sameSecretProofSetRoot",
             "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofRoot",
@@ -1450,9 +1356,27 @@ fn unexpected_galois_key_share_batch_field(value: &Value) -> Option<String> {
             "requiredGaloisSetHash",
             "requiredGaloisKeySchedule",
             "galoisKeyShareRoots",
-            "galoisKeyShareProofs",
-            "galoisKeyBatchProofRoot",
+            "galoisKeyShareMaterialRecords",
             "galoisKeyShareBatchRoot",
         ],
+    )
+}
+
+fn unexpected_galois_key_share_material_field(value: &Value) -> Option<String> {
+    unexpected_field_outside(
+        value,
+        &[
+            "objectType",
+            "objectVersion",
+            "setupProfileId",
+            "setupProofProfileId",
+            "proofFamily",
+            "trusteeIdentity",
+            "trusteeRosterPosition",
+            "rotation",
+            "level",
+            "galoisKeyShareRoot",
+        ],
+        EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES,
     )
 }

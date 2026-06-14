@@ -7,7 +7,7 @@ mod accepted_setup;
 mod certificates;
 mod commitment;
 mod development_fixtures;
-mod evaluation_key_share_proof;
+mod evaluation_key_share_material;
 mod input;
 mod key_material;
 mod local_trustee_state;
@@ -16,12 +16,15 @@ mod participant_material;
 mod private_vss;
 mod private_vss_share_proof;
 mod public_evaluation_key_material;
-mod public_key_share_proof;
-mod same_secret_proof;
 mod sampling;
 mod setup_proof;
 mod sharing;
 mod threshold_share_commitments;
+mod trustee_evaluation_key_proof;
+pub(crate) use trustee_evaluation_key_proof::{
+    generate_trustee_evaluation_key_proof_from_request,
+    verify_trustee_evaluation_key_proof_from_request,
+};
 mod validation;
 mod vss;
 
@@ -33,7 +36,6 @@ pub(crate) use accepted_setup::{
     describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
-pub(crate) use evaluation_key_share_proof::generate_evaluation_key_share_lnp_proof_from_request;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
@@ -46,8 +48,11 @@ pub(crate) use public_evaluation_key_material::{
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
-pub(crate) use public_key_share_proof::generate_public_key_share_lnp_proof_from_request;
-pub(crate) use same_secret_proof::generate_same_secret_lnp_proof_from_request;
+pub(crate) use setup_proof::{
+    absorb_setup_proof_material_transport_stream_chunk_request,
+    begin_setup_proof_material_transport_stream_request,
+    finish_setup_proof_material_transport_stream_request,
+};
 pub(crate) use threshold_share_commitments::{
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,
@@ -75,7 +80,6 @@ use crate::{
             engine::{BgvPublicKey, DevelopmentBgvKey},
             key_switch::{KeySwitchKey, generate_galois_key, generate_relinearization_key},
             records::MAXIMUM_OPTION_COUNT,
-            top_k::selected_evaluator_rotation_key_schedule,
         },
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},

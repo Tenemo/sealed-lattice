@@ -31,7 +31,7 @@ use crate::{
             },
         },
         modular_arithmetic::{add_mod, integer_square_root_ceil, inverse_mod, mul_mod, sub_mod},
-        profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        profile::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -39,6 +39,12 @@ use crate::{
 // The deterministic tie policy: a higher aggregate score ranks first, and equal
 // scores are broken by the lower option index.
 pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
+// The frozen evaluator working level for the selected multi-ballot profile:
+// the aggregate is mod-switched to this level before packing, every rotation
+// and multiplication happens at or below it, and one relinearization key plus
+// the packing/forward rotation keys are generated here (lower levels use the
+// same keys through CRT-idempotent truncation).
+pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 15;
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;

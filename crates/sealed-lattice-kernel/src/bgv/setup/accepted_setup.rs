@@ -32,8 +32,6 @@ pub(super) use self::evaluation_key_material_transport::{
     public_evaluation_key_material_transport_hashes,
 };
 #[cfg(test)]
-pub(super) use self::evaluation_key_proof_checks::register_verified_evaluation_key_share_proof_material_chunks;
-#[cfg(test)]
 pub(super) use self::public_key_share_material::{
     accepted_setup_collective_public_key_from_package, public_key_share_material_transport_hashes,
 };
@@ -59,18 +57,21 @@ use self::evaluation_key_material_transport::{
     transported_evaluation_key_share_component_material_from_request,
     verify_public_evaluation_key_set, verify_required_public_evaluation_key_set,
 };
-use self::evaluation_key_proof_checks::{
-    LnpTboxZ34MetadataExpectation, relinearization_source_square_aggregate_root,
-    relinearization_source_square_binding_root, verify_galois_key_share_lnp_proof_record,
-    verify_lnp_tbox_z34_metadata_fields, verify_relinearization_key_share_lnp_proof_record,
+use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
+    TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
+    register_verified_trustee_evaluation_key_proof_material_chunks,
+    round_one_public_aggregate_diagonals_from_package, trustee_evaluation_key_proof_material_root,
+    trustee_evaluation_key_statement_from_package,
 };
 use self::evaluation_key_share_rounds::{
-    EvaluationKeyProofCommonBinding, EvaluationKeyProofVerificationContext,
-    evaluation_key_proof_common_binding, expected_galois_key_switch_seed,
-    expected_relinearization_key_switch_seed, expected_relinearization_levels,
-    galois_key_share_proof_for_schedule, relinearization_aggregate_roots_by_level,
-    verify_galois_key_share_batches, verify_galois_key_switch_sample_binding,
-    verify_relinearization_key_share_rounds, verify_relinearization_key_switch_sample_binding,
+    EvaluationKeyProofCommonBinding, evaluation_key_proof_common_binding,
+    expected_galois_key_switch_seed, expected_relinearization_key_switch_seed,
+    galois_key_share_material_for_schedule, relinearization_aggregate_roots_by_level,
+    scheduled_relinearization_levels, verify_galois_key_share_batches,
+    verify_galois_key_switch_sample_binding, verify_relinearization_key_share_rounds,
+    verify_relinearization_key_switch_sample_binding,
 };
 use self::evaluator_key_schedule::{
     verify_context_fields_match, verify_evaluator_key_schedule, verify_generic_key_switch_policy,
@@ -81,25 +82,30 @@ use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
     verify_private_vss_envelope_commitments,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, public_key_share_material_uses_transport,
     verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
     verify_public_key_share_material_set,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_material_root;
 use self::public_key_shares::{
     PublicKeyCommonBinding, public_key_common_binding, public_key_share_proof_refusal,
-    public_key_share_records_by_roster_position, verify_optional_public_key_share_lnp_proofs,
+    public_key_share_records_by_roster_position, verify_optional_public_key_share_succinct_proofs,
     verify_public_key_material_acceptance_boundary, verify_public_key_share_proofs,
     verify_public_key_shares,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::same_secret_consistency::same_secret_anchor_proof_material_root;
 use self::same_secret_consistency::{
     SameSecretProofBinding, SameSecretStatementBinding, same_secret_consistency_root_from_package,
     same_secret_constant_commitment_values_from_material, same_secret_proof_bindings_from_package,
     same_secret_proof_family_binding_root, same_secret_proof_set_root_from_package,
     same_secret_statement_bindings_from_package, same_secret_statement_records_by_roster_position,
     same_secret_transported_constant_commitments_by_roster_position,
-    verify_optional_same_secret_lnp_proofs, verify_same_secret_consistency,
-    verify_same_secret_context,
+    verify_optional_same_secret_proofs, verify_same_secret_consistency, verify_same_secret_context,
 };
 use self::setup_context::{q_share_hash, q_share_value, verify_context, verify_q_share};
 use self::threshold_share_commitment_checks::{
@@ -118,7 +124,7 @@ use self::vss_complaints_and_acceptances::{
     verify_vss_share_acceptances,
 };
 
-use super::{commitment, evaluation_key_share_proof, setup_proof, threshold_share_commitments};
+use super::{commitment, setup_proof, threshold_share_commitments};
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -145,57 +151,22 @@ use super::{
         setup_commitment_modulus_product_ceil_bits, setup_commitment_profile_hash,
         setup_commitment_profile_value, setup_commitment_root,
     },
-    evaluation_key_share_proof::{
-        EVALUATION_KEY_SHARE_CARRY_MASK_BITS, EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    evaluation_key_share_material::{
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        EVALUATION_KEY_SHARE_ERROR_INFINITY_BOUND, EVALUATION_KEY_SHARE_ERROR_MASK_BITS,
-        EVALUATION_KEY_SHARE_RANDOMNESS_MASK_BITS,
-        EVALUATION_KEY_SHARE_ROUND_TWO_AGGREGATE_SOURCE_PARTICIPANT_BOUND,
-        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS, EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND,
-        EVALUATION_KEY_SHARE_SECRET_MASK_BITS, EVALUATION_KEY_SHARE_SOURCE_MASK_BITS,
-        EvaluationKeyShareLnpProofVerificationInput, EvaluationKeyShareProofFamily,
-        GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS, GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-        GALOIS_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-        RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-        RELINEARIZATION_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN, component_b_vectors_from_record,
-        evaluation_key_share_lnp_relation_proof_bytes_hash,
-        verify_evaluation_key_share_lnp_relation_proof,
-    },
-    private_vss_share_proof::{
-        PRIVATE_VSS_SHARE_CARRY_MASK_BITS, PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-        PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS, PRIVATE_VSS_SHARE_RANDOMNESS_MASK_BITS,
-        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-    },
-    public_key_share_proof::{
-        PUBLIC_KEY_SHARE_CARRY_MASK_BITS, PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND,
-        PUBLIC_KEY_SHARE_ERROR_MASK_BITS, PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
-        PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
-        PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN, PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND, PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS, PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND,
-        PublicKeyShareLnpProofVerificationInput, public_key_share_coefficient_vector_hash,
-        public_key_share_lnp_relation_proof_bytes_hash, verify_public_key_share_lnp_relation_proof,
-    },
-    same_secret_proof::{
-        SAME_SECRET_LNP_PROOF_MODEL_STATUS, SAME_SECRET_LNP_PROOF_VERIFICATION_STATUS,
-        SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN, SAME_SECRET_MESSAGE_MASK_BITS,
-        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND, SAME_SECRET_RANDOMNESS_MASK_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS, SAME_SECRET_TERNARY_INFINITY_BOUND,
-        same_secret_lnp_relation_proof_bytes_hash, verify_same_secret_lnp_relation_proof,
+        EvaluationKeyShareProofFamily, component_b_vectors_from_record,
     },
     sampling::reduce_unbiased_u64,
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_CHALLENGE_BITS,
         SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND, SETUP_PROOF_CHALLENGE_COUNT,
         SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS, SETUP_PROOF_CHALLENGE_DOMAIN,
-        SETUP_PROOF_CHALLENGE_SAMPLER, SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
-        SETUP_PROOF_CHALLENGE_SPACE, SETUP_PROOF_CHALLENGE_STREAM_DOMAIN, SETUP_PROOF_FAMILIES,
+        SETUP_PROOF_CHALLENGE_SAMPLER, SETUP_PROOF_CHALLENGE_SPACE, SETUP_PROOF_FAMILIES,
         SETUP_PROOF_LNP_CHALLENGE_ENCODED_BITS, SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
         SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS, SETUP_PROOF_LNP_PROOF_RING_DEGREE,
         SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_PROFILE_ID, SETUP_PROOF_SERIALIZATION,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialReferenceInput,
-        setup_proof_material_reference_root, setup_proof_material_transport_hashes,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, setup_proof_material_transport_hashes,
+        verified_setup_proof_material_chunks_from_request,
     },
     threshold_share_commitments::{
         derive_threshold_share_commitment_set_from_parts,
@@ -209,7 +180,7 @@ use super::{
 };
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
 use crate::bgv::evaluator::top_k::{
-    DIRECT_COMPARISON_OUTPUT_LEVEL, direct_score_packing_basis_galois_elements,
+    SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
 };
 use crate::bgv::profile::SPECIAL_PRIME;
@@ -252,8 +223,8 @@ pub(super) const PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT: &str =
     "sealed-lattice-public-key-share-material-binary-v1";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV1";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION: u64 = 1;
-const PUBLIC_KEY_SHARE_LNP_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareLnpProofSet";
-const PUBLIC_KEY_SHARE_LNP_PROOF_OBJECT_TYPE: &str = "PublicKeyShareLnpProof";
+const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProofSet";
+const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProof";
 const COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE: &str = "CollectivePublicKey";
 const EVALUATOR_KEY_SCHEDULE_OBJECT_TYPE: &str = "EvaluatorKeySchedule";
 const REQUIRED_GALOIS_SET_OBJECT_TYPE: &str = "RequiredGaloisSet";
@@ -261,7 +232,9 @@ const RELINEARIZATION_KEY_SHARE_ROUNDS_OBJECT_TYPE: &str = "RelinearizationKeySh
 const RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE: &str = "RelinearizationKeyShareRoundOne";
 const RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE: &str = "RelinearizationKeyShareRoundTwo";
 const GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE: &str = "GaloisKeyShareBatch";
-const GALOIS_KEY_SHARE_PROOF_OBJECT_TYPE: &str = "GaloisKeyShareProof";
+const GALOIS_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "GaloisKeyShareMaterial";
+const TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE: &str = "TrusteeEvaluationKeyProofSet";
+const TRUSTEE_EVALUATION_KEY_PROOF_OBJECT_TYPE: &str = "TrusteeEvaluationKeyProof";
 const PUBLIC_EVALUATION_KEY_SET_OBJECT_TYPE: &str = "PublicEvaluationKeySet";
 pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedPublicEvaluationKeyMaterialSet";
@@ -276,11 +249,14 @@ pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
 const PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE: &str =
     "verified-relinearization-and-galois-proof-records";
 const PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC: &[u8; 8] = b"SLEKPMV1";
-const RELINEARIZATION_PROOF_VERIFICATION_STATUS: &str =
-    RELINEARIZATION_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS;
-const RELINEARIZATION_PROOF_MODEL_STATUS: &str = RELINEARIZATION_KEY_SHARE_LNP_PROOF_MODEL_STATUS;
-const GALOIS_PROOF_VERIFICATION_STATUS: &str = GALOIS_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS;
-const GALOIS_PROOF_MODEL_STATUS: &str = GALOIS_KEY_SHARE_LNP_PROOF_MODEL_STATUS;
+// Share records carry no proof fields: their correctness claim is the
+// per-trustee succinct argument, so every record pins this status pair.
+pub(in crate::bgv::setup) const EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS: &str =
+    "share-records-bound-to-trustee-evaluation-key-argument";
+use super::trustee_evaluation_key_proof::{
+    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
+    TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
+};
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_SET_OBJECT_TYPE: &str =
     "VssCoefficientCommitmentMaterialSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
@@ -309,7 +285,7 @@ const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE: &str =
     "ActiveStaticSetupTheoremCertificate";
 const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE: &str =
     "ActiveStaticSetupTheoremCertificateHash";
-const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-same-secret-public-key-share-relinearization-and-galois-proof-bytes-accepted-for-setup-proof-accounting";
+const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
 const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
@@ -351,6 +327,12 @@ const SAME_SECRET_BOUND_PROOF_FAMILIES: &[&str] = &[
     "relinearization-key-share",
     "galois-key-share",
 ];
+const ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES: &[&str] = &[
+    "same-secret-linkage-anchor",
+    "public-key-share",
+    "vss-opening-carry",
+    "trustee-evaluation-key",
+];
 
 const ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES: &[&str] = &[
     "setupSeed",
@@ -363,9 +345,30 @@ const ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES: &[&str] = &[
     "lattigoPublicKey",
     "lattigoRelinearizationKey",
     "lattigoGaloisKey",
+    "publicKeyShareLnpProofs",
+    "publicKeyShareLnpTboxProofs",
+    "publicKeyShareTboxProofs",
+    "proofGeneration",
+    "proofRandomness",
+    "proofRandomnessNonceHex",
+    "proofRandomnessSeedHex",
+    "proofRandomnessSource",
     "externallySuppliedThresholdShareCommitments",
     "externallySuppliedThresholdShareCommitmentMaterial",
     "externallySuppliedUnverifiedThresholdShareCommitments",
+];
+
+const ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES: &[&str] = &[
+    "targetDecryptionStatus",
+    "targetDecryptionReadiness",
+    "targetDecryptionCertificate",
+    "targetDecryptionCertificateHash",
+    "targetDecryptionClosure",
+    "targetDecryptionClosureCertificate",
+    "targetDecryptionShareProofs",
+    "targetDecryptionShares",
+    "targetPartDecRecords",
+    "targetC1C4Certificate",
 ];
 
 const REQUIRED_PHASES: &[(&str, u64)] = &[
@@ -380,9 +383,10 @@ const REQUIRED_PHASES: &[(&str, u64)] = &[
     ("publicKeyShareProofs", 9),
     ("relinearizationRoundOne", 10),
     ("relinearizationRoundTwo", 11),
-    ("galoisKeyBatchProofs", 12),
-    ("setupPackageAssembly", 13),
-    ("setupPackageVerification", 14),
+    ("galoisKeyShareBatches", 12),
+    ("trusteeEvaluationKeyProofs", 13),
+    ("setupPackageAssembly", 14),
+    ("setupPackageVerification", 15),
 ];
 
 const REQUIRED_FINAL_OBJECTS: &[&str] = &[
@@ -399,12 +403,13 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "publicKeyShares",
     "publicKeyShareProofs",
     "publicKeyShareMaterial",
-    "publicKeyShareLnpProofs",
+    "publicKeyShareSuccinctProofs",
     "collectivePublicKey",
     "collectivePublicKeyRoot",
     "evaluatorKeySchedule",
     "relinearizationKeyShareRounds",
     "galoisKeyShareBatches",
+    "trusteeEvaluationKeyProofs",
     "evaluationKeys",
     "setupCommitmentSecurityCertificate",
     "setupCommitmentSecurityCertificateHash",
@@ -528,6 +533,7 @@ pub(crate) fn describe_collective_bgv_setup_profile() -> CanonicalResult<Value> 
         "genericKeySwitchPolicy": "refused-unless-explicitly-required-by-frozen-evaluator-schedule",
         "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
         "forbiddenAcceptedPathFields": ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES,
+        "topLevelForbiddenAcceptedPathFields": ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES,
     }))
 }
 
@@ -548,6 +554,7 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
             "transportedPublicEvaluationKeyMaterial",
             "transportedSameSecretProofMaterial",
             "transportedVssCoefficientCommitmentMaterial",
+            "verifiedSetupProofMaterials",
             "verifiedVssCoefficientCommitmentMaterial",
         ],
         "verifyCollectiveBgvSetupPackage",
@@ -712,7 +719,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_same_secret_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_optional_same_secret_lnp_proofs(setup_package, request)? {
+    if let Some(response) = verify_optional_same_secret_proofs(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_public_key_shares(setup_package)? {
@@ -721,7 +728,9 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_public_key_share_proofs(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_optional_public_key_share_lnp_proofs(setup_package, request)? {
+    if let Some(response) =
+        verify_optional_public_key_share_succinct_proofs(setup_package, request)?
+    {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
@@ -899,9 +908,8 @@ fn setup_profile_binding() -> CanonicalResult<Value> {
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
-        "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-        "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
-        "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
+        "privateVssShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
+        "publicKeyShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
         "setupTransportProfileHash": setup_transport_profile_hash()?,
         "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
     }))
@@ -1020,37 +1028,33 @@ fn evaluator_key_schedule_profile_value() -> CanonicalResult<Value> {
     }))
 }
 
+// One relinearization key per round at the selected evaluator working level:
+// lower levels reuse the same key through CRT-idempotent truncation, so the
+// schedule carries no per-level entries.
 fn expected_relinearization_level_schedule() -> Value {
-    Value::Array(
-        (1..DATA_PRIMES.len())
-            .map(|level| {
-                json!({
-                    "level": level,
-                    "proofFamily": "relinearization-key-share",
-                    "keyShareRounds": ["round-one", "round-two"],
-                })
-            })
-            .collect(),
-    )
+    Value::Array(vec![json!({
+        "level": SELECTED_EVALUATOR_WORKING_LEVEL,
+        "proofFamily": "relinearization-key-share",
+        "keyShareRounds": ["round-one", "round-two"],
+    })])
 }
 
 fn expected_required_galois_key_schedule() -> CanonicalResult<Value> {
-    let full_level = DATA_PRIMES.len() - 1;
     let mut entries_by_rotation_and_level = BTreeMap::new();
     for rotation in direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level.insert(
-            (rotation, full_level),
+            (rotation, SELECTED_EVALUATOR_WORKING_LEVEL),
             "direct-score-packing-generator-basis",
         );
     }
     for rotation in packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level
-            .entry((rotation, full_level))
+            .entry((rotation, SELECTED_EVALUATOR_WORKING_LEVEL))
             .or_insert("generator-ordered-packed-rank-forward-basis");
     }
     for rotation in packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level.insert(
-            (rotation, DIRECT_COMPARISON_OUTPUT_LEVEL),
+            (rotation, SELECTED_EVALUATOR_WORKING_LEVEL),
             "generator-ordered-packed-rank-return-basis",
         );
     }
@@ -1128,7 +1132,8 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
             "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
             "challengeDifferenceInvertibilityAccounting": super::setup_proof::challenge_difference_invertibility_accounting_value()?,
-            "qromStatus": "qrom-reduction-theorem-accepted-for-setup-proof-claim",
+            "challengeDomainScope": "legacy-lnp-tbox-private-vss-challenge-domain-only; accepted same-secret-linkage-anchor, public-key-share, private-vss-share, and trustee-evaluation-key succinct families bind challenge transcript rows inside their per-family accounting objects",
+            "qromStatus": "qrom-reduction-loss-not-computed-open-caveat",
             "transcriptBinding": [
                 "setupProfileHash",
                 "manifestHash",
@@ -1155,28 +1160,28 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
                 "distribution": "accepted-error-support-pending-certificate",
                 "requiredBeforeAcceptance": "proof verifier rejects missing support certificate"
             },
-            "keySwitchError": {
-                "distribution": "accepted-evaluation-key-error-support-pending-certificate",
-                "requiredBeforeAcceptance": "proof verifier rejects missing evaluation-key support certificate"
-            },
             "noWrapCarry": {
                 "domain": "bounded-lifted-integer",
                 "requiredBeforeAcceptance": "proof verifier rejects missing carry bounds"
             }
         },
         "proofFamilies": setup_proof_family_profiles()?,
-        "privateVssShareTboxParameterProfile": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_value()?,
-        "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-        "sameSecretTboxParameterProfile": super::setup_proof::same_secret_lnp_tbox_parameter_profile_value()?,
-        "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
-        "publicKeyShareTboxParameterProfile": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_value()?,
-        "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
-        "relinearizationKeyShareTboxParameterProfileHash": super::setup_proof::relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
-        "galoisKeyShareTboxParameterProfileHash": super::setup_proof::galois_key_share_lnp_tbox_parameter_profile_hash()?,
+        "privateVssShareProofAccounting": super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_value()?,
+        "privateVssShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
+        "publicKeyShareProofAccounting": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
+        "publicKeyShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
+        "sameSecretLinkageAnchorProofAccountingHash":
+            super::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
+        "trusteeEvaluationKeyProofAccountingHash":
+            super::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         "proofSerialization": {
             "encoding": SETUP_PROOF_SERIALIZATION,
             "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
-            "lnpTboxByteLayoutProfile": super::setup_proof::setup_proof_lnp_tbox_byte_layout_profile_value(),
+            "succinctProofByteLayout": {
+                "encoding": "sealed-lattice-succinct-setup-proof-bytes",
+                "canonicalFieldElementStatus": "decoder-rejects-non-canonical-base-and-extension-field-coordinates",
+                "transportRootStatus": "embedded-and-binary-chunked-proof-material-roots-bind-proof-size-bytes-proof-bytes-hash-and-statement-hash"
+            },
             "chunking": "required-for-large-proof-material",
             "chunkRootRequired": true,
             "statementRootRequired": true,
@@ -1184,6 +1189,7 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
         },
         "matrixDerivation": {
             "crpComponent": "proof-matrix-crp",
+            "matrixScope": "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only",
             "entryStreamEncoding": "xof-unbiased-residue-from-coordinate",
             "coordinateAxes": [
                 "proofFamily",
@@ -1221,36 +1227,35 @@ fn setup_proof_record_binding_value() -> CanonicalResult<Value> {
 }
 
 fn setup_proof_family_profiles() -> CanonicalResult<Vec<Value>> {
-    let family_profiles = SETUP_PROOF_FAMILIES
+    let family_profiles = ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES
         .iter()
         .map(|proof_family| {
-            let (statement, witness, no_wrap_rule) = match *proof_family {
+            let (statement, witness, no_wrap_rule, proof_accounting_hash) = match *proof_family {
+                "same-secret-linkage-anchor" => (
+                    "same-secret linkage anchor opens every accepted VSS constant commitment to one short trustee secret",
+                    "one ternary trustee secret, negative indicators, and opening randomness for every accepted Q_share constant commitment",
+                    "commitment openings are checked over the accepted commitment-modulus fields and cross-limb consistency binds one centered integer secret",
+                    super::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
+                ),
+                "public-key-share" => (
+                    "public-key share relation proves b_l + a_l*s - p*e = 0 over every accepted Q_share limb",
+                    "one ternary trustee secret, one centered-binomial error vector, and the selected limb-zero commitment opening randomness",
+                    "the selected limb-zero opening links the share secret to the same-secret anchor; ternary support makes the congruent secrets equal",
+                    super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
+                ),
                 "vss-opening-carry" => (
                     "private VSS share opens the homomorphic coefficient-commitment combination with explicit q_l carry",
                     "private share, coefficient openings, and bounded non-negative carry",
                     "unreduced lifted share relation must hold below the commitment modulus product",
+                    super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
                 ),
-                "same-secret-consistency" => (
-                    "VSS constant commitments across all Q_share limbs encode one short trustee secret",
-                    "one short trustee secret and openings to all accepted VSS constant commitments",
-                    "limb reductions must be reductions of one short secret, not independent limb witnesses",
+                "trustee-evaluation-key" => (
+                    "trustee evaluation-key relation proves every scheduled relinearization and Galois share against the committed trustee secret",
+                    "one trustee secret, schedule-bound key-switch source witnesses, component openings, carry witnesses, and same-secret linkage openings",
+                    "round-one, round-two, and Galois source relations are enforced against the frozen evaluator schedule and recomputed public aggregates",
+                    super::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
                 ),
-                "public-key-share" => (
-                    "public-key share satisfies PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0",
-                    "same short trustee secret, bounded error, and bounded no-wrap carry",
-                    "proof must check lifted integer equality and error support, not only modulo p or q_l",
-                ),
-                "relinearization-key-share" => (
-                    "linked relinearization round shares are generated from the same trustee secret and accepted round-one aggregate",
-                    "same short trustee secret, round-one ephemeral secret, key-switch error, and carry witnesses",
-                    "round-two proof must bind round-one aggregate and decomposition basis",
-                ),
-                "galois-key-share" => (
-                    "Galois key batch shares are generated from the same trustee secret for the exact required automorphism set",
-                    "same short trustee secret, key-switch error, automorphism witness binding, and carry witnesses",
-                    "proof must bind RequiredGaloisSetHash and reject undeclared automorphisms",
-                ),
-                _ => unreachable!("SETUP_PROOF_FAMILIES is fixed in this module"),
+                _ => unreachable!("ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES is fixed in this module"),
             };
             Ok(json!({
                 "proofFamily": proof_family,
@@ -1260,6 +1265,7 @@ fn setup_proof_family_profiles() -> CanonicalResult<Vec<Value>> {
                 "profileId": SETUP_PROOF_PROFILE_ID,
                 "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
                 "verificationStatus": "family-verifier-required-before-proof-bytes-acceptance",
+                "proofAccountingHash": proof_accounting_hash,
             }))
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -1350,25 +1356,6 @@ fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
         })
 }
 
-fn value_decimal_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
-    let field_value = value_string(value, field_name)?;
-    if field_value.is_empty()
-        || !field_value.bytes().all(|byte| byte.is_ascii_digit())
-        || (field_value.len() > 1 && field_value.starts_with('0'))
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{field_name} must be a canonical decimal u64 string"),
-        ));
-    }
-    field_value.parse::<u64>().map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{field_name} does not fit u64"),
-        )
-    })
-}
-
 fn validate_lowercase_hex(value: &str, field_name: &str) -> CanonicalResult<()> {
     if value.len().is_multiple_of(2)
         && value
@@ -1452,8 +1439,8 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
         accepted_hashes.push(hash.to_string());
     }
     if let Some(hash) = setup_package
-        .get("publicKeyShareLnpProofs")
-        .and_then(|proof_set| proof_set.get("publicKeyShareLnpProofSetRoot"))
+        .get("publicKeyShareSuccinctProofs")
+        .and_then(|proof_set| proof_set.get("publicKeyShareSuccinctProofSetRoot"))
         .and_then(Value::as_str)
     {
         accepted_hashes.push(hash.to_string());
@@ -1488,6 +1475,13 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
                 accepted_hashes.push(hash.to_string());
             }
         }
+    }
+    if let Some(hash) = setup_package
+        .get("trusteeEvaluationKeyProofs")
+        .and_then(|proof_set| proof_set.get("trusteeEvaluationKeyProofSetRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
     }
     if let Some(hash) = setup_package
         .get("evaluationKeys")
@@ -1566,10 +1560,10 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
                 "publicKeyShareMaterial",
                 "publicKeyShareMaterialSetRoot",
             )?,
-            "publicKeyShareLnpProofSetRoot": package_nested_hash(
+            "publicKeyShareSuccinctProofSetRoot": package_nested_hash(
                 setup_package,
-                "publicKeyShareLnpProofs",
-                "publicKeyShareLnpProofSetRoot",
+                "publicKeyShareSuccinctProofs",
+                "publicKeyShareSuccinctProofSetRoot",
             )?,
         },
         "publicAggregationHandoff": {
@@ -1591,6 +1585,11 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
                 setup_package,
                 "relinearizationKeyShareRounds",
                 "relinearizationKeyShareRoundsRoot",
+            )?,
+            "trusteeEvaluationKeyProofSetRoot": package_nested_hash(
+                setup_package,
+                "trusteeEvaluationKeyProofs",
+                "trusteeEvaluationKeyProofSetRoot",
             )?,
             "evaluationKeySetHash": package_nested_hash(
                 setup_package,
@@ -1703,10 +1702,26 @@ fn phase_order_value() -> Value {
 }
 
 fn reject_accepted_setup_forbidden_fields(value: &Value) -> CanonicalResult<()> {
+    if let Some(fields) = value.as_object() {
+        for field_name in fields.keys() {
+            if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!(
+                        "{field_name} cannot appear as a top-level accepted collective BGV setup field"
+                    ),
+                ));
+            }
+        }
+    }
+    reject_accepted_setup_forbidden_fields_recursively(value)
+}
+
+fn reject_accepted_setup_forbidden_fields_recursively(value: &Value) -> CanonicalResult<()> {
     match value {
         Value::Array(items) => {
             for item in items {
-                reject_accepted_setup_forbidden_fields(item)?;
+                reject_accepted_setup_forbidden_fields_recursively(item)?;
             }
         }
         Value::Object(fields) => {
@@ -1721,7 +1736,7 @@ fn reject_accepted_setup_forbidden_fields(value: &Value) -> CanonicalResult<()> 
                         ),
                     ));
                 }
-                reject_accepted_setup_forbidden_fields(field_value)?;
+                reject_accepted_setup_forbidden_fields_recursively(field_value)?;
             }
         }
         _ => {}
@@ -1738,7 +1753,8 @@ fn reject_accepted_setup_forbidden_request_fields(request: &Value) -> CanonicalR
         if field_name == "setupPackage" || field_name == "command" {
             continue;
         }
-        if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
+        if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
+            || ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
             || field_name_suggests_legacy_external_setup_role(field_name)
         {
             return Err(CanonicalError::new(

@@ -518,23 +518,32 @@ fn public_component_a_for_digit(
 
 // Apply a key-switching key to a single ciphertext component (the term that
 // multiplies the source key), producing the two-component RLWE encryption of
-// source * term under the secret.
+// source * term under the secret. The key may be generated at a higher level
+// than the term: the CRT-idempotent gadget keys public samples by digit and
+// modulus only, so the digits and limbs 0..=term_level of a higher-level key
+// are exactly the lower-level key, and the active window is sliced here.
 fn key_switch_component(
     term: &[Vec<u64>],
     key_switch_key: &KeySwitchKey,
 ) -> CanonicalResult<(LimbMatrix, LimbMatrix)> {
-    let primes = &DATA_PRIMES[..=key_switch_key.level];
-    if term.len() != primes.len() {
+    let term_level = term.len().checked_sub(1).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "key-switch term must carry at least one limb",
+        )
+    })?;
+    if key_switch_key.level < term_level {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "key-switch term level does not match the key-switching key level",
+            "key-switching key level is below the term level",
         ));
     }
+    let primes = &DATA_PRIMES[..=term_level];
     let mut switched_zero = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
     let mut switched_one = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
+    let active_components = &key_switch_key.components[..=term_level];
     #[cfg(not(target_arch = "wasm32"))]
-    let partials = key_switch_key
-        .components
+    let partials = active_components
         .par_iter()
         .enumerate()
         .map(|(digit_index, component)| {
@@ -542,8 +551,7 @@ fn key_switch_component(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     #[cfg(target_arch = "wasm32")]
-    let partials = key_switch_key
-        .components
+    let partials = active_components
         .iter()
         .enumerate()
         .map(|(digit_index, component)| {
@@ -551,8 +559,8 @@ fn key_switch_component(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     for (partial_zero, partial_one) in partials {
-        add_component_in_place(&mut switched_zero, &partial_zero, key_switch_key.level)?;
-        add_component_in_place(&mut switched_one, &partial_one, key_switch_key.level)?;
+        add_component_in_place(&mut switched_zero, &partial_zero, term_level)?;
+        add_component_in_place(&mut switched_one, &partial_one, term_level)?;
     }
 
     Ok((switched_zero, switched_one))
@@ -649,10 +657,10 @@ pub(crate) fn relinearize(
             "relinearization requires a three-component ciphertext",
         ));
     }
-    if relinearization_key.level != ciphertext.level {
+    if relinearization_key.level < ciphertext.level {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "relinearization key level does not match the ciphertext level",
+            "relinearization key level is below the ciphertext level",
         ));
     }
     let (switched_zero, switched_one) =
@@ -702,6 +710,75 @@ mod tests {
             current = modulus_switch(&current).expect("modulus switch");
         }
         current
+    }
+
+    #[test]
+    fn higher_level_key_truncates_to_the_lower_level_key() {
+        // The CRT-idempotent gadget keys public samples by digit and modulus
+        // only, so the digits and limbs 0..=l of a level-L key generated from
+        // one seed must equal the level-l key generated from the same seed.
+        let key = shared_key();
+        let higher = generate_relinearization_key(key, 5, "truncation-seed").expect("level 5");
+        let lower = generate_relinearization_key(key, 2, "truncation-seed").expect("level 2");
+        assert_eq!(lower.components.len(), 3);
+        for (digit_index, lower_component) in lower.components.iter().enumerate() {
+            let higher_component = &higher.components[digit_index];
+            let higher_b = higher_component
+                .component_b
+                .as_ref()
+                .expect("component b retained");
+            let lower_b = lower_component
+                .component_b
+                .as_ref()
+                .expect("component b retained");
+            assert_eq!(
+                &higher_b[..lower_b.len()],
+                &lower_b[..],
+                "digit {digit_index} component b must restrict to the lower level"
+            );
+        }
+    }
+
+    #[test]
+    fn higher_level_relinearization_key_relinearizes_lower_level_ciphertexts() {
+        let key = shared_key();
+        let left = at_test_level(&key.encrypt_slots(&[4, 5, 6], "ksk-trunc-a").expect("left"));
+        let right = at_test_level(&key.encrypt_slots(&[7, 8, 9], "ksk-trunc-b").expect("right"));
+        let product = ciphertext_tensor(&left, &right).expect("tensor");
+        // Key generated two levels above the ciphertext level.
+        let relinearization_key =
+            generate_relinearization_key(key, TEST_LEVEL + 2, "trunc-relin-seed")
+                .expect("relin key");
+        let relinearized = relinearize(&product, &relinearization_key).expect("relinearize");
+        assert_eq!(
+            key.decrypt_to_slots(&relinearized).expect("decrypt")[..3].to_vec(),
+            vec![28, 40, 54]
+        );
+    }
+
+    #[test]
+    fn higher_level_galois_key_rotates_lower_level_ciphertexts() {
+        let key = shared_key();
+        let galois_element = 3_usize;
+        let slots = [9_u64, 8, 7, 6, 5, 4, 3, 2];
+        let ciphertext =
+            at_test_level(&key.encrypt_slots(&slots, "ksk-trunc-rot").expect("encrypt"));
+        let galois_key =
+            generate_galois_key(key, galois_element, TEST_LEVEL + 2, "trunc-galois-seed")
+                .expect("galois key");
+        let rotated = rotate(&ciphertext, galois_element, &galois_key).expect("rotate");
+
+        let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
+        let rotated_coefficients =
+            automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS)
+                .expect("plaintext automorphism");
+        let expected_slots =
+            forward_negacyclic_ntt(&rotated_coefficients, PLAINTEXT_MODULUS).expect("decode");
+
+        assert_eq!(
+            key.decrypt_to_slots(&rotated).expect("decrypt"),
+            expected_slots
+        );
     }
 
     #[test]

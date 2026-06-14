@@ -2,6 +2,7 @@ import {
     canonicalJson,
     deriveProtocolHash,
     hash512Hex,
+    setupProofMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
@@ -13,33 +14,27 @@ import {
 } from './evaluator-key-schedule.js';
 import { setupProofProfileId } from './same-secret-consistency-records.js';
 import {
-    assertSetupProofChallenge,
-    optionalSetupProofTboxZ34Metadata,
+    setupProofChunkManifestRoot,
+    setupProofMaterialChunkHash,
     setupProofTransportChunkSizeBytes,
-    transportSetupProofMaterials,
-    type SetupProofChallenge,
-    type SetupProofTboxZ34Metadata,
-    type TransportedSetupProofMaterialSet,
 } from './setup-proof-material-transport.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
-type WideInteger = number | string;
 type EvaluationKeyShareProofFamily =
     | 'relinearization-key-share'
     | 'galois-key-share';
-type ProofRandomnessSource =
-    | 'fresh-csprng'
-    | 'development-deterministic-fixture';
 
-export const relinearizationProofVerificationStatus =
-    'lnp-relinearization-key-share-relation-verified-with-accepted-setup-proof-accounting';
-export const relinearizationProofModelStatus =
-    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, same-secret-bound secret opening response with centered signed 80-bit committed-secret masks and responses, fixed-width signed big-integer key-switch relation commitments, deterministic key-switch sampler, public component-vector material, lifted key-switch algebra, round-one same-secret source response, generator-side round-two aggregate-source product validation, centered-binomial error support, carried no-wrap responses, fixed response bounds, root-bound relinearization source binding records, verifier-side round-two source-square aggregate roots, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing relinearization proof acceptance';
-export const galoisProofVerificationStatus =
-    'lnp-galois-key-share-relation-verified-with-accepted-setup-proof-accounting';
-export const galoisProofModelStatus =
-    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, same-secret-bound secret opening response with centered signed 80-bit committed-secret masks and responses, fixed-width signed big-integer key-switch relation commitments, deterministic key-switch sampler, public component-vector material, Galois automorphism source response, lifted key-switch algebra, centered-binomial error support, carried no-wrap responses, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing Galois-key proof acceptance';
+// Share records carry no proof fields: their correctness claim is the
+// per-trustee succinct evaluation-key argument, so every record pins this
+// status pair. Mirrors the kernel record statuses.
+export const evaluationKeyShareRecordVerificationStatus =
+    'share-records-bound-to-trustee-evaluation-key-argument';
+export const trusteeEvaluationKeyProofModelStatus =
+    'succinct-trustee-evaluation-key-argument-accounting-accepted';
+export const trusteeEvaluationKeyProofVerificationStatus =
+    'succinct-trustee-evaluation-key-argument-verified-with-accepted-proof-accounting';
+export const trusteeEvaluationKeyProofFamily = 'trustee-evaluation-key';
 const publicEvaluationKeyAssemblyStatus =
     'assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate';
 const publicEvaluationKeyMaterialEncoding =
@@ -60,18 +55,17 @@ const evaluationKeyShareComponentMaterialTransportSetObjectType =
     'SetupTransportedEvaluationKeyShareComponentMaterialSet';
 const evaluationKeyShareComponentMaterialTransportObjectType =
     'SetupTransportedEvaluationKeyShareComponentMaterial';
-const evaluationKeyShareComponentMaterialEncoding =
+export const evaluationKeyShareComponentMaterialEncoding =
     'binary-chunked-key-switch-component-vectors';
+const setupProofMaterialTransportEncoding = 'binary-chunked-proof-bytes';
 const evaluationKeyShareComponentVectorHashDomain =
     'sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1';
 const evaluationKeyShareComponentMaterialFullObjectHashDomain =
     'sealed-lattice/setup/evaluation-key-share/component-material/full-object-v1';
 const evaluationKeyShareComponentMaterialChunkHashDomain =
     'sealed-lattice/setup/evaluation-key-share/component-material/chunk-v1';
-const relinearizationProofBytesHashDomain =
-    'sealed-lattice/setup/relinearization-key-share/lnp-proof-bytes-v1';
-const galoisProofBytesHashDomain =
-    'sealed-lattice/setup/galois-key-share/lnp-proof-bytes-v1';
+const trusteeEvaluationKeyProofBytesHashDomain =
+    'sealed-lattice/setup/trustee-evaluation-key/proof-bytes-v1';
 const evaluationKeyShareComponentMaterialMagic = new Uint8Array([
     0x53, 0x4c, 0x45, 0x4b, 0x43, 0x4d, 0x56, 0x31,
 ]);
@@ -90,32 +84,13 @@ export type SameSecretProofReference = Readonly<{
 
 export type KeySwitchComponentVectorEntry = Readonly<JsonRecord>;
 
-export type EvaluationKeyShareEmbeddedProofBytes = Readonly<{
-    readonly proofBytesHex: string;
-}>;
-
-export type EvaluationKeyShareTransportedProofBytes = Readonly<{
-    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
-    readonly proofMaterialRoot: ProtocolHash;
-    readonly proofChunkSizeBytes: number;
-    readonly proofChunkCount: number;
-    readonly proofTotalByteLength: number;
-    readonly proofFullObjectHash: ProtocolHash;
-    readonly proofChunkRoot: ProtocolHash;
-    readonly proofChunkHashes: readonly ProtocolHash[];
-}>;
-
-export type EvaluationKeyShareProofByteMaterial =
-    | EvaluationKeyShareEmbeddedProofBytes
-    | EvaluationKeyShareTransportedProofBytes;
-
 export type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial = Readonly<{
     readonly keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors';
     readonly keySwitchComponentVectors: readonly KeySwitchComponentVectorEntry[];
 }>;
 
 export type EvaluationKeyShareTransportedKeySwitchComponentMaterial = Readonly<{
-    readonly keySwitchMaterialEncoding: 'binary-chunked-key-switch-component-vectors';
+    readonly keySwitchMaterialEncoding: typeof evaluationKeyShareComponentMaterialEncoding;
     readonly keySwitchComponentMaterialRoot: ProtocolHash;
     readonly keySwitchComponentChunkSizeBytes: number;
     readonly keySwitchComponentChunkCount: number;
@@ -129,125 +104,41 @@ export type EvaluationKeyShareKeySwitchComponentMaterial =
     | EvaluationKeyShareEmbeddedKeySwitchComponentMaterial
     | EvaluationKeyShareTransportedKeySwitchComponentMaterial;
 
-export type EvaluationKeyShareProofGenerationBase = Readonly<{
-    readonly setupProofBinding: JsonRecord;
+// The public key-switch component material one trustee publishes for one
+// scheduled key: the runtime key share itself, either embedded as canonical
+// component vector entries or referenced as binary chunked transport.
+export type EvaluationKeyShareMaterial = Readonly<{
     readonly keySwitchDomain: string;
     readonly keySwitchSeedHex: string;
     readonly ringDegree: number;
     readonly keySwitchComponentVectorRoot: ProtocolHash;
-    readonly constantCommitments: readonly JsonRecord[];
-    readonly secretCoefficients: readonly number[];
-    readonly openingRandomnessByLimb: readonly (readonly (readonly WideInteger[])[])[];
-    readonly errorCoefficientsByDigit: readonly (readonly number[])[];
-    readonly transportedKeySwitchComponentMaterial?: JsonRecord;
-    readonly proofRandomnessSource?: ProofRandomnessSource;
-    readonly proofRandomnessSeedHex: string;
 }> &
     EvaluationKeyShareKeySwitchComponentMaterial;
-
-export type RelinearizationKeyShareProofGeneration =
-    EvaluationKeyShareProofGenerationBase &
-        Readonly<{
-            readonly proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1';
-            readonly relinearizationKeyShareTboxParameterProfileHash: ProtocolHash;
-            readonly relinearizationSourceCoefficientsByDigit: readonly (readonly WideInteger[])[];
-            readonly roundOneAggregateSourceCoefficientsByDigit?: readonly (readonly WideInteger[])[];
-        }>;
-
-export type GaloisKeyShareProofGeneration =
-    EvaluationKeyShareProofGenerationBase &
-        Readonly<{
-            readonly proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1';
-            readonly galoisKeyShareTboxParameterProfileHash: ProtocolHash;
-        }>;
-
-export type EvaluationKeyShareProofGenerationOutput = Readonly<{
-    readonly ok: true;
-    readonly operation: 'generateEvaluationKeyShareLnpProof';
-    readonly setupProofProfileId: string;
-    readonly proofFamily: 'relinearization-key-share' | 'galois-key-share';
-    readonly proofVerificationStatus: string;
-    readonly proofModelStatus: string;
-    readonly statementHash: ProtocolHash;
-    readonly relationCommitmentHash: ProtocolHash;
-    readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: SetupProofChallenge;
-    readonly proofSizeBytes: number;
-    readonly proofBytesHash: ProtocolHash;
-    readonly proofBytesHex: string;
-    readonly relinearizationKeyShareTboxParameterProfileHash?: ProtocolHash;
-    readonly galoisKeyShareTboxParameterProfileHash?: ProtocolHash;
-    readonly proofRandomness: Readonly<{
-        readonly source: ProofRandomnessSource;
-        readonly seedBytes: 64;
-        readonly retention: string;
-    }>;
-}> &
-    SetupProofTboxZ34Metadata;
-
-export type EvaluationKeyShareProofGenerator = (
-    input: Readonly<{
-        readonly proofFamily: 'relinearization-key-share' | 'galois-key-share';
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly proofRecord: JsonRecord;
-        readonly sameSecretStatementRecord: JsonRecord;
-        readonly constantCommitments: readonly JsonRecord[];
-        readonly setupProofBinding: JsonRecord;
-        readonly transportedKeySwitchComponentMaterial?: JsonRecord;
-        readonly secretCoefficients: readonly number[];
-        readonly openingRandomnessByLimb: readonly (readonly (readonly WideInteger[])[])[];
-        readonly errorCoefficientsByDigit: readonly (readonly number[])[];
-        readonly relinearizationSourceCoefficientsByDigit?: readonly (readonly WideInteger[])[];
-        readonly roundOneAggregateSourceCoefficientsByDigit?: readonly (readonly WideInteger[])[];
-        readonly proofRandomnessSource?: ProofRandomnessSource;
-        readonly proofRandomnessSeedHex: string;
-    }>,
-) => EvaluationKeyShareProofGenerationOutput;
-
-export type EvaluationKeyShareProofMaterialBase = Readonly<{
-    readonly setupProofBinding: JsonRecord;
-    readonly keySwitchDomain: string;
-    readonly keySwitchSeedHex: string;
-    readonly ringDegree: number;
-    readonly keySwitchComponentVectorRoot: ProtocolHash;
-    readonly statementHash: ProtocolHash;
-    readonly relationCommitmentHash: ProtocolHash;
-    readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: SetupProofChallenge;
-    readonly proofSizeBytes: number;
-    readonly proofBytesHash: ProtocolHash;
-}> &
-    EvaluationKeyShareKeySwitchComponentMaterial &
-    Partial<SetupProofTboxZ34Metadata> &
-    EvaluationKeyShareProofByteMaterial;
-
-export type RelinearizationKeyShareProofMaterial =
-    EvaluationKeyShareProofMaterialBase &
-        Readonly<{
-            readonly proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1';
-            readonly relinearizationKeyShareTboxParameterProfileHash: ProtocolHash;
-        }>;
-
-export type GaloisKeyShareProofMaterial = EvaluationKeyShareProofMaterialBase &
-    Readonly<{
-        readonly proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1';
-        readonly galoisKeyShareTboxParameterProfileHash: ProtocolHash;
-    }>;
 
 export type RelinearizationRoundOneContribution = Readonly<{
     readonly trusteeRosterPosition: number;
     readonly level: number;
     readonly roundOneShareRoot: ProtocolHash;
-    readonly proofMaterial?: RelinearizationKeyShareProofMaterial;
-    readonly proofGeneration?: RelinearizationKeyShareProofGeneration;
+    readonly shareMaterial: EvaluationKeyShareMaterial;
 }>;
 
 export type RelinearizationRoundTwoContribution = Readonly<{
     readonly trusteeRosterPosition: number;
     readonly level: number;
     readonly roundTwoShareRoot: ProtocolHash;
-    readonly proofMaterial?: RelinearizationKeyShareProofMaterial;
-    readonly proofGeneration?: RelinearizationKeyShareProofGeneration;
+    readonly shareMaterial: EvaluationKeyShareMaterial;
+}>;
+
+export type GaloisKeyShareContribution = Readonly<{
+    readonly rotation: number;
+    readonly level: number;
+    readonly galoisKeyShareRoot: ProtocolHash;
+    readonly shareMaterial: EvaluationKeyShareMaterial;
+}>;
+
+export type GaloisKeyShareBatchContribution = Readonly<{
+    readonly trusteeRosterPosition: number;
+    readonly galoisKeyShares: readonly GaloisKeyShareContribution[];
 }>;
 
 export type RelinearizationKeyShareRoundOneRecord = Readonly<
@@ -257,8 +148,8 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
-        readonly proofVerificationStatus: typeof relinearizationProofVerificationStatus;
-        readonly proofModelStatus: typeof relinearizationProofModelStatus;
+        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
+        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly level: number;
@@ -266,31 +157,18 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly sameSecretProofRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
-        readonly roundOneShareRoot: ProtocolHash;
-        readonly sourceSquareBindingRoot: ProtocolHash;
-        readonly proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1';
-        readonly setupProofBinding: JsonRecord;
         readonly keySwitchDomain: string;
         readonly keySwitchSeedHex: string;
         readonly ringDegree: number;
         readonly keySwitchComponentVectorRoot: ProtocolHash;
-        readonly relinearizationKeyShareTboxParameterProfileHash: ProtocolHash;
-        readonly statementHash: ProtocolHash;
-        readonly relationCommitmentHash: ProtocolHash;
-        readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: SetupProofChallenge;
-        readonly proofSizeBytes: number;
-        readonly proofBytesHash: ProtocolHash;
-        readonly roundOneProofRoot: ProtocolHash;
+        readonly roundOneShareRoot: ProtocolHash;
         readonly roundOneRecordRoot: ProtocolHash;
-    } & EvaluationKeyShareKeySwitchComponentMaterial &
-        Partial<SetupProofTboxZ34Metadata> &
-        EvaluationKeyShareProofByteMaterial
+    } & EvaluationKeyShareKeySwitchComponentMaterial
 >;
 
 export type RelinearizationKeyShareRoundTwoRecord = Readonly<
@@ -300,8 +178,8 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
-        readonly proofVerificationStatus: typeof relinearizationProofVerificationStatus;
-        readonly proofModelStatus: typeof relinearizationProofModelStatus;
+        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
+        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly level: number;
@@ -309,36 +187,21 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly sameSecretProofRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
-        readonly roundOneShareRoot: ProtocolHash;
-        readonly roundOneRecordRoot: ProtocolHash;
-        readonly roundOneAggregateRoot: ProtocolHash;
-        readonly roundOneSourceSquareBindingRoot: ProtocolHash;
-        readonly roundOneSourceSquareAggregateRoot: ProtocolHash;
-        readonly roundTwoShareRoot: ProtocolHash;
-        readonly sourceSquareBindingRoot: ProtocolHash;
-        readonly proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1';
-        readonly setupProofBinding: JsonRecord;
         readonly keySwitchDomain: string;
         readonly keySwitchSeedHex: string;
         readonly ringDegree: number;
         readonly keySwitchComponentVectorRoot: ProtocolHash;
-        readonly relinearizationKeyShareTboxParameterProfileHash: ProtocolHash;
-        readonly statementHash: ProtocolHash;
-        readonly relationCommitmentHash: ProtocolHash;
-        readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: SetupProofChallenge;
-        readonly proofSizeBytes: number;
-        readonly proofBytesHash: ProtocolHash;
-        readonly roundTwoProofRoot: ProtocolHash;
+        readonly roundOneShareRoot: ProtocolHash;
+        readonly roundOneRecordRoot: ProtocolHash;
+        readonly roundOneAggregateRoot: ProtocolHash;
+        readonly roundTwoShareRoot: ProtocolHash;
         readonly roundTwoRecordRoot: ProtocolHash;
-    } & EvaluationKeyShareKeySwitchComponentMaterial &
-        Partial<SetupProofTboxZ34Metadata> &
-        EvaluationKeyShareProofByteMaterial
+    } & EvaluationKeyShareKeySwitchComponentMaterial
 >;
 
 export type RelinearizationKeyShareRounds = Readonly<
@@ -348,8 +211,8 @@ export type RelinearizationKeyShareRounds = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
-        readonly proofVerificationStatus: typeof relinearizationProofVerificationStatus;
-        readonly proofModelStatus: typeof relinearizationProofModelStatus;
+        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
+        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
@@ -357,19 +220,17 @@ export type RelinearizationKeyShareRounds = Readonly<
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly roundOneAggregateRoots: readonly {
             readonly level: number;
             readonly roundOneAggregateRoot: ProtocolHash;
-            readonly roundOneSourceSquareAggregateRoot: ProtocolHash;
         }[];
         readonly roundOneRecords: readonly RelinearizationKeyShareRoundOneRecord[];
         readonly roundTwoAggregateRoots: readonly {
             readonly level: number;
             readonly roundTwoAggregateRoot: ProtocolHash;
-            readonly roundTwoSourceSquareAggregateRoot: ProtocolHash;
         }[];
         readonly roundTwoRecords: readonly RelinearizationKeyShareRoundTwoRecord[];
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
@@ -382,58 +243,23 @@ export type GaloisKeyShareRootReference = Readonly<{
     readonly galoisKeyShareRoot: ProtocolHash;
 }>;
 
-export type GaloisKeyShareProofContribution = GaloisKeyShareRootReference &
-    Readonly<{
-        readonly proofMaterial?: GaloisKeyShareProofMaterial;
-        readonly proofGeneration?: GaloisKeyShareProofGeneration;
-    }>;
-
-export type GaloisKeyShareBatchContribution = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly galoisKeyShareProofs: readonly GaloisKeyShareProofContribution[];
-}>;
-
-export type GaloisKeyShareProof = Readonly<
+export type GaloisKeyShareMaterialRecord = Readonly<
     JsonRecord & {
-        readonly objectType: 'GaloisKeyShareProof';
+        readonly objectType: 'GaloisKeyShareMaterial';
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'galois-key-share';
-        readonly proofVerificationStatus: typeof galoisProofVerificationStatus;
-        readonly proofModelStatus: typeof galoisProofModelStatus;
-        readonly proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
-        readonly evaluatorKeyScheduleRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
-        readonly sameSecretStatementRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoot: ProtocolHash;
-        readonly sameSecretProofRoot: ProtocolHash;
-        readonly galoisKeyCrpRoot: ProtocolHash;
-        readonly requiredGaloisSetHash: ProtocolHash;
         readonly rotation: number;
         readonly level: number;
         readonly galoisKeyShareRoot: ProtocolHash;
-        readonly setupProofBinding: JsonRecord;
         readonly keySwitchDomain: string;
         readonly keySwitchSeedHex: string;
         readonly ringDegree: number;
         readonly keySwitchComponentVectorRoot: ProtocolHash;
-        readonly galoisKeyShareTboxParameterProfileHash: ProtocolHash;
-        readonly statementHash: ProtocolHash;
-        readonly relationCommitmentHash: ProtocolHash;
-        readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: SetupProofChallenge;
-        readonly proofSizeBytes: number;
-        readonly proofBytesHash: ProtocolHash;
-        readonly galoisKeyShareProofRoot: ProtocolHash;
-    } & EvaluationKeyShareKeySwitchComponentMaterial &
-        Partial<SetupProofTboxZ34Metadata> &
-        EvaluationKeyShareProofByteMaterial
+    } & EvaluationKeyShareKeySwitchComponentMaterial
 >;
 
 export type GaloisKeyShareBatch = Readonly<
@@ -443,15 +269,15 @@ export type GaloisKeyShareBatch = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'galois-key-share';
-        readonly proofVerificationStatus: typeof galoisProofVerificationStatus;
-        readonly proofModelStatus: typeof galoisProofModelStatus;
+        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
+        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofSetRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly sameSecretProofRoot: ProtocolHash;
@@ -459,20 +285,175 @@ export type GaloisKeyShareBatch = Readonly<
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
         readonly galoisKeyShareRoots: readonly GaloisKeyShareRootReference[];
-        readonly galoisKeyShareProofs: readonly GaloisKeyShareProof[];
-        readonly galoisKeyBatchProofRoot: ProtocolHash;
+        readonly galoisKeyShareMaterialRecords: readonly GaloisKeyShareMaterialRecord[];
         readonly galoisKeyShareBatchRoot: ProtocolHash;
     }
 >;
+
+export type TrusteeEvaluationKeyEmbeddedProofBytes = Readonly<{
+    readonly proofBytesHex: string;
+}>;
+
+export type TrusteeEvaluationKeyTransportedProofBytes = Readonly<{
+    readonly proofBytesEncoding: typeof setupProofMaterialTransportEncoding;
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly proofChunkSizeBytes: number;
+    readonly proofChunkCount: number;
+    readonly proofTotalByteLength: number;
+    readonly proofFullObjectHash: ProtocolHash;
+    readonly proofChunkRoot: ProtocolHash;
+    readonly proofChunkHashes: readonly ProtocolHash[];
+}>;
+
+export type TrusteeEvaluationKeyProofRecord = Readonly<
+    JsonRecord & {
+        readonly objectType: 'TrusteeEvaluationKeyProof';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
+        readonly proofVerificationStatus: typeof trusteeEvaluationKeyProofVerificationStatus;
+        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
+        readonly trusteeIdentity: string;
+        readonly trusteeRosterPosition: number;
+        readonly sameSecretStatementRoot: ProtocolHash;
+        readonly trusteeSecretCommitmentRoot: ProtocolHash;
+        readonly sameSecretProofRoot: ProtocolHash;
+        readonly statementHash: ProtocolHash;
+        readonly keyCount: number;
+        readonly proofSizeBytes: number;
+        readonly proofBytesHash: ProtocolHash;
+        readonly trusteeEvaluationKeyProofRoot: ProtocolHash;
+    } & (
+            | TrusteeEvaluationKeyEmbeddedProofBytes
+            | TrusteeEvaluationKeyTransportedProofBytes
+        )
+>;
+
+export type TrusteeEvaluationKeyProofSet = Readonly<
+    JsonRecord & {
+        readonly objectType: 'TrusteeEvaluationKeyProofSet';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
+        readonly proofVerificationStatus: typeof trusteeEvaluationKeyProofVerificationStatus;
+        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
+        readonly proofAccountingHash: ProtocolHash;
+        readonly participantCount: number;
+        readonly rnsLimbCount: number;
+        readonly evaluatorKeyScheduleRoot: ProtocolHash;
+        readonly requiredGaloisSetHash: ProtocolHash;
+        readonly keySwitchDecompositionHash: ProtocolHash;
+        readonly sameSecretConsistencyRoot: ProtocolHash;
+        readonly sameSecretProofSetRoot: ProtocolHash;
+        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+        readonly publicKeyShareSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
+        readonly relinearizationCrpRoot: ProtocolHash;
+        readonly galoisKeyCrpRoot: ProtocolHash;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
+        readonly galoisKeyShareBatchRoots: readonly {
+            readonly trusteeIdentity: string;
+            readonly trusteeRosterPosition: number;
+            readonly galoisKeyShareBatchRoot: ProtocolHash;
+        }[];
+        readonly proofRecords: readonly TrusteeEvaluationKeyProofRecord[];
+        readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
+    }
+>;
+
+// Statement key descriptors for the kernel trustee evaluation-key proof
+// commands: relinearization round-one and round-two keys plus Galois rotation
+// keys, each with the full public component-b material. The round-two keys
+// additionally carry the recomputed public round-one aggregate diagonal.
+export type TrusteeEvaluationKeyStatementKey = Readonly<{
+    readonly proofFamily:
+        | 'relinearization-round-one'
+        | 'relinearization-round-two'
+        | 'galois-rotation';
+    readonly rotation?: number;
+    readonly level: number;
+    readonly keySwitchDomain: string;
+    readonly keySwitchSeedHex: string;
+    readonly componentBByDigit: readonly (readonly (readonly number[])[])[];
+    readonly roundOneAggregateDiagonal?: readonly (readonly number[])[];
+}>;
+
+export type TrusteeEvaluationKeyStatementContext = Readonly<{
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly setupEpoch: string;
+    readonly requiredGaloisSetHash: ProtocolHash;
+    readonly evaluatorKeyScheduleRoot: ProtocolHash;
+    readonly keySwitchDecompositionHash: ProtocolHash;
+    readonly sameSecretStatementRoot: ProtocolHash;
+    readonly sameSecretProofRoot: ProtocolHash;
+}>;
+
+export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
+    readonly ok: true;
+    readonly operation: 'generateTrusteeEvaluationKeyProof';
+    readonly proofModelStatus: string;
+    readonly proofAccountingHash: ProtocolHash;
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly keyCount: number;
+    readonly sameSecretLinkageIncluded: boolean;
+    readonly proofByteLength: number;
+    readonly proofBytesHex: string;
+    readonly proofRandomness: Readonly<{
+        readonly source: string;
+        readonly binding?: string;
+        readonly nonceHash?: ProtocolHash;
+        readonly retention: string;
+    }>;
+}>;
+
+export type TrusteeEvaluationKeyProofGenerator = (
+    input: Readonly<{
+        readonly context: TrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly keys: readonly TrusteeEvaluationKeyStatementKey[];
+        readonly sameSecretLinkage: Readonly<{
+            readonly publicMatrixSeedHash: ProtocolHash;
+            readonly commitments: readonly JsonRecord[];
+        }>;
+        readonly secretCoefficients: readonly number[];
+        readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
+        readonly negativeIndicatorCoefficients: readonly number[];
+        readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+        readonly proofRandomnessSource: string;
+        readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
+    }>,
+) => TrusteeEvaluationKeyProofGenerationOutput;
+
+// One trustee's private witness for its batched evaluation-key statement: the
+// shared ternary secret, per-key centered-binomial errors in statement key
+// order (relinearization round-one levels ascending, round-two levels
+// ascending, then the frozen Galois schedule), the negative-coefficient
+// indicator, the BDLOP opening randomness, and the same-secret constant
+// commitments the linkage opens.
+export type TrusteeEvaluationKeyWitnessInput = Readonly<{
+    readonly trusteeRosterPosition: number;
+    readonly secretCoefficients: readonly number[];
+    readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
+    readonly negativeIndicatorCoefficients: readonly number[];
+    readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+    readonly constantCommitments: readonly JsonRecord[];
+}>;
 
 export type RelinearizationKeyRootReference = Readonly<{
     readonly level: number;
     readonly decompositionDigitCount: number;
     readonly rnsLimbCount: number;
     readonly roundOneAggregateRoot: ProtocolHash;
-    readonly roundOneSourceSquareAggregateRoot: ProtocolHash;
     readonly roundTwoAggregateRoot: ProtocolHash;
-    readonly roundTwoSourceSquareAggregateRoot: ProtocolHash;
     readonly relinearizationKeyRoot: ProtocolHash;
 }>;
 
@@ -486,7 +467,6 @@ export type GaloisKeyContributingShareRoot = Readonly<{
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly galoisKeyShareRoot: ProtocolHash;
-    readonly galoisKeyShareProofRoot: ProtocolHash;
 }>;
 
 export type GaloisKeyRootReference = Readonly<{
@@ -511,7 +491,7 @@ export type PublicEvaluationKeySet = Readonly<
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly relinearizationKeyRoots: readonly RelinearizationKeyRootReference[];
@@ -545,10 +525,16 @@ export type PublicEvaluationKeyMaterialReference = Readonly<{
     readonly publicEvaluationKeyMaterialChunkHashes: readonly ProtocolHash[];
 }>;
 
-export type TransportedEvaluationKeyShareProofMaterialSet =
-    TransportedSetupProofMaterialSet<
-        typeof evaluationKeyShareProofTransportSetObjectType
-    >;
+export type TransportedEvaluationKeyShareProofMaterialSet = Readonly<
+    JsonRecord & {
+        readonly objectType: typeof evaluationKeyShareProofTransportSetObjectType;
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
+        readonly proofMaterials: readonly JsonRecord[];
+    }
+>;
 
 export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
     JsonRecord & {
@@ -612,7 +598,6 @@ export type BinaryChunkedEvaluationKeyShareMaterialTransport = Readonly<{
     readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
     readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
     readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
-    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
 }>;
 
@@ -633,9 +618,8 @@ export type EvaluationKeyProofCommonInput = Readonly<{
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly sameSecretProofSetRoot: ProtocolHash;
     readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-    readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+    readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     readonly sameSecretProofReferences: readonly SameSecretProofReference[];
-    readonly evaluationKeyShareProofGenerator?: EvaluationKeyShareProofGenerator;
 }>;
 
 export type RelinearizationKeyShareRoundsInput = EvaluationKeyProofCommonInput &
@@ -647,6 +631,16 @@ export type RelinearizationKeyShareRoundsInput = EvaluationKeyProofCommonInput &
 export type GaloisKeyShareBatchesInput = EvaluationKeyProofCommonInput &
     Readonly<{
         readonly batchContributions: readonly GaloisKeyShareBatchContribution[];
+    }>;
+
+export type TrusteeEvaluationKeyProofsInput = EvaluationKeyProofCommonInput &
+    Readonly<{
+        readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
+        readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
+        readonly keySwitchDecompositionHash: ProtocolHash;
+        readonly trusteeWitnesses: readonly TrusteeEvaluationKeyWitnessInput[];
+        readonly trusteeEvaluationKeyProofGenerator: TrusteeEvaluationKeyProofGenerator;
+        readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     }>;
 
 export type PublicEvaluationKeySetInput = EvaluationKeyProofCommonInput &
@@ -712,7 +706,7 @@ const assertLowercaseHex = (value: string, fieldName: string): void => {
     }
 };
 
-const jsonRecordValue = (value: unknown, fieldName: string): JsonRecord => {
+const assertJsonRecord = (value: unknown, fieldName: string): JsonRecord => {
     if (value === null || Array.isArray(value) || typeof value !== 'object') {
         throw new TypeError(`${fieldName} must be a JSON object.`);
     }
@@ -769,6 +763,32 @@ const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
 
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const proofRandomnessByteLength = 64;
+
+const defaultProofRandomBytes = (byteLength: number): Uint8Array => {
+    const cryptoProvider = globalThis.crypto;
+    if (cryptoProvider === undefined) {
+        throw new Error(
+            'Trustee evaluation-key proof generation requires Web Crypto getRandomValues.',
+        );
+    }
+    const bytes = new Uint8Array(byteLength);
+    cryptoProvider.getRandomValues(bytes);
+
+    return bytes;
+};
+
+const freshProofRandomnessHex = (): string => {
+    const bytes = defaultProofRandomBytes(proofRandomnessByteLength);
+    if (bytes.byteLength !== proofRandomnessByteLength) {
+        throw new Error(
+            'proof randomness byte source must return exactly 64 bytes.',
+        );
+    }
+
+    return bytesToHex(bytes);
+};
 
 const appendVaruint = (outputBytes: number[], value: number): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -847,7 +867,7 @@ const coefficientVectorBytes = (
     return bytes;
 };
 
-const evaluationKeyShareComponentVectorHash = (
+export const evaluationKeyShareComponentVectorHash = (
     coefficients: readonly number[],
 ): ProtocolHash =>
     hash512Hex(evaluationKeyShareComponentVectorHashDomain, [
@@ -866,7 +886,7 @@ const u64LittleEndianBytes = (value: number, fieldName: string): Uint8Array => {
     return bytes;
 };
 
-const evaluationKeyShareComponentVectorRoot = (
+export const evaluationKeyShareComponentVectorRoot = (
     proofFamily: EvaluationKeyShareProofFamily,
     keySwitchDomain: string,
     keySwitchSeedHex: string,
@@ -913,15 +933,17 @@ const evaluationKeyShareComponentMaterialChunkHash = (
         chunk,
     ]);
 
-const evaluationKeyShareComponentMaterialTransportHashes = (
-    proofFamily: EvaluationKeyShareProofFamily,
-    chunks: readonly Uint8Array[],
-): Readonly<{
+type ComponentMaterialTransportHashes = Readonly<{
     readonly fullObjectHash: ProtocolHash;
     readonly chunkHashes: readonly ProtocolHash[];
     readonly chunkRoot: ProtocolHash;
     readonly totalByteLength: number;
-}> => {
+}>;
+
+const evaluationKeyShareComponentMaterialTransportHashes = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    chunks: readonly Uint8Array[],
+): ComponentMaterialTransportHashes => {
     const totalByteLength = chunks.reduce(
         (byteLength, chunk) => byteLength + chunk.byteLength,
         0,
@@ -967,13 +989,11 @@ const evaluationKeyShareComponentMaterialTransportHashes = (
 
 const evaluationKeyShareComponentMaterialReferenceRoot = (
     proofFamily: EvaluationKeyShareProofFamily,
-    proofMaterial: EvaluationKeyShareProofMaterialBase,
+    shareMaterial: EvaluationKeyShareMaterial,
     trusteeIdentity: string,
     trusteeRosterPosition: number,
     level: number,
-    transportHashes: ReturnType<
-        typeof evaluationKeyShareComponentMaterialTransportHashes
-    >,
+    transportHashes: ComponentMaterialTransportHashes,
 ): ProtocolHash =>
     deriveProtocolHash('EvaluationKeyShareComponentMaterialRoot', {
         objectType: 'EvaluationKeyShareComponentMaterialReference',
@@ -984,14 +1004,14 @@ const evaluationKeyShareComponentMaterialReferenceRoot = (
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         trusteeIdentity,
         trusteeRosterPosition,
-        keySwitchDomain: proofMaterial.keySwitchDomain,
-        keySwitchSeedHex: proofMaterial.keySwitchSeedHex,
+        keySwitchDomain: shareMaterial.keySwitchDomain,
+        keySwitchSeedHex: shareMaterial.keySwitchSeedHex,
         level,
-        ringDegree: proofMaterial.ringDegree,
+        ringDegree: shareMaterial.ringDegree,
         digitCount: level + 1,
         rnsLimbCount: level + 1,
         keySwitchComponentVectorRoot:
-            proofMaterial.keySwitchComponentVectorRoot,
+            shareMaterial.keySwitchComponentVectorRoot,
         chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: transportHashes.chunkHashes.length,
         totalByteLength: transportHashes.totalByteLength,
@@ -1000,85 +1020,71 @@ const evaluationKeyShareComponentMaterialReferenceRoot = (
         chunkHashes: transportHashes.chunkHashes,
     });
 
-const assertJsonRecord = (value: JsonRecord, fieldName: string): void => {
-    if (value === null || Array.isArray(value) || typeof value !== 'object') {
-        throw new TypeError(`${fieldName} must be a JSON object.`);
-    }
-};
-
-const assertProofByteMaterial = (
-    proofMaterial: EvaluationKeyShareProofMaterialBase,
+const assertEmbeddedComponentMaterial = (
+    shareMaterial: EvaluationKeyShareMaterial,
     fieldName: string,
-): void => {
-    if ('proofBytesHex' in proofMaterial) {
-        assertNonEmptyString(
-            proofMaterial.proofBytesHex,
-            `${fieldName}.proofBytesHex`,
-        );
-        assertLowercaseHex(
-            proofMaterial.proofBytesHex,
-            `${fieldName}.proofBytesHex`,
-        );
-        return;
-    }
-    if (proofMaterial.proofBytesEncoding !== 'binary-chunked-proof-bytes') {
-        throw new TypeError(
-            `${fieldName}.proofBytesEncoding must be binary-chunked-proof-bytes.`,
-        );
-    }
-    for (const [hashFieldName, hashValue] of [
-        ['proofMaterialRoot', proofMaterial.proofMaterialRoot],
-        ['proofFullObjectHash', proofMaterial.proofFullObjectHash],
-        ['proofChunkRoot', proofMaterial.proofChunkRoot],
-    ] as const) {
-        assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
-    }
-    assertPositiveSafeInteger(
-        proofMaterial.proofChunkSizeBytes,
-        `${fieldName}.proofChunkSizeBytes`,
-    );
-    assertPositiveSafeInteger(
-        proofMaterial.proofChunkCount,
-        `${fieldName}.proofChunkCount`,
-    );
-    assertPositiveSafeInteger(
-        proofMaterial.proofTotalByteLength,
-        `${fieldName}.proofTotalByteLength`,
-    );
+): EvaluationKeyShareMaterial &
+    EvaluationKeyShareEmbeddedKeySwitchComponentMaterial => {
     if (
-        proofMaterial.proofChunkHashes.length !== proofMaterial.proofChunkCount
+        shareMaterial.keySwitchMaterialEncoding !==
+        'embedded-full-key-switch-component-vectors'
     ) {
         throw new Error(
-            `${fieldName}.proofChunkHashes must match proofChunkCount.`,
+            `${fieldName}.keySwitchMaterialEncoding must embed full key-switch component vectors.`,
         );
     }
-    proofMaterial.proofChunkHashes.forEach((proofChunkHash, chunkIndex) => {
-        assertProtocolHash(
-            proofChunkHash,
-            `${fieldName}.proofChunkHashes.${String(chunkIndex)}`,
+    if (shareMaterial.keySwitchComponentVectors.length === 0) {
+        throw new Error(
+            `${fieldName}.keySwitchComponentVectors must be non-empty.`,
         );
-    });
+    }
+
+    return shareMaterial;
 };
 
-const assertEvaluationKeyShareProofMaterial = (
-    proofMaterial: EvaluationKeyShareProofMaterialBase,
+const assertShareMaterial = (
+    shareMaterial: EvaluationKeyShareMaterial,
     expectedComponentVectorRoot: ProtocolHash,
     fieldName: string,
 ): void => {
-    assertJsonRecord(
-        proofMaterial.setupProofBinding,
-        `${fieldName}.setupProofBinding`,
+    assertNonEmptyString(
+        shareMaterial.keySwitchDomain,
+        `${fieldName}.keySwitchDomain`,
+    );
+    assertNonEmptyString(
+        shareMaterial.keySwitchSeedHex,
+        `${fieldName}.keySwitchSeedHex`,
+    );
+    assertLowercaseHex(
+        shareMaterial.keySwitchSeedHex,
+        `${fieldName}.keySwitchSeedHex`,
+    );
+    assertPositiveSafeInteger(
+        shareMaterial.ringDegree,
+        `${fieldName}.ringDegree`,
+    );
+    assertProtocolHash(
+        shareMaterial.keySwitchComponentVectorRoot,
+        `${fieldName}.keySwitchComponentVectorRoot`,
     );
     if (
-        proofMaterial.keySwitchMaterialEncoding ===
+        shareMaterial.keySwitchComponentVectorRoot !==
+        expectedComponentVectorRoot
+    ) {
+        throw new Error(
+            `${fieldName}.keySwitchComponentVectorRoot must match the share root.`,
+        );
+    }
+    if (
+        shareMaterial.keySwitchMaterialEncoding ===
         'embedded-full-key-switch-component-vectors'
     ) {
-        if (proofMaterial.keySwitchComponentVectors.length === 0) {
+        if (shareMaterial.keySwitchComponentVectors.length === 0) {
             throw new Error(
                 `${fieldName}.keySwitchComponentVectors must be non-empty.`,
             );
         }
-        proofMaterial.keySwitchComponentVectors.forEach(
+        shareMaterial.keySwitchComponentVectors.forEach(
             (componentVector, vectorIndex) => {
                 assertJsonRecord(
                     componentVector,
@@ -1087,46 +1093,46 @@ const assertEvaluationKeyShareProofMaterial = (
             },
         );
     } else if (
-        proofMaterial.keySwitchMaterialEncoding ===
-        'binary-chunked-key-switch-component-vectors'
+        shareMaterial.keySwitchMaterialEncoding ===
+        evaluationKeyShareComponentMaterialEncoding
     ) {
         for (const [hashFieldName, hashValue] of [
             [
                 'keySwitchComponentMaterialRoot',
-                proofMaterial.keySwitchComponentMaterialRoot,
+                shareMaterial.keySwitchComponentMaterialRoot,
             ],
             [
                 'keySwitchComponentFullObjectHash',
-                proofMaterial.keySwitchComponentFullObjectHash,
+                shareMaterial.keySwitchComponentFullObjectHash,
             ],
             [
                 'keySwitchComponentChunkRoot',
-                proofMaterial.keySwitchComponentChunkRoot,
+                shareMaterial.keySwitchComponentChunkRoot,
             ],
         ] as const) {
             assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
         }
         assertPositiveSafeInteger(
-            proofMaterial.keySwitchComponentChunkSizeBytes,
+            shareMaterial.keySwitchComponentChunkSizeBytes,
             `${fieldName}.keySwitchComponentChunkSizeBytes`,
         );
         assertPositiveSafeInteger(
-            proofMaterial.keySwitchComponentChunkCount,
+            shareMaterial.keySwitchComponentChunkCount,
             `${fieldName}.keySwitchComponentChunkCount`,
         );
         assertPositiveSafeInteger(
-            proofMaterial.keySwitchComponentTotalByteLength,
+            shareMaterial.keySwitchComponentTotalByteLength,
             `${fieldName}.keySwitchComponentTotalByteLength`,
         );
         if (
-            proofMaterial.keySwitchComponentChunkHashes.length !==
-            proofMaterial.keySwitchComponentChunkCount
+            shareMaterial.keySwitchComponentChunkHashes.length !==
+            shareMaterial.keySwitchComponentChunkCount
         ) {
             throw new Error(
                 `${fieldName}.keySwitchComponentChunkHashes must match keySwitchComponentChunkCount.`,
             );
         }
-        proofMaterial.keySwitchComponentChunkHashes.forEach(
+        shareMaterial.keySwitchComponentChunkHashes.forEach(
             (chunkHash, chunkIndex) => {
                 assertProtocolHash(
                     chunkHash,
@@ -1139,754 +1145,41 @@ const assertEvaluationKeyShareProofMaterial = (
             `${fieldName}.keySwitchMaterialEncoding must be embedded-full-key-switch-component-vectors or binary-chunked-key-switch-component-vectors.`,
         );
     }
-    assertNonEmptyString(
-        proofMaterial.keySwitchDomain,
-        `${fieldName}.keySwitchDomain`,
-    );
-    assertNonEmptyString(
-        proofMaterial.keySwitchSeedHex,
-        `${fieldName}.keySwitchSeedHex`,
-    );
-    assertLowercaseHex(
-        proofMaterial.keySwitchSeedHex,
-        `${fieldName}.keySwitchSeedHex`,
-    );
-    assertPositiveSafeInteger(
-        proofMaterial.ringDegree,
-        `${fieldName}.ringDegree`,
-    );
-    assertProtocolHash(
-        proofMaterial.keySwitchComponentVectorRoot,
-        `${fieldName}.keySwitchComponentVectorRoot`,
-    );
-    if (
-        proofMaterial.keySwitchComponentVectorRoot !==
-        expectedComponentVectorRoot
-    ) {
-        throw new Error(
-            `${fieldName}.keySwitchComponentVectorRoot must match the share root.`,
-        );
-    }
-    for (const [hashFieldName, hashValue] of [
-        ['statementHash', proofMaterial.statementHash],
-        ['relationCommitmentHash', proofMaterial.relationCommitmentHash],
-        ['tboxCommitmentPrefixHash', proofMaterial.tboxCommitmentPrefixHash],
-        ['proofBytesHash', proofMaterial.proofBytesHash],
-    ] as const) {
-        assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
-    }
-    assertSetupProofChallenge(
-        proofMaterial.challenge,
-        `${fieldName}.challenge`,
-    );
-    optionalSetupProofTboxZ34Metadata(proofMaterial, fieldName);
-    assertPositiveSafeInteger(
-        proofMaterial.proofSizeBytes,
-        `${fieldName}.proofSizeBytes`,
-    );
-    assertProofByteMaterial(proofMaterial, fieldName);
 };
 
-const assertRelinearizationProofMaterial = (
-    proofMaterial: RelinearizationKeyShareProofMaterial,
-    expectedComponentVectorRoot: ProtocolHash,
-    fieldName: string,
-): void => {
-    if (
-        proofMaterial.proofProfileId !==
-        'sealed-lattice-relinearization-key-share-proof-lnp-v1'
-    ) {
-        throw new TypeError(
-            `${fieldName}.proofProfileId must be sealed-lattice-relinearization-key-share-proof-lnp-v1.`,
-        );
-    }
-    assertProtocolHash(
-        proofMaterial.relinearizationKeyShareTboxParameterProfileHash,
-        `${fieldName}.relinearizationKeyShareTboxParameterProfileHash`,
-    );
-    assertEvaluationKeyShareProofMaterial(
-        proofMaterial,
-        expectedComponentVectorRoot,
-        fieldName,
-    );
-};
-
-const assertGaloisProofMaterial = (
-    proofMaterial: GaloisKeyShareProofMaterial,
-    expectedComponentVectorRoot: ProtocolHash,
-    fieldName: string,
-): void => {
-    if (
-        proofMaterial.proofProfileId !==
-        'sealed-lattice-galois-key-share-proof-lnp-v1'
-    ) {
-        throw new TypeError(
-            `${fieldName}.proofProfileId must be sealed-lattice-galois-key-share-proof-lnp-v1.`,
-        );
-    }
-    assertProtocolHash(
-        proofMaterial.galoisKeyShareTboxParameterProfileHash,
-        `${fieldName}.galoisKeyShareTboxParameterProfileHash`,
-    );
-    assertEvaluationKeyShareProofMaterial(
-        proofMaterial,
-        expectedComponentVectorRoot,
-        fieldName,
-    );
-};
-
-const assertEvaluationKeyShareProofGenerationBase = (
-    proofGeneration: EvaluationKeyShareProofGenerationBase,
-    expectedComponentVectorRoot: ProtocolHash,
-    fieldName: string,
-): void => {
-    assertJsonRecord(
-        proofGeneration.setupProofBinding,
-        `${fieldName}.setupProofBinding`,
-    );
-    assertNonEmptyString(
-        proofGeneration.keySwitchDomain,
-        `${fieldName}.keySwitchDomain`,
-    );
-    assertNonEmptyString(
-        proofGeneration.keySwitchSeedHex,
-        `${fieldName}.keySwitchSeedHex`,
-    );
-    assertLowercaseHex(
-        proofGeneration.keySwitchSeedHex,
-        `${fieldName}.keySwitchSeedHex`,
-    );
-    assertPositiveSafeInteger(
-        proofGeneration.ringDegree,
-        `${fieldName}.ringDegree`,
-    );
-    assertProtocolHash(
-        proofGeneration.keySwitchComponentVectorRoot,
-        `${fieldName}.keySwitchComponentVectorRoot`,
-    );
-    if (
-        proofGeneration.keySwitchComponentVectorRoot !==
-        expectedComponentVectorRoot
-    ) {
-        throw new Error(
-            `${fieldName}.keySwitchComponentVectorRoot must match the share root.`,
-        );
-    }
-    if (proofGeneration.constantCommitments.length === 0) {
-        throw new Error(`${fieldName}.constantCommitments must be non-empty.`);
-    }
-    proofGeneration.constantCommitments.forEach((commitment, commitmentIndex) =>
-        assertJsonRecord(
-            commitment,
-            `${fieldName}.constantCommitments.${String(commitmentIndex)}`,
-        ),
-    );
-    if (proofGeneration.secretCoefficients.length === 0) {
-        throw new Error(`${fieldName}.secretCoefficients must be non-empty.`);
-    }
-    if (proofGeneration.openingRandomnessByLimb.length === 0) {
-        throw new Error(
-            `${fieldName}.openingRandomnessByLimb must be non-empty.`,
-        );
-    }
-    if (proofGeneration.errorCoefficientsByDigit.length === 0) {
-        throw new Error(
-            `${fieldName}.errorCoefficientsByDigit must be non-empty.`,
-        );
-    }
-    if (proofGeneration.proofRandomnessSource !== undefined) {
-        if (
-            proofGeneration.proofRandomnessSource !== 'fresh-csprng' &&
-            proofGeneration.proofRandomnessSource !==
-                'development-deterministic-fixture'
-        ) {
-            throw new TypeError(
-                `${fieldName}.proofRandomnessSource must be fresh-csprng or development-deterministic-fixture.`,
-            );
-        }
-    }
-    assertProtocolHash(
-        proofGeneration.proofRandomnessSeedHex,
-        `${fieldName}.proofRandomnessSeedHex`,
-    );
-    if (proofGeneration.transportedKeySwitchComponentMaterial !== undefined) {
-        assertJsonRecord(
-            proofGeneration.transportedKeySwitchComponentMaterial,
-            `${fieldName}.transportedKeySwitchComponentMaterial`,
-        );
-    }
-    if (
-        proofGeneration.keySwitchMaterialEncoding ===
-        'embedded-full-key-switch-component-vectors'
-    ) {
-        if (proofGeneration.keySwitchComponentVectors.length === 0) {
-            throw new Error(
-                `${fieldName}.keySwitchComponentVectors must be non-empty.`,
-            );
-        }
-        proofGeneration.keySwitchComponentVectors.forEach(
-            (componentVector, vectorIndex) =>
-                assertJsonRecord(
-                    componentVector,
-                    `${fieldName}.keySwitchComponentVectors.${String(vectorIndex)}`,
-                ),
-        );
-    } else if (
-        proofGeneration.keySwitchMaterialEncoding ===
-        'binary-chunked-key-switch-component-vectors'
-    ) {
-        for (const [hashFieldName, hashValue] of [
-            [
-                'keySwitchComponentMaterialRoot',
-                proofGeneration.keySwitchComponentMaterialRoot,
-            ],
-            [
-                'keySwitchComponentFullObjectHash',
-                proofGeneration.keySwitchComponentFullObjectHash,
-            ],
-            [
-                'keySwitchComponentChunkRoot',
-                proofGeneration.keySwitchComponentChunkRoot,
-            ],
-        ] as const) {
-            assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
-        }
-        assertPositiveSafeInteger(
-            proofGeneration.keySwitchComponentChunkSizeBytes,
-            `${fieldName}.keySwitchComponentChunkSizeBytes`,
-        );
-        assertPositiveSafeInteger(
-            proofGeneration.keySwitchComponentChunkCount,
-            `${fieldName}.keySwitchComponentChunkCount`,
-        );
-        assertPositiveSafeInteger(
-            proofGeneration.keySwitchComponentTotalByteLength,
-            `${fieldName}.keySwitchComponentTotalByteLength`,
-        );
-        if (
-            proofGeneration.keySwitchComponentChunkHashes.length !==
-            proofGeneration.keySwitchComponentChunkCount
-        ) {
-            throw new Error(
-                `${fieldName}.keySwitchComponentChunkHashes must match keySwitchComponentChunkCount.`,
-            );
-        }
-        proofGeneration.keySwitchComponentChunkHashes.forEach(
-            (chunkHash, chunkIndex) =>
-                assertProtocolHash(
-                    chunkHash,
-                    `${fieldName}.keySwitchComponentChunkHashes.${String(chunkIndex)}`,
-                ),
-        );
-    } else {
-        throw new TypeError(
-            `${fieldName}.keySwitchMaterialEncoding must be embedded-full-key-switch-component-vectors or binary-chunked-key-switch-component-vectors.`,
-        );
-    }
-};
-
-const sameSecretStatementRecordForProofGeneration = (
-    proofReference: SameSecretProofReference,
+const shareMaterialRecordFields = (
+    shareMaterial: EvaluationKeyShareMaterial,
 ): JsonRecord => ({
-    objectType: 'SameSecretConsistencyStatement',
-    objectVersion: 1,
-    trusteeIdentity: proofReference.trusteeIdentity,
-    trusteeRosterPosition: proofReference.trusteeRosterPosition,
-    sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
-    trusteeSecretCommitmentRoot: proofReference.trusteeSecretCommitmentRoot,
-});
-
-const assertGeneratedProofCommon = (
-    generatedProof: EvaluationKeyShareProofGenerationOutput,
-    proofFamily: 'relinearization-key-share' | 'galois-key-share',
-    fieldName: string,
-): void => {
-    if (
-        generatedProof.ok !== true ||
-        generatedProof.operation !== 'generateEvaluationKeyShareLnpProof' ||
-        generatedProof.proofFamily !== proofFamily
-    ) {
-        throw new Error(`${fieldName} returned the wrong proof family.`);
-    }
-    if (generatedProof.setupProofProfileId !== setupProofProfileId) {
-        throw new Error(
-            `${fieldName}.setupProofProfileId must match the setup proof profile.`,
-        );
-    }
-    if (
-        proofFamily === 'relinearization-key-share' &&
-        (generatedProof.proofVerificationStatus !==
-            relinearizationProofVerificationStatus ||
-            generatedProof.proofModelStatus !== relinearizationProofModelStatus)
-    ) {
-        throw new Error(
-            `${fieldName} returned an unexpected relinearization proof status.`,
-        );
-    }
-    if (
-        proofFamily === 'galois-key-share' &&
-        (generatedProof.proofVerificationStatus !==
-            galoisProofVerificationStatus ||
-            generatedProof.proofModelStatus !== galoisProofModelStatus)
-    ) {
-        throw new Error(
-            `${fieldName} returned an unexpected Galois proof status.`,
-        );
-    }
-    for (const [hashFieldName, hashValue] of [
-        ['statementHash', generatedProof.statementHash],
-        ['relationCommitmentHash', generatedProof.relationCommitmentHash],
-        ['tboxCommitmentPrefixHash', generatedProof.tboxCommitmentPrefixHash],
-        ['proofBytesHash', generatedProof.proofBytesHash],
-    ] as const) {
-        assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
-    }
-    assertSetupProofChallenge(
-        generatedProof.challenge,
-        `${fieldName}.challenge`,
-    );
-    optionalSetupProofTboxZ34Metadata(generatedProof, fieldName);
-    assertPositiveSafeInteger(
-        generatedProof.proofSizeBytes,
-        `${fieldName}.proofSizeBytes`,
-    );
-    assertNonEmptyString(
-        generatedProof.proofBytesHex,
-        `${fieldName}.proofBytesHex`,
-    );
-    assertLowercaseHex(
-        generatedProof.proofBytesHex,
-        `${fieldName}.proofBytesHex`,
-    );
-    if (
-        generatedProof.proofBytesHex.length !==
-        generatedProof.proofSizeBytes * 2
-    ) {
-        throw new Error(
-            `${fieldName}.proofBytesHex length must match proofSizeBytes.`,
-        );
-    }
-    if (
-        generatedProof.proofRandomness.source !== 'fresh-csprng' &&
-        generatedProof.proofRandomness.source !==
-            'development-deterministic-fixture'
-    ) {
-        throw new TypeError(
-            `${fieldName}.proofRandomness.source must be fresh-csprng or development-deterministic-fixture.`,
-        );
-    }
-    if (generatedProof.proofRandomness.seedBytes !== 64) {
-        throw new Error(`${fieldName}.proofRandomness.seedBytes must be 64.`);
-    }
-    assertNonEmptyString(
-        generatedProof.proofRandomness.retention,
-        `${fieldName}.proofRandomness.retention`,
-    );
-};
-
-const resolveRelinearizationProofMaterial = (
-    contribution: Readonly<{
-        readonly proofMaterial?: RelinearizationKeyShareProofMaterial;
-        readonly proofGeneration?: RelinearizationKeyShareProofGeneration;
-    }>,
-    expectedComponentVectorRoot: ProtocolHash,
-    proofRecord: JsonRecord,
-    proofReference: SameSecretProofReference,
-    input: EvaluationKeyProofCommonInput,
-    fieldName: string,
-): RelinearizationKeyShareProofMaterial => {
-    if (
-        (contribution.proofMaterial === undefined) ===
-        (contribution.proofGeneration === undefined)
-    ) {
-        throw new Error(
-            `${fieldName} must provide exactly one of proofMaterial or proofGeneration.`,
-        );
-    }
-    if (contribution.proofMaterial !== undefined) {
-        assertRelinearizationProofMaterial(
-            contribution.proofMaterial,
-            expectedComponentVectorRoot,
-            `${fieldName}.proofMaterial`,
-        );
-
-        return contribution.proofMaterial;
-    }
-    const proofGeneration = contribution.proofGeneration;
-    if (proofGeneration === undefined) {
-        throw new Error(`${fieldName}.proofGeneration is required.`);
-    }
-    if (input.evaluationKeyShareProofGenerator === undefined) {
-        throw new Error(
-            'evaluationKeyShareProofGenerator is required when evaluation-key proofGeneration is supplied.',
-        );
-    }
-    if (
-        proofGeneration.proofProfileId !==
-        'sealed-lattice-relinearization-key-share-proof-lnp-v1'
-    ) {
-        throw new TypeError(
-            `${fieldName}.proofGeneration.proofProfileId must be sealed-lattice-relinearization-key-share-proof-lnp-v1.`,
-        );
-    }
-    assertProtocolHash(
-        proofGeneration.relinearizationKeyShareTboxParameterProfileHash,
-        `${fieldName}.proofGeneration.relinearizationKeyShareTboxParameterProfileHash`,
-    );
-    if (proofGeneration.relinearizationSourceCoefficientsByDigit.length === 0) {
-        throw new Error(
-            `${fieldName}.proofGeneration.relinearizationSourceCoefficientsByDigit must be non-empty.`,
-        );
-    }
-    if (proofRecord.objectType === 'RelinearizationKeyShareRoundTwo') {
-        if (
-            proofGeneration.roundOneAggregateSourceCoefficientsByDigit ===
-                undefined ||
-            proofGeneration.roundOneAggregateSourceCoefficientsByDigit
-                .length === 0
-        ) {
-            throw new Error(
-                `${fieldName}.proofGeneration.roundOneAggregateSourceCoefficientsByDigit is required for relinearization round-two proof generation.`,
-            );
-        }
-    } else if (
-        proofGeneration.roundOneAggregateSourceCoefficientsByDigit !== undefined
-    ) {
-        throw new Error(
-            `${fieldName}.proofGeneration.roundOneAggregateSourceCoefficientsByDigit must not be supplied for relinearization round-one proof generation.`,
-        );
-    }
-    assertEvaluationKeyShareProofGenerationBase(
-        proofGeneration,
-        expectedComponentVectorRoot,
-        `${fieldName}.proofGeneration`,
-    );
-    const generatedProof = input.evaluationKeyShareProofGenerator({
-        proofFamily: 'relinearization-key-share',
-        publicMatrixSeedHash: input.evaluatorKeySchedule.publicMatrixSeedHash,
-        proofRecord,
-        sameSecretStatementRecord:
-            sameSecretStatementRecordForProofGeneration(proofReference),
-        constantCommitments: proofGeneration.constantCommitments,
-        setupProofBinding: proofGeneration.setupProofBinding,
-        transportedKeySwitchComponentMaterial:
-            proofGeneration.transportedKeySwitchComponentMaterial,
-        secretCoefficients: proofGeneration.secretCoefficients,
-        openingRandomnessByLimb: proofGeneration.openingRandomnessByLimb,
-        errorCoefficientsByDigit: proofGeneration.errorCoefficientsByDigit,
-        relinearizationSourceCoefficientsByDigit:
-            proofGeneration.relinearizationSourceCoefficientsByDigit,
-        roundOneAggregateSourceCoefficientsByDigit:
-            proofGeneration.roundOneAggregateSourceCoefficientsByDigit,
-        proofRandomnessSource: proofGeneration.proofRandomnessSource,
-        proofRandomnessSeedHex: proofGeneration.proofRandomnessSeedHex,
-    });
-    assertGeneratedProofCommon(
-        generatedProof,
-        'relinearization-key-share',
-        `${fieldName}.generatedProof`,
-    );
-    if (
-        generatedProof.relinearizationKeyShareTboxParameterProfileHash !==
-        proofGeneration.relinearizationKeyShareTboxParameterProfileHash
-    ) {
-        throw new Error(
-            `${fieldName}.generatedProof.relinearizationKeyShareTboxParameterProfileHash must match proofGeneration.`,
-        );
-    }
-    const commonProofMaterial = {
-        proofProfileId: proofGeneration.proofProfileId,
-        setupProofBinding: proofGeneration.setupProofBinding,
-        keySwitchDomain: proofGeneration.keySwitchDomain,
-        keySwitchSeedHex: proofGeneration.keySwitchSeedHex,
-        ringDegree: proofGeneration.ringDegree,
-        keySwitchComponentVectorRoot:
-            proofGeneration.keySwitchComponentVectorRoot,
-        relinearizationKeyShareTboxParameterProfileHash:
-            generatedProof.relinearizationKeyShareTboxParameterProfileHash,
-        statementHash: generatedProof.statementHash,
-        relationCommitmentHash: generatedProof.relationCommitmentHash,
-        tboxCommitmentPrefixHash: generatedProof.tboxCommitmentPrefixHash,
-        ...optionalSetupProofTboxZ34Metadata(
-            generatedProof,
-            `${fieldName}.generatedProof`,
-        ),
-        challenge: generatedProof.challenge,
-        proofSizeBytes: generatedProof.proofSizeBytes,
-        proofBytesHash: generatedProof.proofBytesHash,
-        proofBytesHex: generatedProof.proofBytesHex,
-    } as const;
-    const proofMaterial =
-        proofGeneration.keySwitchMaterialEncoding ===
-        'embedded-full-key-switch-component-vectors'
-            ? ({
-                  ...commonProofMaterial,
-                  keySwitchMaterialEncoding:
-                      proofGeneration.keySwitchMaterialEncoding,
-                  keySwitchComponentVectors:
-                      proofGeneration.keySwitchComponentVectors,
-              } as const satisfies RelinearizationKeyShareProofMaterial)
-            : ({
-                  ...commonProofMaterial,
-                  keySwitchMaterialEncoding:
-                      proofGeneration.keySwitchMaterialEncoding,
-                  keySwitchComponentMaterialRoot:
-                      proofGeneration.keySwitchComponentMaterialRoot,
-                  keySwitchComponentChunkSizeBytes:
-                      proofGeneration.keySwitchComponentChunkSizeBytes,
-                  keySwitchComponentChunkCount:
-                      proofGeneration.keySwitchComponentChunkCount,
-                  keySwitchComponentTotalByteLength:
-                      proofGeneration.keySwitchComponentTotalByteLength,
-                  keySwitchComponentFullObjectHash:
-                      proofGeneration.keySwitchComponentFullObjectHash,
-                  keySwitchComponentChunkRoot:
-                      proofGeneration.keySwitchComponentChunkRoot,
-                  keySwitchComponentChunkHashes:
-                      proofGeneration.keySwitchComponentChunkHashes,
-              } as const satisfies RelinearizationKeyShareProofMaterial);
-    assertRelinearizationProofMaterial(
-        proofMaterial,
-        expectedComponentVectorRoot,
-        `${fieldName}.generatedProofMaterial`,
-    );
-
-    return proofMaterial;
-};
-
-const resolveGaloisProofMaterial = (
-    contribution: GaloisKeyShareProofContribution,
-    expectedComponentVectorRoot: ProtocolHash,
-    proofRecord: JsonRecord,
-    proofReference: SameSecretProofReference,
-    input: EvaluationKeyProofCommonInput,
-    fieldName: string,
-): GaloisKeyShareProofMaterial => {
-    if (
-        (contribution.proofMaterial === undefined) ===
-        (contribution.proofGeneration === undefined)
-    ) {
-        throw new Error(
-            `${fieldName} must provide exactly one of proofMaterial or proofGeneration.`,
-        );
-    }
-    if (contribution.proofMaterial !== undefined) {
-        assertGaloisProofMaterial(
-            contribution.proofMaterial,
-            expectedComponentVectorRoot,
-            `${fieldName}.proofMaterial`,
-        );
-
-        return contribution.proofMaterial;
-    }
-    const proofGeneration = contribution.proofGeneration;
-    if (proofGeneration === undefined) {
-        throw new Error(`${fieldName}.proofGeneration is required.`);
-    }
-    if (input.evaluationKeyShareProofGenerator === undefined) {
-        throw new Error(
-            'evaluationKeyShareProofGenerator is required when evaluation-key proofGeneration is supplied.',
-        );
-    }
-    if (
-        proofGeneration.proofProfileId !==
-        'sealed-lattice-galois-key-share-proof-lnp-v1'
-    ) {
-        throw new TypeError(
-            `${fieldName}.proofGeneration.proofProfileId must be sealed-lattice-galois-key-share-proof-lnp-v1.`,
-        );
-    }
-    assertProtocolHash(
-        proofGeneration.galoisKeyShareTboxParameterProfileHash,
-        `${fieldName}.proofGeneration.galoisKeyShareTboxParameterProfileHash`,
-    );
-    assertEvaluationKeyShareProofGenerationBase(
-        proofGeneration,
-        expectedComponentVectorRoot,
-        `${fieldName}.proofGeneration`,
-    );
-    const generatedProof = input.evaluationKeyShareProofGenerator({
-        proofFamily: 'galois-key-share',
-        publicMatrixSeedHash: input.evaluatorKeySchedule.publicMatrixSeedHash,
-        proofRecord,
-        sameSecretStatementRecord:
-            sameSecretStatementRecordForProofGeneration(proofReference),
-        constantCommitments: proofGeneration.constantCommitments,
-        setupProofBinding: proofGeneration.setupProofBinding,
-        transportedKeySwitchComponentMaterial:
-            proofGeneration.transportedKeySwitchComponentMaterial,
-        secretCoefficients: proofGeneration.secretCoefficients,
-        openingRandomnessByLimb: proofGeneration.openingRandomnessByLimb,
-        errorCoefficientsByDigit: proofGeneration.errorCoefficientsByDigit,
-        proofRandomnessSource: proofGeneration.proofRandomnessSource,
-        proofRandomnessSeedHex: proofGeneration.proofRandomnessSeedHex,
-    });
-    assertGeneratedProofCommon(
-        generatedProof,
-        'galois-key-share',
-        `${fieldName}.generatedProof`,
-    );
-    if (
-        generatedProof.galoisKeyShareTboxParameterProfileHash !==
-        proofGeneration.galoisKeyShareTboxParameterProfileHash
-    ) {
-        throw new Error(
-            `${fieldName}.generatedProof.galoisKeyShareTboxParameterProfileHash must match proofGeneration.`,
-        );
-    }
-    const commonProofMaterial = {
-        proofProfileId: proofGeneration.proofProfileId,
-        setupProofBinding: proofGeneration.setupProofBinding,
-        keySwitchDomain: proofGeneration.keySwitchDomain,
-        keySwitchSeedHex: proofGeneration.keySwitchSeedHex,
-        ringDegree: proofGeneration.ringDegree,
-        keySwitchComponentVectorRoot:
-            proofGeneration.keySwitchComponentVectorRoot,
-        galoisKeyShareTboxParameterProfileHash:
-            generatedProof.galoisKeyShareTboxParameterProfileHash,
-        statementHash: generatedProof.statementHash,
-        relationCommitmentHash: generatedProof.relationCommitmentHash,
-        tboxCommitmentPrefixHash: generatedProof.tboxCommitmentPrefixHash,
-        ...optionalSetupProofTboxZ34Metadata(
-            generatedProof,
-            `${fieldName}.generatedProof`,
-        ),
-        challenge: generatedProof.challenge,
-        proofSizeBytes: generatedProof.proofSizeBytes,
-        proofBytesHash: generatedProof.proofBytesHash,
-        proofBytesHex: generatedProof.proofBytesHex,
-    } as const;
-    const proofMaterial =
-        proofGeneration.keySwitchMaterialEncoding ===
-        'embedded-full-key-switch-component-vectors'
-            ? ({
-                  ...commonProofMaterial,
-                  keySwitchMaterialEncoding:
-                      proofGeneration.keySwitchMaterialEncoding,
-                  keySwitchComponentVectors:
-                      proofGeneration.keySwitchComponentVectors,
-              } as const satisfies GaloisKeyShareProofMaterial)
-            : ({
-                  ...commonProofMaterial,
-                  keySwitchMaterialEncoding:
-                      proofGeneration.keySwitchMaterialEncoding,
-                  keySwitchComponentMaterialRoot:
-                      proofGeneration.keySwitchComponentMaterialRoot,
-                  keySwitchComponentChunkSizeBytes:
-                      proofGeneration.keySwitchComponentChunkSizeBytes,
-                  keySwitchComponentChunkCount:
-                      proofGeneration.keySwitchComponentChunkCount,
-                  keySwitchComponentTotalByteLength:
-                      proofGeneration.keySwitchComponentTotalByteLength,
-                  keySwitchComponentFullObjectHash:
-                      proofGeneration.keySwitchComponentFullObjectHash,
-                  keySwitchComponentChunkRoot:
-                      proofGeneration.keySwitchComponentChunkRoot,
-                  keySwitchComponentChunkHashes:
-                      proofGeneration.keySwitchComponentChunkHashes,
-              } as const satisfies GaloisKeyShareProofMaterial);
-    assertGaloisProofMaterial(
-        proofMaterial,
-        expectedComponentVectorRoot,
-        `${fieldName}.generatedProofMaterial`,
-    );
-
-    return proofMaterial;
-};
-
-const relinearizationProofRecordMaterialInput = (
-    contribution: Readonly<{
-        readonly proofMaterial?: RelinearizationKeyShareProofMaterial;
-        readonly proofGeneration?: RelinearizationKeyShareProofGeneration;
-    }>,
-    fieldName: string,
-):
-    | RelinearizationKeyShareProofMaterial
-    | RelinearizationKeyShareProofGeneration => {
-    if (
-        (contribution.proofMaterial === undefined) ===
-        (contribution.proofGeneration === undefined)
-    ) {
-        throw new Error(
-            `${fieldName} must provide exactly one of proofMaterial or proofGeneration.`,
-        );
-    }
-
-    return (contribution.proofMaterial ?? contribution.proofGeneration)!;
-};
-
-const galoisProofRecordMaterialInput = (
-    contribution: GaloisKeyShareProofContribution,
-    fieldName: string,
-): GaloisKeyShareProofMaterial | GaloisKeyShareProofGeneration => {
-    if (
-        (contribution.proofMaterial === undefined) ===
-        (contribution.proofGeneration === undefined)
-    ) {
-        throw new Error(
-            `${fieldName} must provide exactly one of proofMaterial or proofGeneration.`,
-        );
-    }
-
-    return (contribution.proofMaterial ?? contribution.proofGeneration)!;
-};
-
-const keySwitchComponentRecordFields = (
-    material:
-        | EvaluationKeyShareProofMaterialBase
-        | EvaluationKeyShareProofGenerationBase,
-): JsonRecord =>
-    material.keySwitchMaterialEncoding ===
+    keySwitchDomain: shareMaterial.keySwitchDomain,
+    keySwitchSeedHex: shareMaterial.keySwitchSeedHex,
+    ringDegree: shareMaterial.ringDegree,
+    keySwitchComponentVectorRoot: shareMaterial.keySwitchComponentVectorRoot,
+    ...(shareMaterial.keySwitchMaterialEncoding ===
     'embedded-full-key-switch-component-vectors'
         ? {
-              keySwitchMaterialEncoding: material.keySwitchMaterialEncoding,
-              keySwitchComponentVectors: material.keySwitchComponentVectors,
+              keySwitchMaterialEncoding:
+                  shareMaterial.keySwitchMaterialEncoding,
+              keySwitchComponentVectors:
+                  shareMaterial.keySwitchComponentVectors,
           }
         : {
-              keySwitchMaterialEncoding: material.keySwitchMaterialEncoding,
+              keySwitchMaterialEncoding:
+                  shareMaterial.keySwitchMaterialEncoding,
               keySwitchComponentMaterialRoot:
-                  material.keySwitchComponentMaterialRoot,
+                  shareMaterial.keySwitchComponentMaterialRoot,
               keySwitchComponentChunkSizeBytes:
-                  material.keySwitchComponentChunkSizeBytes,
+                  shareMaterial.keySwitchComponentChunkSizeBytes,
               keySwitchComponentChunkCount:
-                  material.keySwitchComponentChunkCount,
+                  shareMaterial.keySwitchComponentChunkCount,
               keySwitchComponentTotalByteLength:
-                  material.keySwitchComponentTotalByteLength,
+                  shareMaterial.keySwitchComponentTotalByteLength,
               keySwitchComponentFullObjectHash:
-                  material.keySwitchComponentFullObjectHash,
-              keySwitchComponentChunkRoot: material.keySwitchComponentChunkRoot,
+                  shareMaterial.keySwitchComponentFullObjectHash,
+              keySwitchComponentChunkRoot:
+                  shareMaterial.keySwitchComponentChunkRoot,
               keySwitchComponentChunkHashes:
-                  material.keySwitchComponentChunkHashes,
-          };
-
-const relinearizationProofRecordMaterialFields = (
-    material:
-        | RelinearizationKeyShareProofMaterial
-        | RelinearizationKeyShareProofGeneration,
-): JsonRecord => ({
-    proofProfileId: material.proofProfileId,
-    setupProofBinding: material.setupProofBinding,
-    ...keySwitchComponentRecordFields(material),
-    keySwitchDomain: material.keySwitchDomain,
-    keySwitchSeedHex: material.keySwitchSeedHex,
-    ringDegree: material.ringDegree,
-    keySwitchComponentVectorRoot: material.keySwitchComponentVectorRoot,
-    relinearizationKeyShareTboxParameterProfileHash:
-        material.relinearizationKeyShareTboxParameterProfileHash,
-});
-
-const galoisProofRecordMaterialFields = (
-    material: GaloisKeyShareProofMaterial | GaloisKeyShareProofGeneration,
-): JsonRecord => ({
-    proofProfileId: material.proofProfileId,
-    setupProofBinding: material.setupProofBinding,
-    ...keySwitchComponentRecordFields(material),
-    keySwitchDomain: material.keySwitchDomain,
-    keySwitchSeedHex: material.keySwitchSeedHex,
-    ringDegree: material.ringDegree,
-    keySwitchComponentVectorRoot: material.keySwitchComponentVectorRoot,
-    galoisKeyShareTboxParameterProfileHash:
-        material.galoisKeyShareTboxParameterProfileHash,
+                  shareMaterial.keySwitchComponentChunkHashes,
+          }),
 });
 
 const contextFields = (
@@ -1963,13 +1256,13 @@ const galoisKeySwitchSeed = (
     });
 
 const assertRelinearizationKeySwitchSampleBinding = (
-    proofMaterial: RelinearizationKeyShareProofMaterial,
+    shareMaterial: EvaluationKeyShareMaterial,
     evaluatorKeySchedule: EvaluatorKeySchedule,
     round: 'round-one' | 'round-two',
     level: number,
     fieldName: string,
 ): void => {
-    if (proofMaterial.keySwitchDomain !== 'relinearization') {
+    if (shareMaterial.keySwitchDomain !== 'relinearization') {
         throw new Error(
             `${fieldName}.keySwitchDomain must be relinearization.`,
         );
@@ -1979,7 +1272,7 @@ const assertRelinearizationKeySwitchSampleBinding = (
         round,
         level,
     );
-    if (proofMaterial.keySwitchSeedHex !== expectedSeed) {
+    if (shareMaterial.keySwitchSeedHex !== expectedSeed) {
         throw new Error(
             `${fieldName}.keySwitchSeedHex must be shared by scheduled relinearization level and round.`,
         );
@@ -1987,14 +1280,14 @@ const assertRelinearizationKeySwitchSampleBinding = (
 };
 
 const assertGaloisKeySwitchSampleBinding = (
-    proofMaterial: GaloisKeyShareProofMaterial,
+    shareMaterial: EvaluationKeyShareMaterial,
     evaluatorKeySchedule: EvaluatorKeySchedule,
     rotation: number,
     level: number,
     fieldName: string,
 ): void => {
     const expectedDomain = `galois-${String(rotation)}`;
-    if (proofMaterial.keySwitchDomain !== expectedDomain) {
+    if (shareMaterial.keySwitchDomain !== expectedDomain) {
         throw new Error(
             `${fieldName}.keySwitchDomain must match the scheduled Galois rotation.`,
         );
@@ -2004,88 +1297,11 @@ const assertGaloisKeySwitchSampleBinding = (
         rotation,
         level,
     );
-    if (proofMaterial.keySwitchSeedHex !== expectedSeed) {
+    if (shareMaterial.keySwitchSeedHex !== expectedSeed) {
         throw new Error(
             `${fieldName}.keySwitchSeedHex must be shared by scheduled Galois rotation and level.`,
         );
     }
-};
-
-const relinearizationSourceRelationForRound = (
-    round: 'round-one' | 'round-two',
-): Readonly<{ relation: string; status: string }> =>
-    round === 'round-one'
-        ? {
-              relation: 'same-secret-for-relinearization-round-one-source',
-              status: 'verified-by-round-one-same-secret-source-response',
-          }
-        : {
-              relation:
-                  'same-secret-times-round-one-aggregate-for-relinearization-source',
-              status: 'verifier-checked-round-two-source-square-aggregate-binding',
-          };
-
-const relinearizationSourceSquareBindingRoot = (
-    record: Readonly<Record<string, unknown>>,
-    round: 'round-one' | 'round-two',
-    shareRoot: ProtocolHash,
-): ProtocolHash => {
-    const sourceRelation = relinearizationSourceRelationForRound(round);
-
-    return deriveProtocolHash('RelinearizationSourceSquareBindingRoot', {
-        objectType: 'RelinearizationSourceSquareBinding',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
-        proofFamily: 'relinearization-key-share',
-        sourceRelation: sourceRelation.relation,
-        sourceRelationStatus: sourceRelation.status,
-        round,
-        evaluatorKeyScheduleRoot: record.evaluatorKeyScheduleRoot,
-        sameSecretProofSetRoot: record.sameSecretProofSetRoot,
-        sameSecretProofFamilyBindingRoot:
-            record.sameSecretProofFamilyBindingRoot,
-        publicKeyShareLnpProofSetRoot: record.publicKeyShareLnpProofSetRoot,
-        relinearizationCrpRoot: record.relinearizationCrpRoot,
-        trusteeIdentity: record.trusteeIdentity,
-        trusteeRosterPosition: record.trusteeRosterPosition,
-        level: record.level,
-        sameSecretStatementRoot: record.sameSecretStatementRoot,
-        trusteeSecretCommitmentRoot: record.trusteeSecretCommitmentRoot,
-        sameSecretProofRoot: record.sameSecretProofRoot,
-        shareRoot,
-        keySwitchComponentVectorRoot: record.keySwitchComponentVectorRoot,
-        statementHash: record.statementHash,
-        relationCommitmentHash: record.relationCommitmentHash,
-        proofBytesHash: record.proofBytesHash,
-    });
-};
-
-const relinearizationSourceSquareAggregateRoot = (
-    round: 'round-one' | 'round-two',
-    evaluatorKeyScheduleRoot: ProtocolHash,
-    level: number,
-    sourceSquareBindingRoots: readonly JsonRecord[],
-    roundOneSourceSquareAggregateRoot?: ProtocolHash,
-): ProtocolHash => {
-    const sourceRelation = relinearizationSourceRelationForRound(round);
-
-    return deriveProtocolHash('RelinearizationSourceSquareAggregateRoot', {
-        objectType: 'RelinearizationSourceSquareAggregate',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
-        proofFamily: 'relinearization-key-share',
-        sourceRelation: sourceRelation.relation,
-        sourceRelationStatus: sourceRelation.status,
-        round,
-        evaluatorKeyScheduleRoot,
-        level,
-        ...(roundOneSourceSquareAggregateRoot === undefined
-            ? {}
-            : { roundOneSourceSquareAggregateRoot }),
-        sourceSquareBindingRoots,
-    });
 };
 
 const sortedSameSecretProofReferences = (
@@ -2174,7 +1390,10 @@ const validateCommonInput = (
             'publicKeyShareSetRoot',
             input.evaluatorKeySchedule.publicKeyShareSetRoot,
         ],
-        ['publicKeyShareLnpProofSetRoot', input.publicKeyShareLnpProofSetRoot],
+        [
+            'publicKeyShareSuccinctProofSetRoot',
+            input.publicKeyShareSuccinctProofSetRoot,
+        ],
         [
             'relinearizationCrpRoot',
             input.evaluatorKeySchedule.relinearizationCrpRoot,
@@ -2189,621 +1408,6 @@ const validateCommonInput = (
     }
 
     return sortedSameSecretProofReferences(input);
-};
-
-type EvaluationKeyShareCompletedProofMaterial =
-    | RelinearizationKeyShareProofMaterial
-    | GaloisKeyShareProofMaterial;
-
-type EvaluationKeyShareTransportWorkItem = Readonly<{
-    readonly key: string;
-    readonly proofFamily: EvaluationKeyShareProofFamily;
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly level: number;
-    readonly proofMaterial: EvaluationKeyShareCompletedProofMaterial;
-}>;
-
-const proofBytesHashDomainForFamily = (
-    proofFamily: EvaluationKeyShareProofFamily,
-): string =>
-    proofFamily === 'relinearization-key-share'
-        ? relinearizationProofBytesHashDomain
-        : galoisProofBytesHashDomain;
-
-const evaluationKeyTransportItemKey = (
-    proofFamily: EvaluationKeyShareProofFamily,
-    scope: string,
-    trusteeRosterPosition: number,
-    level: number,
-    rotation?: number,
-): string =>
-    [
-        proofFamily,
-        scope,
-        String(trusteeRosterPosition),
-        String(level),
-        ...(rotation === undefined ? [] : [String(rotation)]),
-    ].join(':');
-
-const trusteeIdentityByRosterPosition = (
-    sameSecretProofReferences: readonly Pick<
-        SameSecretProofReference,
-        'trusteeIdentity' | 'trusteeRosterPosition'
-    >[],
-): ReadonlyMap<number, string> => {
-    const identities = new Map<number, string>();
-    sameSecretProofReferences.forEach((reference, referenceIndex) => {
-        assertNonEmptyString(
-            reference.trusteeIdentity,
-            `sameSecretProofReferences.${String(referenceIndex)}.trusteeIdentity`,
-        );
-        assertNonNegativeSafeInteger(
-            reference.trusteeRosterPosition,
-            `sameSecretProofReferences.${String(referenceIndex)}.trusteeRosterPosition`,
-        );
-        if (identities.has(reference.trusteeRosterPosition)) {
-            throw new Error(
-                'sameSecretProofReferences must not repeat trusteeRosterPosition.',
-            );
-        }
-        identities.set(
-            reference.trusteeRosterPosition,
-            reference.trusteeIdentity,
-        );
-    });
-
-    return identities;
-};
-
-const trusteeIdentityForContribution = (
-    identities: ReadonlyMap<number, string>,
-    trusteeRosterPosition: number,
-    fieldName: string,
-): string => {
-    const trusteeIdentity = identities.get(trusteeRosterPosition);
-    if (trusteeIdentity === undefined) {
-        throw new Error(
-            `${fieldName} references a trustee roster position without a same-secret proof reference.`,
-        );
-    }
-
-    return trusteeIdentity;
-};
-
-const evaluationKeyShareTransportWorkItems = (
-    input: EvaluationKeyShareMaterialTransportInput,
-): readonly EvaluationKeyShareTransportWorkItem[] => {
-    const identities = trusteeIdentityByRosterPosition(
-        input.sameSecretProofReferences,
-    );
-    const workItems: EvaluationKeyShareTransportWorkItem[] = [];
-    input.relinearizationRoundOneContributions.forEach(
-        (contribution, contributionIndex) => {
-            if (
-                contribution.proofGeneration !== undefined ||
-                contribution.proofMaterial === undefined
-            ) {
-                throw new Error(
-                    'evaluation-key material transport requires completed relinearization round-one proof material.',
-                );
-            }
-            assertRelinearizationProofMaterial(
-                contribution.proofMaterial,
-                contribution.roundOneShareRoot,
-                `relinearizationRoundOneContributions.${String(contributionIndex)}.proofMaterial`,
-            );
-            workItems.push({
-                key: evaluationKeyTransportItemKey(
-                    'relinearization-key-share',
-                    'round-one',
-                    contribution.trusteeRosterPosition,
-                    contribution.level,
-                ),
-                proofFamily: 'relinearization-key-share',
-                trusteeIdentity: trusteeIdentityForContribution(
-                    identities,
-                    contribution.trusteeRosterPosition,
-                    'relinearizationRoundOneContributions',
-                ),
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                proofMaterial: contribution.proofMaterial,
-            });
-        },
-    );
-    input.relinearizationRoundTwoContributions.forEach(
-        (contribution, contributionIndex) => {
-            if (
-                contribution.proofGeneration !== undefined ||
-                contribution.proofMaterial === undefined
-            ) {
-                throw new Error(
-                    'evaluation-key material transport requires completed relinearization round-two proof material.',
-                );
-            }
-            assertRelinearizationProofMaterial(
-                contribution.proofMaterial,
-                contribution.roundTwoShareRoot,
-                `relinearizationRoundTwoContributions.${String(contributionIndex)}.proofMaterial`,
-            );
-            workItems.push({
-                key: evaluationKeyTransportItemKey(
-                    'relinearization-key-share',
-                    'round-two',
-                    contribution.trusteeRosterPosition,
-                    contribution.level,
-                ),
-                proofFamily: 'relinearization-key-share',
-                trusteeIdentity: trusteeIdentityForContribution(
-                    identities,
-                    contribution.trusteeRosterPosition,
-                    'relinearizationRoundTwoContributions',
-                ),
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                proofMaterial: contribution.proofMaterial,
-            });
-        },
-    );
-    input.galoisKeyShareBatchContributions.forEach((batchContribution) => {
-        const trusteeIdentity = trusteeIdentityForContribution(
-            identities,
-            batchContribution.trusteeRosterPosition,
-            'galoisKeyShareBatchContributions',
-        );
-        batchContribution.galoisKeyShareProofs.forEach(
-            (proofContribution, proofIndex) => {
-                if (
-                    proofContribution.proofGeneration !== undefined ||
-                    proofContribution.proofMaterial === undefined
-                ) {
-                    throw new Error(
-                        'evaluation-key material transport requires completed Galois proof material.',
-                    );
-                }
-                assertGaloisProofMaterial(
-                    proofContribution.proofMaterial,
-                    proofContribution.galoisKeyShareRoot,
-                    `galoisKeyShareProofs.${String(proofIndex)}.proofMaterial`,
-                );
-                workItems.push({
-                    key: evaluationKeyTransportItemKey(
-                        'galois-key-share',
-                        'proof',
-                        batchContribution.trusteeRosterPosition,
-                        proofContribution.level,
-                        proofContribution.rotation,
-                    ),
-                    proofFamily: 'galois-key-share',
-                    trusteeIdentity,
-                    trusteeRosterPosition:
-                        batchContribution.trusteeRosterPosition,
-                    level: proofContribution.level,
-                    proofMaterial: proofContribution.proofMaterial,
-                });
-            },
-        );
-    });
-
-    return workItems;
-};
-
-const encodeEvaluationKeyShareComponentMaterial = (
-    proofFamily: EvaluationKeyShareProofFamily,
-    proofMaterial: EvaluationKeyShareProofMaterialBase &
-        EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
-    level: number,
-): readonly Uint8Array[] => {
-    const digitCount = level + 1;
-    if (proofMaterial.keySwitchComponentVectors.length !== digitCount ** 2) {
-        throw new Error(
-            'evaluation-key component material must contain one vector per scheduled digit and RNS limb.',
-        );
-    }
-    const writer = new BinaryChunkWriter({
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
-        emptyErrorMessage:
-            'evaluation-key component material transport requires bytes.',
-    });
-    writer.writeBytes(evaluationKeyShareComponentMaterialMagic);
-    writer.writeU64LittleEndian(level, 'evaluation-key level');
-    writer.writeU64LittleEndian(
-        proofMaterial.ringDegree,
-        'evaluation-key ringDegree',
-    );
-    writer.writeU64LittleEndian(digitCount, 'evaluation-key digitCount');
-    writer.writeU64LittleEndian(digitCount, 'evaluation-key rnsLimbCount');
-    const canonicalComponentVectors: JsonRecord[] = [];
-    for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
-        for (
-            let rnsLimbIndex = 0;
-            rnsLimbIndex < digitCount;
-            rnsLimbIndex += 1
-        ) {
-            const componentVector = jsonRecordValue(
-                proofMaterial.keySwitchComponentVectors[
-                    digitIndex * digitCount + rnsLimbIndex
-                ],
-                'keySwitchComponentVectors',
-            );
-            const vectorPath = `keySwitchComponentVectors.${String(
-                digitIndex,
-            )}.${String(rnsLimbIndex)}`;
-            if (
-                nonNegativeIntegerRecordField(
-                    componentVector,
-                    'digitIndex',
-                    vectorPath,
-                ) !== digitIndex ||
-                nonNegativeIntegerRecordField(
-                    componentVector,
-                    'rnsLimbIndex',
-                    vectorPath,
-                ) !== rnsLimbIndex ||
-                componentVector.component !== 'b'
-            ) {
-                throw new Error(
-                    'evaluation-key component material vectors must be ordered by digit and RNS limb.',
-                );
-            }
-            const rnsPrime = nonNegativeIntegerRecordField(
-                componentVector,
-                'rnsPrime',
-                vectorPath,
-            );
-            const coefficientByteLength = nonNegativeIntegerRecordField(
-                componentVector,
-                'coefficientByteLength',
-                vectorPath,
-            );
-            if (coefficientByteLength !== proofMaterial.ringDegree * 8) {
-                throw new Error(
-                    'evaluation-key component material coefficientByteLength must match ringDegree.',
-                );
-            }
-            const coefficientsLeHex = stringRecordField(
-                componentVector,
-                'coefficientsLeHex',
-                vectorPath,
-            );
-            const coefficients = coefficientVectorFromLittleEndianHex(
-                coefficientsLeHex,
-                proofMaterial.ringDegree,
-                `${vectorPath}.coefficientsLeHex`,
-            );
-            if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
-                throw new Error(
-                    'evaluation-key component material coefficients must be canonical residues.',
-                );
-            }
-            const coefficientVectorHash =
-                evaluationKeyShareComponentVectorHash(coefficients);
-            if (
-                stringRecordField(
-                    componentVector,
-                    'coefficientVectorHash512',
-                    vectorPath,
-                ) !== coefficientVectorHash
-            ) {
-                throw new Error(
-                    'evaluation-key component material coefficient hash must match coefficientsLeHex.',
-                );
-            }
-            canonicalComponentVectors.push({
-                digitIndex,
-                rnsLimbIndex,
-                rnsPrime,
-                component: 'b',
-                coefficientByteLength,
-                coefficientVectorHash512: coefficientVectorHash,
-                coefficientsLeHex,
-            });
-            writer.writeU64LittleEndian(
-                digitIndex,
-                'evaluation-key component digitIndex',
-            );
-            writer.writeU64LittleEndian(
-                rnsLimbIndex,
-                'evaluation-key component rnsLimbIndex',
-            );
-            writer.writeU64LittleEndian(
-                rnsPrime,
-                'evaluation-key component rnsPrime',
-            );
-            writer.writeU64LittleEndian(
-                proofMaterial.ringDegree,
-                'evaluation-key component coefficientCount',
-            );
-            coefficients.forEach((coefficient) =>
-                writer.writeU64LittleEndian(
-                    coefficient,
-                    'evaluation-key component coefficient',
-                ),
-            );
-        }
-    }
-    const componentVectorRoot = evaluationKeyShareComponentVectorRoot(
-        proofFamily,
-        proofMaterial.keySwitchDomain,
-        proofMaterial.keySwitchSeedHex,
-        level,
-        proofMaterial.ringDegree,
-        canonicalComponentVectors,
-    );
-    if (componentVectorRoot !== proofMaterial.keySwitchComponentVectorRoot) {
-        throw new Error(
-            'evaluation-key component material root must match keySwitchComponentVectorRoot before transport.',
-        );
-    }
-
-    return writer.finish();
-};
-
-const transportEvaluationKeyShareComponentMaterial = (
-    workItem: EvaluationKeyShareTransportWorkItem,
-): Readonly<{
-    readonly proofMaterial: EvaluationKeyShareCompletedProofMaterial;
-    readonly componentMaterial: JsonRecord;
-}> => {
-    if (
-        workItem.proofMaterial.keySwitchMaterialEncoding !==
-        'embedded-full-key-switch-component-vectors'
-    ) {
-        throw new Error(
-            'evaluation-key component material transport must be built from embedded full component vectors.',
-        );
-    }
-    const chunks = encodeEvaluationKeyShareComponentMaterial(
-        workItem.proofFamily,
-        workItem.proofMaterial,
-        workItem.level,
-    );
-    const transportHashes = evaluationKeyShareComponentMaterialTransportHashes(
-        workItem.proofFamily,
-        chunks,
-    );
-    const keySwitchComponentMaterialRoot =
-        evaluationKeyShareComponentMaterialReferenceRoot(
-            workItem.proofFamily,
-            workItem.proofMaterial,
-            workItem.trusteeIdentity,
-            workItem.trusteeRosterPosition,
-            workItem.level,
-            transportHashes,
-        );
-    const proofMaterialWithoutVectors = {
-        ...workItem.proofMaterial,
-    } as JsonRecord;
-    delete proofMaterialWithoutVectors.keySwitchComponentVectors;
-    const proofMaterial = {
-        ...proofMaterialWithoutVectors,
-        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
-        keySwitchComponentMaterialRoot,
-        keySwitchComponentChunkSizeBytes: setupProofTransportChunkSizeBytes,
-        keySwitchComponentChunkCount: transportHashes.chunkHashes.length,
-        keySwitchComponentTotalByteLength: transportHashes.totalByteLength,
-        keySwitchComponentFullObjectHash: transportHashes.fullObjectHash,
-        keySwitchComponentChunkRoot: transportHashes.chunkRoot,
-        keySwitchComponentChunkHashes: transportHashes.chunkHashes,
-    } as EvaluationKeyShareCompletedProofMaterial;
-
-    return {
-        proofMaterial,
-        componentMaterial: {
-            objectType: evaluationKeyShareComponentMaterialTransportObjectType,
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
-            proofFamily: workItem.proofFamily,
-            keySwitchMaterialEncoding:
-                evaluationKeyShareComponentMaterialEncoding,
-            trusteeIdentity: workItem.trusteeIdentity,
-            trusteeRosterPosition: workItem.trusteeRosterPosition,
-            keySwitchDomain: workItem.proofMaterial.keySwitchDomain,
-            keySwitchSeedHex: workItem.proofMaterial.keySwitchSeedHex,
-            level: workItem.level,
-            ringDegree: workItem.proofMaterial.ringDegree,
-            digitCount: workItem.level + 1,
-            rnsLimbCount: workItem.level + 1,
-            keySwitchComponentVectorRoot:
-                workItem.proofMaterial.keySwitchComponentVectorRoot,
-            keySwitchComponentMaterialRoot,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: transportHashes.chunkHashes.length,
-            totalByteLength: transportHashes.totalByteLength,
-            fullObjectHash: transportHashes.fullObjectHash,
-            chunkRoot: transportHashes.chunkRoot,
-            chunkHashes: transportHashes.chunkHashes,
-            chunks: chunks.map((chunk, chunkIndex) => ({
-                chunkIndex,
-                bytesHex: bytesToHex(chunk),
-            })),
-        },
-    };
-};
-
-const stripEvaluationKeyProofMaterialTransportContext = (
-    proofMaterial: EvaluationKeyShareCompletedProofMaterial &
-        Readonly<{
-            readonly trusteeIdentity: string;
-            readonly trusteeRosterPosition: number;
-            readonly proofFamily: EvaluationKeyShareProofFamily;
-        }>,
-): EvaluationKeyShareCompletedProofMaterial => {
-    const record = { ...proofMaterial } as JsonRecord;
-    delete record.trusteeIdentity;
-    delete record.trusteeRosterPosition;
-    delete record.proofFamily;
-
-    return record as EvaluationKeyShareCompletedProofMaterial;
-};
-
-export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
-    input: EvaluationKeyShareMaterialTransportInput,
-): BinaryChunkedEvaluationKeyShareMaterialTransport => {
-    const workItems = evaluationKeyShareTransportWorkItems(input);
-    const componentTransportByKey = new Map<
-        string,
-        EvaluationKeyShareCompletedProofMaterial
-    >();
-    const componentMaterials: JsonRecord[] = [];
-    const componentRoots = new Set<string>();
-    workItems.forEach((workItem) => {
-        const componentTransport =
-            transportEvaluationKeyShareComponentMaterial(workItem);
-        const componentMaterialRoot = stringRecordField(
-            componentTransport.componentMaterial,
-            'keySwitchComponentMaterialRoot',
-            'componentMaterial',
-        );
-        if (componentRoots.has(componentMaterialRoot)) {
-            throw new Error(
-                'transported evaluation-key component material contains duplicate roots.',
-            );
-        }
-        componentRoots.add(componentMaterialRoot);
-        componentTransportByKey.set(
-            workItem.key,
-            componentTransport.proofMaterial,
-        );
-        componentMaterials.push(componentTransport.componentMaterial);
-    });
-
-    const transportedProofMaterialByKey = new Map<
-        string,
-        EvaluationKeyShareCompletedProofMaterial
-    >();
-    const transportedProofMaterials: JsonRecord[] = [];
-    (['relinearization-key-share', 'galois-key-share'] as const).forEach(
-        (proofFamily) => {
-            const familyItems = workItems.filter(
-                (workItem) => workItem.proofFamily === proofFamily,
-            );
-            if (familyItems.length === 0) {
-                return;
-            }
-            const proofMaterialTransport = transportSetupProofMaterials(
-                familyItems.map((workItem) => ({
-                    ...componentTransportByKey.get(workItem.key),
-                    trusteeIdentity: workItem.trusteeIdentity,
-                    trusteeRosterPosition: workItem.trusteeRosterPosition,
-                    proofFamily,
-                })),
-                {
-                    proofFamily,
-                    proofBytesHashDomain:
-                        proofBytesHashDomainForFamily(proofFamily),
-                    transportedSetObjectType:
-                        evaluationKeyShareProofTransportSetObjectType,
-                    transportedObjectType:
-                        evaluationKeyShareProofTransportObjectType,
-                    transportedObjectHashFieldPrefix: 'proof',
-                },
-            );
-            proofMaterialTransport.proofMaterials.forEach(
-                (proofMaterial, proofIndex) => {
-                    transportedProofMaterialByKey.set(
-                        familyItems[proofIndex].key,
-                        stripEvaluationKeyProofMaterialTransportContext(
-                            proofMaterial as EvaluationKeyShareCompletedProofMaterial &
-                                Readonly<{
-                                    readonly trusteeIdentity: string;
-                                    readonly trusteeRosterPosition: number;
-                                    readonly proofFamily: EvaluationKeyShareProofFamily;
-                                }>,
-                        ),
-                    );
-                },
-            );
-            transportedProofMaterials.push(
-                ...proofMaterialTransport.transportedProofMaterial
-                    .proofMaterials,
-            );
-        },
-    );
-
-    const proofMaterialForKey = (
-        key: string,
-    ): EvaluationKeyShareCompletedProofMaterial => {
-        const proofMaterial = transportedProofMaterialByKey.get(key);
-        if (proofMaterial === undefined) {
-            throw new Error(
-                'evaluation-key proof material transport did not produce a transported proof material.',
-            );
-        }
-
-        return proofMaterial;
-    };
-
-    return {
-        relinearizationRoundOneContributions:
-            input.relinearizationRoundOneContributions.map((contribution) => ({
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                roundOneShareRoot: contribution.roundOneShareRoot,
-                proofMaterial: proofMaterialForKey(
-                    evaluationKeyTransportItemKey(
-                        'relinearization-key-share',
-                        'round-one',
-                        contribution.trusteeRosterPosition,
-                        contribution.level,
-                    ),
-                ) as RelinearizationKeyShareProofMaterial,
-            })),
-        relinearizationRoundTwoContributions:
-            input.relinearizationRoundTwoContributions.map((contribution) => ({
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                roundTwoShareRoot: contribution.roundTwoShareRoot,
-                proofMaterial: proofMaterialForKey(
-                    evaluationKeyTransportItemKey(
-                        'relinearization-key-share',
-                        'round-two',
-                        contribution.trusteeRosterPosition,
-                        contribution.level,
-                    ),
-                ) as RelinearizationKeyShareProofMaterial,
-            })),
-        galoisKeyShareBatchContributions:
-            input.galoisKeyShareBatchContributions.map((batchContribution) => ({
-                trusteeRosterPosition: batchContribution.trusteeRosterPosition,
-                galoisKeyShareProofs:
-                    batchContribution.galoisKeyShareProofs.map(
-                        (proofContribution) => ({
-                            rotation: proofContribution.rotation,
-                            level: proofContribution.level,
-                            galoisKeyShareRoot:
-                                proofContribution.galoisKeyShareRoot,
-                            proofMaterial: proofMaterialForKey(
-                                evaluationKeyTransportItemKey(
-                                    'galois-key-share',
-                                    'proof',
-                                    batchContribution.trusteeRosterPosition,
-                                    proofContribution.level,
-                                    proofContribution.rotation,
-                                ),
-                            ) as GaloisKeyShareProofMaterial,
-                        }),
-                    ),
-            })),
-        transportedEvaluationKeyShareProofMaterial: {
-            objectType: evaluationKeyShareProofTransportSetObjectType,
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
-            proofFamily: 'evaluation-key-share',
-            proofMaterials: transportedProofMaterials,
-        },
-        transportedEvaluationKeyShareComponentMaterial: {
-            objectType:
-                evaluationKeyShareComponentMaterialTransportSetObjectType,
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
-            componentMaterials,
-        },
-    };
 };
 
 const contributionMap = <
@@ -2855,12 +1459,7 @@ export const createRelinearizationKeyShareRounds = (
     const roundOneRecords: RelinearizationKeyShareRoundOneRecord[] = [];
     const roundOneShareRoots = new Map<string, ProtocolHash>();
     const roundOneRecordRoots = new Map<string, ProtocolHash>();
-    const roundOneSourceSquareBindingRoots = new Map<string, ProtocolHash>();
     const roundOneAggregateRootByLevel = new Map<number, ProtocolHash>();
-    const roundOneSourceSquareAggregateRootByLevel = new Map<
-        number,
-        ProtocolHash
-    >();
     const roundOneAggregateRoots = levels.map((level) => {
         const roundOneRecordRootsForLevel = sameSecretProofReferences.map(
             (proofReference) => {
@@ -2878,20 +1477,27 @@ export const createRelinearizationKeyShareRounds = (
                     contribution.roundOneShareRoot,
                     'roundOneShareRoot',
                 );
-                const proofRecordMaterialInput =
-                    relinearizationProofRecordMaterialInput(
-                        contribution,
-                        'roundOneContributions',
-                    );
-                const recordForProofGeneration = {
+                assertShareMaterial(
+                    contribution.shareMaterial,
+                    contribution.roundOneShareRoot,
+                    'roundOneContributions.shareMaterial',
+                );
+                assertRelinearizationKeySwitchSampleBinding(
+                    contribution.shareMaterial,
+                    input.evaluatorKeySchedule,
+                    'round-one',
+                    level,
+                    'roundOneContributions.shareMaterial',
+                );
+                const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundOne',
                     objectVersion: 1,
                     setupProfileId: 'CollectiveBgvSetup-v1',
                     setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
                     proofVerificationStatus:
-                        relinearizationProofVerificationStatus,
-                    proofModelStatus: relinearizationProofModelStatus,
+                        evaluationKeyShareRecordVerificationStatus,
+                    proofModelStatus: trusteeEvaluationKeyProofModelStatus,
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -2903,8 +1509,8 @@ export const createRelinearizationKeyShareRounds = (
                     sameSecretProofSetRoot: input.sameSecretProofSetRoot,
                     sameSecretProofFamilyBindingRoot:
                         input.sameSecretProofFamilyBindingRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        input.publicKeyShareLnpProofSetRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        input.publicKeyShareSuccinctProofSetRoot,
                     sameSecretStatementRoot:
                         proofReference.sameSecretStatementRoot,
                     trusteeSecretCommitmentRoot:
@@ -2913,72 +1519,18 @@ export const createRelinearizationKeyShareRounds = (
                     relinearizationCrpRoot:
                         input.evaluatorKeySchedule.relinearizationCrpRoot,
                     roundOneShareRoot: contribution.roundOneShareRoot,
-                    ...relinearizationProofRecordMaterialFields(
-                        proofRecordMaterialInput,
-                    ),
-                } as const satisfies JsonRecord;
-                const proofMaterial = resolveRelinearizationProofMaterial(
-                    contribution,
-                    contribution.roundOneShareRoot,
-                    recordForProofGeneration,
-                    proofReference,
-                    input,
-                    'roundOneContributions',
-                );
-                assertRelinearizationKeySwitchSampleBinding(
-                    proofMaterial,
-                    input.evaluatorKeySchedule,
-                    'round-one',
-                    level,
-                    'roundOneContributions.proofMaterial',
-                );
-                const recordWithoutProofRoot = {
-                    ...recordForProofGeneration,
-                    ...proofMaterial,
-                } as const satisfies Omit<
-                    RelinearizationKeyShareRoundOneRecord,
-                    | 'sourceSquareBindingRoot'
-                    | 'roundOneProofRoot'
-                    | 'roundOneRecordRoot'
-                >;
-                const sourceSquareBindingRoot =
-                    relinearizationSourceSquareBindingRoot(
-                        recordWithoutProofRoot,
-                        'round-one',
-                        contribution.roundOneShareRoot,
-                    );
-                const recordWithSourceSquareRoot = {
-                    ...recordWithoutProofRoot,
-                    sourceSquareBindingRoot,
-                } as const satisfies Omit<
-                    RelinearizationKeyShareRoundOneRecord,
-                    'roundOneProofRoot' | 'roundOneRecordRoot'
-                >;
-                const roundOneProofRoot = deriveProtocolHash(
-                    'RelinearizationKeyShareProofRoot',
-                    recordWithSourceSquareRoot,
-                );
-                const recordWithoutRoot = {
-                    ...recordWithSourceSquareRoot,
-                    roundOneProofRoot,
-                } as const satisfies Omit<
-                    RelinearizationKeyShareRoundOneRecord,
-                    'roundOneRecordRoot'
-                >;
+                    ...shareMaterialRecordFields(contribution.shareMaterial),
+                } as JsonRecord;
                 const roundOneRecordRoot = deriveProtocolHash(
                     'RelinearizationRoundOneRecordRoot',
                     recordWithoutRoot,
                 );
                 roundOneShareRoots.set(key, contribution.roundOneShareRoot);
                 roundOneRecordRoots.set(key, roundOneRecordRoot);
-                roundOneSourceSquareBindingRoots.set(
-                    key,
-                    sourceSquareBindingRoot,
-                );
                 roundOneRecords.push({
                     ...recordWithoutRoot,
                     roundOneRecordRoot,
-                });
+                } as RelinearizationKeyShareRoundOneRecord);
 
                 return {
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -2987,34 +1539,6 @@ export const createRelinearizationKeyShareRounds = (
                 };
             },
         );
-        const roundOneSourceSquareBindingRootEntries =
-            sameSecretProofReferences.map((proofReference) => {
-                const sourceSquareBindingRoot =
-                    roundOneSourceSquareBindingRoots.get(
-                        contributionKey(
-                            level,
-                            proofReference.trusteeRosterPosition,
-                        ),
-                    );
-                if (sourceSquareBindingRoot === undefined) {
-                    throw new Error(
-                        'roundOneContributions is missing a source-square binding root.',
-                    );
-                }
-
-                return {
-                    trusteeIdentity: proofReference.trusteeIdentity,
-                    trusteeRosterPosition: proofReference.trusteeRosterPosition,
-                    sourceSquareBindingRoot,
-                };
-            });
-        const roundOneSourceSquareAggregateRoot =
-            relinearizationSourceSquareAggregateRoot(
-                'round-one',
-                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                level,
-                roundOneSourceSquareBindingRootEntries,
-            );
         const roundOneAggregateRoot = deriveProtocolHash(
             'RelinearizationRoundOneAggregateRoot',
             {
@@ -3025,20 +1549,14 @@ export const createRelinearizationKeyShareRounds = (
                 evaluatorKeyScheduleRoot:
                     input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                 level,
-                roundOneSourceSquareAggregateRoot,
                 roundOneRecordRoots: roundOneRecordRootsForLevel,
             },
         );
         roundOneAggregateRootByLevel.set(level, roundOneAggregateRoot);
-        roundOneSourceSquareAggregateRootByLevel.set(
-            level,
-            roundOneSourceSquareAggregateRoot,
-        );
 
         return {
             level,
             roundOneAggregateRoot,
-            roundOneSourceSquareAggregateRoot,
         };
     });
 
@@ -3055,17 +1573,11 @@ export const createRelinearizationKeyShareRounds = (
                 const roundOneRecordRoot = roundOneRecordRoots.get(key);
                 const roundOneAggregateRoot =
                     roundOneAggregateRootByLevel.get(level);
-                const roundOneSourceSquareBindingRoot =
-                    roundOneSourceSquareBindingRoots.get(key);
-                const roundOneSourceSquareAggregateRoot =
-                    roundOneSourceSquareAggregateRootByLevel.get(level);
                 if (
                     contribution === undefined ||
                     roundOneShareRoot === undefined ||
                     roundOneRecordRoot === undefined ||
-                    roundOneAggregateRoot === undefined ||
-                    roundOneSourceSquareBindingRoot === undefined ||
-                    roundOneSourceSquareAggregateRoot === undefined
+                    roundOneAggregateRoot === undefined
                 ) {
                     throw new Error(
                         'roundTwoContributions is missing a scheduled trustee and level.',
@@ -3075,20 +1587,27 @@ export const createRelinearizationKeyShareRounds = (
                     contribution.roundTwoShareRoot,
                     'roundTwoShareRoot',
                 );
-                const proofRecordMaterialInput =
-                    relinearizationProofRecordMaterialInput(
-                        contribution,
-                        'roundTwoContributions',
-                    );
-                const recordForProofGeneration = {
+                assertShareMaterial(
+                    contribution.shareMaterial,
+                    contribution.roundTwoShareRoot,
+                    'roundTwoContributions.shareMaterial',
+                );
+                assertRelinearizationKeySwitchSampleBinding(
+                    contribution.shareMaterial,
+                    input.evaluatorKeySchedule,
+                    'round-two',
+                    level,
+                    'roundTwoContributions.shareMaterial',
+                );
+                const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundTwo',
                     objectVersion: 1,
                     setupProfileId: 'CollectiveBgvSetup-v1',
                     setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
                     proofVerificationStatus:
-                        relinearizationProofVerificationStatus,
-                    proofModelStatus: relinearizationProofModelStatus,
+                        evaluationKeyShareRecordVerificationStatus,
+                    proofModelStatus: trusteeEvaluationKeyProofModelStatus,
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -3100,8 +1619,8 @@ export const createRelinearizationKeyShareRounds = (
                     sameSecretProofSetRoot: input.sameSecretProofSetRoot,
                     sameSecretProofFamilyBindingRoot:
                         input.sameSecretProofFamilyBindingRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        input.publicKeyShareLnpProofSetRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        input.publicKeyShareSuccinctProofSetRoot,
                     sameSecretStatementRoot:
                         proofReference.sameSecretStatementRoot,
                     trusteeSecretCommitmentRoot:
@@ -3112,61 +1631,9 @@ export const createRelinearizationKeyShareRounds = (
                     roundOneShareRoot,
                     roundOneRecordRoot,
                     roundOneAggregateRoot,
-                    roundOneSourceSquareBindingRoot,
-                    roundOneSourceSquareAggregateRoot,
                     roundTwoShareRoot: contribution.roundTwoShareRoot,
-                    ...relinearizationProofRecordMaterialFields(
-                        proofRecordMaterialInput,
-                    ),
-                } as const satisfies JsonRecord;
-                const proofMaterial = resolveRelinearizationProofMaterial(
-                    contribution,
-                    contribution.roundTwoShareRoot,
-                    recordForProofGeneration,
-                    proofReference,
-                    input,
-                    'roundTwoContributions',
-                );
-                assertRelinearizationKeySwitchSampleBinding(
-                    proofMaterial,
-                    input.evaluatorKeySchedule,
-                    'round-two',
-                    level,
-                    'roundTwoContributions.proofMaterial',
-                );
-                const recordWithoutProofRoot = {
-                    ...recordForProofGeneration,
-                    ...proofMaterial,
-                } as const satisfies Omit<
-                    RelinearizationKeyShareRoundTwoRecord,
-                    | 'sourceSquareBindingRoot'
-                    | 'roundTwoProofRoot'
-                    | 'roundTwoRecordRoot'
-                >;
-                const sourceSquareBindingRoot =
-                    relinearizationSourceSquareBindingRoot(
-                        recordWithoutProofRoot,
-                        'round-two',
-                        contribution.roundTwoShareRoot,
-                    );
-                const recordWithSourceSquareRoot = {
-                    ...recordWithoutProofRoot,
-                    sourceSquareBindingRoot,
-                } as const satisfies Omit<
-                    RelinearizationKeyShareRoundTwoRecord,
-                    'roundTwoProofRoot' | 'roundTwoRecordRoot'
-                >;
-                const roundTwoProofRoot = deriveProtocolHash(
-                    'RelinearizationKeyShareProofRoot',
-                    recordWithSourceSquareRoot,
-                );
-                const recordWithoutRoot = {
-                    ...recordWithSourceSquareRoot,
-                    roundTwoProofRoot,
-                } as const satisfies Omit<
-                    RelinearizationKeyShareRoundTwoRecord,
-                    'roundTwoRecordRoot'
-                >;
+                    ...shareMaterialRecordFields(contribution.shareMaterial),
+                } as JsonRecord;
                 const roundTwoRecordRoot = deriveProtocolHash(
                     'RelinearizationRoundTwoRecordRoot',
                     recordWithoutRoot,
@@ -3174,7 +1641,7 @@ export const createRelinearizationKeyShareRounds = (
                 roundTwoRecords.push({
                     ...recordWithoutRoot,
                     roundTwoRecordRoot,
-                });
+                } as RelinearizationKeyShareRoundTwoRecord);
 
                 return {
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -3183,28 +1650,12 @@ export const createRelinearizationKeyShareRounds = (
                 };
             },
         );
-        const roundOneSourceSquareAggregateRoot =
-            roundOneSourceSquareAggregateRootByLevel.get(level);
-        if (roundOneSourceSquareAggregateRoot === undefined) {
+        const roundOneAggregateRoot = roundOneAggregateRootByLevel.get(level);
+        if (roundOneAggregateRoot === undefined) {
             throw new Error(
-                'roundTwoContributions is missing a scheduled source-square aggregate root.',
+                'roundTwoContributions is missing a scheduled round-one aggregate root.',
             );
         }
-        const roundTwoSourceSquareBindingRootEntries = roundTwoRecords
-            .filter((record) => record.level === level)
-            .map((record) => ({
-                trusteeIdentity: record.trusteeIdentity,
-                trusteeRosterPosition: record.trusteeRosterPosition,
-                sourceSquareBindingRoot: record.sourceSquareBindingRoot,
-            }));
-        const roundTwoSourceSquareAggregateRoot =
-            relinearizationSourceSquareAggregateRoot(
-                'round-two',
-                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                level,
-                roundTwoSourceSquareBindingRootEntries,
-                roundOneSourceSquareAggregateRoot,
-            );
         const roundTwoAggregateRoot = deriveProtocolHash(
             'RelinearizationRoundTwoAggregateRoot',
             {
@@ -3215,9 +1666,7 @@ export const createRelinearizationKeyShareRounds = (
                 evaluatorKeyScheduleRoot:
                     input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                 level,
-                roundOneAggregateRoot: roundOneAggregateRootByLevel.get(level),
-                roundOneSourceSquareAggregateRoot,
-                roundTwoSourceSquareAggregateRoot,
+                roundOneAggregateRoot,
                 roundTwoRecordRoots: roundTwoRecordRootsForLevel,
             },
         );
@@ -3225,7 +1674,6 @@ export const createRelinearizationKeyShareRounds = (
         return {
             level,
             roundTwoAggregateRoot,
-            roundTwoSourceSquareAggregateRoot,
         };
     });
 
@@ -3235,8 +1683,8 @@ export const createRelinearizationKeyShareRounds = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: 'relinearization-key-share',
-        proofVerificationStatus: relinearizationProofVerificationStatus,
-        proofModelStatus: relinearizationProofModelStatus,
+        proofVerificationStatus: evaluationKeyShareRecordVerificationStatus,
+        proofModelStatus: trusteeEvaluationKeyProofModelStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -3248,7 +1696,8 @@ export const createRelinearizationKeyShareRounds = (
         sameSecretProofFamilyBindingRoot:
             input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
-        publicKeyShareLnpProofSetRoot: input.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            input.publicKeyShareSuccinctProofSetRoot,
         relinearizationCrpRoot:
             input.evaluatorKeySchedule.relinearizationCrpRoot,
         relinearizationLevelSchedule:
@@ -3309,127 +1758,66 @@ export const createGaloisKeyShareBatches = (
             );
         }
         if (
-            contribution.galoisKeyShareProofs.length !==
+            contribution.galoisKeyShares.length !==
             input.evaluatorKeySchedule.requiredGaloisKeySchedule.length
         ) {
             throw new Error(
-                'galoisKeyShareProofs must contain one proof per required Galois key.',
+                'galoisKeyShares must contain one share per required Galois key.',
             );
         }
-        const galoisKeyShareProofs = contribution.galoisKeyShareProofs.map(
-            (proofContribution, index) => {
+        const galoisKeyShareMaterialRecords = contribution.galoisKeyShares.map(
+            (shareContribution, index) => {
                 const expectedScheduleEntry =
                     input.evaluatorKeySchedule.requiredGaloisKeySchedule[index];
                 if (
-                    proofContribution.rotation !==
+                    shareContribution.rotation !==
                         expectedScheduleEntry.rotation ||
-                    proofContribution.level !== expectedScheduleEntry.level
+                    shareContribution.level !== expectedScheduleEntry.level
                 ) {
                     throw new Error(
-                        'galoisKeyShareProofs must follow the frozen Galois key schedule.',
+                        'galoisKeyShares must follow the frozen Galois key schedule.',
                     );
                 }
                 assertProtocolHash(
-                    proofContribution.galoisKeyShareRoot,
+                    shareContribution.galoisKeyShareRoot,
                     'galoisKeyShareRoot',
                 );
-                const proofRecordMaterialInput = galoisProofRecordMaterialInput(
-                    proofContribution,
-                    'galoisKeyShareProofs',
+                assertShareMaterial(
+                    shareContribution.shareMaterial,
+                    shareContribution.galoisKeyShareRoot,
+                    'galoisKeyShares.shareMaterial',
                 );
-                const proofRecordForGeneration = {
-                    objectType: 'GaloisKeyShareProof',
+                assertGaloisKeySwitchSampleBinding(
+                    shareContribution.shareMaterial,
+                    input.evaluatorKeySchedule,
+                    shareContribution.rotation,
+                    shareContribution.level,
+                    'galoisKeyShares.shareMaterial',
+                );
+
+                return {
+                    objectType: 'GaloisKeyShareMaterial',
                     objectVersion: 1,
                     setupProfileId: 'CollectiveBgvSetup-v1',
                     setupProofProfileId,
                     proofFamily: 'galois-key-share',
-                    proofVerificationStatus: galoisProofVerificationStatus,
-                    proofModelStatus: galoisProofModelStatus,
-                    ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
-                    evaluatorKeyScheduleRoot:
-                        input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretConsistencyRoot:
-                        input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-                    sameSecretProofSetRoot: input.sameSecretProofSetRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        input.publicKeyShareLnpProofSetRoot,
-                    sameSecretStatementRoot:
-                        proofReference.sameSecretStatementRoot,
-                    trusteeSecretCommitmentRoot:
-                        proofReference.trusteeSecretCommitmentRoot,
-                    sameSecretProofRoot: proofReference.sameSecretProofRoot,
-                    galoisKeyCrpRoot:
-                        input.evaluatorKeySchedule.galoisKeyCrpRoot,
-                    requiredGaloisSetHash:
-                        input.evaluatorKeySchedule.requiredGaloisSetHash,
-                    rotation: proofContribution.rotation,
-                    level: proofContribution.level,
-                    galoisKeyShareRoot: proofContribution.galoisKeyShareRoot,
-                    ...galoisProofRecordMaterialFields(
-                        proofRecordMaterialInput,
+                    rotation: shareContribution.rotation,
+                    level: shareContribution.level,
+                    galoisKeyShareRoot: shareContribution.galoisKeyShareRoot,
+                    ...shareMaterialRecordFields(
+                        shareContribution.shareMaterial,
                     ),
-                } as const satisfies JsonRecord;
-                const proofMaterial = resolveGaloisProofMaterial(
-                    proofContribution,
-                    proofContribution.galoisKeyShareRoot,
-                    proofRecordForGeneration,
-                    proofReference,
-                    input,
-                    'galoisKeyShareProofs',
-                );
-                assertGaloisKeySwitchSampleBinding(
-                    proofMaterial,
-                    input.evaluatorKeySchedule,
-                    proofContribution.rotation,
-                    proofContribution.level,
-                    'galoisKeyShareProofs.proofMaterial',
-                );
-                const proofWithoutRoot = {
-                    ...proofRecordForGeneration,
-                    ...proofMaterial,
-                } as const satisfies Omit<
-                    GaloisKeyShareProof,
-                    'galoisKeyShareProofRoot'
-                >;
-
-                return {
-                    ...proofWithoutRoot,
-                    galoisKeyShareProofRoot: deriveProtocolHash(
-                        'GaloisKeyShareProofRoot',
-                        proofWithoutRoot,
-                    ),
-                } satisfies GaloisKeyShareProof;
+                } as GaloisKeyShareMaterialRecord;
             },
         );
-        const galoisKeyShareRoots = galoisKeyShareProofs.map((proof) => ({
-            rotation: proof.rotation,
-            level: proof.level,
-            galoisKeyShareRoot: proof.galoisKeyShareRoot,
-        }));
-        const proofRoots = galoisKeyShareProofs.map((proof) => ({
-            rotation: proof.rotation,
-            level: proof.level,
-            galoisKeyShareProofRoot: proof.galoisKeyShareProofRoot,
-        }));
-        const galoisKeyBatchProofRoot = deriveProtocolHash(
-            'GaloisKeyBatchProofRoot',
-            {
-                objectType: 'GaloisKeyBatchProofAggregate',
-                objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                proofFamily: 'galois-key-share',
-                evaluatorKeyScheduleRoot:
-                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                requiredGaloisSetHash:
-                    input.evaluatorKeySchedule.requiredGaloisSetHash,
-                trusteeRosterPosition: proofReference.trusteeRosterPosition,
-                proofRoots,
-            },
+        const galoisKeyShareRoots = contribution.galoisKeyShares.map(
+            (shareContribution) => ({
+                rotation: shareContribution.rotation,
+                level: shareContribution.level,
+                galoisKeyShareRoot: shareContribution.galoisKeyShareRoot,
+            }),
         );
         const batchWithoutRoot = {
             objectType: 'GaloisKeyShareBatch',
@@ -3437,8 +1825,8 @@ export const createGaloisKeyShareBatches = (
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId,
             proofFamily: 'galois-key-share',
-            proofVerificationStatus: galoisProofVerificationStatus,
-            proofModelStatus: galoisProofModelStatus,
+            proofVerificationStatus: evaluationKeyShareRecordVerificationStatus,
+            proofModelStatus: trusteeEvaluationKeyProofModelStatus,
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,
             trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -3449,7 +1837,8 @@ export const createGaloisKeyShareBatches = (
             sameSecretProofSetRoot: input.sameSecretProofSetRoot,
             sameSecretProofFamilyBindingRoot:
                 input.sameSecretProofFamilyBindingRoot,
-            publicKeyShareLnpProofSetRoot: input.publicKeyShareLnpProofSetRoot,
+            publicKeyShareSuccinctProofSetRoot:
+                input.publicKeyShareSuccinctProofSetRoot,
             sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
             trusteeSecretCommitmentRoot:
                 proofReference.trusteeSecretCommitmentRoot,
@@ -3460,8 +1849,7 @@ export const createGaloisKeyShareBatches = (
             requiredGaloisKeySchedule:
                 input.evaluatorKeySchedule.requiredGaloisKeySchedule,
             galoisKeyShareRoots,
-            galoisKeyShareProofs,
-            galoisKeyBatchProofRoot,
+            galoisKeyShareMaterialRecords,
         } as const satisfies Omit<
             GaloisKeyShareBatch,
             'galoisKeyShareBatchRoot'
@@ -3476,6 +1864,1656 @@ export const createGaloisKeyShareBatches = (
         } satisfies GaloisKeyShareBatch;
     });
 };
+
+// Decode one record's full public component-b material, mirroring the kernel
+// decoder: from embedded canonical component vector entries, or from the
+// binary chunked transport referenced by keySwitchComponentMaterialRoot.
+const componentBVectorsFromMaterial = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    record: JsonRecord,
+    qSharePrimes: readonly number[],
+    transportedComponentMaterial:
+        | TransportedEvaluationKeyShareComponentMaterialSet
+        | undefined,
+    objectPath: string,
+): number[][][] => {
+    const level = nonNegativeIntegerRecordField(record, 'level', objectPath);
+    const ringDegree = nonNegativeIntegerRecordField(
+        record,
+        'ringDegree',
+        objectPath,
+    );
+    const digitCount = level + 1;
+    if (digitCount > qSharePrimes.length) {
+        throw new Error(`${objectPath}.level is outside the Q_share basis.`);
+    }
+    const materialEncoding = stringRecordField(
+        record,
+        'keySwitchMaterialEncoding',
+        objectPath,
+    );
+    if (materialEncoding === 'embedded-full-key-switch-component-vectors') {
+        const entriesValue = record.keySwitchComponentVectors;
+        if (!Array.isArray(entriesValue)) {
+            throw new TypeError(
+                `${objectPath}.keySwitchComponentVectors must be an array.`,
+            );
+        }
+        if (entriesValue.length !== digitCount * digitCount) {
+            throw new Error(
+                `${objectPath}.keySwitchComponentVectors must contain one vector per digit and RNS limb.`,
+            );
+        }
+        const componentBByDigit: number[][][] = Array.from(
+            { length: digitCount },
+            () => Array.from({ length: digitCount }, () => [] as number[]),
+        );
+        entriesValue.forEach((entryValue, entryIndex) => {
+            const entry = assertJsonRecord(
+                entryValue,
+                `${objectPath}.keySwitchComponentVectors.${String(entryIndex)}`,
+            );
+            const entryPath = `${objectPath}.keySwitchComponentVectors.${String(entryIndex)}`;
+            const digitIndex = nonNegativeIntegerRecordField(
+                entry,
+                'digitIndex',
+                entryPath,
+            );
+            const rnsLimbIndex = nonNegativeIntegerRecordField(
+                entry,
+                'rnsLimbIndex',
+                entryPath,
+            );
+            if (digitIndex >= digitCount || rnsLimbIndex >= digitCount) {
+                throw new Error(
+                    `${entryPath} component vector index is outside the proof level.`,
+                );
+            }
+            if (
+                nonNegativeIntegerRecordField(entry, 'rnsPrime', entryPath) !==
+                    qSharePrimes[rnsLimbIndex] ||
+                entry.component !== 'b' ||
+                nonNegativeIntegerRecordField(
+                    entry,
+                    'coefficientByteLength',
+                    entryPath,
+                ) !==
+                    ringDegree * 8
+            ) {
+                throw new Error(
+                    `${entryPath} component vector metadata does not match the proof level.`,
+                );
+            }
+            if (componentBByDigit[digitIndex][rnsLimbIndex].length !== 0) {
+                throw new Error(
+                    `${entryPath} repeats a digit and RNS limb component vector.`,
+                );
+            }
+            const coefficients = coefficientVectorFromLittleEndianHex(
+                stringRecordField(entry, 'coefficientsLeHex', entryPath),
+                ringDegree,
+                `${entryPath}.coefficientsLeHex`,
+            );
+            if (
+                coefficients.some(
+                    (coefficient) => coefficient >= qSharePrimes[rnsLimbIndex],
+                )
+            ) {
+                throw new Error(
+                    `${entryPath} contains non-canonical Q_share residues.`,
+                );
+            }
+            if (
+                stringRecordField(
+                    entry,
+                    'coefficientVectorHash512',
+                    entryPath,
+                ) !== evaluationKeyShareComponentVectorHash(coefficients)
+            ) {
+                throw new Error(
+                    `${entryPath} coefficient hash does not match coefficientsLeHex.`,
+                );
+            }
+            componentBByDigit[digitIndex][rnsLimbIndex] = [...coefficients];
+        });
+        const expectedRoot = evaluationKeyShareComponentVectorRoot(
+            proofFamily,
+            stringRecordField(record, 'keySwitchDomain', objectPath),
+            stringRecordField(record, 'keySwitchSeedHex', objectPath),
+            level,
+            ringDegree,
+            entriesValue as JsonRecord[],
+        );
+        if (
+            stringRecordField(
+                record,
+                'keySwitchComponentVectorRoot',
+                objectPath,
+            ) !== expectedRoot
+        ) {
+            throw new Error(
+                `${objectPath}.keySwitchComponentVectorRoot does not match the embedded public material.`,
+            );
+        }
+
+        return componentBByDigit;
+    }
+    if (materialEncoding !== evaluationKeyShareComponentMaterialEncoding) {
+        throw new Error(
+            `${objectPath}.keySwitchMaterialEncoding is not accepted.`,
+        );
+    }
+    if (transportedComponentMaterial === undefined) {
+        throw new Error(
+            `${objectPath} uses binary component material but no transportedEvaluationKeyShareComponentMaterial was supplied.`,
+        );
+    }
+    const expectedMaterialRoot = stringRecordField(
+        record,
+        'keySwitchComponentMaterialRoot',
+        objectPath,
+    );
+    const matchingMaterials =
+        transportedComponentMaterial.componentMaterials.filter(
+            (componentMaterial) =>
+                componentMaterial.keySwitchComponentMaterialRoot ===
+                expectedMaterialRoot,
+        );
+    if (matchingMaterials.length !== 1) {
+        throw new Error(
+            `${objectPath} transported component material must match exactly one keySwitchComponentMaterialRoot.`,
+        );
+    }
+    const componentMaterial = assertJsonRecord(
+        matchingMaterials[0],
+        'componentMaterial',
+    );
+    const chunksValue = componentMaterial.chunks;
+    if (!Array.isArray(chunksValue) || chunksValue.length === 0) {
+        throw new Error(
+            `${objectPath} transported component material chunks must be a non-empty array.`,
+        );
+    }
+    const materialBytesParts = chunksValue.map((chunkValue, chunkIndex) => {
+        const chunk = assertJsonRecord(
+            chunkValue,
+            `componentMaterial.chunks.${String(chunkIndex)}`,
+        );
+        if (chunk.chunkIndex !== chunkIndex) {
+            throw new Error(
+                'transported component material chunks must be in ascending chunk-index order.',
+            );
+        }
+
+        return bytesFromHex(
+            stringRecordField(
+                chunk,
+                'bytesHex',
+                `componentMaterial.chunks.${String(chunkIndex)}`,
+            ),
+            'componentMaterial.chunks.bytesHex',
+        );
+    });
+    const totalByteLength = materialBytesParts.reduce(
+        (byteLength, part) => byteLength + part.byteLength,
+        0,
+    );
+    const materialBytes = new Uint8Array(totalByteLength);
+    let writeOffset = 0;
+    for (const part of materialBytesParts) {
+        materialBytes.set(part, writeOffset);
+        writeOffset += part.byteLength;
+    }
+    const view = new DataView(
+        materialBytes.buffer,
+        materialBytes.byteOffset,
+        materialBytes.byteLength,
+    );
+    let cursor = 0;
+    const readWord = (): number => {
+        if (cursor + 8 > materialBytes.byteLength) {
+            throw new Error(
+                'transported component material ended unexpectedly.',
+            );
+        }
+        const word = view.getBigUint64(cursor, true);
+        cursor += 8;
+        if (word > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error(
+                'transported component material contains a value outside the JavaScript safe integer range.',
+            );
+        }
+
+        return Number(word);
+    };
+    for (
+        let magicIndex = 0;
+        magicIndex < evaluationKeyShareComponentMaterialMagic.length;
+        magicIndex += 1
+    ) {
+        if (
+            materialBytes[magicIndex] !==
+            evaluationKeyShareComponentMaterialMagic[magicIndex]
+        ) {
+            throw new Error(
+                'transported component material has the wrong format marker.',
+            );
+        }
+    }
+    cursor = evaluationKeyShareComponentMaterialMagic.length;
+    const decodedLevel = readWord();
+    const decodedRingDegree = readWord();
+    const decodedDigitCount = readWord();
+    const decodedLimbCount = readWord();
+    if (
+        decodedLevel !== level ||
+        decodedRingDegree !== ringDegree ||
+        decodedDigitCount !== digitCount ||
+        decodedLimbCount !== digitCount
+    ) {
+        throw new Error(
+            'transported component material shape does not match the share record.',
+        );
+    }
+    const componentBByDigit: number[][][] = [];
+    for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
+        const componentBByLimb: number[][] = [];
+        for (
+            let rnsLimbIndex = 0;
+            rnsLimbIndex < digitCount;
+            rnsLimbIndex += 1
+        ) {
+            if (
+                readWord() !== digitIndex ||
+                readWord() !== rnsLimbIndex ||
+                readWord() !== qSharePrimes[rnsLimbIndex] ||
+                readWord() !== ringDegree
+            ) {
+                throw new Error(
+                    'transported component material record order or metadata is invalid.',
+                );
+            }
+            const coefficients: number[] = [];
+            for (
+                let coefficientIndex = 0;
+                coefficientIndex < ringDegree;
+                coefficientIndex += 1
+            ) {
+                const coefficient = readWord();
+                if (coefficient >= qSharePrimes[rnsLimbIndex]) {
+                    throw new Error(
+                        'transported component material contains non-canonical Q_share residues.',
+                    );
+                }
+                coefficients.push(coefficient);
+            }
+            componentBByLimb.push(coefficients);
+        }
+        componentBByDigit.push(componentBByLimb);
+    }
+    if (cursor !== materialBytes.byteLength) {
+        throw new Error('transported component material has trailing bytes.');
+    }
+
+    return componentBByDigit;
+};
+
+const relinearizationRecordForTrusteeAndLevel = (
+    records: readonly JsonRecord[],
+    trusteeRosterPosition: number,
+    level: number,
+    recordFieldName: string,
+): JsonRecord => {
+    const matchingRecords = records.filter(
+        (record) =>
+            record.trusteeRosterPosition === trusteeRosterPosition &&
+            record.level === level,
+    );
+    if (matchingRecords.length !== 1) {
+        throw new Error(
+            `${recordFieldName} must contain exactly one record per scheduled trustee and level.`,
+        );
+    }
+
+    return matchingRecords[0];
+};
+
+// The public round-one aggregate diagonal per scheduled level: for digit j,
+// the sum over every trustee of its round-one component b at (digit j, limb j)
+// mod the j-th Q_share prime. Mirrors the kernel recomputation so the prover
+// statement matches the verifier-rebuilt statement.
+const roundOnePublicAggregateDiagonals = (
+    relinearizationKeyShareRounds: RelinearizationKeyShareRounds,
+    qSharePrimes: readonly number[],
+    participantCount: number,
+    transportedComponentMaterial:
+        | TransportedEvaluationKeyShareComponentMaterialSet
+        | undefined,
+): ReadonlyMap<number, number[][]> => {
+    const aggregatesByLevel = new Map<
+        number,
+        { aggregate: number[][]; contributionCount: number }
+    >();
+    relinearizationKeyShareRounds.roundOneRecords.forEach((record) => {
+        const recordFields = record as JsonRecord;
+        const level = nonNegativeIntegerRecordField(
+            recordFields,
+            'level',
+            'roundOneRecords',
+        );
+        const digitCount = level + 1;
+        const components = componentBVectorsFromMaterial(
+            'relinearization-key-share',
+            recordFields,
+            qSharePrimes,
+            transportedComponentMaterial,
+            'roundOneRecords',
+        );
+        const ringDegree = components[0]?.[0]?.length ?? 0;
+        if (ringDegree === 0) {
+            throw new Error(
+                'round-one component material does not cover the aggregate diagonal.',
+            );
+        }
+        let aggregateEntry = aggregatesByLevel.get(level);
+        if (aggregateEntry === undefined) {
+            aggregateEntry = {
+                aggregate: Array.from({ length: digitCount }, () =>
+                    Array.from({ length: ringDegree }, () => 0),
+                ),
+                contributionCount: 0,
+            };
+            aggregatesByLevel.set(level, aggregateEntry);
+        }
+        for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
+            const modulus = qSharePrimes[digitIndex];
+            const diagonal = components[digitIndex]?.[digitIndex];
+            if (diagonal?.length !== ringDegree) {
+                throw new Error(
+                    'round-one component material does not cover the aggregate diagonal.',
+                );
+            }
+            const accumulated = aggregateEntry.aggregate[digitIndex];
+            for (
+                let coefficientIndex = 0;
+                coefficientIndex < ringDegree;
+                coefficientIndex += 1
+            ) {
+                accumulated[coefficientIndex] =
+                    (accumulated[coefficientIndex] +
+                        diagonal[coefficientIndex]) %
+                    modulus;
+            }
+        }
+        aggregateEntry.contributionCount += 1;
+    });
+    const aggregateDiagonalsByLevel = new Map<number, number[][]>();
+    for (const [level, aggregateEntry] of aggregatesByLevel) {
+        if (aggregateEntry.contributionCount !== participantCount) {
+            throw new Error(
+                'round-one aggregate requires one component contribution per trustee.',
+            );
+        }
+        aggregateDiagonalsByLevel.set(level, aggregateEntry.aggregate);
+    }
+
+    return aggregateDiagonalsByLevel;
+};
+
+export const createTrusteeEvaluationKeyProofs = (
+    input: TrusteeEvaluationKeyProofsInput,
+): TrusteeEvaluationKeyProofSet => {
+    const sameSecretProofReferences = validateCommonInput(input);
+    assertProtocolHash(
+        input.keySwitchDecompositionHash,
+        'keySwitchDecompositionHash',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.relinearizationKeyShareRounds,
+        'relinearizationKeyShareRounds',
+    );
+    if (
+        input.relinearizationKeyShareRounds.evaluatorKeyScheduleRoot !==
+            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
+        input.relinearizationKeyShareRounds.sameSecretProofSetRoot !==
+            input.sameSecretProofSetRoot ||
+        input.relinearizationKeyShareRounds
+            .publicKeyShareSuccinctProofSetRoot !==
+            input.publicKeyShareSuccinctProofSetRoot
+    ) {
+        throw new Error(
+            'relinearizationKeyShareRounds must match the accepted evaluation-key binding.',
+        );
+    }
+    const sortedGaloisBatches = [...input.galoisKeyShareBatches].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    if (sortedGaloisBatches.length !== input.participantCount) {
+        throw new Error(
+            'galoisKeyShareBatches must contain one batch per participant.',
+        );
+    }
+    sortedGaloisBatches.forEach((batch, expectedRosterPosition) => {
+        assertContextMatches(input.setupContext, batch, 'galoisKeyShareBatch');
+        if (batch.trusteeRosterPosition !== expectedRosterPosition) {
+            throw new Error(
+                'galoisKeyShareBatches roster positions must be contiguous from zero.',
+            );
+        }
+    });
+    const witnessesByRosterPosition = new Map<
+        number,
+        TrusteeEvaluationKeyWitnessInput
+    >();
+    input.trusteeWitnesses.forEach((witness) => {
+        assertNonNegativeSafeInteger(
+            witness.trusteeRosterPosition,
+            'trusteeWitnesses.trusteeRosterPosition',
+        );
+        if (witnessesByRosterPosition.has(witness.trusteeRosterPosition)) {
+            throw new Error(
+                'trusteeWitnesses must not repeat a trustee roster position.',
+            );
+        }
+        witnessesByRosterPosition.set(witness.trusteeRosterPosition, witness);
+    });
+
+    const scheduledLevels =
+        input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
+            (entry) => entry.level,
+        );
+    const aggregateDiagonalsByLevel = roundOnePublicAggregateDiagonals(
+        input.relinearizationKeyShareRounds,
+        input.qSharePrimes,
+        input.participantCount,
+        input.transportedEvaluationKeyShareComponentMaterial,
+    );
+
+    let proofAccountingHash: ProtocolHash | undefined;
+    const proofRecords = sameSecretProofReferences.map((proofReference) => {
+        const witness = witnessesByRosterPosition.get(
+            proofReference.trusteeRosterPosition,
+        );
+        if (witness === undefined) {
+            throw new Error(
+                'trusteeWitnesses must contain one witness per participant.',
+            );
+        }
+        const statementKeys: TrusteeEvaluationKeyStatementKey[] = [];
+        let ringDegree: number | undefined;
+        const recordRingDegree = (record: JsonRecord): void => {
+            const observed = nonNegativeIntegerRecordField(
+                record,
+                'ringDegree',
+                'evaluationKeyShareRecord',
+            );
+            if (ringDegree === undefined) {
+                ringDegree = observed;
+            } else if (ringDegree !== observed) {
+                throw new Error(
+                    'evaluation-key share records must agree on one ring degree.',
+                );
+            }
+        };
+        for (const level of scheduledLevels) {
+            const record = relinearizationRecordForTrusteeAndLevel(
+                input.relinearizationKeyShareRounds.roundOneRecords,
+                proofReference.trusteeRosterPosition,
+                level,
+                'roundOneRecords',
+            );
+            recordRingDegree(record);
+            statementKeys.push({
+                proofFamily: 'relinearization-round-one',
+                level,
+                keySwitchDomain: stringRecordField(
+                    record,
+                    'keySwitchDomain',
+                    'roundOneRecords',
+                ),
+                keySwitchSeedHex: stringRecordField(
+                    record,
+                    'keySwitchSeedHex',
+                    'roundOneRecords',
+                ),
+                componentBByDigit: componentBVectorsFromMaterial(
+                    'relinearization-key-share',
+                    record,
+                    input.qSharePrimes,
+                    input.transportedEvaluationKeyShareComponentMaterial,
+                    'roundOneRecords',
+                ),
+            });
+        }
+        for (const level of scheduledLevels) {
+            const record = relinearizationRecordForTrusteeAndLevel(
+                input.relinearizationKeyShareRounds.roundTwoRecords,
+                proofReference.trusteeRosterPosition,
+                level,
+                'roundTwoRecords',
+            );
+            recordRingDegree(record);
+            const aggregateDiagonal = aggregateDiagonalsByLevel.get(level);
+            if (aggregateDiagonal === undefined) {
+                throw new Error(
+                    'round-one public aggregate diagonal is missing for a scheduled level.',
+                );
+            }
+            statementKeys.push({
+                proofFamily: 'relinearization-round-two',
+                level,
+                keySwitchDomain: stringRecordField(
+                    record,
+                    'keySwitchDomain',
+                    'roundTwoRecords',
+                ),
+                keySwitchSeedHex: stringRecordField(
+                    record,
+                    'keySwitchSeedHex',
+                    'roundTwoRecords',
+                ),
+                componentBByDigit: componentBVectorsFromMaterial(
+                    'relinearization-key-share',
+                    record,
+                    input.qSharePrimes,
+                    input.transportedEvaluationKeyShareComponentMaterial,
+                    'roundTwoRecords',
+                ),
+                roundOneAggregateDiagonal: aggregateDiagonal,
+            });
+        }
+        const batch = sortedGaloisBatches[proofReference.trusteeRosterPosition];
+        for (const scheduleEntry of input.evaluatorKeySchedule
+            .requiredGaloisKeySchedule) {
+            const materialRecords = batch.galoisKeyShareMaterialRecords.filter(
+                (materialRecord) =>
+                    materialRecord.rotation === scheduleEntry.rotation &&
+                    materialRecord.level === scheduleEntry.level,
+            );
+            if (materialRecords.length !== 1) {
+                throw new Error(
+                    'galoisKeyShareMaterialRecords must contain exactly one record per scheduled rotation and level.',
+                );
+            }
+            const materialRecord = materialRecords[0] as JsonRecord;
+            recordRingDegree(materialRecord);
+            statementKeys.push({
+                proofFamily: 'galois-rotation',
+                rotation: scheduleEntry.rotation,
+                level: scheduleEntry.level,
+                keySwitchDomain: stringRecordField(
+                    materialRecord,
+                    'keySwitchDomain',
+                    'galoisKeyShareMaterialRecords',
+                ),
+                keySwitchSeedHex: stringRecordField(
+                    materialRecord,
+                    'keySwitchSeedHex',
+                    'galoisKeyShareMaterialRecords',
+                ),
+                componentBByDigit: componentBVectorsFromMaterial(
+                    'galois-key-share',
+                    materialRecord,
+                    input.qSharePrimes,
+                    input.transportedEvaluationKeyShareComponentMaterial,
+                    'galoisKeyShareMaterialRecords',
+                ),
+            });
+        }
+        if (ringDegree === undefined) {
+            throw new Error(
+                'trustee evaluation-key statement requires at least one share record.',
+            );
+        }
+        if (witness.errorCoefficientsByKey.length !== statementKeys.length) {
+            throw new Error(
+                'trusteeWitnesses.errorCoefficientsByKey must contain one error vector set per statement key.',
+            );
+        }
+        witness.constantCommitments.forEach((commitment, commitmentIndex) =>
+            assertJsonRecord(
+                commitment,
+                `trusteeWitnesses.constantCommitments.${String(commitmentIndex)}`,
+            ),
+        );
+        const proofRandomnessSeedHex = freshProofRandomnessHex();
+        const proofRandomnessNonceHex = freshProofRandomnessHex();
+        const generatedProof = input.trusteeEvaluationKeyProofGenerator({
+            context: {
+                ceremonyId: input.setupContext.ceremonyId,
+                manifestHash: input.setupContext.manifestHash,
+                rosterHash: input.setupContext.rosterHash,
+                trusteeIdentity: proofReference.trusteeIdentity,
+                trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                setupEpoch: input.setupContext.setupEpoch,
+                requiredGaloisSetHash:
+                    input.evaluatorKeySchedule.requiredGaloisSetHash,
+                evaluatorKeyScheduleRoot:
+                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                keySwitchDecompositionHash: input.keySwitchDecompositionHash,
+                sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
+                sameSecretProofRoot: proofReference.sameSecretProofRoot,
+            },
+            ringDegree,
+            keys: statementKeys,
+            sameSecretLinkage: {
+                publicMatrixSeedHash:
+                    input.evaluatorKeySchedule.publicMatrixSeedHash,
+                commitments: witness.constantCommitments,
+            },
+            secretCoefficients: witness.secretCoefficients,
+            errorCoefficientsByKey: witness.errorCoefficientsByKey,
+            negativeIndicatorCoefficients:
+                witness.negativeIndicatorCoefficients,
+            openingRandomnessByLimb: witness.openingRandomnessByLimb,
+            proofRandomnessSource: 'fresh-csprng',
+            proofRandomnessSeedHex,
+            proofRandomnessNonceHex,
+        });
+        if (
+            generatedProof.ok !== true ||
+            generatedProof.operation !== 'generateTrusteeEvaluationKeyProof'
+        ) {
+            throw new Error(
+                'trusteeEvaluationKeyProofGenerator returned the wrong operation.',
+            );
+        }
+        if (
+            generatedProof.proofModelStatus !==
+            trusteeEvaluationKeyProofModelStatus
+        ) {
+            throw new Error(
+                'trusteeEvaluationKeyProofGenerator returned an unexpected proof model status.',
+            );
+        }
+        assertProtocolHash(
+            generatedProof.proofAccountingHash,
+            'generatedProof.proofAccountingHash',
+        );
+        if (proofAccountingHash === undefined) {
+            proofAccountingHash = generatedProof.proofAccountingHash;
+        } else if (proofAccountingHash !== generatedProof.proofAccountingHash) {
+            throw new Error(
+                'trustee evaluation-key proofs must pin one proof accounting hash.',
+            );
+        }
+        assertProtocolHash(
+            generatedProof.statementHash,
+            'generatedProof.statementHash',
+        );
+        if (generatedProof.keyCount !== statementKeys.length) {
+            throw new Error(
+                'generatedProof.keyCount must match the frozen key schedule.',
+            );
+        }
+        if (generatedProof.sameSecretLinkageIncluded !== true) {
+            throw new Error(
+                'generatedProof must include the same-secret linkage.',
+            );
+        }
+        assertNonEmptyString(
+            generatedProof.proofBytesHex,
+            'generatedProof.proofBytesHex',
+        );
+        assertLowercaseHex(
+            generatedProof.proofBytesHex,
+            'generatedProof.proofBytesHex',
+        );
+        if (
+            generatedProof.proofBytesHex.length !==
+            generatedProof.proofByteLength * 2
+        ) {
+            throw new Error(
+                'generatedProof.proofBytesHex length must match proofByteLength.',
+            );
+        }
+        const proofBytes = bytesFromHex(
+            generatedProof.proofBytesHex,
+            'generatedProof.proofBytesHex',
+        );
+        const recordWithoutRoot = {
+            objectType: 'TrusteeEvaluationKeyProof',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: trusteeEvaluationKeyProofFamily,
+            proofVerificationStatus:
+                trusteeEvaluationKeyProofVerificationStatus,
+            proofModelStatus: trusteeEvaluationKeyProofModelStatus,
+            ...contextFields(input.setupContext),
+            trusteeIdentity: proofReference.trusteeIdentity,
+            trusteeRosterPosition: proofReference.trusteeRosterPosition,
+            sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
+            trusteeSecretCommitmentRoot:
+                proofReference.trusteeSecretCommitmentRoot,
+            sameSecretProofRoot: proofReference.sameSecretProofRoot,
+            statementHash: generatedProof.statementHash,
+            keyCount: statementKeys.length,
+            proofSizeBytes: proofBytes.byteLength,
+            proofBytesHash: hash512Hex(
+                trusteeEvaluationKeyProofBytesHashDomain,
+                [proofBytes],
+            ),
+            proofBytesHex: generatedProof.proofBytesHex,
+        } as JsonRecord;
+
+        return {
+            ...recordWithoutRoot,
+            trusteeEvaluationKeyProofRoot: deriveProtocolHash(
+                'TrusteeEvaluationKeyProofRoot',
+                recordWithoutRoot,
+            ),
+        } as TrusteeEvaluationKeyProofRecord;
+    });
+    if (proofAccountingHash === undefined) {
+        throw new Error(
+            'trustee evaluation-key proofs require at least one participant.',
+        );
+    }
+
+    const galoisKeyShareBatchRoots = sortedGaloisBatches.map((batch) => ({
+        trusteeIdentity: batch.trusteeIdentity,
+        trusteeRosterPosition: batch.trusteeRosterPosition,
+        galoisKeyShareBatchRoot: batch.galoisKeyShareBatchRoot,
+    }));
+    const proofSetWithoutRoot = {
+        objectType: 'TrusteeEvaluationKeyProofSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        proofFamily: trusteeEvaluationKeyProofFamily,
+        proofVerificationStatus: trusteeEvaluationKeyProofVerificationStatus,
+        proofModelStatus: trusteeEvaluationKeyProofModelStatus,
+        proofAccountingHash,
+        ...contextFields(input.setupContext),
+        participantCount: input.participantCount,
+        rnsLimbCount: input.qSharePrimes.length,
+        evaluatorKeyScheduleRoot:
+            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+        requiredGaloisSetHash: input.evaluatorKeySchedule.requiredGaloisSetHash,
+        keySwitchDecompositionHash: input.keySwitchDecompositionHash,
+        sameSecretConsistencyRoot:
+            input.evaluatorKeySchedule.sameSecretConsistencyRoot,
+        sameSecretProofSetRoot: input.sameSecretProofSetRoot,
+        sameSecretProofFamilyBindingRoot:
+            input.sameSecretProofFamilyBindingRoot,
+        publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            input.publicKeyShareSuccinctProofSetRoot,
+        relinearizationCrpRoot:
+            input.evaluatorKeySchedule.relinearizationCrpRoot,
+        galoisKeyCrpRoot: input.evaluatorKeySchedule.galoisKeyCrpRoot,
+        publicMatrixSeedHash: input.evaluatorKeySchedule.publicMatrixSeedHash,
+        relinearizationKeyShareRoundsRoot:
+            input.relinearizationKeyShareRounds
+                .relinearizationKeyShareRoundsRoot,
+        galoisKeyShareBatchRoots,
+        proofRecords,
+    } as const satisfies Omit<
+        TrusteeEvaluationKeyProofSet,
+        'trusteeEvaluationKeyProofSetRoot'
+    >;
+
+    return {
+        ...proofSetWithoutRoot,
+        trusteeEvaluationKeyProofSetRoot: deriveProtocolHash(
+            'TrusteeEvaluationKeyProofSetRoot',
+            proofSetWithoutRoot,
+        ),
+    } satisfies TrusteeEvaluationKeyProofSet;
+};
+
+export type TrusteeEvaluationKeyProofMaterialTransport = Readonly<{
+    readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
+    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
+}>;
+
+// Move every trustee proof's embedded bytes into binary chunked transport and
+// rebind the record and set roots, mirroring the kernel terminal-transport
+// flow: the proof record keeps the transport reference, the chunks travel in
+// the request-side transported proof material set.
+export const transportTrusteeEvaluationKeyProofSet = (
+    proofSet: TrusteeEvaluationKeyProofSet,
+): TrusteeEvaluationKeyProofMaterialTransport => {
+    const transportedProofMaterials: JsonRecord[] = [];
+    const transportedProofRecords = proofSet.proofRecords.map((proofRecord) => {
+        const recordFields = proofRecord as JsonRecord;
+        const proofBytesHex = stringRecordField(
+            recordFields,
+            'proofBytesHex',
+            'proofRecords',
+        );
+        const proofBytes = bytesFromHex(
+            proofBytesHex,
+            'proofRecords.proofBytesHex',
+        );
+        if (
+            hash512Hex(trusteeEvaluationKeyProofBytesHashDomain, [
+                proofBytes,
+            ]) !== proofRecord.proofBytesHash
+        ) {
+            throw new Error(
+                'proofRecords.proofBytesHash must match proofBytesHex before transport.',
+            );
+        }
+        const chunks: Uint8Array[] = [];
+        for (
+            let chunkStart = 0;
+            chunkStart < proofBytes.byteLength;
+            chunkStart += setupProofTransportChunkSizeBytes
+        ) {
+            chunks.push(
+                proofBytes.slice(
+                    chunkStart,
+                    Math.min(
+                        chunkStart + setupProofTransportChunkSizeBytes,
+                        proofBytes.byteLength,
+                    ),
+                ),
+            );
+        }
+        if (chunks.length === 0) {
+            throw new Error(
+                'proofRecords.proofBytesHex must produce at least one transported chunk.',
+            );
+        }
+        const totalByteLength = proofBytes.byteLength;
+        const fullObjectHash = setupProofMaterialFullObjectHashHex(
+            trusteeEvaluationKeyProofFamily,
+            totalByteLength,
+            chunks,
+        );
+        const chunkHashes = chunks.map((chunk, chunkIndex) =>
+            setupProofMaterialChunkHash(
+                trusteeEvaluationKeyProofFamily,
+                fullObjectHash,
+                chunkIndex,
+                chunk,
+            ),
+        );
+        const chunkRoot = setupProofChunkManifestRoot(
+            trusteeEvaluationKeyProofFamily,
+            chunkHashes,
+            fullObjectHash,
+            totalByteLength,
+        );
+        const proofMaterialRoot = deriveProtocolHash(
+            'TrusteeEvaluationKeyProofMaterialRoot',
+            {
+                objectType: 'TrusteeEvaluationKeyProofMaterialReference',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId,
+                proofFamily: trusteeEvaluationKeyProofFamily,
+                trusteeIdentity: proofRecord.trusteeIdentity,
+                trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+                statementHash: proofRecord.statementHash,
+                proofSizeBytes: proofRecord.proofSizeBytes,
+                proofBytesHash: proofRecord.proofBytesHash,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: chunkHashes.length,
+                totalByteLength,
+                fullObjectHash,
+                chunkRoot,
+                chunkHashes,
+            },
+        );
+        transportedProofMaterials.push({
+            objectType: evaluationKeyShareProofTransportObjectType,
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: trusteeEvaluationKeyProofFamily,
+            proofBytesEncoding: setupProofMaterialTransportEncoding,
+            proofMaterialRoot,
+            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
+            proofChunkCount: chunkHashes.length,
+            proofTotalByteLength: totalByteLength,
+            proofFullObjectHash: fullObjectHash,
+            proofChunkRoot: chunkRoot,
+            proofChunkHashes: chunkHashes,
+            chunks: chunks.map((chunk, chunkIndex) => ({
+                chunkIndex,
+                bytesHex: bytesToHex(chunk),
+            })),
+        });
+        const transportedRecordWithoutRoot = {
+            ...recordFields,
+            proofBytesEncoding: setupProofMaterialTransportEncoding,
+            proofMaterialRoot,
+            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
+            proofChunkCount: chunkHashes.length,
+            proofTotalByteLength: totalByteLength,
+            proofFullObjectHash: fullObjectHash,
+            proofChunkRoot: chunkRoot,
+            proofChunkHashes: chunkHashes,
+        } as JsonRecord;
+        delete transportedRecordWithoutRoot.proofBytesHex;
+        delete transportedRecordWithoutRoot.trusteeEvaluationKeyProofRoot;
+
+        return {
+            ...transportedRecordWithoutRoot,
+            trusteeEvaluationKeyProofRoot: deriveProtocolHash(
+                'TrusteeEvaluationKeyProofRoot',
+                transportedRecordWithoutRoot,
+            ),
+        } as TrusteeEvaluationKeyProofRecord;
+    });
+    const proofSetWithoutRoot: JsonRecord = {
+        ...(proofSet as JsonRecord),
+        proofRecords: transportedProofRecords,
+    };
+    delete proofSetWithoutRoot.trusteeEvaluationKeyProofSetRoot;
+
+    return {
+        trusteeEvaluationKeyProofs: {
+            ...proofSetWithoutRoot,
+            trusteeEvaluationKeyProofSetRoot: deriveProtocolHash(
+                'TrusteeEvaluationKeyProofSetRoot',
+                proofSetWithoutRoot,
+            ),
+        } as TrusteeEvaluationKeyProofSet,
+        transportedEvaluationKeyShareProofMaterial: {
+            objectType: evaluationKeyShareProofTransportSetObjectType,
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: trusteeEvaluationKeyProofFamily,
+            proofMaterials: transportedProofMaterials,
+        },
+    };
+};
+
+type EvaluationKeyShareTransportWorkItem = Readonly<{
+    readonly proofFamily: EvaluationKeyShareProofFamily;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly level: number;
+    readonly shareMaterial: EvaluationKeyShareMaterial &
+        EvaluationKeyShareEmbeddedKeySwitchComponentMaterial;
+}>;
+
+const trusteeIdentityByRosterPosition = (
+    sameSecretProofReferences: readonly Pick<
+        SameSecretProofReference,
+        'trusteeIdentity' | 'trusteeRosterPosition'
+    >[],
+): ReadonlyMap<number, string> => {
+    const identities = new Map<number, string>();
+    sameSecretProofReferences.forEach((reference, referenceIndex) => {
+        assertNonEmptyString(
+            reference.trusteeIdentity,
+            `sameSecretProofReferences.${String(referenceIndex)}.trusteeIdentity`,
+        );
+        assertNonNegativeSafeInteger(
+            reference.trusteeRosterPosition,
+            `sameSecretProofReferences.${String(referenceIndex)}.trusteeRosterPosition`,
+        );
+        if (identities.has(reference.trusteeRosterPosition)) {
+            throw new Error(
+                'sameSecretProofReferences must not repeat trusteeRosterPosition.',
+            );
+        }
+        identities.set(
+            reference.trusteeRosterPosition,
+            reference.trusteeIdentity,
+        );
+    });
+
+    return identities;
+};
+
+const trusteeIdentityForContribution = (
+    identities: ReadonlyMap<number, string>,
+    trusteeRosterPosition: number,
+    fieldName: string,
+): string => {
+    const trusteeIdentity = identities.get(trusteeRosterPosition);
+    if (trusteeIdentity === undefined) {
+        throw new Error(
+            `${fieldName} references a trustee roster position without a same-secret proof reference.`,
+        );
+    }
+
+    return trusteeIdentity;
+};
+
+const encodeEvaluationKeyShareComponentMaterial = (
+    proofFamily: EvaluationKeyShareProofFamily,
+    shareMaterial: EvaluationKeyShareMaterial &
+        EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
+    level: number,
+): readonly Uint8Array[] => {
+    const digitCount = level + 1;
+    if (shareMaterial.keySwitchComponentVectors.length !== digitCount ** 2) {
+        throw new Error(
+            'evaluation-key component material must contain one vector per scheduled digit and RNS limb.',
+        );
+    }
+    const writer = new BinaryChunkWriter({
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        emptyErrorMessage:
+            'evaluation-key component material transport requires bytes.',
+    });
+    writer.writeBytes(evaluationKeyShareComponentMaterialMagic);
+    writer.writeU64LittleEndian(level, 'evaluation-key level');
+    writer.writeU64LittleEndian(
+        shareMaterial.ringDegree,
+        'evaluation-key ringDegree',
+    );
+    writer.writeU64LittleEndian(digitCount, 'evaluation-key digitCount');
+    writer.writeU64LittleEndian(digitCount, 'evaluation-key rnsLimbCount');
+    const canonicalComponentVectors: JsonRecord[] = [];
+    for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
+        for (
+            let rnsLimbIndex = 0;
+            rnsLimbIndex < digitCount;
+            rnsLimbIndex += 1
+        ) {
+            const componentVector = assertJsonRecord(
+                shareMaterial.keySwitchComponentVectors[
+                    digitIndex * digitCount + rnsLimbIndex
+                ],
+                'keySwitchComponentVectors',
+            );
+            const vectorPath = `keySwitchComponentVectors.${String(
+                digitIndex,
+            )}.${String(rnsLimbIndex)}`;
+            if (
+                nonNegativeIntegerRecordField(
+                    componentVector,
+                    'digitIndex',
+                    vectorPath,
+                ) !== digitIndex ||
+                nonNegativeIntegerRecordField(
+                    componentVector,
+                    'rnsLimbIndex',
+                    vectorPath,
+                ) !== rnsLimbIndex ||
+                componentVector.component !== 'b'
+            ) {
+                throw new Error(
+                    'evaluation-key component material vectors must be ordered by digit and RNS limb.',
+                );
+            }
+            const rnsPrime = nonNegativeIntegerRecordField(
+                componentVector,
+                'rnsPrime',
+                vectorPath,
+            );
+            const coefficientByteLength = nonNegativeIntegerRecordField(
+                componentVector,
+                'coefficientByteLength',
+                vectorPath,
+            );
+            if (coefficientByteLength !== shareMaterial.ringDegree * 8) {
+                throw new Error(
+                    'evaluation-key component material coefficientByteLength must match ringDegree.',
+                );
+            }
+            const coefficientsLeHex = stringRecordField(
+                componentVector,
+                'coefficientsLeHex',
+                vectorPath,
+            );
+            const coefficients = coefficientVectorFromLittleEndianHex(
+                coefficientsLeHex,
+                shareMaterial.ringDegree,
+                `${vectorPath}.coefficientsLeHex`,
+            );
+            if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
+                throw new Error(
+                    'evaluation-key component material coefficients must be canonical residues.',
+                );
+            }
+            const coefficientVectorHash =
+                evaluationKeyShareComponentVectorHash(coefficients);
+            if (
+                stringRecordField(
+                    componentVector,
+                    'coefficientVectorHash512',
+                    vectorPath,
+                ) !== coefficientVectorHash
+            ) {
+                throw new Error(
+                    'evaluation-key component material coefficient hash must match coefficientsLeHex.',
+                );
+            }
+            canonicalComponentVectors.push({
+                digitIndex,
+                rnsLimbIndex,
+                rnsPrime,
+                component: 'b',
+                coefficientByteLength,
+                coefficientVectorHash512: coefficientVectorHash,
+                coefficientsLeHex,
+            });
+            writer.writeU64LittleEndian(
+                digitIndex,
+                'evaluation-key component digitIndex',
+            );
+            writer.writeU64LittleEndian(
+                rnsLimbIndex,
+                'evaluation-key component rnsLimbIndex',
+            );
+            writer.writeU64LittleEndian(
+                rnsPrime,
+                'evaluation-key component rnsPrime',
+            );
+            writer.writeU64LittleEndian(
+                shareMaterial.ringDegree,
+                'evaluation-key component coefficientCount',
+            );
+            coefficients.forEach((coefficient) =>
+                writer.writeU64LittleEndian(
+                    coefficient,
+                    'evaluation-key component coefficient',
+                ),
+            );
+        }
+    }
+    const componentVectorRoot = evaluationKeyShareComponentVectorRoot(
+        proofFamily,
+        shareMaterial.keySwitchDomain,
+        shareMaterial.keySwitchSeedHex,
+        level,
+        shareMaterial.ringDegree,
+        canonicalComponentVectors,
+    );
+    if (componentVectorRoot !== shareMaterial.keySwitchComponentVectorRoot) {
+        throw new Error(
+            'evaluation-key component material root must match keySwitchComponentVectorRoot before transport.',
+        );
+    }
+
+    return writer.finish();
+};
+
+const transportEvaluationKeyShareComponentMaterial = (
+    workItem: EvaluationKeyShareTransportWorkItem,
+): Readonly<{
+    readonly shareMaterial: EvaluationKeyShareMaterial;
+    readonly componentMaterial: JsonRecord;
+}> => {
+    const chunks = encodeEvaluationKeyShareComponentMaterial(
+        workItem.proofFamily,
+        workItem.shareMaterial,
+        workItem.level,
+    );
+    const transportHashes = evaluationKeyShareComponentMaterialTransportHashes(
+        workItem.proofFamily,
+        chunks,
+    );
+    const keySwitchComponentMaterialRoot =
+        evaluationKeyShareComponentMaterialReferenceRoot(
+            workItem.proofFamily,
+            workItem.shareMaterial,
+            workItem.trusteeIdentity,
+            workItem.trusteeRosterPosition,
+            workItem.level,
+            transportHashes,
+        );
+    const shareMaterial: EvaluationKeyShareMaterial = {
+        keySwitchDomain: workItem.shareMaterial.keySwitchDomain,
+        keySwitchSeedHex: workItem.shareMaterial.keySwitchSeedHex,
+        ringDegree: workItem.shareMaterial.ringDegree,
+        keySwitchComponentVectorRoot:
+            workItem.shareMaterial.keySwitchComponentVectorRoot,
+        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
+        keySwitchComponentMaterialRoot,
+        keySwitchComponentChunkSizeBytes: setupProofTransportChunkSizeBytes,
+        keySwitchComponentChunkCount: transportHashes.chunkHashes.length,
+        keySwitchComponentTotalByteLength: transportHashes.totalByteLength,
+        keySwitchComponentFullObjectHash: transportHashes.fullObjectHash,
+        keySwitchComponentChunkRoot: transportHashes.chunkRoot,
+        keySwitchComponentChunkHashes: transportHashes.chunkHashes,
+    };
+
+    return {
+        shareMaterial,
+        componentMaterial: {
+            objectType: evaluationKeyShareComponentMaterialTransportObjectType,
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: workItem.proofFamily,
+            keySwitchMaterialEncoding:
+                evaluationKeyShareComponentMaterialEncoding,
+            trusteeIdentity: workItem.trusteeIdentity,
+            trusteeRosterPosition: workItem.trusteeRosterPosition,
+            keySwitchDomain: workItem.shareMaterial.keySwitchDomain,
+            keySwitchSeedHex: workItem.shareMaterial.keySwitchSeedHex,
+            level: workItem.level,
+            ringDegree: workItem.shareMaterial.ringDegree,
+            digitCount: workItem.level + 1,
+            rnsLimbCount: workItem.level + 1,
+            keySwitchComponentVectorRoot:
+                workItem.shareMaterial.keySwitchComponentVectorRoot,
+            keySwitchComponentMaterialRoot,
+            chunkSizeBytes: setupProofTransportChunkSizeBytes,
+            chunkCount: transportHashes.chunkHashes.length,
+            totalByteLength: transportHashes.totalByteLength,
+            fullObjectHash: transportHashes.fullObjectHash,
+            chunkRoot: transportHashes.chunkRoot,
+            chunkHashes: transportHashes.chunkHashes,
+            chunks: chunks.map((chunk, chunkIndex) => ({
+                chunkIndex,
+                bytesHex: bytesToHex(chunk),
+            })),
+        },
+    };
+};
+
+export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
+    input: EvaluationKeyShareMaterialTransportInput,
+): BinaryChunkedEvaluationKeyShareMaterialTransport => {
+    const identities = trusteeIdentityByRosterPosition(
+        input.sameSecretProofReferences,
+    );
+    const componentMaterials: JsonRecord[] = [];
+    const componentRoots = new Set<string>();
+    const transportShareMaterial = (
+        workItem: EvaluationKeyShareTransportWorkItem,
+    ): EvaluationKeyShareMaterial => {
+        const componentTransport =
+            transportEvaluationKeyShareComponentMaterial(workItem);
+        const componentMaterialRoot = stringRecordField(
+            componentTransport.componentMaterial,
+            'keySwitchComponentMaterialRoot',
+            'componentMaterial',
+        );
+        if (componentRoots.has(componentMaterialRoot)) {
+            throw new Error(
+                'transported evaluation-key component material contains duplicate roots.',
+            );
+        }
+        componentRoots.add(componentMaterialRoot);
+        componentMaterials.push(componentTransport.componentMaterial);
+
+        return componentTransport.shareMaterial;
+    };
+
+    const relinearizationRoundOneContributions =
+        input.relinearizationRoundOneContributions.map((contribution) => ({
+            trusteeRosterPosition: contribution.trusteeRosterPosition,
+            level: contribution.level,
+            roundOneShareRoot: contribution.roundOneShareRoot,
+            shareMaterial: transportShareMaterial({
+                proofFamily: 'relinearization-key-share',
+                trusteeIdentity: trusteeIdentityForContribution(
+                    identities,
+                    contribution.trusteeRosterPosition,
+                    'relinearizationRoundOneContributions',
+                ),
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                shareMaterial: assertEmbeddedComponentMaterial(
+                    contribution.shareMaterial,
+                    'relinearizationRoundOneContributions.shareMaterial',
+                ),
+            }),
+        }));
+    const relinearizationRoundTwoContributions =
+        input.relinearizationRoundTwoContributions.map((contribution) => ({
+            trusteeRosterPosition: contribution.trusteeRosterPosition,
+            level: contribution.level,
+            roundTwoShareRoot: contribution.roundTwoShareRoot,
+            shareMaterial: transportShareMaterial({
+                proofFamily: 'relinearization-key-share',
+                trusteeIdentity: trusteeIdentityForContribution(
+                    identities,
+                    contribution.trusteeRosterPosition,
+                    'relinearizationRoundTwoContributions',
+                ),
+                trusteeRosterPosition: contribution.trusteeRosterPosition,
+                level: contribution.level,
+                shareMaterial: assertEmbeddedComponentMaterial(
+                    contribution.shareMaterial,
+                    'relinearizationRoundTwoContributions.shareMaterial',
+                ),
+            }),
+        }));
+    const galoisKeyShareBatchContributions =
+        input.galoisKeyShareBatchContributions.map((batchContribution) => {
+            const trusteeIdentity = trusteeIdentityForContribution(
+                identities,
+                batchContribution.trusteeRosterPosition,
+                'galoisKeyShareBatchContributions',
+            );
+
+            return {
+                trusteeRosterPosition: batchContribution.trusteeRosterPosition,
+                galoisKeyShares: batchContribution.galoisKeyShares.map(
+                    (shareContribution) => ({
+                        rotation: shareContribution.rotation,
+                        level: shareContribution.level,
+                        galoisKeyShareRoot:
+                            shareContribution.galoisKeyShareRoot,
+                        shareMaterial: transportShareMaterial({
+                            proofFamily: 'galois-key-share',
+                            trusteeIdentity,
+                            trusteeRosterPosition:
+                                batchContribution.trusteeRosterPosition,
+                            level: shareContribution.level,
+                            shareMaterial: assertEmbeddedComponentMaterial(
+                                shareContribution.shareMaterial,
+                                'galoisKeyShares.shareMaterial',
+                            ),
+                        }),
+                    }),
+                ),
+            };
+        });
+
+    return {
+        relinearizationRoundOneContributions,
+        relinearizationRoundTwoContributions,
+        galoisKeyShareBatchContributions,
+        transportedEvaluationKeyShareComponentMaterial: {
+            objectType:
+                evaluationKeyShareComponentMaterialTransportSetObjectType,
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            componentMaterials,
+        },
+    };
+};
+
+const galoisShareMaterialForSchedule = (
+    batch: GaloisKeyShareBatch,
+    rotation: number,
+    level: number,
+): GaloisKeyShareMaterialRecord => {
+    const materialRecords = batch.galoisKeyShareMaterialRecords.filter(
+        (materialRecord) =>
+            materialRecord.rotation === rotation &&
+            materialRecord.level === level,
+    );
+    if (materialRecords.length !== 1) {
+        throw new Error(
+            'galoisKeyShareBatches is missing a scheduled material record.',
+        );
+    }
+
+    return materialRecords[0];
+};
+
+export function createPublicEvaluationKeySet(
+    input: PublicEvaluationKeySetInput,
+): PublicEvaluationKeySet {
+    validateCommonInput(input);
+    assertContextMatches(
+        input.setupContext,
+        input.relinearizationKeyShareRounds,
+        'relinearizationKeyShareRounds',
+    );
+    if (
+        input.relinearizationKeyShareRounds.evaluatorKeyScheduleRoot !==
+            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
+        input.relinearizationKeyShareRounds.sameSecretProofFamilyBindingRoot !==
+            input.sameSecretProofFamilyBindingRoot ||
+        input.relinearizationKeyShareRounds
+            .publicKeyShareSuccinctProofSetRoot !==
+            input.publicKeyShareSuccinctProofSetRoot
+    ) {
+        throw new Error(
+            'relinearizationKeyShareRounds must match the accepted evaluation-key binding.',
+        );
+    }
+    const roundOneAggregateRootByLevel = new Map(
+        input.relinearizationKeyShareRounds.roundOneAggregateRoots.map(
+            (entry) => [entry.level, entry.roundOneAggregateRoot] as const,
+        ),
+    );
+    const roundTwoAggregateRootByLevel = new Map(
+        input.relinearizationKeyShareRounds.roundTwoAggregateRoots.map(
+            (entry) => [entry.level, entry.roundTwoAggregateRoot] as const,
+        ),
+    );
+    const relinearizationKeyRoots =
+        input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
+            (scheduleEntry) => {
+                const { level } = scheduleEntry;
+                const roundOneAggregateRoot =
+                    roundOneAggregateRootByLevel.get(level);
+                const roundTwoAggregateRoot =
+                    roundTwoAggregateRootByLevel.get(level);
+                if (
+                    roundOneAggregateRoot === undefined ||
+                    roundTwoAggregateRoot === undefined
+                ) {
+                    throw new Error(
+                        'relinearizationKeyShareRounds is missing a scheduled aggregate root.',
+                    );
+                }
+                const decompositionDigitCount = level + 1;
+                const relinearizationKeyRoot = deriveProtocolHash(
+                    'RelinearizationKeyRoot',
+                    {
+                        objectType: 'RelinearizationKeyAggregate',
+                        objectVersion: 1,
+                        setupProfileId: 'CollectiveBgvSetup-v1',
+                        setupProofProfileId,
+                        assemblyStatus: publicEvaluationKeyAssemblyStatus,
+                        materialEncoding: publicEvaluationKeyMaterialEncoding,
+                        materialSource: publicEvaluationKeyMaterialSource,
+                        evaluatorKeyScheduleRoot:
+                            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                        sameSecretProofFamilyBindingRoot:
+                            input.sameSecretProofFamilyBindingRoot,
+                        publicKeyShareSuccinctProofSetRoot:
+                            input.publicKeyShareSuccinctProofSetRoot,
+                        relinearizationKeyShareRoundsRoot:
+                            input.relinearizationKeyShareRounds
+                                .relinearizationKeyShareRoundsRoot,
+                        level,
+                        decompositionDigitCount,
+                        rnsLimbCount: decompositionDigitCount,
+                        roundOneAggregateRoot,
+                        roundTwoAggregateRoot,
+                    },
+                );
+
+                return {
+                    level,
+                    decompositionDigitCount,
+                    rnsLimbCount: decompositionDigitCount,
+                    roundOneAggregateRoot,
+                    roundTwoAggregateRoot,
+                    relinearizationKeyRoot,
+                } satisfies RelinearizationKeyRootReference;
+            },
+        );
+
+    const sortedGaloisBatches = [...input.galoisKeyShareBatches].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    if (sortedGaloisBatches.length !== input.participantCount) {
+        throw new Error(
+            'galoisKeyShareBatches must contain one batch per participant.',
+        );
+    }
+    sortedGaloisBatches.forEach((batch, expectedRosterPosition) => {
+        assertContextMatches(input.setupContext, batch, 'galoisKeyShareBatch');
+        if (batch.trusteeRosterPosition !== expectedRosterPosition) {
+            throw new Error(
+                'galoisKeyShareBatches roster positions must be contiguous from zero.',
+            );
+        }
+        if (
+            batch.evaluatorKeyScheduleRoot !==
+                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
+            batch.sameSecretProofFamilyBindingRoot !==
+                input.sameSecretProofFamilyBindingRoot ||
+            batch.publicKeyShareSuccinctProofSetRoot !==
+                input.publicKeyShareSuccinctProofSetRoot ||
+            batch.requiredGaloisSetHash !==
+                input.evaluatorKeySchedule.requiredGaloisSetHash
+        ) {
+            throw new Error(
+                'galoisKeyShareBatches must match the accepted evaluation-key binding.',
+            );
+        }
+    });
+    const galoisKeyShareBatchRoots = sortedGaloisBatches.map((batch) => ({
+        trusteeIdentity: batch.trusteeIdentity,
+        trusteeRosterPosition: batch.trusteeRosterPosition,
+        galoisKeyShareBatchRoot: batch.galoisKeyShareBatchRoot,
+    })) satisfies GaloisKeyShareBatchRootReference[];
+    const galoisKeyRoots =
+        input.evaluatorKeySchedule.requiredGaloisKeySchedule.map(
+            (scheduleEntry) => {
+                const { rotation, level } = scheduleEntry;
+                const decompositionDigitCount = level + 1;
+                const contributingShareRoots = sortedGaloisBatches.map(
+                    (batch) => {
+                        const materialRecord = galoisShareMaterialForSchedule(
+                            batch,
+                            rotation,
+                            level,
+                        );
+
+                        return {
+                            trusteeIdentity: batch.trusteeIdentity,
+                            trusteeRosterPosition: batch.trusteeRosterPosition,
+                            galoisKeyShareRoot:
+                                materialRecord.galoisKeyShareRoot,
+                        } satisfies GaloisKeyContributingShareRoot;
+                    },
+                );
+                const galoisKeyRoot = deriveProtocolHash('RotationKeyRoot', {
+                    objectType: 'GaloisKeyAggregate',
+                    objectVersion: 1,
+                    setupProfileId: 'CollectiveBgvSetup-v1',
+                    setupProofProfileId,
+                    assemblyStatus: publicEvaluationKeyAssemblyStatus,
+                    materialEncoding: publicEvaluationKeyMaterialEncoding,
+                    materialSource: publicEvaluationKeyMaterialSource,
+                    evaluatorKeyScheduleRoot:
+                        input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                    sameSecretProofFamilyBindingRoot:
+                        input.sameSecretProofFamilyBindingRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        input.publicKeyShareSuccinctProofSetRoot,
+                    galoisKeyCrpRoot:
+                        input.evaluatorKeySchedule.galoisKeyCrpRoot,
+                    requiredGaloisSetHash:
+                        input.evaluatorKeySchedule.requiredGaloisSetHash,
+                    rotation,
+                    level,
+                    decompositionDigitCount,
+                    rnsLimbCount: decompositionDigitCount,
+                    contributingShareRoots,
+                });
+
+                return {
+                    rotation,
+                    level,
+                    decompositionDigitCount,
+                    rnsLimbCount: decompositionDigitCount,
+                    galoisKeyRoot,
+                    contributingShareRoots,
+                } satisfies GaloisKeyRootReference;
+            },
+        );
+    if (input.publicEvaluationKeyMaterialReference !== undefined) {
+        const reference = input.publicEvaluationKeyMaterialReference;
+        if (
+            reference.publicEvaluationKeyMaterialEncoding !==
+            publicEvaluationKeyTransportMaterialEncoding
+        ) {
+            throw new Error(
+                'publicEvaluationKeyMaterialReference uses an unsupported material encoding.',
+            );
+        }
+        assertProtocolHash(
+            reference.publicEvaluationKeyMaterialRoot,
+            'publicEvaluationKeyMaterialRoot',
+        );
+        assertProtocolHash(
+            reference.publicEvaluationKeyMaterialFullObjectHash,
+            'publicEvaluationKeyMaterialFullObjectHash',
+        );
+        assertProtocolHash(
+            reference.publicEvaluationKeyMaterialChunkRoot,
+            'publicEvaluationKeyMaterialChunkRoot',
+        );
+        assertPositiveSafeInteger(
+            reference.publicEvaluationKeyMaterialChunkSizeBytes,
+            'publicEvaluationKeyMaterialChunkSizeBytes',
+        );
+        assertPositiveSafeInteger(
+            reference.publicEvaluationKeyMaterialChunkCount,
+            'publicEvaluationKeyMaterialChunkCount',
+        );
+        assertPositiveSafeInteger(
+            reference.publicEvaluationKeyMaterialTotalByteLength,
+            'publicEvaluationKeyMaterialTotalByteLength',
+        );
+        if (
+            reference.publicEvaluationKeyMaterialChunkHashes.length !==
+            reference.publicEvaluationKeyMaterialChunkCount
+        ) {
+            throw new Error(
+                'publicEvaluationKeyMaterialChunkHashes must match publicEvaluationKeyMaterialChunkCount.',
+            );
+        }
+        reference.publicEvaluationKeyMaterialChunkHashes.forEach(
+            (chunkHash, chunkIndex) => {
+                assertProtocolHash(
+                    chunkHash,
+                    `publicEvaluationKeyMaterialChunkHashes[${chunkIndex}]`,
+                );
+            },
+        );
+    }
+
+    const evaluationKeysWithoutHash = {
+        objectType: 'PublicEvaluationKeySet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        assemblyStatus: publicEvaluationKeyAssemblyStatus,
+        materialEncoding: publicEvaluationKeyMaterialEncoding,
+        materialSource: publicEvaluationKeyMaterialSource,
+        ...contextFields(input.setupContext),
+        participantCount: input.participantCount,
+        rnsLimbCount: input.qSharePrimes.length,
+        evaluatorKeyScheduleRoot:
+            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+        sameSecretProofFamilyBindingRoot:
+            input.sameSecretProofFamilyBindingRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            input.publicKeyShareSuccinctProofSetRoot,
+        relinearizationKeyShareRoundsRoot:
+            input.relinearizationKeyShareRounds
+                .relinearizationKeyShareRoundsRoot,
+        relinearizationLevelSchedule:
+            input.evaluatorKeySchedule.relinearizationLevelSchedule,
+        relinearizationKeyRoots,
+        requiredGaloisSetHash: input.evaluatorKeySchedule.requiredGaloisSetHash,
+        requiredGaloisKeySchedule:
+            input.evaluatorKeySchedule.requiredGaloisKeySchedule,
+        galoisKeyShareBatchRoots,
+        galoisKeyRoots,
+        genericKeySwitchKeyRoots: [],
+        rawKeyBytesEmbedded: false,
+        verifierGeneratedKeyMaterial: false,
+        ...(input.publicEvaluationKeyMaterialReference ?? {}),
+    } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
+
+    return {
+        ...evaluationKeysWithoutHash,
+        evaluationKeySetHash: deriveProtocolHash(
+            'EvaluationKeySetHash',
+            evaluationKeysWithoutHash,
+        ),
+    } satisfies PublicEvaluationKeySet;
+}
 
 const relinearizationShareMaterialManifest = (
     relinearizationKeyShareRounds: RelinearizationKeyShareRounds,
@@ -3492,7 +3530,6 @@ const relinearizationShareMaterialManifest = (
             roundOrder: 0,
             records: relinearizationKeyShareRounds.roundOneRecords,
             shareRootFieldName: 'roundOneShareRoot',
-            proofRootFieldName: 'roundOneProofRoot',
             recordRootFieldName: 'roundOneRecordRoot',
         },
         {
@@ -3500,7 +3537,6 @@ const relinearizationShareMaterialManifest = (
             roundOrder: 1,
             records: relinearizationKeyShareRounds.roundTwoRecords,
             shareRootFieldName: 'roundTwoShareRoot',
-            proofRootFieldName: 'roundTwoProofRoot',
             recordRootFieldName: 'roundTwoRecordRoot',
         },
     ] as const;
@@ -3525,7 +3561,6 @@ const relinearizationShareMaterialManifest = (
                     keySwitchComponentMaterialRoot:
                         recordFields.keySwitchComponentMaterialRoot ?? null,
                     shareRoot: recordFields[group.shareRootFieldName],
-                    proofRoot: recordFields[group.proofRootFieldName],
                     recordRoot: recordFields[group.recordRootFieldName],
                 },
             });
@@ -3552,28 +3587,26 @@ const galoisShareMaterialManifest = (
         readonly entry: JsonRecord;
     }[] = [];
     galoisKeyShareBatches.forEach((batch) => {
-        batch.galoisKeyShareProofs.forEach((proofRecord) => {
-            const proofFields = proofRecord as JsonRecord;
+        batch.galoisKeyShareMaterialRecords.forEach((materialRecord) => {
+            const materialFields = materialRecord as JsonRecord;
             entries.push({
-                rotation: proofRecord.rotation,
-                level: proofRecord.level,
-                trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+                rotation: materialRecord.rotation,
+                level: materialRecord.level,
+                trusteeRosterPosition: materialRecord.trusteeRosterPosition,
                 entry: {
-                    trusteeIdentity: proofRecord.trusteeIdentity,
-                    trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-                    rotation: proofRecord.rotation,
-                    level: proofRecord.level,
+                    trusteeIdentity: materialRecord.trusteeIdentity,
+                    trusteeRosterPosition: materialRecord.trusteeRosterPosition,
+                    rotation: materialRecord.rotation,
+                    level: materialRecord.level,
                     keySwitchMaterialEncoding:
-                        proofRecord.keySwitchMaterialEncoding,
-                    keySwitchDomain: proofRecord.keySwitchDomain,
-                    keySwitchSeedHex: proofRecord.keySwitchSeedHex,
+                        materialRecord.keySwitchMaterialEncoding,
+                    keySwitchDomain: materialRecord.keySwitchDomain,
+                    keySwitchSeedHex: materialRecord.keySwitchSeedHex,
                     keySwitchComponentVectorRoot:
-                        proofRecord.keySwitchComponentVectorRoot,
+                        materialRecord.keySwitchComponentVectorRoot,
                     keySwitchComponentMaterialRoot:
-                        proofFields.keySwitchComponentMaterialRoot ?? null,
-                    galoisKeyShareRoot: proofRecord.galoisKeyShareRoot,
-                    galoisKeyShareProofRoot:
-                        proofRecord.galoisKeyShareProofRoot,
+                        materialFields.keySwitchComponentMaterialRoot ?? null,
+                    galoisKeyShareRoot: materialRecord.galoisKeyShareRoot,
                 },
             });
         });
@@ -3607,7 +3640,8 @@ const publicEvaluationKeyMaterialManifest = (
     evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
     sameSecretProofFamilyBindingRoot:
         evaluationKeys.sameSecretProofFamilyBindingRoot,
-    publicKeyShareLnpProofSetRoot: evaluationKeys.publicKeyShareLnpProofSetRoot,
+    publicKeyShareSuccinctProofSetRoot:
+        evaluationKeys.publicKeyShareSuccinctProofSetRoot,
     relinearizationKeyShareRoundsRoot:
         evaluationKeys.relinearizationKeyShareRoundsRoot,
     relinearizationLevelSchedule: evaluationKeys.relinearizationLevelSchedule,
@@ -3778,8 +3812,8 @@ const publicEvaluationKeyMaterialReferenceRoot = (
         evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
         sameSecretProofFamilyBindingRoot:
             evaluationKeys.sameSecretProofFamilyBindingRoot,
-        publicKeyShareLnpProofSetRoot:
-            evaluationKeys.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            evaluationKeys.publicKeyShareSuccinctProofSetRoot,
         relinearizationKeyShareRoundsRoot:
             evaluationKeys.relinearizationKeyShareRoundsRoot,
         requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
@@ -3806,7 +3840,7 @@ const expectedPublicEvaluationKeyComponentMaterialRoots = (
         const root = record.keySwitchComponentMaterialRoot;
         if (typeof root !== 'string') {
             throw new TypeError(
-                'binary evaluation-key proof records must carry keySwitchComponentMaterialRoot.',
+                'binary evaluation-key share records must carry keySwitchComponentMaterialRoot.',
             );
         }
         assertProtocolHash(root, 'keySwitchComponentMaterialRoot');
@@ -3820,8 +3854,8 @@ const expectedPublicEvaluationKeyComponentMaterialRoots = (
         collectRoot(record),
     );
     input.galoisKeyShareBatches.forEach((batch) =>
-        batch.galoisKeyShareProofs.forEach((proofRecord) =>
-            collectRoot(proofRecord),
+        batch.galoisKeyShareMaterialRecords.forEach((materialRecord) =>
+            collectRoot(materialRecord),
         ),
     );
 
@@ -3881,306 +3915,6 @@ const assertPublicEvaluationKeyComponentMaterialCoverage = (
         );
     }
 };
-
-export function createPublicEvaluationKeySet(
-    input: PublicEvaluationKeySetInput,
-): PublicEvaluationKeySet {
-    validateCommonInput(input);
-    assertContextMatches(
-        input.setupContext,
-        input.relinearizationKeyShareRounds,
-        'relinearizationKeyShareRounds',
-    );
-    if (
-        input.relinearizationKeyShareRounds.evaluatorKeyScheduleRoot !==
-            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-        input.relinearizationKeyShareRounds.sameSecretProofFamilyBindingRoot !==
-            input.sameSecretProofFamilyBindingRoot ||
-        input.relinearizationKeyShareRounds.publicKeyShareLnpProofSetRoot !==
-            input.publicKeyShareLnpProofSetRoot
-    ) {
-        throw new Error(
-            'relinearizationKeyShareRounds must match the accepted evaluation-key binding.',
-        );
-    }
-    const roundOneAggregateRootByLevel = new Map(
-        input.relinearizationKeyShareRounds.roundOneAggregateRoots.map(
-            (entry) => [entry.level, entry.roundOneAggregateRoot] as const,
-        ),
-    );
-    const roundOneSourceSquareAggregateRootByLevel = new Map(
-        input.relinearizationKeyShareRounds.roundOneAggregateRoots.map(
-            (entry) =>
-                [entry.level, entry.roundOneSourceSquareAggregateRoot] as const,
-        ),
-    );
-    const roundTwoAggregateRootByLevel = new Map(
-        input.relinearizationKeyShareRounds.roundTwoAggregateRoots.map(
-            (entry) => [entry.level, entry.roundTwoAggregateRoot] as const,
-        ),
-    );
-    const roundTwoSourceSquareAggregateRootByLevel = new Map(
-        input.relinearizationKeyShareRounds.roundTwoAggregateRoots.map(
-            (entry) =>
-                [entry.level, entry.roundTwoSourceSquareAggregateRoot] as const,
-        ),
-    );
-    const relinearizationKeyRoots =
-        input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
-            (scheduleEntry) => {
-                const { level } = scheduleEntry;
-                const roundOneAggregateRoot =
-                    roundOneAggregateRootByLevel.get(level);
-                const roundOneSourceSquareAggregateRoot =
-                    roundOneSourceSquareAggregateRootByLevel.get(level);
-                const roundTwoAggregateRoot =
-                    roundTwoAggregateRootByLevel.get(level);
-                const roundTwoSourceSquareAggregateRoot =
-                    roundTwoSourceSquareAggregateRootByLevel.get(level);
-                if (
-                    roundOneAggregateRoot === undefined ||
-                    roundOneSourceSquareAggregateRoot === undefined ||
-                    roundTwoAggregateRoot === undefined ||
-                    roundTwoSourceSquareAggregateRoot === undefined
-                ) {
-                    throw new Error(
-                        'relinearizationKeyShareRounds is missing a scheduled aggregate root.',
-                    );
-                }
-                const decompositionDigitCount = level + 1;
-                const relinearizationKeyRoot = deriveProtocolHash(
-                    'RelinearizationKeyRoot',
-                    {
-                        objectType: 'RelinearizationKeyAggregate',
-                        objectVersion: 1,
-                        setupProfileId: 'CollectiveBgvSetup-v1',
-                        setupProofProfileId,
-                        assemblyStatus: publicEvaluationKeyAssemblyStatus,
-                        materialEncoding: publicEvaluationKeyMaterialEncoding,
-                        materialSource: publicEvaluationKeyMaterialSource,
-                        evaluatorKeyScheduleRoot:
-                            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                        sameSecretProofFamilyBindingRoot:
-                            input.sameSecretProofFamilyBindingRoot,
-                        publicKeyShareLnpProofSetRoot:
-                            input.publicKeyShareLnpProofSetRoot,
-                        relinearizationKeyShareRoundsRoot:
-                            input.relinearizationKeyShareRounds
-                                .relinearizationKeyShareRoundsRoot,
-                        level,
-                        decompositionDigitCount,
-                        rnsLimbCount: decompositionDigitCount,
-                        roundOneAggregateRoot,
-                        roundOneSourceSquareAggregateRoot,
-                        roundTwoAggregateRoot,
-                        roundTwoSourceSquareAggregateRoot,
-                    },
-                );
-
-                return {
-                    level,
-                    decompositionDigitCount,
-                    rnsLimbCount: decompositionDigitCount,
-                    roundOneAggregateRoot,
-                    roundOneSourceSquareAggregateRoot,
-                    roundTwoAggregateRoot,
-                    roundTwoSourceSquareAggregateRoot,
-                    relinearizationKeyRoot,
-                } satisfies RelinearizationKeyRootReference;
-            },
-        );
-
-    const sortedGaloisBatches = [...input.galoisKeyShareBatches].sort(
-        (left, right) =>
-            left.trusteeRosterPosition - right.trusteeRosterPosition,
-    );
-    if (sortedGaloisBatches.length !== input.participantCount) {
-        throw new Error(
-            'galoisKeyShareBatches must contain one batch per participant.',
-        );
-    }
-    sortedGaloisBatches.forEach((batch, expectedRosterPosition) => {
-        assertContextMatches(input.setupContext, batch, 'galoisKeyShareBatch');
-        if (batch.trusteeRosterPosition !== expectedRosterPosition) {
-            throw new Error(
-                'galoisKeyShareBatches roster positions must be contiguous from zero.',
-            );
-        }
-        if (
-            batch.evaluatorKeyScheduleRoot !==
-                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-            batch.sameSecretProofFamilyBindingRoot !==
-                input.sameSecretProofFamilyBindingRoot ||
-            batch.publicKeyShareLnpProofSetRoot !==
-                input.publicKeyShareLnpProofSetRoot ||
-            batch.requiredGaloisSetHash !==
-                input.evaluatorKeySchedule.requiredGaloisSetHash
-        ) {
-            throw new Error(
-                'galoisKeyShareBatches must match the accepted evaluation-key binding.',
-            );
-        }
-    });
-    const galoisKeyShareBatchRoots = sortedGaloisBatches.map((batch) => ({
-        trusteeIdentity: batch.trusteeIdentity,
-        trusteeRosterPosition: batch.trusteeRosterPosition,
-        galoisKeyShareBatchRoot: batch.galoisKeyShareBatchRoot,
-    })) satisfies GaloisKeyShareBatchRootReference[];
-    const galoisKeyRoots =
-        input.evaluatorKeySchedule.requiredGaloisKeySchedule.map(
-            (scheduleEntry) => {
-                const { rotation, level } = scheduleEntry;
-                const decompositionDigitCount = level + 1;
-                const contributingShareRoots = sortedGaloisBatches.map(
-                    (batch) => {
-                        const proof = batch.galoisKeyShareProofs.find(
-                            (proofRecord) =>
-                                proofRecord.rotation === rotation &&
-                                proofRecord.level === level,
-                        );
-                        if (proof === undefined) {
-                            throw new Error(
-                                'galoisKeyShareBatches is missing a scheduled proof record.',
-                            );
-                        }
-
-                        return {
-                            trusteeIdentity: batch.trusteeIdentity,
-                            trusteeRosterPosition: batch.trusteeRosterPosition,
-                            galoisKeyShareRoot: proof.galoisKeyShareRoot,
-                            galoisKeyShareProofRoot:
-                                proof.galoisKeyShareProofRoot,
-                        } satisfies GaloisKeyContributingShareRoot;
-                    },
-                );
-                const galoisKeyRoot = deriveProtocolHash('RotationKeyRoot', {
-                    objectType: 'GaloisKeyAggregate',
-                    objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
-                    assemblyStatus: publicEvaluationKeyAssemblyStatus,
-                    materialEncoding: publicEvaluationKeyMaterialEncoding,
-                    materialSource: publicEvaluationKeyMaterialSource,
-                    evaluatorKeyScheduleRoot:
-                        input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        input.publicKeyShareLnpProofSetRoot,
-                    galoisKeyCrpRoot:
-                        input.evaluatorKeySchedule.galoisKeyCrpRoot,
-                    requiredGaloisSetHash:
-                        input.evaluatorKeySchedule.requiredGaloisSetHash,
-                    rotation,
-                    level,
-                    decompositionDigitCount,
-                    rnsLimbCount: decompositionDigitCount,
-                    contributingShareRoots,
-                });
-
-                return {
-                    rotation,
-                    level,
-                    decompositionDigitCount,
-                    rnsLimbCount: decompositionDigitCount,
-                    galoisKeyRoot,
-                    contributingShareRoots,
-                } satisfies GaloisKeyRootReference;
-            },
-        );
-    if (input.publicEvaluationKeyMaterialReference !== undefined) {
-        const reference = input.publicEvaluationKeyMaterialReference;
-        if (
-            reference.publicEvaluationKeyMaterialEncoding !==
-            publicEvaluationKeyTransportMaterialEncoding
-        ) {
-            throw new Error(
-                'publicEvaluationKeyMaterialReference uses an unsupported material encoding.',
-            );
-        }
-        assertProtocolHash(
-            reference.publicEvaluationKeyMaterialRoot,
-            'publicEvaluationKeyMaterialRoot',
-        );
-        assertProtocolHash(
-            reference.publicEvaluationKeyMaterialFullObjectHash,
-            'publicEvaluationKeyMaterialFullObjectHash',
-        );
-        assertProtocolHash(
-            reference.publicEvaluationKeyMaterialChunkRoot,
-            'publicEvaluationKeyMaterialChunkRoot',
-        );
-        assertPositiveSafeInteger(
-            reference.publicEvaluationKeyMaterialChunkSizeBytes,
-            'publicEvaluationKeyMaterialChunkSizeBytes',
-        );
-        assertPositiveSafeInteger(
-            reference.publicEvaluationKeyMaterialChunkCount,
-            'publicEvaluationKeyMaterialChunkCount',
-        );
-        assertPositiveSafeInteger(
-            reference.publicEvaluationKeyMaterialTotalByteLength,
-            'publicEvaluationKeyMaterialTotalByteLength',
-        );
-        if (
-            reference.publicEvaluationKeyMaterialChunkHashes.length !==
-            reference.publicEvaluationKeyMaterialChunkCount
-        ) {
-            throw new Error(
-                'publicEvaluationKeyMaterialChunkHashes must match publicEvaluationKeyMaterialChunkCount.',
-            );
-        }
-        reference.publicEvaluationKeyMaterialChunkHashes.forEach(
-            (chunkHash, chunkIndex) => {
-                assertProtocolHash(
-                    chunkHash,
-                    `publicEvaluationKeyMaterialChunkHashes[${chunkIndex}]`,
-                );
-            },
-        );
-    }
-
-    const evaluationKeysWithoutHash = {
-        objectType: 'PublicEvaluationKeySet',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
-        assemblyStatus: publicEvaluationKeyAssemblyStatus,
-        materialEncoding: publicEvaluationKeyMaterialEncoding,
-        materialSource: publicEvaluationKeyMaterialSource,
-        ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount: input.qSharePrimes.length,
-        evaluatorKeyScheduleRoot:
-            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretProofFamilyBindingRoot,
-        publicKeyShareLnpProofSetRoot: input.publicKeyShareLnpProofSetRoot,
-        relinearizationKeyShareRoundsRoot:
-            input.relinearizationKeyShareRounds
-                .relinearizationKeyShareRoundsRoot,
-        relinearizationLevelSchedule:
-            input.evaluatorKeySchedule.relinearizationLevelSchedule,
-        relinearizationKeyRoots,
-        requiredGaloisSetHash: input.evaluatorKeySchedule.requiredGaloisSetHash,
-        requiredGaloisKeySchedule:
-            input.evaluatorKeySchedule.requiredGaloisKeySchedule,
-        galoisKeyShareBatchRoots,
-        galoisKeyRoots,
-        genericKeySwitchKeyRoots: [],
-        rawKeyBytesEmbedded: false,
-        verifierGeneratedKeyMaterial: false,
-        ...(input.publicEvaluationKeyMaterialReference ?? {}),
-    } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
-
-    return {
-        ...evaluationKeysWithoutHash,
-        evaluationKeySetHash: deriveProtocolHash(
-            'EvaluationKeySetHash',
-            evaluationKeysWithoutHash,
-        ),
-    } satisfies PublicEvaluationKeySet;
-}
 
 export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
     input: PublicEvaluationKeyMaterialTransportInput,

@@ -161,11 +161,13 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
 
 // Failure modes of `signed_i128_residue_u64`, kept separate so callers can map
 // each one to their own module-specific error message.
+#[cfg(test)]
 pub(crate) enum SignedResidueFailure {
     Overflowed,
     DoesNotFitU64,
 }
 
+#[cfg(test)]
 pub(crate) fn signed_i128_residue_u64(
     value: i128,
     modulus: u64,

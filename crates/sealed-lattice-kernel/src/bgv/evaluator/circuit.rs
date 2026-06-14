@@ -20,17 +20,25 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-// The evaluator context owns the development key set and the per-level
-// relinearization keys needed by homomorphic multiplication. Relinearization
-// keys are generated for every level from one up to the working level so a
-// multiplication at any reachable level can relinearize.
+// The evaluator context owns the development key set and the evaluation keys
+// needed by homomorphic multiplication and rotation. One relinearization key
+// at the working level serves every reachable level: the CRT-idempotent
+// gadget makes the lower-level key a literal sub-matrix, and the key-switch
+// path slices the active window from the ciphertext level. Rotation keys are
+// held per Galois element at their schedule level and truncate the same way.
 pub(crate) struct EvaluatorContext {
     key: Option<DevelopmentBgvKey>,
-    relinearization_keys: Vec<Option<KeySwitchKey>>,
-    rotation_key_seeds: BTreeMap<(usize, usize), String>,
-    rotation_keys: BTreeMap<(usize, usize), KeySwitchKey>,
+    working_level: usize,
+    relinearization_key: Option<KeySwitchKey>,
+    rotation_keys: BTreeMap<usize, KeySwitchKey>,
     #[cfg(not(target_arch = "wasm32"))]
     generated_rotation_keys: RwLock<BTreeMap<(usize, usize, String), KeySwitchKey>>,
+    // Consumed-schedule instrumentation: which relinearization levels and
+    // (rotation, level) pairs the evaluator actually requested.
+    #[cfg(not(target_arch = "wasm32"))]
+    consumed_relinearization_levels: RwLock<std::collections::BTreeSet<usize>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    consumed_rotations: RwLock<std::collections::BTreeSet<(usize, usize)>>,
 }
 
 impl EvaluatorContext {
@@ -45,47 +53,23 @@ impl EvaluatorContext {
         key_switch_seed_hex: &str,
         working_level: usize,
     ) -> CanonicalResult<Self> {
-        let relinearization_key_seeds = (1..=working_level)
-            .map(|level| (level, format!("{key_switch_seed_hex}-relin-{level}")))
-            .collect::<BTreeMap<_, _>>();
-
-        Self::from_key_material(
-            key,
-            relinearization_key_seeds,
-            BTreeMap::new(),
+        let relinearization_key = generate_relinearization_key(
+            &key,
             working_level,
-        )
-    }
-
-    pub(crate) fn from_key_material(
-        key: DevelopmentBgvKey,
-        relinearization_key_seeds: BTreeMap<usize, String>,
-        rotation_key_seeds: BTreeMap<(usize, usize), String>,
-        working_level: usize,
-    ) -> CanonicalResult<Self> {
-        let mut relinearization_keys = Vec::with_capacity(working_level + 1);
-        relinearization_keys.push(None);
-        for level in 1..=working_level {
-            let seed = relinearization_key_seeds.get(&level).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "missing relinearization key stream seed for the requested evaluator level",
-                )
-            })?;
-            relinearization_keys.push(Some(generate_relinearization_key(
-                &key,
-                level,
-                seed.as_str(),
-            )?));
-        }
+            &format!("{key_switch_seed_hex}-relin"),
+        )?;
 
         Ok(Self {
             key: Some(key),
-            relinearization_keys,
-            rotation_key_seeds,
+            working_level,
+            relinearization_key: Some(relinearization_key),
             rotation_keys: BTreeMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
+            #[cfg(not(target_arch = "wasm32"))]
+            consumed_relinearization_levels: RwLock::new(std::collections::BTreeSet::new()),
+            #[cfg(not(target_arch = "wasm32"))]
+            consumed_rotations: RwLock::new(std::collections::BTreeSet::new()),
         })
     }
 
@@ -102,11 +86,15 @@ impl EvaluatorContext {
 
         Ok(Self {
             key: None,
-            relinearization_keys: key_material.relinearization_keys,
-            rotation_key_seeds: BTreeMap::new(),
+            working_level,
+            relinearization_key: key_material.relinearization_key,
             rotation_keys: key_material.rotation_keys,
             #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
+            #[cfg(not(target_arch = "wasm32"))]
+            consumed_relinearization_levels: RwLock::new(std::collections::BTreeSet::new()),
+            #[cfg(not(target_arch = "wasm32"))]
+            consumed_rotations: RwLock::new(std::collections::BTreeSet::new()),
         })
     }
 
@@ -118,19 +106,28 @@ impl EvaluatorContext {
     }
 
     pub(crate) fn working_level(&self) -> usize {
-        self.relinearization_keys.len() - 1
+        self.working_level
     }
 
     fn relinearization_key(&self, level: usize) -> CanonicalResult<&KeySwitchKey> {
-        self.relinearization_keys
-            .get(level)
-            .and_then(Option::as_ref)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "no relinearization key for the requested level",
-                )
-            })
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(mut consumed) = self.consumed_relinearization_levels.write() {
+            consumed.insert(level);
+        }
+        let key = self.relinearization_key.as_ref().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "no relinearization key is loaded",
+            )
+        })?;
+        if key.level < level {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "no relinearization key for the requested level",
+            ));
+        }
+
+        Ok(key)
     }
 
     pub(crate) fn resolve_galois_key(
@@ -139,19 +136,16 @@ impl EvaluatorContext {
         level: usize,
         fallback_seed_hex: &str,
     ) -> CanonicalResult<KeySwitchKey> {
-        if let Some(rotation_key) = self.rotation_keys.get(&(galois_element, level)) {
-            return Ok(rotation_key.clone());
-        }
-        let seed = match self.rotation_key_seeds.get(&(galois_element, level)) {
-            Some(seed) => seed.as_str(),
-            None if self.rotation_key_seeds.is_empty() => fallback_seed_hex,
-            None => {
+        if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
+            if rotation_key.level < level {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ProfileComponentMismatch,
-                    "missing setup-bound rotation key stream seed for the requested evaluator rotation",
+                    "loaded rotation key level is below the requested evaluator level",
                 ));
             }
-        };
+            return Ok(rotation_key.clone());
+        }
+        let seed = fallback_seed_hex;
 
         let key = self.key.as_ref().ok_or_else(|| {
             CanonicalError::new(
@@ -168,14 +162,19 @@ impl EvaluatorContext {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let cache_key = (galois_element, level, seed.to_string());
-            let generated_rotation_keys = self.generated_rotation_keys.read().map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "generated rotation-key cache is poisoned",
-                )
-            })?;
-            if let Some(rotation_key) = generated_rotation_keys.get(&cache_key) {
-                return Ok(rotation_key.clone());
+            // The read guard must drop before the write acquisition below, or
+            // the first cache miss deadlocks on the same thread.
+            {
+                let generated_rotation_keys =
+                    self.generated_rotation_keys.read().map_err(|_| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "generated rotation-key cache is poisoned",
+                        )
+                    })?;
+                if let Some(rotation_key) = generated_rotation_keys.get(&cache_key) {
+                    return Ok(rotation_key.clone());
+                }
             }
 
             let generated_key = generate_galois_key(key, galois_element, level, seed)?;
@@ -200,7 +199,17 @@ impl EvaluatorContext {
         level: usize,
         fallback_seed_hex: &str,
     ) -> CanonicalResult<Ciphertext> {
-        if let Some(rotation_key) = self.rotation_keys.get(&(galois_element, level)) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(mut consumed) = self.consumed_rotations.write() {
+            consumed.insert((galois_element, level));
+        }
+        if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
+            if rotation_key.level < level {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "loaded rotation key level is below the requested evaluator level",
+                ));
+            }
             return rotate(ciphertext, galois_element, rotation_key);
         }
 
@@ -208,6 +217,29 @@ impl EvaluatorContext {
             self.resolve_galois_key(galois_element, level, fallback_seed_hex)?;
 
         rotate(ciphertext, galois_element, &generated_rotation_key)
+    }
+
+    // Consumed-schedule report for development instrumentation: every
+    // relinearization level and (rotation, level) pair requested so far.
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn consumed_key_schedule(
+        &self,
+    ) -> (
+        std::collections::BTreeSet<usize>,
+        std::collections::BTreeSet<(usize, usize)>,
+    ) {
+        let relinearization_levels = self
+            .consumed_relinearization_levels
+            .read()
+            .map(|levels| levels.clone())
+            .unwrap_or_default();
+        let rotations = self
+            .consumed_rotations
+            .read()
+            .map(|rotations| rotations.clone())
+            .unwrap_or_default();
+
+        (relinearization_levels, rotations)
     }
 }
 

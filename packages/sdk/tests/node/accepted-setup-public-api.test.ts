@@ -13,10 +13,10 @@ import {
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
     publicKeyShareCoefficientVectorHashDomain,
-    publicKeyShareLnpProofModelStatus,
-    publicKeyShareLnpProofVerificationStatus,
-    sameSecretLnpProofModelStatus,
-    sameSecretLnpProofVerificationStatus,
+    publicKeyShareSuccinctProofModelStatus,
+    publicKeyShareSuccinctProofVerificationStatus,
+    sameSecretAnchorProofModelStatus,
+    sameSecretAnchorProofVerificationStatus,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
@@ -38,7 +38,7 @@ type PublicSetupApi = {
     readonly createPublicEvaluationKeySet: (
         input: unknown,
     ) => Record<string, unknown>;
-    readonly createPublicKeyShareLnpProofSet: (
+    readonly createPublicKeyShareSuccinctProofSet: (
         input: unknown,
     ) => Record<string, unknown>;
     readonly createPublicKeyShareMaterialSet: (
@@ -163,7 +163,10 @@ const protocolHashFromKernel = (
         value,
     });
 
-const qSharePrimes = [65_537, 114_689, 147_457] as const;
+const qSharePrimes = [
+    65_537, 65_539, 65_543, 65_551, 65_557, 65_563, 65_579, 65_581, 65_587,
+    65_599, 65_609, 65_617, 65_629, 65_633, 65_647, 65_651, 65_657,
+] as const;
 const participantCount = 2;
 const vssFixtureRingDegree = 8;
 const vssFixtureThresholdDegree = 2;
@@ -327,32 +330,21 @@ const vssSourceTrusteeOpeningState = (
 const sameSecretProofMaterial = (
     kernel: TranscriptCoreKernel,
     statementRecord: Record<string, unknown>,
-    sameSecretTboxParameterProfileHash: string,
 ): Record<string, unknown> => {
     const proofRosterPosition = Number(statementRecord.trusteeRosterPosition);
     const proofBytesHex = `aa55${proofRosterPosition.toString(16).padStart(4, '0')}`;
 
     return {
         setupProofProfileId,
-        proofFamily: 'same-secret-consistency',
-        proofVerificationStatus: sameSecretLnpProofVerificationStatus,
-        proofModelStatus: sameSecretLnpProofModelStatus,
-        sameSecretTboxParameterProfileHash,
+        proofFamily: 'same-secret-linkage-anchor',
+        proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
+        proofModelStatus: sameSecretAnchorProofModelStatus,
         trusteeIdentity: statementRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
         statementHash: hashFromKernel(
             kernel,
             `same-secret-proof-statement-${String(proofRosterPosition)}`,
         ),
-        relationCommitmentHash: hashFromKernel(
-            kernel,
-            `same-secret-proof-relation-${String(proofRosterPosition)}`,
-        ),
-        tboxCommitmentPrefixHash: hashFromKernel(
-            kernel,
-            `same-secret-proof-tbox-${String(proofRosterPosition)}`,
-        ),
-        challenge: 17 + proofRosterPosition,
         proofSizeBytes: proofBytesHex.length / 2,
         proofBytesHash: hashFromKernel(
             kernel,
@@ -376,10 +368,9 @@ const sameSecretProofReferencesFromSet = (
         }),
     );
 
-const publicKeyShareLnpProofMaterial = (
+const publicKeyShareSuccinctProofMaterial = (
     kernel: TranscriptCoreKernel,
     proofRecord: Record<string, unknown>,
-    publicKeyShareTboxParameterProfileHash: string,
 ): Record<string, unknown> => {
     const proofRosterPosition = Number(proofRecord.trusteeRosterPosition);
     const proofBytesHex = `bb66${proofRosterPosition.toString(16).padStart(4, '0')}`;
@@ -387,28 +378,18 @@ const publicKeyShareLnpProofMaterial = (
     return {
         setupProofProfileId,
         proofFamily: 'public-key-share',
-        proofVerificationStatus: publicKeyShareLnpProofVerificationStatus,
-        proofModelStatus: publicKeyShareLnpProofModelStatus,
-        publicKeyShareTboxParameterProfileHash,
+        proofVerificationStatus: publicKeyShareSuccinctProofVerificationStatus,
+        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         trusteeIdentity: proofRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
         statementHash: hashFromKernel(
             kernel,
-            `public-key-lnp-statement-${String(proofRosterPosition)}`,
+            `public-key-succinct-statement-${String(proofRosterPosition)}`,
         ),
-        relationCommitmentHash: hashFromKernel(
-            kernel,
-            `public-key-lnp-relation-${String(proofRosterPosition)}`,
-        ),
-        tboxCommitmentPrefixHash: hashFromKernel(
-            kernel,
-            `public-key-lnp-tbox-${String(proofRosterPosition)}`,
-        ),
-        challenge: 23 + proofRosterPosition,
         proofSizeBytes: proofBytesHex.length / 2,
         proofBytesHash: hashFromKernel(
             kernel,
-            `public-key-lnp-proof-bytes-${String(proofRosterPosition)}`,
+            `public-key-succinct-proof-bytes-${String(proofRosterPosition)}`,
         ),
         proofBytesHex,
     };
@@ -453,7 +434,7 @@ const galoisKeySwitchSeed = (
         level,
     });
 
-const relinearizationProofMaterial = (
+const relinearizationShareMaterial = (
     kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     shareRoot: string,
@@ -461,11 +442,6 @@ const relinearizationProofMaterial = (
     round: 'round-one' | 'round-two',
     level: number,
 ): Record<string, unknown> => ({
-    proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
-    setupProofBinding: {
-        objectType: 'SetupProofBindingFixture',
-        label,
-    },
     keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
     keySwitchDomain: 'relinearization',
     keySwitchSeedHex: relinearizationKeySwitchSeed(
@@ -483,44 +459,23 @@ const relinearizationProofMaterial = (
             vectorHash: hashFromKernel(kernel, `component-vector-${label}`),
         },
     ],
-    relinearizationKeyShareTboxParameterProfileHash: hashFromKernel(
-        kernel,
-        `relinearization-tbox-${label}`,
-    ),
-    statementHash: hashFromKernel(kernel, `statement-${label}`),
-    relationCommitmentHash: hashFromKernel(
-        kernel,
-        `relation-commitment-${label}`,
-    ),
-    tboxCommitmentPrefixHash: hashFromKernel(
-        kernel,
-        `tbox-commitment-${label}`,
-    ),
-    challenge: 17,
-    proofSizeBytes: 4,
-    proofBytesHash: hashFromKernel(kernel, `proof-bytes-${label}`),
-    proofBytesHex: '00112233',
 });
 
-const galoisProofMaterial = (
+const galoisShareMaterial = (
     kernel: TranscriptCoreKernel,
     evaluatorKeySchedule: Record<string, unknown>,
     shareRoot: string,
     label: string,
     rotation: number,
+    level: number,
 ): Record<string, unknown> => ({
-    proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1',
-    setupProofBinding: {
-        objectType: 'SetupProofBindingFixture',
-        label,
-    },
     keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
     keySwitchDomain: `galois-${String(rotation)}`,
     keySwitchSeedHex: galoisKeySwitchSeed(
         kernel,
         evaluatorKeySchedule,
         rotation,
-        1,
+        level,
     ),
     ringDegree: 8,
     keySwitchComponentVectorRoot: shareRoot,
@@ -531,20 +486,6 @@ const galoisProofMaterial = (
             vectorHash: hashFromKernel(kernel, `galois-component-${label}`),
         },
     ],
-    galoisKeyShareTboxParameterProfileHash: hashFromKernel(
-        kernel,
-        `galois-tbox-${label}`,
-    ),
-    statementHash: hashFromKernel(kernel, `galois-statement-${label}`),
-    relationCommitmentHash: hashFromKernel(kernel, `galois-relation-${label}`),
-    tboxCommitmentPrefixHash: hashFromKernel(
-        kernel,
-        `galois-tbox-commitment-${label}`,
-    ),
-    challenge: 19,
-    proofSizeBytes: 4,
-    proofBytesHash: hashFromKernel(kernel, `galois-proof-bytes-${label}`),
-    proofBytesHex: '44556677',
 });
 
 type SetupIntentSignerFixture = Readonly<{
@@ -623,7 +564,12 @@ const phaseTranscriptFixture = (
     const profile = kernel.describeCollectiveBgvSetupProfile();
     let previousPhaseRoot: string | null = null;
 
-    return profile.phaseOrder.map((phase) => {
+    return (
+        profile.phaseOrder as readonly {
+            readonly phaseId: string;
+            readonly phaseNumber: number;
+        }[]
+    ).map((phase) => {
         const phaseRecord = publicSetupApi.createSetupPhaseRecord({
             setupContext,
             phaseId: phase.phaseId,
@@ -1251,33 +1197,24 @@ describe('accepted setup public package API in Node', () => {
                 sameSecretConsistency,
                 publicKeyShares,
             });
-        const sameSecretTboxParameterProfileHash = hashFromKernel(
+        const sameSecretLinkageAnchorProofAccountingHash = hashFromKernel(
             kernel,
-            'same-secret-tbox',
+            'same-secret-linkage-anchor-proof-accounting',
         );
-        const setupProofBinding = {
-            objectType: 'SetupProofBindingFixture',
-            label: 'accepted-setup-public-api',
-        };
         const sameSecretProofs = publicSetupApi.createSameSecretProofSet({
             setupContext,
             qSharePrimes,
             participantCount,
             sameSecretConsistency,
             vssCoefficientCommitmentMaterial,
-            setupProofBinding,
-            sameSecretTboxParameterProfileHash,
+            proofAccountingHash: sameSecretLinkageAnchorProofAccountingHash,
             proofMaterials: (
                 sameSecretConsistency.statementRecords as readonly Record<
                     string,
                     unknown
                 >[]
             ).map((statementRecord) =>
-                sameSecretProofMaterial(
-                    kernel,
-                    statementRecord,
-                    sameSecretTboxParameterProfileHash,
-                ),
+                sameSecretProofMaterial(kernel, statementRecord),
             ),
         });
         const publicKeyShareMaterial =
@@ -1292,12 +1229,12 @@ describe('accepted setup public package API in Node', () => {
                 publicKeyShares,
                 materialContributions: publicKeyShareMaterialContributions,
             });
-        const publicKeyShareTboxParameterProfileHash = hashFromKernel(
+        const publicKeyShareProofAccountingHash = hashFromKernel(
             kernel,
-            'public-key-share-tbox',
+            'public-key-share-proof-accounting',
         );
-        const publicKeyShareLnpProofs =
-            publicSetupApi.createPublicKeyShareLnpProofSet({
+        const publicKeyShareSuccinctProofs =
+            publicSetupApi.createPublicKeyShareSuccinctProofSet({
                 setupContext,
                 qSharePrimes,
                 participantCount,
@@ -1309,19 +1246,14 @@ describe('accepted setup public package API in Node', () => {
                 publicKeyShares,
                 publicKeyShareProofs,
                 publicKeyShareMaterial,
-                setupProofBinding,
-                publicKeyShareTboxParameterProfileHash,
+                proofAccountingHash: publicKeyShareProofAccountingHash,
                 proofMaterials: (
                     publicKeyShareProofs.proofRecords as readonly Record<
                         string,
                         unknown
                     >[]
                 ).map((proofRecord) =>
-                    publicKeyShareLnpProofMaterial(
-                        kernel,
-                        proofRecord,
-                        publicKeyShareTboxParameterProfileHash,
-                    ),
+                    publicKeyShareSuccinctProofMaterial(kernel, proofRecord),
                 ),
             });
         const evaluatorKeySchedule = publicSetupApi.createEvaluatorKeySchedule({
@@ -1350,8 +1282,8 @@ describe('accepted setup public package API in Node', () => {
             sameSecretProofSetRoot: sameSecretProofs.sameSecretProofSetRoot,
             sameSecretProofFamilyBindingRoot:
                 sameSecretConsistency.sameSecretProofFamilyBindingRoot,
-            publicKeyShareLnpProofSetRoot:
-                publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+            publicKeyShareSuccinctProofSetRoot:
+                publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot,
             sameSecretProofReferences,
         };
         const relinearizationLevels = relinearizationLevelSchedule.map(
@@ -1370,7 +1302,7 @@ describe('accepted setup public package API in Node', () => {
                         trusteeRosterPosition: reference.trusteeRosterPosition,
                         level,
                         roundOneShareRoot,
-                        proofMaterial: relinearizationProofMaterial(
+                        shareMaterial: relinearizationShareMaterial(
                             kernel,
                             evaluatorKeySchedule,
                             roundOneShareRoot,
@@ -1394,7 +1326,7 @@ describe('accepted setup public package API in Node', () => {
                         trusteeRosterPosition: reference.trusteeRosterPosition,
                         level,
                         roundTwoShareRoot,
-                        proofMaterial: relinearizationProofMaterial(
+                        shareMaterial: relinearizationShareMaterial(
                             kernel,
                             evaluatorKeySchedule,
                             roundTwoShareRoot,
@@ -1417,7 +1349,7 @@ describe('accepted setup public package API in Node', () => {
                 batchContributions: sameSecretProofReferences.map(
                     (reference) => ({
                         trusteeRosterPosition: reference.trusteeRosterPosition,
-                        galoisKeyShareProofs: requiredGaloisKeySchedule.map(
+                        galoisKeyShares: requiredGaloisKeySchedule.map(
                             (scheduleEntry) => {
                                 const galoisKeyShareRoot = hashFromKernel(
                                     kernel,
@@ -1428,12 +1360,13 @@ describe('accepted setup public package API in Node', () => {
                                     rotation: scheduleEntry.rotation,
                                     level: scheduleEntry.level,
                                     galoisKeyShareRoot,
-                                    proofMaterial: galoisProofMaterial(
+                                    shareMaterial: galoisShareMaterial(
                                         kernel,
                                         evaluatorKeySchedule,
                                         galoisKeyShareRoot,
                                         `${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.rotation)}`,
                                         scheduleEntry.rotation,
+                                        scheduleEntry.level,
                                     ),
                                 };
                             },
@@ -1447,6 +1380,21 @@ describe('accepted setup public package API in Node', () => {
                 relinearizationKeyShareRounds,
                 galoisKeyShareBatches,
             });
+        const trusteeEvaluationKeyProofsWithoutRoot = {
+            objectType: 'TrusteeEvaluationKeyProofSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            relinearizationKeyShareRoundsRoot:
+                relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
+            proofRecords: [],
+        };
+        const trusteeEvaluationKeyProofs = {
+            ...trusteeEvaluationKeyProofsWithoutRoot,
+            trusteeEvaluationKeyProofSetRoot: kernel.deriveProtocolHash({
+                namespace: 'TrusteeEvaluationKeyProofSetRoot',
+                value: trusteeEvaluationKeyProofsWithoutRoot,
+            }),
+        };
         const privateVssEnvelopeCommitmentRoot = hashFromKernel(
             kernel,
             'package-private-vss-envelope-root',
@@ -1476,6 +1424,21 @@ describe('accepted setup public package API in Node', () => {
             bgvProfile,
             vssCoefficientCommitmentMaterial,
             transport: setupTransport,
+            sameSecretLinkageAnchorProofAccounting: {
+                objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+                objectVersion: 1,
+                fixture: 'sdk-same-secret-linkage-anchor-accounting',
+            },
+            publicKeyShareProofAccounting: {
+                objectType: 'SuccinctPublicKeyShareAccounting',
+                objectVersion: 1,
+                fixture: 'sdk-public-key-share-accounting',
+            },
+            trusteeEvaluationKeyProofAccounting: {
+                objectType: 'SuccinctEvaluationKeyProofAccounting',
+                objectVersion: 1,
+                fixture: 'sdk-trustee-evaluation-key-accounting',
+            },
         });
         const setupCommitmentSecurityCertificate =
             setupCertificates.setupCommitmentSecurityCertificate as Record<
@@ -1572,10 +1535,11 @@ describe('accepted setup public package API in Node', () => {
             publicKeyShares,
             publicKeyShareProofs,
             publicKeyShareMaterial,
-            publicKeyShareLnpProofs,
+            publicKeyShareSuccinctProofs,
             evaluatorKeySchedule,
             relinearizationKeyShareRounds,
             galoisKeyShareBatches,
+            trusteeEvaluationKeyProofs,
             evaluationKeys: publicEvaluationKeys,
             setupCertificateInput: {
                 setupProfile,
@@ -1616,8 +1580,8 @@ describe('accepted setup public package API in Node', () => {
                 objectType: 'CollectivePublicKey',
                 publicKeyShareMaterialSetRoot:
                     publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
-                publicKeyShareLnpProofSetRoot:
-                    publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+                publicKeyShareSuccinctProofSetRoot:
+                    publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot,
             },
             privateVssEnvelopeCommitmentRoot,
             evaluationKeys: publicEvaluationKeys,
@@ -1664,20 +1628,6 @@ describe('accepted setup public package API in Node', () => {
             /secretCoefficients|openingRandomness|roundOneAggregateSourceCoefficients|proofGeneration/u,
         );
         expect(() =>
-            publicSetupApi.createRelinearizationKeyShareRounds({
-                ...commonEvaluationKeyInput,
-                roundOneContributions: [
-                    {
-                        ...roundOneContributions[0],
-                        proofGeneration: {
-                            secretCoefficients: [1],
-                        },
-                    },
-                ],
-                roundTwoContributions,
-            }),
-        ).toThrow(/proofGeneration is not accepted/u);
-        expect(() =>
             publicSetupApi.createSetupPackage({
                 ...setupPackageInput,
                 thresholdShareCommitments: {
@@ -1706,7 +1656,7 @@ describe('accepted setup public package API in Node', () => {
         for (const requiredPublicKeyClosureField of [
             'sameSecretProofs',
             'publicKeyShareMaterial',
-            'publicKeyShareLnpProofs',
+            'publicKeyShareSuccinctProofs',
         ]) {
             const incompleteSetupPackageInput = {
                 ...setupPackageInput,

@@ -9,7 +9,7 @@ import {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares as exportEncryptedLocalTrusteeSetupStateInternal,
     createEvaluatorKeySchedule as createEvaluatorKeyScheduleInternal,
     createGaloisKeyShareBatches as createGaloisKeyShareBatchesInternal,
-    createPublicKeyShareLnpProofSet as createPublicKeyShareLnpProofSetInternal,
+    createPublicKeyShareSuccinctProofSet as createPublicKeyShareSuccinctProofSetInternal,
     createPublicKeyShareMaterialSet as createPublicKeyShareMaterialSetInternal,
     createPublicEvaluationKeySet as createPublicEvaluationKeySetInternal,
     createPublicKeyShareProofSet as createPublicKeyShareProofSetInternal,
@@ -51,9 +51,11 @@ import type {
     EvaluatorKeyScheduleInput as ProtocolEvaluatorKeyScheduleInput,
     GaloisKeyRootReference as ProtocolGaloisKeyRootReference,
     GaloisKeyShareBatch as ProtocolGaloisKeyShareBatch,
+    GaloisKeyShareBatchContribution as ProtocolGaloisKeyShareBatchContribution,
     GaloisKeyShareBatchRootReference as ProtocolGaloisKeyShareBatchRootReference,
-    GaloisKeyShareProof as ProtocolGaloisKeyShareProof,
-    GaloisKeyShareProofMaterial as ProtocolGaloisKeyShareProofMaterial,
+    GaloisKeyShareContribution as ProtocolGaloisKeyShareContribution,
+    GaloisKeyShareMaterialRecord as ProtocolGaloisKeyShareMaterialRecord,
+    EvaluationKeyShareMaterial as ProtocolEvaluationKeyShareMaterial,
     EvaluationKeyShareMaterialTransportInput as ProtocolEvaluationKeyShareMaterialTransportInput,
     GaloisKeyShareRootReference as ProtocolGaloisKeyShareRootReference,
     LocalTrusteeSetupStateDecryptionInput,
@@ -66,14 +68,14 @@ import type {
     PublicKeyShareCoefficientVectorHash as ProtocolPublicKeyShareCoefficientVectorHash,
     PublicKeyShareCoefficientVectorMaterial as ProtocolPublicKeyShareCoefficientVectorMaterial,
     PublicKeyShareContributionInput as ProtocolPublicKeyShareContributionInput,
-    PublicKeyShareLnpProofMaterial as ProtocolPublicKeyShareLnpProofMaterial,
-    PublicKeyShareLnpProofRecord as ProtocolPublicKeyShareLnpProofRecord,
-    PublicKeyShareLnpProofSet as ProtocolPublicKeyShareLnpProofSet,
-    PublicKeyShareLnpProofSetInput as ProtocolPublicKeyShareLnpProofSetInput,
     PublicKeyShareMaterialContributionInput as ProtocolPublicKeyShareMaterialContributionInput,
     PublicKeyShareMaterialRecord as ProtocolPublicKeyShareMaterialRecord,
     PublicKeyShareMaterialSet as ProtocolPublicKeyShareMaterialSet,
     PublicKeyShareMaterialSetInput as ProtocolPublicKeyShareMaterialSetInput,
+    PublicKeyShareSuccinctProofMaterial as ProtocolPublicKeyShareSuccinctProofMaterial,
+    PublicKeyShareSuccinctProofRecord as ProtocolPublicKeyShareSuccinctProofRecord,
+    PublicKeyShareSuccinctProofSet as ProtocolPublicKeyShareSuccinctProofSet,
+    PublicKeyShareSuccinctProofSetInput as ProtocolPublicKeyShareSuccinctProofSetInput,
     SetupPackagePublicKeyShareMaterialSet as ProtocolSetupPackagePublicKeyShareMaterialSet,
     SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
     PublicKeyShareProofRecord as ProtocolPublicKeyShareProofRecord,
@@ -88,13 +90,18 @@ import type {
     SetupTransportedVssCoefficientCommitmentMaterialLike as ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike,
     SetupTransportedVssCoefficientCommitmentMaterialReference as ProtocolSetupTransportedVssCoefficientCommitmentMaterialReference,
     VerifiedVssCoefficientCommitmentMaterial as ProtocolVerifiedVssCoefficientCommitmentMaterial,
+    VerifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
+    VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
     RelinearizationKeyRootReference as ProtocolRelinearizationKeyRootReference,
-    RelinearizationKeyShareProofMaterial as ProtocolRelinearizationKeyShareProofMaterial,
     RelinearizationKeyShareRoundOneRecord as ProtocolRelinearizationKeyShareRoundOneRecord,
     RelinearizationKeyShareRoundTwoRecord as ProtocolRelinearizationKeyShareRoundTwoRecord,
     RelinearizationKeyShareRounds as ProtocolRelinearizationKeyShareRounds,
     RelinearizationKeyShareRoundsInput as ProtocolRelinearizationKeyShareRoundsInput,
     RelinearizationLevelScheduleEntry as ProtocolRelinearizationLevelScheduleEntry,
+    RelinearizationRoundOneContribution as ProtocolRelinearizationRoundOneContribution,
+    RelinearizationRoundTwoContribution as ProtocolRelinearizationRoundTwoContribution,
+    TrusteeEvaluationKeyProofRecord as ProtocolTrusteeEvaluationKeyProofRecord,
+    TrusteeEvaluationKeyProofSet as ProtocolTrusteeEvaluationKeyProofSet,
     RequiredGaloisKeyScheduleEntry as ProtocolRequiredGaloisKeyScheduleEntry,
     RequiredGaloisSet as ProtocolRequiredGaloisSet,
     SameSecretProofMaterial as ProtocolSameSecretProofMaterial,
@@ -159,6 +166,7 @@ import type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
+import type { TranscriptCoreKernel } from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
 
@@ -736,6 +744,9 @@ export type SetupCertificatesInput = Readonly<{
     readonly bgvProfile: JsonRecord;
     readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
+    readonly sameSecretLinkageAnchorProofAccounting?: JsonRecord;
+    readonly publicKeyShareProofAccounting?: JsonRecord;
+    readonly trusteeEvaluationKeyProofAccounting?: JsonRecord;
 }>;
 
 export type SetupCertificates = ProtocolSetupCertificates;
@@ -770,10 +781,11 @@ export type SetupPackageInput = Readonly<{
         | SetupPackagePublicKeyShareMaterialSet
         | JsonRecord;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
-    readonly publicKeyShareLnpProofs: JsonRecord;
+    readonly publicKeyShareSuccinctProofs: JsonRecord;
     readonly evaluatorKeySchedule: JsonRecord;
     readonly relinearizationKeyShareRounds: JsonRecord;
     readonly galoisKeyShareBatches: readonly JsonRecord[];
+    readonly trusteeEvaluationKeyProofs: JsonRecord;
     readonly evaluationKeys: JsonRecord;
     readonly setupCertificateInput?: Omit<
         SetupCertificatesInput,
@@ -825,6 +837,9 @@ export type SetupTransportedVssCoefficientCommitmentMaterialLike =
     ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike;
 export type VerifiedVssCoefficientCommitmentMaterial =
     ProtocolVerifiedVssCoefficientCommitmentMaterial;
+export type VerifiedSetupProofMaterial = ProtocolVerifiedSetupProofMaterial;
+export type VerifiedSetupProofMaterialSet =
+    ProtocolVerifiedSetupProofMaterialSet;
 export type SetupPackagePublicKeyShareMaterialSet =
     ProtocolSetupPackagePublicKeyShareMaterialSet;
 export type SetupTransportedPublicKeyShareMaterial =
@@ -837,12 +852,14 @@ export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
 export type TransportedEvaluationKeyShareComponentMaterialSet =
     ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
-export type PublicKeyShareLnpProofMaterial =
-    ProtocolPublicKeyShareLnpProofMaterial;
-export type PublicKeyShareLnpProofRecord = ProtocolPublicKeyShareLnpProofRecord;
-export type PublicKeyShareLnpProofSet = ProtocolPublicKeyShareLnpProofSet;
-export type PublicKeyShareLnpProofSetInput =
-    ProtocolPublicKeyShareLnpProofSetInput;
+export type PublicKeyShareSuccinctProofMaterial =
+    ProtocolPublicKeyShareSuccinctProofMaterial;
+export type PublicKeyShareSuccinctProofRecord =
+    ProtocolPublicKeyShareSuccinctProofRecord;
+export type PublicKeyShareSuccinctProofSet =
+    ProtocolPublicKeyShareSuccinctProofSet;
+export type PublicKeyShareSuccinctProofSetInput =
+    ProtocolPublicKeyShareSuccinctProofSetInput;
 export type RelinearizationLevelScheduleEntry =
     ProtocolRelinearizationLevelScheduleEntry;
 export type RequiredGaloisKeyScheduleEntry =
@@ -855,20 +872,11 @@ export type SameSecretProofRecord = ProtocolSameSecretProofRecord;
 export type SameSecretProofReference = ProtocolSameSecretProofReference;
 export type SameSecretProofSet = ProtocolSameSecretProofSet;
 export type SameSecretProofSetInput = ProtocolSameSecretProofSetInput;
-export type RelinearizationKeyShareProofMaterial =
-    ProtocolRelinearizationKeyShareProofMaterial;
-export type RelinearizationRoundOneContribution = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly level: number;
-    readonly roundOneShareRoot: ProtocolHash;
-    readonly proofMaterial: RelinearizationKeyShareProofMaterial;
-}>;
-export type RelinearizationRoundTwoContribution = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly level: number;
-    readonly roundTwoShareRoot: ProtocolHash;
-    readonly proofMaterial: RelinearizationKeyShareProofMaterial;
-}>;
+export type EvaluationKeyShareMaterial = ProtocolEvaluationKeyShareMaterial;
+export type RelinearizationRoundOneContribution =
+    ProtocolRelinearizationRoundOneContribution;
+export type RelinearizationRoundTwoContribution =
+    ProtocolRelinearizationRoundTwoContribution;
 export type RelinearizationKeyShareRoundOneRecord =
     ProtocolRelinearizationKeyShareRoundOneRecord;
 export type RelinearizationKeyShareRoundTwoRecord =
@@ -878,40 +886,26 @@ export type RelinearizationKeyShareRounds =
 type PublicEvaluationKeyProofCommonInput = Readonly<
     Omit<
         ProtocolRelinearizationKeyShareRoundsInput,
-        | 'roundOneContributions'
-        | 'roundTwoContributions'
-        | 'evaluationKeyShareProofGenerator'
+        'roundOneContributions' | 'roundTwoContributions'
     >
 >;
 export type RelinearizationKeyShareRoundsInput =
-    PublicEvaluationKeyProofCommonInput &
-        Readonly<{
-            readonly roundOneContributions: readonly RelinearizationRoundOneContribution[];
-            readonly roundTwoContributions: readonly RelinearizationRoundTwoContribution[];
-        }>;
+    ProtocolRelinearizationKeyShareRoundsInput;
 export type GaloisKeyShareRootReference = ProtocolGaloisKeyShareRootReference;
-export type GaloisKeyShareProofMaterial = ProtocolGaloisKeyShareProofMaterial;
-export type GaloisKeyShareProofContribution =
-    ProtocolGaloisKeyShareRootReference &
-        Readonly<{
-            readonly proofMaterial: GaloisKeyShareProofMaterial;
-        }>;
-export type GaloisKeyShareBatchContribution = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly galoisKeyShareProofs: readonly GaloisKeyShareProofContribution[];
-}>;
-export type GaloisKeyShareProof = ProtocolGaloisKeyShareProof;
+export type GaloisKeyShareContribution = ProtocolGaloisKeyShareContribution;
+export type GaloisKeyShareBatchContribution =
+    ProtocolGaloisKeyShareBatchContribution;
+export type GaloisKeyShareMaterialRecord = ProtocolGaloisKeyShareMaterialRecord;
 export type GaloisKeyShareBatch = ProtocolGaloisKeyShareBatch;
 export type GaloisKeyShareBatchesInput = PublicEvaluationKeyProofCommonInput &
     Readonly<{
         readonly batchContributions: readonly GaloisKeyShareBatchContribution[];
     }>;
-export type EvaluationKeyShareMaterialTransportInput = Readonly<{
-    readonly sameSecretProofReferences: ProtocolEvaluationKeyShareMaterialTransportInput['sameSecretProofReferences'];
-    readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
-    readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
-    readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
-}>;
+export type TrusteeEvaluationKeyProofRecord =
+    ProtocolTrusteeEvaluationKeyProofRecord;
+export type TrusteeEvaluationKeyProofSet = ProtocolTrusteeEvaluationKeyProofSet;
+export type EvaluationKeyShareMaterialTransportInput =
+    ProtocolEvaluationKeyShareMaterialTransportInput;
 export type RelinearizationKeyRootReference =
     ProtocolRelinearizationKeyRootReference;
 export type GaloisKeyShareBatchRootReference =
@@ -1019,6 +1013,7 @@ export type VerifySetupPackageInput = Readonly<{
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
+    readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;
 
 export type SetupPackageVerificationInputSource = Readonly<
@@ -1043,7 +1038,7 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly status: 'accepted-collective-public-key-root-bound-for-direct-ballot-encryption';
         readonly collectivePublicKeyRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     }>;
     readonly publicAggregationHandoff: Readonly<{
         readonly status: 'accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root';
@@ -1053,6 +1048,7 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule';
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
+        readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     }>;
@@ -1390,15 +1386,221 @@ export const createSetupPackageVerificationInput = (
 ): VerifySetupPackageInput =>
     createSetupPackageVerificationInputInternal(input);
 
-const assertNoEvaluationKeyProofGeneration = (
-    contribution: Readonly<Record<string, unknown>>,
-    fieldName: string,
-): void => {
-    if (Object.prototype.hasOwnProperty.call(contribution, 'proofGeneration')) {
-        throw new Error(
-            `${fieldName}.proofGeneration is not accepted by the public setup facade; supply proofMaterial from a proof generator instead.`,
-        );
+type SetupProofMaterialTransportFieldName =
+    | 'transportedSameSecretProofMaterial'
+    | 'transportedPublicKeyShareProofMaterial'
+    | 'transportedEvaluationKeyShareProofMaterial';
+
+type SetupProofMaterialTransportSet =
+    | TransportedSameSecretProofMaterialSet
+    | TransportedPublicKeyShareProofMaterialSet
+    | TransportedEvaluationKeyShareProofMaterialSet;
+
+type SetupProofMaterialChunk = Readonly<{
+    readonly chunkIndex: number;
+    readonly bytesHex: string;
+}>;
+
+const setupProofMaterialTransportFieldNames = [
+    'transportedSameSecretProofMaterial',
+    'transportedPublicKeyShareProofMaterial',
+    'transportedEvaluationKeyShareProofMaterial',
+] as const satisfies readonly SetupProofMaterialTransportFieldName[];
+
+let setupProofMaterialVerificationSequence = 0;
+
+const setupProofMaterialVerificationId = (
+    fieldName: SetupProofMaterialTransportFieldName,
+    materialIndex: number,
+    proofMaterial: JsonRecord,
+): string => {
+    setupProofMaterialVerificationSequence += 1;
+    const proofMaterialRoot =
+        typeof proofMaterial.proofMaterialRoot === 'string'
+            ? proofMaterial.proofMaterialRoot.slice(0, 24)
+            : 'unbound';
+
+    return [
+        'sdk-proof-material',
+        String(setupProofMaterialVerificationSequence),
+        fieldName,
+        String(materialIndex),
+        proofMaterialRoot,
+    ].join('-');
+};
+
+const setupProofMaterialReference = (proofMaterial: JsonRecord): JsonRecord => {
+    const { chunks: omittedChunks, ...reference } = proofMaterial;
+    void omittedChunks;
+
+    return reference;
+};
+
+const compactSetupProofMaterialSet = <
+    MaterialSet extends SetupProofMaterialTransportSet | undefined,
+>(
+    materialSet: MaterialSet,
+    verifiedSetupProofMaterials: VerifiedSetupProofMaterialSet | undefined,
+): MaterialSet => {
+    if (
+        materialSet === undefined ||
+        verifiedSetupProofMaterials === undefined
+    ) {
+        return materialSet;
     }
+
+    const verifiedProofMaterialRoots = new Set(
+        verifiedSetupProofMaterials.proofMaterials.map(
+            (proofMaterial) => proofMaterial.proofMaterialRoot,
+        ),
+    );
+    let strippedAnyChunks = false;
+    const proofMaterials = materialSet.proofMaterials.map((proofMaterial) => {
+        if (
+            !Object.prototype.hasOwnProperty.call(proofMaterial, 'chunks') ||
+            typeof proofMaterial.proofMaterialRoot !== 'string' ||
+            !verifiedProofMaterialRoots.has(proofMaterial.proofMaterialRoot)
+        ) {
+            return proofMaterial;
+        }
+        strippedAnyChunks = true;
+
+        return setupProofMaterialReference(proofMaterial);
+    });
+
+    if (!strippedAnyChunks) {
+        return materialSet;
+    }
+
+    return {
+        ...materialSet,
+        proofMaterials,
+    };
+};
+
+const setupProofMaterialChunks = (
+    proofMaterial: unknown,
+): readonly SetupProofMaterialChunk[] | undefined => {
+    if (
+        proofMaterial === null ||
+        typeof proofMaterial !== 'object' ||
+        !Object.prototype.hasOwnProperty.call(proofMaterial, 'chunks')
+    ) {
+        return undefined;
+    }
+
+    const chunks = (proofMaterial as JsonRecord).chunks;
+
+    return Array.isArray(chunks)
+        ? (chunks as readonly SetupProofMaterialChunk[])
+        : undefined;
+};
+
+const streamSetupProofMaterialSet = (
+    kernel: TranscriptCoreKernel,
+    fieldName: SetupProofMaterialTransportFieldName,
+    materialSet: SetupProofMaterialTransportSet | undefined,
+): readonly VerifiedSetupProofMaterial[] => {
+    if (
+        materialSet === undefined ||
+        !Array.isArray(materialSet.proofMaterials)
+    ) {
+        return [];
+    }
+
+    const verifiedMaterials: VerifiedSetupProofMaterial[] = [];
+    materialSet.proofMaterials.forEach((proofMaterialValue, materialIndex) => {
+        const chunks = setupProofMaterialChunks(proofMaterialValue);
+        if (chunks === undefined) {
+            return;
+        }
+        const proofMaterial = proofMaterialValue as JsonRecord;
+        const proofMaterialReference =
+            setupProofMaterialReference(proofMaterial);
+        const verificationId = setupProofMaterialVerificationId(
+            fieldName,
+            materialIndex,
+            proofMaterial,
+        );
+        kernel.beginSetupProofMaterialTransportStream({
+            verificationId,
+            transportedSetupProofMaterial: proofMaterialReference,
+        });
+        chunks.forEach((chunk) => {
+            kernel.absorbSetupProofMaterialTransportStreamChunk({
+                verificationId,
+                chunkIndex: chunk.chunkIndex,
+                bytesHex: chunk.bytesHex,
+            });
+        });
+        const verification = kernel.finishSetupProofMaterialTransportStream({
+            verificationId,
+        });
+        verifiedMaterials.push(
+            verification.verifiedSetupProofMaterial as VerifiedSetupProofMaterial,
+        );
+    });
+
+    return verifiedMaterials;
+};
+
+const prepareSetupPackageVerificationInputForKernel = (
+    kernel: TranscriptCoreKernel,
+    input: VerifySetupPackageInput,
+): VerifySetupPackageInput => {
+    if (input.verifiedSetupProofMaterials !== undefined) {
+        return {
+            ...input,
+            transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
+                input.transportedSameSecretProofMaterial,
+                input.verifiedSetupProofMaterials,
+            ),
+            transportedPublicKeyShareProofMaterial:
+                compactSetupProofMaterialSet(
+                    input.transportedPublicKeyShareProofMaterial,
+                    input.verifiedSetupProofMaterials,
+                ),
+            transportedEvaluationKeyShareProofMaterial:
+                compactSetupProofMaterialSet(
+                    input.transportedEvaluationKeyShareProofMaterial,
+                    input.verifiedSetupProofMaterials,
+                ),
+        };
+    }
+
+    const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
+        (fieldName) =>
+            streamSetupProofMaterialSet(kernel, fieldName, input[fieldName]),
+    );
+    if (verifiedMaterials.length === 0) {
+        return input;
+    }
+
+    const verifiedSetupProofMaterials = {
+        objectType: 'VerifiedSetupProofMaterialSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        proofMaterials: verifiedMaterials,
+    } as const satisfies VerifiedSetupProofMaterialSet;
+
+    return {
+        ...input,
+        transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
+            input.transportedSameSecretProofMaterial,
+            verifiedSetupProofMaterials,
+        ),
+        transportedPublicKeyShareProofMaterial: compactSetupProofMaterialSet(
+            input.transportedPublicKeyShareProofMaterial,
+            verifiedSetupProofMaterials,
+        ),
+        transportedEvaluationKeyShareProofMaterial:
+            compactSetupProofMaterialSet(
+                input.transportedEvaluationKeyShareProofMaterial,
+                verifiedSetupProofMaterials,
+            ),
+        verifiedSetupProofMaterials,
+    };
 };
 
 /** Creates root-bound public-key share records from public component hashes. */
@@ -1435,7 +1637,7 @@ export const createBinaryChunkedPublicKeyShareMaterialTransport = (
 
 /** Creates root-addressed binary transport for public-key share proof material. */
 export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
-    proofMaterials: readonly PublicKeyShareLnpProofMaterial[],
+    proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[],
 ): BinaryChunkedPublicKeyShareProofMaterialTransport =>
     createBinaryChunkedPublicKeyShareProofMaterialTransportInternal(
         proofMaterials,
@@ -1453,52 +1655,27 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
 ): BinaryChunkedPublicEvaluationKeyMaterialTransport =>
     createBinaryChunkedPublicEvaluationKeyMaterialTransportInternal(input);
 
-/** Creates root-bound public-key LNP proof records from generated proof material. */
-export const createPublicKeyShareLnpProofSet = (
-    input: PublicKeyShareLnpProofSetInput,
-): PublicKeyShareLnpProofSet => createPublicKeyShareLnpProofSetInternal(input);
+/** Creates root-bound public-key succinct proof records from generated proof material. */
+export const createPublicKeyShareSuccinctProofSet = (
+    input: PublicKeyShareSuccinctProofSetInput,
+): PublicKeyShareSuccinctProofSet =>
+    createPublicKeyShareSuccinctProofSetInternal(input);
 
 /** Freezes the evaluator-key schedule used by setup verification. */
 export const createEvaluatorKeySchedule = (
     input: EvaluatorKeyScheduleInput,
 ): EvaluatorKeySchedule => createEvaluatorKeyScheduleInternal(input);
 
-/** Creates root-bound relinearization proof records from generated proof material. */
+/** Creates root-bound relinearization share records from public share material. */
 export const createRelinearizationKeyShareRounds = (
     input: RelinearizationKeyShareRoundsInput,
-): RelinearizationKeyShareRounds => {
-    input.roundOneContributions.forEach((contribution, contributionIndex) =>
-        assertNoEvaluationKeyProofGeneration(
-            contribution,
-            `roundOneContributions.${String(contributionIndex)}`,
-        ),
-    );
-    input.roundTwoContributions.forEach((contribution, contributionIndex) =>
-        assertNoEvaluationKeyProofGeneration(
-            contribution,
-            `roundTwoContributions.${String(contributionIndex)}`,
-        ),
-    );
+): RelinearizationKeyShareRounds =>
+    createRelinearizationKeyShareRoundsInternal(input);
 
-    return createRelinearizationKeyShareRoundsInternal(input);
-};
-
-/** Creates root-bound Galois proof batch records from generated proof material. */
+/** Creates root-bound Galois share batch records from public share material. */
 export const createGaloisKeyShareBatches = (
     input: GaloisKeyShareBatchesInput,
-): readonly GaloisKeyShareBatch[] => {
-    input.batchContributions.forEach((batchContribution, batchIndex) =>
-        batchContribution.galoisKeyShareProofs.forEach(
-            (proofContribution, proofIndex) =>
-                assertNoEvaluationKeyProofGeneration(
-                    proofContribution,
-                    `batchContributions.${String(batchIndex)}.galoisKeyShareProofs.${String(proofIndex)}`,
-                ),
-        ),
-    );
-
-    return createGaloisKeyShareBatchesInternal(input);
-};
+): readonly GaloisKeyShareBatch[] => createGaloisKeyShareBatchesInternal(input);
 
 /** Creates public evaluation-key roots from verified relinearization and Galois records. */
 export const createPublicEvaluationKeySet = (
@@ -1697,8 +1874,12 @@ export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
     const kernel = await loadTranscriptCoreKernel();
+    const verificationInput = prepareSetupPackageVerificationInputForKernel(
+        kernel,
+        input,
+    );
 
-    return kernel.verifyCollectiveBgvSetup(input);
+    return kernel.verifyCollectiveBgvSetup(verificationInput);
 };
 
 /** Verifies a transcript-core fixture with the packaged WASM kernel. */

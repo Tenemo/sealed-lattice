@@ -6,7 +6,7 @@ static TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
 > = OnceLock::new();
 static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
     OnceLock::new();
-static PUBLIC_KEY_SHARE_LNP_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     serde_json::Value,
 > = OnceLock::new();
 static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
@@ -60,8 +60,12 @@ fn private_vss_mailbox_public_key_bytes_hash(roster_position: u64) -> String {
 }
 
 pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
+    // The reduced development ring must stay provable by the trustee
+    // evaluation-key argument: the trace splits each vector in two and the
+    // smallest supported trace is sixty-four, so the development ring is one
+    // hundred twenty-eight.
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(|| build_collective_setup_package_fixture(8, "development-reduced-ring"))
+        .get_or_init(|| build_collective_setup_package_fixture(128, "development-reduced-ring"))
         .clone()
 }
 
@@ -480,6 +484,7 @@ fn build_collective_setup_package_fixture_parts(
         "evaluatorKeySchedule": evaluator_key_schedule,
         "relinearizationKeyShareRounds": {},
         "galoisKeyShareBatches": [],
+        "trusteeEvaluationKeyProofs": {},
         "evaluationKeys": {},
         "setupCommitmentSecurityCertificate": setup_commitment_security_certificate,
         "setupCommitmentSecurityCertificateHash": setup_commitment_security_certificate_hash,
@@ -1124,9 +1129,9 @@ fn streamed_vss_coefficient_commitments_object(
 
     let mut source_trustee_records = Vec::new();
     for source_trustee_roster_position in 0..10_u64 {
-        println!(
-            "terminal-accepted-setup-phase streaming VSS source trustee {source_trustee_roster_position}"
-        );
+        terminal_phase(&format!(
+            "streaming VSS source trustee {source_trustee_roster_position}"
+        ));
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
         let mut coefficient_commitments = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
@@ -1382,8 +1387,9 @@ fn same_secret_consistency_object(
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-            "proofFamily": "same-secret-consistency",
+            "proofFamily": "same-secret-linkage-anchor",
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
+            "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",
             "boundSecretDependentProofFamilies": [
                 "vss-constant-relation",
                 "public-key-share",
@@ -1457,8 +1463,8 @@ fn same_secret_consistency_object(
             "setupProfileId": "CollectiveBgvSetup-v1",
             "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-            "proofFamily": "same-secret-consistency",
-            "proofVerificationStatus": "lnp-proof-verification-pending",
+            "proofFamily": "same-secret-linkage-anchor",
+            "proofVerificationStatus": "anchor-proof-verification-pending",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -1500,8 +1506,8 @@ fn same_secret_consistency_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-        "proofFamily": "same-secret-consistency",
-        "proofVerificationStatus": "lnp-proof-verification-pending",
+        "proofFamily": "same-secret-linkage-anchor",
+        "proofVerificationStatus": "anchor-proof-verification-pending",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -1541,17 +1547,18 @@ fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Val
     package
 }
 
-pub(super) fn public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::Value {
-    PUBLIC_KEY_SHARE_LNP_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(build_public_key_share_lnp_proof_bearing_collective_setup_package)
+pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value
+{
+    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package)
         .clone()
 }
 
-fn build_public_key_share_lnp_proof_bearing_collective_setup_package() -> serde_json::Value {
+fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareLnpProofs"] = public_key_share_lnp_proofs_object(&package);
+    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
@@ -1565,7 +1572,7 @@ pub(super) fn collective_public_key_bearing_collective_setup_package() -> serde_
 }
 
 fn build_collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = public_key_share_lnp_proof_bearing_collective_setup_package();
+    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
@@ -1588,9 +1595,9 @@ pub(super) fn evaluation_key_proof_container_bearing_collective_setup_package_re
 
 fn build_evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = collective_public_key_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"] =
-        relinearization_key_share_rounds_object(&package, true);
-    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package, true);
+    package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds_object(&package);
+    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);
+    package["trusteeEvaluationKeyProofs"] = trustee_evaluation_key_proofs_object(&package);
     package["evaluationKeys"] = public_evaluation_key_set_object(&package);
     rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
@@ -1759,7 +1766,7 @@ fn public_key_share_proofs_object(
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
             "proofFamily": "public-key-share",
-            "proofVerificationStatus": "lnp-proof-verification-pending",
+            "proofVerificationStatus": "succinct-proof-verification-pending",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -1777,10 +1784,8 @@ fn public_key_share_proofs_object(
             "sameSecretStatementRoot": same_secret_statement["sameSecretStatementRoot"],
             "trusteeSecretCommitmentRoot": same_secret_statement["trusteeSecretCommitmentRoot"],
             "rnsLimbCount": DATA_PRIMES.len(),
-            "noWrapRelation": "PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 over lifted integers",
-            "errorSupport": "checked-by-public-key-share-lnp-proof-set",
-            "carryWitnessStatus": "checked-by-public-key-share-lnp-proof-set",
-            "proofBytesStatus": "supplied-by-public-key-share-lnp-proof-set",
+            "errorSupport": "checked-by-public-key-share-succinct-proof-set",
+            "proofBytesStatus": "supplied-by-public-key-share-succinct-proof-set",
         });
         proof_record["publicKeyShareProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
@@ -1799,7 +1804,7 @@ fn public_key_share_proofs_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofVerificationStatus": "lnp-proof-verification-pending",
+        "proofVerificationStatus": "succinct-proof-verification-pending",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -1915,9 +1920,10 @@ fn private_vss_envelope_commitments_object(
             {"phaseId": "publicKeyShareProofs", "phaseNumber": 9},
             {"phaseId": "relinearizationRoundOne", "phaseNumber": 10},
             {"phaseId": "relinearizationRoundTwo", "phaseNumber": 11},
-            {"phaseId": "galoisKeyBatchProofs", "phaseNumber": 12},
-            {"phaseId": "setupPackageAssembly", "phaseNumber": 13},
-            {"phaseId": "setupPackageVerification", "phaseNumber": 14},
+            {"phaseId": "galoisKeyShareBatches", "phaseNumber": 12},
+            {"phaseId": "trusteeEvaluationKeyProofs", "phaseNumber": 13},
+            {"phaseId": "setupPackageAssembly", "phaseNumber": 14},
+            {"phaseId": "setupPackageVerification", "phaseNumber": 15},
         ]),
     )
     .expect("phase order hash");
@@ -2535,7 +2541,19 @@ fn common_randomness_object(
     );
     assert_eq!(
         public_derivations["publicMatrices"]["setupProofMatrix"]["profileStatus"],
-        "setup-proof-profile-bound"
+        "legacy-lnp-tbox-proof-matrix-audit-bound"
+    );
+    assert_eq!(
+        public_derivations["publicMatrices"]["setupProofMatrix"]["challengeDomainScope"],
+        "legacy-lnp-tbox-private-vss-challenge-domain-only"
+    );
+    assert_eq!(
+        public_derivations["publicMatrices"]["setupProofMatrix"]["matrixScope"],
+        "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only; accepted succinct-family matrix and transcript claims are bound by the per-family accounting objects"
+    );
+    assert_eq!(
+        public_derivations["publicMatrices"]["setupProofMatrix"]["legacyLnpTboxProofFamilies"],
+        serde_json::json!(["vss-opening-carry"])
     );
     assert!(
         public_derivations["publicMatrices"]["setupProofMatrix"]["setupProofProfileHash"]

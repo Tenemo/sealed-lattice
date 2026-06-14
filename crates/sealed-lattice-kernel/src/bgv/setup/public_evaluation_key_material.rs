@@ -1,17 +1,19 @@
 use super::*;
+use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
 
 const PUBLIC_KEY_SWITCH_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/public-key-switch-component-vector-v1";
 const PUBLIC_EVALUATION_KEY_COMPONENT_ENCODING: &str = "component-zero-b-little-endian-u64-coefficient-vectors-with-public-component-one-regenerated-from-stream-seed";
 
 pub(crate) struct PassiveSetupEvaluationKeySeeds {
-    pub(crate) relinearization_key_seeds: BTreeMap<usize, String>,
+    pub(crate) relinearization_level: usize,
+    pub(crate) relinearization_key_seed: String,
     pub(crate) rotation_key_seeds: BTreeMap<(usize, usize), String>,
 }
 
 pub(crate) struct PassiveSetupPublicEvaluationKeys {
-    pub(crate) relinearization_keys: Vec<Option<KeySwitchKey>>,
-    pub(crate) rotation_keys: BTreeMap<(usize, usize), KeySwitchKey>,
+    pub(crate) relinearization_key: Option<KeySwitchKey>,
+    pub(crate) rotation_keys: BTreeMap<usize, KeySwitchKey>,
 }
 
 pub(crate) struct PreparedPassiveSetupPublicEvaluationKeys {
@@ -26,25 +28,19 @@ pub(crate) fn evaluation_key_seeds_from_passive_setup_package(
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
     let setup_seed_hash = string_at_path(setup_package, &["setupInputs", "setupSeedHash"])?;
-    if working_level >= DATA_PRIMES.len() {
+    if working_level > SELECTED_EVALUATOR_WORKING_LEVEL {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "setup-bound evaluator working level is outside the selected data basis",
+            "setup-bound evaluator working level is above the selected key schedule level",
         ));
     }
-    let relinearization_key_seeds = (1..=working_level)
-        .map(|level| {
-            (
-                level,
-                key_material::evaluation_key_stream_seed(
-                    setup_seed_hash,
-                    "relinearization",
-                    level,
-                    None,
-                ),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    let relinearization_level = SELECTED_EVALUATOR_WORKING_LEVEL;
+    let relinearization_key_seed = key_material::evaluation_key_stream_seed(
+        setup_seed_hash,
+        "relinearization",
+        relinearization_level,
+        None,
+    );
     let mut rotation_key_seeds = BTreeMap::new();
     let rotation_roots = array_at_path(
         setup_package,
@@ -69,7 +65,8 @@ pub(crate) fn evaluation_key_seeds_from_passive_setup_package(
     }
 
     Ok(PassiveSetupEvaluationKeySeeds {
-        relinearization_key_seeds,
+        relinearization_level,
+        relinearization_key_seed,
         rotation_key_seeds,
     })
 }
@@ -86,45 +83,28 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
         setup_package,
         usize_at_path(&generated.record, &["workingLevel"])?,
     )?;
-    let relinearization_keys = generated
-        .keys
-        .relinearization_keys
-        .iter()
-        .enumerate()
-        .skip(1)
-        .map(|(level, key)| {
-            let seed = seed_material
-                .relinearization_key_seeds
-                .get(&level)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "missing setup-bound relinearization key stream seed",
-                    )
-                })?;
-            public_key_switch_material_entry(
-                "relinearization",
-                "secret-square",
-                None,
-                level,
-                seed,
-                key.as_ref().ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "generated public evaluation-key material is missing a relinearization key",
-                    )
-                })?,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let relinearization_key = generated.keys.relinearization_key.as_ref().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "generated public evaluation-key material is missing the relinearization key",
+        )
+    })?;
+    let relinearization_keys = vec![public_key_switch_material_entry(
+        "relinearization",
+        "secret-square",
+        None,
+        seed_material.relinearization_level,
+        &seed_material.relinearization_key_seed,
+        relinearization_key,
+    )?];
     let rotation_keys = generated
         .keys
         .rotation_keys
         .iter()
-        .map(|((rotation, level), key)| {
+        .map(|(rotation, key)| {
             let seed = seed_material
                 .rotation_key_seeds
-                .get(&(*rotation, *level))
+                .get(&(*rotation, key.level))
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::ProfileComponentMismatch,
@@ -135,7 +115,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
                 "rotation",
                 "selected-rotation",
                 Some(*rotation),
-                *level,
+                key.level,
                 seed,
                 key,
             )
@@ -189,28 +169,18 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
             "public evaluation-key material working level is outside the selected data basis",
         ));
     }
-    let rotation_requests = read_public_evaluation_key_rotation_requests(request, working_level)?;
+    let rotation_requests = read_public_evaluation_key_rotation_requests(request)?;
 
     let evaluator_key =
         development_evaluator_key_from_passive_setup_package(setup_package, private_setup_seed)?;
     let seed_material =
         evaluation_key_seeds_from_passive_setup_package(setup_package, working_level)?;
-    let mut relinearization_keys = Vec::with_capacity(working_level + 1);
-    relinearization_keys.push(None);
-    for level in 1..=working_level {
-        let seed = seed_material
-            .relinearization_key_seeds
-            .get(&level)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "missing setup-bound relinearization key stream seed",
-                )
-            })?;
-        let mut key = generate_relinearization_key(&evaluator_key, level, seed)?;
-        key.drop_component_a_ntt();
-        relinearization_keys.push(Some(key));
-    }
+    let mut relinearization_key = generate_relinearization_key(
+        &evaluator_key,
+        seed_material.relinearization_level,
+        &seed_material.relinearization_key_seed,
+    )?;
+    relinearization_key.drop_component_a_ntt();
     let mut rotation_keys = BTreeMap::new();
     for (rotation, level) in rotation_requests {
         let seed = seed_material
@@ -224,7 +194,12 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
             })?;
         let mut key = generate_galois_key(&evaluator_key, rotation, level, seed)?;
         key.drop_component_a_ntt();
-        rotation_keys.insert((rotation, level), key);
+        if rotation_keys.insert(rotation, key).is_some() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "rotation key requests must not repeat a rotation element",
+            ));
+        }
     }
     let record = json!({
         "objectType": "PreparedBgvPublicEvaluationKeyMaterial",
@@ -236,8 +211,8 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
         "evaluationKeyRoot": string_at_path(setup_package, &["evaluationKeys", "evaluationKeyRoot"])?,
         "keySwitchDecompositionHash": string_at_path(setup_package, &["evaluationKeys", "keySwitchDecompositionHash"])?,
         "rotSetHash": string_at_path(setup_package, &["evaluationKeys", "rotSetHash"])?,
-        "workingLevel": working_level,
-        "relinearizationKeyCount": working_level,
+        "workingLevel": seed_material.relinearization_level,
+        "relinearizationKeyCount": 1,
         "rotationKeyCount": rotation_keys.len(),
         "rawSecretMaterialExported": false,
         "statusLabels": [
@@ -249,7 +224,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
 
     Ok(PreparedPassiveSetupPublicEvaluationKeys {
         keys: PassiveSetupPublicEvaluationKeys {
-            relinearization_keys,
+            relinearization_key: Some(relinearization_key),
             rotation_keys,
         },
         record,
@@ -361,45 +336,30 @@ pub(crate) fn public_evaluation_keys_from_material(
 
     let seed_material =
         evaluation_key_seeds_from_passive_setup_package(setup_package, working_level)?;
-    let mut relinearization_keys = Vec::with_capacity(working_level + 1);
-    relinearization_keys.push(None);
-    let mut relinearization_by_level = BTreeMap::new();
+    let mut relinearization_key = None;
     for entry in array_at_path(material, &["relinearizationKeys"])? {
         let level = usize_at_path(entry, &["level"])?;
         let seed = string_at_path(entry, &["keyStreamSeed"])?;
-        if seed_material
-            .relinearization_key_seeds
-            .get(&level)
-            .map(String::as_str)
-            != Some(seed)
+        if level != seed_material.relinearization_level
+            || seed != seed_material.relinearization_key_seed
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "public relinearization key seed does not match the setup key stream",
+                "public relinearization key entry does not match the selected key schedule",
             ));
         }
         let key = public_key_switch_material_entry_to_key(entry, "relinearization", None)?;
-        if relinearization_by_level.insert(level, key).is_some() {
+        if relinearization_key.replace(key).is_some() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "public evaluation-key material repeats a relinearization key level",
+                "public evaluation-key material repeats a relinearization key entry",
             ));
         }
     }
-    for level in 1..=working_level {
-        relinearization_keys.push(Some(relinearization_by_level.remove(&level).ok_or_else(
-            || {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "public evaluation-key material is missing a required relinearization key",
-                )
-            },
-        )?));
-    }
-    if !relinearization_by_level.is_empty() {
+    if relinearization_key.is_none() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "public evaluation-key material contains relinearization keys outside the requested level schedule",
+            CanonicalErrorCode::InvalidFixture,
+            "public evaluation-key material is missing the required relinearization key",
         ));
     }
 
@@ -420,7 +380,7 @@ pub(crate) fn public_evaluation_keys_from_material(
             ));
         }
         let key = public_key_switch_material_entry_to_key(entry, "rotation", Some(rotation))?;
-        if rotation_keys.insert((rotation, level), key).is_some() {
+        if rotation_keys.insert(rotation, key).is_some() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
                 "public evaluation-key material repeats a rotation key",
@@ -429,7 +389,7 @@ pub(crate) fn public_evaluation_keys_from_material(
     }
 
     Ok(PassiveSetupPublicEvaluationKeys {
-        relinearization_keys,
+        relinearization_key,
         rotation_keys,
     })
 }
@@ -465,10 +425,13 @@ fn reject_forbidden_public_evaluation_key_material_secret_fields(
 
 pub(super) fn read_public_evaluation_key_rotation_requests(
     request: &Value,
-    working_level: usize,
 ) -> CanonicalResult<Vec<(usize, usize)>> {
     match request.get("rotationKeys") {
-        None => selected_public_evaluation_key_rotation_requests(working_level),
+        // Rotation material is generated only on explicit request. The full
+        // committed working-level rotation schedule is too large for one
+        // material response (each working-level key carries every
+        // decomposition digit), so callers request the rotations they need.
+        None => Ok(Vec::new()),
         Some(Value::Array(entries)) => {
             let mut seen = BTreeSet::new();
             entries
@@ -494,10 +457,10 @@ pub(super) fn read_public_evaluation_key_rotation_requests(
     }
 }
 
-pub(super) fn selected_public_evaluation_key_rotation_requests(
-    working_level: usize,
-) -> CanonicalResult<Vec<(usize, usize)>> {
-    selected_evaluator_rotation_key_schedule(MAXIMUM_OPTION_COUNT, working_level)
+#[cfg(test)]
+pub(super) fn selected_public_evaluation_key_rotation_requests()
+-> CanonicalResult<Vec<(usize, usize)>> {
+    crate::bgv::evaluator::top_k::selected_evaluator_rotation_key_schedule(MAXIMUM_OPTION_COUNT)
 }
 
 fn public_key_switch_material_entry(

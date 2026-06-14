@@ -29,6 +29,7 @@
         "test:node:kernel:heavy": "tsx ./tools/ci/run-node-tests.ts --only kernel-heavy",
         "test:node": "tsx ./tools/ci/run-node-tests.ts",
         "test:browser": "tsx ./tools/ci/run-browser-tests.ts",
+        "test:proof-benchmark:browser:desktop": "pnpm run build && vitest --project browser-proof-benchmark-desktop --run",
         "test": "pnpm run test:node && pnpm run test:browser",
         "coverage:node": "pnpm run build && vitest --project node --run --coverage",
         "coverage:badge": "pnpm run coverage:node && tsx ./tools/ci/generate-coverage-badge.ts",

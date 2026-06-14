@@ -9,6 +9,7 @@ import type {
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet,
+    TrusteeEvaluationKeyProofSet,
 } from './evaluation-key-proof-records.js';
 import type {
     EvaluatorKeySchedule,
@@ -17,10 +18,10 @@ import type {
 import type {
     CollectivePublicKey,
     PublicKeyShareProofSet,
-    PublicKeyShareLnpProofSet,
     SetupPackagePublicKeyShareMaterialSet,
     SetupTransportedPublicKeyShareMaterial,
     PublicKeyShareSet,
+    PublicKeyShareSuccinctProofSet,
     TransportedPublicKeyShareProofMaterialSet,
 } from './public-key-share-records.js';
 import {
@@ -39,6 +40,10 @@ import {
     type SetupCertificatesInput,
 } from './setup-certificates.js';
 import type { SetupPhaseRecord } from './setup-phase-records.js';
+import {
+    chunklessSetupProofMaterialSetForVerificationInput,
+    type VerifiedSetupProofMaterialSet,
+} from './setup-proof-material-transport.js';
 import {
     deriveThresholdShareCommitments,
     type ThresholdShareCommitmentSet,
@@ -135,7 +140,9 @@ export type SetupPackageInput = Readonly<{
     readonly transportedPublicKeyShareMaterial?:
         | SetupTransportedPublicKeyShareMaterial
         | JsonRecord;
-    readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet | JsonRecord;
+    readonly publicKeyShareSuccinctProofs:
+        | PublicKeyShareSuccinctProofSet
+        | JsonRecord;
     readonly transportedPublicKeyShareProofMaterial?:
         | TransportedPublicKeyShareProofMaterialSet
         | JsonRecord;
@@ -143,6 +150,7 @@ export type SetupPackageInput = Readonly<{
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
     readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
+    readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
     readonly transportedEvaluationKeyShareProofMaterial?:
         | TransportedEvaluationKeyShareProofMaterialSet
         | JsonRecord;
@@ -185,14 +193,15 @@ export type SetupPackage = Readonly<
         readonly publicKeyShareMaterial:
             | SetupPackagePublicKeyShareMaterialSet
             | JsonRecord;
-        readonly publicKeyShareLnpProofs:
-            | PublicKeyShareLnpProofSet
+        readonly publicKeyShareSuccinctProofs:
+            | PublicKeyShareSuccinctProofSet
             | JsonRecord;
         readonly collectivePublicKey: CollectivePublicKey | JsonRecord;
         readonly collectivePublicKeyRoot: ProtocolHash;
         readonly evaluatorKeySchedule: EvaluatorKeySchedule;
         readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
+        readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
         readonly evaluationKeys: PublicEvaluationKeySet;
         readonly setupCommitmentSecurityCertificate: JsonRecord;
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
@@ -220,6 +229,7 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
+    readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;
 
 export type SetupPackageVerificationInput = SetupPackageVerificationInputSource;
@@ -255,6 +265,21 @@ export const createSetupPackageVerificationInput = (
             input.transportedVssCoefficientCommitmentMaterial,
             input.verifiedVssCoefficientCommitmentMaterial,
         );
+    const transportedSameSecretProofMaterial =
+        chunklessSetupProofMaterialSetForVerificationInput(
+            input.transportedSameSecretProofMaterial,
+            input.verifiedSetupProofMaterials,
+        );
+    const transportedPublicKeyShareProofMaterial =
+        chunklessSetupProofMaterialSetForVerificationInput(
+            input.transportedPublicKeyShareProofMaterial,
+            input.verifiedSetupProofMaterials,
+        );
+    const transportedEvaluationKeyShareProofMaterial =
+        chunklessSetupProofMaterialSetForVerificationInput(
+            input.transportedEvaluationKeyShareProofMaterial,
+            input.verifiedSetupProofMaterials,
+        );
 
     return {
         setupPackage: input.setupPackage,
@@ -269,11 +294,11 @@ export const createSetupPackageVerificationInput = (
                   verifiedVssCoefficientCommitmentMaterial:
                       input.verifiedVssCoefficientCommitmentMaterial,
               }),
-        ...(input.transportedSameSecretProofMaterial === undefined
+        ...(transportedSameSecretProofMaterial === undefined
             ? {}
             : {
                   transportedSameSecretProofMaterial:
-                      input.transportedSameSecretProofMaterial,
+                      transportedSameSecretProofMaterial,
               }),
         ...(input.transportedPublicKeyShareMaterial === undefined
             ? {}
@@ -281,17 +306,17 @@ export const createSetupPackageVerificationInput = (
                   transportedPublicKeyShareMaterial:
                       input.transportedPublicKeyShareMaterial,
               }),
-        ...(input.transportedPublicKeyShareProofMaterial === undefined
+        ...(transportedPublicKeyShareProofMaterial === undefined
             ? {}
             : {
                   transportedPublicKeyShareProofMaterial:
-                      input.transportedPublicKeyShareProofMaterial,
+                      transportedPublicKeyShareProofMaterial,
               }),
-        ...(input.transportedEvaluationKeyShareProofMaterial === undefined
+        ...(transportedEvaluationKeyShareProofMaterial === undefined
             ? {}
             : {
                   transportedEvaluationKeyShareProofMaterial:
-                      input.transportedEvaluationKeyShareProofMaterial,
+                      transportedEvaluationKeyShareProofMaterial,
               }),
         ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}
@@ -304,6 +329,12 @@ export const createSetupPackageVerificationInput = (
             : {
                   transportedPublicEvaluationKeyMaterial:
                       input.transportedPublicEvaluationKeyMaterial,
+              }),
+        ...(input.verifiedSetupProofMaterials === undefined
+            ? {}
+            : {
+                  verifiedSetupProofMaterials:
+                      input.verifiedSetupProofMaterials,
               }),
     };
 };
@@ -321,6 +352,7 @@ const firstProfileParticipantCount = 10;
 const firstProfileSetupCompletionQuorum = 10;
 const firstProfileDecryptionThreshold = 4;
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
+const setupContextTokenPattern = /^[A-Za-z0-9._:/@+-]{1,128}$/u;
 const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
@@ -350,9 +382,10 @@ const requiredSetupPhases = [
     ['publicKeyShareProofs', 9],
     ['relinearizationRoundOne', 10],
     ['relinearizationRoundTwo', 11],
-    ['galoisKeyBatchProofs', 12],
-    ['setupPackageAssembly', 13],
-    ['setupPackageVerification', 14],
+    ['galoisKeyShareBatches', 12],
+    ['trusteeEvaluationKeyProofs', 13],
+    ['setupPackageAssembly', 14],
+    ['setupPackageVerification', 15],
 ] as const;
 
 const forbiddenPackageFieldNames = new Set([
@@ -387,6 +420,8 @@ const forbiddenPackageFieldNames = new Set([
     'setupSeed',
     'setupSeedHash',
     'shareValues',
+    'transportedPrivateVssShareProofMaterial',
+    'transportedPrivateVssShareProofMaterialForRecipientTransport',
 ]);
 const legacyExternalSetupRoleFieldNameTokens = [
     'setup',
@@ -415,6 +450,14 @@ const assertNonEmptyString = (value: string, fieldName: string): void => {
     }
 };
 
+const assertSetupContextToken = (value: string, fieldName: string): void => {
+    if (!setupContextTokenPattern.test(value)) {
+        throw new TypeError(
+            `${fieldName} must be a bounded setup context token.`,
+        );
+    }
+};
+
 const assertObjectRecord = (value: unknown, fieldName: string): JsonRecord => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         throw new TypeError(`${fieldName} must be an object.`);
@@ -426,6 +469,12 @@ const assertObjectRecord = (value: unknown, fieldName: string): JsonRecord => {
 const assertContext = (setupContext: CollectiveBgvSetupContext): void => {
     for (const fieldName of contextFieldNames) {
         assertNonEmptyString(
+            setupContext[fieldName],
+            `setupContext.${fieldName}`,
+        );
+    }
+    for (const fieldName of ['ceremonyId', 'setupEpoch'] as const) {
+        assertSetupContextToken(
             setupContext[fieldName],
             `setupContext.${fieldName}`,
         );
@@ -834,14 +883,14 @@ const assertKeyRecordBindings = (input: SetupPackageInput): void => {
         'publicKeyShareMaterial',
     );
     assertObjectType(
-        input.publicKeyShareLnpProofs,
-        'publicKeyShareLnpProofs',
-        'PublicKeyShareLnpProofSet',
+        input.publicKeyShareSuccinctProofs,
+        'publicKeyShareSuccinctProofs',
+        'PublicKeyShareSuccinctProofSet',
     );
     hashField(
-        input.publicKeyShareLnpProofs,
-        'publicKeyShareLnpProofSetRoot',
-        'publicKeyShareLnpProofs',
+        input.publicKeyShareSuccinctProofs,
+        'publicKeyShareSuccinctProofSetRoot',
+        'publicKeyShareSuccinctProofs',
     );
     assertObjectType(
         input.evaluatorKeySchedule,
@@ -867,6 +916,24 @@ const assertKeyRecordBindings = (input: SetupPackageInput): void => {
         const objectPath = `galoisKeyShareBatches.${String(batchIndex)}`;
         assertObjectType(batch, objectPath, 'GaloisKeyShareBatch');
         hashField(batch, 'galoisKeyShareBatchRoot', objectPath);
+    }
+    assertObjectType(
+        input.trusteeEvaluationKeyProofs,
+        'trusteeEvaluationKeyProofs',
+        'TrusteeEvaluationKeyProofSet',
+    );
+    hashField(
+        input.trusteeEvaluationKeyProofs,
+        'trusteeEvaluationKeyProofSetRoot',
+        'trusteeEvaluationKeyProofs',
+    );
+    if (
+        input.trusteeEvaluationKeyProofs.relinearizationKeyShareRoundsRoot !==
+        input.relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot
+    ) {
+        throw new Error(
+            'trusteeEvaluationKeyProofs must bind the supplied relinearization share-record container.',
+        );
     }
     assertObjectType(
         input.evaluationKeys,
@@ -1379,8 +1446,9 @@ const assertGaloisScheduleCovered = (input: SetupPackageInput): void => {
     }
     const availableBatchKeys = new Set(
         input.galoisKeyShareBatches.flatMap((batch) =>
-            batch.galoisKeyShareProofs.map(
-                (proof) => `${String(proof.rotation)}:${String(proof.level)}`,
+            batch.galoisKeyShareMaterialRecords.map(
+                (materialRecord) =>
+                    `${String(materialRecord.rotation)}:${String(materialRecord.level)}`,
             ),
         ),
     );
@@ -1525,8 +1593,8 @@ const derivedCollectivePublicKey = (
         publicKeyShares: input.publicKeyShares,
         publicKeyShareProofs: input.publicKeyShareProofs,
         publicKeyShareMaterial,
-        publicKeyShareLnpProofs:
-            input.publicKeyShareLnpProofs as PublicKeyShareLnpProofSet,
+        publicKeyShareSuccinctProofs:
+            input.publicKeyShareSuccinctProofs as PublicKeyShareSuccinctProofSet,
     } as const;
 
     if (
@@ -1585,10 +1653,10 @@ const setupKeyCorrectnessCertificateBody = (
         'publicKeyShareMaterialSetRoot',
         'publicKeyShareMaterial',
     );
-    const publicKeyShareLnpProofSetRoot = hashField(
-        input.publicKeyShareLnpProofs,
-        'publicKeyShareLnpProofSetRoot',
-        'publicKeyShareLnpProofs',
+    const publicKeyShareSuccinctProofSetRoot = hashField(
+        input.publicKeyShareSuccinctProofs,
+        'publicKeyShareSuccinctProofSetRoot',
+        'publicKeyShareSuccinctProofs',
     );
 
     return {
@@ -1616,7 +1684,7 @@ const setupKeyCorrectnessCertificateBody = (
                 'malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading',
         },
         collectivePublicKey: {
-            status: 'collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots',
+            status: 'collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots',
             collectivePublicKeyRoot,
             sourceRoots: {
                 publicKeyShareSetRoot: hashField(
@@ -1630,7 +1698,7 @@ const setupKeyCorrectnessCertificateBody = (
                     'publicKeyShareProofs',
                 ),
                 publicKeyShareMaterialSetRoot,
-                publicKeyShareLnpProofSetRoot,
+                publicKeyShareSuccinctProofSetRoot,
             },
         },
         publicEvaluationKeys: {
@@ -1801,10 +1869,10 @@ const activeStaticSetupTheoremCertificateBody = (
                 'publicKeyShareMaterial',
                 'publicKeyShareMaterialSetRoot',
             ),
-            publicKeyShareLnpProofSetRoot: optionalNestedHashValue(
+            publicKeyShareSuccinctProofSetRoot: optionalNestedHashValue(
                 setupPackage,
-                'publicKeyShareLnpProofs',
-                'publicKeyShareLnpProofSetRoot',
+                'publicKeyShareSuccinctProofs',
+                'publicKeyShareSuccinctProofSetRoot',
             ),
             collectivePublicKeyRoot: optionalNestedHashValue(
                 setupPackage,
@@ -1966,12 +2034,13 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         publicKeyShares: input.publicKeyShares,
         publicKeyShareProofs: input.publicKeyShareProofs,
         publicKeyShareMaterial: input.publicKeyShareMaterial,
-        publicKeyShareLnpProofs: input.publicKeyShareLnpProofs,
+        publicKeyShareSuccinctProofs: input.publicKeyShareSuccinctProofs,
         collectivePublicKey,
         collectivePublicKeyRoot,
         evaluatorKeySchedule: input.evaluatorKeySchedule,
         relinearizationKeyShareRounds: input.relinearizationKeyShareRounds,
         galoisKeyShareBatches: input.galoisKeyShareBatches,
+        trusteeEvaluationKeyProofs: input.trusteeEvaluationKeyProofs,
         evaluationKeys: input.evaluationKeys,
         setupCommitmentSecurityCertificate:
             certificates.setupCommitmentSecurityCertificate,

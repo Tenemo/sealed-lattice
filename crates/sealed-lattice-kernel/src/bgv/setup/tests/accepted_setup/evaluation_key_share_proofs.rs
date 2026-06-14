@@ -70,6 +70,94 @@ fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_proof_randomness_metadata_with_rebound_roots() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_proof_randomness_metadata_with_rebound_roots",
+    );
+
+    for forbidden_field_name in [
+        "proofGeneration",
+        "proofRandomness",
+        "proofRandomnessSource",
+        "proofRandomnessSeedHex",
+        "proofRandomnessNonceHex",
+    ] {
+        let mut package = minimal_collective_setup_package();
+        package[forbidden_field_name] = forbidden_proof_randomness_metadata(forbidden_field_name);
+        rebind_collective_setup_package_hash(&mut package);
+        assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
+    }
+
+    for forbidden_field_name in [
+        "proofRandomnessSource",
+        "proofRandomnessSeedHex",
+        "proofRandomnessNonceHex",
+    ] {
+        for proof_set_field_name in [
+            "sameSecretProofs",
+            "publicKeyShareSuccinctProofs",
+            "trusteeEvaluationKeyProofs",
+        ] {
+            let mut package = minimal_collective_setup_package();
+            package[proof_set_field_name] = serde_json::json!({
+                "objectType": "FixtureTerminalProofSet",
+                "objectVersion": 1,
+                "proofRecords": [{
+                    "objectType": "FixtureTerminalProofRecord",
+                    "objectVersion": 1,
+                    forbidden_field_name: forbidden_proof_randomness_metadata(forbidden_field_name),
+                }],
+            });
+            rebind_collective_setup_package_hash(&mut package);
+            assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
+        }
+    }
+}
+
+fn forbidden_proof_randomness_metadata(field_name: &str) -> serde_json::Value {
+    match field_name {
+        "proofGeneration" => serde_json::json!({
+            "source": "development-deterministic-fixture",
+            "proofRandomnessSeedHex": valid_hash('7'),
+        }),
+        "proofRandomness" => serde_json::json!({
+            "source": "development-deterministic-fixture",
+            "seedBytes": 64,
+            "retention": "not-terminal-evidence",
+        }),
+        "proofRandomnessSource" => serde_json::json!("development-deterministic-fixture"),
+        "proofRandomnessSeedHex" | "proofRandomnessNonceHex" => serde_json::json!(valid_hash('8')),
+        _ => panic!("unsupported forbidden proof randomness field {field_name}"),
+    }
+}
+
+fn assert_refuses_forbidden_accepted_path_field(
+    package: &serde_json::Value,
+    forbidden_field_name: &str,
+) {
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "acceptedPathForbiddenField"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains(forbidden_field_name)
+    );
+    assert!(
+        result.get("acceptedSetupHandoff").is_none() || result["acceptedSetupHandoff"].is_null(),
+        "refused proof-randomness metadata must not return an accepted setup handoff"
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_generic_key_switch_material_by_default",
@@ -88,6 +176,70 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
         result["refusedObjects"][0]["reasonCode"],
         "genericKeySwitchOutsideProfile"
     );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_premature_target_decryption_readiness_artifacts() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_premature_target_decryption_readiness_artifacts",
+    );
+
+    for forbidden_field_name in [
+        "targetDecryptionStatus",
+        "targetDecryptionReadiness",
+        "targetDecryptionCertificate",
+        "targetDecryptionCertificateHash",
+        "targetDecryptionClosure",
+        "targetDecryptionShareProofs",
+        "targetDecryptionShares",
+        "targetPartDecRecords",
+        "targetC1C4Certificate",
+    ] {
+        let mut package = minimal_collective_setup_package();
+        package[forbidden_field_name] = premature_target_decryption_artifact(forbidden_field_name);
+        rebind_collective_setup_package_hash(&mut package);
+        assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
+    }
+
+    let valid_nested_boundary_package = minimal_collective_setup_package();
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": valid_nested_boundary_package,
+    }))
+    .expect("verification response");
+    assert_ne!(
+        result["refusedObjects"][0]["reasonCode"], "acceptedPathForbiddenField",
+        "nested HE target-decryption status must remain allowed"
+    );
+}
+
+fn premature_target_decryption_artifact(field_name: &str) -> serde_json::Value {
+    match field_name {
+        "targetDecryptionStatus" => serde_json::json!({
+            "targetDecryptionReadiness": "accepted",
+            "targetDecryptionProfileId": "BGV-RNS-AsyncTargetDecryption-v1",
+        }),
+        "targetDecryptionReadiness" => serde_json::json!("accepted"),
+        "targetDecryptionCertificate" => serde_json::json!({
+            "objectType": "TargetDecryptionCertificate",
+            "objectVersion": 1,
+            "certificateStatus": "accepted",
+        }),
+        "targetDecryptionCertificateHash" => serde_json::json!(valid_hash('6')),
+        "targetDecryptionClosure" => serde_json::json!({
+            "closureStatus": "accepted",
+        }),
+        "targetDecryptionShareProofs" => serde_json::json!({
+            "objectType": "TargetDecryptionShareProofSet",
+            "proofRecords": [],
+        }),
+        "targetDecryptionShares" => serde_json::json!([]),
+        "targetPartDecRecords" => serde_json::json!([]),
+        "targetC1C4Certificate" => serde_json::json!({
+            "objectType": "TargetC1C4Certificate",
+            "certificateStatus": "accepted",
+        }),
+        _ => panic!("unsupported target-decryption artifact {field_name}"),
+    }
 }
 
 #[test]
@@ -164,6 +316,8 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
         package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"].clone();
     let first_galois_batch_root =
         package["galoisKeyShareBatches"][0]["galoisKeyShareBatchRoot"].clone();
+    let trustee_proof_set_root =
+        package["trusteeEvaluationKeyProofs"]["trusteeEvaluationKeyProofSetRoot"].clone();
     let evaluation_key_set_hash = package["evaluationKeys"]["evaluationKeySetHash"].clone();
     let accepted_hashes = accepted_hashes_from_package(package);
 
@@ -177,26 +331,23 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
         result["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideProfile"
     );
-    let relinearization_root = relinearization_root.as_str().expect("relinearization root");
-    let first_galois_batch_root = first_galois_batch_root.as_str().expect("Galois batch root");
-    assert!(
-        accepted_hashes
-            .iter()
-            .any(|accepted_hash| accepted_hash == relinearization_root)
-    );
-    assert!(
-        accepted_hashes
-            .iter()
-            .any(|accepted_hash| accepted_hash == first_galois_batch_root)
-    );
-    let evaluation_key_set_hash = evaluation_key_set_hash
-        .as_str()
-        .expect("evaluation key set hash");
-    assert!(
-        accepted_hashes
-            .iter()
-            .any(|accepted_hash| accepted_hash == evaluation_key_set_hash)
-    );
+    for expected_hash in [
+        relinearization_root.as_str().expect("relinearization root"),
+        first_galois_batch_root.as_str().expect("Galois batch root"),
+        trustee_proof_set_root
+            .as_str()
+            .expect("trustee evaluation-key proof set root"),
+        evaluation_key_set_hash
+            .as_str()
+            .expect("evaluation key set hash"),
+    ] {
+        assert!(
+            accepted_hashes
+                .iter()
+                .any(|accepted_hash| accepted_hash == expected_hash),
+            "accepted hashes must cover {expected_hash}"
+        );
+    }
 }
 
 #[test]
@@ -225,7 +376,12 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_transported_public_eval
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["verifierStatus"],
+        "outsideProfile",
+        "unexpected verification result: {}",
+        serde_json::to_string_pretty(&result).expect("verification result JSON")
+    );
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideProfile"
@@ -279,6 +435,54 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
         "accepted terminal setup response must carry a handoff root"
     );
+}
+
+#[test]
+#[ignore = "manual accepted setup closure diagnostic"]
+fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift",
+    );
+    let (mut package, companions) = setup_package_with_transported_public_setup_companions();
+
+    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["statementHash"] =
+        serde_json::json!(valid_hash('4'));
+    rebind_trustee_evaluation_key_proof_record_root(&mut package, 0);
+    rebind_trustee_evaluation_key_proof_set_root(&mut package);
+    rebind_setup_key_correctness_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
+        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
+        "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
+        "transportedPublicKeyShareMaterial": companions.public_key_share_material,
+        "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
+        "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
+        "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
+        "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(
+        result["verifierStatus"],
+        "refused",
+        "terminal setup verification result: {}",
+        serde_json::to_string_pretty(&result).expect("verification result JSON")
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("statementHash must match the statement rebuilt")
+    );
+    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -339,10 +543,74 @@ fn heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_k
     }))
     .expect("verification response");
 
+    assert_eq!(
+        result["verifierStatus"],
+        "outsideProfile",
+        "unexpected verification result: {}",
+        serde_json::to_string_pretty(&result).expect("verification result JSON")
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "vssCoefficientCommitmentMaterialOutsideProfile"
+    );
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let proof_material_set =
+        move_first_trustee_evaluation_key_proof_bytes_to_transport(&mut package);
+    let transported_public_evaluation_key_material =
+        add_public_evaluation_key_material_transport(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedEvaluationKeyShareProofMaterial": proof_material_set,
+        "transportedPublicEvaluationKeyMaterial": transported_public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
     assert_eq!(result["verifierStatus"], "outsideProfile");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideProfile"
+    );
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk()
+{
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let mut proof_material_set =
+        move_first_trustee_evaluation_key_proof_bytes_to_transport(&mut package);
+    let chunk_bytes_hex = proof_material_set["proofMaterials"][0]["chunks"][0]["bytesHex"]
+        .as_str()
+        .expect("transported proof chunk bytes")
+        .to_string();
+    let mut tampered = chunk_bytes_hex.into_bytes();
+    tampered[0] = if tampered[0] == b'0' { b'1' } else { b'0' };
+    proof_material_set["proofMaterials"][0]["chunks"][0]["bytesHex"] =
+        serde_json::json!(String::from_utf8(tampered).expect("tampered chunk hex"));
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedEvaluationKeyShareProofMaterial": proof_material_set,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
     );
 }
 
@@ -395,256 +663,6 @@ fn heavy_accepted_setup_collective_setup_public_relinearization_key_loader_refus
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_relinearization_round_one_generation_refuses_independent_source_square() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_relinearization_round_one_generation_refuses_independent_source_square",
-    );
-    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
-    let proof_record_snapshot =
-        package["relinearizationKeyShareRounds"]["roundOneRecords"][0].clone();
-    let trustee_roster_position = proof_record_snapshot["trusteeRosterPosition"]
-        .as_u64()
-        .expect("trustee roster position");
-    let level = proof_record_snapshot["level"].as_u64().expect("level");
-    let ring_degree = proof_record_snapshot["ringDegree"]
-        .as_u64()
-        .expect("ring degree") as usize;
-    let key_switch_seed_hex = proof_record_snapshot["keySwitchSeedHex"]
-        .as_str()
-        .expect("key-switch seed");
-    let legacy_source = legacy_relinearization_source_square_coefficients_for_fixture(
-        trustee_roster_position,
-        ring_degree,
-    );
-    let fixture_material = evaluation_key_share_fixture_material(
-        EvaluationKeyShareProofFamily::Relinearization,
-        trustee_roster_position,
-        level,
-        None,
-        ring_degree,
-        key_switch_seed_hex,
-        Some(&legacy_source),
-    );
-    let mut proof_record = proof_record_snapshot.clone();
-    proof_record["keySwitchComponentVectorRoot"] =
-        serde_json::json!(fixture_material.component_vector_root.clone());
-    proof_record["keySwitchComponentVectors"] =
-        serde_json::json!(fixture_material.component_vector_entries.clone());
-    let statement_record =
-        &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
-    let constant_commitments =
-        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
-    let setup_proof_binding = setup_proof_binding_for_test_package(package);
-    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
-        .as_str()
-        .expect("public matrix seed hash");
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "RelinearizationRoundOneProofRandomness",
-        &serde_json::json!({
-            "trusteeRosterPosition": trustee_roster_position,
-            "level": level,
-            "rotation": serde_json::Value::Null,
-        }),
-    )
-    .expect("proof randomness seed");
-    let witness = EvaluationKeyShareLnpProofWitness {
-        secret_coefficients: evaluation_key_secret_coefficients_for_fixture(
-            trustee_roster_position,
-            ring_degree,
-        ),
-        opening_randomness_by_limb: (0..DATA_PRIMES.len())
-            .map(|rns_limb_index| {
-                accepted_vss_randomness_fixture(
-                    trustee_roster_position,
-                    rns_limb_index,
-                    0,
-                    ring_degree,
-                )
-            })
-            .collect(),
-        error_coefficients_by_digit: fixture_material.error_coefficients_by_digit.clone(),
-        relinearization_source_coefficients_by_digit: fixture_material
-            .relinearization_source_coefficients_by_digit
-            .clone(),
-        round_one_aggregate_source_coefficients_by_digit: Vec::new(),
-    };
-    let error = match generate_evaluation_key_share_lnp_relation_proof(
-        EvaluationKeyShareLnpProofGenerationInput {
-            proof_family: EvaluationKeyShareProofFamily::Relinearization,
-            public_matrix_seed_hash,
-            proof_record: &proof_record,
-            same_secret_statement_record: statement_record,
-            constant_commitments: &constant_commitments,
-            component_b_by_digit: &fixture_material.component_b_by_digit,
-            setup_proof_binding: &setup_proof_binding,
-            transported_key_switch_component_material: None,
-            witness: &witness,
-            proof_randomness_seed_hex: &proof_randomness_seed_hex,
-        },
-    ) {
-        Ok(_) => panic!("round-one source-square shortcut must reject"),
-        Err(error) => error,
-    };
-
-    assert!(
-        error.message.contains(
-            "round-one relinearization source witness must equal the same-secret witness"
-        ),
-        "{}",
-        error.message
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_duplicated_public_evaluation_key_component_chunks()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_duplicated_public_evaluation_key_component_chunks",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    let component_material_set =
-        move_first_galois_key_share_component_vectors_to_transport(&mut package);
-    let mut transported_public_evaluation_key_material =
-        add_public_evaluation_key_material_transport(&mut package);
-    transported_public_evaluation_key_material["componentMaterials"] =
-        component_material_set["componentMaterials"].clone();
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedPublicEvaluationKeyMaterial": transported_public_evaluation_key_material,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyMaterialVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("must not duplicate evaluation-key component material chunks")
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_material()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_galois_lnp_proofs_from_transported_proof_material",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    let transported_proof_material =
-        move_first_galois_key_share_lnp_proof_bytes_to_transport(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedEvaluationKeyShareProofMaterial": transported_proof_material,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideProfile");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_galois_lnp_proof_chunk",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    let mut transported_proof_material =
-        move_first_galois_key_share_lnp_proof_bytes_to_transport(&mut package);
-    transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
-        serde_json::json!("00");
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedEvaluationKeyShareProofMaterial": transported_proof_material,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyMaterialVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("transported evaluation-key proof material hashes do not match chunks")
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component_material()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_galois_lnp_proofs_from_transported_component_material",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    let transported_component_material =
-        move_first_galois_key_share_component_vectors_to_transport(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedEvaluationKeyShareComponentMaterial": transported_component_material,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideProfile");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_galois_component_material_chunk()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_galois_component_material_chunk",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    let mut transported_component_material =
-        move_first_galois_key_share_component_vectors_to_transport(&mut package);
-    transported_component_material["componentMaterials"][0]["chunks"][0]["bytesHex"] =
-        serde_json::json!("00");
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedEvaluationKeyShareComponentMaterial": transported_component_material,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyMaterialVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("transported evaluation-key component material hash metadata does not match supplied chunks")
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -652,9 +670,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoAggregateRoot"] =
-        serde_json::json!(valid_hash('b'));
-    rebind_relinearization_key_share_rounds_root(&mut package);
-    rebind_setup_key_correctness_certificate(&mut package);
+        serde_json::json!(valid_hash('7'));
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -671,51 +687,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_source_square_binding_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_source_square_binding_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["sourceSquareBindingRoot"] =
-        serde_json::json!(valid_hash('d'));
-    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]
-        .as_object_mut()
-        .expect("relinearization round-one record")
-        .remove("roundOneProofRoot");
-    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]
-        .as_object_mut()
-        .expect("relinearization round-one record")
-        .remove("roundOneRecordRoot");
-    let round_one_proof_root = derive_protocol_hash(
-        "RelinearizationKeyShareProofRoot",
-        &package["relinearizationKeyShareRounds"]["roundOneRecords"][0],
-    )
-    .expect("relinearization round-one proof root");
-    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["roundOneProofRoot"] =
-        serde_json::json!(round_one_proof_root);
-    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["roundOneRecordRoot"] =
-        serde_json::json!(valid_hash('c'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyMaterialVerificationFailed"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["message"],
-        "sourceSquareBindingRoot does not match the canonical relinearization source-square binding"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -723,7 +694,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_truste
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["keySwitchSeedHex"] =
-        serde_json::json!(valid_hash('8'));
+        serde_json::json!(valid_hash('3'));
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -746,116 +717,14 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_truste
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_one_source_square_aggregate_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_one_source_square_aggregate_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"]["roundOneAggregateRoots"][0]["roundOneSourceSquareAggregateRoot"] =
-        serde_json::json!(valid_hash('e'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "relinearizationRoundOneSourceSquareAggregateRootMismatch"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_source_square_linkage_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_source_square_linkage_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"]["roundTwoRecords"][0]["roundOneSourceSquareBindingRoot"] =
-        serde_json::json!(valid_hash('f'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyMaterialVerificationFailed"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["message"],
-        "relinearization round-two record must bind the accepted round-one record, share, aggregate, and source-square roots"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_source_square_aggregate_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_source_square_aggregate_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoSourceSquareAggregateRoot"] =
-        serde_json::json!(valid_hash('a'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "relinearizationRoundTwoSourceSquareAggregateRootMismatch"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["sameSecretProofFamilyBindingRoot"] =
-        serde_json::json!(valid_hash('e'));
-    rebind_relinearization_key_share_rounds_root(&mut package);
-    rebind_setup_key_correctness_certificate(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyMaterialVerificationFailed"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed()
 {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed",
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0]["keySwitchSeedHex"] =
-        serde_json::json!(valid_hash('9'));
+    package["galoisKeyShareBatches"][0]["galoisKeyShareMaterialRecords"][0]["keySwitchSeedHex"] =
+        serde_json::json!(valid_hash('2'));
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -884,9 +753,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["galoisKeyShareBatches"][0]["requiredGaloisKeySchedule"][0]["rotation"] =
-        serde_json::json!(999_u64);
-    rebind_galois_key_share_batch_root(&mut package, 0);
-    rebind_setup_key_correctness_certificate(&mut package);
+        serde_json::json!(9_999);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -899,19 +766,24 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
     );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("frozen RequiredGaloisSetHash and schedule")
+    );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_assembly_root_drift() {
+fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_assembly_root_drift",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift",
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["evaluationKeys"]["relinearizationKeyRoots"][0]["relinearizationKeyRoot"] =
-        serde_json::json!(valid_hash('c'));
-    rebind_public_evaluation_key_set_hash(&mut package);
-    rebind_setup_key_correctness_certificate(&mut package);
+    package["relinearizationKeyShareRounds"]["sameSecretProofSetRoot"] =
+        serde_json::json!(valid_hash('6'));
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -922,294 +794,405 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_assembl
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyRelinearizationKeyRootMismatch"
+        "relinearizationKeyShareRoundsBindingMismatch"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_and_extra_evaluation_keys() {
+fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_missing_and_extra_evaluation_keys",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs",
     );
-    let mut missing_galois_key = evaluation_key_proof_container_bearing_collective_setup_package();
-    missing_galois_key["evaluationKeys"]["galoisKeyRoots"]
-        .as_array_mut()
-        .expect("Galois key roots")
-        .pop();
-    rebind_public_evaluation_key_set_hash(&mut missing_galois_key);
-    rebind_collective_setup_package_hash(&mut missing_galois_key);
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package
+        .as_object_mut()
+        .expect("setup package object")
+        .remove("trusteeEvaluationKeyProofs");
+    rebind_collective_setup_package_hash(&mut package);
 
-    let missing_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": missing_galois_key,
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
     }))
     .expect("verification response");
 
-    assert_eq!(missing_result["verifierStatus"], "refused");
+    assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
-        missing_result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeyGaloisKeyCountMismatch"
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofsMissing"
     );
-
-    let mut extra_generic_key = evaluation_key_proof_container_bearing_collective_setup_package();
-    extra_generic_key["evaluationKeys"]["genericKeySwitchKeyRoots"] =
-        serde_json::json!([valid_hash('d')]);
-    rebind_public_evaluation_key_set_hash(&mut extra_generic_key);
-    rebind_collective_setup_package_hash(&mut extra_generic_key);
-
-    let extra_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": extra_generic_key,
-    }))
-    .expect("verification response");
-
-    assert_eq!(extra_result["verifierStatus"], "refused");
     assert_eq!(
-        extra_result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeysGenericKeySwitchOutsideProfile"
+        result["refusedObjects"][0]["objectPath"],
+        "setupPackage.trusteeEvaluationKeyProofs"
     );
+    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_relinearization_round_two_generation_refuses_aggregate_source_product_mismatch()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_relinearization_round_two_generation_refuses_aggregate_source_product_mismatch",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container",
     );
-    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
-    let proof_record = package["relinearizationKeyShareRounds"]["roundTwoRecords"][0].clone();
-    let trustee_roster_position = proof_record["trusteeRosterPosition"]
-        .as_u64()
-        .expect("trustee roster position");
-    let level = proof_record["level"].as_u64().expect("level");
-    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
-    let key_switch_seed_hex = proof_record["keySwitchSeedHex"]
-        .as_str()
-        .expect("key-switch seed");
-    let round_two_source = relinearization_round_two_source_coefficients_for_fixture(
-        trustee_roster_position,
-        ring_degree,
-    );
-    let fixture_material = evaluation_key_share_fixture_material(
-        EvaluationKeyShareProofFamily::Relinearization,
-        trustee_roster_position,
-        level,
-        None,
-        ring_degree,
-        key_switch_seed_hex,
-        Some(&round_two_source),
-    );
-    let statement_record =
-        &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
-    let constant_commitments =
-        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
-    let constant_commitment_values = constant_commitments
-        .iter()
-        .map(crate::bgv::setup::commitment::setup_commitment_full_value)
-        .collect::<Vec<_>>();
-    let setup_proof_binding = setup_proof_binding_for_test_package(package);
-    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
-        .as_str()
-        .expect("public matrix seed hash");
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "RelinearizationRoundTwoProofRandomness",
-        &serde_json::json!({
-            "trusteeRosterPosition": trustee_roster_position,
-            "level": level,
-            "rotation": serde_json::Value::Null,
-        }),
-    )
-    .expect("proof randomness seed");
-    let request = serde_json::json!({
-        "proofFamily": "relinearization-key-share",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "proofRecord": proof_record,
-        "sameSecretStatementRecord": statement_record,
-        "constantCommitments": constant_commitment_values,
-        "setupProofBinding": setup_proof_binding,
-        "secretCoefficients": evaluation_key_secret_coefficients_for_fixture(
-            trustee_roster_position,
-            ring_degree,
-        ),
-        "openingRandomnessByLimb": (0..DATA_PRIMES.len())
-            .map(|rns_limb_index| {
-                accepted_vss_randomness_fixture(
-                    trustee_roster_position,
-                    rns_limb_index,
-                    0,
-                    ring_degree,
-                )
-            })
-            .collect::<Vec<_>>(),
-        "errorCoefficientsByDigit": fixture_material.error_coefficients_by_digit,
-        "relinearizationSourceCoefficientsByDigit": fixture_material
-            .relinearization_source_coefficients_by_digit,
-        "roundOneAggregateSourceCoefficientsByDigit": vec![
-            vec![0_i128; ring_degree];
-            fixture_material.component_b_by_digit.len()
-        ],
-        "proofRandomnessSource": "development-deterministic-fixture",
-        "proofRandomnessSeedHex": proof_randomness_seed_hex,
-    });
 
-    let error = match generate_evaluation_key_share_lnp_proof_from_request(&request) {
-        Ok(_) => panic!("round-two source product mismatch must reject"),
-        Err(error) => error,
-    };
+    for field_name in ["proofRecords", "trusteeEvaluationKeyProofSetRoot"] {
+        let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+        package["trusteeEvaluationKeyProofs"]
+            .as_object_mut()
+            .expect("trustee evaluation-key proof set")
+            .remove(field_name);
+        rebind_collective_setup_package_hash(&mut package);
 
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(
+            result["refusedObjects"][0]["reasonCode"],
+            "trusteeEvaluationKeyProofVerificationFailed"
+        );
+        assert!(
+            result["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message")
+                .contains(field_name)
+        );
+        assert_eq!(
+            result["refusedObjects"][0]["objectPath"],
+            "setupPackage.trusteeEvaluationKeyProofs"
+        );
+        assert!(result["acceptedSetupHandoff"].is_null());
+    }
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs",
+    );
+
+    let mut extra_proof_package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let duplicate_proof_record =
+        extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
+    extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"]
+        .as_array_mut()
+        .expect("trustee evaluation-key proof records")
+        .push(duplicate_proof_record);
+    rebind_trustee_evaluation_key_proof_set_root(&mut extra_proof_package);
+    rebind_setup_key_correctness_certificate(&mut extra_proof_package);
+    rebind_collective_setup_package_hash(&mut extra_proof_package);
+    assert_refuses_trustee_evaluation_key_proof_variant(
+        extra_proof_package,
+        "proofRecords must contain one proof per trustee",
+    );
+
+    let mut duplicate_proof_package =
+        evaluation_key_proof_container_bearing_collective_setup_package();
+    duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][1] =
+        duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
+    rebind_trustee_evaluation_key_proof_record_root(&mut duplicate_proof_package, 1);
+    rebind_trustee_evaluation_key_proof_set_root(&mut duplicate_proof_package);
+    rebind_setup_key_correctness_certificate(&mut duplicate_proof_package);
+    rebind_collective_setup_package_hash(&mut duplicate_proof_package);
+    assert_refuses_trustee_evaluation_key_proof_variant(
+        duplicate_proof_package,
+        "proof records must be ordered by roster position",
+    );
+}
+
+fn assert_refuses_trustee_evaluation_key_proof_variant(
+    package: serde_json::Value,
+    message_fragment: &str,
+) {
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["objectPath"],
+        "setupPackage.trusteeEvaluationKeyProofs"
+    );
     assert!(
-        error.message.contains(
-            "round-two relinearization source witness must equal the trustee secret times the accepted round-one aggregate source"
-        ),
-        "{}",
-        error.message
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains(message_fragment)
+    );
+    assert!(result["acceptedSetupHandoff"].is_null());
+}
+
+#[test]
+fn collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share_records() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share_records",
+    );
+    let mut package = minimal_collective_setup_package();
+    package["trusteeEvaluationKeyProofs"] = serde_json::json!({
+        "objectType": "TrusteeEvaluationKeyProofSet",
+    });
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofsWithoutShareRecords"
     );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof()
-{
+fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_accounting_hash_drift() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_generate_evaluation_key_share_lnp_proof_command_self_verifies_galois_proof",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_accounting_hash_drift",
     );
-    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
-    let proof_record = package["galoisKeyShareBatches"][0]["galoisKeyShareProofs"][0].clone();
-    let trustee_roster_position = proof_record["trusteeRosterPosition"]
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["trusteeEvaluationKeyProofs"]["proofAccountingHash"] =
+        serde_json::json!(valid_hash('1'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("proofAccountingHash")
+    );
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift",
+    );
+    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["statementHash"] =
+        serde_json::json!(valid_hash('4'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("statementHash must match the statement rebuilt")
+    );
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof_bytes() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof_bytes",
+    );
+    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+
+    let mut noncanonical_claim_package = package.clone();
+    mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
+        &mut noncanonical_claim_package,
+        |proof_bytes| {
+            set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes);
+        },
+    );
+    let noncanonical_claim_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": noncanonical_claim_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(noncanonical_claim_result["verifierStatus"], "refused");
+    assert_eq!(
+        noncanonical_claim_result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+
+    let mut low_degree_shape_package = package;
+    let trustee_roster_position = low_degree_shape_package["trusteeEvaluationKeyProofs"]
+        ["proofRecords"][0]["trusteeRosterPosition"]
         .as_u64()
         .expect("trustee roster position");
-    let rotation = proof_record["rotation"].as_u64().expect("rotation");
-    let level = proof_record["level"].as_u64().expect("level");
-    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
-    let key_switch_seed_hex = proof_record["keySwitchSeedHex"]
-        .as_str()
-        .expect("key-switch seed");
-    let fixture_material = evaluation_key_share_fixture_material(
-        EvaluationKeyShareProofFamily::Galois,
-        trustee_roster_position,
-        level,
-        Some(rotation),
-        ring_degree,
-        key_switch_seed_hex,
-        None,
+    let round_one_aggregate_diagonals =
+        round_one_aggregate_diagonals_from_fixture_package(&low_degree_shape_package, None);
+    let statement =
+        trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
+            setup_package: &low_degree_shape_package,
+            transported_key_switch_component_material: None,
+            transported_constant_commitments: &BTreeMap::new(),
+            round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals,
+            trustee_roster_position,
+        })
+        .expect("trustee evaluation-key statement");
+    let total_error_column_count = statement.keys.iter().map(|key| key.level + 1).sum();
+    let linkage_commitment_count = statement
+        .same_secret_linkage
+        .as_ref()
+        .expect("trustee evaluation-key same-secret linkage")
+        .commitments
+        .len();
+    mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
+        &mut low_degree_shape_package,
+        |proof_bytes| {
+            set_first_limb_low_degree_fold_count_to_wrong_value(
+                proof_bytes,
+                statement.ring_degree,
+                total_error_column_count,
+                linkage_commitment_count,
+            );
+        },
     );
-    let statement_record =
-        &package["sameSecretConsistency"]["statementRecords"][trustee_roster_position as usize];
-    let constant_commitments =
-        same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
-    let constant_commitment_values = constant_commitments
-        .iter()
-        .map(crate::bgv::setup::commitment::setup_commitment_full_value)
-        .collect::<Vec<_>>();
-    let setup_proof_binding = setup_proof_binding_for_test_package(package);
-    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+    let low_degree_shape_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": low_degree_shape_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(low_degree_shape_result["verifierStatus"], "refused");
+    assert_eq!(
+        low_degree_shape_result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert!(
+        low_degree_shape_result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("low-degree committed fold count does not match the statement")
+    );
+    assert!(low_degree_shape_result["acceptedSetupHandoff"].is_null());
+}
+
+fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
+    package: &mut serde_json::Value,
+    mutate_proof_bytes: impl FnOnce(&mut [u8]),
+) {
+    let proof_record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
+    let proof_bytes_hex = proof_record["proofBytesHex"]
         .as_str()
-        .expect("public matrix seed hash");
+        .expect("embedded trustee proof bytes")
+        .to_string();
+    let mut proof_bytes = decode_hex(&proof_bytes_hex).expect("trustee proof bytes");
+    mutate_proof_bytes(&mut proof_bytes);
+    proof_record["proofBytesHex"] = serde_json::json!(to_hex(&proof_bytes));
+    proof_record["proofBytesHash"] =
+        serde_json::json!(trustee_evaluation_key_proof_bytes_hash(&proof_bytes));
+    proof_record["proofSizeBytes"] = serde_json::json!(proof_bytes.len());
+    rebind_trustee_evaluation_key_proof_record_root(package, 0);
+    rebind_trustee_evaluation_key_proof_set_root(package);
+    rebind_setup_key_correctness_certificate(package);
+    rebind_collective_setup_package_hash(package);
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cannot_reprove() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cannot_reprove",
+    );
+    // A trustee whose round-two share multiplies a substituted aggregate
+    // cannot generate a verifying proof: the statement carries the aggregate
+    // recomputed from the round-one records, so the honest witness fails the
+    // batched relation at proving time.
+    let package = evaluation_key_proof_container_bearing_collective_setup_package_ref();
+    let honest_aggregates = round_one_aggregate_diagonals_from_fixture_package(package, None);
+    let scheduled_level = *honest_aggregates
+        .keys()
+        .next()
+        .expect("scheduled relinearization level");
+    let mut substituted_aggregates = honest_aggregates
+        .get(&scheduled_level)
+        .expect("aggregate diagonals")
+        .clone();
+    substituted_aggregates[0][0] = (substituted_aggregates[0][0] + 1) % DATA_PRIMES[0];
+    let ring_degree =
+        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let substituted_source = relinearization_round_two_source_by_digit_for_fixture(
+        0,
+        ring_degree,
+        &substituted_aggregates,
+    );
+    let schedule = &package["evaluatorKeySchedule"];
+    let key_switch_seed_hex =
+        relinearization_key_switch_seed_for_test(schedule, "round-two", scheduled_level);
+    let substituted_material = evaluation_key_share_fixture_material(
+        EvaluationKeyShareProofFamily::Relinearization,
+        0,
+        scheduled_level,
+        None,
+        ring_degree,
+        &key_switch_seed_hex,
+        Some(&substituted_source),
+    );
+
+    let mut tampered_package = package.clone();
+    let record = &mut tampered_package["relinearizationKeyShareRounds"]["roundTwoRecords"][0];
+    assert_eq!(record["trusteeRosterPosition"], 0);
+    record["keySwitchComponentVectorRoot"] =
+        serde_json::json!(substituted_material.component_vector_root.clone());
+    record["roundTwoShareRoot"] =
+        serde_json::json!(substituted_material.component_vector_root.clone());
+    record["keySwitchComponentVectors"] =
+        serde_json::json!(substituted_material.component_vector_entries.clone());
+
+    let aggregates = round_one_aggregate_diagonals_from_fixture_package(&tampered_package, None);
+    let statement =
+        trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
+            setup_package: &tampered_package,
+            transported_key_switch_component_material: None,
+            transported_constant_commitments: &BTreeMap::new(),
+            round_one_aggregate_diagonals_by_level: &aggregates,
+            trustee_roster_position: 0,
+        })
+        .expect("statement over substituted round-two share");
+    let witness = trustee_evaluation_key_witness_for_fixture(0, ring_degree, &statement);
     let proof_randomness_seed_hex = derive_protocol_hash(
-        "GaloisKeyShareProofRandomness",
+        "TrusteeEvaluationKeyProofRandomness",
         &serde_json::json!({
-            "trusteeRosterPosition": trustee_roster_position,
-            "level": level,
-            "rotation": rotation,
+            "fixture": "substituted-aggregate-reprove",
+            "trusteeRosterPosition": 0,
         }),
     )
     .expect("proof randomness seed");
-    let request = serde_json::json!({
-        "proofFamily": "galois-key-share",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "proofRecord": proof_record,
-        "sameSecretStatementRecord": statement_record,
-        "constantCommitments": constant_commitment_values,
-        "setupProofBinding": setup_proof_binding,
-        "secretCoefficients": evaluation_key_secret_coefficients_for_fixture(
-            trustee_roster_position,
-            ring_degree,
-        ),
-        "openingRandomnessByLimb": (0..DATA_PRIMES.len())
-            .map(|rns_limb_index| {
-                accepted_vss_randomness_fixture(
-                    trustee_roster_position,
-                    rns_limb_index,
-                    0,
-                    ring_degree,
-                )
-            })
-            .collect::<Vec<_>>(),
-        "errorCoefficientsByDigit": fixture_material.error_coefficients_by_digit,
-        "proofRandomnessSource": "development-deterministic-fixture",
-        "proofRandomnessSeedHex": proof_randomness_seed_hex,
-    });
 
-    let result = generate_evaluation_key_share_lnp_proof_from_request(&request)
-        .expect("generated evaluation-key proof");
-
-    assert_eq!(
-        result["ok"],
-        true,
-        "terminal setup verification result: {}",
-        serde_json::to_string_pretty(&result).expect("verification result JSON")
-    );
-    assert_eq!(result["operation"], "generateEvaluationKeyShareLnpProof");
-    assert_eq!(result["proofFamily"], "galois-key-share");
-    assert!(
-        result["galoisKeyShareTboxParameterProfileHash"]
-            .as_str()
-            .is_some()
-    );
-    let proof_bytes = decode_hex(result["proofBytesHex"].as_str().expect("proof bytes hex"))
-        .expect("proof bytes");
-    assert_eq!(
-        result["proofSizeBytes"].as_u64(),
-        Some(u64::try_from(proof_bytes.len()).expect("proof size fits u64"))
-    );
-    assert_eq!(
-        result["proofBytesHash"].as_str().expect("proof bytes hash"),
-        evaluation_key_share_lnp_relation_proof_bytes_hash(
-            EvaluationKeyShareProofFamily::Galois,
-            &proof_bytes,
-        ),
-    );
-    let verification = verify_evaluation_key_share_lnp_relation_proof(
-        EvaluationKeyShareLnpProofVerificationInput {
-            proof_family: EvaluationKeyShareProofFamily::Galois,
-            public_matrix_seed_hash,
-            proof_record: &request["proofRecord"],
-            same_secret_statement_record: statement_record,
-            constant_commitments: &constant_commitments,
-            setup_proof_binding: &setup_proof_binding,
-            transported_key_switch_component_material: None,
-            proof_bytes: &proof_bytes,
-        },
-    )
-    .expect("returned proof verifies");
-    assert_eq!(
-        result["statementHash"].as_str().expect("statement hash"),
-        verification.statement_hash_hex
-    );
-    assert_eq!(
-        result["relationCommitmentHash"]
-            .as_str()
-            .expect("relation commitment hash"),
-        verification.relation_commitment_hash_hex
-    );
-    assert_eq!(
-        result["tboxCommitmentPrefixHash"]
-            .as_str()
-            .expect("tbox commitment prefix hash"),
-        verification.tbox_commitment_prefix_hash
-    );
-
-    let mut rejected_request = request;
-    rejected_request["relinearizationSourceCoefficientsByDigit"] =
-        serde_json::json!([vec![0_i64; ring_degree]]);
-    let error = match generate_evaluation_key_share_lnp_proof_from_request(&rejected_request) {
-        Ok(_) => panic!("Galois command must reject relinearization-only source witness material"),
+    let error = match prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex) {
+        Ok(_) => panic!("substituted aggregate source must not prove"),
         Err(error) => error,
     };
+
     assert!(
-        error
-            .message
-            .contains("must not be provided for Galois proof generation"),
+        error.message.contains("witness does not satisfy") || error.message.contains("sumcheck"),
         "{}",
         error.message
     );

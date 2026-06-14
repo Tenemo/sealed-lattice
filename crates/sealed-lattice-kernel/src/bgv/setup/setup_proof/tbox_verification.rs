@@ -38,58 +38,6 @@ pub(crate) fn setup_proof_lnp_tbox_commitment_prefix_byte_count(
     Ok(prefix_bit_count / 8)
 }
 
-pub(crate) fn setup_proof_lnp_tbox_commitment_prefix_hash(
-    layout: &SetupProofLnpTboxLayout,
-    proof_bytes: &[u8],
-) -> CanonicalResult<String> {
-    let prefix_byte_count = setup_proof_lnp_tbox_commitment_prefix_byte_count(layout)?;
-    let Some(prefix_bytes) = proof_bytes.get(..prefix_byte_count) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof LNP tbox proof ended before the commitment prefix",
-        ));
-    };
-
-    Ok(hash512_hex(
-        layout.tbox_commitment_prefix_hash_domain,
-        &[
-            layout.proof_family.as_bytes(),
-            layout.tbox_parameter_profile_id.as_bytes(),
-            prefix_bytes,
-        ],
-    ))
-}
-
-pub(in crate::bgv::setup) fn setup_proof_lnp_tbox_prefix_binding_seed(
-    layout: &SetupProofLnpTboxLayout,
-    statement_hash_hex: &str,
-    tbox_parameter_profile_hash: &str,
-    encoded_relation_commitments: &[u8],
-) -> CanonicalResult<String> {
-    validate_lnp_tbox_layout(layout)?;
-    validate_hash_string(statement_hash_hex, "setupProofLnpTboxPrefix.statementHash")?;
-    validate_hash_string(
-        tbox_parameter_profile_hash,
-        "setupProofLnpTboxPrefix.parameterProfileHash",
-    )?;
-    if encoded_relation_commitments.is_empty() {
-        return Err(setup_proof_error(
-            "setup proof LNP tbox prefix binding requires relation commitments",
-        ));
-    }
-
-    Ok(hash512_hex(
-        "sealed-lattice/setup/lnp-tbox-prefix-binding-seed-v1",
-        &[
-            layout.proof_family.as_bytes(),
-            layout.tbox_parameter_profile_id.as_bytes(),
-            statement_hash_hex.as_bytes(),
-            tbox_parameter_profile_hash.as_bytes(),
-            encoded_relation_commitments,
-        ],
-    ))
-}
-
 pub(in crate::bgv::setup) fn setup_proof_lnp_tbox_h_coefficient_must_be_zero(
     coefficient_index: usize,
     proof_ring_degree: usize,
@@ -135,6 +83,7 @@ pub(crate) struct SetupProofLnpTboxDecodedSummary {
     dead_code,
     reason = "entry point for the accepted family verifier once generated LNP tbox dimensions are pinned"
 )]
+#[cfg(test)]
 pub(crate) fn verify_setup_proof_lnp_tbox_proof_bytes(
     layout: &SetupProofLnpTboxLayout,
     statement_hash_hex: &str,

@@ -19,24 +19,26 @@ use crate::{
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
         setup::{
+            absorb_setup_proof_material_transport_stream_chunk_request,
             absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
+            begin_setup_proof_material_transport_stream_request,
             begin_threshold_share_commitment_transport_derivation_stream_request,
             compute_setup_commitment_from_opening_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             derive_threshold_share_commitments_from_request,
             derive_threshold_share_commitments_from_transport_request,
             describe_collective_bgv_setup_profile, describe_passive_setup_object_model,
+            finish_setup_proof_material_transport_stream_request,
             finish_threshold_share_commitment_transport_derivation_stream_request,
-            generate_evaluation_key_share_lnp_proof_from_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
-            generate_public_key_share_lnp_proof_from_request,
-            generate_same_secret_lnp_proof_from_request,
+            generate_trustee_evaluation_key_proof_from_request,
             verify_collective_bgv_setup_package_from_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
             verify_private_vss_share_envelope_from_request,
+            verify_trustee_evaluation_key_proof_from_request,
         },
         validation::{
             bgv_profile_rejection, reject_reference_oracle_artifact,
@@ -159,16 +161,12 @@ pub(crate) fn generate_private_vss_share_proof(request: &Value) -> CanonicalResu
     generate_private_vss_share_proof_from_request(request)
 }
 
-pub(crate) fn generate_same_secret_lnp_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_same_secret_lnp_proof_from_request(request)
+pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_trustee_evaluation_key_proof_from_request(request)
 }
 
-pub(crate) fn generate_public_key_share_lnp_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_public_key_share_lnp_proof_from_request(request)
-}
-
-pub(crate) fn generate_evaluation_key_share_lnp_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_evaluation_key_share_lnp_proof_from_request(request)
+pub(crate) fn verify_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
+    verify_trustee_evaluation_key_proof_from_request(request)
 }
 
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {
@@ -201,6 +199,24 @@ pub(crate) fn finish_threshold_share_commitments_from_transport_stream(
     request: &Value,
 ) -> CanonicalResult<Value> {
     finish_threshold_share_commitment_transport_derivation_stream_request(request)
+}
+
+pub(crate) fn begin_setup_proof_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    begin_setup_proof_material_transport_stream_request(request)
+}
+
+pub(crate) fn absorb_setup_proof_material_transport_stream_chunk(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    absorb_setup_proof_material_transport_stream_chunk_request(request)
+}
+
+pub(crate) fn finish_setup_proof_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    finish_setup_proof_material_transport_stream_request(request)
 }
 
 pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {

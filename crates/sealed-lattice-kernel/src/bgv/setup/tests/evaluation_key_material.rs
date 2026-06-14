@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
 
 #[test]
 fn passive_setup_public_evaluation_key_material_drives_relinearization_without_private_witness() {
@@ -60,34 +61,29 @@ fn passive_setup_public_evaluation_key_material_drives_rotation_without_private_
 }
 
 #[test]
-fn public_evaluation_key_default_rotation_requests_follow_selected_schedule() {
+fn selected_rotation_key_schedule_matches_package_commitment() {
     let package = setup_package();
-    let full_schedule = selected_public_evaluation_key_rotation_requests(DATA_PRIMES.len() - 1)
+    let full_schedule = selected_public_evaluation_key_rotation_requests()
         .expect("full selected rotation schedule");
-    let comparison_return_schedule =
-        selected_public_evaluation_key_rotation_requests(DIRECT_COMPARISON_OUTPUT_LEVEL)
-            .expect("comparison return schedule");
-    let low_level_schedule =
-        selected_public_evaluation_key_rotation_requests(1).expect("low-level schedule");
 
-    assert_eq!(full_schedule.len(), 20);
-    assert_eq!(comparison_return_schedule.len(), 5);
-    assert!(low_level_schedule.is_empty());
+    assert_eq!(full_schedule.len(), 23);
     assert!(
         full_schedule
             .iter()
-            .any(|(rotation, level)| *rotation == 3 && *level == DATA_PRIMES.len() - 1)
+            .any(|(rotation, level)| *rotation == 3 && *level == SELECTED_EVALUATOR_WORKING_LEVEL)
     );
     assert!(
         full_schedule
             .iter()
             .any(|(rotation, level)| *rotation == 2 * POLYNOMIAL_DEGREE - 1
-                && *level == DATA_PRIMES.len() - 1)
+                && *level == SELECTED_EVALUATOR_WORKING_LEVEL)
     );
+    // One key per element at the working level; truncation serves the
+    // comparison output level.
     assert!(
         full_schedule
             .iter()
-            .any(|(_, level)| *level == DIRECT_COMPARISON_OUTPUT_LEVEL)
+            .all(|(_, level)| *level == SELECTED_EVALUATOR_WORKING_LEVEL)
     );
 
     let committed_rotation_schedule = package["evaluationKeys"]["evaluationKeyMaterialCommitment"]
@@ -127,7 +123,7 @@ fn public_evaluation_key_default_rotation_requests_follow_selected_schedule() {
     assert_eq!(committed_rotation_schedule, full_schedule);
     assert_eq!(
         committed_relinearization_levels,
-        (1..DATA_PRIMES.len()).collect::<Vec<_>>()
+        vec![SELECTED_EVALUATOR_WORKING_LEVEL]
     );
 }
 
@@ -140,9 +136,8 @@ fn public_evaluation_key_rotation_request_rejects_duplicates_before_generation()
         ]
     });
 
-    let error =
-        read_public_evaluation_key_rotation_requests(&request, DIRECT_COMPARISON_OUTPUT_LEVEL)
-            .expect_err("duplicate rotation requests must reject");
+    let error = read_public_evaluation_key_rotation_requests(&request)
+        .expect_err("duplicate rotation requests must reject");
 
     assert!(
         error.message.contains("must not repeat"),
@@ -252,18 +247,18 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
         .iter()
         .find(|check| {
             check["keyKind"] == "relinearization"
-                && check["level"] == DIRECT_COMPARISON_OUTPUT_LEVEL
+                && check["level"] == SELECTED_EVALUATOR_WORKING_LEVEL
         })
         .and_then(|check| check["keyStreamSeed"].as_str())
-        .expect("direct comparison output relinearization stream seed");
+        .expect("working-level relinearization stream seed");
     let rotation_check = sampled_checks
         .iter()
         .find(|check| {
             check["keyKind"] == "rotation"
-                && check["level"] == DIRECT_COMPARISON_OUTPUT_LEVEL
+                && check["level"] == SELECTED_EVALUATOR_WORKING_LEVEL
                 && check["purpose"] == "generator-ordered-packed-rank-return-basis"
         })
-        .expect("direct comparison output return rotation stream check");
+        .expect("packed-rank return rotation stream check");
     let rotation = rotation_check["rotation"]
         .as_u64()
         .expect("rotation")
@@ -287,9 +282,12 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
         DIRECT_COMPARISON_OUTPUT_LEVEL,
     )
     .expect("right level");
+    // The schedule key is generated at the working level; relinearizing a
+    // comparison-output-level ciphertext exercises the truncation window the
+    // evaluator consumes.
     let relinearization_key = generate_relinearization_key(
         evaluator_key,
-        DIRECT_COMPARISON_OUTPUT_LEVEL,
+        SELECTED_EVALUATOR_WORKING_LEVEL,
         relinearization_seed,
     )
     .expect("setup stream relinearization key");
@@ -306,7 +304,7 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
     let rotation_key = generate_galois_key(
         evaluator_key,
         rotation,
-        DIRECT_COMPARISON_OUTPUT_LEVEL,
+        SELECTED_EVALUATOR_WORKING_LEVEL,
         rotation_seed,
     )
     .expect("setup stream rotation key");

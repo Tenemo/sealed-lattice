@@ -66,15 +66,6 @@ export type PrivateVssShareProofFactory = (
     input: PrivateVssShareProofFactoryInput,
 ) => JsonRecord;
 
-export type PrivateVssShareProofRandomness = {
-    readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
-    readonly seedHex: string;
-};
-
-export type PrivateVssShareProofRandomnessFactory = (
-    input: PrivateVssShareProofFactoryInput,
-) => PrivateVssShareProofRandomness;
-
 export type PrivateVssMailboxDeliveryKernel = {
     readonly deriveProtocolHash: (input: {
         readonly namespace: string;
@@ -146,6 +137,7 @@ export type PrivateVssMailboxDeliveryKernel = {
             | 'fresh-csprng'
             | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
     }) => {
         readonly privateVssShareProof: JsonRecord;
     };
@@ -162,6 +154,7 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly ok: boolean;
         readonly privateEnvelopeHash: ProtocolHash | null;
         readonly localVerificationRoot: ProtocolHash | null;
+        readonly verifiedPrivateVssShareProofCount?: number;
         readonly refusedObjects: readonly {
             readonly reasonCode: string;
             readonly message: string;
@@ -185,7 +178,6 @@ export type PrivateVssMailboxDeliverySetInput = {
         | typeof embeddedPrivateVssShareProofBytesEncoding
         | typeof transportedSetupProofMaterialEncoding;
     readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
-    readonly privateVssShareProofRandomnessFactory?: PrivateVssShareProofRandomnessFactory;
     readonly sourceTrusteeContributionStates: readonly PrivateVssSourceTrusteeContributionState[];
     readonly recipients: readonly PrivateVssMailboxRecipient[];
 };
@@ -226,6 +218,23 @@ const privateVssEnvelopeCommitmentSetRootInput = (
     ),
 });
 
+const assertAcceptedPrivateVssProofCoverage = (
+    localVerification: {
+        readonly verifiedPrivateVssShareProofCount?: number;
+    },
+    expectedProofCount: number,
+    objectPath: string,
+): void => {
+    if (
+        localVerification.verifiedPrivateVssShareProofCount !==
+        expectedProofCount
+    ) {
+        throw new Error(
+            `${objectPath}.verifiedPrivateVssShareProofCount must match the accepted Q_share limb count.`,
+        );
+    }
+};
+
 export type PrivateVssMailboxDeliverySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PrivateVssEnvelopeCommitmentSet';
@@ -244,7 +253,7 @@ export type PrivateVssEnvelopeCommitment = Readonly<
         readonly encryptedEnvelopeHash: ProtocolHash;
         readonly privateEnvelopeAad: JsonRecord;
         readonly privateEnvelopeAadHash: ProtocolHash;
-        readonly encryptedEnvelope: PrivateVssEncryptedEnvelope;
+        readonly encryptedEnvelope?: PrivateVssEncryptedEnvelope;
         readonly recipientMailboxPublicKeyHash: ProtocolHash;
         readonly localVerificationRoot: ProtocolHash;
         readonly transportedPrivateVssShareProofMaterial?: TransportedPrivateVssShareProofMaterialSet;
@@ -308,17 +317,19 @@ const localOpeningAcceptedStatus = 'accepted-local-private-vss-opening';
 const recipientVerificationRequirement =
     'recipient-verifies-private-vss-opening-before-acceptance';
 const setupProfileId = 'CollectiveBgvSetup-v1';
+const privateVssShareProofProfileId =
+    'sealed-lattice-private-vss-share-proof-succinct-v1';
 const privateVssShareProofFamily = 'vss-opening-carry';
-export const privateVssShareLnpProofVerificationStatus =
-    'lnp-private-vss-share-relation-verified-with-accepted-setup-proof-accounting';
-export const privateVssShareLnpProofModelStatus =
-    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, centered signed 112-bit coefficient opening masks and responses, hidden carry responses, carry-aware VSS share algebra, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing VSS proof acceptance';
+export const privateVssShareSuccinctProofVerificationStatus =
+    'succinct-private-vss-share-argument-verified-with-accepted-proof-accounting';
+export const privateVssShareSuccinctProofModelStatus =
+    'succinct-private-vss-share-argument-accounting-accepted';
 const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
 const setupProofTransportChunkSizeBytes = 1_048_576;
 const privateVssShareProofBytesHashDomain =
-    'sealed-lattice/setup/private-vss-share/lnp-proof-bytes-v1';
+    'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1';
 const textEncoder = new TextEncoder();
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -405,6 +416,32 @@ const hexToBytes = (hex: string, fieldName: string): Uint8Array => {
 
 const bytesToHex = (bytes: Uint8Array): string =>
     [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const proofRandomnessByteLength = 64;
+
+const defaultProofRandomBytes = (byteLength: number): Uint8Array => {
+    const cryptoProvider = globalThis.crypto;
+    if (cryptoProvider === undefined) {
+        throw new Error(
+            'Private VSS share proof generation requires Web Crypto getRandomValues.',
+        );
+    }
+    const bytes = new Uint8Array(byteLength);
+    cryptoProvider.getRandomValues(bytes);
+
+    return bytes;
+};
+
+const freshProofRandomnessHex = (): string => {
+    const bytes = defaultProofRandomBytes(proofRandomnessByteLength);
+    if (bytes.byteLength !== proofRandomnessByteLength) {
+        throw new Error(
+            'proof randomness byte source must return exactly 64 bytes.',
+        );
+    }
+
+    return bytesToHex(bytes);
+};
 
 const varUintBytes = (value: number, fieldName: string): Uint8Array => {
     assertNonNegativeSafeInteger(value, fieldName);
@@ -701,7 +738,6 @@ const privateEnvelopeAad = (
 
 const transportPrivateVssShareProofMaterial = (
     kernel: PrivateVssMailboxDeliveryKernel,
-    sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
     proofRecord: JsonRecord,
 ): {
     readonly proofRecord: JsonRecord;
@@ -711,7 +747,10 @@ const transportPrivateVssShareProofMaterial = (
         proofRecord.proofVerificationStatus,
         'privateVssShareProof.proofVerificationStatus',
     );
-    if (proofVerificationStatus !== privateVssShareLnpProofVerificationStatus) {
+    if (
+        proofVerificationStatus !==
+        privateVssShareSuccinctProofVerificationStatus
+    ) {
         throw new Error(
             'privateVssShareProof.proofVerificationStatus must match the accepted private VSS share verifier status.',
         );
@@ -720,7 +759,7 @@ const transportPrivateVssShareProofMaterial = (
         proofRecord.proofModelStatus,
         'privateVssShareProof.proofModelStatus',
     );
-    if (proofModelStatus !== privateVssShareLnpProofModelStatus) {
+    if (proofModelStatus !== privateVssShareSuccinctProofModelStatus) {
         throw new Error(
             'privateVssShareProof.proofModelStatus must match the accepted private VSS share proof model.',
         );
@@ -789,37 +828,25 @@ const transportPrivateVssShareProofMaterial = (
         proofRecord.statementHash,
         'privateVssShareProof.statementHash',
     );
-    const relationCommitmentHash = assertProtocolHash(
-        proofRecord.relationCommitmentHash,
-        'privateVssShareProof.relationCommitmentHash',
-    );
-    const tboxCommitmentPrefixHash = assertProtocolHash(
-        proofRecord.tboxCommitmentPrefixHash,
-        'privateVssShareProof.tboxCommitmentPrefixHash',
-    );
     const proofMaterialRoot = kernel.deriveProtocolHash({
-        namespace: 'SetupProofMaterialRoot',
+        namespace: 'PrivateVssShareProofMaterialRoot',
         value: {
-            objectType: 'SetupProofMaterialReference',
+            objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             objectVersion: 1,
             setupProfileId,
             setupProofProfileId,
+            proofProfileId: privateVssShareProofProfileId,
             proofFamily: privateVssShareProofFamily,
             proofBytesEncoding: transportedSetupProofMaterialEncoding,
-            trusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
-            trusteeRosterPosition:
-                sourceTrusteeState.sourceTrusteeRosterPosition,
             statementHash,
-            relationCommitmentHash,
-            tboxCommitmentPrefixHash,
             proofSizeBytes,
             proofBytesHash,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            fullObjectHash,
-            chunkRoot,
-            chunkHashes,
+            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
+            proofChunkCount: chunkHashes.length,
+            proofTotalByteLength: totalByteLength,
+            proofFullObjectHash: fullObjectHash,
+            proofChunkRoot: chunkRoot,
+            proofChunkHashes: chunkHashes,
         },
     });
     const transportedProofRecord = { ...proofRecord };
@@ -938,19 +965,14 @@ const privateEnvelope = (
                 input.privateVssShareProofFactory?.(proofFactoryInput) ??
                 (() => {
                     if (
-                        input.kernel.generatePrivateVssShareProof ===
-                            undefined ||
-                        input.privateVssShareProofRandomnessFactory ===
-                            undefined
+                        input.kernel.generatePrivateVssShareProof === undefined
                     ) {
                         throw new Error(
                             'Private VSS mailbox delivery requires recipient-local zero-knowledge privateVssShareProof generation; plaintext aggregate openings and carry witnesses are refused.',
                         );
                     }
-                    const proofRandomness =
-                        input.privateVssShareProofRandomnessFactory(
-                            proofFactoryInput,
-                        );
+                    const proofRandomnessSeedHex = freshProofRandomnessHex();
+                    const proofRandomnessNonceHex = freshProofRandomnessHex();
                     const generatedProof =
                         input.kernel.generatePrivateVssShareProof({
                             setupContext: input.setupContext,
@@ -973,8 +995,9 @@ const privateEnvelope = (
                                 coefficientOpenings.map(
                                     (opening) => opening.randomnessByColumn,
                                 ),
-                            proofRandomnessSource: proofRandomness.source,
-                            proofRandomnessSeedHex: proofRandomness.seedHex,
+                            proofRandomnessSource: 'fresh-csprng',
+                            proofRandomnessSeedHex,
+                            proofRandomnessNonceHex,
                         });
 
                     return generatedProof.privateVssShareProof;
@@ -985,7 +1008,6 @@ const privateEnvelope = (
                           const transportedProof =
                               transportPrivateVssShareProofMaterial(
                                   input.kernel,
-                                  sourceTrusteeState,
                                   generatedPrivateVssShareProof,
                               );
                           transportedProofMaterials.push(
@@ -1102,6 +1124,11 @@ const createEnvelopeCommitment = async (
                 : `Private VSS envelope failed local verification: ${refusal.reasonCode}: ${refusal.message}`,
         );
     }
+    assertAcceptedPrivateVssProofCoverage(
+        localVerification,
+        input.qSharePrimes.length,
+        'localVerification',
+    );
     const encryptedDelivery = await encryptPrivateVssMailboxEnvelope({
         privateEnvelope: privateShareEnvelopeBuild.privateEnvelope,
         privateEnvelopeAad: associatedData,

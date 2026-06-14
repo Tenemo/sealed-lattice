@@ -29,23 +29,17 @@ import {
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssCoefficientCommitmentBundle,
     deriveThresholdShareCommitments,
-    galoisProofModelStatus,
-    galoisProofVerificationStatus,
     type CollectiveBgvSetupContext,
     type EvaluatorKeySchedule,
-    type EvaluationKeyShareProofGenerator,
+    type EvaluationKeyShareMaterial,
     type GaloisKeyShareBatchContribution,
-    type GaloisKeyShareProofGeneration,
-    type GaloisKeyShareProofMaterial,
     type PrivateVssMailboxDeliveryKernel,
     type PrivateVssMailboxDeliverySet,
     type PrivateVssShareProofFactory,
     type ProtocolRootSigner,
     type PublicKeyShareContributionInput,
-    type PublicKeyShareLnpProofMaterial,
+    type PublicKeyShareSuccinctProofMaterial,
     type PublicKeyShareMaterialContributionInput,
-    type RelinearizationKeyShareProofGeneration,
-    type RelinearizationKeyShareProofMaterial,
     type RelinearizationRoundOneContribution,
     type RelinearizationRoundTwoContribution,
     type RequiredGaloisKeyScheduleEntry,
@@ -56,29 +50,34 @@ import {
     type SetupPackageCertificateInput,
     type SetupPhaseParticipantObject,
     type SetupPhaseRecord,
+    type TrusteeEvaluationKeyProofGenerator,
+    type TrusteeEvaluationKeyWitnessInput,
+    type VerifiedSetupProofMaterialSet,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
-    relinearizationProofModelStatus,
-    relinearizationProofVerificationStatus,
+    trusteeEvaluationKeyProofFamily,
+    trusteeEvaluationKeyProofModelStatus,
     publicKeyShareCoefficientVectorHashDomain,
-    publicKeyShareLnpProofModelStatus,
-    publicKeyShareLnpProofVerificationStatus,
+    publicKeyShareSuccinctProofModelStatus,
+    publicKeyShareSuccinctProofVerificationStatus,
     publicKeyShareMaterialTransportEncoding,
-    sameSecretLnpProofModelStatus,
-    sameSecretLnpProofVerificationStatus,
+    sameSecretAnchorProofModelStatus,
+    sameSecretAnchorProofVerificationStatus,
 } from '#packages/protocol/src/index';
 import {
-    privateVssShareLnpProofModelStatus,
-    privateVssShareLnpProofVerificationStatus,
+    privateVssShareSuccinctProofModelStatus,
+    privateVssShareSuccinctProofVerificationStatus,
 } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
-import type { SetupProofTboxZ34Metadata } from '#packages/protocol/src/setup/setup-proof-material-transport';
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
 } from '#tests/support/protocol-signature-fixtures';
 
-const qSharePrimes = [65_537, 114_689, 147_457] as const;
+const qSharePrimes = [
+    65_537, 65_539, 65_543, 65_551, 65_557, 65_563, 65_579, 65_581, 65_587,
+    65_599, 65_609, 65_617, 65_629, 65_633, 65_647, 65_651, 65_657,
+] as const;
 const ringDegree = 2;
 const thresholdDegree = 2;
 const firstProfileThresholdDegree = 4;
@@ -90,6 +89,41 @@ const fixtureHash = (label: string): string =>
     });
 
 type JsonRecord = Record<string, unknown>;
+
+const fixtureStringField = (record: JsonRecord, fieldName: string): string => {
+    const value = record[fieldName];
+    if (typeof value !== 'string') {
+        throw new Error(`${fieldName} must be a string in the test fixture.`);
+    }
+
+    return value;
+};
+
+const fixtureNumberField = (record: JsonRecord, fieldName: string): number => {
+    const value = record[fieldName];
+    if (typeof value !== 'number') {
+        throw new Error(`${fieldName} must be a number in the test fixture.`);
+    }
+
+    return value;
+};
+
+const fixtureHashArrayField = (
+    record: JsonRecord,
+    fieldName: string,
+): readonly ProtocolHash[] => {
+    const value = record[fieldName];
+    if (
+        !Array.isArray(value) ||
+        !value.every((entry) => typeof entry === 'string')
+    ) {
+        throw new Error(
+            `${fieldName} must be a string array in the test fixture.`,
+        );
+    }
+
+    return value;
+};
 
 const jsonRecord = (value: unknown, label: string): JsonRecord => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -164,46 +198,41 @@ const requiredGaloisKeySchedule = [
     },
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
-const setupProofBindingFixture = (
-    context: CollectiveBgvSetupContext,
-): JsonRecord => ({
-    objectType: 'SetupCeremonyAssemblyProofBindingFixture',
+const privateVssShareProofAccounting = {
+    objectType: 'SuccinctPrivateVssShareAccounting',
     objectVersion: 1,
-    ceremonyId: context.ceremonyId,
-    manifestHash: context.manifestHash,
-    rosterHash: context.rosterHash,
-    setupProfileHash: context.setupProfileHash,
-    qShareHash: context.qShareHash,
-    setupEpoch: context.setupEpoch,
-});
-
-const sameSecretTboxParameterProfileHash = fixtureHash('same-secret-tbox');
-const publicKeyShareTboxParameterProfileHash = fixtureHash(
-    'public-key-share-tbox',
+    fixture: 'succinct-private-vss-share-accounting',
+} as const;
+const privateVssShareProofAccountingHash = deriveProtocolHash(
+    'SuccinctPrivateVssShareAccountingHash',
+    privateVssShareProofAccounting,
 );
-const privateVssShareTboxParameterProfileHash = fixtureHash(
-    'private-vss-share-tbox',
+const sameSecretLinkageAnchorProofAccounting = {
+    objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+    objectVersion: 1,
+    fixture: 'succinct-same-secret-linkage-anchor-accounting',
+} as const;
+const sameSecretLinkageAnchorProofAccountingHash = deriveProtocolHash(
+    'SuccinctSameSecretLinkageAnchorAccountingHash',
+    sameSecretLinkageAnchorProofAccounting,
 );
-const relinearizationKeyShareTboxParameterProfileHash = fixtureHash(
-    'relinearization-key-share-tbox',
+const publicKeyShareProofAccounting = {
+    objectType: 'SuccinctPublicKeyShareAccounting',
+    objectVersion: 1,
+    fixture: 'succinct-public-key-share-accounting',
+} as const;
+const publicKeyShareProofAccountingHash = deriveProtocolHash(
+    'SuccinctPublicKeyShareAccountingHash',
+    publicKeyShareProofAccounting,
 );
-const galoisKeyShareTboxParameterProfileHash = fixtureHash(
-    'galois-key-share-tbox',
-);
-const setupProofFamilies = [
-    'vss-opening-carry',
-    'same-secret-consistency',
-    'public-key-share',
-    'relinearization-key-share',
-    'galois-key-share',
-] as const;
+const trusteeEvaluationKeyProofAccounting = {
+    objectType: 'SuccinctEvaluationKeyProofAccounting',
+    objectVersion: 1,
+    fixture: 'succinct-evaluation-key-proof-accounting',
+} as const;
+const setupProofFamilies = ['vss-opening-carry'] as const;
 const setupProofChallengeDifferenceInvertibilityStatus =
     'repo-owned-lnp22-small-coefficient-challenge-differences-invertible';
-const setupProofLnpTboxProofRingDegree = 128;
-const setupProofLnpTboxChallengeLog2Range = 3;
-const setupProofLnpTboxChallengeEncodedBits =
-    setupProofLnpTboxProofRingDegree * setupProofLnpTboxChallengeLog2Range;
-const setupProofLnpTboxChallengeSpaceBits = 147;
 const setupProofChallengeSamplePositions = [0, 1, 63, 64, 65, 127] as const;
 const setupProofChallengeDifferenceInvertibilityAccounting = {
     objectType: 'SetupProofChallengeDifferenceInvertibilityAccounting',
@@ -248,9 +277,10 @@ const setupPhaseOrder = [
     ['publicKeyShareProofs', 9],
     ['relinearizationRoundOne', 10],
     ['relinearizationRoundTwo', 11],
-    ['galoisKeyBatchProofs', 12],
-    ['setupPackageAssembly', 13],
-    ['setupPackageVerification', 14],
+    ['galoisKeyShareBatches', 12],
+    ['trusteeEvaluationKeyProofs', 13],
+    ['setupPackageAssembly', 14],
+    ['setupPackageVerification', 15],
 ] as const;
 
 type CeremonyKernelFixture = Readonly<{
@@ -385,24 +415,6 @@ const evaluationKeyComponentVectorRoot = (
         componentVectors,
     });
 
-const setupProofTboxZ34Metadata = (
-    label: string,
-): SetupProofTboxZ34Metadata => ({
-    z34SeedMaterialHash: fixtureHash(`${label}-z34-seed-material`),
-    z34ChallengeSeedHash: fixtureHash(`${label}-z34-challenge-seed`),
-    z34ChallengeTailHash: fixtureHash(`${label}-z34-challenge-tail`),
-    z34ChallengeRowDomainHash: fixtureHash(`${label}-z34-row-domain`),
-    z34ChallengeZ3RowSetHash: fixtureHash(`${label}-z34-z3-row-set`),
-    z34ChallengeZ4RowSetHash: fixtureHash(`${label}-z34-z4-row-set`),
-    tboxLowerProtocolChallengeHash: fixtureHash(
-        `${label}-tbox-lower-protocol-challenge`,
-    ),
-    z34Z3CheckWindowHash: fixtureHash(`${label}-z34-z3-check-window`),
-    z34Z4CheckWindowHash: fixtureHash(`${label}-z34-z4-check-window`),
-    z34Z3L2SquaredDecimal: '64',
-    z34Z4InfinityNormDecimal: '1',
-});
-
 const sameSecretProofMaterial = (
     trusteeRosterPosition: number,
 ): SameSecretProofMaterial => {
@@ -410,25 +422,14 @@ const sameSecretProofMaterial = (
 
     return {
         setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-        proofFamily: 'same-secret-consistency',
-        proofVerificationStatus: sameSecretLnpProofVerificationStatus,
-        proofModelStatus: sameSecretLnpProofModelStatus,
-        sameSecretTboxParameterProfileHash,
+        proofFamily: 'same-secret-linkage-anchor',
+        proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
+        proofModelStatus: sameSecretAnchorProofModelStatus,
         trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
         trusteeRosterPosition,
         statementHash: fixtureHash(
             `same-secret-statement-${String(trusteeRosterPosition)}`,
         ),
-        relationCommitmentHash: fixtureHash(
-            `same-secret-relation-${String(trusteeRosterPosition)}`,
-        ),
-        tboxCommitmentPrefixHash: fixtureHash(
-            `same-secret-tbox-prefix-${String(trusteeRosterPosition)}`,
-        ),
-        ...setupProofTboxZ34Metadata(
-            `same-secret-${String(trusteeRosterPosition)}`,
-        ),
-        challenge: String(17 + trusteeRosterPosition),
         proofSizeBytes: proofMaterialBytesHex.length / 2,
         proofBytesHash: fixtureHash(
             `same-secret-proof-bytes-${String(trusteeRosterPosition)}`,
@@ -437,42 +438,31 @@ const sameSecretProofMaterial = (
     };
 };
 
-const publicKeyShareLnpProofMaterial = (
+const publicKeyShareSuccinctProofMaterial = (
     trusteeRosterPosition: number,
-): PublicKeyShareLnpProofMaterial => {
+): PublicKeyShareSuccinctProofMaterial => {
     const proofMaterialBytesHex = `bb66${trusteeRosterPosition.toString(16).padStart(4, '0')}`;
 
     return {
         setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
         proofFamily: 'public-key-share',
-        proofVerificationStatus: publicKeyShareLnpProofVerificationStatus,
-        proofModelStatus: publicKeyShareLnpProofModelStatus,
-        publicKeyShareTboxParameterProfileHash,
+        proofVerificationStatus: publicKeyShareSuccinctProofVerificationStatus,
+        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
         trusteeRosterPosition,
         statementHash: fixtureHash(
-            `public-key-lnp-statement-${String(trusteeRosterPosition)}`,
+            `public-key-succinct-statement-${String(trusteeRosterPosition)}`,
         ),
-        relationCommitmentHash: fixtureHash(
-            `public-key-lnp-relation-${String(trusteeRosterPosition)}`,
-        ),
-        tboxCommitmentPrefixHash: fixtureHash(
-            `public-key-lnp-tbox-prefix-${String(trusteeRosterPosition)}`,
-        ),
-        ...setupProofTboxZ34Metadata(
-            `public-key-lnp-${String(trusteeRosterPosition)}`,
-        ),
-        challenge: String(29 + trusteeRosterPosition),
         proofSizeBytes: proofMaterialBytesHex.length / 2,
         proofBytesHash: fixtureHash(
-            `public-key-lnp-proof-bytes-${String(trusteeRosterPosition)}`,
+            `public-key-succinct-proof-bytes-${String(trusteeRosterPosition)}`,
         ),
         proofBytesHex: proofMaterialBytesHex,
     };
 };
 
 const embeddedProofMaterialBytesHex = (
-    material: SameSecretProofMaterial | PublicKeyShareLnpProofMaterial,
+    material: SameSecretProofMaterial | PublicKeyShareSuccinctProofMaterial,
 ): string => {
     const embeddedMaterial = material as Readonly<{ proofBytesHex?: unknown }>;
     if (typeof embeddedMaterial.proofBytesHex !== 'string') {
@@ -491,7 +481,7 @@ const hashBoundSameSecretProofMaterial = (
     return {
         ...material,
         proofBytesHash: hash512Hex(
-            'sealed-lattice/setup/same-secret/lnp-proof-bytes-v1',
+            'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1',
             [proofBytes(bytesHex)],
         ),
     };
@@ -499,17 +489,65 @@ const hashBoundSameSecretProofMaterial = (
 
 const hashBoundPublicKeyShareProofMaterial = (
     trusteeRosterPosition: number,
-): PublicKeyShareLnpProofMaterial => {
-    const material = publicKeyShareLnpProofMaterial(trusteeRosterPosition);
+): PublicKeyShareSuccinctProofMaterial => {
+    const material = publicKeyShareSuccinctProofMaterial(trusteeRosterPosition);
     const bytesHex = embeddedProofMaterialBytesHex(material);
 
     return {
         ...material,
         proofBytesHash: hash512Hex(
-            'sealed-lattice/setup/public-key-share/lnp-proof-bytes-v1',
+            'sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1',
             [proofBytes(bytesHex)],
         ),
     };
+};
+
+const verifiedSetupProofMaterialFromTransport = (
+    transportedMaterialSet: Readonly<{ proofMaterials: readonly JsonRecord[] }>,
+    materialIndex: number,
+    verificationId: string,
+): VerifiedSetupProofMaterialSet['proofMaterials'][number] => {
+    const transportedMaterial =
+        transportedMaterialSet.proofMaterials[materialIndex];
+    if (transportedMaterial === undefined) {
+        throw new Error('transported proof material fixture is missing.');
+    }
+    if (
+        fixtureNumberField(transportedMaterial, 'chunkSizeBytes') !== 1_048_576
+    ) {
+        throw new Error(
+            'transported proof material fixture must use the accepted chunk size.',
+        );
+    }
+
+    return {
+        objectType: 'VerifiedSetupProofMaterial',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        verificationId,
+        proofFamily: fixtureStringField(transportedMaterial, 'proofFamily'),
+        proofMaterialRoot: fixtureStringField(
+            transportedMaterial,
+            'proofMaterialRoot',
+        ),
+        proofBytesEncoding: 'binary-chunked-proof-bytes',
+        proofChunkSizeBytes: 1_048_576,
+        proofChunkCount: fixtureNumberField(transportedMaterial, 'chunkCount'),
+        proofTotalByteLength: fixtureNumberField(
+            transportedMaterial,
+            'totalByteLength',
+        ),
+        proofFullObjectHash: fixtureStringField(
+            transportedMaterial,
+            'fullObjectHash',
+        ),
+        proofChunkRoot: fixtureStringField(transportedMaterial, 'chunkRoot'),
+        proofChunkHashes: fixtureHashArrayField(
+            transportedMaterial,
+            'chunkHashes',
+        ),
+    } as const;
 };
 
 const privateVssShareProofFactory: PrivateVssShareProofFactory = (input) => {
@@ -519,20 +557,19 @@ const privateVssShareProofFactory: PrivateVssShareProofFactory = (input) => {
         input.rnsLimbIndex,
     );
     const proofMaterialBytesHash = hash512Hex(
-        'sealed-lattice/setup/private-vss-share/lnp-proof-bytes-v1',
+        'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1',
         [proofBytes(proofMaterialBytesHex)],
     );
 
     return {
         objectType: 'PrivateVssShareProof',
         objectVersion: 1,
-        proofProfileId: 'sealed-lattice-private-vss-share-proof-lnp-v1',
+        proofProfileId: 'sealed-lattice-private-vss-share-proof-succinct-v1',
         setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
         proofFamily: 'vss-opening-carry',
         proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-        privateVssShareTboxParameterProfileHash,
-        proofVerificationStatus: privateVssShareLnpProofVerificationStatus,
-        proofModelStatus: privateVssShareLnpProofModelStatus,
+        proofVerificationStatus: privateVssShareSuccinctProofVerificationStatus,
+        proofModelStatus: privateVssShareSuccinctProofModelStatus,
         proofStatementRoot: deriveProtocolHash(
             'PrivateVssShareProofStatementRoot',
             {
@@ -546,9 +583,6 @@ const privateVssShareProofFactory: PrivateVssShareProofFactory = (input) => {
             },
         ),
         statementHash: fixtureHash('private-vss-statement'),
-        relationCommitmentHash: fixtureHash('private-vss-relation'),
-        tboxCommitmentPrefixHash: fixtureHash('private-vss-tbox-prefix'),
-        challenge: 17,
         proofSizeBytes: proofMaterialBytesHex.length / 2,
         proofBytesHash: proofMaterialBytesHash,
         proofMaterialRoot: deriveProtocolHash(
@@ -576,6 +610,11 @@ const createKernelFixture = (): CeremonyKernelFixture => {
                     'PrivateVssShareEnvelopeHash',
                     privateEnvelope,
                 );
+                const rnsShareOpenings = Array.isArray(
+                    privateEnvelope.rnsShareOpenings,
+                )
+                    ? privateEnvelope.rnsShareOpenings
+                    : [];
                 const sourceTrusteeRecord =
                     input.sourceTrusteeCoefficientCommitmentRecord as Record<
                         string,
@@ -603,6 +642,8 @@ const createKernelFixture = (): CeremonyKernelFixture => {
                         ok: false,
                         privateEnvelopeHash,
                         localVerificationRoot: null,
+                        verifiedPrivateVssShareProofCount:
+                            rnsShareOpenings.length,
                         refusedObjects: [
                             {
                                 reasonCode: 'mixed-source-material',
@@ -664,6 +705,7 @@ const createKernelFixture = (): CeremonyKernelFixture => {
                     ok: true,
                     privateEnvelopeHash,
                     localVerificationRoot,
+                    verifiedPrivateVssShareProofCount: rnsShareOpenings.length,
                     refusedObjects: [],
                 };
             },
@@ -710,6 +752,36 @@ const createRefusingKernelFixture = (): CeremonyKernelFixture => {
         },
     };
 };
+
+const createShortPrivateVssProofCountKernelFixture =
+    (): CeremonyKernelFixture => {
+        const kernelFixture = createKernelFixture();
+
+        return {
+            verifiedExpectedEnvelopeCount:
+                kernelFixture.verifiedExpectedEnvelopeCount,
+            kernel: {
+                ...kernelFixture.kernel,
+                verifyPrivateVssShareEnvelope: (input) => {
+                    const result =
+                        kernelFixture.kernel.verifyPrivateVssShareEnvelope(
+                            input,
+                        );
+                    if (!result.ok) {
+                        return result;
+                    }
+
+                    return {
+                        ...result,
+                        verifiedPrivateVssShareProofCount: Math.max(
+                            0,
+                            (result.verifiedPrivateVssShareProofCount ?? 0) - 1,
+                        ),
+                    };
+                },
+            },
+        };
+    };
 
 const coefficientMessage = (
     sourceTrusteeRosterPosition: number,
@@ -931,14 +1003,14 @@ const galoisKeySwitchSeed = (
         level,
     });
 
-const relinearizationProofMaterial = (
+const relinearizationShareMaterial = (
     evaluatorKeySchedule: EvaluatorKeySchedule,
     label: string,
     round: 'round-one' | 'round-two',
     level: number,
     applicationRingDegree = ringDegree,
     qSharePrimeList: readonly number[] = qSharePrimes,
-): RelinearizationKeyShareProofMaterial => {
+): EvaluationKeyShareMaterial => {
     const keySwitchDomain = 'relinearization';
     const keySwitchSeedHex = relinearizationKeySwitchSeed(
         evaluatorKeySchedule,
@@ -951,14 +1023,8 @@ const relinearizationProofMaterial = (
         applicationRingDegree,
         qSharePrimeList,
     );
-    const proofMaterialBytesHex = '00112233';
 
     return {
-        proofProfileId: 'sealed-lattice-relinearization-key-share-proof-lnp-v1',
-        setupProofBinding: {
-            objectType: 'SetupCeremonyAssemblyProofBindingFixture',
-            label,
-        },
         keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
         keySwitchDomain,
         keySwitchSeedHex,
@@ -972,30 +1038,17 @@ const relinearizationProofMaterial = (
             applicationRingDegree,
         ),
         keySwitchComponentVectors,
-        relinearizationKeyShareTboxParameterProfileHash: fixtureHash(
-            `relinearization-tbox-${label}`,
-        ),
-        statementHash: fixtureHash(`statement-${label}`),
-        relationCommitmentHash: fixtureHash(`relation-commitment-${label}`),
-        tboxCommitmentPrefixHash: fixtureHash(`tbox-commitment-${label}`),
-        challenge: 17,
-        proofSizeBytes: proofMaterialBytesHex.length / 2,
-        proofBytesHash: hash512Hex(
-            'sealed-lattice/setup/relinearization-key-share/lnp-proof-bytes-v1',
-            [proofBytes(proofMaterialBytesHex)],
-        ),
-        proofBytesHex: proofMaterialBytesHex,
     };
 };
 
-const galoisProofMaterial = (
+const galoisShareMaterial = (
     evaluatorKeySchedule: EvaluatorKeySchedule,
     label: string,
     rotation: number,
     level: number,
     applicationRingDegree = ringDegree,
     qSharePrimeList: readonly number[] = qSharePrimes,
-): GaloisKeyShareProofMaterial => {
+): EvaluationKeyShareMaterial => {
     const keySwitchDomain = `galois-${String(rotation)}`;
     const keySwitchSeedHex = galoisKeySwitchSeed(
         evaluatorKeySchedule,
@@ -1008,14 +1061,8 @@ const galoisProofMaterial = (
         applicationRingDegree,
         qSharePrimeList,
     );
-    const proofMaterialBytesHex = '44556677';
 
     return {
-        proofProfileId: 'sealed-lattice-galois-key-share-proof-lnp-v1',
-        setupProofBinding: {
-            objectType: 'SetupCeremonyAssemblyProofBindingFixture',
-            label,
-        },
         keySwitchMaterialEncoding: 'embedded-full-key-switch-component-vectors',
         keySwitchDomain,
         keySwitchSeedHex,
@@ -1029,303 +1076,85 @@ const galoisProofMaterial = (
             applicationRingDegree,
         ),
         keySwitchComponentVectors,
-        galoisKeyShareTboxParameterProfileHash: fixtureHash(
-            `galois-tbox-${label}`,
-        ),
-        statementHash: fixtureHash(`galois-statement-${label}`),
-        relationCommitmentHash: fixtureHash(
-            `galois-relation-commitment-${label}`,
-        ),
-        tboxCommitmentPrefixHash: fixtureHash(
-            `galois-tbox-commitment-${label}`,
-        ),
-        challenge: 19,
-        proofSizeBytes: proofMaterialBytesHex.length / 2,
-        proofBytesHash: hash512Hex(
-            'sealed-lattice/setup/galois-key-share/lnp-proof-bytes-v1',
-            [proofBytes(proofMaterialBytesHex)],
-        ),
-        proofBytesHex: proofMaterialBytesHex,
     };
 };
 
-const relinearizationProofGenerationFromMaterial = (
-    proofMaterial: RelinearizationKeyShareProofMaterial,
-    label: string,
-    round: 'round-one' | 'round-two',
-): RelinearizationKeyShareProofGeneration => {
-    if (
-        proofMaterial.keySwitchMaterialEncoding !==
-        'embedded-full-key-switch-component-vectors'
-    ) {
-        throw new Error(
-            'relinearization proof-generation fixture requires embedded component vectors.',
-        );
-    }
+// One scheduled relinearization level contributes a round-one and a round-two
+// statement key; the Galois schedule contributes one key per entry.
+const trusteeEvaluationKeyStatementKeyCount =
+    2 + requiredGaloisKeySchedule.length;
 
-    return {
-        proofProfileId: proofMaterial.proofProfileId,
-        setupProofBinding: proofMaterial.setupProofBinding,
-        keySwitchMaterialEncoding: proofMaterial.keySwitchMaterialEncoding,
-        keySwitchDomain: proofMaterial.keySwitchDomain,
-        keySwitchSeedHex: proofMaterial.keySwitchSeedHex,
-        ringDegree: proofMaterial.ringDegree,
-        keySwitchComponentVectorRoot:
-            proofMaterial.keySwitchComponentVectorRoot,
-        keySwitchComponentVectors: proofMaterial.keySwitchComponentVectors,
-        constantCommitments: [
-            {
-                objectType: 'EvaluationKeyConstantCommitmentFixture',
-                label,
+const trusteeEvaluationKeyProofGeneratorFixture =
+    (): TrusteeEvaluationKeyProofGenerator => (input) => {
+        const generatedProofBytesHex = `cc77${input.context.trusteeRosterPosition
+            .toString(16)
+            .padStart(4, '0')}`;
+
+        return {
+            ok: true,
+            operation: 'generateTrusteeEvaluationKeyProof',
+            proofModelStatus: trusteeEvaluationKeyProofModelStatus,
+            proofAccountingHash: fixtureHash(
+                'trustee-evaluation-key-proof-accounting',
+            ),
+            statementHash: fixtureHash(
+                `trustee-evaluation-key-statement-${String(
+                    input.context.trusteeRosterPosition,
+                )}`,
+            ),
+            limbCount: input.keys[0]?.componentBByDigit.length ?? 0,
+            keyCount: input.keys.length,
+            sameSecretLinkageIncluded: true,
+            proofByteLength: generatedProofBytesHex.length / 2,
+            proofBytesHex: generatedProofBytesHex,
+            proofRandomness: {
+                source: input.proofRandomnessSource,
+                retention: 'test-only fixture',
             },
-        ],
-        secretCoefficients: Array.from(
-            { length: proofMaterial.ringDegree },
-            (_unused, coefficientIndex) => (coefficientIndex % 3) - 1,
-        ),
-        openingRandomnessByLimb: [
-            [
-                Array.from(
-                    { length: proofMaterial.ringDegree },
-                    (_unused, coefficientIndex) =>
-                        coefficientIndex % 2 === 0 ? 1 : -1,
-                ),
-            ],
-        ],
-        errorCoefficientsByDigit: [
-            Array.from(
-                { length: proofMaterial.ringDegree },
-                (_unused, coefficientIndex) =>
-                    coefficientIndex % 2 === 0 ? 0 : 1,
-            ),
-        ],
-        relinearizationKeyShareTboxParameterProfileHash:
-            proofMaterial.relinearizationKeyShareTboxParameterProfileHash,
-        relinearizationSourceCoefficientsByDigit: [
-            Array.from(
-                { length: proofMaterial.ringDegree },
-                (_unused, coefficientIndex) => coefficientIndex % 5,
-            ),
-        ],
-        ...(round === 'round-one'
-            ? {}
-            : {
-                  roundOneAggregateSourceCoefficientsByDigit: [
-                      Array.from(
-                          { length: proofMaterial.ringDegree },
-                          (_unused, coefficientIndex) =>
-                              coefficientIndex % 2 === 0 ? 1 : 0,
-                      ),
-                  ],
-              }),
-        proofRandomnessSource: 'development-deterministic-fixture',
-        proofRandomnessSeedHex: fixtureHash(
-            `relinearization-proof-randomness-${label}`,
-        ),
-    };
-};
-
-const galoisProofGenerationFromMaterial = (
-    proofMaterial: GaloisKeyShareProofMaterial,
-    label: string,
-): GaloisKeyShareProofGeneration => {
-    if (
-        proofMaterial.keySwitchMaterialEncoding !==
-        'embedded-full-key-switch-component-vectors'
-    ) {
-        throw new Error(
-            'Galois proof-generation fixture requires embedded component vectors.',
-        );
-    }
-
-    return {
-        proofProfileId: proofMaterial.proofProfileId,
-        setupProofBinding: proofMaterial.setupProofBinding,
-        keySwitchMaterialEncoding: proofMaterial.keySwitchMaterialEncoding,
-        keySwitchDomain: proofMaterial.keySwitchDomain,
-        keySwitchSeedHex: proofMaterial.keySwitchSeedHex,
-        ringDegree: proofMaterial.ringDegree,
-        keySwitchComponentVectorRoot:
-            proofMaterial.keySwitchComponentVectorRoot,
-        keySwitchComponentVectors: proofMaterial.keySwitchComponentVectors,
-        constantCommitments: [
-            {
-                objectType: 'EvaluationKeyConstantCommitmentFixture',
-                label,
-            },
-        ],
-        secretCoefficients: Array.from(
-            { length: proofMaterial.ringDegree },
-            (_unused, coefficientIndex) => (coefficientIndex % 3) - 1,
-        ),
-        openingRandomnessByLimb: [
-            [
-                Array.from(
-                    { length: proofMaterial.ringDegree },
-                    (_unused, coefficientIndex) =>
-                        coefficientIndex % 2 === 0 ? -1 : 1,
-                ),
-            ],
-        ],
-        errorCoefficientsByDigit: [
-            Array.from(
-                { length: proofMaterial.ringDegree },
-                (_unused, coefficientIndex) =>
-                    coefficientIndex % 2 === 0 ? 1 : 0,
-            ),
-        ],
-        galoisKeyShareTboxParameterProfileHash:
-            proofMaterial.galoisKeyShareTboxParameterProfileHash,
-        proofRandomnessSource: 'development-deterministic-fixture',
-        proofRandomnessSeedHex: fixtureHash(`galois-proof-randomness-${label}`),
-    };
-};
-
-const generatedEvaluationKeyContributions = (
-    input: SetupCeremonyAssemblyInput,
-): Pick<
-    SetupCeremonyAssemblyInput,
-    | 'relinearizationRoundOneContributions'
-    | 'relinearizationRoundTwoContributions'
-    | 'galoisKeyShareBatchContributions'
-> => ({
-    relinearizationRoundOneContributions:
-        input.relinearizationRoundOneContributions.map((contribution) => {
-            if (contribution.proofMaterial === undefined) {
-                throw new Error(
-                    'round-one fixture contribution must include proof material.',
-                );
-            }
-
-            return {
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                roundOneShareRoot: contribution.roundOneShareRoot,
-                proofGeneration: relinearizationProofGenerationFromMaterial(
-                    contribution.proofMaterial,
-                    `round-one-${String(contribution.trusteeRosterPosition)}-${String(contribution.level)}`,
-                    'round-one',
-                ),
-            };
-        }),
-    relinearizationRoundTwoContributions:
-        input.relinearizationRoundTwoContributions.map((contribution) => {
-            if (contribution.proofMaterial === undefined) {
-                throw new Error(
-                    'round-two fixture contribution must include proof material.',
-                );
-            }
-
-            return {
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                roundTwoShareRoot: contribution.roundTwoShareRoot,
-                proofGeneration: relinearizationProofGenerationFromMaterial(
-                    contribution.proofMaterial,
-                    `round-two-${String(contribution.trusteeRosterPosition)}-${String(contribution.level)}`,
-                    'round-two',
-                ),
-            };
-        }),
-    galoisKeyShareBatchContributions:
-        input.galoisKeyShareBatchContributions.map((batchContribution) => ({
-            trusteeRosterPosition: batchContribution.trusteeRosterPosition,
-            galoisKeyShareProofs: batchContribution.galoisKeyShareProofs.map(
-                (proofContribution) => {
-                    if (proofContribution.proofMaterial === undefined) {
-                        throw new Error(
-                            'Galois fixture contribution must include proof material.',
-                        );
-                    }
-
-                    return {
-                        rotation: proofContribution.rotation,
-                        level: proofContribution.level,
-                        galoisKeyShareRoot:
-                            proofContribution.galoisKeyShareRoot,
-                        proofGeneration: galoisProofGenerationFromMaterial(
-                            proofContribution.proofMaterial,
-                            `${String(batchContribution.trusteeRosterPosition)}-${String(proofContribution.rotation)}-${String(proofContribution.level)}`,
-                        ),
-                    };
-                },
-            ),
-        })),
-});
-
-const generatedEvaluationKeyProofGenerator =
-    (): EvaluationKeyShareProofGenerator => {
-        let proofCallCount = 0;
-
-        return (input) => {
-            const proofCallIndex = proofCallCount;
-            proofCallCount += 1;
-            const generatedProofBytesHex = proofCallIndex
-                .toString(16)
-                .padStart(8, '0');
-            const proofBytesHash =
-                input.proofFamily === 'relinearization-key-share'
-                    ? hash512Hex(
-                          'sealed-lattice/setup/relinearization-key-share/lnp-proof-bytes-v1',
-                          [proofBytes(generatedProofBytesHex)],
-                      )
-                    : hash512Hex(
-                          'sealed-lattice/setup/galois-key-share/lnp-proof-bytes-v1',
-                          [proofBytes(generatedProofBytesHex)],
-                      );
-            const proofRecord = jsonRecord(
-                input.proofRecord,
-                'evaluation-key proof generator record',
-            );
-
-            return {
-                ok: true,
-                operation: 'generateEvaluationKeyShareLnpProof',
-                setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-                proofFamily: input.proofFamily,
-                proofVerificationStatus:
-                    input.proofFamily === 'relinearization-key-share'
-                        ? relinearizationProofVerificationStatus
-                        : galoisProofVerificationStatus,
-                proofModelStatus:
-                    input.proofFamily === 'relinearization-key-share'
-                        ? relinearizationProofModelStatus
-                        : galoisProofModelStatus,
-                ...(input.proofFamily === 'relinearization-key-share'
-                    ? {
-                          relinearizationKeyShareTboxParameterProfileHash:
-                              proofRecord.relinearizationKeyShareTboxParameterProfileHash as string,
-                      }
-                    : {
-                          galoisKeyShareTboxParameterProfileHash:
-                              proofRecord.galoisKeyShareTboxParameterProfileHash as string,
-                      }),
-                statementHash: fixtureHash(
-                    `generated-evaluation-key-statement-${String(proofCallIndex)}`,
-                ),
-                relationCommitmentHash: fixtureHash(
-                    `generated-evaluation-key-relation-${String(proofCallIndex)}`,
-                ),
-                tboxCommitmentPrefixHash: fixtureHash(
-                    `generated-evaluation-key-tbox-${String(proofCallIndex)}`,
-                ),
-                ...setupProofTboxZ34Metadata(
-                    `generated-evaluation-key-${String(proofCallIndex)}`,
-                ),
-                challenge: String(41 + proofCallIndex),
-                proofSizeBytes: generatedProofBytesHex.length / 2,
-                proofBytesHash,
-                proofBytesHex: generatedProofBytesHex,
-                proofRandomness: {
-                    source:
-                        input.proofRandomnessSource ??
-                        'development-deterministic-fixture',
-                    seedBytes: 64,
-                    retention: 'test-only fixture',
-                },
-            };
         };
     };
+
+const trusteeEvaluationKeyWitnessesFixture = (
+    participantCount: number,
+    statementKeyCount = trusteeEvaluationKeyStatementKeyCount,
+    applicationRingDegree = ringDegree,
+    qSharePrimeList: readonly number[] = qSharePrimes,
+): TrusteeEvaluationKeyWitnessInput[] => {
+    return Array.from(
+        { length: participantCount },
+        (_unused, trusteeRosterPosition) => ({
+            trusteeRosterPosition,
+            secretCoefficients: Array.from(
+                { length: applicationRingDegree },
+                (_unusedCoefficient, coefficientIndex) =>
+                    (coefficientIndex % 3) - 1,
+            ),
+            errorCoefficientsByKey: Array.from(
+                { length: statementKeyCount },
+                () => [
+                    Array.from(
+                        { length: applicationRingDegree },
+                        (_unusedCoefficient, coefficientIndex) =>
+                            coefficientIndex % 2,
+                    ),
+                ],
+            ),
+            negativeIndicatorCoefficients: Array.from(
+                { length: applicationRingDegree },
+                () => 0,
+            ),
+            openingRandomnessByLimb: qSharePrimeList.map(() => [
+                Array.from({ length: applicationRingDegree }, () => 1),
+            ]),
+            constantCommitments: [
+                {
+                    objectType: 'EvaluationKeyConstantCommitmentFixture',
+                    trusteeRosterPosition,
+                },
+            ],
+        }),
+    );
+};
 
 const evaluationKeyFixture = (
     participantCount: number,
@@ -1405,7 +1234,7 @@ const evaluationKeyFixture = (
             evaluatorKeySchedule.relinearizationLevelSchedule.flatMap(
                 (scheduleEntry) =>
                     sameSecretProofReferences.map((reference) => {
-                        const proofMaterial = relinearizationProofMaterial(
+                        const shareMaterial = relinearizationShareMaterial(
                             evaluatorKeySchedule,
                             `round-one-${String(
                                 reference.trusteeRosterPosition,
@@ -1421,8 +1250,8 @@ const evaluationKeyFixture = (
                                 reference.trusteeRosterPosition,
                             level: scheduleEntry.level,
                             roundOneShareRoot:
-                                proofMaterial.keySwitchComponentVectorRoot,
-                            proofMaterial,
+                                shareMaterial.keySwitchComponentVectorRoot,
+                            shareMaterial,
                         };
                     }),
             ),
@@ -1430,7 +1259,7 @@ const evaluationKeyFixture = (
             evaluatorKeySchedule.relinearizationLevelSchedule.flatMap(
                 (scheduleEntry) =>
                     sameSecretProofReferences.map((reference) => {
-                        const proofMaterial = relinearizationProofMaterial(
+                        const shareMaterial = relinearizationShareMaterial(
                             evaluatorKeySchedule,
                             `round-two-${String(
                                 reference.trusteeRosterPosition,
@@ -1446,17 +1275,17 @@ const evaluationKeyFixture = (
                                 reference.trusteeRosterPosition,
                             level: scheduleEntry.level,
                             roundTwoShareRoot:
-                                proofMaterial.keySwitchComponentVectorRoot,
-                            proofMaterial,
+                                shareMaterial.keySwitchComponentVectorRoot,
+                            shareMaterial,
                         };
                     }),
             ),
         galoisKeyShareBatchContributions: sameSecretProofReferences.map(
             (reference) => ({
                 trusteeRosterPosition: reference.trusteeRosterPosition,
-                galoisKeyShareProofs: requiredGaloisKeySchedule.map(
+                galoisKeyShares: requiredGaloisKeySchedule.map(
                     (scheduleEntry) => {
-                        const proofMaterial = galoisProofMaterial(
+                        const shareMaterial = galoisShareMaterial(
                             evaluatorKeySchedule,
                             `${String(
                                 reference.trusteeRosterPosition,
@@ -1473,8 +1302,8 @@ const evaluationKeyFixture = (
                             rotation: scheduleEntry.rotation,
                             level: scheduleEntry.level,
                             galoisKeyShareRoot:
-                                proofMaterial.keySwitchComponentVectorRoot,
-                            proofMaterial,
+                                shareMaterial.keySwitchComponentVectorRoot,
+                            shareMaterial,
                         };
                     },
                 ),
@@ -1746,7 +1575,7 @@ const setupCertificateInputFixture = (
                 setupProofChallengeDifferenceInvertibilityStatus,
             challengeDifferenceInvertibilityAccounting:
                 setupProofChallengeDifferenceInvertibilityAccounting,
-            qromStatus: 'qrom-reduction-theorem-accepted-for-setup-proof-claim',
+            qromStatus: 'qrom-reduction-loss-not-computed-open-caveat',
             transcriptBinding: [
                 'setupProfileHash',
                 'manifestHash',
@@ -1787,14 +1616,13 @@ const setupCertificateInputFixture = (
         proofFamilies: setupProofFamilies.map((proofFamily) => ({
             proofFamily,
         })),
-        privateVssShareTboxParameterProfileHash,
-        sameSecretTboxParameterProfileHash,
-        publicKeyShareTboxParameterProfileHash,
-        relinearizationKeyShareTboxParameterProfileHash,
-        galoisKeyShareTboxParameterProfileHash,
+        privateVssShareProofAccounting,
+        privateVssShareProofAccountingHash,
+        publicKeyShareProofAccountingHash,
+        sameSecretLinkageAnchorProofAccountingHash,
         verificationPolicy: {
             proofBytesAcceptedStatus:
-                'private-vss-same-secret-public-key-share-relinearization-and-galois-proof-bytes-accepted-for-setup-proof-accounting',
+                'private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting',
         },
     };
     const setupTransportProfile = {
@@ -1864,6 +1692,9 @@ const setupCertificateInputFixture = (
             fullObjectHash: fixtureHash('transport-full-object'),
             chunkHashes: [fixtureHash('transport-chunk-0')],
         },
+        sameSecretLinkageAnchorProofAccounting,
+        publicKeyShareProofAccounting,
+        trusteeEvaluationKeyProofAccounting,
     };
 };
 
@@ -1929,7 +1760,6 @@ type AssemblyInputFixtureOptions = Readonly<{
     readonly setupContext?: CollectiveBgvSetupContext;
     readonly qShare?: SetupCeremonyAssemblyInput['qShare'];
     readonly qSharePrimes?: readonly number[];
-    readonly setupProofBinding?: SetupCeremonyAssemblyInput['setupProofBinding'];
 }>;
 
 const createAssemblyInput = (
@@ -1942,9 +1772,6 @@ const createAssemblyInput = (
     const fixtureSetupContext = options.setupContext ?? setupContext;
     const fixtureQShare = options.qShare ?? qShare;
     const fixtureQSharePrimes = options.qSharePrimes ?? qSharePrimes;
-    const fixtureSetupProofBinding =
-        options.setupProofBinding ??
-        setupProofBindingFixture(fixtureSetupContext);
     const publicKeyShareMaterialContributions = Array.from(
         { length: participantCount },
         (_unused, position) =>
@@ -1993,17 +1820,17 @@ const createAssemblyInput = (
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         publicKeyCrpRoot: fixtureHash('public-key-crp'),
         publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-        setupProofBinding: fixtureSetupProofBinding,
-        sameSecretTboxParameterProfileHash,
+        sameSecretLinkageAnchorProofAccountingHash,
         sameSecretProofMaterials: Array.from(
             { length: participantCount },
             (_unused, position) => sameSecretProofMaterial(position),
         ),
         publicKeyShareMaterialContributions,
-        publicKeyShareTboxParameterProfileHash,
-        publicKeyShareLnpProofMaterials: Array.from(
+        publicKeyShareProofAccountingHash,
+        publicKeyShareSuccinctProofMaterials: Array.from(
             { length: participantCount },
-            (_unused, position) => publicKeyShareLnpProofMaterial(position),
+            (_unused, position) =>
+                publicKeyShareSuccinctProofMaterial(position),
         ),
         relinearizationCrpRoot: fixtureHash('relinearization-crp'),
         galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
@@ -2031,6 +1858,15 @@ const createAssemblyInput = (
         deliveryPhaseNumber: 6,
         verificationPhaseNumber: 7,
         privateVssShareProofFactory,
+        trusteeEvaluationKeyProofGenerator:
+            trusteeEvaluationKeyProofGeneratorFixture(),
+        trusteeEvaluationKeyWitnesses: trusteeEvaluationKeyWitnessesFixture(
+            participantCount,
+            trusteeEvaluationKeyStatementKeyCount,
+            applicationRingDegree,
+            fixtureQSharePrimes,
+        ),
+        keySwitchDecompositionHash: fixtureHash('key-switch-decomposition'),
     };
 };
 
@@ -2108,7 +1944,7 @@ describe('setup ceremony assembly', () => {
             objectVersion: 1,
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-            proofFamily: 'same-secret-consistency',
+            proofFamily: 'same-secret-linkage-anchor',
         });
         expect(
             publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
@@ -2203,7 +2039,7 @@ describe('setup ceremony assembly', () => {
         );
     });
 
-    it('creates transported evaluation-key proof and component material companions', () => {
+    it('creates transported evaluation-key component material companions', () => {
         const participantCount = 3;
         const kernelFixture = createKernelFixture();
         const input = createAssemblyInput(
@@ -2223,17 +2059,8 @@ describe('setup ceremony assembly', () => {
                     input.galoisKeyShareBatchContributions,
             });
 
-        const transportedProofSet =
-            transport.transportedEvaluationKeyShareProofMaterial;
         const transportedComponentSet =
             transport.transportedEvaluationKeyShareComponentMaterial;
-        expect(transportedProofSet).toMatchObject({
-            objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
-            proofFamily: 'evaluation-key-share',
-        });
         expect(transportedComponentSet).toMatchObject({
             objectType:
                 'SetupTransportedEvaluationKeyShareComponentMaterialSet',
@@ -2241,26 +2068,16 @@ describe('setup ceremony assembly', () => {
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
         });
-        const expectedProofMaterialCount =
+        const expectedComponentMaterialCount =
             input.relinearizationRoundOneContributions.length +
             input.relinearizationRoundTwoContributions.length +
             input.galoisKeyShareBatchContributions.reduce(
-                (proofCount, batchContribution) =>
-                    proofCount + batchContribution.galoisKeyShareProofs.length,
+                (shareCount, batchContribution) =>
+                    shareCount + batchContribution.galoisKeyShares.length,
                 0,
             );
-        expect(transportedProofSet.proofMaterials).toHaveLength(
-            expectedProofMaterialCount,
-        );
         expect(transportedComponentSet.componentMaterials).toHaveLength(
-            expectedProofMaterialCount,
-        );
-        const transportedProofRoots = new Set(
-            transportedProofSet.proofMaterials.map(
-                (proofMaterial) =>
-                    jsonRecord(proofMaterial, 'proofMaterial')
-                        .proofMaterialRoot,
-            ),
+            expectedComponentMaterialCount,
         );
         const transportedComponentRoots = new Set(
             transportedComponentSet.componentMaterials.map(
@@ -2269,63 +2086,36 @@ describe('setup ceremony assembly', () => {
                         .keySwitchComponentMaterialRoot,
             ),
         );
-        for (const contribution of [
-            ...transport.relinearizationRoundOneContributions,
-            ...transport.relinearizationRoundTwoContributions,
+        for (const shareMaterial of [
+            ...transport.relinearizationRoundOneContributions.map(
+                (contribution) => contribution.shareMaterial,
+            ),
+            ...transport.relinearizationRoundTwoContributions.map(
+                (contribution) => contribution.shareMaterial,
+            ),
+            ...transport.galoisKeyShareBatchContributions.flatMap(
+                (batchContribution) =>
+                    batchContribution.galoisKeyShares.map(
+                        (shareContribution) => shareContribution.shareMaterial,
+                    ),
+            ),
         ]) {
-            const proofMaterial = jsonRecord(
-                contribution.proofMaterial,
-                'relinearization proof material',
+            const shareMaterialRecord = jsonRecord(
+                shareMaterial,
+                'transported share material',
             );
-            expect(proofMaterial.proofBytesHex).toBeUndefined();
-            expect(proofMaterial.keySwitchComponentVectors).toBeUndefined();
-            expect(proofMaterial.proofBytesEncoding).toBe(
-                'binary-chunked-proof-bytes',
-            );
-            expect(proofMaterial.keySwitchMaterialEncoding).toBe(
+            expect(
+                shareMaterialRecord.keySwitchComponentVectors,
+            ).toBeUndefined();
+            expect(shareMaterialRecord.keySwitchMaterialEncoding).toBe(
                 'binary-chunked-key-switch-component-vectors',
             );
             expect(
-                transportedProofRoots.has(proofMaterial.proofMaterialRoot),
-            ).toBe(true);
-            expect(
                 transportedComponentRoots.has(
-                    proofMaterial.keySwitchComponentMaterialRoot,
+                    shareMaterialRecord.keySwitchComponentMaterialRoot,
                 ),
             ).toBe(true);
         }
-        for (const batchContribution of transport.galoisKeyShareBatchContributions) {
-            for (const proofContribution of batchContribution.galoisKeyShareProofs) {
-                const proofMaterial = jsonRecord(
-                    proofContribution.proofMaterial,
-                    'Galois proof material',
-                );
-                expect(proofMaterial.proofBytesHex).toBeUndefined();
-                expect(proofMaterial.keySwitchComponentVectors).toBeUndefined();
-                expect(proofMaterial.proofBytesEncoding).toBe(
-                    'binary-chunked-proof-bytes',
-                );
-                expect(proofMaterial.keySwitchMaterialEncoding).toBe(
-                    'binary-chunked-key-switch-component-vectors',
-                );
-                expect(
-                    transportedProofRoots.has(proofMaterial.proofMaterialRoot),
-                ).toBe(true);
-                expect(
-                    transportedComponentRoots.has(
-                        proofMaterial.keySwitchComponentMaterialRoot,
-                    ),
-                ).toBe(true);
-            }
-        }
-        const firstProofMaterial = jsonRecord(
-            transportedProofSet.proofMaterials[0],
-            'transported evaluation-key proof material',
-        );
-        expect(firstProofMaterial.proofFullObjectHash).toMatch(
-            /^[0-9a-f]{128}$/u,
-        );
-        expect(firstProofMaterial.fullObjectHash).toBeUndefined();
         const firstComponentMaterial = jsonRecord(
             transportedComponentSet.componentMaterials[0],
             'transported evaluation-key component material',
@@ -2337,51 +2127,126 @@ describe('setup ceremony assembly', () => {
         expect(firstComponentChunk.bytesHex).toMatch(/^534c454b434d5631/u);
     });
 
-    it('assembles transported evaluation-key proof records with material companions', async () => {
+    it('generates trustee evaluation-key proofs and transports material during setup assembly', async () => {
         const participantCount = 3;
         const kernelFixture = createKernelFixture();
         const input = createAssemblyInput(
             participantCount,
             kernelFixture.kernel,
         );
-        const transport =
-            createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    sameSecretProofReferencesFixture(participantCount),
-                relinearizationRoundOneContributions:
-                    input.relinearizationRoundOneContributions,
-                relinearizationRoundTwoContributions:
-                    input.relinearizationRoundTwoContributions,
-                galoisKeyShareBatchContributions:
-                    input.galoisKeyShareBatchContributions,
-            });
 
-        const assembly = await createSetupCeremonyAssembly({
-            ...input,
-            relinearizationRoundOneContributions:
-                transport.relinearizationRoundOneContributions,
-            relinearizationRoundTwoContributions:
-                transport.relinearizationRoundTwoContributions,
-            galoisKeyShareBatchContributions:
-                transport.galoisKeyShareBatchContributions,
-            transportedEvaluationKeyShareProofMaterial:
-                transport.transportedEvaluationKeyShareProofMaterial,
-            transportedEvaluationKeyShareComponentMaterial:
-                transport.transportedEvaluationKeyShareComponentMaterial,
+        const assembly = await createSetupCeremonyAssembly(input);
+        const transportedProofMaterial =
+            assembly.transportedEvaluationKeyShareProofMaterial;
+        const transportedComponentMaterial =
+            assembly.transportedEvaluationKeyShareComponentMaterial;
+
+        if (
+            transportedProofMaterial === undefined ||
+            transportedComponentMaterial === undefined
+        ) {
+            throw new Error(
+                'generated evaluation-key assembly must return transported sidecars.',
+            );
+        }
+
+        expect(transportedProofMaterial).toMatchObject({
+            objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofFamily: trusteeEvaluationKeyProofFamily,
         });
-
-        expect(assembly.transportedEvaluationKeyShareProofMaterial).toBe(
-            transport.transportedEvaluationKeyShareProofMaterial,
+        expect(transportedProofMaterial.proofMaterials).toHaveLength(
+            participantCount,
         );
-        expect(assembly.transportedEvaluationKeyShareComponentMaterial).toBe(
-            transport.transportedEvaluationKeyShareComponentMaterial,
+        const expectedComponentMaterialCount =
+            input.relinearizationRoundOneContributions.length +
+            input.relinearizationRoundTwoContributions.length +
+            input.galoisKeyShareBatchContributions.reduce(
+                (shareCount, batchContribution) =>
+                    shareCount + batchContribution.galoisKeyShares.length,
+                0,
+            );
+        expect(transportedComponentMaterial.componentMaterials).toHaveLength(
+            expectedComponentMaterialCount,
         );
+        const trusteeEvaluationKeyProofs = assembly.trusteeEvaluationKeyProofs;
+        expect(trusteeEvaluationKeyProofs.proofFamily).toBe(
+            trusteeEvaluationKeyProofFamily,
+        );
+        expect(trusteeEvaluationKeyProofs.proofModelStatus).toBe(
+            trusteeEvaluationKeyProofModelStatus,
+        );
+        expect(trusteeEvaluationKeyProofs.proofRecords).toHaveLength(
+            participantCount,
+        );
+        expect(
+            trusteeEvaluationKeyProofs.relinearizationKeyShareRoundsRoot,
+        ).toBe(
+            assembly.relinearizationKeyShareRounds
+                .relinearizationKeyShareRoundsRoot,
+        );
+        const transportedProofRoots = new Set(
+            transportedProofMaterial.proofMaterials.map(
+                (proofMaterial) =>
+                    jsonRecord(proofMaterial, 'proofMaterial')
+                        .proofMaterialRoot,
+            ),
+        );
+        for (const proofRecord of trusteeEvaluationKeyProofs.proofRecords) {
+            const proofRecordFields = jsonRecord(
+                proofRecord,
+                'trustee evaluation-key proof record',
+            );
+            expect(proofRecordFields.proofBytesHex).toBeUndefined();
+            expect(proofRecordFields.proofBytesEncoding).toBe(
+                'binary-chunked-proof-bytes',
+            );
+            expect(proofRecordFields.keyCount).toBe(
+                trusteeEvaluationKeyStatementKeyCount,
+            );
+            expect(
+                transportedProofRoots.has(proofRecordFields.proofMaterialRoot),
+            ).toBe(true);
+        }
+        expect(
+            assembly.relinearizationKeyShareRounds.roundOneRecords.every(
+                (record) =>
+                    !('proofBytesHex' in record) &&
+                    !('proofBytesHash' in record) &&
+                    !('keySwitchComponentVectors' in record) &&
+                    record.keySwitchMaterialEncoding ===
+                        'binary-chunked-key-switch-component-vectors',
+            ),
+        ).toBe(true);
+        expect(
+            assembly.relinearizationKeyShareRounds.roundTwoRecords.every(
+                (record) =>
+                    !('proofBytesHex' in record) &&
+                    !('proofBytesHash' in record) &&
+                    !('keySwitchComponentVectors' in record) &&
+                    record.keySwitchMaterialEncoding ===
+                        'binary-chunked-key-switch-component-vectors',
+            ),
+        ).toBe(true);
+        expect(
+            assembly.galoisKeyShareBatches.every((batch) =>
+                batch.galoisKeyShareMaterialRecords.every(
+                    (materialRecord) =>
+                        !('proofBytesHex' in materialRecord) &&
+                        !('keySwitchComponentVectors' in materialRecord) &&
+                        materialRecord.keySwitchMaterialEncoding ===
+                            'binary-chunked-key-switch-component-vectors',
+                ),
+            ),
+        ).toBe(true);
         const setupTransportedObjects =
             setupTransportCertificateTransportedObjects(assembly.setupPackage);
-        transport.transportedEvaluationKeyShareProofMaterial.proofMaterials.forEach(
-            (transportedProofMaterial) => {
+        transportedProofMaterial.proofMaterials.forEach(
+            (transportedProofRecord) => {
                 const transportedProofMaterialRecord = jsonRecord(
-                    transportedProofMaterial,
+                    transportedProofRecord,
                     'transported evaluation-key proof material',
                 );
                 expect(setupTransportedObjects).toEqual(
@@ -2404,10 +2269,10 @@ describe('setup ceremony assembly', () => {
                 );
             },
         );
-        transport.transportedEvaluationKeyShareComponentMaterial.componentMaterials.forEach(
-            (transportedComponentMaterial) => {
+        transportedComponentMaterial.componentMaterials.forEach(
+            (transportedComponentRecord) => {
                 const transportedComponentMaterialRecord = jsonRecord(
-                    transportedComponentMaterial,
+                    transportedComponentRecord,
                     'transported evaluation-key component material',
                 );
                 expect(setupTransportedObjects).toEqual(
@@ -2431,123 +2296,6 @@ describe('setup ceremony assembly', () => {
                 );
             },
         );
-        expect(
-            assembly.relinearizationKeyShareRounds.roundOneRecords.every(
-                (record) =>
-                    !('proofBytesHex' in record) &&
-                    !('keySwitchComponentVectors' in record) &&
-                    record.proofBytesEncoding ===
-                        'binary-chunked-proof-bytes' &&
-                    record.keySwitchMaterialEncoding ===
-                        'binary-chunked-key-switch-component-vectors',
-            ),
-        ).toBe(true);
-        expect(
-            assembly.galoisKeyShareBatches.every((batch) =>
-                batch.galoisKeyShareProofs.every(
-                    (proofRecord) =>
-                        !('proofBytesHex' in proofRecord) &&
-                        !('keySwitchComponentVectors' in proofRecord) &&
-                        proofRecord.proofBytesEncoding ===
-                            'binary-chunked-proof-bytes' &&
-                        proofRecord.keySwitchMaterialEncoding ===
-                            'binary-chunked-key-switch-component-vectors',
-                ),
-            ),
-        ).toBe(true);
-    });
-
-    it('generates evaluation-key proofs then transports material during setup assembly', async () => {
-        const participantCount = 3;
-        const kernelFixture = createKernelFixture();
-        const input = createAssemblyInput(
-            participantCount,
-            kernelFixture.kernel,
-        );
-
-        const assembly = await createSetupCeremonyAssembly({
-            ...input,
-            ...generatedEvaluationKeyContributions(input),
-            evaluationKeyShareProofGenerator:
-                generatedEvaluationKeyProofGenerator(),
-        });
-        const transportedProofMaterial =
-            assembly.transportedEvaluationKeyShareProofMaterial;
-        const transportedComponentMaterial =
-            assembly.transportedEvaluationKeyShareComponentMaterial;
-
-        if (
-            transportedProofMaterial === undefined ||
-            transportedComponentMaterial === undefined
-        ) {
-            throw new Error(
-                'generated evaluation-key assembly must return transported sidecars.',
-            );
-        }
-
-        const expectedProofMaterialCount =
-            input.relinearizationRoundOneContributions.length +
-            input.relinearizationRoundTwoContributions.length +
-            input.galoisKeyShareBatchContributions.reduce(
-                (proofCount, batchContribution) =>
-                    proofCount + batchContribution.galoisKeyShareProofs.length,
-                0,
-            );
-        expect(transportedProofMaterial.proofMaterials).toHaveLength(
-            expectedProofMaterialCount,
-        );
-        expect(transportedComponentMaterial.componentMaterials).toHaveLength(
-            expectedProofMaterialCount,
-        );
-        expect(
-            assembly.relinearizationKeyShareRounds.roundOneRecords.every(
-                (record) =>
-                    !('proofBytesHex' in record) &&
-                    !('keySwitchComponentVectors' in record) &&
-                    record.proofBytesEncoding ===
-                        'binary-chunked-proof-bytes' &&
-                    record.keySwitchMaterialEncoding ===
-                        'binary-chunked-key-switch-component-vectors',
-            ),
-        ).toBe(true);
-        expect(
-            assembly.relinearizationKeyShareRounds.roundTwoRecords.every(
-                (record) =>
-                    !('proofBytesHex' in record) &&
-                    !('keySwitchComponentVectors' in record) &&
-                    record.proofBytesEncoding ===
-                        'binary-chunked-proof-bytes' &&
-                    record.keySwitchMaterialEncoding ===
-                        'binary-chunked-key-switch-component-vectors',
-            ),
-        ).toBe(true);
-        expect(
-            assembly.galoisKeyShareBatches.every((batch) =>
-                batch.galoisKeyShareProofs.every(
-                    (proofRecord) =>
-                        !('proofBytesHex' in proofRecord) &&
-                        !('keySwitchComponentVectors' in proofRecord) &&
-                        proofRecord.proofBytesEncoding ===
-                            'binary-chunked-proof-bytes' &&
-                        proofRecord.keySwitchMaterialEncoding ===
-                            'binary-chunked-key-switch-component-vectors',
-                ),
-            ),
-        ).toBe(true);
-        expect(
-            setupTransportCertificateTransportedObjects(assembly.setupPackage),
-        ).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    objectName: 'evaluationKeyShareProofMaterial',
-                    objectRole: 'evaluation-key-share-proof-material',
-                }),
-                expect.objectContaining({
-                    objectName: 'evaluationKeyShareComponentMaterial',
-                    objectRole: 'evaluation-key-share-component-material',
-                }),
-            ]),
-        );
 
         const verificationInput = createSetupPackageVerificationInput(assembly);
 
@@ -2562,12 +2310,13 @@ describe('setup ceremony assembly', () => {
                 relinearizationKeyShareRounds:
                     assembly.relinearizationKeyShareRounds,
                 galoisKeyShareBatches: assembly.galoisKeyShareBatches,
+                trusteeEvaluationKeyProofs: assembly.trusteeEvaluationKeyProofs,
             }),
         ).not.toMatch(
-            /proofGeneration|secretCoefficients|proofBytesHex|keySwitchComponentVectors/u,
+            /proofGeneration|secretCoefficients|errorCoefficientsByKey|proofBytesHex|keySwitchComponentVectors/u,
         );
         expect(JSON.stringify(verificationInput)).not.toMatch(
-            /proofGeneration|secretCoefficients/u,
+            /proofGeneration|secretCoefficients|errorCoefficientsByKey/u,
         );
     });
 
@@ -2596,7 +2345,7 @@ describe('setup ceremony assembly', () => {
             sameSecretProofMaterials: sameSecretTransport.proofMaterials,
             transportedSameSecretProofMaterial:
                 sameSecretTransport.transportedSameSecretProofMaterial,
-            publicKeyShareLnpProofMaterials:
+            publicKeyShareSuccinctProofMaterials:
                 publicKeyShareTransport.proofMaterials,
             transportedPublicKeyShareProofMaterial:
                 publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
@@ -2679,8 +2428,10 @@ describe('setup ceremony assembly', () => {
         publicKeyShareTransport.proofMaterials.forEach(
             (proofMaterial, proofIndex) => {
                 const proofRecord = jsonRecord(
-                    assembly.publicKeyShareLnpProofs.proofRecords[proofIndex],
-                    'publicKeyShareLnpProofRecord',
+                    assembly.publicKeyShareSuccinctProofs.proofRecords[
+                        proofIndex
+                    ],
+                    'publicKeyShareSuccinctProofRecord',
                 );
                 expect(proofRecord.proofMaterialRoot).toBe(
                     jsonRecord(proofMaterial, 'publicKeyShareProofMaterial')
@@ -2713,17 +2464,6 @@ describe('setup ceremony assembly', () => {
                     hashBoundPublicKeyShareProofMaterial(position),
                 ),
             );
-        const evaluationKeyTransport =
-            createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    sameSecretProofReferencesFixture(participantCount),
-                relinearizationRoundOneContributions:
-                    input.relinearizationRoundOneContributions,
-                relinearizationRoundTwoContributions:
-                    input.relinearizationRoundTwoContributions,
-                galoisKeyShareBatchContributions:
-                    input.galoisKeyShareBatchContributions,
-            });
         const binaryVssMaterialByteLength =
             binaryVssMaterialByteLengthForInput(input);
         const transportedAssemblyInput = {
@@ -2731,20 +2471,10 @@ describe('setup ceremony assembly', () => {
             sameSecretProofMaterials: sameSecretTransport.proofMaterials,
             transportedSameSecretProofMaterial:
                 sameSecretTransport.transportedSameSecretProofMaterial,
-            publicKeyShareLnpProofMaterials:
+            publicKeyShareSuccinctProofMaterials:
                 publicKeyShareTransport.proofMaterials,
             transportedPublicKeyShareProofMaterial:
                 publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
-            relinearizationRoundOneContributions:
-                evaluationKeyTransport.relinearizationRoundOneContributions,
-            relinearizationRoundTwoContributions:
-                evaluationKeyTransport.relinearizationRoundTwoContributions,
-            galoisKeyShareBatchContributions:
-                evaluationKeyTransport.galoisKeyShareBatchContributions,
-            transportedEvaluationKeyShareProofMaterial:
-                evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
-            transportedEvaluationKeyShareComponentMaterial:
-                evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
             vssCoefficientCommitmentMaterialEncoding:
                 'binary-chunked-full-public-setup-commitment-values',
             publicKeyShareMaterialEncoding:
@@ -2756,6 +2486,13 @@ describe('setup ceremony assembly', () => {
         } satisfies SetupCeremonyAssemblyInput;
         const assemblyWithoutPublicEvaluationKeyMaterial =
             await createSetupCeremonyAssembly(transportedAssemblyInput);
+        const generatedComponentMaterial =
+            assemblyWithoutPublicEvaluationKeyMaterial.transportedEvaluationKeyShareComponentMaterial;
+        if (generatedComponentMaterial === undefined) {
+            throw new Error(
+                'generated assembly must include transported evaluation-key component material.',
+            );
+        }
         const publicEvaluationKeyMaterialTransport =
             createBinaryChunkedPublicEvaluationKeyMaterialTransport({
                 setupContext: input.setupContext,
@@ -2769,9 +2506,10 @@ describe('setup ceremony assembly', () => {
                 sameSecretProofFamilyBindingRoot:
                     assemblyWithoutPublicEvaluationKeyMaterial
                         .sameSecretConsistency.sameSecretProofFamilyBindingRoot,
-                publicKeyShareLnpProofSetRoot:
+                publicKeyShareSuccinctProofSetRoot:
                     assemblyWithoutPublicEvaluationKeyMaterial
-                        .publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+                        .publicKeyShareSuccinctProofs
+                        .publicKeyShareSuccinctProofSetRoot,
                 sameSecretProofReferences:
                     assemblyWithoutPublicEvaluationKeyMaterial.sameSecretProofs.proofRecords.map(
                         (proofRecord) => ({
@@ -2791,7 +2529,7 @@ describe('setup ceremony assembly', () => {
                 galoisKeyShareBatches:
                     assemblyWithoutPublicEvaluationKeyMaterial.galoisKeyShareBatches,
                 transportedEvaluationKeyShareComponentMaterial:
-                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+                    generatedComponentMaterial,
             });
 
         const assembly = await createSetupCeremonyAssembly({
@@ -2843,17 +2581,56 @@ describe('setup ceremony assembly', () => {
         );
         expect(
             verificationInput.transportedEvaluationKeyShareProofMaterial,
-        ).toBe(
-            evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
-        );
+        ).toBe(assembly.transportedEvaluationKeyShareProofMaterial);
         expect(
             verificationInput.transportedEvaluationKeyShareComponentMaterial,
-        ).toBe(
-            evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
-        );
+        ).toBe(assembly.transportedEvaluationKeyShareComponentMaterial);
         expect(verificationInput.transportedPublicEvaluationKeyMaterial).toBe(
             publicEvaluationKeyMaterialTransport.transportedPublicEvaluationKeyMaterial,
         );
+        const verifiedSetupProofMaterials = {
+            objectType: 'VerifiedSetupProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            proofMaterials: [
+                verifiedSetupProofMaterialFromTransport(
+                    sameSecretTransport.transportedSameSecretProofMaterial,
+                    0,
+                    'same-secret-fixture-proof-material',
+                ),
+                verifiedSetupProofMaterialFromTransport(
+                    publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
+                    0,
+                    'public-key-fixture-proof-material',
+                ),
+            ],
+        } as const satisfies VerifiedSetupProofMaterialSet;
+        const compactVerificationInput = createSetupPackageVerificationInput({
+            ...assembly,
+            transportedVssCoefficientCommitmentMaterial:
+                transportedVssMaterialReference,
+            verifiedSetupProofMaterials,
+        });
+        expect(compactVerificationInput.verifiedSetupProofMaterials).toBe(
+            verifiedSetupProofMaterials,
+        );
+        expect(
+            compactVerificationInput.transportedSameSecretProofMaterial
+                ?.proofMaterials[0],
+        ).not.toHaveProperty('chunks');
+        expect(
+            compactVerificationInput.transportedPublicKeyShareProofMaterial
+                ?.proofMaterials[0],
+        ).not.toHaveProperty('chunks');
+        expect(
+            compactVerificationInput.transportedSameSecretProofMaterial
+                ?.proofMaterials[1],
+        ).toHaveProperty('chunks');
+        expect(
+            compactVerificationInput.transportedPublicKeyShareProofMaterial
+                ?.proofMaterials[1],
+        ).toHaveProperty('chunks');
         const publicEvaluationKeyMaterialRoot =
             publicEvaluationKeyMaterialTransport
                 .publicEvaluationKeyMaterialReference
@@ -2930,17 +2707,6 @@ describe('setup ceremony assembly', () => {
                     hashBoundPublicKeyShareProofMaterial(position),
                 ),
             );
-        const evaluationKeyTransport =
-            createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    sameSecretProofReferencesFixture(participantCount),
-                relinearizationRoundOneContributions:
-                    input.relinearizationRoundOneContributions,
-                relinearizationRoundTwoContributions:
-                    input.relinearizationRoundTwoContributions,
-                galoisKeyShareBatchContributions:
-                    input.galoisKeyShareBatchContributions,
-            });
         const binaryVssMaterialByteLength =
             binaryVssMaterialByteLengthForInput(input);
         const providerBackedTransportedInput = {
@@ -2950,20 +2716,10 @@ describe('setup ceremony assembly', () => {
             sameSecretProofMaterials: sameSecretTransport.proofMaterials,
             transportedSameSecretProofMaterial:
                 sameSecretTransport.transportedSameSecretProofMaterial,
-            publicKeyShareLnpProofMaterials:
+            publicKeyShareSuccinctProofMaterials:
                 publicKeyShareTransport.proofMaterials,
             transportedPublicKeyShareProofMaterial:
                 publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
-            relinearizationRoundOneContributions:
-                evaluationKeyTransport.relinearizationRoundOneContributions,
-            relinearizationRoundTwoContributions:
-                evaluationKeyTransport.relinearizationRoundTwoContributions,
-            galoisKeyShareBatchContributions:
-                evaluationKeyTransport.galoisKeyShareBatchContributions,
-            transportedEvaluationKeyShareProofMaterial:
-                evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
-            transportedEvaluationKeyShareComponentMaterial:
-                evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
             vssCoefficientCommitmentMaterialEncoding:
                 'binary-chunked-full-public-setup-commitment-values',
             publicKeyShareMaterialEncoding:
@@ -2975,6 +2731,13 @@ describe('setup ceremony assembly', () => {
         } satisfies SetupCeremonyAssemblyInput;
         const assemblyWithoutPublicEvaluationKeyMaterial =
             await createSetupCeremonyAssembly(providerBackedTransportedInput);
+        const generatedComponentMaterial =
+            assemblyWithoutPublicEvaluationKeyMaterial.transportedEvaluationKeyShareComponentMaterial;
+        if (generatedComponentMaterial === undefined) {
+            throw new Error(
+                'generated assembly must include transported evaluation-key component material.',
+            );
+        }
         const publicEvaluationKeyMaterialTransport =
             createBinaryChunkedPublicEvaluationKeyMaterialTransport({
                 setupContext: input.setupContext,
@@ -2988,9 +2751,10 @@ describe('setup ceremony assembly', () => {
                 sameSecretProofFamilyBindingRoot:
                     assemblyWithoutPublicEvaluationKeyMaterial
                         .sameSecretConsistency.sameSecretProofFamilyBindingRoot,
-                publicKeyShareLnpProofSetRoot:
+                publicKeyShareSuccinctProofSetRoot:
                     assemblyWithoutPublicEvaluationKeyMaterial
-                        .publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+                        .publicKeyShareSuccinctProofs
+                        .publicKeyShareSuccinctProofSetRoot,
                 sameSecretProofReferences:
                     assemblyWithoutPublicEvaluationKeyMaterial.sameSecretProofs.proofRecords.map(
                         (proofRecord) => ({
@@ -3010,7 +2774,7 @@ describe('setup ceremony assembly', () => {
                 galoisKeyShareBatches:
                     assemblyWithoutPublicEvaluationKeyMaterial.galoisKeyShareBatches,
                 transportedEvaluationKeyShareComponentMaterial:
-                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
+                    generatedComponentMaterial,
             });
 
         const assembly = await createSetupCeremonyAssembly({
@@ -3050,9 +2814,12 @@ describe('setup ceremony assembly', () => {
         expect(assembly.transportedPublicKeyShareProofMaterial).toBe(
             publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
         );
-        expect(assembly.transportedEvaluationKeyShareComponentMaterial).toBe(
-            evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
-        );
+        expect(
+            assembly.transportedEvaluationKeyShareComponentMaterial,
+        ).toBeDefined();
+        expect(
+            assembly.transportedEvaluationKeyShareProofMaterial,
+        ).toBeDefined();
         expect(verificationInput).toMatchObject({
             setupPackage: assembly.setupPackage,
             transportedVssCoefficientCommitmentMaterial: transportedVssMaterial,
@@ -3111,7 +2878,6 @@ describe('setup ceremony assembly', () => {
         await expect(
             createSetupCeremonyAssembly({
                 ...input,
-                ...generatedEvaluationKeyContributions(input),
                 ringDegree: acceptedBgvProfileRingDegree,
                 vssCoefficientCommitmentMaterialEncoding:
                     'binary-chunked-full-public-setup-commitment-values',
@@ -3120,12 +2886,10 @@ describe('setup ceremony assembly', () => {
                 sameSecretProofMaterials: sameSecretTransport.proofMaterials,
                 transportedSameSecretProofMaterial:
                     sameSecretTransport.transportedSameSecretProofMaterial,
-                publicKeyShareLnpProofMaterials:
+                publicKeyShareSuccinctProofMaterials:
                     publicKeyShareTransport.proofMaterials,
                 transportedPublicKeyShareProofMaterial:
                     publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
-                evaluationKeyShareProofGenerator:
-                    generatedEvaluationKeyProofGenerator(),
             }),
         ).rejects.toThrow(
             'profile-ring setup assembly requires provider-backed source trustee opening state loading.',
@@ -3164,6 +2928,42 @@ describe('setup ceremony assembly', () => {
             }),
         ).rejects.toThrow(
             'profile-ring setup assembly requires first-profile q_dec 4 threshold shares.',
+        );
+    });
+
+    it('refuses profile-ring assembly with malformed setup context tokens', async () => {
+        const kernelFixture = createKernelFixture();
+        const input = createAcceptedQShareAssemblyInput(
+            10,
+            kernelFixture.kernel,
+            ringDegree,
+            firstProfileThresholdDegree,
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                setupContext: {
+                    ...input.setupContext,
+                    setupEpoch: 'setup-epoch 1',
+                },
+                ringDegree: acceptedBgvProfileRingDegree,
+            }),
+        ).rejects.toThrow(
+            'setupContext.setupEpoch must be a bounded setup context token.',
+        );
+
+        await expect(
+            createSetupCeremonyAssembly({
+                ...input,
+                setupContext: {
+                    ...input.setupContext,
+                    ceremonyId: 'ceremony-1\nfork',
+                },
+                ringDegree: acceptedBgvProfileRingDegree,
+            }),
+        ).rejects.toThrow(
+            'setupContext.ceremonyId must be a bounded setup context token.',
         );
     });
 
@@ -3231,17 +3031,6 @@ describe('setup ceremony assembly', () => {
                     hashBoundPublicKeyShareProofMaterial(position),
                 ),
             );
-        const evaluationKeyTransport =
-            createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    sameSecretProofReferencesFixture(participantCount),
-                relinearizationRoundOneContributions:
-                    input.relinearizationRoundOneContributions,
-                relinearizationRoundTwoContributions:
-                    input.relinearizationRoundTwoContributions,
-                galoisKeyShareBatchContributions:
-                    input.galoisKeyShareBatchContributions,
-            });
 
         await expect(
             createSetupCeremonyAssembly({
@@ -3254,20 +3043,10 @@ describe('setup ceremony assembly', () => {
                 sameSecretProofMaterials: sameSecretTransport.proofMaterials,
                 transportedSameSecretProofMaterial:
                     sameSecretTransport.transportedSameSecretProofMaterial,
-                publicKeyShareLnpProofMaterials:
+                publicKeyShareSuccinctProofMaterials:
                     publicKeyShareTransport.proofMaterials,
                 transportedPublicKeyShareProofMaterial:
                     publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
-                relinearizationRoundOneContributions:
-                    evaluationKeyTransport.relinearizationRoundOneContributions,
-                relinearizationRoundTwoContributions:
-                    evaluationKeyTransport.relinearizationRoundTwoContributions,
-                galoisKeyShareBatchContributions:
-                    evaluationKeyTransport.galoisKeyShareBatchContributions,
-                transportedEvaluationKeyShareProofMaterial:
-                    evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
-                transportedEvaluationKeyShareComponentMaterial:
-                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
             }),
         ).rejects.toThrow(
             'profile-ring setup assembly requires provider-backed source trustee opening state loading.',
@@ -3295,17 +3074,6 @@ describe('setup ceremony assembly', () => {
                     hashBoundPublicKeyShareProofMaterial(position),
                 ),
             );
-        const evaluationKeyTransport =
-            createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    sameSecretProofReferencesFixture(participantCount),
-                relinearizationRoundOneContributions:
-                    input.relinearizationRoundOneContributions,
-                relinearizationRoundTwoContributions:
-                    input.relinearizationRoundTwoContributions,
-                galoisKeyShareBatchContributions:
-                    input.galoisKeyShareBatchContributions,
-            });
         const sourceTrusteeOpeningStateProvider = {
             sourceTrusteeReferences: input.trustees.map((trustee) => ({
                 sourceTrusteeIdentity: trustee.trusteeIdentity,
@@ -3358,20 +3126,10 @@ describe('setup ceremony assembly', () => {
                 sameSecretProofMaterials: sameSecretTransport.proofMaterials,
                 transportedSameSecretProofMaterial:
                     sameSecretTransport.transportedSameSecretProofMaterial,
-                publicKeyShareLnpProofMaterials:
+                publicKeyShareSuccinctProofMaterials:
                     publicKeyShareTransport.proofMaterials,
                 transportedPublicKeyShareProofMaterial:
                     publicKeyShareTransport.transportedPublicKeyShareProofMaterial,
-                relinearizationRoundOneContributions:
-                    evaluationKeyTransport.relinearizationRoundOneContributions,
-                relinearizationRoundTwoContributions:
-                    evaluationKeyTransport.relinearizationRoundTwoContributions,
-                galoisKeyShareBatchContributions:
-                    evaluationKeyTransport.galoisKeyShareBatchContributions,
-                transportedEvaluationKeyShareProofMaterial:
-                    evaluationKeyTransport.transportedEvaluationKeyShareProofMaterial,
-                transportedEvaluationKeyShareComponentMaterial:
-                    evaluationKeyTransport.transportedEvaluationKeyShareComponentMaterial,
             }),
         ).rejects.toThrow(
             'profile-ring setup assembly requires publicKeyCrpRoot to match commonRandomness public derivations.',
@@ -3497,16 +3255,17 @@ describe('setup ceremony assembly', () => {
         );
         expect(assembly.sameSecretProofs).toMatchObject({
             objectType: 'SameSecretProofSet',
-            proofVerificationStatus: sameSecretLnpProofVerificationStatus,
+            proofFamily: 'same-secret-linkage-anchor',
+            proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
+            proofModelStatus: sameSecretAnchorProofModelStatus,
+            proofAccountingHash: sameSecretLinkageAnchorProofAccountingHash,
         });
         expect(assembly.sameSecretProofs.proofRecords).toHaveLength(
             participantCount,
         );
         expect(assembly.sameSecretProofs.proofRecords[0]).toMatchObject({
-            challenge: '17',
-            z34SeedMaterialHash: fixtureHash('same-secret-0-z34-seed-material'),
-            z34Z3L2SquaredDecimal: '64',
-            z34Z4InfinityNormDecimal: '1',
+            proofFamily: 'same-secret-linkage-anchor',
+            statementHash: fixtureHash('same-secret-statement-0'),
         });
         expect(assembly.publicKeyShares.shareRecords).toHaveLength(
             participantCount,
@@ -3522,24 +3281,26 @@ describe('setup ceremony assembly', () => {
         expect(
             assembly.publicKeyShareMaterial.shareMaterialRecords,
         ).toHaveLength(participantCount);
-        expect(assembly.publicKeyShareLnpProofs).toMatchObject({
-            objectType: 'PublicKeyShareLnpProofSet',
-            proofVerificationStatus: publicKeyShareLnpProofVerificationStatus,
+        expect(assembly.publicKeyShareSuccinctProofs).toMatchObject({
+            objectType: 'PublicKeyShareSuccinctProofSet',
+            proofVerificationStatus:
+                publicKeyShareSuccinctProofVerificationStatus,
             sameSecretProofSetRoot:
                 assembly.sameSecretProofs.sameSecretProofSetRoot,
             publicKeyShareMaterialSetRoot:
                 assembly.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
         });
-        expect(assembly.publicKeyShareLnpProofs.proofRecords).toHaveLength(
+        expect(assembly.publicKeyShareSuccinctProofs.proofRecords).toHaveLength(
             participantCount,
         );
-        expect(assembly.publicKeyShareLnpProofs.proofRecords[0]).toMatchObject({
-            challenge: '29',
-            z34SeedMaterialHash: fixtureHash(
-                'public-key-lnp-0-z34-seed-material',
-            ),
-            z34Z3L2SquaredDecimal: '64',
-            z34Z4InfinityNormDecimal: '1',
+        expect(
+            assembly.publicKeyShareSuccinctProofs.proofRecords[0],
+        ).toMatchObject({
+            objectType: 'PublicKeyShareSuccinctProof',
+            proofVerificationStatus:
+                publicKeyShareSuccinctProofVerificationStatus,
+            proofModelStatus: publicKeyShareSuccinctProofModelStatus,
+            proofBytesHex: 'bb660000',
         });
         expect(assembly.evaluatorKeySchedule.requiredGaloisKeySchedule).toEqual(
             requiredGaloisKeySchedule,
@@ -3549,8 +3310,11 @@ describe('setup ceremony assembly', () => {
         ).toBe(assembly.sameSecretProofs.sameSecretProofSetRoot);
         expect(
             assembly.relinearizationKeyShareRounds
-                .publicKeyShareLnpProofSetRoot,
-        ).toBe(assembly.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot);
+                .publicKeyShareSuccinctProofSetRoot,
+        ).toBe(
+            assembly.publicKeyShareSuccinctProofs
+                .publicKeyShareSuccinctProofSetRoot,
+        );
         expect(
             assembly.relinearizationKeyShareRounds.roundOneRecords,
         ).toHaveLength(
@@ -3569,13 +3333,14 @@ describe('setup ceremony assembly', () => {
                 (batch) =>
                     batch.sameSecretProofSetRoot ===
                         assembly.sameSecretProofs.sameSecretProofSetRoot &&
-                    batch.publicKeyShareLnpProofSetRoot ===
-                        assembly.publicKeyShareLnpProofs
-                            .publicKeyShareLnpProofSetRoot,
+                    batch.publicKeyShareSuccinctProofSetRoot ===
+                        assembly.publicKeyShareSuccinctProofs
+                            .publicKeyShareSuccinctProofSetRoot,
             ),
         ).toBe(true);
-        expect(assembly.evaluationKeys.publicKeyShareLnpProofSetRoot).toBe(
-            assembly.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+        expect(assembly.evaluationKeys.publicKeyShareSuccinctProofSetRoot).toBe(
+            assembly.publicKeyShareSuccinctProofs
+                .publicKeyShareSuccinctProofSetRoot,
         );
         expect(assembly.evaluationKeys.relinearizationKeyRoots).toHaveLength(
             assembly.evaluatorKeySchedule.relinearizationLevelSchedule.length,
@@ -3595,7 +3360,7 @@ describe('setup ceremony assembly', () => {
             setupContext,
             sameSecretProofs: assembly.sameSecretProofs,
             publicKeyShareMaterial: assembly.publicKeyShareMaterial,
-            publicKeyShareLnpProofs: assembly.publicKeyShareLnpProofs,
+            publicKeyShareSuccinctProofs: assembly.publicKeyShareSuccinctProofs,
             collectivePublicKey: assembly.collectivePublicKey,
             collectivePublicKeyRoot:
                 assembly.collectivePublicKey.collectivePublicKeyRoot,
@@ -3614,8 +3379,9 @@ describe('setup ceremony assembly', () => {
                 assembly.publicKeyShares.publicKeyShareSetRoot,
             publicKeyShareMaterialSetRoot:
                 assembly.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
-            publicKeyShareLnpProofSetRoot:
-                assembly.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+            publicKeyShareSuccinctProofSetRoot:
+                assembly.publicKeyShareSuccinctProofs
+                    .publicKeyShareSuccinctProofSetRoot,
         });
         expect(
             assembly.collectivePublicKey.sourceShareMaterialRoots,
@@ -3648,18 +3414,18 @@ describe('setup ceremony assembly', () => {
                 string,
                 unknown
             >[];
-        expect(proofFamilyAccounting).toHaveLength(setupProofFamilies.length);
+        expect(proofFamilyAccounting).toHaveLength(
+            setupProofFamilies.length + 3,
+        );
         expect(proofFamilyAccounting[0]).toMatchObject({
             proofFamily: 'vss-opening-carry',
             verifierClosedStatus:
-                'relation-transcript-and-bound-checks-verifier-closed',
+                'statement-rebuild-and-succinct-argument-checks-verifier-closed',
             accountingStatus:
-                'repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted',
+                'succinct-private-vss-share-theorem-accounting-accepted',
             claimAccounting: {
-                soundness:
-                    'LNP22 commit-and-prove extractor accounting is accepted for the recipient-local carry-aware VSS relation because statement binding, first-message commitments, generated tbox bytes, coefficient openings, carry relations, and response bounds are verified before acceptance',
-                zeroKnowledge:
-                    'LNP22 simulator accounting is accepted for centered 112-bit coefficient masks, opening-randomness masks, carry masks, verifier-bound no-wrap bounds, and transcript-bound tbox bytes; private coefficients, openings, and carries are not exposed in accepted public artifacts',
+                accountingObject: 'SuccinctPrivateVssShareAccounting',
+                accountingHash: privateVssShareProofAccountingHash,
             },
         });
         expect(JSON.stringify(proofFamilyAccounting)).not.toContain(
@@ -3667,67 +3433,102 @@ describe('setup ceremony assembly', () => {
         );
         expect(
             proofFamilyAccounting.map((entry) => entry.proofFamily),
-        ).toStrictEqual([...setupProofFamilies]);
-        const responseMaskingAccounting =
-            setupProofAccountingCertificate.responseMaskingAccounting as Record<
-                string,
-                unknown
-            >;
-        expect(responseMaskingAccounting).toMatchObject({
-            objectType: 'SetupProofResponseMaskingAccounting',
+        ).toStrictEqual([
+            'vss-opening-carry',
+            'same-secret-linkage-anchor',
+            'public-key-share',
+            'trustee-evaluation-key',
+        ]);
+        expect(proofFamilyAccounting[1]).toMatchObject({
+            proofFamily: 'same-secret-linkage-anchor',
+            verifierClosedStatus:
+                'statement-rebuild-and-argument-checks-verifier-closed',
             accountingStatus:
-                'response-mask-bounds-strengthened-verifier-bound-and-zk-accounting-accepted',
-            zeroKnowledgeAccountingStatus:
-                'response masking, witness-dependent support commitments, committed-secret response distributions, fixed-width signed relation commitments, and no-wrap response bounds are accepted by the setup proof theorem accounting object',
+                'succinct-same-secret-linkage-anchor-theorem-accounting-accepted',
+            claimAccounting: {
+                accountingObject: 'SuccinctSameSecretLinkageAnchorAccounting',
+                accountingHash:
+                    setupProofAccountingCertificate.sameSecretLinkageAnchorProofAccountingHash,
+            },
         });
-        expect(JSON.stringify(responseMaskingAccounting)).not.toContain(
-            'full LNP tbox proof closure',
-        );
-        const responseMaskingFamilies =
-            responseMaskingAccounting.families as readonly Record<
-                string,
-                unknown
-            >[];
-        expect(responseMaskingFamilies).toHaveLength(setupProofFamilies.length);
-        expect(responseMaskingFamilies[0]).toMatchObject({
-            proofFamily: 'vss-opening-carry',
-            fullWidthCoefficientMaskingStatus:
-                'centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted',
-            commitmentNoWrapStatus: 'three-limb-big-int-no-wrap-bound-recorded',
-        });
-        const privateVssResponseProfiles = responseMaskingFamilies[0]
-            .responseProfiles as readonly Record<string, unknown>[];
-        expect(privateVssResponseProfiles[0]).toMatchObject({
-            responseKind: 'coefficient-message',
-            maskRandomBits: 112,
-            scalarChallengeBits: 63,
+        expect(proofFamilyAccounting[2]).toMatchObject({
+            proofFamily: 'public-key-share',
+            verifierClosedStatus:
+                'statement-rebuild-and-argument-checks-verifier-closed',
+            accountingStatus:
+                'succinct-public-key-share-theorem-accounting-accepted',
+            claimAccounting: {
+                accountingObject: 'SuccinctPublicKeyShareAccounting',
+                accountingHash:
+                    setupProofAccountingCertificate.publicKeyShareProofAccountingHash,
+            },
         });
         expect(
-            privateVssResponseProfiles[0].maskingSlackBits as number,
-        ).toBeGreaterThan(0);
-        const relinearizationResponseProfiles = responseMaskingFamilies[3]
-            .responseProfiles as readonly Record<string, unknown>[];
-        expect(relinearizationResponseProfiles[2]).toMatchObject({
-            responseKind: 'round-two-source',
-            maskRandomBits: 80,
+            (proofFamilyAccounting[2].verifierClosedChecks as string[]).some(
+                (check) =>
+                    check.includes('limb-zero') &&
+                    check.includes('same-secret anchor'),
+            ),
+        ).toBe(true);
+        expect(proofFamilyAccounting[3]).toMatchObject({
+            proofFamily: 'trustee-evaluation-key',
+            verifierClosedStatus:
+                'statement-rebuild-and-argument-checks-verifier-closed',
+            accountingStatus:
+                'succinct-trustee-evaluation-key-theorem-accounting-accepted',
+            claimAccounting: {
+                accountingObject: 'SuccinctEvaluationKeyProofAccounting',
+            },
         });
-        const tboxAccounting =
-            setupProofAccountingCertificate.tboxAccounting as Record<
+        const succinctTransportAccounting =
+            setupProofAccountingCertificate.succinctTransportAccounting as Record<
                 string,
                 unknown
             >;
-        expect(tboxAccounting).toMatchObject({
+        expect(succinctTransportAccounting).toMatchObject({
+            objectType: 'SetupProofSuccinctTransportAccounting',
             accountingStatus:
-                'generated-lower-protocol-tbox-profile-verifier-and-prover-closed',
-            closedProofFamilies: [...setupProofFamilies],
-            proofRingDegree: setupProofLnpTboxProofRingDegree,
-            challengeLog2Range: setupProofLnpTboxChallengeLog2Range,
-            challengeEncodedBits: setupProofLnpTboxChallengeEncodedBits,
-            challengeSpaceBits: setupProofLnpTboxChallengeSpaceBits,
+                'succinct-proof-material-roots-and-transport-binding-accepted',
         });
-        expect(tboxAccounting.closedVerifierChecks).toContain(
-            'generated lower-protocol tbox suffix byte-for-byte enforcement',
+        expect(succinctTransportAccounting.closedVerifierChecks).toContain(
+            'private VSS transported proof material uses the succinct proof material root and carries no relation-commitment or tbox metadata',
         );
+        const succinctLeakageAccounting =
+            setupProofAccountingCertificate.succinctLeakageAccounting as Record<
+                string,
+                unknown
+            >;
+        expect(succinctLeakageAccounting).toMatchObject({
+            objectType: 'SetupProofSuccinctLeakageAccounting',
+            accountingStatus: 'succinct-family-leakage-scope-bound-per-family',
+            familyAccountingHashes: {
+                privateVssShare: privateVssShareProofAccountingHash,
+            },
+        });
+        const fiatShamirTranscriptAccounting =
+            setupProofAccountingCertificate.fiatShamirTranscriptAccounting as Record<
+                string,
+                unknown
+            >;
+        expect(fiatShamirTranscriptAccounting).toMatchObject({
+            objectType: 'SetupProofFiatShamirTranscriptAccounting',
+            accountingStatus:
+                'succinct-family-classical-fiat-shamir-accounting-bound-per-family',
+        });
+        const proofTheoremAccounting =
+            setupProofAccountingCertificate.proofTheoremAccounting as Record<
+                string,
+                unknown
+            >;
+        expect(proofTheoremAccounting).toMatchObject({
+            objectType: 'SetupProofTheoremAccounting',
+            accountingStatus:
+                'succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open',
+        });
+        expect(
+            (proofTheoremAccounting.familyAccounting as Record<string, unknown>)
+                .privateVssShare,
+        ).toMatchObject(privateVssShareProofAccounting);
         const challengeSpaceAudit =
             challengeAccounting.challengeSpaceAudit as Record<string, unknown>;
         expect(challengeSpaceAudit).toMatchObject({
@@ -3741,7 +3542,9 @@ describe('setup ceremony assembly', () => {
         expect(challengeSpaceAudit.familySamples).toHaveLength(
             setupProofFamilies.length,
         );
-        expect(challengeSpaceAudit.sampledDifferenceChecks).toHaveLength(10);
+        expect(challengeSpaceAudit.sampledDifferenceChecks).toHaveLength(
+            (setupProofFamilies.length * (setupProofFamilies.length - 1)) / 2,
+        );
         expect(challengeAccounting.challengeSpaceAuditHash).toBe(
             deriveProtocolHash(
                 'SetupProofChallengeSpaceAuditHash',
@@ -3758,7 +3561,7 @@ describe('setup ceremony assembly', () => {
                     'repo-owned-key-correctness-theorem-accepted-for-verifier-recomputed-roots',
             },
             collectivePublicKey: {
-                status: 'collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots',
+                status: 'collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots',
                 collectivePublicKeyRoot:
                     assembly.collectivePublicKey.collectivePublicKeyRoot,
                 sourceRoots: {
@@ -3770,9 +3573,9 @@ describe('setup ceremony assembly', () => {
                     publicKeyShareMaterialSetRoot:
                         assembly.publicKeyShareMaterial
                             .publicKeyShareMaterialSetRoot,
-                    publicKeyShareLnpProofSetRoot:
-                        assembly.publicKeyShareLnpProofs
-                            .publicKeyShareLnpProofSetRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        assembly.publicKeyShareSuccinctProofs
+                            .publicKeyShareSuccinctProofSetRoot,
                 },
             },
             publicEvaluationKeys: {
@@ -3817,10 +3620,42 @@ describe('setup ceremony assembly', () => {
             setupPackagePrivateVssEnvelopeCommitments.envelopeReferences[0],
         ).not.toHaveProperty('encryptedEnvelope');
         expect(
+            setupPackagePrivateVssEnvelopeCommitments.envelopeReferences[0],
+        ).not.toHaveProperty('transportedPrivateVssShareProofMaterial');
+        expect(
             collectForbiddenSetupPackageAssemblyFieldPaths(
                 assembly.setupPackage,
             ),
         ).toEqual([]);
+        const packageWithPrivateProofSidecar = JSON.parse(
+            JSON.stringify(assembly.setupPackage),
+        ) as JsonRecord;
+        const privateVssEnvelopeCommitmentSet = jsonRecord(
+            packageWithPrivateProofSidecar.privateVssEnvelopeCommitments,
+            'privateVssEnvelopeCommitments',
+        );
+        const envelopeReferences =
+            privateVssEnvelopeCommitmentSet.envelopeReferences;
+        if (!Array.isArray(envelopeReferences)) {
+            throw new Error(
+                'privateVssEnvelopeCommitments.envelopeReferences must be an array.',
+            );
+        }
+        const firstEnvelopeReference = jsonRecord(
+            envelopeReferences[0],
+            'privateVssEnvelopeCommitments.envelopeReferences.0',
+        );
+        firstEnvelopeReference.transportedPrivateVssShareProofMaterial = {
+            objectType: 'SetupTransportedPrivateVssShareProofMaterialSet',
+            proofFamily: 'vss-opening-carry',
+        };
+        expect(
+            collectForbiddenSetupPackageAssemblyFieldPaths(
+                packageWithPrivateProofSidecar,
+            ),
+        ).toEqual([
+            'setupPackage.privateVssEnvelopeCommitments.envelopeReferences.0.transportedPrivateVssShareProofMaterial',
+        ]);
         expect(assembly.localTrusteeSetupStates).toHaveLength(participantCount);
         expect(assembly.setupContributions).toHaveLength(participantCount);
         expect(kernelFixture.verifiedExpectedEnvelopeCount()).toBe(
@@ -3944,12 +3779,19 @@ describe('setup ceremony assembly', () => {
                 transportedObject.objectName ===
                 'vssCoefficientCommitmentMaterial',
         );
+        // The transport certificate also carries the generated trustee
+        // evaluation-key proof and component material objects, so the total
+        // byte length is the sum over every transported object.
+        const certificateTotalByteLength = transportedObjects.reduce(
+            (byteLengthSum, transportedObject) =>
+                byteLengthSum + (transportedObject.byteLength as number),
+            0,
+        );
         expect(assembly.setupPackage.setupTransportCertificate).toMatchObject({
-            totalByteLength: fullMaterialCoefficientBytes,
-            chunkCount:
-                assembly.transportedVssCoefficientCommitmentMaterial
-                    ?.chunkCount,
-            transportedObjects: [
+            totalByteLength: certificateTotalByteLength,
+        });
+        expect(transportedObjects).toEqual(
+            expect.arrayContaining([
                 expect.objectContaining({
                     objectName: 'vssCoefficientCommitmentMaterial',
                     objectRole: 'public-vss-coefficient-commitment-material',
@@ -3967,8 +3809,8 @@ describe('setup ceremony assembly', () => {
                             ?.chunkHashes,
                     byteLength: fullMaterialCoefficientBytes,
                 }),
-            ],
-        });
+            ]),
+        );
         expect(vssTransportedObject).toBeDefined();
         expect(
             assembly.sameSecretProofs.vssCoefficientCommitmentMaterialRoot,
@@ -4320,7 +4162,7 @@ describe('setup ceremony assembly', () => {
             ]),
         );
         expect(
-            assembly.publicKeyShareLnpProofs.publicKeyShareMaterialSetRoot,
+            assembly.publicKeyShareSuccinctProofs.publicKeyShareMaterialSetRoot,
         ).toBe(assembly.publicKeyShareMaterial.publicKeyShareMaterialSetRoot);
         expect(assembly.collectivePublicKey.publicKeyShareMaterialSetRoot).toBe(
             assembly.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
@@ -4458,7 +4300,7 @@ describe('setup ceremony assembly', () => {
         ).rejects.toThrow(/bind the derived same-secret statements/u);
     });
 
-    it('rejects public-key LNP proof material rebound to another trustee identity', async () => {
+    it('rejects public-key succinct proof material rebound to another trustee identity', async () => {
         const participantCount = 3;
         const kernelFixture = createKernelFixture();
         const input = createAssemblyInput(
@@ -4469,8 +4311,8 @@ describe('setup ceremony assembly', () => {
         await expect(
             createSetupCeremonyAssembly({
                 ...input,
-                publicKeyShareLnpProofMaterials:
-                    input.publicKeyShareLnpProofMaterials.map(
+                publicKeyShareSuccinctProofMaterials:
+                    input.publicKeyShareSuccinctProofMaterials.map(
                         (proofMaterial) =>
                             proofMaterial.trusteeRosterPosition === 1
                                 ? {
@@ -4483,7 +4325,7 @@ describe('setup ceremony assembly', () => {
         ).rejects.toThrow(/bind accepted public-key and same-secret records/u);
     });
 
-    it('rejects missing scheduled Galois proof contributions', async () => {
+    it('rejects missing scheduled Galois share contributions', async () => {
         const participantCount = 3;
         const kernelFixture = createKernelFixture();
         const input = createAssemblyInput(
@@ -4500,8 +4342,8 @@ describe('setup ceremony assembly', () => {
                             batchContribution.trusteeRosterPosition === 1
                                 ? {
                                       ...batchContribution,
-                                      galoisKeyShareProofs:
-                                          batchContribution.galoisKeyShareProofs.slice(
+                                      galoisKeyShares:
+                                          batchContribution.galoisKeyShares.slice(
                                               0,
                                               1,
                                           ),
@@ -4509,7 +4351,7 @@ describe('setup ceremony assembly', () => {
                                 : batchContribution,
                     ),
             }),
-        ).rejects.toThrow(/one proof per required Galois key/u);
+        ).rejects.toThrow(/one share per required Galois key/u);
     });
 
     it('rejects recipient-local private VSS re-verification failure before acceptance export', async () => {
@@ -4521,5 +4363,16 @@ describe('setup ceremony assembly', () => {
                 createAssemblyInput(participantCount, kernelFixture.kernel),
             ),
         ).rejects.toThrow(/recipient-local verification/u);
+    });
+
+    it('rejects recipient-local private VSS verification that omits a Q_share proof', async () => {
+        const participantCount = 3;
+        const kernelFixture = createShortPrivateVssProofCountKernelFixture();
+
+        await expect(
+            createSetupCeremonyAssembly(
+                createAssemblyInput(participantCount, kernelFixture.kernel),
+            ),
+        ).rejects.toThrow(/verifiedPrivateVssShareProofCount/u);
     });
 });

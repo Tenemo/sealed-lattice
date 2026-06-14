@@ -46,35 +46,33 @@ fn compact_rotation_basis_covers_selected_logical_rotations() {
         direct_score_packing_basis_galois_elements(20).expect("direct score basis");
     let forward_basis = packed_rank_forward_basis_galois_elements(20).expect("rank forward basis");
     let return_basis = packed_rank_return_basis_galois_elements(20).expect("rank return basis");
-    let schedule =
-        selected_evaluator_rotation_key_schedule(20, DATA_PRIMES.len() - 1).expect("schedule");
-    let full_level = DATA_PRIMES.len() - 1;
-    let full_level_keys = schedule
+    let schedule = selected_evaluator_rotation_key_schedule(20).expect("schedule");
+    let working_level_keys = schedule
         .iter()
-        .filter(|(_, level)| *level == full_level)
-        .map(|(rotation, _)| *rotation)
-        .collect::<std::collections::BTreeSet<_>>();
-    let return_level_keys = schedule
-        .iter()
-        .filter(|(_, level)| *level == DIRECT_COMPARISON_OUTPUT_LEVEL)
+        .filter(|(_, level)| *level == SELECTED_EVALUATOR_WORKING_LEVEL)
         .map(|(rotation, _)| *rotation)
         .collect::<std::collections::BTreeSet<_>>();
 
+    // The power-of-two bases cover score shifts and pair-window offsets: the
+    // largest window offset for twenty options is 189, so eight bits each.
     assert_eq!(aggregate_basis.len(), 15);
-    assert_eq!(forward_basis.len(), 5);
-    assert_eq!(return_basis.len(), 5);
-    assert_eq!(schedule.len(), 20);
-    assert_eq!(full_level_keys.len(), 15);
-    assert_eq!(return_level_keys.len(), 5);
-    assert!(full_level_keys.contains(&(2 * POLYNOMIAL_DEGREE - 1)));
+    assert_eq!(forward_basis.len(), 8);
+    assert_eq!(return_basis.len(), 8);
+    // Every schedule entry sits at the working level; lower-level uses are
+    // served by truncation of the same keys.
+    assert_eq!(schedule.len(), working_level_keys.len());
+    assert!(working_level_keys.contains(&(2 * POLYNOMIAL_DEGREE - 1)));
+    for rotation in forward_basis.iter().chain(return_basis.iter()) {
+        assert!(working_level_keys.contains(rotation));
+    }
     for rotation in direct_score_packing_galois_elements(20).expect("logical packing") {
         let (requires_conjugation, exponent) =
             generator_exponent_or_conjugated(rotation).expect("covered rotation");
         if requires_conjugation {
-            assert!(full_level_keys.contains(&(2 * POLYNOMIAL_DEGREE - 1)));
+            assert!(working_level_keys.contains(&(2 * POLYNOMIAL_DEGREE - 1)));
         }
         for basis_rotation in generator_power_basis_for_exponent(exponent) {
-            assert!(full_level_keys.contains(&basis_rotation));
+            assert!(working_level_keys.contains(&basis_rotation));
         }
     }
 }

@@ -204,16 +204,29 @@ export const createRequiredGaloisSet = (
     };
 };
 
+// The selected evaluator working level: every evaluation key is generated at
+// this level and lower-level uses reuse the same key through CRT-idempotent
+// truncation, so the frozen schedule carries one relinearization entry per
+// round and no per-level entries. Mirrors the kernel evaluator constant.
+export const selectedEvaluatorWorkingLevel = 15;
+
 export const createRelinearizationLevelSchedule = (
     rnsLimbCount: number,
 ): RelinearizationLevelScheduleEntry[] => {
     assertPositiveSafeInteger(rnsLimbCount, 'rnsLimbCount');
+    if (selectedEvaluatorWorkingLevel >= rnsLimbCount) {
+        throw new Error(
+            'selected evaluator working level must stay inside the Q_share basis.',
+        );
+    }
 
-    return Array.from({ length: rnsLimbCount - 1 }, (_unused, index) => ({
-        level: index + 1,
-        proofFamily: 'relinearization-key-share',
-        keyShareRounds: ['round-one', 'round-two'],
-    }));
+    return [
+        {
+            level: selectedEvaluatorWorkingLevel,
+            proofFamily: 'relinearization-key-share',
+            keyShareRounds: ['round-one', 'round-two'],
+        },
+    ];
 };
 
 export const createEvaluatorKeySchedule = (

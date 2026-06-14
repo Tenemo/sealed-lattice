@@ -73,6 +73,33 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         profile["setupProofProfile"]["challengeBinding"]["challengeBits"],
         128
     );
+    assert_eq!(
+        profile["setupProofProfile"]["challengeBinding"]["challengeDomainScope"],
+        "legacy-lnp-tbox-private-vss-challenge-domain-only; accepted same-secret-linkage-anchor, public-key-share, private-vss-share, and trustee-evaluation-key succinct families bind challenge transcript rows inside their per-family accounting objects"
+    );
+    assert_eq!(
+        profile["setupProofProfile"]["matrixDerivation"]["matrixScope"],
+        "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only"
+    );
+    let setup_proof_families = profile["setupProofProfile"]["proofFamilies"]
+        .as_array()
+        .expect("setup proof family profiles");
+    assert_eq!(setup_proof_families.len(), 4);
+    for expected_family in [
+        "same-secret-linkage-anchor",
+        "public-key-share",
+        "vss-opening-carry",
+        "trustee-evaluation-key",
+    ] {
+        assert!(
+            setup_proof_families.iter().any(|family_profile| {
+                family_profile["proofFamily"]
+                    .as_str()
+                    .is_some_and(|proof_family| proof_family == expected_family)
+            }),
+            "setup proof profile must list {expected_family}"
+        );
+    }
     assert!(profile["setupProofProfileHash"].as_str().is_some());
     assert_eq!(
         profile["setupTransportProfile"]["objectType"],
@@ -138,7 +165,14 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["phaseOrder"].as_array().expect("phase order").len(),
-        14
+        15
+    );
+    assert!(
+        profile["phaseOrder"]
+            .as_array()
+            .expect("phase order")
+            .iter()
+            .any(|phase| phase["phaseId"] == "trusteeEvaluationKeyProofs")
     );
     assert!(profile["setupProfileHash"].as_str().is_some());
     assert!(profile["phaseOrderHash"].as_str().is_some());
@@ -184,6 +218,50 @@ fn collective_setup_verifier_reports_missing_phase_as_pending() {
         result["missingObjects"],
         serde_json::json!(["phaseTranscript"])
     );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later_pending() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later_pending",
+    );
+
+    for (field_name, malformed_value) in [
+        ("ceremonyId", "ceremony one"),
+        ("setupEpoch", "setup-epoch-1\nfork"),
+        (
+            "setupEpoch",
+            "setup-epoch-000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        ),
+    ] {
+        let mut package = minimal_collective_setup_package();
+        package["setupContext"][field_name] = serde_json::json!(malformed_value);
+        package
+            .as_object_mut()
+            .expect("package object")
+            .remove("phaseTranscript");
+        rebind_collective_setup_package_hash(&mut package);
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(
+            result["refusedObjects"][0]["reasonCode"],
+            "setupContextTokenMalformed"
+        );
+        assert_eq!(
+            result["refusedObjects"][0]["objectPath"],
+            format!("setupPackage.setupContext.{field_name}")
+        );
+        assert_eq!(result["missingObjects"], serde_json::json!([]));
+        assert!(
+            result.get("acceptedSetupHandoff").is_none(),
+            "malformed setup context packages must not return an accepted setup handoff"
+        );
+    }
 }
 
 #[test]

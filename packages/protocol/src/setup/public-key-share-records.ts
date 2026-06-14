@@ -1,4 +1,8 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import {
+    deriveProtocolHash,
+    hash512Hex,
+    setupProofMaterialFullObjectHashHex,
+} from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { BinaryChunkWriter } from './binary-chunk-writer.js';
@@ -9,11 +13,9 @@ import {
     type SameSecretConsistencyStatementSet,
 } from './same-secret-consistency-records.js';
 import {
-    assertSetupProofChallenge,
-    optionalSetupProofTboxZ34Metadata,
-    transportSetupProofMaterials,
-    type SetupProofChallenge,
-    type SetupProofTboxZ34Metadata,
+    setupProofChunkManifestRoot,
+    setupProofMaterialChunkHash,
+    setupProofTransportChunkSizeBytes,
     type TransportedSetupProofMaterialSet,
 } from './setup-proof-material-transport.js';
 import {
@@ -28,14 +30,14 @@ const isJsonRecord = (value: unknown): value is JsonRecord =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const publicKeyShareProofFamily = 'public-key-share';
-const publicKeyShareProofBytesHashDomain =
-    'sealed-lattice/setup/public-key-share/lnp-proof-bytes-v1';
+const publicKeyShareSuccinctProofBytesHashDomain =
+    'sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1';
 export const publicKeyShareProofVerificationStatus =
-    'lnp-proof-verification-pending';
-export const publicKeyShareLnpProofVerificationStatus =
-    'lnp-public-key-share-relation-verified-with-accepted-setup-proof-accounting';
-export const publicKeyShareLnpProofModelStatus =
-    'pinned LNP tbox proof bytes with deterministic statement-and-relation-bound full-width tbox commitment-prefix residue generation, h zero-position enforcement, z34-bound lower-protocol challenge sampling, generated lower-protocol tbox suffix enforcement, setup-proof challenge domain, 63-bit scalar relation challenge, binary proof-material schema, VSS-bound secret opening with centered signed 80-bit committed-secret masks and responses, fixed-width signed big-integer public-key relation commitments, centered-binomial error support, lifted no-wrap carry witnesses, public-key algebra, fixed response bounds, and repo-owned setup proof soundness, zero-knowledge, and QROM accounting accepted for claim-bearing public-key proof acceptance';
+    'succinct-proof-verification-pending';
+export const publicKeyShareSuccinctProofVerificationStatus =
+    'succinct-public-key-share-argument-verified-with-accepted-proof-accounting';
+export const publicKeyShareSuccinctProofModelStatus =
+    'succinct-public-key-share-argument-accounting-accepted';
 export const publicKeyShareProofBindingStatus =
     'public-key-share-proof-required';
 export const publicKeyShareMaterialEncoding =
@@ -138,10 +140,8 @@ export type PublicKeyShareProofRecord = Readonly<
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly rnsLimbCount: number;
-        readonly noWrapRelation: 'PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 over lifted integers';
-        readonly errorSupport: 'checked-by-public-key-share-lnp-proof-set';
-        readonly carryWitnessStatus: 'checked-by-public-key-share-lnp-proof-set';
-        readonly proofBytesStatus: 'supplied-by-public-key-share-lnp-proof-set';
+        readonly errorSupport: 'checked-by-public-key-share-succinct-proof-set';
+        readonly proofBytesStatus: 'supplied-by-public-key-share-succinct-proof-set';
         readonly publicKeyShareProofRoot: ProtocolHash;
     }
 >;
@@ -178,7 +178,7 @@ export type PublicKeyShareMaterialRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
+        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -206,7 +206,7 @@ export type PublicKeyShareMaterialSet = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
+        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -228,7 +228,7 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
+        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly materialEncoding: typeof publicKeyShareMaterialTransportEncoding;
         readonly binaryFormat: typeof publicKeyShareMaterialBinaryFormat;
         readonly participantCount: number;
@@ -283,11 +283,11 @@ export type SetupPackagePublicKeyShareMaterialSet =
     | PublicKeyShareMaterialSet
     | BinaryChunkedPublicKeyShareMaterialSet;
 
-export type PublicKeyShareLnpEmbeddedProofBytes = Readonly<{
+export type PublicKeyShareSuccinctEmbeddedProofBytes = Readonly<{
     readonly proofBytesHex: string;
 }>;
 
-export type PublicKeyShareLnpTransportedProofBytes = Readonly<{
+export type PublicKeyShareSuccinctTransportedProofBytes = Readonly<{
     readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofMaterialRoot: ProtocolHash;
     readonly proofChunkSizeBytes: number;
@@ -298,40 +298,34 @@ export type PublicKeyShareLnpTransportedProofBytes = Readonly<{
     readonly proofChunkHashes: readonly ProtocolHash[];
 }>;
 
-export type PublicKeyShareLnpProofByteMaterial =
-    | PublicKeyShareLnpEmbeddedProofBytes
-    | PublicKeyShareLnpTransportedProofBytes;
+export type PublicKeyShareSuccinctProofByteMaterial =
+    | PublicKeyShareSuccinctEmbeddedProofBytes
+    | PublicKeyShareSuccinctTransportedProofBytes;
 
-export type PublicKeyShareLnpProofMaterial = Readonly<
-    PublicKeyShareLnpProofByteMaterial & {
+export type PublicKeyShareSuccinctProofMaterial = Readonly<
+    PublicKeyShareSuccinctProofByteMaterial & {
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareLnpProofVerificationStatus;
-        readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
-        readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
+        readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
+        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly statementHash: ProtocolHash;
-        readonly relationCommitmentHash: ProtocolHash;
-        readonly tboxCommitmentPrefixHash: ProtocolHash;
-        readonly challenge: SetupProofChallenge;
         readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
-    } & Partial<SetupProofTboxZ34Metadata>
+    }
 >;
 
-export type PublicKeyShareLnpProofRecord = Readonly<
+export type PublicKeyShareSuccinctProofRecord = Readonly<
     JsonRecord &
-        PublicKeyShareLnpProofByteMaterial & {
-            readonly objectType: 'PublicKeyShareLnpProof';
+        PublicKeyShareSuccinctProofByteMaterial & {
+            readonly objectType: 'PublicKeyShareSuccinctProof';
             readonly objectVersion: 1;
             readonly setupProfileId: 'CollectiveBgvSetup-v1';
             readonly setupProofProfileId: typeof setupProofProfileId;
             readonly proofFamily: typeof publicKeyShareProofFamily;
-            readonly proofVerificationStatus: typeof publicKeyShareLnpProofVerificationStatus;
-            readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
-            readonly setupProofBinding: JsonRecord;
-            readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
+            readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
+            readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
             readonly publicKeyShareRoot: ProtocolHash;
@@ -342,32 +336,28 @@ export type PublicKeyShareLnpProofRecord = Readonly<
             readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
             readonly sameSecretProofRoot: ProtocolHash;
             readonly statementHash: ProtocolHash;
-            readonly relationCommitmentHash: ProtocolHash;
-            readonly tboxCommitmentPrefixHash: ProtocolHash;
-            readonly challenge: SetupProofChallenge;
             readonly proofSizeBytes: number;
             readonly proofBytesHash: ProtocolHash;
-            readonly publicKeyShareLnpProofRoot: ProtocolHash;
-        } & Partial<SetupProofTboxZ34Metadata>
+            readonly publicKeyShareSuccinctProofRoot: ProtocolHash;
+        }
 >;
 
-export type PublicKeyShareLnpProofRootReference = Readonly<{
+export type PublicKeyShareSuccinctProofRootReference = Readonly<{
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
-    readonly publicKeyShareLnpProofRoot: ProtocolHash;
+    readonly publicKeyShareSuccinctProofRoot: ProtocolHash;
 }>;
 
-export type PublicKeyShareLnpProofSet = Readonly<
+export type PublicKeyShareSuccinctProofSet = Readonly<
     JsonRecord & {
-        readonly objectType: 'PublicKeyShareLnpProofSet';
+        readonly objectType: 'PublicKeyShareSuccinctProofSet';
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareLnpProofVerificationStatus;
-        readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
-        readonly setupProofBinding: JsonRecord;
-        readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
+        readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
+        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
+        readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -379,9 +369,9 @@ export type PublicKeyShareLnpProofSet = Readonly<
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofRoots: readonly PublicKeyShareLnpProofRootReference[];
-        readonly proofRecords: readonly PublicKeyShareLnpProofRecord[];
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofRoots: readonly PublicKeyShareSuccinctProofRootReference[];
+        readonly proofRecords: readonly PublicKeyShareSuccinctProofRecord[];
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     }
 >;
 
@@ -410,9 +400,9 @@ export type CollectivePublicKey = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareLnpProofVerificationStatus;
-        readonly proofModelStatus: typeof publicKeyShareLnpProofModelStatus;
-        readonly aggregationStatus: 'lnp-proof-aggregated-with-accepted-setup-proof-accounting';
+        readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
+        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
+        readonly aggregationStatus: 'succinct-proof-aggregated-with-accepted-setup-proof-accounting';
         readonly materialEncoding: 'embedded-full-collective-public-key-coefficients';
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -426,7 +416,7 @@ export type CollectivePublicKey = Readonly<
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly sourceShareMaterialRoots: readonly CollectivePublicKeySourceShareMaterialRoot[];
         readonly aggregateCoefficientVectorsByLimb: readonly CollectivePublicKeyCoefficientVectorMaterial[];
         readonly collectivePublicKeyRoot: ProtocolHash;
@@ -446,7 +436,7 @@ export type CollectivePublicKeyInput = Readonly<{
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial: PublicKeyShareMaterialSet;
-    readonly publicKeyShareLnpProofs: PublicKeyShareLnpProofSet;
+    readonly publicKeyShareSuccinctProofs: PublicKeyShareSuccinctProofSet;
 }>;
 
 type CollectivePublicKeySourceBindingInput = Omit<
@@ -493,7 +483,7 @@ export type PublicKeyShareMaterialSetInput = Omit<
     readonly materialContributions: readonly PublicKeyShareMaterialContributionInput[];
 };
 
-export type PublicKeyShareLnpProofSetInput = Omit<
+export type PublicKeyShareSuccinctProofSetInput = Omit<
     PublicKeyShareProofSetInput,
     'sameSecretConsistency'
 > & {
@@ -501,9 +491,8 @@ export type PublicKeyShareLnpProofSetInput = Omit<
     readonly sameSecretProofs: SameSecretProofSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
-    readonly setupProofBinding: JsonRecord;
-    readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
-    readonly proofMaterials: readonly PublicKeyShareLnpProofMaterial[];
+    readonly proofAccountingHash: ProtocolHash;
+    readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
 };
 
 export type TransportedPublicKeyShareProofMaterialSet = Readonly<
@@ -514,7 +503,7 @@ export type TransportedPublicKeyShareProofMaterialSet = Readonly<
 >;
 
 export type BinaryChunkedPublicKeyShareProofMaterialTransport = Readonly<{
-    readonly proofMaterials: readonly PublicKeyShareLnpProofMaterial[];
+    readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
     readonly transportedPublicKeyShareProofMaterial: TransportedPublicKeyShareProofMaterialSet;
 }>;
 
@@ -563,19 +552,6 @@ const assertNonNegativeSafeInteger = (
 const assertNonEmptyString = (value: string, fieldName: string): void => {
     if (value.length === 0) {
         throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const assertSetupProofBinding = (
-    setupProofBinding: JsonRecord,
-    fieldName: string,
-): void => {
-    if (
-        setupProofBinding === null ||
-        typeof setupProofBinding !== 'object' ||
-        Array.isArray(setupProofBinding)
-    ) {
-        throw new TypeError(`${fieldName} must be an object.`);
     }
 };
 
@@ -1132,11 +1108,9 @@ export const createPublicKeyShareProofSet = (
                 trusteeSecretCommitmentRoot:
                     sameSecretStatement.trusteeSecretCommitmentRoot,
                 rnsLimbCount: input.qSharePrimes.length,
-                noWrapRelation:
-                    'PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 over lifted integers',
-                errorSupport: 'checked-by-public-key-share-lnp-proof-set',
-                carryWitnessStatus: 'checked-by-public-key-share-lnp-proof-set',
-                proofBytesStatus: 'supplied-by-public-key-share-lnp-proof-set',
+                errorSupport: 'checked-by-public-key-share-succinct-proof-set',
+                proofBytesStatus:
+                    'supplied-by-public-key-share-succinct-proof-set',
             } as const satisfies Omit<
                 PublicKeyShareProofRecord,
                 'publicKeyShareProofRoot'
@@ -1360,7 +1334,7 @@ const publicKeyShareMaterialRecordsFromContributions = (
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
-                proofModelStatus: publicKeyShareLnpProofModelStatus,
+                proofModelStatus: publicKeyShareSuccinctProofModelStatus,
                 materialEncoding: publicKeyShareMaterialEncoding,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -1436,7 +1410,7 @@ export const createPublicKeyShareMaterialSet = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofModelStatus: publicKeyShareLnpProofModelStatus,
+        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         materialEncoding: publicKeyShareMaterialEncoding,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -1578,7 +1552,7 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofModelStatus: publicKeyShareLnpProofModelStatus,
+        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         materialEncoding: publicKeyShareMaterialTransportEncoding,
         binaryFormat: publicKeyShareMaterialBinaryFormat,
         ...contextFields(input.setupContext),
@@ -2126,7 +2100,7 @@ export const materialRecordsFromTransportedPublicKeyShareMaterial = (
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
-            proofModelStatus: publicKeyShareLnpProofModelStatus,
+            proofModelStatus: publicKeyShareSuccinctProofModelStatus,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),
             trusteeIdentity: shareRecord.trusteeIdentity,
@@ -2206,8 +2180,8 @@ const assertCollectivePublicKeySourceBindings = (
     );
     assertContextMatches(
         input.setupContext,
-        input.publicKeyShareLnpProofs,
-        'publicKeyShareLnpProofs',
+        input.publicKeyShareSuccinctProofs,
+        'publicKeyShareSuccinctProofs',
     );
     if (
         input.sameSecretProofs.sameSecretConsistencyRoot !==
@@ -2220,13 +2194,13 @@ const assertCollectivePublicKeySourceBindings = (
             input.publicKeyShares.publicKeyShareSetRoot ||
         input.publicKeyShareMaterial.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot ||
-        input.publicKeyShareLnpProofs.sameSecretProofSetRoot !==
+        input.publicKeyShareSuccinctProofs.sameSecretProofSetRoot !==
             input.sameSecretProofs.sameSecretProofSetRoot ||
-        input.publicKeyShareLnpProofs.publicKeyShareSetRoot !==
+        input.publicKeyShareSuccinctProofs.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot ||
-        input.publicKeyShareLnpProofs.publicKeyShareProofSetRoot !==
+        input.publicKeyShareSuccinctProofs.publicKeyShareProofSetRoot !==
             input.publicKeyShareProofs.publicKeyShareProofSetRoot ||
-        input.publicKeyShareLnpProofs.publicKeyShareMaterialSetRoot !==
+        input.publicKeyShareSuccinctProofs.publicKeyShareMaterialSetRoot !==
             input.publicKeyShareMaterial.publicKeyShareMaterialSetRoot
     ) {
         throw new Error(
@@ -2282,10 +2256,10 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofVerificationStatus: publicKeyShareLnpProofVerificationStatus,
-        proofModelStatus: publicKeyShareLnpProofModelStatus,
+        proofVerificationStatus: publicKeyShareSuccinctProofVerificationStatus,
+        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         aggregationStatus:
-            'lnp-proof-aggregated-with-accepted-setup-proof-accounting',
+            'succinct-proof-aggregated-with-accepted-setup-proof-accounting',
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -2304,8 +2278,9 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
             input.publicKeyShareProofs.publicKeyShareProofSetRoot,
         publicKeyShareMaterialSetRoot:
             input.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
-        publicKeyShareLnpProofSetRoot:
-            input.publicKeyShareLnpProofs.publicKeyShareLnpProofSetRoot,
+        publicKeyShareSuccinctProofSetRoot:
+            input.publicKeyShareSuccinctProofs
+                .publicKeyShareSuccinctProofSetRoot,
         sourceShareMaterialRoots: input.sourceShareMaterialRoots,
         aggregateCoefficientVectorsByLimb,
     } as const satisfies Omit<CollectivePublicKey, 'collectivePublicKeyRoot'>;
@@ -2514,7 +2489,7 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
-            proofModelStatus: publicKeyShareLnpProofModelStatus,
+            proofModelStatus: publicKeyShareSuccinctProofModelStatus,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),
             trusteeIdentity: shareRecord.trusteeIdentity,
@@ -2571,7 +2546,7 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
 
 const publicKeyShareProofRecordsByRosterPosition = (
     input: Pick<
-        PublicKeyShareLnpProofSetInput,
+        PublicKeyShareSuccinctProofSetInput,
         'setupContext' | 'participantCount' | 'publicKeyShareProofs'
     >,
 ): ReadonlyMap<number, PublicKeyShareProofRecord> => {
@@ -2617,7 +2592,7 @@ const publicKeyShareProofRecordsByRosterPosition = (
 
 const sameSecretProofRecordsByRosterPosition = (
     input: Pick<
-        PublicKeyShareLnpProofSetInput,
+        PublicKeyShareSuccinctProofSetInput,
         | 'setupContext'
         | 'participantCount'
         | 'sameSecretConsistency'
@@ -2682,7 +2657,7 @@ type PublicKeyShareMaterialProofReference =
 
 const publicKeyShareMaterialReferencesByRosterPosition = (
     input: Pick<
-        PublicKeyShareLnpProofSetInput,
+        PublicKeyShareSuccinctProofSetInput,
         'setupContext' | 'participantCount' | 'publicKeyShareMaterial'
     >,
 ): ReadonlyMap<number, PublicKeyShareMaterialProofReference> => {
@@ -2759,9 +2734,8 @@ const publicKeyShareMaterialReferencesByRosterPosition = (
     return recordsByRosterPosition;
 };
 
-const validatePublicKeyShareLnpProofMaterial = (
-    material: PublicKeyShareLnpProofMaterial,
-    expectedTboxParameterProfileHash: ProtocolHash,
+const validatePublicKeyShareSuccinctProofMaterial = (
+    material: PublicKeyShareSuccinctProofMaterial,
     fieldName: string,
 ): void => {
     if (material.setupProofProfileId !== setupProofProfileId) {
@@ -2774,29 +2748,17 @@ const validatePublicKeyShareLnpProofMaterial = (
     }
     if (
         material.proofVerificationStatus !==
-        publicKeyShareLnpProofVerificationStatus
+        publicKeyShareSuccinctProofVerificationStatus
     ) {
         throw new Error(
-            `${fieldName}.proofVerificationStatus must be the public-key share LNP verification status.`,
+            `${fieldName}.proofVerificationStatus must be the public-key share succinct verification status.`,
         );
     }
-    if (material.proofModelStatus !== publicKeyShareLnpProofModelStatus) {
+    if (material.proofModelStatus !== publicKeyShareSuccinctProofModelStatus) {
         throw new Error(
-            `${fieldName}.proofModelStatus must match public-key share LNP proof model.`,
+            `${fieldName}.proofModelStatus must match public-key share succinct proof model.`,
         );
     }
-    if (
-        material.publicKeyShareTboxParameterProfileHash !==
-        expectedTboxParameterProfileHash
-    ) {
-        throw new Error(
-            `${fieldName}.publicKeyShareTboxParameterProfileHash must match the setup proof profile.`,
-        );
-    }
-    assertProtocolHash(
-        material.publicKeyShareTboxParameterProfileHash,
-        `${fieldName}.publicKeyShareTboxParameterProfileHash`,
-    );
     assertNonEmptyString(
         material.trusteeIdentity,
         `${fieldName}.trusteeIdentity`,
@@ -2806,16 +2768,6 @@ const validatePublicKeyShareLnpProofMaterial = (
         `${fieldName}.trusteeRosterPosition`,
     );
     assertProtocolHash(material.statementHash, `${fieldName}.statementHash`);
-    assertProtocolHash(
-        material.relationCommitmentHash,
-        `${fieldName}.relationCommitmentHash`,
-    );
-    assertProtocolHash(
-        material.tboxCommitmentPrefixHash,
-        `${fieldName}.tboxCommitmentPrefixHash`,
-    );
-    assertSetupProofChallenge(material.challenge, `${fieldName}.challenge`);
-    optionalSetupProofTboxZ34Metadata(material, fieldName);
     assertPositiveSafeInteger(
         material.proofSizeBytes,
         `${fieldName}.proofSizeBytes`,
@@ -2832,74 +2784,72 @@ const validatePublicKeyShareLnpProofMaterial = (
                 `${fieldName}.proofBytesHex must match proofSizeBytes.`,
             );
         }
-    } else {
-        const transportedMaterial =
-            material as PublicKeyShareLnpTransportedProofBytes;
-        if (
-            transportedMaterial.proofBytesEncoding !==
-            'binary-chunked-proof-bytes'
-        ) {
-            throw new TypeError(
-                `${fieldName}.proofBytesEncoding must be binary-chunked-proof-bytes.`,
-            );
-        }
+
+        return;
+    }
+
+    const transportedMaterial =
+        material as PublicKeyShareSuccinctTransportedProofBytes;
+    if (
+        transportedMaterial.proofBytesEncoding !== 'binary-chunked-proof-bytes'
+    ) {
+        throw new TypeError(
+            `${fieldName}.proofBytesEncoding must be binary-chunked-proof-bytes.`,
+        );
+    }
+    assertProtocolHash(
+        transportedMaterial.proofMaterialRoot,
+        `${fieldName}.proofMaterialRoot`,
+    );
+    assertPositiveSafeInteger(
+        transportedMaterial.proofChunkSizeBytes,
+        `${fieldName}.proofChunkSizeBytes`,
+    );
+    assertPositiveSafeInteger(
+        transportedMaterial.proofChunkCount,
+        `${fieldName}.proofChunkCount`,
+    );
+    assertPositiveSafeInteger(
+        transportedMaterial.proofTotalByteLength,
+        `${fieldName}.proofTotalByteLength`,
+    );
+    if (transportedMaterial.proofTotalByteLength !== material.proofSizeBytes) {
+        throw new Error(
+            `${fieldName}.proofTotalByteLength must match proofSizeBytes.`,
+        );
+    }
+    assertProtocolHash(
+        transportedMaterial.proofFullObjectHash,
+        `${fieldName}.proofFullObjectHash`,
+    );
+    assertProtocolHash(
+        transportedMaterial.proofChunkRoot,
+        `${fieldName}.proofChunkRoot`,
+    );
+    transportedMaterial.proofChunkHashes.forEach((proofChunkHash, chunkIndex) =>
         assertProtocolHash(
-            transportedMaterial.proofMaterialRoot,
-            `${fieldName}.proofMaterialRoot`,
+            proofChunkHash,
+            `${fieldName}.proofChunkHashes.${String(chunkIndex)}`,
+        ),
+    );
+    if (
+        transportedMaterial.proofChunkHashes.length !==
+        transportedMaterial.proofChunkCount
+    ) {
+        throw new Error(
+            `${fieldName}.proofChunkHashes must match proofChunkCount.`,
         );
-        assertPositiveSafeInteger(
-            transportedMaterial.proofChunkSizeBytes,
-            `${fieldName}.proofChunkSizeBytes`,
-        );
-        assertPositiveSafeInteger(
-            transportedMaterial.proofChunkCount,
-            `${fieldName}.proofChunkCount`,
-        );
-        assertPositiveSafeInteger(
-            transportedMaterial.proofTotalByteLength,
-            `${fieldName}.proofTotalByteLength`,
-        );
-        if (
-            transportedMaterial.proofTotalByteLength !== material.proofSizeBytes
-        ) {
-            throw new Error(
-                `${fieldName}.proofTotalByteLength must match proofSizeBytes.`,
-            );
-        }
-        assertProtocolHash(
-            transportedMaterial.proofFullObjectHash,
-            `${fieldName}.proofFullObjectHash`,
-        );
-        assertProtocolHash(
-            transportedMaterial.proofChunkRoot,
-            `${fieldName}.proofChunkRoot`,
-        );
-        transportedMaterial.proofChunkHashes.forEach(
-            (proofChunkHash, chunkIndex) =>
-                assertProtocolHash(
-                    proofChunkHash,
-                    `${fieldName}.proofChunkHashes.${String(chunkIndex)}`,
-                ),
-        );
-        if (
-            transportedMaterial.proofChunkHashes.length !==
-            transportedMaterial.proofChunkCount
-        ) {
-            throw new Error(
-                `${fieldName}.proofChunkHashes must match proofChunkCount.`,
-            );
-        }
     }
 };
 
-const publicKeyShareLnpProofByteMaterial = (
-    material: PublicKeyShareLnpProofMaterial,
-): PublicKeyShareLnpProofByteMaterial => {
+const publicKeyShareSuccinctProofByteMaterial = (
+    material: PublicKeyShareSuccinctProofMaterial,
+): PublicKeyShareSuccinctProofByteMaterial => {
     const proofBytesHex = (material as JsonRecord).proofBytesHex;
     if (proofBytesHex !== undefined) {
         if (typeof proofBytesHex !== 'string') {
             throw new TypeError(
-                'publicKeyShareLnpProofMaterial.proofBytesHex must be a string.',
+                'publicKeyShareSuccinctProofMaterial.proofBytesHex must be a string.',
             );
         }
         return {
@@ -2908,7 +2858,7 @@ const publicKeyShareLnpProofByteMaterial = (
     }
 
     const transportedMaterial =
-        material as PublicKeyShareLnpTransportedProofBytes;
+        material as PublicKeyShareSuccinctTransportedProofBytes;
 
     return {
         proofBytesEncoding: transportedMaterial.proofBytesEncoding,
@@ -2922,32 +2872,29 @@ const publicKeyShareLnpProofByteMaterial = (
     };
 };
 
-const sortedPublicKeyShareLnpProofMaterials = (
+const sortedPublicKeyShareSuccinctProofMaterials = (
     input: Pick<
-        PublicKeyShareLnpProofSetInput,
-        | 'participantCount'
-        | 'proofMaterials'
-        | 'publicKeyShareTboxParameterProfileHash'
+        PublicKeyShareSuccinctProofSetInput,
+        'participantCount' | 'proofMaterials'
     >,
-): PublicKeyShareLnpProofMaterial[] => {
+): PublicKeyShareSuccinctProofMaterial[] => {
     const proofMaterials = [...input.proofMaterials].sort(
         (left, right) =>
             left.trusteeRosterPosition - right.trusteeRosterPosition,
     );
     if (proofMaterials.length !== input.participantCount) {
         throw new Error(
-            'publicKeyShareLnpProofMaterials must contain one proof per participant.',
+            'publicKeyShareSuccinctProofMaterials must contain one proof per participant.',
         );
     }
     proofMaterials.forEach((proofMaterial, expectedRosterPosition) => {
-        validatePublicKeyShareLnpProofMaterial(
+        validatePublicKeyShareSuccinctProofMaterial(
             proofMaterial,
-            input.publicKeyShareTboxParameterProfileHash,
-            `publicKeyShareLnpProofMaterials.${String(expectedRosterPosition)}`,
+            `publicKeyShareSuccinctProofMaterials.${String(expectedRosterPosition)}`,
         );
         if (proofMaterial.trusteeRosterPosition !== expectedRosterPosition) {
             throw new Error(
-                'publicKeyShareLnpProofMaterials roster positions must be contiguous from zero.',
+                'publicKeyShareSuccinctProofMaterials roster positions must be contiguous from zero.',
             );
         }
     });
@@ -2955,21 +2902,36 @@ const sortedPublicKeyShareLnpProofMaterials = (
     return proofMaterials;
 };
 
-export const createPublicKeyShareLnpProofSet = (
-    input: PublicKeyShareLnpProofSetInput,
-): PublicKeyShareLnpProofSet => {
+export const createPublicKeyShareSuccinctProofSet = (
+    input: PublicKeyShareSuccinctProofSetInput,
+): PublicKeyShareSuccinctProofSet => {
     validateCommonInput(input);
-    assertSetupProofBinding(input.setupProofBinding, 'setupProofBinding');
-    assertProtocolHash(
-        input.publicKeyShareTboxParameterProfileHash,
-        'publicKeyShareTboxParameterProfileHash',
+    assertProtocolHash(input.proofAccountingHash, 'proofAccountingHash');
+    assertContextMatches(
+        input.setupContext,
+        input.sameSecretConsistency,
+        'sameSecretConsistency',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.sameSecretProofs,
+        'sameSecretProofs',
     );
     assertContextMatches(
         input.setupContext,
         input.publicKeyShareProofs,
         'publicKeyShareProofs',
     );
+    assertContextMatches(
+        input.setupContext,
+        input.publicKeyShareMaterial,
+        'publicKeyShareMaterial',
+    );
     if (
+        input.sameSecretProofs.sameSecretConsistencyRoot !==
+            input.sameSecretConsistency.sameSecretConsistencyRoot ||
+        input.sameSecretProofs.sameSecretProofFamilyBindingRoot !==
+            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot ||
         input.publicKeyShareProofs.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot ||
         input.publicKeyShareProofs.sameSecretConsistencyRoot !==
@@ -2978,9 +2940,10 @@ export const createPublicKeyShareLnpProofSet = (
             input.publicKeyShares.publicKeyShareSetRoot
     ) {
         throw new Error(
-            'public-key LNP proofs must bind the accepted public-key share, proof statement, and material roots.',
+            'public-key succinct proofs must bind the accepted public-key share, same-secret, statement, and material roots.',
         );
     }
+
     const statementsByRosterPosition = statementRecordsByRosterPosition(input);
     const shareRecords = publicKeyShareRecordsByRosterPosition(input);
     const proofStatementRecords =
@@ -2989,7 +2952,7 @@ export const createPublicKeyShareLnpProofSet = (
         sameSecretProofRecordsByRosterPosition(input);
     const materialReferences =
         publicKeyShareMaterialReferencesByRosterPosition(input);
-    const proofMaterials = sortedPublicKeyShareLnpProofMaterials(input);
+    const proofMaterials = sortedPublicKeyShareSuccinctProofMaterials(input);
     const proofRecords = proofMaterials.map(
         (proofMaterial, expectedRosterPosition) => {
             const statementRecord = statementsByRosterPosition.get(
@@ -3013,7 +2976,7 @@ export const createPublicKeyShareLnpProofSet = (
                 materialReference === undefined
             ) {
                 throw new Error(
-                    'publicKeyShareLnpProofMaterials must match accepted setup records.',
+                    'publicKeyShareSuccinctProofMaterials must match accepted setup records.',
                 );
             }
             if (
@@ -3033,21 +2996,18 @@ export const createPublicKeyShareLnpProofSet = (
                     statementRecord.trusteeSecretCommitmentRoot
             ) {
                 throw new Error(
-                    'publicKeyShareLnpProofMaterials must bind accepted public-key and same-secret records.',
+                    'publicKeyShareSuccinctProofMaterials must bind accepted public-key and same-secret records.',
                 );
             }
             const proofRecordWithoutRoot = {
-                objectType: 'PublicKeyShareLnpProof',
+                objectType: 'PublicKeyShareSuccinctProof',
                 objectVersion: 1,
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
                 proofVerificationStatus:
-                    publicKeyShareLnpProofVerificationStatus,
-                proofModelStatus: publicKeyShareLnpProofModelStatus,
-                setupProofBinding: input.setupProofBinding,
-                publicKeyShareTboxParameterProfileHash:
-                    input.publicKeyShareTboxParameterProfileHash,
+                    publicKeyShareSuccinctProofVerificationStatus,
+                proofModelStatus: publicKeyShareSuccinctProofModelStatus,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
@@ -3064,42 +3024,32 @@ export const createPublicKeyShareLnpProofSet = (
                     sameSecretProofRecord.sameSecretProofFamilyBindingRoot,
                 sameSecretProofRoot: sameSecretProofRecord.sameSecretProofRoot,
                 statementHash: proofMaterial.statementHash,
-                relationCommitmentHash: proofMaterial.relationCommitmentHash,
-                tboxCommitmentPrefixHash:
-                    proofMaterial.tboxCommitmentPrefixHash,
-                ...optionalSetupProofTboxZ34Metadata(
-                    proofMaterial,
-                    `publicKeyShareLnpProofMaterials.${String(expectedRosterPosition)}`,
-                ),
-                challenge: proofMaterial.challenge,
                 proofSizeBytes: proofMaterial.proofSizeBytes,
                 proofBytesHash: proofMaterial.proofBytesHash,
-                ...publicKeyShareLnpProofByteMaterial(proofMaterial),
+                ...publicKeyShareSuccinctProofByteMaterial(proofMaterial),
             } as const satisfies Omit<
-                PublicKeyShareLnpProofRecord,
-                'publicKeyShareLnpProofRoot'
+                PublicKeyShareSuccinctProofRecord,
+                'publicKeyShareSuccinctProofRoot'
             >;
 
             return {
                 ...proofRecordWithoutRoot,
-                publicKeyShareLnpProofRoot: deriveProtocolHash(
+                publicKeyShareSuccinctProofRoot: deriveProtocolHash(
                     'PublicKeyShareProofRoot',
                     proofRecordWithoutRoot,
                 ),
-            } satisfies PublicKeyShareLnpProofRecord;
+            } satisfies PublicKeyShareSuccinctProofRecord;
         },
     );
     const proofSetWithoutRoot = {
-        objectType: 'PublicKeyShareLnpProofSet',
+        objectType: 'PublicKeyShareSuccinctProofSet',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofVerificationStatus: publicKeyShareLnpProofVerificationStatus,
-        proofModelStatus: publicKeyShareLnpProofModelStatus,
-        setupProofBinding: input.setupProofBinding,
-        publicKeyShareTboxParameterProfileHash:
-            input.publicKeyShareTboxParameterProfileHash,
+        proofVerificationStatus: publicKeyShareSuccinctProofVerificationStatus,
+        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
+        proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -3116,40 +3066,171 @@ export const createPublicKeyShareLnpProofSet = (
             input.publicKeyShareProofs.publicKeyShareProofSetRoot,
         publicKeyShareMaterialSetRoot:
             input.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
-        publicKeyShareLnpProofRoots: proofRecords.map((proofRecord) => ({
+        publicKeyShareSuccinctProofRoots: proofRecords.map((proofRecord) => ({
             trusteeIdentity: proofRecord.trusteeIdentity,
             trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            publicKeyShareLnpProofRoot: proofRecord.publicKeyShareLnpProofRoot,
+            publicKeyShareSuccinctProofRoot:
+                proofRecord.publicKeyShareSuccinctProofRoot,
         })),
         proofRecords,
     } as const satisfies Omit<
-        PublicKeyShareLnpProofSet,
-        'publicKeyShareLnpProofSetRoot'
+        PublicKeyShareSuccinctProofSet,
+        'publicKeyShareSuccinctProofSetRoot'
     >;
 
     return {
         ...proofSetWithoutRoot,
-        publicKeyShareLnpProofSetRoot: deriveProtocolHash(
+        publicKeyShareSuccinctProofSetRoot: deriveProtocolHash(
             'PublicKeyShareProofRoot',
             proofSetWithoutRoot,
         ),
-    } satisfies PublicKeyShareLnpProofSet;
+    } satisfies PublicKeyShareSuccinctProofSet;
 };
 
 export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
-    proofMaterials: readonly PublicKeyShareLnpProofMaterial[],
+    proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[],
 ): BinaryChunkedPublicKeyShareProofMaterialTransport => {
-    const transport = transportSetupProofMaterials(proofMaterials, {
-        proofFamily: publicKeyShareProofFamily,
-        proofBytesHashDomain: publicKeyShareProofBytesHashDomain,
-        transportedSetObjectType:
-            'SetupTransportedPublicKeyShareProofMaterialSet',
-        transportedObjectType: 'SetupTransportedPublicKeyShareProofMaterial',
-    });
+    const transportedProofMaterials: JsonRecord[] = [];
+    const transportedRecords = proofMaterials.map(
+        (proofMaterial, proofIndex) => {
+            validatePublicKeyShareSuccinctProofMaterial(
+                proofMaterial,
+                `proofMaterials.${String(proofIndex)}`,
+            );
+            const materialRecord = proofMaterial as JsonRecord;
+            const proofBytesHex = materialRecord.proofBytesHex;
+            if (
+                typeof proofBytesHex !== 'string' ||
+                proofBytesHex.length === 0
+            ) {
+                throw new TypeError(
+                    `proofMaterials.${String(proofIndex)}.proofBytesHex must be non-empty.`,
+                );
+            }
+            const proofBytes = bytesFromHex(
+                proofBytesHex,
+                `proofMaterials.${String(proofIndex)}.proofBytesHex`,
+            );
+            if (proofMaterial.proofSizeBytes !== proofBytes.byteLength) {
+                throw new Error(
+                    `proofMaterials.${String(proofIndex)}.proofSizeBytes must match proofBytesHex.`,
+                );
+            }
+            const expectedProofBytesHash = hash512Hex(
+                publicKeyShareSuccinctProofBytesHashDomain,
+                [proofBytes],
+            );
+            if (proofMaterial.proofBytesHash !== expectedProofBytesHash) {
+                throw new Error(
+                    `proofMaterials.${String(proofIndex)}.proofBytesHash must match proofBytesHex before transport.`,
+                );
+            }
+            const chunks: Uint8Array[] = [];
+            for (
+                let chunkStart = 0;
+                chunkStart < proofBytes.byteLength;
+                chunkStart += setupProofTransportChunkSizeBytes
+            ) {
+                chunks.push(
+                    proofBytes.slice(
+                        chunkStart,
+                        Math.min(
+                            chunkStart + setupProofTransportChunkSizeBytes,
+                            proofBytes.byteLength,
+                        ),
+                    ),
+                );
+            }
+            if (chunks.length === 0) {
+                throw new Error(
+                    `proofMaterials.${String(proofIndex)}.proofBytesHex must produce at least one transported chunk.`,
+                );
+            }
+            const totalByteLength = proofBytes.byteLength;
+            const fullObjectHash = setupProofMaterialFullObjectHashHex(
+                publicKeyShareProofFamily,
+                totalByteLength,
+                chunks,
+            );
+            const chunkHashes = chunks.map((chunk, chunkIndex) =>
+                setupProofMaterialChunkHash(
+                    publicKeyShareProofFamily,
+                    fullObjectHash,
+                    chunkIndex,
+                    chunk,
+                ),
+            );
+            const chunkRoot = setupProofChunkManifestRoot(
+                publicKeyShareProofFamily,
+                chunkHashes,
+                fullObjectHash,
+                totalByteLength,
+            );
+            const proofMaterialRoot = deriveProtocolHash(
+                'PublicKeyShareProofMaterialRoot',
+                {
+                    objectType: 'PublicKeyShareSuccinctProofMaterialReference',
+                    objectVersion: 1,
+                    setupProfileId: 'CollectiveBgvSetup-v1',
+                    setupProofProfileId,
+                    proofFamily: publicKeyShareProofFamily,
+                    trusteeIdentity: proofMaterial.trusteeIdentity,
+                    trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
+                    statementHash: proofMaterial.statementHash,
+                    proofSizeBytes: proofMaterial.proofSizeBytes,
+                    proofBytesHash: proofMaterial.proofBytesHash,
+                    chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                    chunkCount: chunkHashes.length,
+                    totalByteLength,
+                    fullObjectHash,
+                    chunkRoot,
+                    chunkHashes,
+                },
+            );
+            transportedProofMaterials.push({
+                objectType: 'SetupTransportedPublicKeyShareProofMaterial',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId,
+                proofFamily: publicKeyShareProofFamily,
+                proofMaterialRoot,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: chunkHashes.length,
+                totalByteLength,
+                fullObjectHash,
+                chunkHashes,
+                chunkRoot,
+                chunks: chunks.map((chunk, chunkIndex) => ({
+                    chunkIndex,
+                    bytesHex: bytesToHex(chunk),
+                })),
+            });
+            const transportedMaterial = {
+                ...materialRecord,
+                proofBytesEncoding: 'binary-chunked-proof-bytes',
+                proofMaterialRoot,
+                proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
+                proofChunkCount: chunkHashes.length,
+                proofTotalByteLength: totalByteLength,
+                proofFullObjectHash: fullObjectHash,
+                proofChunkRoot: chunkRoot,
+                proofChunkHashes: chunkHashes,
+            } as JsonRecord;
+            delete transportedMaterial.proofBytesHex;
+
+            return transportedMaterial as unknown as PublicKeyShareSuccinctProofMaterial;
+        },
+    );
 
     return {
-        proofMaterials: transport.proofMaterials,
-        transportedPublicKeyShareProofMaterial:
-            transport.transportedProofMaterial as TransportedPublicKeyShareProofMaterialSet,
+        proofMaterials: transportedRecords,
+        transportedPublicKeyShareProofMaterial: {
+            objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId,
+            proofFamily: publicKeyShareProofFamily,
+            proofMaterials: transportedProofMaterials,
+        },
     };
 };

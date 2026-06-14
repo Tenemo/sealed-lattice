@@ -1,7 +1,7 @@
 use super::*;
 
 fn expected_relinearization_key_switch_component_polynomial_count() -> CanonicalResult<u64> {
-    expected_relinearization_levels()
+    scheduled_relinearization_levels()?
         .into_iter()
         .try_fold(0_u64, |total, level| {
             let digit_count = level.checked_add(1).ok_or_else(|| {
@@ -387,14 +387,6 @@ fn scalar_power_sum(coefficient_count: u64, trustee_point: u64) -> CanonicalResu
     Ok(scalar_sum)
 }
 
-fn ceil_log2_u128(value: u128) -> u32 {
-    if value <= 1 {
-        0
-    } else {
-        u128::BITS - (value - 1).leading_zeros()
-    }
-}
-
 fn setup_commitment_certificate_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
@@ -509,829 +501,177 @@ pub(super) fn setup_proof_accounting_certificate_with_hash_value() -> CanonicalR
     Ok(certificate)
 }
 
-fn setup_proof_family_accounting_value() -> Value {
-    json!([
+fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
+    use crate::bgv::setup::trustee_evaluation_key_proof::{
+        succinct_evaluation_key_proof_accounting_hash, succinct_private_vss_share_accounting_hash,
+        succinct_public_key_share_accounting_hash,
+        succinct_same_secret_linkage_anchor_accounting_hash,
+    };
+
+    Ok(json!([
         {
             "proofFamily": "vss-opening-carry",
             "claimScope": "recipient-local private VSS share proof relation over accepted Q_share limbs",
-            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "verifierClosedStatus": "statement-rebuild-and-succinct-argument-checks-verifier-closed",
             "verifierClosedChecks": [
-                "proof bytes hash, size, statement root, material root, statement-and-relation-bound tbox prefix, and scalar challenge are recomputed from canonical proof material",
-                "accepted private VSS tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
-                "four first-profile Shamir coefficient opening responses are checked against accepted coefficient commitments",
-                "recipient-point lifted share equality and explicit carry responses are checked coefficientwise before acceptance",
-                "message, randomness, and carry responses are checked against fixed first-profile bounds",
+                "every private VSS statement is rebuilt by the recipient verifier from the encrypted envelope AAD hash, accepted VSS coefficient commitments, share values, setup context, and source and recipient identities",
+                "canonical proof bytes are hashed, decoded, checked for canonical field elements, and rebound to the statement hash, proof statement root, proof material root, and accepted accounting hash before acceptance",
+                "one succinct argument checks all four hidden Shamir coefficient commitment openings and the hidden lifted carry vector over the commitment-modulus fields",
+                "the recipient-point lifted share relation sum_k alpha_j^k F_k - q_l * carry = sigma is enforced coefficientwise inside the batched sumcheck",
+                "coefficient messages, opening randomness, carry witnesses, and source trustee secret constants remain outside public transcript artifacts",
             ],
-            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "accountingStatus": "succinct-private-vss-share-theorem-accounting-accepted",
             "claimAccounting": {
-                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the recipient-local carry-aware VSS relation because statement binding, first-message commitments, generated tbox bytes, coefficient openings, carry relations, and response bounds are verified before acceptance",
-                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 112-bit coefficient masks, opening-randomness masks, carry masks, verifier-bound no-wrap bounds, and transcript-bound tbox bytes; private coefficients, openings, and carries are not exposed in accepted public artifacts",
-                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+                "accountingObject": "SuccinctPrivateVssShareAccounting",
+                "accountingHash": succinct_private_vss_share_accounting_hash()?,
+                "closedItems": "the relation shape, canonical statement binding, proof-byte decoding, batched low-degree checks, cross-field integer consistency bound, classical Fiat-Shamir transcript rows, and bounded-leakage scope are recorded inside the bound accounting object",
+                "claimBoundary": "recipient-local private VSS accounting is accepted only for the succinct family under the named FRI conjecture and classical Fiat-Shamir rows; QROM loss and 128-bit zero-knowledge are not accepted rows",
             },
         },
         {
-            "proofFamily": "same-secret-consistency",
-            "claimScope": "same trustee secret across accepted VSS constant commitments",
-            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "proofFamily": "same-secret-linkage-anchor",
+            "claimScope": "one short trustee secret behind every accepted VSS constant commitment, proven once per trustee by a keyless succinct linkage argument over the commitment-modulus fields",
+            "verifierClosedStatus": "statement-rebuild-and-argument-checks-verifier-closed",
             "verifierClosedChecks": [
-                "statement hash binds setup proof record binding, trustee statement roots, accepted constant commitment roots, and tbox profile hash",
-                "relation commitment hash and scalar challenge are recomputed from proof commitments and canonical transcript fields",
-                "accepted same-secret tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
-                "ternary secret support is checked through Boolean negative-indicator and shifted-secret support equations",
-                "all accepted Q_share constant commitments are checked against one shared secret response and opening randomness response",
-                "secret, negative-indicator, and randomness responses are checked against fixed first-profile bounds",
+                "every anchor statement is rebuilt by the verifier from the accepted VSS constant commitments, the accepted public VSS material root, and the ceremony context; no prover-supplied statement field is trusted",
+                "the linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against one committed ternary secret with Boolean negative-indicator support",
+                "per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every commitment-modulus field",
+                "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",
+                "canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package",
             ],
-            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "accountingStatus": "succinct-same-secret-linkage-anchor-theorem-accounting-accepted",
             "claimAccounting": {
-                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the same-secret relation because the verifier binds one shared secret response to every accepted constant commitment and support equation",
-                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit same-secret and support-response masks with witness-dependent support commitments treated as simulated first messages under the fixed relation and no-wrap response accounting",
-                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+                "accountingObject": "SuccinctSameSecretLinkageAnchorAccounting",
+                "accountingHash": succinct_same_secret_linkage_anchor_accounting_hash()?,
+                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
+                "claimBoundary": "active-malicious same-secret linkage accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; secret-dependent setup families reference this anchor through the accepted family binding root",
             },
         },
         {
             "proofFamily": "public-key-share",
-            "claimScope": "public-key share relation bound to the accepted same-secret proof and public-key material roots",
-            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "claimScope": "the public-key share of one trustee over every accepted Q_share limb, proven by one succinct argument against the committed trustee secret, one shared centered-binomial error, and the accepted common reference polynomial",
+            "verifierClosedStatus": "statement-rebuild-and-argument-checks-verifier-closed",
             "verifierClosedChecks": [
-                "statement hash binds public-key share roots, same-secret statement roots, public matrix roots, coefficient vector hashes, and setup proof record binding",
-                "relation commitment hash and scalar challenge are recomputed from public-key, support, and commitment-response commitments",
-                "accepted public-key-share tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
-                "same-secret opening response and ternary secret support are checked against accepted VSS constant commitments",
-                "centered-binomial error support is checked for every accepted Q_share limb and coefficient",
-                "lifted public-key equality PKShare_i,l - p*e_i,l + a_l*s_i + q_l*v_i,l = 0 is checked with explicit carry responses",
-                "secret, negative-indicator, opening-randomness, and error responses are checked against fixed first-profile bounds",
+                "every statement is rebuilt by the verifier from the accepted public-key share records, the seed-derived common reference polynomial, the selected accepted limb-zero same-secret constant commitment, the accepted same-secret anchor roots, and the ceremony context; no prover-supplied statement field is trusted",
+                "per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every Q_share limb field",
+                "the share-correctness relation b_l + a_l*s - p*e = 0 is enforced inside the argument over every Q_share limb against one committed ternary secret and one shared centered-binomial error column",
+                "one limb-zero constant-commitment linkage opening rebinds the share secret to the accepted same-secret anchor over the commitment-modulus fields; this is sufficient only because the same-secret anchor already proves all accepted Q_share constant commitments open to the same ternary trustee secret",
+                "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",
+                "canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package",
             ],
-            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "accountingStatus": "succinct-public-key-share-theorem-accounting-accepted",
             "claimAccounting": {
-                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the public-key share relation because same-secret openings, ternary support, centered-binomial error support, lifted no-wrap public-key equality, and fixed response bounds are verifier-bound",
-                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit committed-secret masks, support commitments, error masks, opening masks, and carry masks with fixed-width signed relation commitments and no-wrap accounting",
-                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+                "accountingObject": "SuccinctPublicKeyShareAccounting",
+                "accountingHash": succinct_public_key_share_accounting_hash()?,
+                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
+                "claimBoundary": "active-malicious public-key share accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; the share secret is rebound to the same-secret linkage anchor through the accepted family binding root and the limb-zero commitment opening theorem dependency",
             },
         },
         {
-            "proofFamily": "relinearization-key-share",
-            "claimScope": "relinearization key-share relation bound to the same secret, round-one aggregate, and key-switch component roots",
-            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
+            "proofFamily": "trustee-evaluation-key",
+            "claimScope": "every scheduled relinearization and Galois key share of one trustee, proven by one batched succinct argument against the committed trustee secret and the recomputed round-one public aggregates",
+            "verifierClosedStatus": "statement-rebuild-and-argument-checks-verifier-closed",
             "verifierClosedChecks": [
-                "statement hash binds relinearization proof record roots, same-secret roots, transported key-switch component material when supplied, and setup proof record binding",
-                "relation commitment hash and scalar challenge are recomputed from key-switch, source, carry, and commitment-response commitments",
-                "accepted relinearization tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
-                "same-secret opening response is checked against accepted VSS constant commitments",
-                "round-one same-secret source responses and verifier-side round-two source-square aggregate roots are checked before runtime key material is accepted",
-                "deterministic key-switch component vectors, centered-binomial errors, and lifted no-wrap carry responses are checked for scheduled relinearization levels",
-                "secret, opening-randomness, error, source, and carry responses are checked against fixed first-profile bounds",
+                "every statement is rebuilt by the verifier from the transported share records, the recomputed round-one public aggregate diagonals, the accepted same-secret constant commitments, and the ceremony context; no prover-supplied statement field is trusted",
+                "key-switch component material is decoded against record-bound component vector roots and deterministic public sampler seeds shared by schedule entry",
+                "per-limb trace commitments, masked column openings, batched row checks, the digit-and-key-batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every limb field",
+                "arithmetic source relations are enforced inside the argument: round-one sources equal the committed secret, round-two sources equal the secret times the recomputed public aggregate, and Galois sources equal the automorphism image",
+                "the same-secret linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against the shared key-relation secret",
+                "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",
+                "canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package",
             ],
-            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
+            "accountingStatus": "succinct-trustee-evaluation-key-theorem-accounting-accepted",
             "claimAccounting": {
-                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the relinearization key-share relation because same-secret source binding, key-switch component material, lifted no-wrap equations, round-two source-square aggregate roots, and response bounds are verifier-bound",
-                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit committed-secret, error, source, opening, and carry response masks with transported public component vectors treated as public statement material",
-                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
+                "accountingObject": "SuccinctEvaluationKeyProofAccounting",
+                "accountingHash": succinct_evaluation_key_proof_accounting_hash()?,
+                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
+                "claimBoundary": "active-malicious evaluation-key proof accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; ceremony transport, roster binding, and target decryption keep their own gates",
             },
         },
-        {
-            "proofFamily": "galois-key-share",
-            "claimScope": "Galois key-share relation bound to the required automorphism schedule and key-switch component roots",
-            "verifierClosedStatus": "relation-transcript-and-bound-checks-verifier-closed",
-            "verifierClosedChecks": [
-                "statement hash binds Galois proof record roots, required schedule roots, same-secret roots, transported key-switch component material when supplied, and setup proof record binding",
-                "relation commitment hash and scalar challenge are recomputed from key-switch, source, carry, and commitment-response commitments",
-                "accepted Galois tbox parameter profile is pinned, deterministic full-width commitment-prefix bytes are recomputed from statement and relation commitments, h coefficients at positions 0 and d/2 are enforced as zero, LaZer check_z34 seed material, challenge seed, challenge-tail hash, lower-protocol challenge hash, row-domain hash, full-width R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms are record-bound and enforced, generated z3/z4 check-window bounds are enforced, z1/z21 Gaussian L2 bounds and generated hint ranges are enforced, z34-bound lower-protocol challenge sampling is enforced, and generated lower-protocol tbox suffix bytes are decoded and enforced against the relation transcript",
-                "same-secret opening response is checked against accepted VSS constant commitments",
-                "required automorphism source response, deterministic key-switch component vectors, centered-binomial errors, and lifted no-wrap carry responses are checked for scheduled Galois keys",
-                "secret, opening-randomness, error, source, and carry responses are checked against fixed first-profile bounds",
-            ],
-            "accountingStatus": "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted",
-            "claimAccounting": {
-                "soundness": "LNP22 commit-and-prove extractor accounting is accepted for the Galois key-share relation because same-secret source binding, automorphism source response, scheduled key-switch component material, lifted no-wrap equations, and response bounds are verifier-bound",
-                "zeroKnowledge": "LNP22 simulator accounting is accepted for centered 80-bit committed-secret, error, automorphism-source, opening, and carry response masks with transported public component vectors treated as public statement material",
-                "qrom": "DFM20/DFMS22 Fiat-Shamir reduction accounting is accepted through duplicate-free setup challenge domains and the setup proof theorem accounting object",
-            },
-        },
-    ])
+    ]))
 }
 
-fn setup_proof_tbox_accounting_value() -> CanonicalResult<Value> {
+fn setup_proof_succinct_transport_accounting_value() -> CanonicalResult<Value> {
     Ok(json!({
-        "objectType": "SetupProofLnpTboxAccounting",
+        "objectType": "SetupProofSuccinctTransportAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "accountingStatus": "generated-lower-protocol-tbox-profile-verifier-and-prover-closed",
-        "closedProofFamilies": SETUP_PROOF_FAMILIES,
-        "proofRingDegree": SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-        "challengeLog2Range": SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
-        "challengeEncodedBits": SETUP_PROOF_LNP_CHALLENGE_ENCODED_BITS,
-        "challengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
-        "profileHashes": {
-            "privateVssShareTboxParameterProfileHash": super::setup_proof::private_vss_share_lnp_tbox_parameter_profile_hash()?,
-            "sameSecretTboxParameterProfileHash": super::setup_proof::same_secret_lnp_tbox_parameter_profile_hash()?,
-            "publicKeyShareTboxParameterProfileHash": super::setup_proof::public_key_share_lnp_tbox_parameter_profile_hash()?,
-            "relinearizationKeyShareTboxParameterProfileHash": super::setup_proof::relinearization_key_share_lnp_tbox_parameter_profile_hash()?,
-            "galoisKeyShareTboxParameterProfileHash": super::setup_proof::galois_key_share_lnp_tbox_parameter_profile_hash()?,
-        },
-        "challengeAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
-            SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
-            SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-        )?,
-        "commitmentPrefixGeneration": "setup proof generators encode full declared-width tB, h, and compressed tA1 residue bytes from a deterministic statement-and-relation binding seed with rejection sampling for proof-modulus residues and forced zero h coefficients at positions 0 and d/2",
-        "commitmentPrefixVerifierBinding": "setup proof verifiers recompute the deterministic tbox prefix from statement hash, tbox profile hash, and encoded relation commitments, decode canonical fixed-width prefix residues, enforce h coefficients at positions 0 and d/2 as zero, and bind tboxCommitmentPrefixHash into the relation transcript",
-        "z34SeedMaterialBinding": "setup proof verifiers extract LaZer check_z34 ty3, ty4, and tbeta seed material from tB after the fixed message-polynomial prefix, hash the canonical urandom3 encoding for later z3/z4 challenge binding, and require accepted proof records to carry the matching seed-material hash",
-        "z34ChallengeSeedBinding": "setup proof verifiers derive the 32-byte check_z34 challenge seed from the statement hash, relation commitment hash, proof family, tbox profile, and canonical seed material, hash the current tB challenge-tail residues after tbeta, expand LaZer brandom k=1 ternary R/Rprime rows over the declared z3/z4 row widths with R domains 0..255 and Rprime domains 256..511, sample the proof-byte challenge polynomial from the lower-protocol challenge hash, then require accepted proof records to carry matching challenge-seed, challenge-tail, lower-protocol challenge, row-domain, z3 row-set, and z4 row-set hashes",
-        "suffixVerifierBinding": "setup proof verifiers decode LaZer signed hint and Gaussian suffix values, hash the signed z3/z4 check-window values, compute z3 L2 squared and z4 infinity norm over the 256-coefficient check_z34 window, reject values above the generated LaZer Bz3sqr/Bz4 bounds, check z1/z21 Gaussian L2 bounds and generated hint ranges, and enforce the generated lower-protocol tbox suffix profile against the statement-and-relation-bound prefix",
-        "closedVerifierChecks": [
-            "deterministic statement-and-relation-bound full-width tbox commitment-prefix generation and verifier recomputation",
-            "proof-record-bound LaZer check_z34 seed material, challenge seed, challenge tail, lower-protocol challenge hash, row domains, R/Rprime row-set hashes, signed z3/z4 check-window hashes, and measured z3/z4 norms",
-            "generated LaZer check_z34 256-coefficient z3/z4 norm-bound enforcement",
-            "signed LaZer hint and Gaussian suffix decoding",
-            "generated z1/z21 Gaussian L2 bound enforcement",
-            "generated hint range enforcement",
-            "h zero-position enforcement",
-            "z34-bound lower-protocol challenge sampling",
-            "generated lower-protocol tbox suffix byte-for-byte enforcement",
+        "accountingStatus": "succinct-proof-material-roots-and-transport-binding-accepted",
+        "closedProofFamilies": [
+            "same-secret-linkage-anchor",
+            "public-key-share",
+            "vss-opening-carry",
+            "trustee-evaluation-key"
         ],
-        "claimBoundary": "tbox proof-byte generation and verification are closed for the fixed setup proof profiles and feed the accepted setup proof soundness, zero-knowledge, and QROM accounting object",
+        "closedVerifierChecks": [
+            "embedded proof bytes bind statement hash, proof size, proof bytes hash, and proof material root",
+            "transported proof bytes bind chunk size, chunk count, total byte length, full object hash, chunk root, and chunk hashes",
+            "private VSS transported proof material uses the succinct proof material root and carries no relation-commitment or tbox metadata",
+            "canonical proof decoding and verifier arithmetic reject malformed proof bytes before accepted setup handoff"
+        ],
+        "claimBoundary": "proof material transport accounting covers root binding and canonical byte delivery only; each proof family's soundness, leakage, and Fiat-Shamir rows live in its bound succinct accounting object"
     }))
 }
-
-fn setup_proof_scalar_relation_challenge_bits() -> CanonicalResult<usize> {
-    let challenge_bits = [
-        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-    ];
-    let first_challenge_bits = challenge_bits[0];
-    if challenge_bits
-        .iter()
-        .any(|candidate_bits| *candidate_bits != first_challenge_bits)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "setup proof scalar relation challenge bit counts must match across proof families",
-        ));
-    }
-
-    Ok(first_challenge_bits)
-}
-
 fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Value> {
-    let scalar_relation_challenge_bits = setup_proof_scalar_relation_challenge_bits()?;
-
     Ok(json!({
         "objectType": "SetupProofFiatShamirTranscriptAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "accountingStatus": "fiat-shamir-transcript-domain-and-challenge-input-accounting-closed",
-        "qromReductionStatus": "repo-owned-qrom-reduction-theorem-accepted-for-setup-proof-claim",
-        "challengeDomainHash": setup_proof_challenge_domain_hash()?,
-        "challengeSpaceAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
-            SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
-            SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-        )?,
-        "challengeStages": [
-            {
-                "stageId": "lnp-polynomial-challenge",
-                "domain": SETUP_PROOF_CHALLENGE_DOMAIN,
-                "seedDomain": SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
-                "streamDomain": SETUP_PROOF_CHALLENGE_STREAM_DOMAIN,
-                "inputBinding": [
-                    "proofFamily",
-                    "statementHash",
-                    "relationCommitmentHash"
-                ],
-                "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
-                "challengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
-                "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
-            },
-            {
-                "stageId": "scalar-relation-challenge",
-                "challengeBits": scalar_relation_challenge_bits,
-                "nonzeroChallengeRequired": true,
-                "inputBinding": [
-                    "family-specific scalar challenge domain",
-                    "statementHash",
-                    "relationCommitmentHash",
-                    "encoded LNP polynomial challenge coefficients",
-                    "rejection block index"
-                ],
-                "familyDomains": [
-                    {
-                        "proofFamily": "vss-opening-carry",
-                        "domain": PRIVATE_VSS_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-                    },
-                    {
-                        "proofFamily": "same-secret-consistency",
-                        "domain": SAME_SECRET_LNP_SCALAR_CHALLENGE_DOMAIN,
-                    },
-                    {
-                        "proofFamily": "public-key-share",
-                        "domain": PUBLIC_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-                    },
-                    {
-                        "proofFamily": "relinearization-key-share",
-                        "domain": RELINEARIZATION_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-                    },
-                    {
-                        "proofFamily": "galois-key-share",
-                        "domain": GALOIS_KEY_SHARE_LNP_SCALAR_CHALLENGE_DOMAIN,
-                    },
-                ],
-            },
-        ],
-        "duplicateFreeInputAccounting": {
-            "familyDomainSeparation": "scalar relation challenges use one fixed domain string per setup proof family",
-            "stageSeparation": "polynomial challenge sampling and scalar relation challenge sampling use distinct domains and distinct encoded inputs",
-            "statementBinding": "statement hashes include setup profile, trustee or schedule roots, accepted public material roots, and setup proof record binding before any challenge is derived",
-            "firstMessageBinding": "relation commitment hashes bind the prover first-message commitments before the scalar relation challenge is derived",
-            "tboxBinding": "tbox lower-protocol challenge hashes and z34 challenge metadata are bound to statement, relation commitment, proof family, tbox profile, and canonical seed material before accepted proof records are accepted",
+        "accountingStatus": "succinct-family-classical-fiat-shamir-accounting-bound-per-family",
+        "qromReductionStatus": "qrom-reduction-loss-not-computed-classical-transcript-accounting-only",
+        "familyAccountingHashes": {
+            "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
+            "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
+            "privateVssShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
+            "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         },
-        "referenceRows": [
-            {
-                "document": "DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More",
-                "localReferencePath": "reference-documents/DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More.txt",
-                "sections": [
-                    "Definition 11 Fiat-Shamir transformation for public-coin protocols",
-                    "Remark 12 duplicate-free hash inputs through round indices or transcript/domain separation",
-                    "Corollary 13 multi-round Fiat-Shamir in the QROM"
-                ]
-            },
-            {
-                "document": "DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM",
-                "localReferencePath": "reference-documents/DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM.txt",
-                "sections": [
-                    "Section 3.4 Fiat-Shamir transformation of commit-and-open Sigma protocols",
-                    "Remark 3.7 domain separation of random-oracle inputs",
-                    "Theorem 4.2 online extractability of the Fiat-Shamir transformation"
-                ]
-            },
-            {
-                "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
-                "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
-                "sections": [
-                    "Section 2.7 Challenge Space",
-                    "Section 3 ABDLOP commitment scheme and proofs of linear relations",
-                    "Appendix A knowledge soundness"
-                ]
-            }
-        ],
-        "claimBoundary": "Fiat-Shamir transcript domain separation, challenge input binding, challenge-space accounting, QROM reduction, and fixed-profile composition loss are accepted for setup proof-family claim accounting",
+        "challengeBinding": "each succinct proof statement hash, proof family label, binding roots, Merkle transcript, low-degree transcript, and challenge-extension sampling rule is recorded inside the bound family accounting object",
+        "claimBoundary": "the setup accounting certificate binds classical Fiat-Shamir rows only through the succinct family accounting objects; QROM rows remain reference-only until a fixed-profile reduction-loss calculation exists"
     }))
 }
-
 fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
-    let scalar_relation_challenge_bits = setup_proof_scalar_relation_challenge_bits()?;
-
     Ok(json!({
         "objectType": "SetupProofTheoremAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "proofFamilies": SETUP_PROOF_FAMILIES,
-        "accountingStatus": "repo-owned-setup-proof-soundness-zero-knowledge-and-qrom-accounting-accepted",
+        "proofFamilies": [
+            "same-secret-linkage-anchor",
+            "public-key-share",
+            "vss-opening-carry",
+            "trustee-evaluation-key"
+        ],
+        "accountingStatus": "succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open",
+        "familyAccounting": {
+            "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_value()?,
+            "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
+            "privateVssShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_value()?,
+            "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_value()?,
+        },
         "acceptedClaimScope": [
-            "private VSS share opening and carry proof relation",
-            "same-secret consistency proof relation",
-            "public-key share proof relation",
-            "relinearization key-share proof relation",
-            "Galois key-share proof relation",
+            "same-secret linkage anchor relation",
+            "public-key share correctness relation",
+            "recipient-local private VSS opening and carry relation",
+            "trustee evaluation-key schedule relation"
         ],
-        "soundnessAccounting": {
-            "baseProtocol": "LNP22 AB-DLOP/LNP commit-and-prove linear-relation proof profile",
-            "extractorModel": "repo-owned extractor mapping over verifier-closed statement roots, relation commitments, generated tbox bytes, response bounds, no-wrap lifted relations, and support equations",
-            "knowledgeFailureEvents": [
-                "noncanonical proof bytes",
-                "statement or material root drift",
-                "relation commitment drift",
-                "generated tbox suffix drift",
-                "challenge-domain replay across proof families",
-                "response bound overflow",
-                "lifted no-wrap violation",
-                "support equation violation",
-            ],
-            "acceptedFailureLabel": "refused-before-claim-bearing-setup-acceptance",
-        },
-        "zeroKnowledgeAccounting": {
-            "simulatorModel": "LNP22 commit-and-prove simulator for non-aborting transcripts with setup-family statements treated as public inputs",
-            "responseMasking": "centered signed response masks are verifier-bound, no-wrap checked, and have positive masking slack for each committed-secret, error, opening, source, and carry response class",
-            "supportCommitments": "witness-dependent support commitments are accounted as simulated first-message commitments bound to the accepted relation and response distributions",
-            "witnessExportBoundary": "accepted proof records expose statement roots, commitments, proof bytes, roots, and public key material only; raw shares, trustee secrets, openings, errors, carries, and key-switch witnesses remain outside accepted public artifacts",
-        },
-        "qromReductionAccounting": {
-            "model": "quantum-random-oracle-model",
-            "transform": "Fiat-Shamir",
-            "fixedProofFamilyCount": SETUP_PROOF_FAMILIES.len(),
-            "challengeStageCount": 2,
-            "lnpPolynomialChallengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
-            "scalarRelationChallengeBits": scalar_relation_challenge_bits,
-            "compositionStatus": "accepted-for-fixed-five-family-two-stage-setup-profile",
-            "duplicateFreeInputStatus": "accepted-by-family-specific-domain-separation-and-stage-specific-transcript-inputs",
-            "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
-        },
-        "referenceRows": [
-            {
-                "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
-                "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
-                "sections": [
-                    "commit-and-prove simulatability",
-                    "Lemma 4.3 knowledge soundness",
-                    "Fiat-Shamir transformed knowledge soundness"
-                ]
-            },
-            {
-                "document": "DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More",
-                "localReferencePath": "reference-documents/DFM20_The Measure-and-Reprogram Technique 2.0 Multi-Round Fiat-Shamir and More.txt",
-                "sections": [
-                    "Theorem 7 measure-and-reprogram with enforced extraction order",
-                    "Corollary 13 multi-round Fiat-Shamir in the QROM",
-                    "Corollary 15 preservation of soundness and proof of knowledge"
-                ]
-            },
-            {
-                "document": "DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM",
-                "localReferencePath": "reference-documents/DFMS22_Efficient NIZKs and Signatures from Commit-and-Open Protocols in the QROM.txt",
-                "sections": [
-                    "Section 3.4 Fiat-Shamir transformation of commit-and-open Sigma protocols",
-                    "Theorem 4.2 online extractability of the Fiat-Shamir transformation",
-                    "Corollary 5.3 Fiat-Shamir soundness after parallel repetition"
-                ]
-            }
-        ],
-        "claimBoundary": "accepted only for setup proof families under CollectiveBgvSetup-v1; this does not close ballot proof soundness, evaluator replay, target decryption, supported-phone evidence, production audit readiness, or future proof-system families",
+        "claimBoundary": "accepted only for the listed succinct setup proof families under their bound family accounting objects; QROM reduction loss and 128-bit zero-knowledge are not accepted rows, and this does not close ballot proofs, evaluator replay, target decryption, supported-phone evidence, production audit readiness, or future proof-system families"
     }))
 }
-
-fn scalar_challenge_maximum_for_bits(bit_count: usize) -> CanonicalResult<u128> {
-    let bit_count = u32::try_from(bit_count).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting challenge bit count overflowed",
-        )
-    })?;
-    1_u128
-        .checked_shl(bit_count)
-        .and_then(|value| value.checked_sub(1))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting challenge maximum overflowed",
-            )
-        })
-}
-
-fn response_mask_random_bound(mask_bits: usize) -> CanonicalResult<u128> {
-    let mask_bits = u32::try_from(mask_bits).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting mask bit count overflowed",
-        )
-    })?;
-    1_u128
-        .checked_shl(mask_bits)
-        .and_then(|value| value.checked_sub(1))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting mask bound overflowed",
-            )
-        })
-}
-
-fn response_mask_profile_value(
-    response_kind: &str,
-    mask_bits: usize,
-    challenge_bits: usize,
-    witness_infinity_bound: u128,
-    mask_offset: u128,
-    encoding_role: &str,
-) -> CanonicalResult<Value> {
-    let scalar_challenge_maximum = scalar_challenge_maximum_for_bits(challenge_bits)?;
-    let random_mask_bound = response_mask_random_bound(mask_bits)?;
-    let effective_mask_bound = random_mask_bound.checked_add(mask_offset).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting effective mask bound overflowed",
-        )
-    })?;
-    let challenge_witness_term_bound = scalar_challenge_maximum
-        .checked_mul(witness_infinity_bound)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting challenge witness term overflowed",
-            )
-        })?;
-    let response_bound = effective_mask_bound
-        .checked_add(challenge_witness_term_bound)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting response bound overflowed",
-            )
-        })?;
-    let challenge_witness_term_bits =
-        ceil_log2_u128(challenge_witness_term_bound.checked_add(1).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting challenge term bit length overflowed",
-            )
-        })?);
-    let masking_slack_bits = i64::try_from(mask_bits).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting mask bits do not fit i64",
-        )
-    })? - i64::from(challenge_witness_term_bits);
-
+fn setup_proof_succinct_leakage_accounting_value() -> CanonicalResult<Value> {
     Ok(json!({
-        "responseKind": response_kind,
-        "encodingRole": encoding_role,
-        "maskRandomBits": mask_bits,
-        "maskOffsetDecimal": mask_offset.to_string(),
-        "effectiveMaskBoundDecimal": effective_mask_bound.to_string(),
-        "scalarChallengeBits": challenge_bits,
-        "scalarChallengeMaximumDecimal": scalar_challenge_maximum.to_string(),
-        "witnessInfinityBoundDecimal": witness_infinity_bound.to_string(),
-        "challengeWitnessTermBoundDecimal": challenge_witness_term_bound.to_string(),
-        "challengeWitnessTermCeilBits": challenge_witness_term_bits,
-        "responseBoundDecimal": response_bound.to_string(),
-        "responseBoundCeilBits": ceil_log2_u128(response_bound),
-        "maskingSlackBits": masking_slack_bits,
-    }))
-}
-
-fn response_profile_bound(
-    mask_bits: usize,
-    challenge_bits: usize,
-    witness_infinity_bound: u128,
-    mask_offset: u128,
-) -> CanonicalResult<u128> {
-    let scalar_challenge_maximum = scalar_challenge_maximum_for_bits(challenge_bits)?;
-    response_mask_random_bound(mask_bits)?
-        .checked_add(mask_offset)
-        .and_then(|mask_bound| {
-            scalar_challenge_maximum
-                .checked_mul(witness_infinity_bound)
-                .and_then(|challenge_term| mask_bound.checked_add(challenge_term))
-        })
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting response bound overflowed",
-            )
-        })
-}
-
-fn lifted_message_no_wrap_value(
-    relation_name: &str,
-    secret_response_bound: u128,
-    negative_indicator_response_bound: u128,
-    max_source_message_modulus: u64,
-    commitment_modulus_product: &BigUint,
-) -> CanonicalResult<Value> {
-    let lifted_bound = u128::from(max_source_message_modulus)
-        .checked_mul(negative_indicator_response_bound)
-        .and_then(|value| value.checked_add(secret_response_bound))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting lifted message bound overflowed",
-            )
-        })?;
-    let lifted_bound_big = BigUint::from(lifted_bound);
-    let no_wrap_satisfied = &lifted_bound_big < commitment_modulus_product;
-
-    Ok(json!({
-        "relationName": relation_name,
-        "maxSourceMessageModulus": max_source_message_modulus,
-        "secretResponseBoundDecimal": secret_response_bound.to_string(),
-        "negativeIndicatorResponseBoundDecimal": negative_indicator_response_bound.to_string(),
-        "liftedMessageResponseBoundDecimal": lifted_bound.to_string(),
-        "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
-        "noWrapSatisfied": no_wrap_satisfied,
-    }))
-}
-
-fn setup_proof_response_masking_accounting_value() -> CanonicalResult<Value> {
-    let max_source_message_modulus = DATA_PRIMES.iter().copied().max().ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "accepted Q_share prime list must not be empty",
-        )
-    })?;
-    let commitment_modulus_product = setup_commitment_modulus_product();
-    let profile_ring_degree = u128::try_from(POLYNOMIAL_DEGREE).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting ring degree does not fit u128",
-        )
-    })?;
-    let private_vss_carry_witness_bound = scalar_power_sum(
-        FIRST_PROFILE_DECRYPTION_THRESHOLD,
-        FIRST_PROFILE_PARTICIPANT_COUNT,
-    )?;
-    let public_key_carry_witness_bound = profile_ring_degree.checked_add(3).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof response accounting public-key carry bound overflowed",
-        )
-    })?;
-    let evaluation_key_carry_witness_bound = profile_ring_degree
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(8))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting evaluation-key carry bound overflowed",
-            )
-        })?;
-    let evaluation_key_round_two_source_bound = profile_ring_degree
-        .checked_mul(
-            u128::try_from(EVALUATION_KEY_SHARE_ROUND_TWO_AGGREGATE_SOURCE_PARTICIPANT_BOUND)
-                .map_err(|_| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "setup proof response accounting source bound does not fit u128",
-                    )
-                })?,
-        )
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof response accounting round-two source bound overflowed",
-            )
-        })?;
-    let same_secret_response_bound = response_profile_bound(
-        SAME_SECRET_MESSAGE_MASK_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-        SAME_SECRET_TERNARY_INFINITY_BOUND as u128,
-        0,
-    )?;
-    let same_secret_negative_response_bound = response_profile_bound(
-        SAME_SECRET_MESSAGE_MASK_BITS,
-        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-        0,
-    )?;
-    let public_key_secret_response_bound = response_profile_bound(
-        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-        PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-        0,
-    )?;
-    let public_key_negative_response_bound = response_profile_bound(
-        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-        0,
-    )?;
-    let evaluation_key_secret_response_bound = response_profile_bound(
-        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
-        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-        0,
-    )?;
-
-    Ok(json!({
-        "objectType": "SetupProofResponseMaskingAccounting",
+        "objectType": "SetupProofSuccinctLeakageAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "accountingStatus": "response-mask-bounds-strengthened-verifier-bound-and-zk-accounting-accepted",
-        "encodingConstraints": {
-            "responseEncoding": "signed-i128-little-endian",
-            "committedMessageEncoding": "u128-source-coefficients-and-centered-signed-response-coefficients-with-big-int-no-wrap-before-commitment-modulus-reduction",
-            "relationCommitmentEncoding": "public-key and evaluation-key lifted relation commitments use fixed-width signed 32-byte little-endian big-integer coefficients; response vectors remain signed i128",
-            "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
-            "commitmentModulusProductCeilBits": setup_commitment_modulus_product_ceil_bits(),
-            "maxSourceMessageModulus": max_source_message_modulus,
-            "carryMaskWideningStatus": "carry masks remain 64 bits and scalar relation challenges are capped at 63 bits because carry responses and response vectors remain signed i128",
+        "accountingStatus": "succinct-family-leakage-scope-bound-per-family",
+        "familyAccountingHashes": {
+            "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
+            "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
+            "privateVssShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
+            "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         },
-        "families": [
-            {
-                "proofFamily": "vss-opening-carry",
-                "responseProfiles": [
-                    response_mask_profile_value(
-                        "coefficient-message",
-                        PRIVATE_VSS_SHARE_MESSAGE_MASK_BITS,
-                        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-                        u128::from(max_source_message_modulus - 1),
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "opening-randomness",
-                        PRIVATE_VSS_SHARE_RANDOMNESS_MASK_BITS,
-                        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
-                        0,
-                        "signed-opening-response",
-                    )?,
-                    response_mask_profile_value(
-                        "lifted-carry",
-                        PRIVATE_VSS_SHARE_CARRY_MASK_BITS,
-                        PRIVATE_VSS_SHARE_SCALAR_CHALLENGE_BITS,
-                        private_vss_carry_witness_bound,
-                        0,
-                        "signed-carry-response",
-                    )?,
-                ],
-                "fullWidthCoefficientMaskingStatus": "centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted",
-                "commitmentNoWrapStatus": "three-limb-big-int-no-wrap-bound-recorded",
-            },
-            {
-                "proofFamily": "same-secret-consistency",
-                "responseProfiles": [
-                    response_mask_profile_value(
-                        "secret",
-                        SAME_SECRET_MESSAGE_MASK_BITS,
-                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-                        SAME_SECRET_TERNARY_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "negative-indicator",
-                        SAME_SECRET_MESSAGE_MASK_BITS,
-                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-                        SAME_SECRET_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "opening-randomness",
-                        SAME_SECRET_RANDOMNESS_MASK_BITS,
-                        SAME_SECRET_SCALAR_CHALLENGE_BITS,
-                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
-                        0,
-                        "signed-opening-response",
-                    )?,
-                ],
-                "liftedMessageNoWrap": lifted_message_no_wrap_value(
-                    "secret-plus-rns-prime-times-negative-indicator",
-                    same_secret_response_bound,
-                    same_secret_negative_response_bound,
-                    max_source_message_modulus,
-                    &commitment_modulus_product,
-                )?,
-            },
-            {
-                "proofFamily": "public-key-share",
-                "responseProfiles": [
-                    response_mask_profile_value(
-                        "secret",
-                        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        PUBLIC_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "negative-indicator",
-                        PUBLIC_KEY_SHARE_MESSAGE_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        PUBLIC_KEY_SHARE_NEGATIVE_INDICATOR_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "error",
-                        PUBLIC_KEY_SHARE_ERROR_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        PUBLIC_KEY_SHARE_ERROR_INFINITY_BOUND as u128,
-                        0,
-                        "signed-error-response",
-                    )?,
-                    response_mask_profile_value(
-                        "opening-randomness",
-                        PUBLIC_KEY_SHARE_RANDOMNESS_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
-                        0,
-                        "signed-opening-response",
-                    )?,
-                    response_mask_profile_value(
-                        "lifted-carry",
-                        PUBLIC_KEY_SHARE_CARRY_MASK_BITS,
-                        PUBLIC_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        public_key_carry_witness_bound,
-                        0,
-                        "signed-carry-response",
-                    )?,
-                ],
-                "liftedMessageNoWrap": lifted_message_no_wrap_value(
-                    "secret-plus-rns-prime-times-negative-indicator",
-                    public_key_secret_response_bound,
-                    public_key_negative_response_bound,
-                    max_source_message_modulus,
-                    &commitment_modulus_product,
-                )?,
-            },
-            {
-                "proofFamily": "relinearization-key-share",
-                "responseProfiles": [
-                    response_mask_profile_value(
-                        "secret",
-                        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "error",
-                        EVALUATION_KEY_SHARE_ERROR_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        EVALUATION_KEY_SHARE_ERROR_INFINITY_BOUND as u128,
-                        0,
-                        "signed-error-response",
-                    )?,
-                    response_mask_profile_value(
-                        "round-two-source",
-                        EVALUATION_KEY_SHARE_SOURCE_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        evaluation_key_round_two_source_bound,
-                        0,
-                        "signed-source-response",
-                    )?,
-                    response_mask_profile_value(
-                        "opening-randomness",
-                        EVALUATION_KEY_SHARE_RANDOMNESS_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
-                        0,
-                        "signed-opening-response",
-                    )?,
-                    response_mask_profile_value(
-                        "lifted-carry",
-                        EVALUATION_KEY_SHARE_CARRY_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        evaluation_key_carry_witness_bound,
-                        0,
-                        "signed-carry-response",
-                    )?,
-                ],
-                "liftedMessageNoWrap": lifted_message_no_wrap_value(
-                    "secret-plus-rns-prime-times-negative-indicator",
-                    evaluation_key_secret_response_bound,
-                    evaluation_key_secret_response_bound,
-                    max_source_message_modulus,
-                    &commitment_modulus_product,
-                )?,
-            },
-            {
-                "proofFamily": "galois-key-share",
-                "responseProfiles": [
-                    response_mask_profile_value(
-                        "secret",
-                        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-                        0,
-                        "committed-message-response",
-                    )?,
-                    response_mask_profile_value(
-                        "error",
-                        EVALUATION_KEY_SHARE_ERROR_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        EVALUATION_KEY_SHARE_ERROR_INFINITY_BOUND as u128,
-                        0,
-                        "signed-error-response",
-                    )?,
-                    response_mask_profile_value(
-                        "automorphism-source",
-                        EVALUATION_KEY_SHARE_SECRET_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        EVALUATION_KEY_SHARE_SECRET_INFINITY_BOUND as u128,
-                        0,
-                        "signed-source-response",
-                    )?,
-                    response_mask_profile_value(
-                        "opening-randomness",
-                        EVALUATION_KEY_SHARE_RANDOMNESS_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND as u128,
-                        0,
-                        "signed-opening-response",
-                    )?,
-                    response_mask_profile_value(
-                        "lifted-carry",
-                        EVALUATION_KEY_SHARE_CARRY_MASK_BITS,
-                        EVALUATION_KEY_SHARE_SCALAR_CHALLENGE_BITS,
-                        evaluation_key_carry_witness_bound,
-                        0,
-                        "signed-carry-response",
-                    )?,
-                ],
-                "liftedMessageNoWrap": lifted_message_no_wrap_value(
-                    "secret-plus-rns-prime-times-negative-indicator",
-                    evaluation_key_secret_response_bound,
-                    evaluation_key_secret_response_bound,
-                    max_source_message_modulus,
-                    &commitment_modulus_product,
-                )?,
-            },
-        ],
-        "zeroKnowledgeAccountingStatus": "response masking, witness-dependent support commitments, committed-secret response distributions, fixed-width signed relation commitments, and no-wrap response bounds are accepted by the setup proof theorem accounting object",
+        "zeroKnowledgeScope": "bounded-leakage succinct-family accounting only; the setup certificate does not claim 128-bit zero-knowledge for these families",
+        "claimBoundary": "legacy response-mask accounting for non-succinct private VSS records is not terminal setup evidence after the private VSS succinct migration"
     }))
 }
-
 pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Value> {
     let setup_proof_record_binding = setup_proof_record_binding_value()?;
 
@@ -1344,10 +684,22 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
         "setupProofProfileHash": setup_proof_profile_hash()?,
         "setupProofRecordBinding": setup_proof_record_binding,
         "setupProofRecordBindingHash": setup_proof_record_binding_hash()?,
-        "proofFamilies": SETUP_PROOF_FAMILIES,
-        "proofFamilyAccounting": setup_proof_family_accounting_value(),
-        "tboxAccounting": setup_proof_tbox_accounting_value()?,
-        "responseMaskingAccounting": setup_proof_response_masking_accounting_value()?,
+        "proofFamilies": ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES,
+        "proofFamilyAccounting": setup_proof_family_accounting_value()?,
+        "sameSecretLinkageAnchorProofAccounting":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_value()?,
+        "sameSecretLinkageAnchorProofAccountingHash":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
+        "trusteeEvaluationKeyProofAccounting":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_value()?,
+        "trusteeEvaluationKeyProofAccountingHash":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
+        "publicKeyShareProofAccounting":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
+        "publicKeyShareProofAccountingHash":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
+        "succinctTransportAccounting": setup_proof_succinct_transport_accounting_value()?,
+        "succinctLeakageAccounting": setup_proof_succinct_leakage_accounting_value()?,
         "fiatShamirTranscriptAccounting": setup_proof_fiat_shamir_transcript_accounting_value()?,
         "proofTheoremAccounting": setup_proof_theorem_accounting_value()?,
         "challengeAccounting": {
@@ -1364,8 +716,8 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
                 SETUP_PROOF_LNP_PROOF_RING_DEGREE,
             )?,
             "scalarRelationChallengePolicy": "per-family scalar relation challenges use 63 bits, capped by signed i128 carried relation arithmetic after the setup commitment no-wrap product moved to three selected limbs with big-integer accounting",
-            "randomOracleModel": "Fiat-Shamir transcript accounting and repo-owned QROM reduction theorem are accepted for setup proof-family claim accounting",
-            "qromStatus": "qrom-reduction-theorem-accepted-for-setup-proof-claim",
+            "randomOracleModel": "classical Fiat-Shamir transcript accounting is accepted for setup proof-family claim accounting; QROM rows are references until reduction loss is computed",
+            "qromStatus": "qrom-reduction-loss-not-computed-open-caveat",
             "transcriptBinding": [
                 "setupProfileHash",
                 "manifestHash",
@@ -1378,7 +730,8 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
             ],
         },
         "completionBoundary": "claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate",
-        "certificateStatus": "claim-bearing-setup-proof-accounting-accepted",
+        "certificateStatus": "succinct-setup-proof-family-classical-accounting-accepted-qrom-open",
+        "claimBoundary": "every bound setup proof family carries accepted classical accounting through its succinct-family accounting object under the named FRI conjecture where applicable; QROM reduction loss and 128-bit zero-knowledge are not accepted by this certificate",
     }))
 }
 
@@ -1524,10 +877,10 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
         "publicKeyShareMaterial",
         "publicKeyShareMaterialSetRoot",
     )?;
-    let public_key_share_lnp_proof_set_root = package_nested_hash(
+    let public_key_share_succinct_proof_set_root = package_nested_hash(
         setup_package,
-        "publicKeyShareLnpProofs",
-        "publicKeyShareLnpProofSetRoot",
+        "publicKeyShareSuccinctProofs",
+        "publicKeyShareSuccinctProofSetRoot",
     )?;
 
     Ok(json!({
@@ -1557,13 +910,13 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
             "activeMaliciousPrototypeBoundary": "malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading",
         },
         "collectivePublicKey": {
-            "status": "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots",
+            "status": "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots",
             "collectivePublicKeyRoot": collective_public_key_root,
             "sourceRoots": {
                 "publicKeyShareSetRoot": package_nested_hash(setup_package, "publicKeyShares", "publicKeyShareSetRoot")?,
                 "publicKeyShareProofSetRoot": package_nested_hash(setup_package, "publicKeyShareProofs", "publicKeyShareProofSetRoot")?,
                 "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
-                "publicKeyShareLnpProofSetRoot": public_key_share_lnp_proof_set_root,
+                "publicKeyShareSuccinctProofSetRoot": public_key_share_succinct_proof_set_root,
             }
         },
         "publicEvaluationKeys": {
@@ -1766,10 +1119,10 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
                 "publicKeyShareMaterial",
                 "publicKeyShareMaterialSetRoot",
             )?,
-            "publicKeyShareLnpProofSetRoot": optional_nested_hash_value(
+            "publicKeyShareSuccinctProofSetRoot": optional_nested_hash_value(
                 setup_package,
-                "publicKeyShareLnpProofs",
-                "publicKeyShareLnpProofSetRoot",
+                "publicKeyShareSuccinctProofs",
+                "publicKeyShareSuccinctProofSetRoot",
             )?,
             "collectivePublicKeyRoot": optional_nested_hash_value(
                 setup_package,

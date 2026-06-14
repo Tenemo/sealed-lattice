@@ -90,57 +90,175 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     let proof_family_accounting = certificate["proofFamilyAccounting"]
         .as_array()
         .expect("proof family accounting");
+    let proof_families = certificate["proofFamilies"]
+        .as_array()
+        .expect("proof family list");
 
-    assert_eq!(proof_family_accounting.len(), 5);
+    assert_eq!(proof_family_accounting.len(), 4);
+    assert_eq!(proof_families.len(), 4);
+    for expected_family in [
+        "same-secret-linkage-anchor",
+        "public-key-share",
+        "vss-opening-carry",
+        "trustee-evaluation-key",
+    ] {
+        assert!(
+            proof_families
+                .iter()
+                .any(|proof_family| proof_family == expected_family),
+            "setup proof accounting certificate must list {expected_family}"
+        );
+    }
     assert_eq!(
         proof_family_accounting[0]["proofFamily"],
         "vss-opening-carry"
     );
     assert_eq!(
         proof_family_accounting[0]["verifierClosedStatus"],
-        "relation-transcript-and-bound-checks-verifier-closed"
+        "statement-rebuild-and-succinct-argument-checks-verifier-closed"
     );
     assert_eq!(
         proof_family_accounting[0]["accountingStatus"],
-        "repo-owned-soundness-zero-knowledge-and-qrom-accounting-accepted"
+        "succinct-private-vss-share-theorem-accounting-accepted"
     );
     assert!(
-        proof_family_accounting[2]["verifierClosedChecks"]
+        proof_family_accounting[0]["verifierClosedChecks"]
             .as_array()
-            .expect("public-key verifier-closed checks")
+            .expect("private VSS verifier-closed checks")
             .iter()
             .any(|check| check
                 .as_str()
-                .is_some_and(|text| text.contains("lifted public-key equality")))
+                .is_some_and(|text| text.contains("lifted share relation")))
     );
-    assert!(proof_family_accounting.iter().all(|family| {
-        family["claimAccounting"]["qrom"]
-            .as_str()
-            .is_some_and(|text| text.contains("Fiat-Shamir reduction accounting is accepted"))
-    }));
+    assert_eq!(
+        proof_family_accounting[0]["claimAccounting"]["accountingObject"],
+        "SuccinctPrivateVssShareAccounting"
+    );
 
-    let tbox_accounting = certificate["tboxAccounting"]
-        .as_object()
-        .expect("tbox accounting");
+    // The same-secret linkage anchor carries its accepted succinct accounting:
+    // the row binds the anchor accounting object with every theorem row closed
+    // under the explicitly named FRI conjecture.
+    let anchor_family = &proof_family_accounting[1];
+    assert_eq!(anchor_family["proofFamily"], "same-secret-linkage-anchor");
     assert_eq!(
-        tbox_accounting["accountingStatus"],
-        "generated-lower-protocol-tbox-profile-verifier-and-prover-closed"
+        anchor_family["accountingStatus"],
+        "succinct-same-secret-linkage-anchor-theorem-accounting-accepted"
     );
     assert_eq!(
-        tbox_accounting["closedProofFamilies"]
-            .as_array()
-            .expect("closed tbox proof families")
-            .len(),
-        5
+        anchor_family["claimAccounting"]["accountingHash"],
+        certificate["sameSecretLinkageAnchorProofAccountingHash"]
     );
     assert!(
-        tbox_accounting["closedVerifierChecks"]
+        anchor_family["claimAccounting"]["claimBoundary"]
+            .as_str()
+            .is_some_and(|text| text.contains("named FRI conjecture"))
+    );
+    assert_eq!(
+        certificate["sameSecretLinkageAnchorProofAccounting"]["objectType"],
+        "SuccinctSameSecretLinkageAnchorAccounting"
+    );
+
+    let public_key_family = &proof_family_accounting[2];
+    assert_eq!(public_key_family["proofFamily"], "public-key-share");
+    assert_eq!(
+        public_key_family["accountingStatus"],
+        "succinct-public-key-share-theorem-accounting-accepted"
+    );
+    assert_eq!(
+        public_key_family["claimAccounting"]["accountingHash"],
+        certificate["publicKeyShareProofAccountingHash"]
+    );
+    assert_eq!(
+        certificate["publicKeyShareProofAccounting"]["objectType"],
+        "SuccinctPublicKeyShareAccounting"
+    );
+    assert!(
+        public_key_family["verifierClosedChecks"]
             .as_array()
-            .expect("closed tbox verifier checks")
+            .expect("public-key verifier checks")
             .iter()
             .any(|check| check
                 .as_str()
-                .is_some_and(|text| text.contains("generated lower-protocol tbox suffix")))
+                .is_some_and(|text| text.contains("limb-zero"))),
+        "public-key setup proof accounting must state the limb-zero linkage dependency"
+    );
+
+    // The trustee evaluation-key family carries its accepted accounting: the
+    // row binds the succinct accounting object with every theorem row closed
+    // under the explicitly named FRI conjecture.
+    let trustee_family = &proof_family_accounting[3];
+    assert_eq!(trustee_family["proofFamily"], "trustee-evaluation-key");
+    assert_eq!(
+        trustee_family["accountingStatus"],
+        "succinct-trustee-evaluation-key-theorem-accounting-accepted"
+    );
+    assert_eq!(
+        trustee_family["claimAccounting"]["accountingHash"],
+        certificate["trusteeEvaluationKeyProofAccountingHash"]
+    );
+    assert!(
+        trustee_family["claimAccounting"]["claimBoundary"]
+            .as_str()
+            .is_some_and(|text| text.contains("named FRI conjecture"))
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["objectType"],
+        "SuccinctEvaluationKeyProofAccounting"
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["accepted"],
+        true
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["acceptedUnderNamedFriConjecture"],
+        true
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["acceptedUnderProvenFallback"],
+        false
+    );
+    assert!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["fiatShamir"]
+            ["effectiveSoundnessBitsAfterUnion"]
+            .as_i64()
+            .expect("effective soundness bits")
+            >= 128
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["fiatShamir"]["qromAccepted"],
+        false
+    );
+    assert_eq!(
+        certificate["trusteeEvaluationKeyProofAccounting"]["zeroKnowledge"]["smudgingBudget"]["acceptedFor128BitZeroKnowledge"],
+        false
+    );
+    assert_eq!(
+        certificate["certificateStatus"],
+        "succinct-setup-proof-family-classical-accounting-accepted-qrom-open"
+    );
+
+    let succinct_transport_accounting = certificate["succinctTransportAccounting"]
+        .as_object()
+        .expect("succinct transport accounting");
+    assert_eq!(
+        succinct_transport_accounting["accountingStatus"],
+        "succinct-proof-material-roots-and-transport-binding-accepted"
+    );
+    assert_eq!(
+        succinct_transport_accounting["closedProofFamilies"]
+            .as_array()
+            .expect("closed succinct transport proof families")
+            .len(),
+        4
+    );
+    assert!(
+        succinct_transport_accounting["closedVerifierChecks"]
+            .as_array()
+            .expect("closed succinct transport verifier checks")
+            .iter()
+            .any(|check| check
+                .as_str()
+                .is_some_and(|text| text.contains("no relation-commitment or tbox metadata")))
     );
 
     let fiat_shamir_accounting = certificate["fiatShamirTranscriptAccounting"]
@@ -148,121 +266,186 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
         .expect("Fiat-Shamir transcript accounting");
     assert_eq!(
         fiat_shamir_accounting["accountingStatus"],
-        "fiat-shamir-transcript-domain-and-challenge-input-accounting-closed"
+        "succinct-family-classical-fiat-shamir-accounting-bound-per-family"
     );
     assert_eq!(
         fiat_shamir_accounting["qromReductionStatus"],
-        "repo-owned-qrom-reduction-theorem-accepted-for-setup-proof-claim"
+        "qrom-reduction-loss-not-computed-classical-transcript-accounting-only"
     );
-    assert!(
-        fiat_shamir_accounting["challengeStages"]
-            .as_array()
-            .expect("Fiat-Shamir challenge stages")
-            .iter()
-            .any(|stage| stage["stageId"] == "scalar-relation-challenge")
-    );
-    assert!(
-        fiat_shamir_accounting["referenceRows"]
-            .as_array()
-            .expect("Fiat-Shamir reference rows")
-            .iter()
-            .any(|reference| reference["document"]
-                .as_str()
-                .is_some_and(|text| text.starts_with("DFM20_")))
+    assert_eq!(
+        fiat_shamir_accounting["familyAccountingHashes"]["privateVssShare"],
+        proof_family_accounting[0]["claimAccounting"]["accountingHash"]
     );
 
-    let response_masking_accounting = certificate["responseMaskingAccounting"]
+    let succinct_leakage_accounting = certificate["succinctLeakageAccounting"]
         .as_object()
-        .expect("response masking accounting");
+        .expect("succinct leakage accounting");
     assert_eq!(
-        response_masking_accounting["accountingStatus"],
-        "response-mask-bounds-strengthened-verifier-bound-and-zk-accounting-accepted"
-    );
-    assert_eq!(
-        response_masking_accounting["encodingConstraints"]["relationCommitmentEncoding"],
-        "public-key and evaluation-key lifted relation commitments use fixed-width signed 32-byte little-endian big-integer coefficients; response vectors remain signed i128"
-    );
-    let response_families = response_masking_accounting["families"]
-        .as_array()
-        .expect("response masking families");
-    assert_eq!(response_families.len(), 5);
-    assert_eq!(
-        response_families[0]["fullWidthCoefficientMaskingStatus"],
-        "centered-signed-private-vss-message-response-masking-verifier-bound-and-simulator-accounting-accepted"
-    );
-    assert_eq!(
-        response_families[0]["commitmentNoWrapStatus"],
-        "three-limb-big-int-no-wrap-bound-recorded"
-    );
-    assert_eq!(
-        response_families[0]["responseProfiles"][0]["maskRandomBits"],
-        112
+        succinct_leakage_accounting["accountingStatus"],
+        "succinct-family-leakage-scope-bound-per-family"
     );
     assert!(
-        response_families[0]["responseProfiles"][0]["maskingSlackBits"]
-            .as_i64()
-            .expect("private VSS coefficient masking slack")
-            > 0
+        succinct_leakage_accounting["zeroKnowledgeScope"]
+            .as_str()
+            .is_some_and(|text| text.contains("bounded-leakage"))
     );
-    assert_eq!(
-        response_families[1]["responseProfiles"][0]["maskRandomBits"],
-        80
-    );
-    assert!(
-        response_families[1]["responseProfiles"][0]["maskingSlackBits"]
-            .as_i64()
-            .expect("same-secret secret masking slack")
-            > 0
-    );
-    assert_eq!(
-        response_families[2]["responseProfiles"][0]["maskRandomBits"],
-        80
-    );
-    assert!(
-        response_families[2]["responseProfiles"][0]["maskingSlackBits"]
-            .as_i64()
-            .expect("public-key secret masking slack")
-            > 0
-    );
-    assert_eq!(
-        response_families[3]["responseProfiles"][0]["maskRandomBits"],
-        80
-    );
-    assert!(
-        response_families[3]["responseProfiles"][0]["maskingSlackBits"]
-            .as_i64()
-            .expect("relinearization secret masking slack")
-            > 0
-    );
-    assert_eq!(
-        response_families[3]["responseProfiles"][2]["responseKind"],
-        "round-two-source"
-    );
-    assert_eq!(
-        response_families[3]["responseProfiles"][2]["maskRandomBits"],
-        80
-    );
-
     let proof_theorem_accounting = certificate["proofTheoremAccounting"]
         .as_object()
         .expect("proof theorem accounting");
     assert_eq!(
         proof_theorem_accounting["accountingStatus"],
-        "repo-owned-setup-proof-soundness-zero-knowledge-and-qrom-accounting-accepted"
+        "succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open"
     );
     assert_eq!(
-        proof_theorem_accounting["qromReductionAccounting"]["compositionStatus"],
-        "accepted-for-fixed-five-family-two-stage-setup-profile"
+        proof_theorem_accounting["familyAccounting"]["privateVssShare"]["objectType"],
+        "SuccinctPrivateVssShareAccounting"
     );
     assert!(
-        proof_theorem_accounting["referenceRows"]
+        proof_theorem_accounting["proofFamilies"]
             .as_array()
-            .expect("proof theorem reference rows")
+            .expect("proof theorem families")
             .iter()
-            .any(|reference| reference["document"]
-                .as_str()
-                .is_some_and(|text| text.starts_with("LNP22_")))
+            .any(|proof_family| proof_family == "vss-opening-carry")
     );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_legacy_proof_accounting_rows() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_legacy_proof_accounting_rows",
+    );
+
+    for (
+        legacy_proof_family,
+        legacy_claim_scope,
+        legacy_verifier_closed_status,
+        legacy_accounting_status,
+    ) in [
+        (
+            "same-secret-linkage-anchor-lnp-tbox",
+            "legacy same-secret LNP/tbox proof route",
+            "legacy-same-secret-proof-route-not-accepted",
+            "legacy-same-secret-proof-accounting-not-accepted",
+        ),
+        (
+            "public-key-share-lnp-tbox",
+            "legacy public-key LNP/tbox proof route",
+            "legacy-public-key-proof-route-not-accepted",
+            "legacy-public-key-proof-accounting-not-accepted",
+        ),
+        (
+            "trustee-evaluation-key-lnp-tbox",
+            "legacy trustee evaluation-key LNP/tbox proof route",
+            "legacy-trustee-evaluation-key-proof-route-not-accepted",
+            "legacy-trustee-evaluation-key-proof-accounting-not-accepted",
+        ),
+    ] {
+        let mut package = minimal_collective_setup_package();
+        package["setupProofAccountingCertificate"]["proofFamilies"]
+            .as_array_mut()
+            .expect("proof family list")
+            .push(serde_json::json!(legacy_proof_family));
+        package["setupProofAccountingCertificate"]["proofFamilyAccounting"]
+            .as_array_mut()
+            .expect("proof family accounting")
+            .push(serde_json::json!({
+                "proofFamily": legacy_proof_family,
+                "claimScope": legacy_claim_scope,
+                "verifierClosedStatus": legacy_verifier_closed_status,
+                "accountingStatus": legacy_accounting_status,
+            }));
+        rebind_setup_proof_accounting_certificate_hash(&mut package);
+        rebind_collective_setup_package_hash(&mut package);
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(
+            result["refusedObjects"][0]["reasonCode"],
+            "setupProofAccountingCertificatePayloadMismatch"
+        );
+        assert!(result["acceptedSetupHandoff"].is_null());
+    }
+}
+
+#[test]
+fn collective_setup_verifier_refuses_duplicate_current_proof_accounting_row() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_duplicate_current_proof_accounting_row",
+    );
+    let mut package = minimal_collective_setup_package();
+    let duplicate_public_key_accounting_row =
+        package["setupProofAccountingCertificate"]["proofFamilyAccounting"][2].clone();
+    package["setupProofAccountingCertificate"]["proofFamilies"]
+        .as_array_mut()
+        .expect("proof family list")
+        .push(serde_json::json!("public-key-share"));
+    package["setupProofAccountingCertificate"]["proofFamilyAccounting"]
+        .as_array_mut()
+        .expect("proof family accounting")
+        .push(duplicate_public_key_accounting_row);
+    rebind_setup_proof_accounting_certificate_hash(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupProofAccountingCertificatePayloadMismatch"
+    );
+    assert!(result["acceptedSetupHandoff"].is_null());
+}
+
+#[test]
+fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
+    );
+
+    let model_row_mutations: [fn(&mut serde_json::Value); 4] = [
+        |package| {
+            package["setupProofAccountingCertificate"]["fiatShamirTranscriptAccounting"]["qromReductionStatus"] =
+                serde_json::json!("qrom-reduction-loss-accepted-for-final-claim");
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["challengeAccounting"]["qromStatus"] =
+                serde_json::json!("qrom-reduction-loss-computed-and-accepted");
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] =
+                serde_json::json!("128-bit zero-knowledge accepted for every setup proof family");
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]["zeroKnowledge"]
+                ["smudgingBudget"]["acceptedFor128BitZeroKnowledge"] = serde_json::json!(true);
+        },
+    ];
+
+    for mutate_model_row in model_row_mutations {
+        let mut package = minimal_collective_setup_package();
+        mutate_model_row(&mut package);
+        rebind_setup_proof_accounting_certificate_hash(&mut package);
+        rebind_collective_setup_package_hash(&mut package);
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(
+            result["refusedObjects"][0]["reasonCode"],
+            "setupProofAccountingCertificatePayloadMismatch"
+        );
+        assert!(result["acceptedSetupHandoff"].is_null());
+    }
 }
 
 #[test]
@@ -441,8 +624,8 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
         "publicKeyShareMaterial": {
             "publicKeyShareMaterialSetRoot": valid_hash('a'),
         },
-        "publicKeyShareLnpProofs": {
-            "publicKeyShareLnpProofSetRoot": valid_hash('b'),
+        "publicKeyShareSuccinctProofs": {
+            "publicKeyShareSuccinctProofSetRoot": valid_hash('b'),
         },
         "evaluationKeys": {
             "evaluationKeySetHash": valid_hash('c'),
@@ -474,7 +657,7 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
     );
     assert_eq!(
         certificate["collectivePublicKey"]["status"],
-        "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-LNP-proof-roots"
+        "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots"
     );
     assert_eq!(
         certificate["publicEvaluationKeys"]["status"],

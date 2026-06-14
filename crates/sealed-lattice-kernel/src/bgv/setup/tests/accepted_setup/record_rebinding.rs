@@ -139,6 +139,22 @@ pub(super) fn private_vss_envelope_commitment_record_root_input(
     root_input
 }
 
+pub(super) fn rebind_first_private_vss_envelope_commitment_record_root(
+    package: &mut serde_json::Value,
+) {
+    let envelope_reference = &mut package["privateVssEnvelopeCommitments"]["envelopeReferences"][0];
+    envelope_reference
+        .as_object_mut()
+        .expect("private VSS envelope commitment reference")
+        .remove("privateEnvelopeCommitmentRoot");
+    let record_root = derive_protocol_hash(
+        "PrivateVssEnvelopeCommitmentRoot",
+        &private_vss_envelope_commitment_record_root_input(envelope_reference),
+    )
+    .expect("private VSS envelope commitment record root");
+    envelope_reference["privateEnvelopeCommitmentRoot"] = serde_json::json!(record_root);
+}
+
 pub(super) fn private_vss_envelope_commitment_set_root_input(
     commitment_set: &serde_json::Value,
 ) -> serde_json::Value {
@@ -225,6 +241,38 @@ pub(super) fn rebind_collective_same_secret_consistency_root(package: &mut serde
     );
 }
 
+pub(super) fn rebind_same_secret_proof_record_root(
+    package: &mut serde_json::Value,
+    proof_record_index: usize,
+) {
+    let proof_record = &mut package["sameSecretProofs"]["proofRecords"]
+        .as_array_mut()
+        .expect("same-secret proof records")[proof_record_index];
+    proof_record
+        .as_object_mut()
+        .expect("same-secret proof record")
+        .remove("sameSecretProofRoot");
+    proof_record["sameSecretProofRoot"] = serde_json::json!(
+        derive_protocol_hash("SameSecretProofRoot", proof_record).expect("same-secret proof root")
+    );
+}
+
+pub(super) fn rebind_collective_same_secret_proof_roots(package: &mut serde_json::Value) {
+    let proof_roots = package["sameSecretProofs"]["proofRecords"]
+        .as_array()
+        .expect("same-secret proof records")
+        .iter()
+        .map(|proof_record| {
+            serde_json::json!({
+                "trusteeIdentity": proof_record["trusteeIdentity"],
+                "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
+                "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
+            })
+        })
+        .collect::<Vec<_>>();
+    package["sameSecretProofs"]["sameSecretProofRoots"] = serde_json::json!(proof_roots);
+}
+
 pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_json::Value) {
     package["sameSecretProofs"]
         .as_object_mut()
@@ -237,38 +285,38 @@ pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_j
     rebind_active_static_setup_theorem_certificate(package);
 }
 
-pub(super) fn rebind_collective_public_key_lnp_proof_roots(package: &mut serde_json::Value) {
-    let proof_records = package["publicKeyShareLnpProofs"]["proofRecords"]
+pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut serde_json::Value) {
+    let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
         .as_array_mut()
-        .expect("public-key LNP proof records");
+        .expect("public-key succinct proof records");
     let mut proof_roots = Vec::new();
     for proof_record in proof_records {
         proof_record
             .as_object_mut()
-            .expect("public-key LNP proof record")
-            .remove("publicKeyShareLnpProofRoot");
-        proof_record["publicKeyShareLnpProofRoot"] = serde_json::json!(
+            .expect("public-key succinct proof record")
+            .remove("publicKeyShareSuccinctProofRoot");
+        proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", proof_record)
-                .expect("public-key LNP proof root")
+                .expect("public-key succinct proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": proof_record["trusteeIdentity"],
             "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
-            "publicKeyShareLnpProofRoot": proof_record["publicKeyShareLnpProofRoot"],
+            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
         }));
     }
-    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofRoots"] =
+    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofRoots"] =
         serde_json::json!(proof_roots);
-    package["publicKeyShareLnpProofs"]
+    package["publicKeyShareSuccinctProofs"]
         .as_object_mut()
-        .expect("public-key LNP proof set")
-        .remove("publicKeyShareLnpProofSetRoot");
-    package["publicKeyShareLnpProofs"]["publicKeyShareLnpProofSetRoot"] = serde_json::json!(
+        .expect("public-key succinct proof set")
+        .remove("publicKeyShareSuccinctProofSetRoot");
+    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
         derive_protocol_hash(
             "PublicKeyShareProofRoot",
-            &package["publicKeyShareLnpProofs"]
+            &package["publicKeyShareSuccinctProofs"]
         )
-        .expect("public-key LNP proof set root")
+        .expect("public-key succinct proof set root")
     );
     rebind_active_static_setup_theorem_certificate(package);
 }
@@ -361,54 +409,59 @@ pub(super) fn rebind_collective_evaluator_key_schedule_root(package: &mut serde_
     );
 }
 
-pub(super) fn rebind_relinearization_key_share_rounds_root(package: &mut serde_json::Value) {
-    package["relinearizationKeyShareRounds"]
+pub(super) fn rebind_trustee_evaluation_key_proof_set_root(package: &mut serde_json::Value) {
+    package["trusteeEvaluationKeyProofs"]
         .as_object_mut()
-        .expect("relinearization key share rounds")
-        .remove("relinearizationKeyShareRoundsRoot");
-    package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"] = serde_json::json!(
+        .expect("trustee evaluation-key proof set")
+        .remove("trusteeEvaluationKeyProofSetRoot");
+    package["trusteeEvaluationKeyProofs"]["trusteeEvaluationKeyProofSetRoot"] = serde_json::json!(
         derive_protocol_hash(
-            "RelinearizationKeyShareRoundsRoot",
-            &package["relinearizationKeyShareRounds"]
+            "TrusteeEvaluationKeyProofSetRoot",
+            &package["trusteeEvaluationKeyProofs"]
         )
-        .expect("relinearization key share rounds root")
+        .expect("trustee evaluation-key proof set root")
     );
 }
 
-pub(super) fn rebind_galois_key_batch_proof_root(
+pub(super) fn rebind_trustee_evaluation_key_proof_record_root(
     package: &mut serde_json::Value,
-    batch_index: usize,
+    proof_record_index: usize,
 ) {
-    let batch = &mut package["galoisKeyShareBatches"][batch_index];
-    let proof_roots = batch["galoisKeyShareProofs"]
+    let proof_record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"]
+        .as_array_mut()
+        .expect("trustee evaluation-key proof records")[proof_record_index];
+    proof_record
+        .as_object_mut()
+        .expect("trustee evaluation-key proof record")
+        .remove("trusteeEvaluationKeyProofRoot");
+    proof_record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
+        derive_protocol_hash("TrusteeEvaluationKeyProofRoot", proof_record)
+            .expect("trustee evaluation-key proof root")
+    );
+}
+
+// Rebind the proof set's record-container bindings after share records were
+// re-rooted; the proofs themselves stay valid because the statements bind the
+// share-record content, not the package roots.
+pub(super) fn rebind_trustee_evaluation_key_proof_set_bindings(package: &mut serde_json::Value) {
+    let rounds_root =
+        package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"].clone();
+    let batch_roots = package["galoisKeyShareBatches"]
         .as_array()
-        .expect("Galois key share proofs")
+        .expect("Galois key share batches")
         .iter()
-        .map(|proof| {
+        .map(|batch| {
             serde_json::json!({
-                "rotation": proof["rotation"],
-                "level": proof["level"],
-                "galoisKeyShareProofRoot": proof["galoisKeyShareProofRoot"],
+                "trusteeIdentity": batch["trusteeIdentity"],
+                "trusteeRosterPosition": batch["trusteeRosterPosition"],
+                "galoisKeyShareBatchRoot": batch["galoisKeyShareBatchRoot"],
             })
         })
         .collect::<Vec<_>>();
-    batch["galoisKeyBatchProofRoot"] = serde_json::json!(
-        derive_protocol_hash(
-            "GaloisKeyBatchProofRoot",
-            &serde_json::json!({
-                "objectType": "GaloisKeyBatchProofAggregate",
-                "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
-                "proofFamily": "galois-key-share",
-                "evaluatorKeyScheduleRoot": batch["evaluatorKeyScheduleRoot"],
-                "trusteeRosterPosition": batch["trusteeRosterPosition"],
-                "requiredGaloisSetHash": batch["requiredGaloisSetHash"],
-                "proofRoots": proof_roots,
-            })
-        )
-        .expect("Galois proof root")
-    );
+    package["trusteeEvaluationKeyProofs"]["relinearizationKeyShareRoundsRoot"] = rounds_root;
+    package["trusteeEvaluationKeyProofs"]["galoisKeyShareBatchRoots"] =
+        serde_json::json!(batch_roots);
+    rebind_trustee_evaluation_key_proof_set_root(package);
 }
 
 pub(super) fn rebind_galois_key_share_batch_root(
@@ -428,17 +481,6 @@ pub(super) fn rebind_galois_key_share_batch_root(
     );
 }
 
-pub(super) fn rebind_public_evaluation_key_set_hash(package: &mut serde_json::Value) {
-    package["evaluationKeys"]
-        .as_object_mut()
-        .expect("public evaluation-key set")
-        .remove("evaluationKeySetHash");
-    package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
-            .expect("evaluation key set hash")
-    );
-}
-
 pub(super) fn rebind_collective_he_security_certificate_hash(package: &mut serde_json::Value) {
     package["heSecurityCertificate"]
         .as_object_mut()
@@ -452,6 +494,22 @@ pub(super) fn rebind_collective_he_security_certificate_hash(package: &mut serde
     package["heSecurityCertificate"]["heSecurityCertificateHash"] =
         serde_json::json!(he_security_certificate_hash.clone());
     package["heSecurityCertificateHash"] = serde_json::json!(he_security_certificate_hash);
+}
+
+pub(super) fn rebind_setup_proof_accounting_certificate_hash(package: &mut serde_json::Value) {
+    package["setupProofAccountingCertificate"]
+        .as_object_mut()
+        .expect("setup proof accounting certificate")
+        .remove("setupProofAccountingCertificateHash");
+    let setup_proof_accounting_certificate_hash = derive_protocol_hash(
+        "SetupProofAccountingCertificateHash",
+        &package["setupProofAccountingCertificate"],
+    )
+    .expect("setup proof accounting certificate hash");
+    package["setupProofAccountingCertificate"]["setupProofAccountingCertificateHash"] =
+        serde_json::json!(setup_proof_accounting_certificate_hash.clone());
+    package["setupProofAccountingCertificateHash"] =
+        serde_json::json!(setup_proof_accounting_certificate_hash);
 }
 
 pub(super) fn rebind_setup_key_correctness_certificate(package: &mut serde_json::Value) {

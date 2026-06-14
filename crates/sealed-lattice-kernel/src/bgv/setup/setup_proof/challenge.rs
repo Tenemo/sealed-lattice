@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn sample_setup_proof_lnp_tbox_uniform_residue_bytes(
     domain: &str,
     proof_randomness_seed_hex: &str,
@@ -77,6 +78,7 @@ pub(in crate::bgv::setup) fn sample_setup_proof_lnp_tbox_uniform_residue_bytes(
     }
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn derive_setup_proof_scalar_challenge(
     proof_family: &str,
     scalar_challenge_domain: &str,
@@ -140,6 +142,7 @@ pub(in crate::bgv::setup) fn derive_setup_proof_scalar_challenge(
     }
 }
 
+#[cfg(test)]
 pub(crate) struct SetupProofLnpTboxChallengeMaterial {
     pub(crate) challenge_coefficients: Vec<i64>,
     pub(crate) lower_protocol_challenge_hash: String,
@@ -176,8 +179,9 @@ pub(super) fn setup_proof_challenge_domain_value(setup_profile_id: &str) -> Valu
         "challengeStreamDomain": SETUP_PROOF_CHALLENGE_STREAM_DOMAIN,
         "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
         "challengeDifferenceInvertibilityAccounting": challenge_difference_invertibility_accounting_value().expect("fixed setup proof challenge accounting is valid"),
-        "proofFamilies": SETUP_PROOF_FAMILIES,
-        "randomOracleModel": "repo-owned Fiat-Shamir/QROM accounting is accepted by the setup proof accounting certificate",
+        "legacyLnpTboxProofFamilies": SETUP_PROOF_FAMILIES,
+        "challengeScope": "legacy-lnp-tbox-private-vss-challenge-domain-only; accepted same-secret, public-key-share, and trustee-evaluation-key succinct families bind their challenge transcript rows through their own accounting objects",
+        "randomOracleModel": "repo-owned classical Fiat-Shamir accounting is accepted by the setup proof accounting certificate; QROM reduction loss is not computed",
     })
 }
 
@@ -491,7 +495,8 @@ pub(in crate::bgv::setup) fn setup_proof_challenge_space_audit_value(
         "objectType": "SetupProofChallengeSpaceAudit",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "proofFamilies": SETUP_PROOF_FAMILIES,
+        "legacyLnpTboxProofFamilies": SETUP_PROOF_FAMILIES,
+        "auditScope": "legacy-lnp-tbox-private-vss-challenge-space-audit-only; current accepted succinct families carry their low-degree and transcript accounting in per-family objects",
         "applicationRingDegree": POLYNOMIAL_DEGREE,
         "lnpTboxProofRingDegree": ring_degree,
         "challengeCoefficientBound": SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND,
@@ -564,6 +569,7 @@ pub(crate) fn derive_setup_proof_lnp_tbox_challenge_from_prefix(
     Ok(challenge_material)
 }
 
+#[cfg(test)]
 pub(super) fn setup_proof_lnp_tbox_z34_seed_and_challenge_from_prefix(
     layout: &SetupProofLnpTboxLayout,
     statement_hash_hex: &str,
@@ -631,6 +637,7 @@ pub(super) fn setup_proof_lnp_tbox_z34_seed_and_challenge_from_prefix(
     Ok((z34_seed_material, challenge_material))
 }
 
+#[cfg(test)]
 pub(super) fn setup_proof_lnp_tbox_challenge_material(
     layout: &SetupProofLnpTboxLayout,
     statement_hash_hex: &str,
@@ -742,6 +749,7 @@ impl SetupProofChallengeSampler {
         }
     }
 
+    #[cfg(test)]
     fn new_lnp_tbox_lower_protocol(
         proof_family: &str,
         statement_hash_hex: &str,

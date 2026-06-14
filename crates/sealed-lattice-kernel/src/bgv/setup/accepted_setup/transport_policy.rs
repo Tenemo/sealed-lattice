@@ -38,12 +38,12 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
     {
         return Ok(Some(response));
     }
-    if let Some(proof_set) = setup_package.get("publicKeyShareLnpProofs")
+    if let Some(proof_set) = setup_package.get("publicKeyShareSuccinctProofs")
         && let Some(response) = verify_profile_ring_records(
             proof_set,
             "proofRecords",
-            "public-key LNP proof records must use the accepted profile ring degree before terminal setup acceptance",
-            "setupPackage.publicKeyShareLnpProofs.proofRecords.ringDegree",
+            "public-key succinct proof records must use the accepted profile ring degree before terminal setup acceptance",
+            "setupPackage.publicKeyShareSuccinctProofs.proofRecords.ringDegree",
         )?
     {
         return Ok(Some(response));
@@ -76,9 +76,9 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
         for batch in galois_batches {
             if let Some(response) = verify_profile_ring_records(
                 batch,
-                "galoisKeyShareProofs",
-                "Galois key-share proof records must use the accepted profile ring degree before terminal setup acceptance",
-                "setupPackage.galoisKeyShareBatches.galoisKeyShareProofs.ringDegree",
+                "galoisKeyShareMaterialRecords",
+                "Galois key-share material records must use the accepted profile ring degree before terminal setup acceptance",
+                "setupPackage.galoisKeyShareBatches.galoisKeyShareMaterialRecords.ringDegree",
             )? {
                 return Ok(Some(response));
             }
@@ -123,9 +123,14 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.sameSecretProofs.proofRecords",
         ),
         (
-            "publicKeyShareLnpProofs",
+            "publicKeyShareSuccinctProofs",
             "proofRecords",
-            "setupPackage.publicKeyShareLnpProofs.proofRecords",
+            "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
+        ),
+        (
+            "trusteeEvaluationKeyProofs",
+            "proofRecords",
+            "setupPackage.trusteeEvaluationKeyProofs.proofRecords",
         ),
     ] {
         if let Some(response) = verify_terminal_proof_material_transport_records(
@@ -168,8 +173,8 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     for galois_batch in array_value(setup_package, "galoisKeyShareBatches")? {
         if let Some(response) = verify_terminal_key_switch_transport_records(
             galois_batch,
-            "galoisKeyShareProofs",
-            "setupPackage.galoisKeyShareBatches.galoisKeyShareProofs",
+            "galoisKeyShareMaterialRecords",
+            "setupPackage.galoisKeyShareBatches.galoisKeyShareMaterialRecords",
         )? {
             return Ok(Some(response));
         }
@@ -292,9 +297,6 @@ fn verify_terminal_key_switch_transport_records(
     object_path: &str,
 ) -> CanonicalResult<Option<Value>> {
     for proof_record in array_value(record_set, records_field_name)? {
-        if let Some(response) = verify_terminal_proof_record_transport(proof_record, object_path)? {
-            return Ok(Some(response));
-        }
         if proof_record.get("keySwitchComponentVectors").is_some() {
             return Ok(Some(terminal_transport_policy_refusal(
                 "terminalKeySwitchMaterialTransportRequired",
@@ -313,32 +315,6 @@ fn verify_terminal_key_switch_transport_records(
                 format!("{object_path}.keySwitchMaterialEncoding"),
             )?));
         }
-    }
-
-    Ok(None)
-}
-
-fn verify_terminal_proof_record_transport(
-    proof_record: &Value,
-    object_path: &str,
-) -> CanonicalResult<Option<Value>> {
-    if proof_record.get("proofBytesHex").is_some() {
-        return Ok(Some(terminal_transport_policy_refusal(
-            "terminalProofMaterialTransportRequired",
-            "terminal accepted setup requires transported setup proof bytes",
-            format!("{object_path}.proofBytesHex"),
-        )?));
-    }
-    if proof_record
-        .get("proofBytesEncoding")
-        .and_then(Value::as_str)
-        != Some(SETUP_PROOF_MATERIAL_ENCODING)
-    {
-        return Ok(Some(terminal_transport_policy_refusal(
-            "terminalProofMaterialTransportRequired",
-            "terminal accepted setup requires binary-chunked setup proof bytes",
-            format!("{object_path}.proofBytesEncoding"),
-        )?));
     }
 
     Ok(None)
@@ -1216,7 +1192,7 @@ fn verify_setup_transport_request_bindings(
     if let Some(material_set) = request.get("transportedPublicKeyShareProofMaterial") {
         let referenced_material_roots = setup_transport_referenced_proof_material_roots(
             setup_package,
-            "publicKeyShareLnpProofs",
+            "publicKeyShareSuccinctProofs",
             "proofRecords",
             "proofMaterialRoot",
         )?;
@@ -1235,8 +1211,10 @@ fn verify_setup_transport_request_bindings(
         ));
     }
     if let Some(material_set) = request.get("transportedEvaluationKeyShareProofMaterial") {
-        let referenced_material_roots = setup_transport_referenced_evaluation_key_material_roots(
+        let referenced_material_roots = setup_transport_referenced_proof_material_roots(
             setup_package,
+            "trusteeEvaluationKeyProofs",
+            "proofRecords",
             "proofMaterialRoot",
         )?;
         transport_canonical_try!(require_setup_transport_proof_material_entries(
@@ -1347,10 +1325,10 @@ fn setup_transport_referenced_evaluation_key_material_roots(
         for batch in batches {
             setup_transport_collect_optional_record_roots(
                 batch,
-                "galoisKeyShareProofs",
+                "galoisKeyShareMaterialRecords",
                 root_field_name,
                 &format!(
-                    "setupPackage.galoisKeyShareBatches.galoisKeyShareProofs.{root_field_name}"
+                    "setupPackage.galoisKeyShareBatches.galoisKeyShareMaterialRecords.{root_field_name}"
                 ),
                 &mut referenced_roots,
             )?;

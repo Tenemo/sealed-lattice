@@ -456,7 +456,7 @@ fn passive_setup_verification_rejects_rotation_set_gaps() {
     let rotations = package["evaluationKeys"]["rotSet"]["rotations"]
         .as_array()
         .expect("rotations");
-    assert_eq!(rotations.len(), 20);
+    assert_eq!(rotations.len(), 23);
     assert_eq!(rotations[0], serde_json::json!(3));
     assert_eq!(
         package["evaluationKeys"]["rotSet"]["requiredRotationGroups"][0]["purpose"],

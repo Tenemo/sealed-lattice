@@ -7,8 +7,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
 import {
-    privateVssShareLnpProofModelStatus,
-    privateVssShareLnpProofVerificationStatus,
+    privateVssShareSuccinctProofModelStatus,
+    privateVssShareSuccinctProofVerificationStatus,
 } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
 
 const fixtureHash = (label: string): string =>
@@ -88,7 +88,7 @@ describe('private VSS mailbox delivery', () => {
         const proofBytesHex = '0001020304050607';
         const proofBytes = Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7]);
         const proofBytesHash = hash512Hex(
-            'sealed-lattice/setup/private-vss-share/lnp-proof-bytes-v1',
+            'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1',
             [proofBytes],
         );
         let observedPrivateEnvelope: Record<string, unknown> | undefined;
@@ -121,6 +121,7 @@ describe('private VSS mailbox delivery', () => {
                         ),
                         localVerificationRoot:
                             fixtureHash('local-verification'),
+                        verifiedPrivateVssShareProofCount: 1,
                         refusedObjects: [],
                     };
                 },
@@ -140,20 +141,16 @@ describe('private VSS mailbox delivery', () => {
             privateVssShareProofFactory: () => ({
                 objectType: 'PrivateVssShareProof',
                 objectVersion: 1,
-                proofProfileId: 'sealed-lattice-private-vss-share-proof-lnp-v1',
+                proofProfileId:
+                    'sealed-lattice-private-vss-share-proof-succinct-v1',
                 setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-                privateVssShareTboxParameterProfileHash:
-                    fixtureHash('private-vss-tbox'),
                 proofVerificationStatus:
-                    privateVssShareLnpProofVerificationStatus,
-                proofModelStatus: privateVssShareLnpProofModelStatus,
+                    privateVssShareSuccinctProofVerificationStatus,
+                proofModelStatus: privateVssShareSuccinctProofModelStatus,
                 proofStatementRoot: fixtureHash('statement-root'),
                 statementHash: fixtureHash('statement-hash'),
-                relationCommitmentHash: fixtureHash('relation-commitment'),
-                tboxCommitmentPrefixHash: fixtureHash('tbox-prefix'),
-                challenge: 17,
                 proofSizeBytes: proofBytes.byteLength,
                 proofBytesHash,
                 proofMaterialRoot: fixtureHash('embedded-material-root'),
@@ -224,5 +221,114 @@ describe('private VSS mailbox delivery', () => {
                 .transportedPrivateVssShareProofMaterial?.proofMaterials[0]
                 .proofMaterialRoot,
         ).toBe(transportedProofRecord.proofMaterialRoot);
+    });
+
+    it('refuses accepted local verification that omits a private VSS proof limb', async () => {
+        const mailboxKeyPair = createPrivateVssMailboxKeyPair(
+            fixtureHash('short-proof-count-mailbox-key'),
+        );
+
+        await expect(
+            createPrivateVssMailboxDeliverySet({
+                kernel: {
+                    deriveProtocolHash: ({ namespace, value }) =>
+                        deriveProtocolHash(namespace, value),
+                    verifyPrivateVssShareEnvelope: (input) => ({
+                        ok: true,
+                        privateEnvelopeHash: deriveProtocolHash(
+                            'PrivateVssShareEnvelopeHash',
+                            input.privateEnvelope,
+                        ),
+                        localVerificationRoot: fixtureHash(
+                            'short-proof-count-local-verification',
+                        ),
+                        verifiedPrivateVssShareProofCount: 1,
+                        refusedObjects: [],
+                    }),
+                },
+                setupContext,
+                phaseOrderHash: fixtureHash('phase-order'),
+                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                vssCoefficientCommitmentRoot: fixtureHash(
+                    'vss-coefficient-commitment',
+                ),
+                qSharePrimes: [65_537, 65_539],
+                ringDegree: 2,
+                participantCount: 1,
+                deliveryPhaseNumber: 6,
+                verificationPhaseNumber: 7,
+                privateVssShareProofFactory: ({ rnsLimbIndex }) => ({
+                    objectType: 'PrivateVssShareProof',
+                    objectVersion: 1,
+                    proofProfileId:
+                        'sealed-lattice-private-vss-share-proof-succinct-v1',
+                    setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                    proofFamily: 'vss-opening-carry',
+                    proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
+                    proofVerificationStatus:
+                        privateVssShareSuccinctProofVerificationStatus,
+                    proofModelStatus: privateVssShareSuccinctProofModelStatus,
+                    proofStatementRoot: fixtureHash(
+                        `short-proof-count-statement-root-${String(
+                            rnsLimbIndex,
+                        )}`,
+                    ),
+                    statementHash: fixtureHash(
+                        `short-proof-count-statement-hash-${String(
+                            rnsLimbIndex,
+                        )}`,
+                    ),
+                    proofSizeBytes: 4,
+                    proofBytesHash: fixtureHash(
+                        `short-proof-count-proof-bytes-${String(rnsLimbIndex)}`,
+                    ),
+                    proofMaterialRoot: fixtureHash(
+                        `short-proof-count-material-root-${String(
+                            rnsLimbIndex,
+                        )}`,
+                    ),
+                    proofBytesHex: '00010203',
+                }),
+                sourceTrusteeContributionStates: [
+                    {
+                        sourceTrusteeIdentity: 'trustee-0',
+                        sourceTrusteeRosterPosition: 0,
+                        sourceTrusteeCommitmentRoot: fixtureHash(
+                            'source-trustee-root',
+                        ),
+                        sourceTrusteeCoefficientCommitmentRecord: {},
+                        sourceTrusteeCoefficientCommitmentMaterialRecords: [],
+                        coefficientOpenings: [
+                            {
+                                rnsLimbIndex: 0,
+                                rnsPrime: 65_537,
+                                shamirCoefficientIndex: 0,
+                                commitmentRoot:
+                                    fixtureHash('coefficient-root-0'),
+                                coefficientMessage: [1, 2],
+                                randomnessByColumn: [[0, 1]],
+                            },
+                            {
+                                rnsLimbIndex: 1,
+                                rnsPrime: 65_539,
+                                shamirCoefficientIndex: 0,
+                                commitmentRoot:
+                                    fixtureHash('coefficient-root-1'),
+                                coefficientMessage: [3, 4],
+                                randomnessByColumn: [[1, 0]],
+                            },
+                        ],
+                    },
+                ],
+                recipients: [
+                    {
+                        recipientIdentity: 'trustee-0',
+                        recipientRosterPosition: 0,
+                        mailboxPublicKeyBytesHex:
+                            mailboxKeyPair.publicKeyBytesHex,
+                    },
+                ],
+            }),
+        ).rejects.toThrow(/verifiedPrivateVssShareProofCount/u);
     });
 });

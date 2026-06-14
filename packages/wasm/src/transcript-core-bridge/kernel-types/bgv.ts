@@ -69,6 +69,35 @@ export type BgvTransportedSetupProofMaterialSet<
         readonly proofMaterials: readonly BgvJsonRecord[];
     }>;
 
+export type BgvVerifiedSetupProofMaterial = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: 'VerifiedSetupProofMaterial';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: string;
+        readonly verificationId: string;
+        readonly proofFamily: string;
+        readonly proofMaterialRoot: ProtocolHash;
+        readonly proofBytesEncoding: string;
+        readonly proofChunkSizeBytes: number;
+        readonly proofChunkCount: number;
+        readonly proofTotalByteLength: number;
+        readonly proofFullObjectHash: ProtocolHash;
+        readonly proofChunkRoot: ProtocolHash;
+        readonly proofChunkHashes: readonly ProtocolHash[];
+    }
+>;
+
+export type BgvVerifiedSetupProofMaterialSet = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: 'VerifiedSetupProofMaterialSet';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupProofProfileId: string;
+        readonly proofMaterials: readonly BgvVerifiedSetupProofMaterial[];
+    }
+>;
+
 export type BgvTransportedPublicKeyShareMaterial =
     BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
         Readonly<{
@@ -111,6 +140,7 @@ export type BgvCollectiveSetupTransportCompanions = Readonly<{
     readonly transportedEvaluationKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
     readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
+    readonly verifiedSetupProofMaterials?: BgvVerifiedSetupProofMaterialSet;
 }>;
 
 export type BgvRnsProfileDescription = {
@@ -491,6 +521,7 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly genericKeySwitchPolicy: string;
     readonly transportProfileId: string;
     readonly forbiddenAcceptedPathFields: readonly string[];
+    readonly topLevelForbiddenAcceptedPathFields: readonly string[];
 };
 
 export type BgvCollectiveSetupPublicDerivations = {
@@ -593,7 +624,7 @@ export type BgvAcceptedSetupHandoff = {
         readonly status: 'accepted-collective-public-key-root-bound-for-direct-ballot-encryption';
         readonly collectivePublicKeyRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-        readonly publicKeyShareLnpProofSetRoot: ProtocolHash;
+        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     };
     readonly publicAggregationHandoff: {
         readonly status: 'accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root';
@@ -603,6 +634,7 @@ export type BgvAcceptedSetupHandoff = {
         readonly status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule';
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
+        readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     };
@@ -689,100 +721,104 @@ export type BgvPrivateVssShareProofGeneration = {
     readonly privateVssShareProof: Record<string, unknown>;
     readonly proofRandomness: {
         readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
+        readonly binding?: string;
+        readonly nonceHash?: ProtocolHash;
         readonly seedBytes: 64;
         readonly retention: string;
     };
 };
 
-type BgvSetupProofChallenge = number | string;
-
-type BgvSetupProofTboxZ34Metadata = {
-    readonly z34SeedMaterialHash: ProtocolHash;
-    readonly z34ChallengeSeedHash: ProtocolHash;
-    readonly z34ChallengeTailHash: ProtocolHash;
-    readonly z34ChallengeRowDomainHash: ProtocolHash;
-    readonly z34ChallengeZ3RowSetHash: ProtocolHash;
-    readonly z34ChallengeZ4RowSetHash: ProtocolHash;
-    readonly tboxLowerProtocolChallengeHash: ProtocolHash;
-    readonly z34Z3CheckWindowHash: ProtocolHash;
-    readonly z34Z4CheckWindowHash: ProtocolHash;
-    readonly z34Z3L2SquaredDecimal: string;
-    readonly z34Z4InfinityNormDecimal: string;
+// One key share inside a trustee evaluation-key proof statement. The
+// component material is supplied either as embedded coefficient matrices or
+// as canonical binary component-material bytes; round-two keys also carry the
+// recomputed public round-one aggregate diagonals.
+export type BgvTrusteeEvaluationKeyStatementKey = {
+    readonly proofFamily:
+        | 'relinearization-round-one'
+        | 'relinearization-round-two'
+        | 'galois-rotation'
+        | 'public-key-share';
+    readonly rotation?: number;
+    readonly level: number;
+    readonly keySwitchDomain: string;
+    readonly keySwitchSeedHex: string;
+    readonly componentBByDigit?: readonly (readonly (readonly number[])[])[];
+    readonly componentMaterialBytesHex?: string;
+    readonly roundOneAggregateDiagonal?: readonly (readonly number[])[];
 };
 
-export type BgvSameSecretLnpProofGeneration = {
+// The kernel derives the proof family from the key list: a populated key
+// list is the trustee evaluation-key family and binds the schedule roots; an
+// empty key list is the keyless same-secret linkage anchor family and binds
+// the accepted public VSS material root.
+export type BgvTrusteeEvaluationKeyStatementContext = {
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly setupEpoch: string;
+} & (
+    | {
+          readonly requiredGaloisSetHash: ProtocolHash;
+          readonly evaluatorKeyScheduleRoot: ProtocolHash;
+          readonly keySwitchDecompositionHash: ProtocolHash;
+          readonly sameSecretStatementRoot: ProtocolHash;
+          readonly sameSecretProofRoot: ProtocolHash;
+      }
+    | {
+          readonly sameSecretStatementRoot: ProtocolHash;
+          readonly sameSecretProofRoot: ProtocolHash;
+      }
+    | {
+          readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+      }
+);
+
+export type BgvTrusteeEvaluationKeySameSecretLinkage = {
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly commitments: readonly unknown[];
+};
+
+export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly ok: true;
-    readonly operation: 'generateSameSecretLnpProof';
-    readonly setupProofProfileId: string;
-    readonly proofFamily: 'same-secret-consistency';
-    readonly proofVerificationStatus: string;
+    readonly operation: 'generateTrusteeEvaluationKeyProof';
+    readonly proofFamily:
+        | 'trustee-evaluation-key'
+        | 'same-secret-linkage-anchor'
+        | 'public-key-share';
     readonly proofModelStatus: string;
-    readonly sameSecretTboxParameterProfileHash: ProtocolHash;
+    readonly proofAccountingHash: ProtocolHash;
     readonly statementHash: ProtocolHash;
-    readonly relationCommitmentHash: ProtocolHash;
-    readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: BgvSetupProofChallenge;
-    readonly proofSizeBytes: number;
-    readonly proofBytesHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly keyCount: number;
+    readonly sameSecretLinkageIncluded: boolean;
+    readonly proofByteLength: number;
     readonly proofBytesHex: string;
     readonly proofRandomness: {
-        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
-        readonly seedBytes: 64;
+        readonly source: string;
+        readonly binding?: string;
+        readonly nonceHash?: ProtocolHash;
         readonly retention: string;
     };
-} & BgvSetupProofTboxZ34Metadata;
+};
 
-export type BgvPublicKeyShareLnpProofGeneration = {
+export type BgvTrusteeEvaluationKeyProofVerification = {
     readonly ok: true;
-    readonly operation: 'generatePublicKeyShareLnpProof';
-    readonly setupProofProfileId: string;
-    readonly proofFamily: 'public-key-share';
-    readonly proofVerificationStatus: string;
+    readonly operation: 'verifyTrusteeEvaluationKeyProof';
+    readonly proofFamily:
+        | 'trustee-evaluation-key'
+        | 'same-secret-linkage-anchor'
+        | 'public-key-share';
     readonly proofModelStatus: string;
-    readonly publicKeyShareTboxParameterProfileHash: ProtocolHash;
+    readonly proofAccountingHash: ProtocolHash;
+    readonly proofAccounting: Readonly<Record<string, unknown>>;
     readonly statementHash: ProtocolHash;
-    readonly relationCommitmentHash: ProtocolHash;
-    readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: BgvSetupProofChallenge;
-    readonly proofSizeBytes: number;
-    readonly proofBytesHash: ProtocolHash;
-    readonly proofBytesHex: string;
-    readonly proofRandomness: {
-        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
-        readonly seedBytes: 64;
-        readonly retention: string;
-    };
-} & BgvSetupProofTboxZ34Metadata;
-
-type BgvEvaluationKeyShareLnpProofGenerationBase = {
-    readonly ok: true;
-    readonly operation: 'generateEvaluationKeyShareLnpProof';
-    readonly setupProofProfileId: string;
-    readonly proofVerificationStatus: string;
-    readonly proofModelStatus: string;
-    readonly statementHash: ProtocolHash;
-    readonly relationCommitmentHash: ProtocolHash;
-    readonly tboxCommitmentPrefixHash: ProtocolHash;
-    readonly challenge: BgvSetupProofChallenge;
-    readonly proofSizeBytes: number;
-    readonly proofBytesHash: ProtocolHash;
-    readonly proofBytesHex: string;
-    readonly proofRandomness: {
-        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
-        readonly seedBytes: 64;
-        readonly retention: string;
-    };
-} & BgvSetupProofTboxZ34Metadata;
-
-export type BgvEvaluationKeyShareLnpProofGeneration =
-    | (BgvEvaluationKeyShareLnpProofGenerationBase & {
-          readonly proofFamily: 'relinearization-key-share';
-          readonly relinearizationKeyShareTboxParameterProfileHash: ProtocolHash;
-      })
-    | (BgvEvaluationKeyShareLnpProofGenerationBase & {
-          readonly proofFamily: 'galois-key-share';
-          readonly galoisKeyShareTboxParameterProfileHash: ProtocolHash;
-      });
+    readonly limbCount: number;
+    readonly keyCount: number;
+    readonly sameSecretLinkageIncluded: boolean;
+    readonly proofByteLength: number;
+};
 
 export type BgvThresholdShareCommitmentDerivation = {
     readonly ok: true;
@@ -846,6 +882,41 @@ export type BgvThresholdShareCommitmentTransportStreamDerivation = Omit<
     readonly operation: 'finishThresholdShareCommitmentsFromTransportStream';
     readonly derivationId: string;
     readonly verifiedVssCoefficientCommitmentMaterial: BgvVerifiedVssCoefficientCommitmentMaterial;
+};
+
+export type BgvSetupProofMaterialTransportStreamBegin = {
+    readonly ok: true;
+    readonly operation: 'beginSetupProofMaterialTransportStream';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly setupProofProfileId: string;
+    readonly verificationId: string;
+    readonly proofFamily: string;
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly proofBytesEncoding: string;
+    readonly transport: Readonly<Record<string, unknown>>;
+};
+
+export type BgvSetupProofMaterialTransportStreamChunkAbsorption = {
+    readonly ok: true;
+    readonly operation: 'absorbSetupProofMaterialTransportStreamChunk';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly setupProofProfileId: string;
+    readonly absorbedChunkIndex: number;
+    readonly nextChunkIndex: number;
+    readonly observedTotalByteLength: number;
+};
+
+export type BgvSetupProofMaterialTransportStreamVerification = {
+    readonly ok: true;
+    readonly operation: 'finishSetupProofMaterialTransportStream';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly setupProofProfileId: string;
+    readonly verificationId: string;
+    readonly proofFamily: string;
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly proofBytesEncoding: string;
+    readonly transport: Readonly<Record<string, unknown>>;
+    readonly verifiedSetupProofMaterial: BgvVerifiedSetupProofMaterial;
 };
 
 export type BgvLocalTrusteeSetupStateVerification = {

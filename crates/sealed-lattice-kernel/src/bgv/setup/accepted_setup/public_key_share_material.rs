@@ -1,5 +1,25 @@
 use super::*;
 
+use crate::bgv::coefficient_codec::coefficient_vector_hash512;
+use crate::bgv::setup::trustee_evaluation_key_proof::{
+    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
+};
+
+// Canonical per-limb hash of a public-key share coefficient vector, bound into
+// the public-key share records and the public-key share material records.
+const PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/public-key-share-coefficient-vector-v1";
+
+pub(in crate::bgv::setup) fn public_key_share_coefficient_vector_hash(
+    coefficients: &[u64],
+) -> String {
+    coefficient_vector_hash512(
+        coefficients,
+        PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN,
+    )
+}
+
 #[derive(Clone)]
 pub(super) struct PublicKeyShareMaterialBinding {
     trustee_identity: String,
@@ -42,7 +62,7 @@ pub(super) fn verify_collective_public_key_material(
     let Some(aggregate_object) = aggregate_object else {
         return Ok(Some(public_key_share_proof_refusal(
             "publicKeyMaterialBeforeProofVerification",
-            "collective public-key material is not accepted unless it is root-bound to verified public-key share material and LNP proof records",
+            "collective public-key material is not accepted unless it is root-bound to verified public-key share material and succinct proof records",
             "setupPackage.collectivePublicKeyRoot",
         )?));
     };
@@ -99,12 +119,15 @@ pub(super) fn verify_collective_public_key_material(
         ("proofFamily", "public-key-share"),
         (
             "proofVerificationStatus",
-            PUBLIC_KEY_SHARE_LNP_PROOF_VERIFICATION_STATUS,
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
         ),
-        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        ),
         (
             "aggregationStatus",
-            "lnp-proof-aggregated-with-accepted-setup-proof-accounting",
+            "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
         ),
         (
             "materialEncoding",
@@ -125,12 +148,12 @@ pub(super) fn verify_collective_public_key_material(
             "publicKeyShareMaterial was required before collective public-key verification",
         )
     })?;
-    let lnp_proof_set = setup_package
-        .get("publicKeyShareLnpProofs")
+    let succinct_proof_set = setup_package
+        .get("publicKeyShareSuccinctProofs")
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareLnpProofs was required before collective public-key verification",
+                "publicKeyShareSuccinctProofs was required before collective public-key verification",
             )
         })?;
     if public_key_share_material_uses_transport(material_set)
@@ -236,9 +259,9 @@ pub(super) fn verify_collective_public_key_material(
                 .and_then(Value::as_str),
         ),
         (
-            "publicKeyShareLnpProofSetRoot",
-            lnp_proof_set
-                .get("publicKeyShareLnpProofSetRoot")
+            "publicKeyShareSuccinctProofSetRoot",
+            succinct_proof_set
+                .get("publicKeyShareSuccinctProofSetRoot")
                 .and_then(Value::as_str),
         ),
     ];
@@ -1222,7 +1245,7 @@ fn decode_public_key_share_material_bindings(
             "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
             "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "public-key-share",
-            "proofModelStatus": PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS,
+            "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
             "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
             "ceremonyId": value_string(setup_context, "ceremonyId")?,
             "manifestHash": value_string(setup_context, "manifestHash")?,
@@ -1315,7 +1338,10 @@ pub(super) fn verify_public_key_share_material_set(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        ),
     ] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1469,7 +1495,10 @@ fn verify_public_key_share_material_record(
             "materialEncoding",
             "embedded-full-public-key-share-coefficients",
         ),
-        ("proofModelStatus", PUBLIC_KEY_SHARE_LNP_PROOF_MODEL_STATUS),
+        (
+            "proofModelStatus",
+            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
+        ),
     ] {
         if material_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1723,7 +1752,7 @@ fn unexpected_collective_public_key_field(value: &Value) -> Option<String> {
             "publicKeyShareSetRoot",
             "publicKeyShareProofSetRoot",
             "publicKeyShareMaterialSetRoot",
-            "publicKeyShareLnpProofSetRoot",
+            "publicKeyShareSuccinctProofSetRoot",
             "sourceShareMaterialRoots",
             "aggregateCoefficientVectorsByLimb",
             "collectivePublicKeyRoot",

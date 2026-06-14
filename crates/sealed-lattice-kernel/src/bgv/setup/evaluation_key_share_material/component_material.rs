@@ -43,10 +43,10 @@ pub(in crate::bgv::setup) fn encode_evaluation_key_share_component_vectors(
     component_b_by_digit: &[Vec<Vec<u64>>],
 ) -> CanonicalResult<Vec<u8>> {
     let digit_count = level.checked_add(1).ok_or_else(|| {
-        invalid_evaluation_key_share_proof("evaluation-key level digit count overflowed")
+        invalid_evaluation_key_share_material("evaluation-key level digit count overflowed")
     })?;
     if component_b_by_digit.len() != digit_count {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material digit count does not match the proof level",
         ));
     }
@@ -55,36 +55,36 @@ pub(in crate::bgv::setup) fn encode_evaluation_key_share_component_vectors(
     write_u64(
         &mut output,
         u64::try_from(level).map_err(|_| {
-            invalid_evaluation_key_share_proof("evaluation-key level does not fit u64")
+            invalid_evaluation_key_share_material("evaluation-key level does not fit u64")
         })?,
     );
     write_u64(
         &mut output,
         u64::try_from(ring_degree).map_err(|_| {
-            invalid_evaluation_key_share_proof("evaluation-key ringDegree does not fit u64")
+            invalid_evaluation_key_share_material("evaluation-key ringDegree does not fit u64")
         })?,
     );
     write_u64(
         &mut output,
         u64::try_from(digit_count).map_err(|_| {
-            invalid_evaluation_key_share_proof("evaluation-key digit count does not fit u64")
+            invalid_evaluation_key_share_material("evaluation-key digit count does not fit u64")
         })?,
     );
     write_u64(
         &mut output,
         u64::try_from(digit_count).map_err(|_| {
-            invalid_evaluation_key_share_proof("evaluation-key limb count does not fit u64")
+            invalid_evaluation_key_share_material("evaluation-key limb count does not fit u64")
         })?,
     );
     for (digit_index, component_b_by_limb) in component_b_by_digit.iter().enumerate() {
         if component_b_by_limb.len() != digit_count {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component material limb count does not match the proof level",
             ));
         }
         for (rns_limb_index, coefficients) in component_b_by_limb.iter().enumerate() {
             if coefficients.len() != ring_degree {
-                return Err(invalid_evaluation_key_share_proof(
+                return Err(invalid_evaluation_key_share_material(
                     "evaluation-key component material coefficient count does not match ringDegree",
                 ));
             }
@@ -92,14 +92,14 @@ pub(in crate::bgv::setup) fn encode_evaluation_key_share_component_vectors(
                 .iter()
                 .any(|coefficient| *coefficient >= DATA_PRIMES[rns_limb_index])
             {
-                return Err(invalid_evaluation_key_share_proof(
+                return Err(invalid_evaluation_key_share_material(
                     "evaluation-key component material contains non-canonical Q_share residues",
                 ));
             }
             write_u64(
                 &mut output,
                 u64::try_from(digit_index).map_err(|_| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key digit index does not fit u64",
                     )
                 })?,
@@ -107,7 +107,7 @@ pub(in crate::bgv::setup) fn encode_evaluation_key_share_component_vectors(
             write_u64(
                 &mut output,
                 u64::try_from(rns_limb_index).map_err(|_| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key RNS limb index does not fit u64",
                     )
                 })?,
@@ -116,7 +116,7 @@ pub(in crate::bgv::setup) fn encode_evaluation_key_share_component_vectors(
             write_u64(
                 &mut output,
                 u64::try_from(coefficients.len()).map_err(|_| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key coefficient count does not fit u64",
                     )
                 })?,
@@ -245,17 +245,21 @@ fn verified_evaluation_key_share_component_material_chunks()
 pub(in crate::bgv::setup) fn register_verified_evaluation_key_share_component_material_chunks(
     material_root: &str,
     chunks: Vec<Vec<u8>>,
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
 ) -> CanonicalResult<()> {
     validate_lowercase_hash(
         material_root,
         "verifiedEvaluationKeyShareComponentMaterial.keySwitchComponentMaterialRoot",
     )?;
-    let store_entry =
-        write_verified_evaluation_key_share_component_material_chunks(material_root, &chunks)?;
+    let store_entry = write_verified_evaluation_key_share_component_material_chunks(
+        material_root,
+        &chunks,
+        transport_hashes,
+    )?;
     let mut stored_chunks = verified_evaluation_key_share_component_material_chunks()
         .lock()
         .map_err(|_| {
-            invalid_evaluation_key_share_proof(
+            invalid_evaluation_key_share_material(
                 "verified evaluation-key component material store is unavailable",
             )
         })?;
@@ -263,7 +267,7 @@ pub(in crate::bgv::setup) fn register_verified_evaluation_key_share_component_ma
         && (existing_chunks.path != store_entry.path
             || existing_chunks.total_byte_length != store_entry.total_byte_length)
     {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "verified evaluation-key component material root is already bound to different material storage",
         ));
     }
@@ -278,12 +282,12 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
     let stored_chunks = verified_evaluation_key_share_component_material_chunks()
         .lock()
         .map_err(|_| {
-            invalid_evaluation_key_share_proof(
+            invalid_evaluation_key_share_material(
                 "verified evaluation-key component material store is unavailable",
             )
         })?;
     let store_entry = stored_chunks.get(material_root).cloned().ok_or_else(|| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "transported evaluation-key component material requires chunks or a live verified material handle",
         )
     })?;
@@ -304,53 +308,71 @@ fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf
 fn write_verified_evaluation_key_share_component_material_chunks(
     material_root: &str,
     chunks: &[Vec<u8>],
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
 ) -> CanonicalResult<VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry> {
     let total_byte_length = chunks.iter().try_fold(0_u64, |total, chunk| {
         total
             .checked_add(u64::try_from(chunk.len()).map_err(|_| {
-                invalid_evaluation_key_share_proof(
+                invalid_evaluation_key_share_material(
                     "verified evaluation-key component material chunk length does not fit u64",
                 )
             })?)
             .ok_or_else(|| {
-                invalid_evaluation_key_share_proof(
+                invalid_evaluation_key_share_material(
                     "verified evaluation-key component material byte length overflowed",
                 )
             })
     })?;
     let directory = verified_evaluation_key_share_component_material_store_directory();
     fs::create_dir_all(&directory).map_err(|error| {
-        invalid_evaluation_key_share_proof(format!(
+        invalid_evaluation_key_share_material(format!(
             "verified evaluation-key component material store could not be created: {error}",
         ))
     })?;
     let path = directory.join(format!("{material_root}.bin"));
-    if path.exists() {
-        let observed_byte_length = fs::metadata(&path)
-            .map_err(|error| {
-                invalid_evaluation_key_share_proof(format!(
-                    "verified evaluation-key component material store entry could not be read: {error}",
+    let metadata_path = path.with_extension("metadata.json");
+    let metadata = verified_evaluation_key_share_component_material_store_metadata(
+        material_root,
+        transport_hashes,
+    );
+    let cache_entry_matches =
+        verified_evaluation_key_share_component_material_store_metadata_matches(
+            &path,
+            &metadata_path,
+            total_byte_length,
+            &metadata,
+        )?;
+    if !cache_entry_matches {
+        if metadata_path.exists() {
+            fs::remove_file(&metadata_path).map_err(|error| {
+                invalid_evaluation_key_share_material(format!(
+                    "verified evaluation-key component material store metadata could not be refreshed: {error}",
                 ))
-            })?
-            .len();
-        if observed_byte_length != total_byte_length {
-            return Err(invalid_evaluation_key_share_proof(
-                "verified evaluation-key component material store entry length does not match the registered chunks",
-            ));
+            })?;
         }
-    } else {
         let mut file = File::create(&path).map_err(|error| {
-            invalid_evaluation_key_share_proof(format!(
+            invalid_evaluation_key_share_material(format!(
                 "verified evaluation-key component material store entry could not be created: {error}",
             ))
         })?;
         for chunk in chunks {
             file.write_all(chunk).map_err(|error| {
-                invalid_evaluation_key_share_proof(format!(
+                invalid_evaluation_key_share_material(format!(
                     "verified evaluation-key component material store entry could not be written: {error}",
                 ))
             })?;
         }
+        drop(file);
+        let metadata_bytes = serde_json::to_vec(&metadata).map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "verified evaluation-key component material store metadata could not be encoded: {error}",
+            ))
+        })?;
+        fs::write(&metadata_path, metadata_bytes).map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "verified evaluation-key component material store metadata could not be written: {error}",
+            ))
+        })?;
     }
 
     Ok(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
@@ -359,17 +381,70 @@ fn write_verified_evaluation_key_share_component_material_chunks(
     })
 }
 
+#[cfg(test)]
+fn verified_evaluation_key_share_component_material_store_metadata(
+    material_root: &str,
+    transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
+) -> Value {
+    json!({
+        "objectType": "VerifiedEvaluationKeyShareComponentMaterialStoreEntry",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+        "keySwitchComponentMaterialRoot": material_root,
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    })
+}
+
+#[cfg(test)]
+fn verified_evaluation_key_share_component_material_store_metadata_matches(
+    path: &PathBuf,
+    metadata_path: &PathBuf,
+    total_byte_length: u64,
+    expected_metadata: &Value,
+) -> CanonicalResult<bool> {
+    if !path.exists() || !metadata_path.exists() {
+        return Ok(false);
+    }
+    let observed_byte_length = fs::metadata(path)
+        .map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "verified evaluation-key component material store entry could not be read: {error}",
+            ))
+        })?
+        .len();
+    if observed_byte_length != total_byte_length {
+        return Ok(false);
+    }
+    let metadata_bytes = fs::read(metadata_path).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata could not be read: {error}",
+        ))
+    })?;
+    let observed_metadata = serde_json::from_slice::<Value>(&metadata_bytes).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata is invalid: {error}",
+        ))
+    })?;
+
+    Ok(&observed_metadata == expected_metadata)
+}
+
 fn read_verified_evaluation_key_share_component_material_chunks(
     store_entry: &VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
     let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "evaluation-key component material chunk size does not fit usize",
         )
     })?;
     let mut remaining_byte_length = store_entry.total_byte_length;
     let mut file = File::open(&store_entry.path).map_err(|error| {
-        invalid_evaluation_key_share_proof(format!(
+        invalid_evaluation_key_share_material(format!(
             "verified evaluation-key component material store entry could not be opened: {error}",
         ))
     })?;
@@ -378,18 +453,18 @@ fn read_verified_evaluation_key_share_component_material_chunks(
         let next_chunk_length =
             usize::try_from(remaining_byte_length.min(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES))
                 .map_err(|_| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key component material chunk length does not fit usize",
                     )
                 })?;
         let mut chunk = vec![0_u8; next_chunk_length.min(chunk_size)];
         file.read_exact(&mut chunk).map_err(|error| {
-            invalid_evaluation_key_share_proof(format!(
+            invalid_evaluation_key_share_material(format!(
                 "verified evaluation-key component material store entry could not be read: {error}",
             ))
         })?;
         remaining_byte_length -= u64::try_from(chunk.len()).map_err(|_| {
-            invalid_evaluation_key_share_proof(
+            invalid_evaluation_key_share_material(
                 "evaluation-key component material chunk length does not fit u64",
             )
         })?;
@@ -406,7 +481,7 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
 ) -> CanonicalResult<String> {
     let level = value_u64(proof_record, "level")?;
     let digit_count = level.checked_add(1).ok_or_else(|| {
-        invalid_evaluation_key_share_proof("evaluation-key digit count overflowed")
+        invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
     })?;
     derive_protocol_hash(
         "EvaluationKeyShareComponentMaterialRoot",
@@ -502,7 +577,7 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
                 || record.get("keySwitchComponentChunkRoot").is_some()
                 || record.get("keySwitchComponentChunkHashes").is_some()
             {
-                return Err(invalid_evaluation_key_share_proof(
+                return Err(invalid_evaluation_key_share_material(
                     "embedded evaluation-key component material must not include transported component references",
                 ));
             }
@@ -510,13 +585,13 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
         }
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING => {
             if record.get("keySwitchComponentVectors").is_some() {
-                return Err(invalid_evaluation_key_share_proof(
+                return Err(invalid_evaluation_key_share_material(
                     "binary evaluation-key component material must not embed keySwitchComponentVectors",
                 ));
             }
             let transported_material_set =
                 transported_key_switch_component_material.ok_or_else(|| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "transported evaluation-key component material is required by binary keySwitchMaterialEncoding",
                     )
                 })?;
@@ -526,7 +601,7 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
                 transported_material_set,
             )
         }
-        _ => Err(invalid_evaluation_key_share_proof(
+        _ => Err(invalid_evaluation_key_share_material(
             "evaluation-key keySwitchMaterialEncoding is not accepted",
         )),
     }
@@ -542,16 +617,18 @@ fn component_b_vectors_from_embedded_record(
     let key_switch_seed_hex = string_field(record, "keySwitchSeedHex")?;
     validate_hex_string(key_switch_seed_hex, "keySwitchSeedHex")?;
     let digit_count = level.checked_add(1).ok_or_else(|| {
-        invalid_evaluation_key_share_proof("evaluation-key level digit count overflowed")
+        invalid_evaluation_key_share_material("evaluation-key level digit count overflowed")
     })?;
     let limb_count = digit_count;
     let entries = array_field(record, "keySwitchComponentVectors")?;
     if entries.len()
         != digit_count.checked_mul(limb_count).ok_or_else(|| {
-            invalid_evaluation_key_share_proof("evaluation-key component vector count overflowed")
+            invalid_evaluation_key_share_material(
+                "evaluation-key component vector count overflowed",
+            )
         })?
     {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component vectors must contain one vector for every digit and active limb",
         ));
     }
@@ -560,7 +637,7 @@ fn component_b_vectors_from_embedded_record(
         let digit_index = value_usize(entry, "digitIndex")?;
         let rns_limb_index = value_usize(entry, "rnsLimbIndex")?;
         if digit_index >= digit_count || rns_limb_index >= limb_count {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component vector index is outside the proof level",
             ));
         }
@@ -569,23 +646,23 @@ fn component_b_vectors_from_embedded_record(
             || entry.get("coefficientByteLength").and_then(Value::as_u64)
                 != Some(
                     u64::try_from(ring_degree.checked_mul(8).ok_or_else(|| {
-                        invalid_evaluation_key_share_proof(
+                        invalid_evaluation_key_share_material(
                             "evaluation-key coefficient byte length overflowed",
                         )
                     })?)
                     .map_err(|_| {
-                        invalid_evaluation_key_share_proof(
+                        invalid_evaluation_key_share_material(
                             "evaluation-key coefficient byte length does not fit u64",
                         )
                     })?,
                 )
         {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component vector metadata does not match the proof level",
             ));
         }
         if !component_b_by_digit[digit_index][rns_limb_index].is_empty() {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component vectors contain a duplicate digit and limb",
             ));
         }
@@ -598,7 +675,7 @@ fn component_b_vectors_from_embedded_record(
             .iter()
             .any(|coefficient| *coefficient >= DATA_PRIMES[rns_limb_index])
         {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component vector contains non-canonical Q_share residues",
             ));
         }
@@ -609,7 +686,7 @@ fn component_b_vectors_from_embedded_record(
             .and_then(Value::as_str)
             != Some(expected_coefficient_vector_hash.as_str())
         {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component vector hash does not match coefficientsLeHex",
             ));
         }
@@ -628,7 +705,7 @@ fn component_b_vectors_from_embedded_record(
         .and_then(Value::as_str)
         != Some(expected_root.as_str())
     {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component vector root does not match embedded public material",
         ));
     }
@@ -651,7 +728,7 @@ fn component_b_vectors_from_transported_material(
             .and_then(Value::as_str)
             != Some(SETUP_PROOF_PROFILE_ID)
     {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material set header is invalid",
         ));
     }
@@ -665,14 +742,14 @@ fn component_b_vectors_from_transported_material(
             continue;
         }
         if matching_component_material.is_some() {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "transported evaluation-key component material contains duplicate keySwitchComponentMaterialRoot entries",
             ));
         }
         matching_component_material = Some(component_material);
     }
     let component_material = matching_component_material.ok_or_else(|| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "transported evaluation-key component material is missing the requested keySwitchComponentMaterialRoot",
         )
     })?;
@@ -703,7 +780,7 @@ fn component_b_vectors_from_transported_material(
         &transport_hashes,
     )?;
     if expected_material_root != canonical_material_root {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material root must match the canonical transported material reference",
         ));
     }
@@ -749,7 +826,7 @@ fn verify_evaluation_key_share_component_material_header(
             .and_then(Value::as_str)
             != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING)
     {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material header is invalid",
         ));
     }
@@ -763,14 +840,14 @@ fn verify_evaluation_key_share_component_material_header(
         "keySwitchComponentVectorRoot",
     ] {
         if component_material.get(field_name) != record.get(field_name) {
-            return Err(invalid_evaluation_key_share_proof(format!(
+            return Err(invalid_evaluation_key_share_material(format!(
                 "transported evaluation-key component material {field_name} must match the proof record"
             )));
         }
     }
     let level = value_u64(record, "level")?;
     let digit_count = level.checked_add(1).ok_or_else(|| {
-        invalid_evaluation_key_share_proof("evaluation-key digit count overflowed")
+        invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
     })?;
     if component_material.get("digitCount").and_then(Value::as_u64) != Some(digit_count)
         || component_material
@@ -778,7 +855,7 @@ fn verify_evaluation_key_share_component_material_header(
             .and_then(Value::as_u64)
             != Some(digit_count)
     {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material digit and limb counts must match the proof level",
         ));
     }
@@ -788,12 +865,12 @@ fn verify_evaluation_key_share_component_material_header(
 
 fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
     if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material chunkSizeBytes must match the setup transport profile",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "transported evaluation-key component material chunkCount does not fit usize",
         )
     })?;
@@ -801,7 +878,7 @@ fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalRes
         let material_root = string_field(value, "keySwitchComponentMaterialRoot")?;
         let chunks = stored_verified_evaluation_key_share_component_material_chunks(material_root)?;
         if chunks.len() != expected_chunk_count {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "verified evaluation-key component material chunks length must match chunkCount",
             ));
         }
@@ -809,12 +886,12 @@ fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalRes
         return Ok(chunks);
     };
     let chunk_values = chunk_values.as_array().ok_or_else(|| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "transported evaluation-key component material chunks must be an array",
         )
     })?;
     if chunk_values.len() != expected_chunk_count {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material chunks length must match chunkCount",
         ));
     }
@@ -822,7 +899,7 @@ fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalRes
     for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
         let observed_chunk_index = value_usize(chunk_value, "chunkIndex")?;
         if observed_chunk_index != expected_chunk_index {
-            return Err(invalid_evaluation_key_share_proof(
+            return Err(invalid_evaluation_key_share_material(
                 "transported evaluation-key component material chunks must be in ascending chunk-index order",
             ));
         }
@@ -859,7 +936,7 @@ fn verify_evaluation_key_share_component_material_hash_fields(
             .or_else(|_| string_field(value, "keySwitchComponentChunkRoot"))?
             != transport_hashes.chunk_root
     {
-        return Err(invalid_evaluation_key_share_proof(format!(
+        return Err(invalid_evaluation_key_share_material(format!(
             "{value_name} hash metadata does not match supplied chunks"
         )));
     }
@@ -868,12 +945,12 @@ fn verify_evaluation_key_share_component_material_hash_fields(
         .or_else(|| value.get("keySwitchComponentChunkHashes"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            invalid_evaluation_key_share_proof(format!(
+            invalid_evaluation_key_share_material(format!(
                 "{value_name} must list every component material chunk hash"
             ))
         })?;
     if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(invalid_evaluation_key_share_proof(format!(
+        return Err(invalid_evaluation_key_share_material(format!(
             "{value_name} chunk hash count must match supplied chunks"
         )));
     }
@@ -882,7 +959,7 @@ fn verify_evaluation_key_share_component_material_hash_fields(
         .zip(transport_hashes.chunk_hashes.iter())
     {
         if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
-            return Err(invalid_evaluation_key_share_proof(format!(
+            return Err(invalid_evaluation_key_share_material(format!(
                 "{value_name} chunk hashes must match supplied chunks"
             )));
         }
@@ -899,27 +976,27 @@ fn decode_evaluation_key_share_component_vectors(
     let mut cursor = 0_usize;
     let magic = read_fixed::<8>(material_bytes, &mut cursor)?;
     if &magic != EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material has the wrong format marker",
         ));
     }
     let level = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "evaluation-key component material level does not fit usize",
         )
     })?;
     let ring_degree = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "evaluation-key component material ringDegree does not fit usize",
         )
     })?;
     let digit_count = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "evaluation-key component material digit count does not fit usize",
         )
     })?;
     let limb_count = usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
-        invalid_evaluation_key_share_proof(
+        invalid_evaluation_key_share_material(
             "evaluation-key component material limb count does not fit usize",
         )
     })?;
@@ -929,13 +1006,13 @@ fn decode_evaluation_key_share_component_vectors(
         || ring_degree > POLYNOMIAL_DEGREE
         || digit_count
             != level.checked_add(1).ok_or_else(|| {
-                invalid_evaluation_key_share_proof("evaluation-key digit count overflowed")
+                invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
             })?
         || limb_count != digit_count
         || limb_count == 0
         || limb_count > DATA_PRIMES.len()
     {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material shape does not match the proof record",
         ));
     }
@@ -948,20 +1025,20 @@ fn decode_evaluation_key_share_component_vectors(
         for expected_rns_limb_index in 0..limb_count {
             let digit_index =
                 usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key component material digit index does not fit usize",
                     )
                 })?;
             let rns_limb_index =
                 usize::try_from(read_u64(material_bytes, &mut cursor)?).map_err(|_| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key component material RNS limb index does not fit usize",
                     )
                 })?;
             let rns_prime = read_u64(material_bytes, &mut cursor)?;
             let coefficient_count = usize::try_from(read_u64(material_bytes, &mut cursor)?)
                 .map_err(|_| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key component material coefficient count does not fit usize",
                     )
                 })?;
@@ -971,7 +1048,7 @@ fn decode_evaluation_key_share_component_vectors(
                 || rns_prime != DATA_PRIMES[rns_limb_index]
                 || coefficient_count != ring_degree
             {
-                return Err(invalid_evaluation_key_share_proof(
+                return Err(invalid_evaluation_key_share_material(
                     "evaluation-key component material record order or metadata is invalid",
                 ));
             }
@@ -979,7 +1056,7 @@ fn decode_evaluation_key_share_component_vectors(
             for _ in 0..ring_degree {
                 let coefficient = read_u64(material_bytes, &mut cursor)?;
                 if coefficient >= DATA_PRIMES[rns_limb_index] {
-                    return Err(invalid_evaluation_key_share_proof(
+                    return Err(invalid_evaluation_key_share_material(
                         "evaluation-key component material contains non-canonical Q_share residues",
                     ));
                 }
@@ -991,7 +1068,7 @@ fn decode_evaluation_key_share_component_vectors(
                 "rnsPrime": DATA_PRIMES[rns_limb_index],
                 "component": "b",
                 "coefficientByteLength": ring_degree.checked_mul(8).ok_or_else(|| {
-                    invalid_evaluation_key_share_proof(
+                    invalid_evaluation_key_share_material(
                         "evaluation-key coefficient byte length overflowed",
                     )
                 })?,
@@ -1002,7 +1079,7 @@ fn decode_evaluation_key_share_component_vectors(
         }
     }
     if cursor != material_bytes.len() {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material has trailing bytes",
         ));
     }
@@ -1015,7 +1092,7 @@ fn decode_evaluation_key_share_component_vectors(
         &entries,
     )?;
     if string_field(record, "keySwitchComponentVectorRoot")? != expected_root {
-        return Err(invalid_evaluation_key_share_proof(
+        return Err(invalid_evaluation_key_share_material(
             "evaluation-key component vector root does not match transported public material",
         ));
     }
@@ -1051,32 +1128,38 @@ pub(in crate::bgv::setup) fn key_switch_component_b_for_evaluation_key_fixture(
         input.modulus,
         input.ring_degree,
     );
+    let secret_residues = secret_i128
+        .iter()
+        .map(|coefficient| signed_i128_residue_u64(*coefficient, input.modulus))
+        .collect::<CanonicalResult<Vec<_>>>()?;
     let public_sample_secret_product =
-        negacyclic_public_sample_secret_product_lifted(&public_sample, &secret_i128)?;
+        negacyclic_product_mod(&public_sample, &secret_residues, input.modulus)?;
+    let plaintext_modulus = u64::try_from(PLAINTEXT_MODULUS_I64)
+        .expect("plaintext modulus is positive")
+        % input.modulus;
     (0..input.ring_degree)
         .map(|coefficient_index| {
-            let mut lifted_value = i128::from(PLAINTEXT_MODULUS_I64)
-                .checked_mul(i128::from(input.error_coefficients[coefficient_index]))
-                .ok_or_else(|| {
-                    invalid_evaluation_key_share_proof(
-                        "evaluation-key fixture error scaling overflowed",
-                    )
-                })?;
-            lifted_value = lifted_value
-                .checked_sub(public_sample_secret_product[coefficient_index])
-                .ok_or_else(|| {
-                    invalid_evaluation_key_share_proof(
-                        "evaluation-key fixture public-sample subtraction overflowed",
-                    )
-                })?;
-            lifted_value = lifted_value
-                .checked_add(input.source_coefficients[coefficient_index])
-                .ok_or_else(|| {
-                    invalid_evaluation_key_share_proof(
-                        "evaluation-key fixture source addition overflowed",
-                    )
-                })?;
-            signed_i128_residue_u64(lifted_value, input.modulus)
+            let scaled_error = mul_mod(
+                plaintext_modulus,
+                signed_i128_residue_u64(
+                    i128::from(input.error_coefficients[coefficient_index]),
+                    input.modulus,
+                )?,
+                input.modulus,
+            )?;
+            let without_sample = sub_mod(
+                scaled_error,
+                public_sample_secret_product[coefficient_index],
+                input.modulus,
+            )?;
+            add_mod(
+                without_sample,
+                signed_i128_residue_u64(
+                    input.source_coefficients[coefficient_index],
+                    input.modulus,
+                )?,
+                input.modulus,
+            )
         })
         .collect()
 }

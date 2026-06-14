@@ -126,7 +126,10 @@ pub(crate) fn packed_rank_shift_basis_exponents(
             "packed rank compact rotation basis requires 2 <= option count and a valid slot window",
         ));
     }
-    let largest_shift = option_count - 1;
+    // The batched-pair evaluation rotates by score shifts (below the option
+    // count) and by pair-window offsets (below the unordered pair count), so
+    // the power-of-two basis must cover the largest window offset.
+    let largest_shift = option_count * (option_count - 1) / 2 - 1;
     let mut exponents = Vec::new();
     let mut bit = 0_usize;
     while (1_usize << bit) <= largest_shift {
@@ -223,30 +226,35 @@ pub(crate) fn rotate_with_compact_inverse_generator_basis(
     Ok(rotated)
 }
 
+// The frozen rotation key schedule: score-packing and packed-rank-forward
+// rotations at the selected evaluator working level (the replay mod-switches
+// the aggregate there before packing), and packed-rank-return rotations at
+// the comparison output level. Lower-level consumers use the same keys
+// through truncation.
+#[cfg(test)]
 pub(crate) fn selected_evaluator_rotation_key_schedule(
     option_count: usize,
-    working_level: usize,
 ) -> CanonicalResult<Vec<(usize, usize)>> {
-    if working_level >= DATA_PRIMES.len() {
+    if SELECTED_EVALUATOR_WORKING_LEVEL >= crate::bgv::profile::DATA_PRIMES.len()
+        || DIRECT_COMPARISON_OUTPUT_LEVEL > SELECTED_EVALUATOR_WORKING_LEVEL
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "selected evaluator rotation schedule requires a working level inside the data basis",
+            "selected evaluator rotation schedule levels must fit the data basis",
         ));
     }
-    let full_level = DATA_PRIMES.len() - 1;
     let mut required = BTreeSet::new();
-    if full_level <= working_level {
-        for galois_element in direct_score_packing_basis_galois_elements(option_count)? {
-            required.insert((galois_element, full_level));
-        }
-        for galois_element in packed_rank_forward_basis_galois_elements(option_count)? {
-            required.insert((galois_element, full_level));
-        }
+    for galois_element in direct_score_packing_basis_galois_elements(option_count)? {
+        required.insert((galois_element, SELECTED_EVALUATOR_WORKING_LEVEL));
     }
-    if DIRECT_COMPARISON_OUTPUT_LEVEL <= working_level {
-        for galois_element in packed_rank_return_basis_galois_elements(option_count)? {
-            required.insert((galois_element, DIRECT_COMPARISON_OUTPUT_LEVEL));
-        }
+    for galois_element in packed_rank_forward_basis_galois_elements(option_count)? {
+        required.insert((galois_element, SELECTED_EVALUATOR_WORKING_LEVEL));
+    }
+    // Inverse-basis rotations run at the working level (pair-window
+    // realignment) and at the comparison output level (rank return); one key
+    // at the working level serves both through truncation.
+    for galois_element in packed_rank_return_basis_galois_elements(option_count)? {
+        required.insert((galois_element, SELECTED_EVALUATOR_WORKING_LEVEL));
     }
 
     Ok(required.into_iter().collect())
