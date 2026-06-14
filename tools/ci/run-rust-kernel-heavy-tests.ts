@@ -98,6 +98,7 @@ const main = async (): Promise<void> => {
             observer: progressReporter.observer,
             outputMode: 'inherit',
             runLog,
+            terminalOutputFilter: progressReporter.terminalOutputFilter,
         });
         process.exitCode = exitCode;
     } finally {

@@ -28,6 +28,9 @@ pub(super) const SETUP_COMMITMENT_MODULE_RANK: usize = 2;
 pub(super) const SETUP_COMMITMENT_RANDOMNESS_WIDTH: usize = (2 * SETUP_COMMITMENT_MODULE_RANK) + 1;
 pub(super) const SETUP_COMMITMENT_ROW_COUNT: usize = SETUP_COMMITMENT_MODULE_RANK + 1;
 pub(super) const SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 1;
+// Three data-prime limbs set the CRT message-space ceiling; lifted linear
+// combinations must stay below their product or binding breaks, which is why the
+// carry relation is required above one q_l.
 pub(super) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
 
 static SETUP_COMMITMENT_MATRIX_NTT_CACHE: OnceLock<Mutex<SetupCommitmentMatrixNttCache>> =
@@ -1196,6 +1199,8 @@ fn setup_commitment_matrix_coefficient(
     )
 }
 
+// Structural identity and message-blinding entries are the ring scalar 1
+// (constant coefficient only), not an all-ones coefficient vector.
 fn structural_matrix_coefficient(
     matrix_row_index: usize,
     randomness_column_index: usize,
@@ -1425,6 +1430,8 @@ fn signed_message_coefficient_magnitude_bound(
         })
 }
 
+// ceil(log2(value)) via bit_length(value - 1); the minus one makes exact powers
+// of two report b instead of b + 1.
 fn ceil_log2_big_uint(value: &BigUint) -> u32 {
     if value <= &BigUint::from(1_u8) {
         return 0;

@@ -1,4 +1,4 @@
-﻿import type { ProtocolHash } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 type BgvJsonRecord = Readonly<Record<string, unknown>>;
 
@@ -746,6 +746,7 @@ export type BgvTrusteeEvaluationKeyStatementKey = {
 // list is the trustee evaluation-key family and binds the schedule roots; an
 // empty key list is the keyless same-secret linkage anchor family and binds
 // the accepted public VSS material root.
+// These branches share fields and carry no discriminant, so which root set is mandatory is enforced by the kernel from the key list, not by the type.
 export type BgvTrusteeEvaluationKeyStatementContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;

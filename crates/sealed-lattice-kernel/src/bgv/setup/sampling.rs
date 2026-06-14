@@ -117,6 +117,9 @@ pub(super) fn sample_small_distribution_offset(
     }
 }
 
+// Each coefficient position has a single hash-elected owner, so the collective
+// secret and error are a position-partition of single-draw samples and stay
+// within the per-coefficient bound (no n-fold variance blow-up).
 pub(super) fn bounded_collective_secret_share_coefficient(
     seed_hash: &str,
     participant_identities: &[String],
@@ -374,6 +377,8 @@ fn centered_binomial_eta2_coefficient(
 
 // Centered binomial distribution with eta=2, support [-2, 2]: takes 4 random
 // bits per sample and returns (b0 + b1) - (b2 + b3).
+// eta = 2 is the accepted error parameter: per-coefficient noise stays in
+// [-2, 2], which feeds the BGV noise budget and the commitment no-wrap bound.
 fn centered_binomial_eta2_from_bits(bits: u8) -> i64 {
     let low_weight = i64::from(bits & 1) + i64::from((bits >> 1) & 1);
     let high_weight = i64::from((bits >> 2) & 1) + i64::from((bits >> 3) & 1);
@@ -515,6 +520,8 @@ pub(super) fn reduce_unbiased_u64(candidate: u64, modulus: u64) -> Option<u64> {
         return None;
     }
     let modulus = u128::from(modulus);
+    // Rejection sampling: accept only the largest multiple of the modulus below
+    // 2^64 so the reduction is bias-free; None means resample.
     let accepted_candidate_count = ((1_u128 << 64) / modulus) * modulus;
     let candidate = u128::from(candidate);
     if candidate < accepted_candidate_count {

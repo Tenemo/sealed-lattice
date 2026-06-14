@@ -222,6 +222,7 @@ const deriveRosterProfile = (
             warnings: ['CasualMicroRoster'],
         };
     }
+    // Size 10 is the pre-certified first profile and is the only dynamic-range size allowed to be claim-bearing without a dynamic roster certificate.
     if (rosterSize === firstProfileRosterSize) {
         return {
             claimBoundary: 'FirstProfile',

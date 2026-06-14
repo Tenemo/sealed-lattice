@@ -41,6 +41,7 @@ const varUintBytes = (value: number, fieldName: string): Uint8Array => {
     return Uint8Array.from(bytes);
 };
 
+// Each chunk hash binds its index and the full-object hash, so chunks cannot be reordered within an object or spliced in from a different proof object.
 export const setupProofMaterialChunkHash = (
     proofFamily: string,
     fullObjectHash: ProtocolHash,

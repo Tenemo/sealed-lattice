@@ -140,6 +140,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         )?));
     }
 
+    // Commit-then-reveal coin toss: commits bind each reveal before any are opened (no last-mover bias), and folding the roster-ordered reveals yields a canonical unbiased CRS seed that anchors every public derivation below.
     let ordered_reveal_hash_values = ordered_reveal_hashes
         .values()
         .cloned()
@@ -208,6 +209,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
     Ok(None)
 }
 
+// The whole CRS is a deterministic function of the verified seed, so the verifier recomputes it and refuses any supplied derivation; this prevents a trapdoored public a or commitment matrix.
 fn verify_public_derivations(
     common_randomness: &Value,
     public_matrix_seed_hash: &str,
@@ -362,6 +364,7 @@ fn commitment_matrix_sampled_entries(public_matrix_seed_hash: &str) -> Canonical
     )
 }
 
+// The CRP root is a seed-bound label tag, not a commitment to coefficients; the actual relinearization/Galois a is bound downstream through keySwitchSeedHex, which folds this root in.
 fn setup_public_derivation_root(
     public_matrix_seed_hash: &str,
     component_name: &str,

@@ -24,6 +24,7 @@ const formatElapsed = (milliseconds: number): string => {
 export type HeavyTestProgressReporter = {
     readonly observer: CommandRunObserver;
     readonly stop: () => void;
+    readonly terminalOutputFilter: (line: string) => boolean;
 };
 
 // `running N tests` is emitted once per test binary as it starts.
@@ -32,6 +33,13 @@ const runningTestsPattern = /^running (\d+) tests?/;
 // `has been running for over 60 seconds` notices use a different shape and are
 // intentionally not matched here.
 const finishedTestPattern = /^test (\S+) \.\.\. (ok|FAILED|ignored)\b/;
+// libtest prints "test <name> has been running for over N seconds" roughly every
+// minute for a still-running test. The heartbeat above already conveys liveness
+// and progress, so on a suite whose tests routinely run several minutes these
+// notices are redundant terminal noise. The reporter exposes a filter that drops
+// them from the terminal echo; the on-disk run log still keeps every line.
+const libtestSlowTestNoticePattern =
+    /\bhas been running for over \d+ seconds?\b/;
 
 export const createHeavyTestProgressReporter = (input: {
     readonly label: string;
@@ -146,5 +154,10 @@ export const createHeavyTestProgressReporter = (input: {
         },
     };
 
-    return { observer, stop };
+    return {
+        observer,
+        stop,
+        terminalOutputFilter: (line: string): boolean =>
+            !libtestSlowTestNoticePattern.test(line),
+    };
 };

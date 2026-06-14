@@ -151,6 +151,10 @@ impl EvaluationDomainPlan {
             modulus,
         )?;
         let trace_root = pow_mod(extension_root, DOMAIN_BLOWUP as u64, modulus)?;
+        // Coset disjointness from H requires the offset to generate all of
+        // F_p^* (order p-1), not just any unit; the profile's
+        // primitive_generator is a full generator, so the coset stays outside
+        // every 2-power subgroup and thus off H.
         let coset_offset = root_parameters.primitive_generator;
 
         Ok(Self {

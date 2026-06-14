@@ -244,6 +244,7 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
         checkpoints: checkpoints.ok_or_else(|| missing_field("checkpoints"))?,
     };
 
+    // Canonical-form gate: an object is accepted only if it re-serializes byte-identically to the input, guaranteeing one unique encoding per object for stable hashing.
     if serialize_transcript_core_object(&object) != bytes {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -404,6 +405,7 @@ fn validate_profiles(
     Ok(())
 }
 
+// Each list item is at least one encoded byte, so a count exceeding the remaining bytes is malformed; reject before allocating to avoid an OOM from a forged length.
 fn read_list_count(reader: &mut CanonicalReader<'_>, item_name: &str) -> CanonicalResult<usize> {
     let count = reader.read_varuint()?;
     let count_usize = usize::try_from(count).map_err(|_| {

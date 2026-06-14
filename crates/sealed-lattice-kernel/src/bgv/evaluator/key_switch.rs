@@ -289,6 +289,10 @@ fn generate_key_switch_component_for_digit(
                 negacyclic_mul(&public_sample, &secret_residues[limb_index], *modulus)?;
             let component_b_limb = (0..POLYNOMIAL_DEGREE)
                 .map(|coefficient_index| {
+                    // Noise is scaled by the plaintext modulus t so it lies in
+                    // t*Z and vanishes under the final mod-t reduction (the
+                    // least-significant-residue BGV convention: message
+                    // unscaled, error times t).
                     let scaled_error =
                         signed_residue(error[coefficient_index] * PLAINTEXT_MODULUS_I64, *modulus);
                     let mut value = sub_mod(
@@ -327,6 +331,10 @@ fn generate_key_switch_component_for_digit(
                 negacyclic_mul(&public_sample, &secret_residues[limb_index], *modulus)?;
             let component_b_limb = (0..POLYNOMIAL_DEGREE)
                 .map(|coefficient_index| {
+                    // Noise is scaled by the plaintext modulus t so it lies in
+                    // t*Z and vanishes under the final mod-t reduction (the
+                    // least-significant-residue BGV convention: message
+                    // unscaled, error times t).
                     let scaled_error =
                         signed_residue(error[coefficient_index] * PLAINTEXT_MODULUS_I64, *modulus);
                     let mut value = sub_mod(
@@ -821,13 +829,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rotation_matches_the_plaintext_automorphism() {
+    fn assert_rotation_matches_plaintext_automorphism(
+        galois_element: usize,
+        encryption_seed: &str,
+        galois_key_seed: &str,
+    ) {
         let key = shared_key();
-        let galois_element = 3_usize;
         let slots = [11_u64, 22, 33, 44, 55, 66, 77, 88];
-        let ciphertext = at_test_level(&key.encrypt_slots(&slots, "ksk06").expect("encrypt"));
-        let galois_key = generate_galois_key(key, galois_element, TEST_LEVEL, "galois-seed")
+        let ciphertext =
+            at_test_level(&key.encrypt_slots(&slots, encryption_seed).expect("encrypt"));
+        let galois_key = generate_galois_key(key, galois_element, TEST_LEVEL, galois_key_seed)
             .expect("galois key");
         let rotated = rotate(&ciphertext, galois_element, &galois_key).expect("rotate");
 
@@ -845,26 +856,12 @@ mod tests {
     }
 
     #[test]
+    fn rotation_matches_the_plaintext_automorphism() {
+        assert_rotation_matches_plaintext_automorphism(3, "ksk06", "galois-seed");
+    }
+
+    #[test]
     fn inverse_rotation_matches_the_plaintext_automorphism() {
-        let key = shared_key();
-        let galois_element = 43_691_usize;
-        let slots = [11_u64, 22, 33, 44, 55, 66, 77, 88];
-        let ciphertext = at_test_level(&key.encrypt_slots(&slots, "ksk07").expect("encrypt"));
-        let galois_key =
-            generate_galois_key(key, galois_element, TEST_LEVEL, "inverse-galois-seed")
-                .expect("galois key");
-        let rotated = rotate(&ciphertext, galois_element, &galois_key).expect("rotate");
-
-        let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
-        let rotated_coefficients =
-            automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS)
-                .expect("plaintext automorphism");
-        let expected_slots =
-            forward_negacyclic_ntt(&rotated_coefficients, PLAINTEXT_MODULUS).expect("decode");
-
-        assert_eq!(
-            key.decrypt_to_slots(&rotated).expect("decrypt"),
-            expected_slots
-        );
+        assert_rotation_matches_plaintext_automorphism(43_691, "ksk07", "inverse-galois-seed");
     }
 }

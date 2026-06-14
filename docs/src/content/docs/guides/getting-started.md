@@ -7,7 +7,7 @@ sidebar:
 
 `sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting prototype.
 
-The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
+The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, ballot validity proofs for the fixed encrypted-ballot relation, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
 
 The package is under active implementation and has not been independently audited. Use it for development, integration experiments, and verification tooling, not production elections.
 
@@ -79,7 +79,7 @@ These helpers are useful for current development verification and package integr
 ## What is not available yet
 
 - production setup ceremony, ballot generation, or casting APIs
-- public direct ballot proof construction APIs
+- public encrypted ballot package creation or verification APIs
 - public encrypted ballot aggregation APIs
 - public bounded-domain mobile evaluator replay APIs
 - production target-bound decryption or result release

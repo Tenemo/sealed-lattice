@@ -123,6 +123,7 @@ fn verify_trustee_evaluation_key_proof_set(
         )
     })?;
     verify_context_fields_match(proof_set, setup_context, "trusteeEvaluationKeyProofs")?;
+    // These status strings are claim-gate labels: exact-matching them is what refuses fixture-backed or non-succinct records.
     for (field_name, expected_value) in [
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
@@ -292,6 +293,7 @@ fn verify_trustee_evaluation_key_proof_set(
             "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
         ));
     }
+    // Index-equals-position enforces a single canonical ordering and full dense coverage 0..n, so a proof set cannot be reshuffled or have a trustee silently dropped or duplicated.
     for (record_position, proof_record) in proof_records.iter().enumerate() {
         let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
         if trustee_roster_position != record_position as u64 {
@@ -677,6 +679,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     // the shared material source returns the full Q_share commitment set and
     // this evaluation-key statement selects the active key-switch prefix that
     // the per-limb prover and verifier iterate over.
+    // Safe because the keyless same-secret anchor already binds the secret across all Q_share limbs; this statement only re-opens the active-level prefix the keys use, so the truncation cannot admit a second secret in the dropped limbs.
     let active_key_switch_limb_count = keys.iter().map(|key| key.level + 1).max().unwrap_or(0);
     constant_commitments.truncate(active_key_switch_limb_count);
     let statement = TrusteeEvaluationKeyStatement {
@@ -763,6 +766,7 @@ fn relinearization_record_for_trustee_and_level<'a>(
         })
 }
 
+// Two-round collective relinearization: round one publishes gadget shares of s, and round two proves each trustee's source equals s times the public sum of round-one diagonals, so the assembled key switches s^2 back to s.
 // The public round-one aggregate diagonal per scheduled level: for digit j,
 // the sum over every trustee of its round-one component b_{j,j} mod q_j. Each
 // trustee's round-two source multiplies its secret by this public aggregate,
@@ -808,6 +812,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
         let (aggregate, contribution_count) = aggregates_by_level
             .entry(level)
             .or_insert_with(|| (vec![vec![0_u64; ring_degree]; digit_count], 0));
+        // Exactly one contribution per trustee prevents under or over-counting the collective round-one aggregate that every round-two proof multiplies against; only the (digit j, limb j) diagonal contributes, reduced mod q_j.
         for digit_index in 0..digit_count {
             let modulus = DATA_PRIMES[digit_index];
             let diagonal = components

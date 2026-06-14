@@ -514,6 +514,8 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
     )
 }
 
+// Each chunk is a length-framed hash part here (unlike the streamed setup-proof
+// full-object hash), so the two transport digests are not interchangeable.
 fn evaluation_key_share_component_material_full_object_hash(
     proof_family: EvaluationKeyShareProofFamily,
     total_byte_length: u64,
@@ -968,6 +970,9 @@ fn verify_evaluation_key_share_component_material_hash_fields(
     Ok(())
 }
 
+// Canonical decode: fixed record order, in-range residues, and zero trailing
+// bytes make the binary encoding injective and non-malleable against the bound
+// component-vector root.
 fn decode_evaluation_key_share_component_vectors(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
@@ -1113,6 +1118,9 @@ pub(in crate::bgv::setup) struct KeySwitchComponentBFixtureInput<'a> {
 }
 
 #[cfg(test)]
+// BGV key-switch hint b_i = source_i - a_i*s + p*e_i: the secret is masked by
+// the shared public sample a and a plaintext-modulus-scaled error, so
+// key-switching preserves the message mod p.
 pub(in crate::bgv::setup) fn key_switch_component_b_for_evaluation_key_fixture(
     input: KeySwitchComponentBFixtureInput<'_>,
 ) -> CanonicalResult<Vec<u64>> {

@@ -1409,6 +1409,7 @@ const setupProofMaterialTransportFieldNames = [
 
 let setupProofMaterialVerificationSequence = 0;
 
+// Verification ids are process-local kernel stream handles, not security bindings; the cryptographic binding is the full proof material root.
 const setupProofMaterialVerificationId = (
     fieldName: SetupProofMaterialTransportFieldName,
     materialIndex: number,
@@ -1436,6 +1437,7 @@ const setupProofMaterialReference = (proofMaterial: JsonRecord): JsonRecord => {
     return reference;
 };
 
+// Safe only because proofMaterialRoot is the collision-resistant commitment the kernel rebinds; chunks are dropped only after that root is in the verified set.
 const compactSetupProofMaterialSet = <
     MaterialSet extends SetupProofMaterialTransportSet | undefined,
 >(
@@ -1726,6 +1728,7 @@ const assertExpectedHash = (
     }
 };
 
+// Unconditional payload-to-commitment binding comes from the kernel localStateRoot check; the optional expected* arguments only add extra caller pins and are skipped when undefined.
 const assertRestoredLocalStateBindings = (
     input: RestoreLocalTrusteeSetupStateInput,
     sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload,

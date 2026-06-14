@@ -2,6 +2,7 @@ use super::*;
 
 const MAX_SETUP_CONTEXT_TOKEN_BYTES: usize = 128;
 
+// Restricting these tokens keeps them safe as hash and signature-context inputs: no delimiters, no control bytes, and a bounded preimage length.
 fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal> {
     if value.is_empty() {
         return Some(Refusal::new(
@@ -279,6 +280,7 @@ pub(super) fn q_share_value() -> Value {
         "objectVersion": 1,
         "sharingDomain": "per-rns-prime",
         "primeOrder": "profile-order",
+        // This readiness flag is hashed into qShareHash on purpose, so the closed-target claim boundary is committed by every object that binds the Q_share list.
         "targetDecryptionReadiness": "refused-until-q-target-certificate-closes",
         "primes": DATA_PRIMES,
     })

@@ -57,6 +57,9 @@ pub(crate) fn packed_rank_galois_elements(option_count: usize) -> CanonicalResul
 pub(crate) fn generator_exponent_or_conjugated(
     galois_element: usize,
 ) -> CanonicalResult<(bool, usize)> {
+    // Only odd residues are units mod 2N, so only odd Galois elements induce
+    // slot permutations; an even element would not be invertible and would
+    // merge slots.
     if galois_element.is_multiple_of(2) || galois_element >= 2 * POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -81,6 +84,9 @@ pub(crate) fn generator_exponent_or_conjugated(
     ))
 }
 
+// Decompose each rotation into power-of-two generator steps (and one
+// conjugation X -> X^-1 when needed) so the scheduled rotation-key set is
+// O(log N) keys instead of one per rotation.
 pub(crate) fn generator_power_basis_for_exponent(exponent: usize) -> Vec<usize> {
     let mut basis = Vec::new();
     let mut remaining = exponent % GENERATOR_SUBGROUP_ORDER;

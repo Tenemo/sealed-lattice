@@ -22,18 +22,6 @@ fn passive_setup_rejects_externally_supplied_setup_material_secret_fields() {
             error.message
         );
     }
-
-    let legacy_external_setup_role_field =
-        ["central", "Trusted", "Setup", "Authority", "KeyMaterial"].join("");
-    let mut request = request();
-    request[legacy_external_setup_role_field.as_str()] = serde_json::json!("forbidden");
-    let error = generate_passive_setup_package_from_request(&request)
-        .expect_err("setup must reject legacy externally supplied setup material fields");
-    assert!(
-        error.message.contains(&legacy_external_setup_role_field),
-        "{}",
-        error.message
-    );
 }
 
 #[test]

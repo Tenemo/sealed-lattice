@@ -895,6 +895,7 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
     })
 }
 
+// Prefixing the total length (and folding chunk_index per chunk) makes the chunk concatenation injective, so a re-chunked or reordered stream cannot collide to the same full-object hash.
 fn public_evaluation_key_material_full_object_hash(
     total_byte_length: u64,
     chunks: &[Vec<u8>],

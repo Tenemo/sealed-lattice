@@ -96,6 +96,7 @@ export class BinaryChunkWriter {
         } while (remainingValue !== 0);
     }
 
+    // Two integer encodings on purpose: fixed 8-byte little-endian for layout-fixed fields, minimal LEB128 for length-style fields; the per-field choice is part of the wire contract and must byte-match the kernel.
     public writeU64LittleEndian(value: number, fieldName: string): void {
         if (!Number.isSafeInteger(value) || value < 0) {
             throw new TypeError(

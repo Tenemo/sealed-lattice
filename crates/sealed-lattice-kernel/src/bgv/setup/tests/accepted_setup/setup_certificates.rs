@@ -320,6 +320,9 @@ fn collective_setup_verifier_refuses_duplicate_current_proof_accounting_row() {
 
 #[test]
 fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
+    // These rows must stay false and the verifier must reject any upgrade to
+    // true: the setup proofs are not QROM-sound and not 128-bit zero-knowledge,
+    // so claiming otherwise would overstate the closed claim boundary.
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
     );

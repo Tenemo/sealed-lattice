@@ -85,6 +85,7 @@ pub(super) fn validate_one_hot_witnesses(
                 "direct encrypted ballot one-hot witness must select exactly one score",
             ));
         }
+        // Bucket j (0-based) encodes score j+1 because the score domain is 1..=10; this maps the one-hot witness back to its scalar score.
         let derived_score = one_hot_row
             .iter()
             .enumerate()
@@ -142,6 +143,7 @@ pub(super) fn validate_direct_ballot_preflight(
     validate_all_limb_encryption_relation(evaluator_key, ballot)
 }
 
+// Support bounds: the randomizer is ternary {-1,0,1} and both errors are centered-binomial eta = 2 in [-2,2]; these are the bounds the relation proof certifies and they bound the decryption noise.
 pub(super) fn validate_encryption_witness_support(
     witness: &EncryptionWitness,
 ) -> CanonicalResult<()> {
@@ -239,6 +241,7 @@ pub(super) fn validate_limb_encryption_relation(
         modulus,
     )?;
     for coefficient_index in 0..POLYNOMIAL_DEGREE {
+        // BGV LSB encoding: the error is scaled by the plaintext modulus p while the message m is added raw, so c0 + c1*s = m + p*(...); decryption recovers m by centered reduction mod p.
         let expected_component_zero = add_mod(
             add_mod(
                 public_key_product[coefficient_index],

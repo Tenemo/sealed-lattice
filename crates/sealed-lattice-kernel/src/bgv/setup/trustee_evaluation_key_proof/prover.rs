@@ -145,6 +145,9 @@ pub(super) fn barycentric_weights(
     point: &ChallengeExtensionElement,
 ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
     let modulus = plan.modulus;
+    // Barycentric interpolation over H = {omega^i}; valid only for a point
+    // outside H (else a difference is zero and inversion fails), which
+    // sample_deep_points guarantees by rejecting H.
     let mut differences = Vec::with_capacity(plan.trace_size);
     let mut subgroup_power = 1_u64;
     for _ in 0..plan.trace_size {
@@ -202,6 +205,9 @@ pub(super) fn sample_deep_points(
         if tower.pow(&candidate, plan.trace_size as u64) == ChallengeExtensionTower::one() {
             continue;
         }
+        // Every element of the coset raises to g^extension_size, so this single
+        // equality rejects the whole coset at once; likewise
+        // candidate^trace_size == 1 rejects all of H.
         if tower.pow(&candidate, plan.extension_size as u64) == coset_marker {
             continue;
         }
@@ -392,6 +398,9 @@ fn masked_half_coefficients(
     let mut coefficients = plan.coefficients_from_trace_values(half_values);
     coefficients.resize(trace_size + mask_degree, 0);
     let mask = mask_sampler.uniform_residues(plan.modulus, mask_degree);
+    // coeffs - r at [0,deg) and + r at [T, T+deg) equals coeffs + (X^T - 1)*r =
+    // coeffs + Z_H*r: off-trace evaluations are randomized while trace values
+    // are unchanged (the ZK simulator relies on this).
     for (index, mask_value) in mask.iter().enumerate() {
         // Z_H * r = (X^T - 1) * r: subtract at the low positions, add at T+.
         coefficients[index] = sub_mod_fast(coefficients[index], *mask_value, plan.modulus);
@@ -985,6 +994,9 @@ fn prove_limb(
                 "witness does not satisfy the batched row checks",
             ));
         }
+        // The cubic row-check composition has degree up to about 3*bound, so
+        // its quotient is committed as two sub-bound columns; low is
+        // length-capped by truncate, only high can overflow the bound.
         let mut low = quotient.clone();
         low.truncate(commitment_bound);
         let high = if quotient.len() > commitment_bound {
@@ -1016,6 +1028,10 @@ fn prove_limb(
                 "sumcheck quotient exceeds the commitment bound",
             ));
         }
+        // Sum of an interpolant over the subgroup H of order T equals T times
+        // its constant coefficient, so only remainder[0] carries the sumcheck
+        // claim; remainder[1..] is the residual low-degree term bound separately
+        // by the DEEP/FRI layer.
         let expected_constant = mul_mod_fast(
             publics.lincheck_claim[coordinate],
             inverse_trace_size,
@@ -1093,6 +1109,10 @@ fn prove_limb(
         for coefficients in &commitment.masked_coefficients {
             evaluations.push(evaluate_base(coefficients));
         }
+        // Evaluation is F_p-linear, so an extension column equals the sum of its
+        // base-coordinate columns times the basis {1, s, t, st}; evaluating each
+        // coordinate over F_p then recombining through the basis is exact, not
+        // an approximation.
         for coordinate_sets in &logical_phase_two_coefficients {
             // Recombine the per-coordinate base evaluations through the basis.
             let mut combined = ChallengeExtensionTower::zero();

@@ -127,6 +127,7 @@ pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Op
         )?));
     }
 
+    // A single valid complaint aborts the ceremony because any provable dealer equivocation is disqualifying, whereas acceptance must be unanimous over all source-by-recipient pairs.
     Ok(Some(verification_response(
         VerifierStatus::Aborted,
         Some("vssAcceptanceOrComplaint"),
@@ -529,6 +530,7 @@ fn verify_vss_complaint_record(
             object_type: "VssShareComplaint",
             object_version: 1,
             signer_role: "Trustee",
+            // The recipient is the signer of both complaints and acceptances, since only the share recipient can attest whether the dealt share opened correctly.
             signer_identity: recipient_identity,
             ceremony_id,
             public_key_hash: signing_public_key_hash,

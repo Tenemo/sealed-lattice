@@ -344,6 +344,7 @@ export const createVssShareAcceptanceRecord = async (
         acceptancePayload,
     );
     const acceptanceByteLength = canonicalByteLength(acceptancePayload);
+    // Same namespace as the object root; the distinct purpose field (and payload shape) domain-separates the signature-context hash from the root under the canonical-JSON preimage.
     const acceptanceContextHash = deriveProtocolHash('VssShareAcceptanceRoot', {
         purpose: 'vss-share-acceptance-signature-context',
         ...shareVerificationPayloadFields(

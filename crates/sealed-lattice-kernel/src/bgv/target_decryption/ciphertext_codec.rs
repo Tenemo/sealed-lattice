@@ -104,6 +104,7 @@ pub(super) fn parse_target_ciphertext(
         ciphertext: Ciphertext {
             components,
             level,
+            // Target ciphertexts are produced pre-normalized to plaintext-scaling 1; recombination's mod-p step assumes this, so any other accumulated scaling would mis-decrypt.
             decrypt_scaling: 1,
         },
         root: ciphertext_root(&bytes),

@@ -49,6 +49,9 @@ pub(super) struct LowDegreePairOpening {
     pub(super) pair: [ChallengeExtensionElement; 2],
 }
 
+// fold_count is the total number of fold rounds; the codec commits
+// fold_count - 1 Merkle layers because the final fold is sent as coefficients,
+// not a committed layer.
 fn fold_count(parameters: &LowDegreeParameters) -> usize {
     debug_assert!(parameters.initial_degree_bound.is_power_of_two());
     debug_assert!(parameters.initial_degree_bound > LOW_DEGREE_FINAL_COEFFICIENT_COUNT);
@@ -105,6 +108,9 @@ fn fold_layer(
 
 // Fold-layer values are deterministic functions of the batched codeword, so
 // their leaves carry no independent witness information and stay unsalted.
+// Fold layers need only binding so their leaves are unsalted; phase-tree leaves
+// commit raw witness rows and must be salted to stay hiding -- the asymmetry is
+// intentional.
 fn pair_leaf_hashes(layer: &[ChallengeExtensionElement]) -> Vec<[u8; 64]> {
     let half = layer.len() / 2;
     (0..half)
@@ -265,6 +271,10 @@ pub(super) fn prove_low_degree(
     ))
 }
 
+// Layer 0 is the DEEP-batched codeword and is intentionally uncommitted here;
+// its queried values are re-derived and bound through the phase-tree openings
+// plus the lambda batch, so its low-degreeness still implies the committed
+// columns are low-degree.
 // Verify the folding argument. The callback receives (query ordinal, pair
 // index in the initial layer) and must return the initial-layer values at
 // (pair index, pair index + half) re-derived from the phase tree openings.
@@ -339,6 +349,9 @@ pub(super) fn verify_low_degree(
             // Move to the folded layer: its size is the current pair count and
             // the folded value sits at the held pair position.
             layer_size /= 2;
+            // Offset and root are squared each fold to descend the coset tower;
+            // the fold divides the odd part by the coset point offset *
+            // root^position, so this squaring must stay lockstep with the prover.
             offset = mul_mod_fast(offset, offset, modulus);
             root = mul_mod_fast(root, root, modulus);
             let value_position = pair_position;

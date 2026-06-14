@@ -187,3 +187,39 @@ describe('createHeavyTestProgressReporter', () => {
         expect(lines).toHaveLength(0);
     });
 });
+
+describe('heavy test terminal output filter', () => {
+    const { terminalOutputFilter } = createHeavyTestProgressReporter({
+        label: 'heavy',
+        threadCount: 4,
+    });
+
+    it('drops libtest slow-test notices', () => {
+        expect(
+            terminalOutputFilter(
+                'test accepted_setup::slow has been running for over 60 seconds',
+            ),
+        ).toBe(false);
+        expect(
+            terminalOutputFilter(
+                'test x has been running for over 120 seconds',
+            ),
+        ).toBe(false);
+    });
+
+    it('keeps real test output, progress, compile, and summary lines', () => {
+        expect(terminalOutputFilter('test accepted_setup::one ... ok')).toBe(
+            true,
+        );
+        expect(terminalOutputFilter('running 61 tests')).toBe(true);
+        expect(
+            terminalOutputFilter('   Compiling sealed-lattice-kernel v0.1.0'),
+        ).toBe(true);
+        expect(
+            terminalOutputFilter(
+                'test result: ok. 61 passed; 0 failed; 0 ignored',
+            ),
+        ).toBe(true);
+        expect(terminalOutputFilter('')).toBe(true);
+    });
+});

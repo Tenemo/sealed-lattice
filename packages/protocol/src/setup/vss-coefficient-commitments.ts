@@ -1410,6 +1410,7 @@ class BinaryChunkReader {
         return outputBytes;
     }
 
+    // Reject non-minimal LEB128: multiple byte encodings of the same integer would let crafted chunk bytes decode identically while changing the hashed bytes, breaking the full-object and chunk-root binding.
     public readVaruint(fieldName: string): number {
         let shift = 0;
         let value = 0n;

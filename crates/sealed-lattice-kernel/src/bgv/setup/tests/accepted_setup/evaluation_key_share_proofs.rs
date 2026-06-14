@@ -39,34 +39,6 @@ fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
         externally_supplied_threshold_result["refusedObjects"][0]["reasonCode"],
         "acceptedPathForbiddenField"
     );
-
-    let legacy_external_setup_role_field = [
-        "central",
-        "Trusted",
-        "Setup",
-        "Authority",
-        "ThresholdShareCommitments",
-    ]
-    .join("");
-    let mut legacy_external_setup_role_package = minimal_collective_setup_package();
-    legacy_external_setup_role_package[legacy_external_setup_role_field.as_str()] =
-        serde_json::json!({ "root": valid_hash('6') });
-    rebind_collective_setup_package_hash(&mut legacy_external_setup_role_package);
-
-    let legacy_external_setup_role_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": legacy_external_setup_role_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        legacy_external_setup_role_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        legacy_external_setup_role_result["refusedObjects"][0]["reasonCode"],
-        "secretMaterialPresent"
-    );
 }
 
 #[test]
@@ -501,8 +473,7 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     // covers exactly the root set the accept response binds: every accepted root,
     // drifted at every occurrence with the outer package hash recomputed, must be
     // refused. A root the verifier never recomputes would silently survive here.
-    let accepted_roots =
-        crate::bgv::setup::accepted_setup::accepted_hashes_from_package(&package);
+    let accepted_roots = crate::bgv::setup::accepted_setup::accepted_hashes_from_package(&package);
     let package_hash = package["setupPackageHash"]
         .as_str()
         .expect("setup package hash")

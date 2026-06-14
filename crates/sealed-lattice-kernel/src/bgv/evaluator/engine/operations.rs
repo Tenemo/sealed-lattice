@@ -210,6 +210,9 @@ fn plaintext_mul_limb(
         .collect()
 }
 
+// Center mod t before the RNS lift so a coefficient like t-1 multiplies as -1,
+// not about t; the uncentered lift would blow up multiplicative noise by a
+// factor of about t.
 fn centered_plaintext_lift(coefficient: u64, modulus: u64) -> u64 {
     let coefficient = coefficient % PLAINTEXT_MODULUS;
     if coefficient > PLAINTEXT_MODULUS / 2 {
@@ -325,6 +328,10 @@ pub(crate) fn modulus_switch(ciphertext: &Ciphertext) -> CanonicalResult<Ciphert
             let corrections = dropped_limb
                 .iter()
                 .map(|dropped_value| {
+                    // BGV modulus switch: the correction is t * round((c_drop /
+                    // t) / q_drop) so the plaintext residue mod t is preserved
+                    // exactly; centering implements the rounding that minimizes
+                    // added noise.
                     let scaled = mul_mod(
                         *dropped_value,
                         plaintext_inverse_mod_dropped,

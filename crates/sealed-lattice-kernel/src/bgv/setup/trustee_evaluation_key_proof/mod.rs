@@ -158,6 +158,9 @@ pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS: &str =
 // columns claim degree below COMMITMENT_BOUND_FACTOR times the trace, so the
 // batched FRI still runs at rate 1/2 while masked columns of degree
 // trace + COLUMN_MASK_DEGREE fit under the bound without splitting.
+// TRACE_SPLIT packs each logical length-N witness as two half-columns over a
+// half-size domain because only 2^16 divides p-1 (two-adicity headroom); a
+// full-N coset would not fit at the rate-one-half blowup.
 pub(super) const TRACE_SPLIT: usize = 2;
 pub(super) const DOMAIN_BLOWUP: usize = 4;
 pub(super) const COMMITMENT_BOUND_FACTOR: usize = 2;

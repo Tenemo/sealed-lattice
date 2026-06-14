@@ -1842,6 +1842,7 @@ fn compare_context_fields(
     Ok(())
 }
 
+// These field names are exactly the witness quantities (coefficient openings, opening randomness, carry witnesses) that must never appear in a published envelope; any new witness field must be added here or it leaks the zero-knowledge witness.
 fn find_private_vss_coefficient_leakage(
     value: &Value,
     object_path: &str,
@@ -2236,6 +2237,7 @@ fn derive_private_vss_carry_witnesses(
                 "private VSS reduced share value does not fit u64",
             )
         })?;
+        // The carry is fully determined by the coefficient messages and the prime (not an independent input); this check rejects messages that do not reduce to the published share.
         if share_values.get(coefficient_position) != Some(&reduced_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,

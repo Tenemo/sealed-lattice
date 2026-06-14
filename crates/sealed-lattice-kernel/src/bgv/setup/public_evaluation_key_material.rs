@@ -180,6 +180,9 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
         seed_material.relinearization_level,
         &seed_material.relinearization_key_seed,
     )?;
+    // Only component-b is transported; component-a is the public uniform RLWE
+    // sample, regenerated deterministically from the bound stream seed, so it
+    // carries no secret and needs no transport.
     relinearization_key.drop_component_a_ntt();
     let mut rotation_keys = BTreeMap::new();
     for (rotation, level) in rotation_requests {

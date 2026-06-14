@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use super::{
     certificates::{
         collective_secret_distribution_certificate, error_distribution_certificate,

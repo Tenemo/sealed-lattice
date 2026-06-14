@@ -46,6 +46,7 @@ const deriveBoardRootFromMerkleInclusionProof = (
 
     while (levelWidth > 1) {
         const pathStep = boardEntryMerklePath[pathStepIndex];
+        // An odd node at a level is promoted unchanged (no sibling, no path step) rather than duplicated; this mirrors the prover and avoids the duplicate-last-leaf Merkle malleability. The leaf binds boardPosition and the root binds boardEntryCount.
         if (levelIndex % 2 === 0) {
             if (levelIndex + 1 < levelWidth) {
                 if (

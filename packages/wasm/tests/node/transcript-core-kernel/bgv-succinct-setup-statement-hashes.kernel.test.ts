@@ -21,6 +21,7 @@ const proofRandomnessSeedHex =
 const proofRandomnessNonceHex =
     'ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100';
 
+// These vectors are the same constants asserted in the Rust kernel tests; they pin canonical statement-hash agreement across the TS/WASM and Rust provers, so a mismatch means a cross-implementation encoding drift, not a fixture refresh.
 const expectedStatementHashes = {
     sameSecret:
         'c300200cb9bde4e95f2129ad4c07ca6fa22a2c236278be5f0be474095f604d3afd0613c791e807dc4e4d942f202ea4f5cac20d5a93745eab3d87abf05a3cf4ee',

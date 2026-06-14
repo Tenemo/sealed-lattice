@@ -195,7 +195,9 @@ fn decode_low_degree_proof(
         for _fold_index in 0..fold_count {
             let first = read_extension_element(bytes, cursor, modulus)?;
             let second = read_extension_element(bytes, cursor, modulus)?;
-            folded_layer_pairs.push(LowDegreePairOpening { pair: [first, second] });
+            folded_layer_pairs.push(LowDegreePairOpening {
+                pair: [first, second],
+            });
         }
         query_openings.push(LowDegreeQueryOpening { folded_layer_pairs });
     }
@@ -217,6 +219,8 @@ fn decode_low_degree_proof(
     })
 }
 
+// Committed layer count is total folds minus one: the final fold is transmitted
+// as coefficients, not a Merkle-committed layer.
 fn expected_low_degree_committed_fold_count(initial_domain_size: usize) -> CanonicalResult<usize> {
     let initial_degree_bound_numerator = initial_domain_size
         .checked_mul(COMMITMENT_BOUND_FACTOR)
@@ -273,6 +277,9 @@ fn expected_low_degree_folded_layer_path_length(
     Ok(leaf_count.trailing_zeros() as usize)
 }
 
+// Six-byte field width is compile-time derived and build-gated against the data
+// primes; the decode-side value >= modulus reject is what makes the truncated
+// encoding canonical for transcript binding.
 fn write_field_residue_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     for value in values {
         bytes.extend_from_slice(&value.to_le_bytes()[..FIELD_RESIDUE_BYTE_WIDTH]);

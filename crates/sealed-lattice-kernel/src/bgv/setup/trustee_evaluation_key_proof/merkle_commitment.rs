@@ -79,6 +79,9 @@ pub(super) fn verify_merkle_opening(
         index >>= 1;
     }
 
+    // index == 0 rejects an over-long leaf index (a path shorter than the tree
+    // depth), and consuming exactly every authentication node rejects padded or
+    // short node lists; both prevent forged short-path openings.
     node == *root && index == 0
 }
 
@@ -135,6 +138,10 @@ impl MerkleTree {
     // derivable from the opened leaves, emitted in ascending-index, leaf-to-root
     // order, which `verify_merkle_batch` consumes in the same order.
     pub(super) fn open_batch(&self, sorted_unique_indices: &[usize]) -> BatchedMerkleOpening {
+        // Node emission and consumption must walk identically: sorted-unique
+        // indices make a sibling pair adjacent, so the both-children-opened
+        // branch skips a node on both sides. Any divergence between these two
+        // traversals breaks soundness.
         let mut authentication_nodes = Vec::new();
         let mut current = sorted_unique_indices.to_vec();
         for level in &self.levels[..self.levels.len() - 1] {
@@ -142,8 +149,7 @@ impl MerkleTree {
             let mut index_cursor = 0;
             while index_cursor < current.len() {
                 let node_index = current[index_cursor];
-                if index_cursor + 1 < current.len()
-                    && current[index_cursor + 1] == (node_index ^ 1)
+                if index_cursor + 1 < current.len() && current[index_cursor + 1] == (node_index ^ 1)
                 {
                     // Both children are opened; the parent needs no extra node.
                     index_cursor += 2;
@@ -287,12 +293,7 @@ mod tests {
         let indices = sorted_unique_indices([3_usize, 7, 8, 100, 200, 201]);
         let opening = tree.open_batch(&indices);
         let opened = opened_leaf_set(&leaves, &indices);
-        assert!(verify_merkle_batch(
-            &tree.root(),
-            depth,
-            &opened,
-            &opening
-        ));
+        assert!(verify_merkle_batch(&tree.root(), depth, &opened, &opening));
 
         // A flipped authentication node is rejected.
         let mut tampered_nodes = opening.authentication_nodes.clone();

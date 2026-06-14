@@ -704,6 +704,7 @@ fn private_vss_envelope_binding_from_reference(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientMailboxPublicKeyHash",
         )));
     }
+    // Source-major sequence number uniquely identifying the ordered (source, recipient) envelope; it is bound into the AEAD associated data to prevent cross-pair ciphertext replay.
     let expected_sequence_number = source_trustee_roster_position * FIRST_PROFILE_PARTICIPANT_COUNT
         + recipient_roster_position;
     if envelope_reference
@@ -895,6 +896,7 @@ fn private_vss_envelope_binding_from_reference(
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")
         .remove("privateEnvelopeCommitmentRoot");
+    // The commitment root binds the envelope metadata but deliberately excludes encryptedEnvelope (bound separately by encryptedEnvelopeHash), so the same commitment covers re-encryptions.
     record_root_input
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")

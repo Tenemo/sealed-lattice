@@ -329,6 +329,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                 "level": level,
+                // Chaining round two onto the accepted round-one aggregate root binds the rounds together, so round-two material proven against a substituted or rolled-back round-one transcript cannot verify.
                 "roundOneAggregateRoot": supplied_round_one_aggregate_roots
                     .get(level)
                     .expect("round-one aggregate root exists after verification"),
@@ -348,6 +349,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
         }
     }
 
+    // Self-hash: the root commits to every other field of this object; the root field is excluded to avoid self-reference.
     let supplied_root = value_string(rounds, "relinearizationKeyShareRoundsRoot")?;
     let mut root_input = rounds.clone();
     root_input
@@ -558,6 +560,7 @@ pub(super) fn relinearization_aggregate_roots_by_level(
     Ok(roots)
 }
 
+// Binds the shared public sampler a to the accepted CRP root and the exact schedule slot, so every trustee derives the same a and no party can choose it adaptively; per-digit and per-modulus sampler inputs domain-separate a across gadget digits and RNS limbs.
 pub(super) fn expected_relinearization_key_switch_seed(
     binding: &EvaluationKeyProofCommonBinding,
     round: &str,

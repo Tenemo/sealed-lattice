@@ -764,6 +764,7 @@ const setupCommitmentSecurityCertificateBody = (
         BigInt(maxSourceMessageModulus - 1) * recipientScalarSum;
     const maxThresholdLiftedCoefficient =
         BigInt(maxSourceMessageModulus - 1) * thresholdScalarSum;
+    // No-wrap bound: the homomorphic threshold-share aggregate (sum of message * trusteePoint^i over all trustees) must stay below the commitment modulus product, or the re-derived commitment opening becomes ambiguous and binding fails.
     if (maxThresholdLiftedCoefficient >= commitmentModulusProduct) {
         throw new Error(
             'setupProfile commitment modulus product must cover the threshold-share aggregate no-wrap bound.',

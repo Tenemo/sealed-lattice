@@ -20,6 +20,9 @@ use super::relation::{
 use super::*;
 use crate::bgv::modular_arithmetic::inverse_mod;
 
+// Each logical length-N vector is committed as TRACE_SPLIT half-columns over a
+// half-size trace domain (2-adicity headroom), so it is interpolated as two
+// independent halves sharing the barycentric weights.
 // Evaluate the trace-domain interpolants of both halves of a logical length-N
 // extension vector at one point, sharing the barycentric weights.
 fn extension_halves_at_point(
@@ -103,6 +106,9 @@ fn verify_limb(
         &challenges,
         &limb_proof.masked_consistency_claims,
     )?;
+    // Univariate sumcheck: a codeword sums to the lincheck claim over the
+    // size-H trace subgroup iff its constant coefficient equals claim / H, hence
+    // the inverse-trace-size scaling.
     let expected_constant = tower.scale_base(
         &publics.lincheck_claim,
         inverse_mod(trace_size as u64, modulus)?,
@@ -129,6 +135,9 @@ fn verify_limb(
             &challenges.beta,
             &layout,
         );
+        // The cubic row-check quotient exceeds the committed degree bound, so it
+        // is committed as two columns (low, high) and recombined with the
+        // point^bound shift to stay under COMMITMENT_BOUND_FACTOR * trace.
         let row_quotient = tower.add(
             &evaluations[phase_one_columns + QUOTIENT_COLUMN_ROW_CHECK_LOW],
             &tower.mul(
@@ -317,6 +326,10 @@ fn verify_limb(
     // each. A position opened to two different rows across queries is rejected
     // here, so binding is exactly as strong as an independent path per slot.
     let phase_tree_depth = extension_size.trailing_zeros() as usize;
+    // Batched verification is only as strong as per-slot paths because
+    // consistent_sorted_leaves first rejects a position opened to two different
+    // leaves; without that dedup a prover could fold one value while the tree
+    // binds another.
     let Some(witness_sorted_leaves) = consistent_sorted_leaves(witness_leaves) else {
         return Err(invalid_succinct_setup_proof(
             "witness tree opens one position to two values",
@@ -386,6 +399,10 @@ fn verify_cross_limb_consistency(
         }
     }
     for residues in residues_by_global_id.values() {
+        // The first two residues are the two smallest profile limbs by
+        // construction, so their product exceeds twice the claim bound and the
+        // centered lift is the unique integer; the range guard below enforces
+        // this rather than assuming it.
         let [
             (first_modulus, first_residue),
             (second_modulus, second_residue),
@@ -402,6 +419,9 @@ fn verify_cross_limb_consistency(
                 "masked consistency claim range is too wide for two-prime lifting",
             ));
         }
+        // Garner's step (second_residue - first_residue) * inverse(first_modulus)
+        // mod second_modulus, kept non-negative by adding second_modulus before
+        // the subtraction.
         let step = i128::from(mul_mod_fast(
             (second_residue + second_modulus - (first_residue % second_modulus) % second_modulus)
                 % second_modulus,
@@ -442,6 +462,10 @@ pub(crate) fn verify_evaluation_key_share(
     }
     let mut transcript = FiatShamirTranscript::new("trustee-evaluation-key-share");
     transcript.absorb("statement", &statement.statement_hash());
+    // All witness roots are absorbed before the consistency challenges so each
+    // limb's quotient root (which depends on those challenges) is committed
+    // afterward, preventing the prover from adapting the quotient to the
+    // challenge.
     for limb_proof in &proof.limb_proofs {
         transcript.absorb("witness-tree-root", &limb_proof.witness_tree_root);
     }

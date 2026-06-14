@@ -102,8 +102,7 @@ use crate::{
         },
         setup_helpers::{
             array_at_path, bool_at_path, compare_derived_hash, compare_expected_string,
-            compare_hash_at_path, compare_string_at_path,
-            field_name_suggests_legacy_external_setup_role, forbidden_setup_field_names,
+            compare_hash_at_path, compare_string_at_path, forbidden_setup_field_names,
             hash_at_path, integer_at_path, read_hash_field, read_non_empty_string,
             read_optional_u64, read_optional_usize, reject_forbidden_setup_fields,
             reject_forbidden_setup_fields_for_context,

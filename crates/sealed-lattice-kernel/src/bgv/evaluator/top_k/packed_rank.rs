@@ -26,10 +26,17 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             "batched packed-rank evaluation exceeds the generator subgroup slot window",
         ));
     }
+    // Only greater_or_equal is evaluated, so on a tie the lower option index
+    // wins; its complement (mask minus the indicator) is the strict-less
+    // indicator for the higher index, realizing the tie policy.
     let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_max)?;
     let shift_constant = broadcast_constant(score_domain_max);
     let mut comparison_input_sum = None;
     let mut pair_windows = Vec::with_capacity(option_count - 1);
+    // Pack pair windows contiguously: the forward pass rotates each shift-s
+    // window to next_window_offset for one batched comparison, the return pass
+    // rotates each result back to its pair's generator slot, and offset 0 needs
+    // no realigning rotation in either direction.
     let mut next_window_offset = 0_usize;
     for shift in 1..option_count {
         let pair_window_size = option_count - shift;
@@ -42,6 +49,9 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             &format!("{seed_hex}-batched-pair-score-shift-{shift}"),
         )?;
         let difference = ciphertext_sub(packed_scores, &shifted_scores)?;
+        // Shift the signed difference into [0, 2*score_domain_max] so the
+        // order-less plaintext field can be compared by a step polynomial; this
+        // requires 2*score_domain_max < t to avoid wraparound.
         let shifted_difference =
             add_plaintext_coefficients(&normalize_scaling(&difference)?, &shift_constant)?;
         let lower_pair_inputs = plaintext_mul(

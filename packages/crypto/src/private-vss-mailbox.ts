@@ -289,6 +289,7 @@ export const encryptPrivateVssMailboxEnvelope = async (
         kemCiphertextHash,
     );
     const aesGcmKey = await importAesGcmKey(aesGcmKeyBytes, ['encrypt']);
+    // GCM authenticates the canonical-JSON AAD bytes; the AAD protocol hash plus the KEM-ciphertext and recipient-key hashes are folded into HKDF so the symmetric key is bound to this recipient and this encapsulation.
     const aadBytes = textEncoder.encode(
         canonicalJson(input.privateEnvelopeAad),
     );

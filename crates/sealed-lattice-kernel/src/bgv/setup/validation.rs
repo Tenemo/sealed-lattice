@@ -1,4 +1,4 @@
-﻿use super::certificates::{
+use super::certificates::{
     passive_setup_evaluator_context_bindings, target_decryption_profile,
     target_threshold_decryptability_certificate_from_setup_package,
 };

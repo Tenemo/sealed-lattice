@@ -236,6 +236,7 @@ pub(super) fn verify_carry_aware_vss_commitment_opening(
         lifted_message_coefficients.push(share_opening.lifted_share);
         lifted_share_openings.push(share_opening);
     }
+    // The lifted share coefficient must stay below the commitment modulus product so the cross-field CRT lift of the share is unique (the two-prime window rule in the accounting).
     if lifted_message_coefficients
         .iter()
         .any(|coefficient| !setup_coefficient_fits_commitment_modulus_product(*coefficient))
@@ -295,6 +296,7 @@ fn carry_bound_for_coefficient_count(
         ));
     }
 
+    // Because the trustee point and coefficient count are far smaller than the sharing prime, ceil(sum / modulus) is exactly 1, so the maximum carry floor((modulus-1)*S/modulus) equals (sum of alpha^k) - 1.
     let mut power_sum = 0_u128;
     let mut trustee_point_power = 1_u128;
     let trustee_point_wide = u128::from(trustee_point);
@@ -333,6 +335,7 @@ fn trustee_point_powers(
 }
 
 #[cfg(test)]
+// The combined opening randomness is the same alpha^k-weighted sum as the messages, so the combined commitment opens to the evaluated share f(alpha); the noise bound grows by the sum of alpha^k.
 fn combine_vss_commitment_randomness(
     coefficient_randomness_by_shamir_index: &[Vec<Vec<i128>>],
     scalar_powers: &[u128],

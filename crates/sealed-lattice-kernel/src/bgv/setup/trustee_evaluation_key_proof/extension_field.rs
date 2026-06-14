@@ -30,6 +30,8 @@ pub(super) const CHALLENGE_EXTENSION_DEGREE: usize = 4;
 
 fn is_quadratic_residue(value: u64, modulus: u64) -> CanonicalResult<bool> {
     // Euler criterion; the data primes are odd.
+    // Zero is reported as a residue by convention so the seed search's norm
+    // != 0 guard, not this predicate, is what rejects a degenerate zero norm.
     Ok(value == 0 || pow_mod(value, (modulus - 1) / 2, modulus)? == 1)
 }
 
@@ -64,6 +66,10 @@ impl ChallengeExtensionTower {
                 quadratic_non_residue,
                 modulus,
             );
+            // An element of F_{p^2} is a square iff its F_p-norm is a square
+            // (the norm map is 2-to-1 onto squares), so a non-square norm makes
+            // the seed a non-square and t^2 - seed irreducible; this is what
+            // makes the degree-4 tower a field.
             if norm != 0 && !is_quadratic_residue(norm, modulus)? {
                 return Ok(Self {
                     modulus,

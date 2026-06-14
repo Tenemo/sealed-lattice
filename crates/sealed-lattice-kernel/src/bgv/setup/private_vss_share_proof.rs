@@ -1206,6 +1206,7 @@ fn verify_private_vss_share_witness_relation(
                     })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
+        // Integer-lift relation: the q_l * carry term vanishes in the source field (q_l == 0 there) but is bound by the other commitment-modulus fields, which forces the unique integer lift; the recipient point reuses roster_position + 1.
         let carry_term = i128::from(rns_prime)
             .checked_mul(carry_witnesses[coefficient_index])
             .and_then(i128::checked_neg)

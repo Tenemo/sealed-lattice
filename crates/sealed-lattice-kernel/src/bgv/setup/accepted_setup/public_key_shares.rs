@@ -41,6 +41,7 @@ fn public_key_share_succinct_proof_bytes_from_record(
     .iter()
     .any(|field_name| proof_record.get(*field_name).is_some());
 
+    // Embedded and transported proof bytes are mutually exclusive so a record cannot present one byte string for verification and bind a different one through the transport manifest.
     if has_embedded_proof_bytes && has_transport_reference {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -160,6 +161,7 @@ fn verify_public_key_share_succinct_proof_transport_reference(
             "public-key share succinct proofTotalByteLength must match transported proof chunks",
         ));
     }
+    // proofSizeBytes is bound both here and inside the material root, so it must equal the chunk-manifest total or the two commitments could diverge.
     if value_u64(proof_record, "proofSizeBytes")? != transport_hashes.total_byte_length {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -1646,6 +1648,7 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof requires the limb-zero constant commitment opening",
         ));
     }
+    // One commitment opening suffices: congruence over the commitment modulus product plus ternary support re-identifies the share secret as the anchor's short secret, so only the limb-zero constant commitment is replayed here.
     let limb_zero_commitment = constant_commitments.remove(0);
     let ring_degree = limb_zero_commitment.ring_degree;
     if value_u64(proof_record, "ringDegree")? != ring_degree as u64 {
@@ -1675,6 +1678,7 @@ fn verify_public_key_share_succinct_proof_record(
             ],
         },
         ring_degree,
+        // A public-key share is one digit spanning all Q_share limbs with no diagonal source; key_switch_seed_hex carries the public matrix seed because the relation's public sample is the shared reference polynomial a.
         keys: vec![EvaluationKeyShareDescriptor {
             kind: EvaluationKeyShareKind::PublicKeyShare,
             level: DATA_PRIMES.len() - 1,

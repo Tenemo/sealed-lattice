@@ -123,6 +123,7 @@ export type SetupCommonRandomness = Readonly<
 >;
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
+// Each reveal contributes exactly 32 bytes (256 bits) of entropy to the joint public matrix seed.
 const revealHexPattern = /^[0-9a-f]{64}$/u;
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
@@ -547,6 +548,7 @@ export const createSetupCommonRandomness = (
     const orderedRevealHashes = revealRecords.map(
         (revealRecord) => revealRecord.revealHash,
     );
+    // Commit-then-reveal coin flip: the public matrix seed is the joint digest of all reveal hashes in roster order, so no single trustee can bias the derived CRS after seeing others' reveals.
     const publicMatrixSeedHash = deriveProtocolHash(
         'SetupPublicMatrixSeedHash',
         {

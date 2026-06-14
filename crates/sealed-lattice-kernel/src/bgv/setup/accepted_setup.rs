@@ -1666,9 +1666,7 @@ fn reject_accepted_setup_forbidden_fields_recursively(value: &Value) -> Canonica
         }
         Value::Object(fields) => {
             for (field_name, field_value) in fields {
-                if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
-                    || field_name_suggests_legacy_external_setup_role(field_name)
-                {
+                if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::InvalidProtocolObject,
                         format!(
@@ -1695,7 +1693,6 @@ fn reject_accepted_setup_forbidden_request_fields(request: &Value) -> CanonicalR
         }
         if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
             || ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
-            || field_name_suggests_legacy_external_setup_role(field_name)
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidProtocolObject,

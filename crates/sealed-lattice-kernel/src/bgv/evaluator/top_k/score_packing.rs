@@ -9,6 +9,9 @@ pub(crate) fn slot_selector(slot: usize) -> CanonicalResult<Vec<u64>> {
     encode_slots_to_coefficients(&slots)
 }
 
+// Logical option i lives in the batch slot whose odd CRT point is g^i mod 2N
+// (generator g = 3); slot k corresponds to point 2k+1, so the inverse map is
+// (g^i - 1)/2. This fixes the canonical packed-score and target slot ordering.
 pub(crate) fn packed_score_slot(logical_index: usize) -> usize {
     (galois_power(logical_index) - 1) / 2
 }

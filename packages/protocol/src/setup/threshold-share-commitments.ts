@@ -152,6 +152,7 @@ const contextFieldNames = [
 const coefficientVectorBytes = (
     coefficients: readonly number[],
 ): Uint8Array => {
+    // Inputs here are already constrained to [0, modulus) by parseCommitmentValue upstream; unlike the public-key-share encoder this does not re-validate, so callers must pass pre-validated residues.
     const bytes = new Uint8Array(coefficients.length * 8);
     coefficients.forEach((coefficient, coefficientIndex) => {
         let value = BigInt(coefficient);
@@ -867,6 +868,7 @@ const deriveRecipientCommitment = (
     ringDegree: number,
     ringDegreeStatus: 'profile-ring' | 'development-reduced-ring',
 ): ThresholdShareCommitmentRecipient => {
+    // Shamir evaluation point = rosterPosition + 1 (point 0 holds the secret); scalars [1, x, x^2, ...] evaluate the committed polynomial at x via the additive homomorphism, so points must be nonzero and distinct mod every Q_share prime.
     const trusteePoint = recipientRecord.sourceTrusteeRosterPosition + 1;
     const recipientWithoutRoot = {
         objectType: 'TrusteeThresholdShareCommitments',

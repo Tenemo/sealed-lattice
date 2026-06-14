@@ -12,6 +12,7 @@ pub(super) struct RnsShamirShare {
     pub(super) value: u64,
 }
 
+// Shamir evaluation point = roster_position + 1: point 0 is the secret (the polynomial's constant term), so participants get position + 1, which must stay nonzero, distinct, and below every Q_share prime so Lagrange interpolation is well defined.
 pub(super) fn canonical_trustee_point(
     roster_position: usize,
     modulus: u64,
@@ -74,6 +75,7 @@ pub(super) fn interpolate_shamir_constant_with_threshold(
     if threshold == 0 {
         return Err(invalid_sharing_input("Shamir threshold must be positive"));
     }
+    // threshold is the reconstruction quorum (= polynomial degree + 1); callers must supply mutually consistent shares, since extra or inconsistent points are not cross-checked here.
     if shares.len() < threshold {
         return Err(invalid_sharing_input(
             "not enough Shamir shares for the required threshold",
@@ -115,6 +117,7 @@ fn interpolate_shamir_constant(shares: &[RnsShamirShare], modulus: u64) -> Canon
             if other_trustee_point == selected_trustee_point {
                 continue;
             }
+            // This reconstructs the constant term f(0), so each Lagrange factor is (0 - x_m) = -x_m mod q over the denominator x_j - x_m.
             numerator = mul_mod(numerator, modulus - other_trustee_point, modulus)?;
             let difference = sub_mod(*selected_trustee_point, *other_trustee_point, modulus)?;
             denominator = mul_mod(denominator, difference, modulus)?;

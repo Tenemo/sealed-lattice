@@ -51,62 +51,65 @@ fn direct_ballot_shared_rns_relation_proof_rejects_last_limb_ciphertext_mutation
 }
 
 #[test]
-fn direct_ballot_shared_rns_relation_proof_rejects_response_mutation() {
+fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() {
     let fixture = direct_ballot_relation_proof_fixture();
-    let mut proof_generation = fixture.proof_generation.clone();
-    let response_offset = direct_ballot_relation_response_offset(&proof_generation.proof_bytes);
-    proof_generation.proof_bytes[response_offset] ^= 1;
+    let proof_bytes = &fixture.proof_generation.proof_bytes;
+    let score_response_offset = direct_ballot_score_response_offset(proof_bytes);
 
-    let error = verify_direct_ballot_relation_proof(
-        &fixture.setup_package,
-        &fixture.evaluator_key,
-        &fixture.encrypted_ballot,
-        &proof_generation.proof_bytes,
-    )
-    .expect_err("mutated response must reject");
+    // Each case flips a single bit at a distinct structural offset in the
+    // serialized relation proof and asserts the verifier rejects with that
+    // offset's specific reason. Folding the offsets into one table keeps every
+    // offset-and-message assertion while dropping four copies of the identical
+    // clone-mutate-verify body.
+    let single_bit_mutation_cases: [(&str, usize, &str); 4] = [
+        (
+            "randomizer response",
+            direct_ballot_relation_response_offset(proof_bytes),
+            "randomizer support check failed",
+        ),
+        (
+            "score response",
+            score_response_offset,
+            "direct ballot score proof option 0",
+        ),
+        (
+            "one-hot response",
+            score_response_offset
+                + DIRECT_BALLOT_OPTION_COUNT * direct_ballot_response_coefficient_bytes(),
+            "direct ballot score proof option 0",
+        ),
+        (
+            "relation commitment",
+            direct_ballot_relation_commitment_offset(proof_bytes),
+            "challenge does not match its commitment",
+        ),
+    ];
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(error.message.contains("randomizer support check failed"));
-}
+    for (case_label, mutation_offset, expected_message_fragment) in single_bit_mutation_cases {
+        let mut mutated_proof_bytes = fixture.proof_generation.proof_bytes.clone();
+        mutated_proof_bytes[mutation_offset] ^= 1;
 
-#[test]
-fn direct_ballot_shared_rns_relation_proof_rejects_score_response_mutation() {
-    let fixture = direct_ballot_relation_proof_fixture();
-    let mut proof_generation = fixture.proof_generation.clone();
-    let score_response_offset = direct_ballot_score_response_offset(&proof_generation.proof_bytes);
-    proof_generation.proof_bytes[score_response_offset] ^= 1;
+        let error = match verify_direct_ballot_relation_proof(
+            &fixture.setup_package,
+            &fixture.evaluator_key,
+            &fixture.encrypted_ballot,
+            &mutated_proof_bytes,
+        ) {
+            Ok(_) => panic!("{case_label}: mutated proof must reject"),
+            Err(error) => error,
+        };
 
-    let error = verify_direct_ballot_relation_proof(
-        &fixture.setup_package,
-        &fixture.evaluator_key,
-        &fixture.encrypted_ballot,
-        &proof_generation.proof_bytes,
-    )
-    .expect_err("mutated score response must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(error.message.contains("direct ballot score proof option 0"));
-}
-
-#[test]
-fn direct_ballot_shared_rns_relation_proof_rejects_one_hot_response_mutation() {
-    let fixture = direct_ballot_relation_proof_fixture();
-    let mut proof_generation = fixture.proof_generation.clone();
-    let one_hot_response_offset =
-        direct_ballot_score_response_offset(&proof_generation.proof_bytes)
-            + DIRECT_BALLOT_OPTION_COUNT * direct_ballot_response_coefficient_bytes();
-    proof_generation.proof_bytes[one_hot_response_offset] ^= 1;
-
-    let error = verify_direct_ballot_relation_proof(
-        &fixture.setup_package,
-        &fixture.evaluator_key,
-        &fixture.encrypted_ballot,
-        &proof_generation.proof_bytes,
-    )
-    .expect_err("mutated one-hot response must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(error.message.contains("direct ballot score proof option 0"));
+        assert_eq!(
+            error.code,
+            CanonicalErrorCode::InvalidFixture,
+            "{case_label}: unexpected rejection code"
+        );
+        assert!(
+            error.message.contains(expected_message_fragment),
+            "{case_label}: unexpected rejection message: {}",
+            error.message
+        );
+    }
 }
 
 #[test]
@@ -146,29 +149,6 @@ fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_wi
         error
             .message
             .contains("one-hot Booleanity option 0 support check failed")
-    );
-}
-
-#[test]
-fn direct_ballot_shared_rns_relation_proof_rejects_commitment_mutation() {
-    let fixture = direct_ballot_relation_proof_fixture();
-    let mut proof_generation = fixture.proof_generation.clone();
-    let commitment_offset = direct_ballot_relation_commitment_offset(&proof_generation.proof_bytes);
-    proof_generation.proof_bytes[commitment_offset] ^= 1;
-
-    let error = verify_direct_ballot_relation_proof(
-        &fixture.setup_package,
-        &fixture.evaluator_key,
-        &fixture.encrypted_ballot,
-        &proof_generation.proof_bytes,
-    )
-    .expect_err("mutated commitment must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error
-            .message
-            .contains("challenge does not match its commitment")
     );
 }
 

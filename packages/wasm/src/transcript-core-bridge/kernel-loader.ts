@@ -99,6 +99,7 @@ export const createTranscriptCoreKernelLoader = (
             )
                 .map((entry) => entry.name)
                 .sort();
+            // This guards a single synchronous allocate/run/free cycle only; multi-call transport streams are kept separate by their kernel-side id, not by this flag.
             let kernelOperationInProgress = false;
             // One WASM instance has a single shared linear memory and allocator, so
             // overlapping commands would corrupt each other's buffers; the kernel is
@@ -131,6 +132,7 @@ export const createTranscriptCoreKernelLoader = (
                         request,
                     ),
                 );
+            // Accepted setup is claim-bearing protocol input, not a fixture, so a fixture-shaped rejection is surfaced as a rejected protocol object rather than leaking the kernel fixture error code.
             const executeAcceptedSetupCommand = <
                 Result extends BgvCollectiveSetupVerification,
             >(

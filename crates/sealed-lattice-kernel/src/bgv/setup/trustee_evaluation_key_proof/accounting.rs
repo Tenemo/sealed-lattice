@@ -35,6 +35,10 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     // centered-binomial errors) times the ring degree times the coefficient
     // bound; the smudging mask spans CLAIM_MASK_DIGIT_COUNT binary digits.
     let consistency_coefficient_bound = (1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1;
+    // Clear consistency sums are bounded by max witness magnitude (2 for
+    // centered-binomial errors) times the ring degree times the per-coefficient
+    // bound; this is correct for the eval-key family but is reused unchanged by
+    // migrated families (see the private-VSS known-issue note).
     let clear_claim_bound =
         2_u128 * POLYNOMIAL_DEGREE as u128 * u128::from(consistency_coefficient_bound);
     // Ceiling of the clear bound's bit length, again the conservative side.
@@ -207,6 +211,11 @@ fn migrated_family_accounting(
     family_relation_rows: Value,
     wasm_browser_measurement: Value,
 ) -> CanonicalResult<Value> {
+    // Note: this carries the base eval-key smudgingBudget block
+    // (perClaimStatisticalDistanceLog2 about -68) unchanged into every migrated
+    // family. That figure is only correct for families whose witnesses are
+    // centered-binomial errors of magnitude 2; see the known-issue note on
+    // succinct_private_vss_share_accounting_value.
     let mut accounting = succinct_evaluation_key_proof_accounting_value()?;
     let accounting_fields = accounting
         .as_object_mut()
@@ -323,6 +332,16 @@ pub(crate) fn succinct_public_key_share_accounting_hash() -> CanonicalResult<Str
 // coefficient openings plus the lifted recipient-share relation with hidden
 // carry columns over the setup commitment fields.
 pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<Value> {
+    // KNOWN ISSUE (leakage accounting): this family inherits the smudgingBudget
+    // from succinct_evaluation_key_proof_accounting_value via
+    // migrated_family_accounting, whose perClaimStatisticalDistanceLog2 is
+    // computed from clear_claim_bound about 2^24 (centered-binomial magnitude
+    // 2). The private-VSS family's real masked claim uses message_bound about
+    // the source prime (about 2^47) per masked_claim_bounds in relation.rs, so
+    // its true clear bound is about 2^70 and true per-claim leakage about
+    // 2^-22, not the disclosed about 2^-68. The masking math is family-correct;
+    // only the disclosed and bound accounting figure under-reports. Fix:
+    // recompute clear_claim_bound per family from masked_claim_bounds.
     let mut accounting = migrated_family_accounting(
         "SuccinctPrivateVssShareAccounting",
         super::PRIVATE_VSS_SHARE_PROOF_FAMILY,

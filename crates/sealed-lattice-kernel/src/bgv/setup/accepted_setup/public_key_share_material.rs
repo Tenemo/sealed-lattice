@@ -533,6 +533,7 @@ fn verify_collective_public_key_coefficients(
                     "public-key share material width does not match collective public-key width",
                 ));
             }
+            // Each share b_i already equals p*e_i - a*s_i over its limb against the common a, so the modular sum is the collective public key B = p*E - a*S with collective secret S = sum of s_i.
             for (coefficient_index, share_coefficient) in share_coefficients.iter().enumerate() {
                 expected_coefficients[coefficient_index] = add_mod(
                     expected_coefficients[coefficient_index],

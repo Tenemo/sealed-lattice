@@ -230,6 +230,7 @@ export type SetupVssMaterialFullObjectHasher = Readonly<{
     digestHex: () => string;
 }>;
 
+// Chunks are concatenated unframed; the digest is injective only because all non-final chunks are exactly the fixed transport chunk size, so totalByteLength recovers the boundaries. Do not call with variable-size chunks.
 export const createSetupVssMaterialFullObjectHasher = (
     totalByteLength: number,
 ): SetupVssMaterialFullObjectHasher => {

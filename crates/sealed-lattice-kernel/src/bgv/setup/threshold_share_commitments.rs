@@ -1453,6 +1453,7 @@ impl StreamingVssThresholdMaterialParser {
             PendingRead::Ready(value) => value,
             PendingRead::NeedMore => return Ok(()),
         };
+        // A forged ring degree mis-frames every subsequent fixed-length record, but it cannot survive the per-coordinate commitment-root match; varuints are also required to be minimally encoded so the byte stream is canonical.
         let ring_degree = match try_read_varuint_from_pending(&self.pending_bytes, &mut cursor)? {
             PendingRead::Ready(value) => usize::try_from(value)
                 .map_err(|_| invalid_threshold_commitment_input("ringDegree does not fit usize"))?,
@@ -2408,6 +2409,7 @@ fn read_binary_setup_commitment(
 }
 
 #[allow(clippy::too_many_arguments)]
+// Feldman-style homomorphic evaluation: scaling coefficient commitment k by alpha_j^k and summing yields the public commitment to f_i(alpha_j), the recipient's threshold share, summed across source trustees.
 fn accumulate_transport_threshold_commitments(
     _setup_context: &Value,
     _public_matrix_seed_hash: &str,

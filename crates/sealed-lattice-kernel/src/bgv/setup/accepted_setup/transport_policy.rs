@@ -984,6 +984,7 @@ fn setup_transported_object_binding(
         "transported object byteLength must be positive",
         &object_path,
     ));
+    // Threading chunkStartIndex enforces a gap-free, non-overlapping, ordered global chunk stream, so transported objects cannot overlap, reorder, or leave holes while still matching the aggregate chunk count.
     let chunk_start_index = transport_try!(require_transport_u64_at(
         transported_object,
         "chunkStartIndex",

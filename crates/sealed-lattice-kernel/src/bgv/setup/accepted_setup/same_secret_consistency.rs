@@ -296,6 +296,7 @@ fn verify_same_secret_statement_record(
             "proofVerificationStatus",
             "anchor-proof-verification-pending",
         ),
+        // This relation asserts the per-limb VSS constant commitments C_i,l,0 all open to one short secret congruent across every Q_share limb, proven over the commitment modulus product by CRT.
         (
             "sameSecretRelation",
             "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
@@ -399,6 +400,7 @@ fn verify_same_secret_statement_record(
         trustee_secret_commitment_root,
         "sameSecretConsistency.statementRecords.trusteeSecretCommitmentRoot",
     )?;
+    // Recompute the trustee secret commitment from the setup context and the ordered VSS constant commitments so it cannot be detached from this ceremony's dealing.
     let expected_trustee_secret_commitment_root = derive_protocol_hash(
         "TrusteeSecretCommitmentRoot",
         &trustee_secret_commitment_payload(setup_context, binding)?,
@@ -514,6 +516,7 @@ fn same_secret_constant_commitment_roots_from_source_trustee(
             )
         })?;
     let mut roots = Vec::with_capacity(DATA_PRIMES.len());
+    // Only the constant Shamir coefficient (index 0, the secret) is opened, and limbs must be contiguous and ordered because the anchor relation indexes commitments by limb position.
     for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
         let coefficient_record = coefficient_commitments
             .iter()
@@ -927,6 +930,7 @@ fn verify_same_secret_anchor_proof_record(
             "same-secret proof ringDegree must match the rebuilt anchor statement",
         ));
     }
+    // Rebuild the keyless anchor statement (no keys, one commitment per limb) exactly as the prover did; the matching statement_hash is what binds the proof to this ceremony, trustee, and VSS material root.
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY.to_string(),
@@ -1055,6 +1059,7 @@ fn same_secret_proof_bytes_from_record(
     Ok(proof_bytes)
 }
 
+// No relation prefix is needed because statementHash already transcript-binds the family and ceremony; the material root only binds proof-byte identity.
 pub(in crate::bgv::setup) fn same_secret_anchor_proof_material_root(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,

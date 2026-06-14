@@ -1076,6 +1076,7 @@ const createEnvelopeCommitment = async (
     sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
     recipient: PrivateVssMailboxRecipient,
 ): Promise<PrivateVssEnvelopeCommitment> => {
+    // Row-major index over the participant-by-participant delivery grid: gives each (source, recipient) envelope a unique sequence number bound into the AEAD associated data to prevent cross-cell replay.
     const envelopeSequenceNumber =
         sourceTrusteeState.sourceTrusteeRosterPosition *
             input.participantCount +

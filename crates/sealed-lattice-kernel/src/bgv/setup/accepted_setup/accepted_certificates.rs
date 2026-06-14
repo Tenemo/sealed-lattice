@@ -566,6 +566,7 @@ fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
                 "every statement is rebuilt by the verifier from the transported share records, the recomputed round-one public aggregate diagonals, the accepted same-secret constant commitments, and the ceremony context; no prover-supplied statement field is trusted",
                 "key-switch component material is decoded against record-bound component vector roots and deterministic public sampler seeds shared by schedule entry",
                 "per-limb trace commitments, masked column openings, batched row checks, the digit-and-key-batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every limb field",
+                // A Galois/rotation key switches s(X^k) back to s, so its proven source is the automorphism image of the secret, and the rotation amount is the Galois exponent k.
                 "arithmetic source relations are enforced inside the argument: round-one sources equal the committed secret, round-two sources equal the secret times the recomputed public aggregate, and Galois sources equal the automorphism image",
                 "the same-secret linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against the shared key-relation secret",
                 "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",

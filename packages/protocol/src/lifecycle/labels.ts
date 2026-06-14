@@ -89,6 +89,7 @@ const pushFailure = (
     }
 };
 
+// Every conjunct is a claim-gate precondition for the fullyVerified label; strict true equality prevents truthy placeholders from forging full verification.
 const resultPathIsFullyGated = (input: LifecycleLabelInput): boolean =>
     input.localRosterAccepted === true &&
     input.thresholdProfile.claimBearing &&
@@ -130,6 +131,7 @@ const deriveSecurityProfileModes = (
             labels.push(label);
         }
     }
+    // These closure labels are claim-bearing; emit only when the caller has actually closed the gate, and require strict true so truthy placeholders never upgrade the label.
     if (input.targetDecryptionClosureApplied === true) {
         labels.push('targetDecryptionClosure');
     }

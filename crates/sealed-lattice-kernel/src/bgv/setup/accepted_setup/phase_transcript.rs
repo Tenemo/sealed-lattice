@@ -60,6 +60,7 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
                 Vec::new(),
             )?));
         };
+        // A byte-identical re-post of a phase is benign idempotency and skipped; any non-identical record for the same phaseId is trustee equivocation and rejected as a fork.
         if let Some(previous_hash) = seen_phase_hashes.get(phase_identifier) {
             if previous_hash == &phase_object_hash {
                 continue;
@@ -211,6 +212,7 @@ fn verify_phase_object_binding(
             }
         }
         None => {
+            // The genesis phase must carry an explicit null predecessor, not an absent field, so no earlier phase can later be spliced into the hash chain.
             if !phase_value
                 .get("previousPhaseRoot")
                 .is_some_and(Value::is_null)
@@ -391,6 +393,7 @@ fn verify_participant_phase_object(
             format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
         )?));
     };
+    // Identity must already be NFC so the same trustee cannot appear under two byte-distinct Unicode forms across signatures, roster matching, and hashing.
     if trustee_identity.is_empty() || trustee_identity.nfc().collect::<String>() != trustee_identity
     {
         return Ok(Some(phase_refusal(
@@ -718,6 +721,7 @@ fn phase_signature_context_hash(
     roster_position: u64,
     phase_object_root: &str,
 ) -> CanonicalResult<String> {
+    // Same hash domain is safe here only because the purpose field and disjoint key sets make the object-root and signature-context preimages non-overlapping.
     derive_protocol_hash(
         "SetupPhaseObjectHash",
         &json!({

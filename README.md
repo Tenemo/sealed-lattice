@@ -15,12 +15,17 @@ The active project route is:
 ```text
 active-static secure-with-abort collective BGV setup
 -> direct BGV-encrypted ballots
--> LaZer/LNP-derived no-wrap ballot validity proofs
+-> ballot validity proofs for the fixed encrypted-ballot relation
 -> public ciphertext aggregation
 -> bounded-domain encrypted evaluator replay on mobile
 -> unanimous target finality for the first profile
 -> one-shot target-bound threshold decryption of C_target only
 ```
+
+The first ballot proof backend candidate is the LaZer/LNP-derived no-wrap
+profile. The public ballot package boundary is relation-fixed so that the proof
+backend can be replaced if soundness, zero-knowledge, QROM, proof size, or
+mobile-compatible runtime evidence fails to close.
 
 The first claim-bearing mobile profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. That profile is not closed yet.
 
@@ -80,7 +85,7 @@ const thresholdProfile = deriveThresholdProfile({
 - a complete threshold voting workflow;
 - claim-bearing accepted setup for `CollectiveBgvSetup-v1`;
 - production setup ceremony, VSS, ballot generation, or casting APIs;
-- public direct ballot proof construction or accepted proof transport APIs;
+- public encrypted ballot package creation, verification, or accepted proof transport APIs;
 - public encrypted ballot aggregation APIs;
 - public bounded-domain mobile evaluator replay APIs;
 - production target-bound decryption, target recombination, or result release APIs;
@@ -92,7 +97,7 @@ The public package must not expose raw BGV decryption, arbitrary threshold decry
 
 All current setup, ballot, aggregation, evaluator, and target-decryption code is development evidence only. The package must not be used for real ballots or ballot secrecy, and nothing in it is supported-phone, production, audited, or certified.
 
-In particular, the accepted collective BGV setup for `CollectiveBgvSetup-v1` is not claim-complete: a profile-scale Rust terminal setup-package lane now passes, but cross-runtime/public-package confirmation, transport/profile measurement rows, final adversarial package coverage, and final verification gates are still pending. The accepted ballot proof path still needs soundness, zero-knowledge, and Fiat-Shamir/QROM accounting, accepted binary proof transport, accepted randomness boundaries, and supported-phone verification; the evaluator and target-decryption paths still need bounded-domain all-`K_top` replay, target share proof certification, C1-C4 closure, public recombination, and supported-phone evidence.
+In particular, the accepted collective BGV setup for `CollectiveBgvSetup-v1` is not claim-complete: a profile-scale Rust terminal setup-package lane now passes, but cross-runtime/public-package confirmation, transport/profile measurement rows, final adversarial package coverage, and final verification gates are still pending. The accepted ballot package path still needs the accepted setup handoff consumer, canonical package and statement schemas, soundness, zero-knowledge, and Fiat-Shamir/QROM accounting, accepted binary proof transport, accepted randomness boundaries, and mobile-compatible proof readiness; supported-phone evidence remains a later runtime target. The evaluator and target-decryption paths still need bounded-domain all-`K_top` replay, target share proof certification, C1-C4 closure, public recombination, and supported-phone evidence.
 
 Development runs on native, Node, desktop browser, or mobile-emulated browser do not count as supported-phone or production evidence. Internal package names, private workspace commands, and fixture evidence are not stable public APIs.
 

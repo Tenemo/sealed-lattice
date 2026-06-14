@@ -5,7 +5,7 @@ sidebar:
     order: 4
 ---
 
-`sealed-lattice` currently ships a development verification package, not a published voting workflow. The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, LaZer/LNP-derived no-wrap ballot validity proofs, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
+`sealed-lattice` currently ships a development verification package, not a published voting workflow. The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, ballot validity proofs for the fixed encrypted-ballot relation, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
 
 ## What the current release guarantees
 
@@ -23,7 +23,7 @@ sidebar:
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
 - active-static setup is not claim-bearing until the `CollectiveBgvSetup-v1` public verifier accepts a full-profile setup with repo-owned setup proof accounting, per-RNS-prime VSS package integration, same-secret proof verification, public-key proofs, evaluation-key proofs, key transport, and downstream integration bindings
 - independent external validation is not a prerequisite for the active-static setup prototype claim, but production use would still require separate production hardening and review
-- the internal direct encrypted ballot proof is not claim-bearing until soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and supported-phone mobile evidence close
+- the internal direct encrypted ballot proof is not claim-bearing until the accepted encrypted ballot package verifier, soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and mobile-compatible proof readiness close; supported-phone evidence remains a later runtime target
 - bounded-domain encrypted sparse target projection is not complete for every supported top count
 - target-bound decryption is not implemented as an accepted direct-path rule
 - no caller should rely on private package names or future public subpaths becoming stable
@@ -35,7 +35,7 @@ The final direct path must preserve these rules:
 ```text
 Every ballot is encrypted before publication.
 Setup is active-static secure with abort, not robust-liveness secure.
-Ballot validity proofs are zero-knowledge and sound under the accepted LNP/no-wrap profile.
+Accepted ballot validity proofs must be zero-knowledge and sound under the selected proof profile.
 Accepted ballot ciphertexts aggregate by public ciphertext addition.
 Evaluator correctness is verified by deterministic bounded-domain mobile replay.
 C_topK is encrypted under the collective key, but it is not an authorized decryption target.

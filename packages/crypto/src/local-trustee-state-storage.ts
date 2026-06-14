@@ -160,6 +160,7 @@ export type LocalTrusteeSetupSealedMaterialEncryptionResult = {
     readonly materialAadHash: ProtocolHash;
 };
 
+// Defense in depth for the roots-only device-state policy: refuse to encrypt or decrypt any object that still carries raw share, opening, seed, or witness material, even nested.
 const forbiddenLocalStateFieldNames = new Set([
     'rawSecret',
     'rawSecretShare',
@@ -468,6 +469,7 @@ const sealedMaterialAad = (
         localStateBinding.thresholdShareCommitmentRecipientRoot,
 });
 
+// GCM safety comes from per-object key separation: the HKDF salt is the unique object root, so even a repeated random nonce never recurs under the same derived key.
 const deriveAesGcmKeyBytes = (
     storageKeyBytes: Uint8Array,
     localStateRoot: ProtocolHash,
@@ -1032,6 +1034,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
         materialRoot,
         materialAad: associatedData,
         materialAadHash,
+        // Key commitment: AES-GCM is not key-committing, so a hash of the key is bound to prevent a ciphertext from being opened under a second key (partitioning-oracle defense).
         keyCommitmentHash: hashBytes(
             'sealed-lattice-local-trustee-state/sealed-material-storage-key-commitment-v1',
             storageKeyBytes,
@@ -1049,6 +1052,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
         EncryptedLocalTrusteeSetupMaterial,
         'encryptedMaterialHash'
     >;
+    // Self-hash convention: a record's root is the protocol hash of the same record with its own root field removed; verification strips that field and recomputes.
     const encryptedMaterial = {
         ...encryptedMaterialWithoutHash,
         encryptedMaterialHash: hashCanonicalValue(

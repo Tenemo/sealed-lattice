@@ -30,8 +30,6 @@ const PACKAGE_SECRET_FLAG_FIELD_NAMES: &[&str] = &[
     "externallySuppliedSecretReconstruction",
     "rawSecretShareExported",
 ];
-const LEGACY_EXTERNAL_SETUP_ROLE_FIELD_NAME_TOKENS: &[&str] =
-    &["setup", "authority", "central", "trusted"];
 
 pub(super) fn reject_forbidden_setup_fields(request: &Value) -> CanonicalResult<()> {
     reject_forbidden_setup_fields_for_context(request, "passive BGV setup")
@@ -51,19 +49,6 @@ pub(super) fn reject_forbidden_setup_fields_for_context(
             ));
         }
     }
-    if let Some(request_object) = request.as_object() {
-        for field_name in request_object.keys() {
-            if field_name_suggests_legacy_external_setup_role(field_name) {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "{field_name} would externally supply BGV setup material and cannot be accepted by {setup_context_description}"
-                    ),
-                ));
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -73,13 +58,6 @@ pub(super) fn forbidden_setup_field_names() -> Vec<&'static str> {
         .chain(REQUEST_ONLY_FORBIDDEN_SETUP_SECRET_FIELD_NAMES)
         .copied()
         .collect()
-}
-
-pub(super) fn field_name_suggests_legacy_external_setup_role(field_name: &str) -> bool {
-    let lowercase_field_name = field_name.to_ascii_lowercase();
-    LEGACY_EXTERNAL_SETUP_ROLE_FIELD_NAME_TOKENS
-        .iter()
-        .all(|token| lowercase_field_name.contains(token))
 }
 
 pub(super) fn read_non_empty_string<'a>(
@@ -341,7 +319,6 @@ pub(super) fn compare_derived_hash(
 
 fn is_forbidden_setup_package_secret_field(field_name: &str) -> bool {
     COMMON_FORBIDDEN_SETUP_SECRET_FIELD_NAMES.contains(&field_name)
-        || field_name_suggests_legacy_external_setup_role(field_name)
 }
 
 fn is_setup_package_secret_flag_field(field_name: &str) -> bool {

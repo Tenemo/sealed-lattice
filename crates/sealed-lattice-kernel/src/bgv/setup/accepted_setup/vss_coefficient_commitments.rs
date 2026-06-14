@@ -666,6 +666,7 @@ fn verify_vss_source_trustee_commitment_record(
         source_trustee_commitment_root,
         "vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeCommitmentRoot",
     )?;
+    // Self-hash: the root commits to the record minus its own root field, so the canonical JSON encoding of the remaining fields is what the bound root covers.
     let mut root_input = source_trustee_record.clone();
     root_input
         .as_object_mut()

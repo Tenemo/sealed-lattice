@@ -49,6 +49,10 @@ impl FiatShamirTranscript {
         forked
     }
 
+    // The init, absorb, squeeze, and fork byte tags domain-separate the four
+    // operations so a squeeze output can never be replayed as an absorbed
+    // message, and the per-round counter (reset on absorb) keeps same-round
+    // challenges distinct.
     fn squeeze_block(&mut self, label: &str) -> [u8; 64] {
         let block = hash512(
             TRANSCRIPT_DOMAIN,
@@ -134,6 +138,10 @@ impl FiatShamirTranscript {
         bit_count: u32,
         count: usize,
     ) -> Vec<u64> {
+        // Bounded-integer combination: the collision probability over the
+        // integers is at most 2^-bit_count per repetition independent of the
+        // field, so masking (not rejection) yields the exact uniform target
+        // [0, 2^bits).
         debug_assert!(bit_count <= 63);
         let mask = (1_u64 << bit_count) - 1;
         let mut integers = Vec::with_capacity(count);
@@ -158,6 +166,9 @@ impl FiatShamirTranscript {
         range: usize,
         count: usize,
     ) -> Vec<usize> {
+        // Masking is unbiased only because FRI domain sizes are powers of two
+        // (debug-asserted); base-field challenges differ and must
+        // rejection-sample against the non-power-of-two modulus.
         debug_assert!(range.is_power_of_two());
         let mask = (range - 1) as u64;
         let mut positions = Vec::with_capacity(count);

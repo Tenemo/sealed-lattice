@@ -120,6 +120,9 @@ pub(super) fn galois_automorphism_transpose_apply(
     }
     let mut transposed = Vec::with_capacity(degree);
     for index in 0..degree {
+        // The element acts modulo 2N, so a full-profile schedule value reduces
+        // to a valid automorphism on a smaller ring; the target >= N branch is
+        // the negacyclic X^N = -1 sign fold.
         let target = (index * galois_element) % ring_order;
         if target < degree {
             transposed.push(vector[target]);
@@ -2492,6 +2495,12 @@ pub(crate) fn generate_development_trustee_ceremony_slice(
 // Centered bound for a published masked consistency claim: the clear sum is
 // bounded by max witness magnitude * ring degree * (2^bits - 1), and the
 // smudging mask lies in [0, 2^CLAIM_MASK_DIGIT_COUNT).
+// Family-aware clear bound: the private-VSS family uses message_bound (the
+// source prime, about 2^47); every other family uses 2 (centered-binomial
+// magnitude). The mask is one-sided in [0, 2^CLAIM_MASK_DIGIT_COUNT), so the
+// centered claim lies in [-clear_bound, mask_bound + clear_bound]. NOTE: the
+// disclosed smudging figure in accounting.rs does not use this family-aware
+// bound and under-reports private-VSS leakage (see the known-issue note there).
 pub(super) fn masked_claim_bounds(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<(i128, i128)> {

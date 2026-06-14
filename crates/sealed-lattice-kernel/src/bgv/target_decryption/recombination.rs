@@ -28,6 +28,7 @@ pub(super) fn recombine_target_decryption_shares(
             ));
         }
     }
+    // Shares are selected deterministically by board position, but interpolation uses the roster-derived abscissa; the triple dedup prevents a trustee from re-submitting under a different board/roster slot.
     shares.sort_by_key(|share| share.board_position);
     let selected = shares
         .into_iter()
@@ -105,6 +106,7 @@ pub(super) fn recombine_ciphertext_slots<F>(
 where
     F: Fn(&PartialDecryptionShare) -> &[Vec<u64>],
 {
+    // c0 is the message-bearing component; adding the sum of lambda_i * (c1*s_i) reconstructs c0 + c1*s = m + p*e, then centered reduction mod p recovers m.
     let mut accumulator = ciphertext.components[0].clone();
     for (limb_index, modulus) in ciphertext.primes().iter().enumerate() {
         let coefficients = lagrange_coefficients_at_zero_mod(shares, *modulus)?;
@@ -137,6 +139,7 @@ where
     forward_negacyclic_ntt(&coefficients, crate::bgv::profile::PLAINTEXT_MODULUS)
 }
 
+// Interpolation is per RNS prime field, so abscissae must stay distinct mod each prime; the reduction is identity for the tiny roster points but the check is required in general.
 pub(super) fn lagrange_coefficients_at_zero_mod(
     shares: &[PartialDecryptionShare],
     modulus: u64,

@@ -55,6 +55,7 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
             DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS,
             response_union_loss_bits,
         )?;
+    // The weakest subrelation is checked mod the about 16-bit plaintext modulus 65537, so each check yields only about 16 soundness bits despite the 192-bit nominal challenge; this is why claim soundness is not accepted.
     let weakest_relation_bits_per_check = 16_u32;
     let support_modulus_bits = 64 - direct_ballot_support_modulus().leading_zeros();
     let repeated_proof_size_bytes = checked_repeated_byte_count(
@@ -137,10 +138,12 @@ pub(super) fn direct_ballot_support_check_count() -> usize {
     DIRECT_BALLOT_OPTION_COUNT * DIRECT_BALLOT_SCORE_BUCKET_COUNT + 3 * POLYNOMIAL_DEGREE
 }
 
+// Support-check polynomial degrees: 5 is the max degree of the checked support identities; the 2/3/5 expansion counts are the monomials proven per one-hot / randomizer / error witness, feeding the union-bound soundness loss.
 pub(super) fn direct_ballot_support_maximum_degree() -> usize {
     5
 }
 
+// Statistical masking budget: the response z = mask + challenge*witness hides the witness only if mask bits exceed challenge bits + witness magnitude bits + the per-scalar union-bound loss; the remaining slack is the statistical zero-knowledge margin.
 fn zero_knowledge_shift_slack_bits_after_response_union_bound(
     mask_coefficient_bits: usize,
     response_union_loss_bits: u32,

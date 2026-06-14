@@ -1007,6 +1007,9 @@ fn usize_field_at(value: &Value, field_name: &str, object_path: &str) -> Canonic
     })
 }
 
+// Chunks are streamed unframed; the bound total length plus the enforced
+// uniform chunk size make this concatenation unambiguous, so no per-chunk length
+// prefix is needed.
 fn setup_proof_material_full_object_hash(
     proof_family: &str,
     total_byte_length: u64,

@@ -143,6 +143,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 }
 
 #[allow(clippy::too_many_arguments)]
+// Development-only dealer: this reshares the actual secret coefficient (Shamir constant term) with a per-prime degree-(t-1) polynomial derived deterministically from private_setup_seed, so reconstruction at x=0 returns s. This is a centralized dealer simulating a DKG, not a real distributed key generation; the shares are only as private as the seed.
 pub(super) fn derive_threshold_secret_share_limb(
     secret: &[i64],
     setup_package_hash: &str,
@@ -185,6 +186,7 @@ pub(super) fn derive_threshold_secret_share_limb(
     Ok(share)
 }
 
+// PROTOTYPE GAP (labeled, not a hidden flaw): partial shares are released as bare c1*s_i with no smudging / noise-flooding term. Threshold-BGV simulation security requires adding flooding noise E_i super-polynomially larger than the decryption noise; without it the released shares leak c1*s_i exactly. This is gated: read_setup_binding in bindings.rs refuses to run unless targetC1C4StatusAccepted is false, and share records carry ShareProofCertificationPending. The C1-C4 smudging/noise closure is the open work.
 pub(super) fn partial_decryption_by_limb(
     ciphertext: &Ciphertext,
     secret_share_by_limb: &[Vec<u64>],

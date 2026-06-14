@@ -25,7 +25,8 @@ use std::time::Instant;
 use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::merkle_commitment::LEAF_SALT_BYTES;
 use super::relation::{
-    EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, SameSecretLinkageStatement,
+    EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
+    SameSecretLinkageStatement,
 };
 use super::{
     COMMITMENT_BOUND_FACTOR, DEEP_POINT_COUNT, DOMAIN_BLOWUP, LOW_DEGREE_FINAL_COEFFICIENT_COUNT,
@@ -196,13 +197,15 @@ fn shape_only_trustee_statement(
     let same_secret_linkage = (linkage_commitment_count > 0).then(|| SameSecretLinkageStatement {
         public_matrix_seed_hash: repeated_hash("00"),
         commitments: (0..linkage_commitment_count)
-            .map(|index| crate::bgv::setup::commitment::SetupCommitmentValue {
-                source_rns_limb_index: index,
-                source_message_modulus: DATA_PRIMES[index],
-                shamir_coefficient_index: 0,
-                ring_degree,
-                limbs: Vec::new(),
-            })
+            .map(
+                |index| crate::bgv::setup::commitment::SetupCommitmentValue {
+                    source_rns_limb_index: index,
+                    source_message_modulus: DATA_PRIMES[index],
+                    shamir_coefficient_index: 0,
+                    ring_degree,
+                    limbs: Vec::new(),
+                },
+            )
             .collect(),
     });
     TrusteeEvaluationKeyStatement {
@@ -1855,6 +1858,10 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
     ] {
         assert_eq!(accepted_row, &serde_json::json!(true));
     }
+    // These bounds are load-bearing: 128-bit effective soundness depends on the
+    // -160 pre-union margin and a named, unproven FRI conjecture, and
+    // zero-knowledge is bounded-leakage only -- do not relax them to make the
+    // accounting pass.
     assert_eq!(
         accounting["lowDegreeSoundness"]["acceptedUnderNamedFriConjecture"],
         serde_json::json!(true)

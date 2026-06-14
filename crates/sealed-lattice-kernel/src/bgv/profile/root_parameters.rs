@@ -85,6 +85,10 @@ impl BgvBasisKind {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RootParameters {
     pub(crate) modulus: u64,
+    // Full multiplicative generator of F_p^* (order p - 1), not merely some root.
+    // The trustee evaluation-key FRI proof uses this as the evaluation-coset
+    // offset, which must lie outside every 2-power subgroup so the coset stays
+    // disjoint from the trace subgroup H; only a full generator guarantees that.
     pub(crate) primitive_generator: u64,
     pub(crate) negacyclic_root: u64,
     pub(crate) cyclic_root: u64,

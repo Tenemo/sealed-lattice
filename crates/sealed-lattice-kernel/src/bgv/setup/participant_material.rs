@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(super) fn participant_setup_material(
     input: &PassiveSetupInput,

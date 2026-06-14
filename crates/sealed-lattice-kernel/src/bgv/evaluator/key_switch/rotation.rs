@@ -11,6 +11,8 @@ pub(super) fn automorphism_residues(
     let two_n = 2 * POLYNOMIAL_DEGREE;
     let mut output = vec![0_u64; POLYNOMIAL_DEGREE];
     for (coefficient_index, value) in input.iter().enumerate() {
+        // X -> X^k sends coefficient i to i*k mod 2N; the subtraction on the
+        // upper half is the negacyclic X^N = -1 sign fold.
         let exponent = (coefficient_index * galois_element) % two_n;
         if exponent < POLYNOMIAL_DEGREE {
             output[exponent] = add_mod(output[exponent], *value, modulus)?;

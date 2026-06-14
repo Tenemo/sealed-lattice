@@ -382,6 +382,9 @@ fn evaluate_polynomial_by_power_table(
     // The constant term anchors the accumulator at the target level and scaling.
     let anchor_level = target_level.unwrap_or(working_input.level);
     let anchor = normalize_scaling(&modulus_switch_to(&working_input, anchor_level)?)?;
+    // scalar_mul(anchor, 0) materializes an encrypted zero at the target level
+    // and scaling so the plaintext constant term is added into a shape-compatible
+    // ciphertext.
     let mut result = add_plaintext_coefficients(
         &scalar_mul(&anchor, 0)?,
         &broadcast_constant_coefficients(coefficients[0]),
@@ -449,6 +452,9 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
         }
         let block_value =
             linear_combination_from_powers(&working_input, &baby_powers, block_coefficients)?;
+        // Paterson-Stockmeyer: block 0 multiplies the identity giant power (skip
+        // the product), and a block with only a constant term folds into a
+        // scalar multiply rather than a ciphertext multiply.
         if block_index == 0 {
             terms.push(block_value);
             continue;
@@ -479,6 +485,9 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
     sum_ciphertexts_at_common_level(&terms)
 }
 
+// Defer the terminal modulus switch so the comparison output keeps one extra
+// level for the downstream rank-prefix projection; noise is still bounded
+// because no further multiply follows in this block.
 pub(crate) fn multiply_without_immediate_modulus_switch(
     context: &EvaluatorContext,
     left: &Ciphertext,

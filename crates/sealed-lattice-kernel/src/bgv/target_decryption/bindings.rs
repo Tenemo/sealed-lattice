@@ -64,6 +64,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
                 trustee_identity: string_at_path(participant, &["trusteeIdentity"])?.to_string(),
                 roster_position,
                 board_position,
+                // Shamir abscissa = roster_position + 1 so 0-based roster positions never produce the forbidden x = 0 point; share generation and recombination must use the identical mapping.
                 interpolation_point: u64::try_from(roster_position + 1).map_err(|_| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,

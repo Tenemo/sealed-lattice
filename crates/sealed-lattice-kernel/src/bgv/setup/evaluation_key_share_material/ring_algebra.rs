@@ -61,6 +61,8 @@ pub(super) fn automorphism_i128(
                 )
             })?;
         } else {
+            // X^N = -1 in this negacyclic ring, so an image exponent in [N, 2N)
+            // folds back with a sign flip.
             output[exponent - ring_degree] = output[exponent - ring_degree]
                 .checked_sub(*value)
                 .ok_or_else(|| {

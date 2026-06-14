@@ -289,6 +289,7 @@ const verifyFoundationTranscriptUnchecked = (
         recoveryEpochUpdates.every((result) => result.ok) &&
         firstValidOrdering.ok &&
         targetFinality.ok;
+    // Status labels (including recovery-epoch labels) are aggregated regardless of acceptance and are also returned on the rejected path.
     const statusLabels: readonly ProtocolVerificationStatusLabel[] =
         uniqueStrings([
             ...rosterManifest.statusLabels,
