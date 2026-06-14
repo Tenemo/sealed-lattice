@@ -1381,6 +1381,23 @@ const sourceTrusteeRecordForEnvelope = (
     return sourceTrusteeRecord;
 };
 
+const assertAcceptedPrivateVssProofCoverage = (
+    localVerification: {
+        readonly verifiedPrivateVssShareProofCount?: number;
+    },
+    expectedProofCount: number,
+    objectPath: string,
+): void => {
+    if (
+        localVerification.verifiedPrivateVssShareProofCount !==
+        expectedProofCount
+    ) {
+        throw new Error(
+            `${objectPath}.verifiedPrivateVssShareProofCount must match the accepted Q_share limb count.`,
+        );
+    }
+};
+
 const sourceTrusteeMaterialRecords = (
     sourceTrusteeOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[],
     envelopeReference: PrivateVssEnvelopeVerificationReference,
@@ -1674,6 +1691,11 @@ const decryptAndVerifyRecipientEnvelopes = async (
                     : `decrypted private VSS envelope failed recipient-local verification: ${refusal.reasonCode}: ${refusal.message}`,
             );
         }
+        assertAcceptedPrivateVssProofCoverage(
+            localVerification,
+            input.qSharePrimes.length,
+            'localVerification',
+        );
         verifiedEnvelopes.push(decryptedEnvelope.privateEnvelope as JsonRecord);
     }
 

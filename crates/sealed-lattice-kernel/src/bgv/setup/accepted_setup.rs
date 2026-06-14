@@ -345,9 +345,30 @@ const ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES: &[&str] = &[
     "lattigoPublicKey",
     "lattigoRelinearizationKey",
     "lattigoGaloisKey",
+    "publicKeyShareLnpProofs",
+    "publicKeyShareLnpTboxProofs",
+    "publicKeyShareTboxProofs",
+    "proofGeneration",
+    "proofRandomness",
+    "proofRandomnessNonceHex",
+    "proofRandomnessSeedHex",
+    "proofRandomnessSource",
     "externallySuppliedThresholdShareCommitments",
     "externallySuppliedThresholdShareCommitmentMaterial",
     "externallySuppliedUnverifiedThresholdShareCommitments",
+];
+
+const ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES: &[&str] = &[
+    "targetDecryptionStatus",
+    "targetDecryptionReadiness",
+    "targetDecryptionCertificate",
+    "targetDecryptionCertificateHash",
+    "targetDecryptionClosure",
+    "targetDecryptionClosureCertificate",
+    "targetDecryptionShareProofs",
+    "targetDecryptionShares",
+    "targetPartDecRecords",
+    "targetC1C4Certificate",
 ];
 
 const REQUIRED_PHASES: &[(&str, u64)] = &[
@@ -512,6 +533,7 @@ pub(crate) fn describe_collective_bgv_setup_profile() -> CanonicalResult<Value> 
         "genericKeySwitchPolicy": "refused-unless-explicitly-required-by-frozen-evaluator-schedule",
         "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
         "forbiddenAcceptedPathFields": ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES,
+        "topLevelForbiddenAcceptedPathFields": ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES,
     }))
 }
 
@@ -1680,10 +1702,26 @@ fn phase_order_value() -> Value {
 }
 
 fn reject_accepted_setup_forbidden_fields(value: &Value) -> CanonicalResult<()> {
+    if let Some(fields) = value.as_object() {
+        for field_name in fields.keys() {
+            if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!(
+                        "{field_name} cannot appear as a top-level accepted collective BGV setup field"
+                    ),
+                ));
+            }
+        }
+    }
+    reject_accepted_setup_forbidden_fields_recursively(value)
+}
+
+fn reject_accepted_setup_forbidden_fields_recursively(value: &Value) -> CanonicalResult<()> {
     match value {
         Value::Array(items) => {
             for item in items {
-                reject_accepted_setup_forbidden_fields(item)?;
+                reject_accepted_setup_forbidden_fields_recursively(item)?;
             }
         }
         Value::Object(fields) => {
@@ -1698,7 +1736,7 @@ fn reject_accepted_setup_forbidden_fields(value: &Value) -> CanonicalResult<()> 
                         ),
                     ));
                 }
-                reject_accepted_setup_forbidden_fields(field_value)?;
+                reject_accepted_setup_forbidden_fields_recursively(field_value)?;
             }
         }
         _ => {}
@@ -1715,7 +1753,8 @@ fn reject_accepted_setup_forbidden_request_fields(request: &Value) -> CanonicalR
         if field_name == "setupPackage" || field_name == "command" {
             continue;
         }
-        if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
+        if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
+            || ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
             || field_name_suggests_legacy_external_setup_role(field_name)
         {
             return Err(CanonicalError::new(

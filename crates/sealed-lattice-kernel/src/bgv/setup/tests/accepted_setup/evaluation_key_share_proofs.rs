@@ -70,6 +70,94 @@ fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_proof_randomness_metadata_with_rebound_roots() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_proof_randomness_metadata_with_rebound_roots",
+    );
+
+    for forbidden_field_name in [
+        "proofGeneration",
+        "proofRandomness",
+        "proofRandomnessSource",
+        "proofRandomnessSeedHex",
+        "proofRandomnessNonceHex",
+    ] {
+        let mut package = minimal_collective_setup_package();
+        package[forbidden_field_name] = forbidden_proof_randomness_metadata(forbidden_field_name);
+        rebind_collective_setup_package_hash(&mut package);
+        assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
+    }
+
+    for forbidden_field_name in [
+        "proofRandomnessSource",
+        "proofRandomnessSeedHex",
+        "proofRandomnessNonceHex",
+    ] {
+        for proof_set_field_name in [
+            "sameSecretProofs",
+            "publicKeyShareSuccinctProofs",
+            "trusteeEvaluationKeyProofs",
+        ] {
+            let mut package = minimal_collective_setup_package();
+            package[proof_set_field_name] = serde_json::json!({
+                "objectType": "FixtureTerminalProofSet",
+                "objectVersion": 1,
+                "proofRecords": [{
+                    "objectType": "FixtureTerminalProofRecord",
+                    "objectVersion": 1,
+                    forbidden_field_name: forbidden_proof_randomness_metadata(forbidden_field_name),
+                }],
+            });
+            rebind_collective_setup_package_hash(&mut package);
+            assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
+        }
+    }
+}
+
+fn forbidden_proof_randomness_metadata(field_name: &str) -> serde_json::Value {
+    match field_name {
+        "proofGeneration" => serde_json::json!({
+            "source": "development-deterministic-fixture",
+            "proofRandomnessSeedHex": valid_hash('7'),
+        }),
+        "proofRandomness" => serde_json::json!({
+            "source": "development-deterministic-fixture",
+            "seedBytes": 64,
+            "retention": "not-terminal-evidence",
+        }),
+        "proofRandomnessSource" => serde_json::json!("development-deterministic-fixture"),
+        "proofRandomnessSeedHex" | "proofRandomnessNonceHex" => serde_json::json!(valid_hash('8')),
+        _ => panic!("unsupported forbidden proof randomness field {field_name}"),
+    }
+}
+
+fn assert_refuses_forbidden_accepted_path_field(
+    package: &serde_json::Value,
+    forbidden_field_name: &str,
+) {
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "acceptedPathForbiddenField"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains(forbidden_field_name)
+    );
+    assert!(
+        result.get("acceptedSetupHandoff").is_none() || result["acceptedSetupHandoff"].is_null(),
+        "refused proof-randomness metadata must not return an accepted setup handoff"
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_generic_key_switch_material_by_default",
@@ -88,6 +176,70 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
         result["refusedObjects"][0]["reasonCode"],
         "genericKeySwitchOutsideProfile"
     );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_premature_target_decryption_readiness_artifacts() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_premature_target_decryption_readiness_artifacts",
+    );
+
+    for forbidden_field_name in [
+        "targetDecryptionStatus",
+        "targetDecryptionReadiness",
+        "targetDecryptionCertificate",
+        "targetDecryptionCertificateHash",
+        "targetDecryptionClosure",
+        "targetDecryptionShareProofs",
+        "targetDecryptionShares",
+        "targetPartDecRecords",
+        "targetC1C4Certificate",
+    ] {
+        let mut package = minimal_collective_setup_package();
+        package[forbidden_field_name] = premature_target_decryption_artifact(forbidden_field_name);
+        rebind_collective_setup_package_hash(&mut package);
+        assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
+    }
+
+    let valid_nested_boundary_package = minimal_collective_setup_package();
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": valid_nested_boundary_package,
+    }))
+    .expect("verification response");
+    assert_ne!(
+        result["refusedObjects"][0]["reasonCode"], "acceptedPathForbiddenField",
+        "nested HE target-decryption status must remain allowed"
+    );
+}
+
+fn premature_target_decryption_artifact(field_name: &str) -> serde_json::Value {
+    match field_name {
+        "targetDecryptionStatus" => serde_json::json!({
+            "targetDecryptionReadiness": "accepted",
+            "targetDecryptionProfileId": "BGV-RNS-AsyncTargetDecryption-v1",
+        }),
+        "targetDecryptionReadiness" => serde_json::json!("accepted"),
+        "targetDecryptionCertificate" => serde_json::json!({
+            "objectType": "TargetDecryptionCertificate",
+            "objectVersion": 1,
+            "certificateStatus": "accepted",
+        }),
+        "targetDecryptionCertificateHash" => serde_json::json!(valid_hash('6')),
+        "targetDecryptionClosure" => serde_json::json!({
+            "closureStatus": "accepted",
+        }),
+        "targetDecryptionShareProofs" => serde_json::json!({
+            "objectType": "TargetDecryptionShareProofSet",
+            "proofRecords": [],
+        }),
+        "targetDecryptionShares" => serde_json::json!([]),
+        "targetPartDecRecords" => serde_json::json!([]),
+        "targetC1C4Certificate" => serde_json::json!({
+            "objectType": "TargetC1C4Certificate",
+            "certificateStatus": "accepted",
+        }),
+        _ => panic!("unsupported target-decryption artifact {field_name}"),
+    }
 }
 
 #[test]
@@ -283,6 +435,54 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
         "accepted terminal setup response must carry a handoff root"
     );
+}
+
+#[test]
+#[ignore = "manual accepted setup closure diagnostic"]
+fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift",
+    );
+    let (mut package, companions) = setup_package_with_transported_public_setup_companions();
+
+    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["statementHash"] =
+        serde_json::json!(valid_hash('4'));
+    rebind_trustee_evaluation_key_proof_record_root(&mut package, 0);
+    rebind_trustee_evaluation_key_proof_set_root(&mut package);
+    rebind_setup_key_correctness_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
+        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
+        "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
+        "transportedPublicKeyShareMaterial": companions.public_key_share_material,
+        "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
+        "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
+        "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
+        "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
+    }))
+    .expect("verification response");
+
+    assert_eq!(
+        result["verifierStatus"],
+        "refused",
+        "terminal setup verification result: {}",
+        serde_json::to_string_pretty(&result).expect("verification result JSON")
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("statementHash must match the statement rebuilt")
+    );
+    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -616,14 +816,120 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evalua
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "pending");
-    assert!(
-        result["missingObjects"]
-            .as_array()
-            .expect("missing objects")
-            .iter()
-            .any(|missing| missing == "trusteeEvaluationKeyProofs")
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofsMissing"
     );
+    assert_eq!(
+        result["refusedObjects"][0]["objectPath"],
+        "setupPackage.trusteeEvaluationKeyProofs"
+    );
+    assert!(result["acceptedSetupHandoff"].is_null());
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container",
+    );
+
+    for field_name in ["proofRecords", "trusteeEvaluationKeyProofSetRoot"] {
+        let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+        package["trusteeEvaluationKeyProofs"]
+            .as_object_mut()
+            .expect("trustee evaluation-key proof set")
+            .remove(field_name);
+        rebind_collective_setup_package_hash(&mut package);
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(
+            result["refusedObjects"][0]["reasonCode"],
+            "trusteeEvaluationKeyProofVerificationFailed"
+        );
+        assert!(
+            result["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message")
+                .contains(field_name)
+        );
+        assert_eq!(
+            result["refusedObjects"][0]["objectPath"],
+            "setupPackage.trusteeEvaluationKeyProofs"
+        );
+        assert!(result["acceptedSetupHandoff"].is_null());
+    }
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs()
+ {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs",
+    );
+
+    let mut extra_proof_package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let duplicate_proof_record =
+        extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
+    extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"]
+        .as_array_mut()
+        .expect("trustee evaluation-key proof records")
+        .push(duplicate_proof_record);
+    rebind_trustee_evaluation_key_proof_set_root(&mut extra_proof_package);
+    rebind_setup_key_correctness_certificate(&mut extra_proof_package);
+    rebind_collective_setup_package_hash(&mut extra_proof_package);
+    assert_refuses_trustee_evaluation_key_proof_variant(
+        extra_proof_package,
+        "proofRecords must contain one proof per trustee",
+    );
+
+    let mut duplicate_proof_package =
+        evaluation_key_proof_container_bearing_collective_setup_package();
+    duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][1] =
+        duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
+    rebind_trustee_evaluation_key_proof_record_root(&mut duplicate_proof_package, 1);
+    rebind_trustee_evaluation_key_proof_set_root(&mut duplicate_proof_package);
+    rebind_setup_key_correctness_certificate(&mut duplicate_proof_package);
+    rebind_collective_setup_package_hash(&mut duplicate_proof_package);
+    assert_refuses_trustee_evaluation_key_proof_variant(
+        duplicate_proof_package,
+        "proof records must be ordered by roster position",
+    );
+}
+
+fn assert_refuses_trustee_evaluation_key_proof_variant(
+    package: serde_json::Value,
+    message_fragment: &str,
+) {
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["objectPath"],
+        "setupPackage.trusteeEvaluationKeyProofs"
+    );
+    assert!(
+        result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains(message_fragment)
+    );
+    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -713,30 +1019,100 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof_bytes",
     );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    let proof_bytes_hex = package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHex"]
+    let package = evaluation_key_proof_container_bearing_collective_setup_package();
+
+    let mut noncanonical_claim_package = package.clone();
+    mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
+        &mut noncanonical_claim_package,
+        |proof_bytes| {
+            set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes);
+        },
+    );
+    let noncanonical_claim_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": noncanonical_claim_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(noncanonical_claim_result["verifierStatus"], "refused");
+    assert_eq!(
+        noncanonical_claim_result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+
+    let mut low_degree_shape_package = package;
+    let trustee_roster_position = low_degree_shape_package["trusteeEvaluationKeyProofs"]
+        ["proofRecords"][0]["trusteeRosterPosition"]
+        .as_u64()
+        .expect("trustee roster position");
+    let round_one_aggregate_diagonals =
+        round_one_aggregate_diagonals_from_fixture_package(&low_degree_shape_package, None);
+    let statement =
+        trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
+            setup_package: &low_degree_shape_package,
+            transported_key_switch_component_material: None,
+            transported_constant_commitments: &BTreeMap::new(),
+            round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals,
+            trustee_roster_position,
+        })
+        .expect("trustee evaluation-key statement");
+    let total_error_column_count = statement.keys.iter().map(|key| key.level + 1).sum();
+    let linkage_commitment_count = statement
+        .same_secret_linkage
+        .as_ref()
+        .expect("trustee evaluation-key same-secret linkage")
+        .commitments
+        .len();
+    mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
+        &mut low_degree_shape_package,
+        |proof_bytes| {
+            set_first_limb_low_degree_fold_count_to_wrong_value(
+                proof_bytes,
+                statement.ring_degree,
+                total_error_column_count,
+                linkage_commitment_count,
+            );
+        },
+    );
+    let low_degree_shape_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": low_degree_shape_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(low_degree_shape_result["verifierStatus"], "refused");
+    assert_eq!(
+        low_degree_shape_result["refusedObjects"][0]["reasonCode"],
+        "trusteeEvaluationKeyProofVerificationFailed"
+    );
+    assert!(
+        low_degree_shape_result["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("refusal message")
+            .contains("low-degree committed fold count does not match the statement")
+    );
+    assert!(low_degree_shape_result["acceptedSetupHandoff"].is_null());
+}
+
+fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
+    package: &mut serde_json::Value,
+    mutate_proof_bytes: impl FnOnce(&mut [u8]),
+) {
+    let proof_record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
+    let proof_bytes_hex = proof_record["proofBytesHex"]
         .as_str()
         .expect("embedded trustee proof bytes")
         .to_string();
-    let mut tampered_bytes = decode_hex(&proof_bytes_hex).expect("trustee proof bytes");
-    set_first_masked_consistency_claim_to_noncanonical_modulus(&mut tampered_bytes);
-    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHex"] =
-        serde_json::json!(to_hex(&tampered_bytes));
-    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHash"] =
-        serde_json::json!(trustee_evaluation_key_proof_bytes_hash(&tampered_bytes));
-    rebind_trustee_evaluation_key_proof_set_root(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
-    );
+    let mut proof_bytes = decode_hex(&proof_bytes_hex).expect("trustee proof bytes");
+    mutate_proof_bytes(&mut proof_bytes);
+    proof_record["proofBytesHex"] = serde_json::json!(to_hex(&proof_bytes));
+    proof_record["proofBytesHash"] =
+        serde_json::json!(trustee_evaluation_key_proof_bytes_hash(&proof_bytes));
+    proof_record["proofSizeBytes"] = serde_json::json!(proof_bytes.len());
+    rebind_trustee_evaluation_key_proof_record_root(package, 0);
+    rebind_trustee_evaluation_key_proof_set_root(package);
+    rebind_setup_key_correctness_certificate(package);
+    rebind_collective_setup_package_hash(package);
 }
 
 #[test]

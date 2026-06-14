@@ -241,6 +241,38 @@ pub(super) fn rebind_collective_same_secret_consistency_root(package: &mut serde
     );
 }
 
+pub(super) fn rebind_same_secret_proof_record_root(
+    package: &mut serde_json::Value,
+    proof_record_index: usize,
+) {
+    let proof_record = &mut package["sameSecretProofs"]["proofRecords"]
+        .as_array_mut()
+        .expect("same-secret proof records")[proof_record_index];
+    proof_record
+        .as_object_mut()
+        .expect("same-secret proof record")
+        .remove("sameSecretProofRoot");
+    proof_record["sameSecretProofRoot"] = serde_json::json!(
+        derive_protocol_hash("SameSecretProofRoot", proof_record).expect("same-secret proof root")
+    );
+}
+
+pub(super) fn rebind_collective_same_secret_proof_roots(package: &mut serde_json::Value) {
+    let proof_roots = package["sameSecretProofs"]["proofRecords"]
+        .as_array()
+        .expect("same-secret proof records")
+        .iter()
+        .map(|proof_record| {
+            serde_json::json!({
+                "trusteeIdentity": proof_record["trusteeIdentity"],
+                "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
+                "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
+            })
+        })
+        .collect::<Vec<_>>();
+    package["sameSecretProofs"]["sameSecretProofRoots"] = serde_json::json!(proof_roots);
+}
+
 pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_json::Value) {
     package["sameSecretProofs"]
         .as_object_mut()
@@ -391,6 +423,23 @@ pub(super) fn rebind_trustee_evaluation_key_proof_set_root(package: &mut serde_j
     );
 }
 
+pub(super) fn rebind_trustee_evaluation_key_proof_record_root(
+    package: &mut serde_json::Value,
+    proof_record_index: usize,
+) {
+    let proof_record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"]
+        .as_array_mut()
+        .expect("trustee evaluation-key proof records")[proof_record_index];
+    proof_record
+        .as_object_mut()
+        .expect("trustee evaluation-key proof record")
+        .remove("trusteeEvaluationKeyProofRoot");
+    proof_record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
+        derive_protocol_hash("TrusteeEvaluationKeyProofRoot", proof_record)
+            .expect("trustee evaluation-key proof root")
+    );
+}
+
 // Rebind the proof set's record-container bindings after share records were
 // re-rooted; the proofs themselves stay valid because the statements bind the
 // share-record content, not the package roots.
@@ -445,6 +494,22 @@ pub(super) fn rebind_collective_he_security_certificate_hash(package: &mut serde
     package["heSecurityCertificate"]["heSecurityCertificateHash"] =
         serde_json::json!(he_security_certificate_hash.clone());
     package["heSecurityCertificateHash"] = serde_json::json!(he_security_certificate_hash);
+}
+
+pub(super) fn rebind_setup_proof_accounting_certificate_hash(package: &mut serde_json::Value) {
+    package["setupProofAccountingCertificate"]
+        .as_object_mut()
+        .expect("setup proof accounting certificate")
+        .remove("setupProofAccountingCertificateHash");
+    let setup_proof_accounting_certificate_hash = derive_protocol_hash(
+        "SetupProofAccountingCertificateHash",
+        &package["setupProofAccountingCertificate"],
+    )
+    .expect("setup proof accounting certificate hash");
+    package["setupProofAccountingCertificate"]["setupProofAccountingCertificateHash"] =
+        serde_json::json!(setup_proof_accounting_certificate_hash.clone());
+    package["setupProofAccountingCertificateHash"] =
+        serde_json::json!(setup_proof_accounting_certificate_hash);
 }
 
 pub(super) fn rebind_setup_key_correctness_certificate(package: &mut serde_json::Value) {

@@ -610,6 +610,11 @@ const createKernelFixture = (): CeremonyKernelFixture => {
                     'PrivateVssShareEnvelopeHash',
                     privateEnvelope,
                 );
+                const rnsShareOpenings = Array.isArray(
+                    privateEnvelope.rnsShareOpenings,
+                )
+                    ? privateEnvelope.rnsShareOpenings
+                    : [];
                 const sourceTrusteeRecord =
                     input.sourceTrusteeCoefficientCommitmentRecord as Record<
                         string,
@@ -637,6 +642,8 @@ const createKernelFixture = (): CeremonyKernelFixture => {
                         ok: false,
                         privateEnvelopeHash,
                         localVerificationRoot: null,
+                        verifiedPrivateVssShareProofCount:
+                            rnsShareOpenings.length,
                         refusedObjects: [
                             {
                                 reasonCode: 'mixed-source-material',
@@ -698,6 +705,7 @@ const createKernelFixture = (): CeremonyKernelFixture => {
                     ok: true,
                     privateEnvelopeHash,
                     localVerificationRoot,
+                    verifiedPrivateVssShareProofCount: rnsShareOpenings.length,
                     refusedObjects: [],
                 };
             },
@@ -744,6 +752,36 @@ const createRefusingKernelFixture = (): CeremonyKernelFixture => {
         },
     };
 };
+
+const createShortPrivateVssProofCountKernelFixture =
+    (): CeremonyKernelFixture => {
+        const kernelFixture = createKernelFixture();
+
+        return {
+            verifiedExpectedEnvelopeCount:
+                kernelFixture.verifiedExpectedEnvelopeCount,
+            kernel: {
+                ...kernelFixture.kernel,
+                verifyPrivateVssShareEnvelope: (input) => {
+                    const result =
+                        kernelFixture.kernel.verifyPrivateVssShareEnvelope(
+                            input,
+                        );
+                    if (!result.ok) {
+                        return result;
+                    }
+
+                    return {
+                        ...result,
+                        verifiedPrivateVssShareProofCount: Math.max(
+                            0,
+                            (result.verifiedPrivateVssShareProofCount ?? 0) - 1,
+                        ),
+                    };
+                },
+            },
+        };
+    };
 
 const coefficientMessage = (
     sourceTrusteeRosterPosition: number,
@@ -4325,5 +4363,16 @@ describe('setup ceremony assembly', () => {
                 createAssemblyInput(participantCount, kernelFixture.kernel),
             ),
         ).rejects.toThrow(/recipient-local verification/u);
+    });
+
+    it('rejects recipient-local private VSS verification that omits a Q_share proof', async () => {
+        const participantCount = 3;
+        const kernelFixture = createShortPrivateVssProofCountKernelFixture();
+
+        await expect(
+            createSetupCeremonyAssembly(
+                createAssemblyInput(participantCount, kernelFixture.kernel),
+            ),
+        ).rejects.toThrow(/verifiedPrivateVssShareProofCount/u);
     });
 });

@@ -854,6 +854,14 @@ pub(super) fn verify_public_key_share_proofs(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let Some(proof_set) = setup_package.get("publicKeyShareProofs") else {
+        if public_key_share_proofs_have_terminal_dependents(setup_package) {
+            return Ok(Some(public_key_share_proof_refusal(
+                "publicKeyShareProofsMissing",
+                "publicKeyShareProofs must be present before dependent public-key succinct proofs or terminal key material can be accepted",
+                "setupPackage.publicKeyShareProofs",
+            )?));
+        }
+
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
@@ -982,12 +990,10 @@ pub(super) fn verify_public_key_share_proofs(
     let share_bindings = public_key_share_bindings_from_package(setup_package)?;
     let same_secret_bindings = same_secret_statement_bindings_from_package(setup_package)?;
     let Some(proof_records) = proof_set.get("proofRecords").and_then(Value::as_array) else {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("publicKeyShareProofs"),
-            vec!["publicKeyShareProofs.proofRecords".to_string()],
-            Vec::new(),
-            Vec::new(),
+        return Ok(Some(public_key_share_proof_refusal(
+            "publicKeyShareProofRecordsMissing",
+            "publicKeyShareProofs.proofRecords must be present on the accepted proof set",
+            "setupPackage.publicKeyShareProofs.proofRecords",
         )?));
     };
     if proof_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
@@ -1030,12 +1036,10 @@ pub(super) fn verify_public_key_share_proofs(
         .get("publicKeyShareProofSetRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("publicKeyShareProofs"),
-            vec!["publicKeyShareProofs.publicKeyShareProofSetRoot".to_string()],
-            Vec::new(),
-            Vec::new(),
+        return Ok(Some(public_key_share_proof_refusal(
+            "publicKeyShareProofSetRootMissing",
+            "publicKeyShareProofs.publicKeyShareProofSetRoot must be present on the accepted proof set",
+            "setupPackage.publicKeyShareProofs.publicKeyShareProofSetRoot",
         )?));
     };
     validate_hash_string(
@@ -1059,6 +1063,26 @@ pub(super) fn verify_public_key_share_proofs(
     Ok(None)
 }
 
+fn public_key_share_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
+    setup_package.get("publicKeyShareSuccinctProofs").is_some()
+        || public_key_share_succinct_proofs_have_terminal_dependents(setup_package)
+}
+
+fn public_key_share_succinct_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
+    setup_package.get("collectivePublicKey").is_some()
+        || setup_package.get("collectivePublicKeyRoot").is_some()
+        || setup_package.get("relinearizationKeyShareRounds").is_some()
+        || setup_package.get("galoisKeyShareBatches").is_some()
+        || setup_package.get("trusteeEvaluationKeyProofs").is_some()
+        || setup_package.get("evaluationKeys").is_some()
+        || setup_package
+            .get("setupKeyCorrectnessCertificate")
+            .is_some()
+        || setup_package
+            .get("setupKeyCorrectnessCertificateHash")
+            .is_some()
+}
+
 pub(super) fn verify_optional_public_key_share_succinct_proofs(
     setup_package: &Value,
     request: &Value,
@@ -1078,6 +1102,14 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
         )?));
     };
     let Some(proof_set) = proof_set else {
+        if public_key_share_succinct_proofs_have_terminal_dependents(setup_package) {
+            return Ok(Some(public_key_share_succinct_proof_refusal(
+                "publicKeyShareSuccinctProofsMissing",
+                "publicKeyShareSuccinctProofs must be present before terminal public-key or evaluation-key material can be accepted",
+                "setupPackage.publicKeyShareSuccinctProofs",
+            )?));
+        }
+
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
@@ -1105,12 +1137,10 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
     let common_binding = public_key_common_binding(setup_package)?;
     let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
     if setup_package.get("sameSecretProofs").is_none() {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("proofVerification"),
-            vec!["sameSecretProofs".to_string()],
-            Vec::new(),
-            Vec::new(),
+        return Ok(Some(public_key_share_succinct_proof_refusal(
+            "sameSecretProofsMissing",
+            "sameSecretProofs must be present before public-key succinct proofs can be verified",
+            "setupPackage.sameSecretProofs",
         )?));
     }
     let same_secret_proof_set_root = same_secret_proof_set_root_from_package(setup_package)?;
@@ -1286,12 +1316,10 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
         )?));
     }
     let Some(proof_records_array) = proof_set.get("proofRecords").and_then(Value::as_array) else {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("publicKeyShareProofs"),
-            vec!["publicKeyShareSuccinctProofs.proofRecords".to_string()],
-            Vec::new(),
-            Vec::new(),
+        return Ok(Some(public_key_share_succinct_proof_refusal(
+            "publicKeyShareSuccinctProofRecordsMissing",
+            "publicKeyShareSuccinctProofs.proofRecords must be present on the accepted proof set",
+            "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
         )?));
     };
     if proof_records_array.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
@@ -1347,12 +1375,10 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
         .get("publicKeyShareSuccinctProofSetRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("publicKeyShareProofs"),
-            vec!["publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot".to_string()],
-            Vec::new(),
-            Vec::new(),
+        return Ok(Some(public_key_share_succinct_proof_refusal(
+            "publicKeyShareSuccinctProofSetRootMissing",
+            "publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot must be present on the accepted proof set",
+            "setupPackage.publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot",
         )?));
     };
     validate_hash_string(
@@ -1622,6 +1648,12 @@ fn verify_public_key_share_succinct_proof_record(
     }
     let limb_zero_commitment = constant_commitments.remove(0);
     let ring_degree = limb_zero_commitment.ring_degree;
+    if value_u64(proof_record, "ringDegree")? != ring_degree as u64 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key share succinct proof ringDegree must match the rebuilt statement",
+        ));
+    }
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
@@ -2308,6 +2340,7 @@ fn unexpected_public_key_share_succinct_proof_record_field(value: &Value) -> Opt
             "setupEpoch",
             "trusteeIdentity",
             "trusteeRosterPosition",
+            "ringDegree",
             "publicKeyShareRoot",
             "publicKeyShareProofRoot",
             "publicKeyShareMaterialRoot",

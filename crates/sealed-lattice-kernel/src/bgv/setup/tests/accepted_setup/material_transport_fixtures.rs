@@ -768,15 +768,6 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
 
     let public_evaluation_key_material = add_public_evaluation_key_material_transport(&mut package);
     terminal_phase("generated public evaluation-key material");
-    append_transport_certificate_entries_from_material_set(
-        &mut package,
-        &public_evaluation_key_material,
-        "publicEvaluationKeyMaterials",
-        "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterial",
-        "public-evaluation-key-runtime-material",
-        DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
-    );
 
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);

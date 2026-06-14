@@ -154,6 +154,7 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly ok: boolean;
         readonly privateEnvelopeHash: ProtocolHash | null;
         readonly localVerificationRoot: ProtocolHash | null;
+        readonly verifiedPrivateVssShareProofCount?: number;
         readonly refusedObjects: readonly {
             readonly reasonCode: string;
             readonly message: string;
@@ -216,6 +217,23 @@ const privateVssEnvelopeCommitmentSetRootInput = (
         privateVssEnvelopeCommitmentRootInput,
     ),
 });
+
+const assertAcceptedPrivateVssProofCoverage = (
+    localVerification: {
+        readonly verifiedPrivateVssShareProofCount?: number;
+    },
+    expectedProofCount: number,
+    objectPath: string,
+): void => {
+    if (
+        localVerification.verifiedPrivateVssShareProofCount !==
+        expectedProofCount
+    ) {
+        throw new Error(
+            `${objectPath}.verifiedPrivateVssShareProofCount must match the accepted Q_share limb count.`,
+        );
+    }
+};
 
 export type PrivateVssMailboxDeliverySet = Readonly<
     JsonRecord & {
@@ -1106,6 +1124,11 @@ const createEnvelopeCommitment = async (
                 : `Private VSS envelope failed local verification: ${refusal.reasonCode}: ${refusal.message}`,
         );
     }
+    assertAcceptedPrivateVssProofCoverage(
+        localVerification,
+        input.qSharePrimes.length,
+        'localVerification',
+    );
     const encryptedDelivery = await encryptPrivateVssMailboxEnvelope({
         privateEnvelope: privateShareEnvelopeBuild.privateEnvelope,
         privateEnvelopeAad: associatedData,

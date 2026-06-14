@@ -52,6 +52,14 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         };
     }
     let Some(proof_set) = proof_set else {
+        if trustee_evaluation_key_proofs_have_terminal_dependents(setup_package) {
+            return Ok(Some(evaluation_key_material_refusal(
+                "trusteeEvaluationKeyProofsMissing",
+                "trusteeEvaluationKeyProofs must be present before terminal evaluation-key material can be accepted",
+                "setupPackage.trusteeEvaluationKeyProofs",
+            )?));
+        }
+
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("trusteeEvaluationKeyProofs"),
@@ -76,6 +84,16 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     }
 
     Ok(None)
+}
+
+fn trustee_evaluation_key_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
+    setup_package.get("evaluationKeys").is_some()
+        || setup_package
+            .get("setupKeyCorrectnessCertificate")
+            .is_some()
+        || setup_package
+            .get("setupKeyCorrectnessCertificateHash")
+            .is_some()
 }
 
 fn verify_trustee_evaluation_key_proof_set(

@@ -78,10 +78,10 @@ describe('trustee evaluation-key browser measurement', () => {
             trusteeRosterPosition: 0,
             setupEpoch: 'setup-epoch-1',
             requiredGaloisSetHash: fixtureHash('required-galois-set'),
-            evaluatorKeyScheduleRoot: fixtureHash('evaluator-key-schedule-root'),
-            keySwitchDecompositionHash: fixtureHash(
-                'key-switch-decomposition',
+            evaluatorKeyScheduleRoot: fixtureHash(
+                'evaluator-key-schedule-root',
             ),
+            keySwitchDecompositionHash: fixtureHash('key-switch-decomposition'),
             sameSecretStatementRoot: fixtureHash('same-secret-statement-root'),
             sameSecretProofRoot: fixtureHash('same-secret-proof-root'),
         } as const;

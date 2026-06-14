@@ -39,7 +39,9 @@ describe('public-key share browser measurement', () => {
         expect(qSharePrimes).toHaveLength(firstProfileRnsLimbCount);
         const limbZeroPrime = qSharePrimes[0];
         if (limbZeroPrime === undefined) {
-            throw new Error('Collective setup profile must expose Q_share primes.');
+            throw new Error(
+                'Collective setup profile must expose Q_share primes.',
+            );
         }
 
         const fixtureHash = (label: string): string =>

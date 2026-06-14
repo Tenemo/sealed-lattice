@@ -7,8 +7,9 @@ use super::*;
 
 // Canonical binary proof encoding. The decoder is statement-driven: every
 // count and width is derived from the statement and the fixed parameters, so
-// the byte stream carries no self-describing lengths except the variable
-// low-degree fold depth, and trailing bytes are refused.
+// the byte stream carries no self-describing lengths except folded-layer
+// opening lengths that are checked against the statement, and trailing bytes
+// are refused.
 const PROOF_MAGIC: &[u8; 8] = b"SLTEKP01";
 
 pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyProof) -> Vec<u8> {
@@ -154,11 +155,10 @@ fn decode_low_degree_proof(
 ) -> CanonicalResult<LowDegreeProof> {
     let fold_count = usize::try_from(read_u64(bytes, cursor)?)
         .map_err(|_| invalid_succinct_setup_proof("low-degree fold count does not fit usize"))?;
-    // The fold depth is bounded by the domain size; refuse absurd values
-    // before allocating.
-    if fold_count > initial_domain_size.trailing_zeros() as usize {
+    let expected_fold_count = expected_low_degree_committed_fold_count(initial_domain_size)?;
+    if fold_count != expected_fold_count {
         return Err(invalid_succinct_setup_proof(
-            "low-degree fold count exceeds the domain depth",
+            "low-degree committed fold count does not match the statement",
         ));
     }
     let folded_layer_roots = read_hash_vec(bytes, cursor, fold_count)?;
@@ -167,15 +167,17 @@ fn decode_low_degree_proof(
     let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
     for _ in 0..LOW_DEGREE_QUERY_COUNT {
         let mut folded_layer_pairs = Vec::with_capacity(fold_count);
-        for _ in 0..fold_count {
+        for fold_index in 0..fold_count {
             let first = read_extension_element(bytes, cursor, modulus)?;
             let second = read_extension_element(bytes, cursor, modulus)?;
             let path_length = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
                 invalid_succinct_setup_proof("low-degree path length does not fit usize")
             })?;
-            if path_length > initial_domain_size.trailing_zeros() as usize {
+            let expected_path_length =
+                expected_low_degree_folded_layer_path_length(initial_domain_size, fold_index)?;
+            if path_length != expected_path_length {
                 return Err(invalid_succinct_setup_proof(
-                    "low-degree path length exceeds the domain depth",
+                    "low-degree folded layer path length does not match the statement",
                 ));
             }
             let path = read_hash_vec(bytes, cursor, path_length)?;
@@ -192,6 +194,62 @@ fn decode_low_degree_proof(
         final_coefficients,
         query_openings,
     })
+}
+
+fn expected_low_degree_committed_fold_count(initial_domain_size: usize) -> CanonicalResult<usize> {
+    let initial_degree_bound_numerator = initial_domain_size
+        .checked_mul(COMMITMENT_BOUND_FACTOR)
+        .ok_or_else(|| {
+        invalid_succinct_setup_proof("low-degree statement domain size overflowed")
+    })?;
+    if initial_domain_size == 0
+        || !initial_domain_size.is_power_of_two()
+        || initial_degree_bound_numerator % DOMAIN_BLOWUP != 0
+    {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree statement domain does not match the fixed proof parameters",
+        ));
+    }
+
+    let initial_degree_bound = initial_degree_bound_numerator / DOMAIN_BLOWUP;
+    if initial_degree_bound <= LOW_DEGREE_FINAL_COEFFICIENT_COUNT
+        || !initial_degree_bound.is_multiple_of(LOW_DEGREE_FINAL_COEFFICIENT_COUNT)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree statement bound does not reach the final coefficient layer",
+        ));
+    }
+
+    let fold_ratio = initial_degree_bound / LOW_DEGREE_FINAL_COEFFICIENT_COUNT;
+    if !fold_ratio.is_power_of_two() {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree statement bound does not have a canonical fold depth",
+        ));
+    }
+
+    Ok(fold_ratio.trailing_zeros() as usize - 1)
+}
+
+fn expected_low_degree_folded_layer_path_length(
+    initial_domain_size: usize,
+    committed_fold_index: usize,
+) -> CanonicalResult<usize> {
+    let leaf_count_shift = committed_fold_index
+        .checked_add(2)
+        .ok_or_else(|| invalid_succinct_setup_proof("low-degree folded layer index overflowed"))?;
+    if leaf_count_shift >= usize::BITS as usize {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree folded layer index exceeds the statement domain",
+        ));
+    }
+    let leaf_count = initial_domain_size >> leaf_count_shift;
+    if leaf_count == 0 || !leaf_count.is_power_of_two() {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree folded layer tree does not match the statement domain",
+        ));
+    }
+
+    Ok(leaf_count.trailing_zeros() as usize)
 }
 
 fn write_u64_slice(bytes: &mut Vec<u8>, values: &[u64]) {

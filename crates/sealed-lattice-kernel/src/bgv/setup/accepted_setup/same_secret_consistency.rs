@@ -707,12 +707,10 @@ pub(super) fn verify_optional_same_secret_proofs(
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
     let Some(proof_records) = proof_set.get("proofRecords").and_then(Value::as_array) else {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("proofVerification"),
-            vec!["sameSecretProofs.proofRecords".to_string()],
-            Vec::new(),
-            Vec::new(),
+        return Ok(Some(same_secret_proof_refusal(
+            "sameSecretProofRecordsMissing",
+            "sameSecretProofs.proofRecords must be present on the accepted proof set",
+            "setupPackage.sameSecretProofs.proofRecords",
         )?));
     };
     if proof_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
@@ -773,12 +771,10 @@ pub(super) fn verify_optional_same_secret_proofs(
         .get("sameSecretProofSetRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("proofVerification"),
-            vec!["sameSecretProofs.sameSecretProofSetRoot".to_string()],
-            Vec::new(),
-            Vec::new(),
+        return Ok(Some(same_secret_proof_refusal(
+            "sameSecretProofSetRootMissing",
+            "sameSecretProofs.sameSecretProofSetRoot must be present on the accepted proof set",
+            "setupPackage.sameSecretProofs.sameSecretProofSetRoot",
         )?));
     };
     validate_hash_string(proof_set_root, "sameSecretProofs.sameSecretProofSetRoot")?;
@@ -925,6 +921,12 @@ fn verify_same_secret_anchor_proof_record(
             )
         })?
         .ring_degree;
+    if value_u64(proof_record, "ringDegree")? != ring_degree as u64 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "same-secret proof ringDegree must match the rebuilt anchor statement",
+        ));
+    }
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY.to_string(),
@@ -1893,6 +1895,7 @@ fn unexpected_same_secret_proof_record_field(value: &Value) -> Option<String> {
             "setupEpoch",
             "trusteeIdentity",
             "trusteeRosterPosition",
+            "ringDegree",
             "sameSecretStatementRoot",
             "trusteeSecretCommitmentRoot",
             "sameSecretProofFamilyBindingRoot",

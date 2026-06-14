@@ -521,6 +521,7 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly genericKeySwitchPolicy: string;
     readonly transportProfileId: string;
     readonly forbiddenAcceptedPathFields: readonly string[];
+    readonly topLevelForbiddenAcceptedPathFields: readonly string[];
 };
 
 export type BgvCollectiveSetupPublicDerivations = {

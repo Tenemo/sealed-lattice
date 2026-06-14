@@ -67,15 +67,18 @@ use self::record_rebinding::{
     rebind_collective_phase_roots, rebind_collective_private_vss_envelope_commitment_root,
     rebind_collective_public_key_root, rebind_collective_public_key_share_proof_roots,
     rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
-    rebind_collective_same_secret_consistency_root, rebind_collective_same_secret_proof_set_root,
-    rebind_collective_same_secret_statement_roots, rebind_collective_setup_package_hash,
-    rebind_collective_threshold_share_commitment_root, rebind_collective_vss_acceptance_root,
+    rebind_collective_same_secret_consistency_root, rebind_collective_same_secret_proof_roots,
+    rebind_collective_same_secret_proof_set_root, rebind_collective_same_secret_statement_roots,
+    rebind_collective_setup_package_hash, rebind_collective_threshold_share_commitment_root,
+    rebind_collective_vss_acceptance_root,
     rebind_collective_vss_coefficient_commitment_material_root,
     rebind_collective_vss_commitment_roots, rebind_collective_vss_complaint_root,
     rebind_first_private_vss_encrypted_envelope_hash,
     rebind_first_private_vss_envelope_commitment_record_root, rebind_galois_key_share_batch_root,
-    rebind_setup_key_correctness_certificate, rebind_trustee_evaluation_key_proof_set_bindings,
-    rebind_trustee_evaluation_key_proof_set_root,
+    rebind_same_secret_proof_record_root, rebind_setup_key_correctness_certificate,
+    rebind_setup_proof_accounting_certificate_hash,
+    rebind_trustee_evaluation_key_proof_record_root,
+    rebind_trustee_evaluation_key_proof_set_bindings, rebind_trustee_evaluation_key_proof_set_root,
 };
 
 use super::super::accepted_setup::{
@@ -122,7 +125,8 @@ use super::super::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
     TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS, TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
     TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
-    succinct_evaluation_key_proof_accounting_hash, trustee_evaluation_key_proof_bytes_hash,
+    public_key_share_succinct_proof_bytes_hash, succinct_evaluation_key_proof_accounting_hash,
+    trustee_evaluation_key_proof_bytes_hash,
 };
 use super::super::trustee_evaluation_key_proof::{
     PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
@@ -183,6 +187,87 @@ fn set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes: &mut 
     );
     proof_bytes[FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET..end]
         .copy_from_slice(&crate::bgv::profile::DATA_PRIMES[0].to_le_bytes());
+}
+
+fn set_first_limb_low_degree_fold_count_to_wrong_value(
+    proof_bytes: &mut [u8],
+    ring_degree: usize,
+    total_error_columns: usize,
+    linkage_commitment_count: usize,
+) {
+    const PROOF_CODEC_TRACE_SPLIT: usize = 2;
+    const PROOF_CODEC_DOMAIN_BLOWUP: usize = 4;
+    const PROOF_CODEC_DEEP_POINT_COUNT: usize = 2;
+    const PROOF_CODEC_CONSISTENCY_REPETITIONS: usize = 20;
+    const PROOF_CODEC_CLAIM_MASK_DIGIT_COUNT: usize = 92;
+    const PROOF_CODEC_CHALLENGE_EXTENSION_DEGREE: usize = 4;
+    const PROOF_CODEC_PHASE_TWO_COLUMN_COUNT: usize = 4;
+    const PROOF_CODEC_ROOT_BYTES_PER_LIMB: usize = 64 + 64;
+    const PROOF_CODEC_HEADER_BYTES: usize = 8 + 8;
+
+    let linkage_randomness_columns = linkage_commitment_count
+        .checked_mul(SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+        .expect("linkage randomness column count");
+    let linkage_logical_columns = if linkage_randomness_columns == 0 {
+        0
+    } else {
+        1 + linkage_randomness_columns
+    };
+    let consistency_vector_count = 1 + total_error_columns + linkage_logical_columns;
+    let claim_count = consistency_vector_count
+        .checked_mul(PROOF_CODEC_CONSISTENCY_REPETITIONS)
+        .expect("claim count");
+    let mask_slot_count = claim_count
+        .checked_mul(PROOF_CODEC_CLAIM_MASK_DIGIT_COUNT)
+        .expect("mask slot count");
+    let mask_column_count = mask_slot_count.div_ceil(ring_degree);
+    let phase_one_logical_columns = 1_usize
+        .checked_add(2 * total_error_columns)
+        .and_then(|count| count.checked_add(linkage_logical_columns))
+        .and_then(|count| count.checked_add(mask_column_count))
+        .expect("phase-one logical column count");
+    let phase_one_physical_count = PROOF_CODEC_TRACE_SPLIT
+        .checked_mul(phase_one_logical_columns)
+        .expect("phase-one physical count");
+    let total_column_count = phase_one_physical_count + PROOF_CODEC_PHASE_TWO_COLUMN_COUNT;
+    let deep_evaluation_bytes = PROOF_CODEC_DEEP_POINT_COUNT
+        .checked_mul(total_column_count)
+        .and_then(|count| count.checked_mul(PROOF_CODEC_CHALLENGE_EXTENSION_DEGREE))
+        .and_then(|count| count.checked_mul(8))
+        .expect("deep-evaluation byte count");
+    let low_degree_fold_count_offset = PROOF_CODEC_HEADER_BYTES
+        .checked_add(PROOF_CODEC_ROOT_BYTES_PER_LIMB)
+        .and_then(|offset| offset.checked_add(claim_count * 8))
+        .and_then(|offset| offset.checked_add(deep_evaluation_bytes))
+        .expect("low-degree fold-count offset");
+    let low_degree_fold_count_end = low_degree_fold_count_offset + 8;
+    assert!(
+        proof_bytes.len() >= low_degree_fold_count_end,
+        "proof bytes must include the first low-degree fold count"
+    );
+
+    let mut fold_count_bytes = [0_u8; 8];
+    fold_count_bytes
+        .copy_from_slice(&proof_bytes[low_degree_fold_count_offset..low_degree_fold_count_end]);
+    let committed_fold_count = u64::from_le_bytes(fold_count_bytes);
+    assert!(
+        committed_fold_count > 0,
+        "first low-degree committed fold count must be nonzero"
+    );
+    let wrong_committed_fold_count = committed_fold_count - 1;
+    proof_bytes[low_degree_fold_count_offset..low_degree_fold_count_end]
+        .copy_from_slice(&wrong_committed_fold_count.to_le_bytes());
+
+    let trace_size = ring_degree / PROOF_CODEC_TRACE_SPLIT;
+    let extension_size = trace_size * PROOF_CODEC_DOMAIN_BLOWUP;
+    let expected_degree_bound = extension_size / 2;
+    let final_coefficient_count = 8;
+    let expected_committed_fold_count =
+        (expected_degree_bound / final_coefficient_count).trailing_zeros() as u64 - 1;
+    assert_eq!(
+        committed_fold_count, expected_committed_fold_count,
+        "test offset must point at the first low-degree committed fold count"
+    );
 }
 
 // Shared elapsed-clock logger for the terminal accepted-setup fixture phases.

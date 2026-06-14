@@ -423,6 +423,93 @@ fn collective_setup_verifier_refuses_private_vss_proof_sidecars_in_public_packag
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_private_vss_proof_sidecars_in_public_package",
     );
+    let mut set_extra_proof_package = minimal_collective_setup_package();
+    set_extra_proof_package["privateVssEnvelopeCommitments"]["privateVssShareProofMaterialRoot"] =
+        serde_json::json!(valid_hash('2'));
+    rebind_collective_private_vss_envelope_commitment_root(&mut set_extra_proof_package);
+    rebind_collective_setup_package_hash(&mut set_extra_proof_package);
+
+    let set_extra_proof_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": set_extra_proof_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(set_extra_proof_result["verifierStatus"], "refused");
+    assert_eq!(
+        set_extra_proof_result["refusedObjects"][0]["reasonCode"],
+        "privateVssEnvelopeCommitmentSetUnexpectedField"
+    );
+    assert!(
+        set_extra_proof_result["refusedObjects"][0]["objectPath"]
+            .as_str()
+            .expect("object path")
+            .contains("privateVssShareProofMaterialRoot")
+    );
+    assert!(set_extra_proof_result["acceptedSetupHandoff"].is_null());
+
+    let mut current_private_proof_package = minimal_collective_setup_package();
+    current_private_proof_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["privateVssShareProof"] = serde_json::json!({
+        "objectType": "PrivateVssShareProof",
+        "objectVersion": 1,
+        "proofFamily": "vss-opening-carry",
+        "proofBytesHash": valid_hash('8'),
+    });
+    rebind_first_private_vss_envelope_commitment_record_root(&mut current_private_proof_package);
+    rebind_collective_private_vss_envelope_commitment_root(&mut current_private_proof_package);
+    rebind_collective_setup_package_hash(&mut current_private_proof_package);
+
+    let current_private_proof_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": current_private_proof_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(current_private_proof_result["verifierStatus"], "refused");
+    assert_eq!(
+        current_private_proof_result["refusedObjects"][0]["reasonCode"],
+        "privateVssEnvelopeReferenceUnexpectedField"
+    );
+    assert!(
+        current_private_proof_result["refusedObjects"][0]["objectPath"]
+            .as_str()
+            .expect("object path")
+            .contains("privateVssShareProof")
+    );
+    assert!(current_private_proof_result["acceptedSetupHandoff"].is_null());
+
+    let mut leaking_encrypted_envelope_package = minimal_collective_setup_package();
+    leaking_encrypted_envelope_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]
+        ["encryptedEnvelope"]["privateShareValues"] = serde_json::json!([1, 2, 3]);
+    rebind_first_private_vss_encrypted_envelope_hash(&mut leaking_encrypted_envelope_package);
+    rebind_first_private_vss_envelope_commitment_record_root(
+        &mut leaking_encrypted_envelope_package,
+    );
+    rebind_collective_private_vss_envelope_commitment_root(&mut leaking_encrypted_envelope_package);
+    rebind_collective_setup_package_hash(&mut leaking_encrypted_envelope_package);
+
+    let leaking_encrypted_envelope_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": leaking_encrypted_envelope_package,
+        }))
+        .expect("verification response");
+
+    assert_eq!(
+        leaking_encrypted_envelope_result["verifierStatus"],
+        "refused"
+    );
+    assert_eq!(
+        leaking_encrypted_envelope_result["refusedObjects"][0]["reasonCode"],
+        "privateVssEncryptedEnvelopeUnexpectedField"
+    );
+    assert!(
+        leaking_encrypted_envelope_result["refusedObjects"][0]["objectPath"]
+            .as_str()
+            .expect("object path")
+            .contains("privateShareValues")
+    );
+    assert!(leaking_encrypted_envelope_result["acceptedSetupHandoff"].is_null());
+
     let mut transported_private_proof_package = minimal_collective_setup_package();
     transported_private_proof_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["transportedPrivateVssShareProofMaterial"] = serde_json::json!({
         "objectType": "SetupTransportedPrivateVssShareProofMaterialSet",

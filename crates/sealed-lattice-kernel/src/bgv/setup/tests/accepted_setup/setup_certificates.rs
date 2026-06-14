@@ -310,6 +310,145 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_legacy_proof_accounting_rows() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_legacy_proof_accounting_rows",
+    );
+
+    for (
+        legacy_proof_family,
+        legacy_claim_scope,
+        legacy_verifier_closed_status,
+        legacy_accounting_status,
+    ) in [
+        (
+            "same-secret-linkage-anchor-lnp-tbox",
+            "legacy same-secret LNP/tbox proof route",
+            "legacy-same-secret-proof-route-not-accepted",
+            "legacy-same-secret-proof-accounting-not-accepted",
+        ),
+        (
+            "public-key-share-lnp-tbox",
+            "legacy public-key LNP/tbox proof route",
+            "legacy-public-key-proof-route-not-accepted",
+            "legacy-public-key-proof-accounting-not-accepted",
+        ),
+        (
+            "trustee-evaluation-key-lnp-tbox",
+            "legacy trustee evaluation-key LNP/tbox proof route",
+            "legacy-trustee-evaluation-key-proof-route-not-accepted",
+            "legacy-trustee-evaluation-key-proof-accounting-not-accepted",
+        ),
+    ] {
+        let mut package = minimal_collective_setup_package();
+        package["setupProofAccountingCertificate"]["proofFamilies"]
+            .as_array_mut()
+            .expect("proof family list")
+            .push(serde_json::json!(legacy_proof_family));
+        package["setupProofAccountingCertificate"]["proofFamilyAccounting"]
+            .as_array_mut()
+            .expect("proof family accounting")
+            .push(serde_json::json!({
+                "proofFamily": legacy_proof_family,
+                "claimScope": legacy_claim_scope,
+                "verifierClosedStatus": legacy_verifier_closed_status,
+                "accountingStatus": legacy_accounting_status,
+            }));
+        rebind_setup_proof_accounting_certificate_hash(&mut package);
+        rebind_collective_setup_package_hash(&mut package);
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(
+            result["refusedObjects"][0]["reasonCode"],
+            "setupProofAccountingCertificatePayloadMismatch"
+        );
+        assert!(result["acceptedSetupHandoff"].is_null());
+    }
+}
+
+#[test]
+fn collective_setup_verifier_refuses_duplicate_current_proof_accounting_row() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_duplicate_current_proof_accounting_row",
+    );
+    let mut package = minimal_collective_setup_package();
+    let duplicate_public_key_accounting_row =
+        package["setupProofAccountingCertificate"]["proofFamilyAccounting"][2].clone();
+    package["setupProofAccountingCertificate"]["proofFamilies"]
+        .as_array_mut()
+        .expect("proof family list")
+        .push(serde_json::json!("public-key-share"));
+    package["setupProofAccountingCertificate"]["proofFamilyAccounting"]
+        .as_array_mut()
+        .expect("proof family accounting")
+        .push(duplicate_public_key_accounting_row);
+    rebind_setup_proof_accounting_certificate_hash(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupProofAccountingCertificatePayloadMismatch"
+    );
+    assert!(result["acceptedSetupHandoff"].is_null());
+}
+
+#[test]
+fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
+    );
+
+    let model_row_mutations: [fn(&mut serde_json::Value); 4] = [
+        |package| {
+            package["setupProofAccountingCertificate"]["fiatShamirTranscriptAccounting"]["qromReductionStatus"] =
+                serde_json::json!("qrom-reduction-loss-accepted-for-final-claim");
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["challengeAccounting"]["qromStatus"] =
+                serde_json::json!("qrom-reduction-loss-computed-and-accepted");
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] =
+                serde_json::json!("128-bit zero-knowledge accepted for every setup proof family");
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]["zeroKnowledge"]
+                ["smudgingBudget"]["acceptedFor128BitZeroKnowledge"] = serde_json::json!(true);
+        },
+    ];
+
+    for mutate_model_row in model_row_mutations {
+        let mut package = minimal_collective_setup_package();
+        mutate_model_row(&mut package);
+        rebind_setup_proof_accounting_certificate_hash(&mut package);
+        rebind_collective_setup_package_hash(&mut package);
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(
+            result["refusedObjects"][0]["reasonCode"],
+            "setupProofAccountingCertificatePayloadMismatch"
+        );
+        assert!(result["acceptedSetupHandoff"].is_null());
+    }
+}
+
+#[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_proof_challenge_audit_hash_drift() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(

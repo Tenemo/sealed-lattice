@@ -180,9 +180,10 @@ const setupProofChallengeSeedDomain =
 const setupProofChallengeStreamDomain =
     'sealed-lattice/collective-bgv-setup/lnp-challenge-stream-v1';
 const setupProofBytesDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-proof-bytes-v1';
+    'sealed-lattice/collective-bgv-setup/succinct-proof-bytes-v1';
 const setupProofSerialization = 'binary';
-const setupProofByteDecoder = 'sealed-lattice-lnp-tbox-proof-byte-decoder-v1';
+const setupProofByteDecoder =
+    'sealed-lattice-succinct-setup-proof-byte-decoder-v1';
 const setupProofChallengeSpaceAuditHashNamespace =
     'SetupProofChallengeSpaceAuditHash';
 const setupProofChallengeDifferenceInvertibilityStatus =

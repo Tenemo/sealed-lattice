@@ -132,13 +132,12 @@ const SETUP_PROOF_LNP_TBOX_LOWER_PROTOCOL_CHALLENGE_DOMAIN: &str =
 const SETUP_PROOF_LNP_TBOX_LOWER_PROTOCOL_CHALLENGE_SEED_DOMAIN: &str =
     "sealed-lattice/setup/lnp-tbox-lower-protocol-challenge-seed-v1";
 pub(super) const SETUP_PROOF_BYTES_DOMAIN: &str =
-    "sealed-lattice/collective-bgv-setup/lnp-proof-bytes-v1";
+    "sealed-lattice/collective-bgv-setup/succinct-proof-bytes-v1";
 pub(super) const SETUP_PROOF_SERIALIZATION: &str = "binary";
 pub(crate) const SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 pub(crate) const SETUP_PROOF_MATERIAL_ENCODING: &str = "binary-chunked-proof-bytes";
 const SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupProofMaterialChunkManifest";
-const SETUP_PROOF_LNP_TBOX_PROOF_BYTE_DECODER: &str =
-    "sealed-lattice-lnp-tbox-proof-byte-decoder-v1";
+const SETUP_PROOF_BYTE_DECODER: &str = "sealed-lattice-succinct-setup-proof-byte-decoder-v1";
 #[cfg(test)]
 pub(crate) const PRIVATE_VSS_SHARE_LNP_TBOX_PARAMETER_PROFILE_ID: &str =
     "SealedLattice-LNP-PrivateVssShare-Tbox-v1";

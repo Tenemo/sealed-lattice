@@ -1087,6 +1087,7 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
+            "ringDegree": ring_degree,
             "sameSecretStatementRoot": statement_record["sameSecretStatementRoot"],
             "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
             "sameSecretProofFamilyBindingRoot": statement_record["sameSecretProofFamilyBindingRoot"],
@@ -1832,6 +1833,10 @@ fn trustee_evaluation_key_proofs_object_inner(
                 sinks.proof_materials.push(proof_material);
             }
         }
+        record
+            .as_object_mut()
+            .expect("trustee evaluation-key proof record object")
+            .remove("trusteeEvaluationKeyProofRoot");
         record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
             derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
                 .expect("trustee evaluation-key proof root")
@@ -1934,7 +1939,17 @@ fn build_trustee_evaluation_key_proof_record(
     .expect("trustee proof randomness seed");
     let proof =
         prove_evaluation_key_share(&work_item.statement, &witness, &proof_randomness_seed_hex)
-            .expect("trustee evaluation-key proof");
+            .unwrap_or_else(|error| {
+                panic!(
+                    "trustee evaluation-key proof generation failed for trustee {}: {error}; {}",
+                    work_item.trustee_roster_position,
+                    trustee_evaluation_key_fixture_material_mismatch_summary(
+                        work_item.trustee_roster_position,
+                        ring_degree,
+                        &work_item.statement,
+                    )
+                )
+            });
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
     terminal_phase(&format!(
         "generated trustee evaluation-key proof trustee {} ({} bytes)",
@@ -2175,6 +2190,126 @@ pub(super) fn trustee_evaluation_key_witness_for_fixture(
     }
 }
 
+fn trustee_evaluation_key_fixture_material_mismatch_summary(
+    trustee_roster_position: u64,
+    ring_degree: usize,
+    statement: &crate::bgv::setup::trustee_evaluation_key_proof::TrusteeEvaluationKeyStatement,
+) -> String {
+    for (key_index, key) in statement.keys.iter().enumerate() {
+        let (proof_family, rotation, source_by_digit) = match key.kind {
+            EvaluationKeyShareKind::RelinearizationRoundOne => {
+                let source_by_digit = relinearization_round_one_source_by_digit_for_fixture(
+                    trustee_roster_position,
+                    ring_degree,
+                    key.level + 1,
+                );
+                (
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    None,
+                    Some(source_by_digit),
+                )
+            }
+            EvaluationKeyShareKind::RelinearizationRoundTwo => {
+                let source_by_digit = relinearization_round_two_source_by_digit_for_fixture(
+                    trustee_roster_position,
+                    ring_degree,
+                    &key.round_one_aggregate_diagonal,
+                );
+                (
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    None,
+                    Some(source_by_digit),
+                )
+            }
+            EvaluationKeyShareKind::GaloisRotation { galois_element } => (
+                EvaluationKeyShareProofFamily::Galois,
+                Some(u64::try_from(galois_element).expect("rotation fits u64")),
+                None,
+            ),
+            EvaluationKeyShareKind::PublicKeyShare => {
+                return format!("unexpected public-key share key at index {key_index}");
+            }
+        };
+        let expected_material = evaluation_key_share_fixture_material(
+            proof_family,
+            trustee_roster_position,
+            u64::try_from(key.level).expect("key level fits u64"),
+            rotation,
+            ring_degree,
+            &key.key_switch_seed_hex,
+            source_by_digit.as_deref(),
+        );
+        if expected_material.component_b_by_digit == key.component_b_by_digit {
+            continue;
+        }
+        for (digit_index, (expected_by_limb, actual_by_limb)) in expected_material
+            .component_b_by_digit
+            .iter()
+            .zip(key.component_b_by_digit.iter())
+            .enumerate()
+        {
+            for (rns_limb_index, (expected_coefficients, actual_coefficients)) in expected_by_limb
+                .iter()
+                .zip(actual_by_limb.iter())
+                .enumerate()
+            {
+                if expected_coefficients == actual_coefficients {
+                    continue;
+                }
+                for (coefficient_index, (expected_coefficient, actual_coefficient)) in
+                    expected_coefficients
+                        .iter()
+                        .zip(actual_coefficients.iter())
+                        .enumerate()
+                {
+                    if expected_coefficient != actual_coefficient {
+                        return format!(
+                            "component material mismatch at key {key_index} ({:?}, level {}, seed {}), digit {digit_index}, limb {rns_limb_index}, coefficient {coefficient_index}: expected {expected_coefficient}, observed {actual_coefficient}",
+                            key.kind, key.level, key.key_switch_seed_hex
+                        );
+                    }
+                }
+                if expected_coefficients.len() != actual_coefficients.len() {
+                    return format!(
+                        "component material length mismatch at key {key_index} ({:?}, level {}, seed {}), digit {digit_index}, limb {rns_limb_index}: expected {}, observed {}",
+                        key.kind,
+                        key.level,
+                        key.key_switch_seed_hex,
+                        expected_coefficients.len(),
+                        actual_coefficients.len()
+                    );
+                }
+            }
+            if expected_by_limb.len() != actual_by_limb.len() {
+                return format!(
+                    "component material limb-count mismatch at key {key_index} ({:?}, level {}, seed {}), digit {digit_index}: expected {}, observed {}",
+                    key.kind,
+                    key.level,
+                    key.key_switch_seed_hex,
+                    expected_by_limb.len(),
+                    actual_by_limb.len()
+                );
+            }
+        }
+        if expected_material.component_b_by_digit.len() != key.component_b_by_digit.len() {
+            return format!(
+                "component material digit-count mismatch at key {key_index} ({:?}, level {}, seed {}): expected {}, observed {}",
+                key.kind,
+                key.level,
+                key.key_switch_seed_hex,
+                expected_material.component_b_by_digit.len(),
+                key.component_b_by_digit.len()
+            );
+        }
+        return format!(
+            "component material differs at key {key_index} ({:?}, level {}, seed {}) but no differing coefficient was found",
+            key.kind, key.level, key.key_switch_seed_hex
+        );
+    }
+
+    "component material matches the deterministic fixture".to_string()
+}
+
 pub(super) fn public_key_share_succinct_proofs_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -2350,6 +2485,7 @@ pub(super) fn public_key_share_succinct_proofs_object(
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
+            "ringDegree": ring_degree,
             "publicKeyShareRoot": share_record["publicKeyShareRoot"],
             "publicKeyShareProofRoot": proof_statement_record["publicKeyShareProofRoot"],
             "publicKeyShareMaterialRoot": material_record["publicKeyShareMaterialRoot"],

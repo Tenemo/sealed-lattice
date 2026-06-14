@@ -23,7 +23,7 @@ const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445
 const PROOF_RANDOMNESS_NONCE: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
 const SAME_SECRET_STATEMENT_HASH_VECTOR: &str = "c300200cb9bde4e95f2129ad4c07ca6fa22a2c236278be5f0be474095f604d3afd0613c791e807dc4e4d942f202ea4f5cac20d5a93745eab3d87abf05a3cf4ee";
 const PUBLIC_KEY_SHARE_STATEMENT_HASH_VECTOR: &str = "108d59c7677c2007c43910828650f4a93d7555c63041e5865dcc906ca3b6e114456c85fc963165929bc676aac063307b69ecc18c3abcfa6f0f91a6bbcdff861e";
-const PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR: &str = "abbdce8f903d61471ddfd952470f3e10b059b09f33188c27adad663b86347dee54aa7f23ed607527318d9a6ed7b1df98d2f44a4cb35be129a222f36b813135b1";
+const PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR: &str = "31df064f8256ba84467e2ce2f868acb9b9ee1b065c66157eb8f9ea634e0f5b44d8bb121c66d8d1563b2ad39be8d6167f82901e9ec8aa1dcb8348abef1bfb4d3a";
 const TRUSTEE_EVALUATION_KEY_STATEMENT_HASH_VECTOR: &str = "11fce9a48c01d57c8b08e2816a9a7704623775fcfdf5afca029ec4d2c32f5c2f070e567c2042e6554f6bbb3f46fe75a4711b8b52ab6626509e0ecd10f307bef0";
 
 fn round_one(level: usize) -> (EvaluationKeyShareKind, usize) {
@@ -553,6 +553,62 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
             "a decoded bit-flipped proof must fail verification"
         );
     }
+}
+
+#[test]
+fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "c0dec0de",
+        &[round_one(2), rotation(3, 1)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    proof.limb_proofs[0]
+        .low_degree
+        .folded_layer_roots
+        .pop()
+        .expect("at least one committed folded layer");
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
+        Ok(_) => panic!("wrong low-degree fold count must reject at decode"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("low-degree committed fold count does not match the statement"),
+        "unexpected low-degree fold-count error: {}",
+        error.message
+    );
+
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "dec0ded0",
+        &[round_one(2), rotation(3, 1)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_pairs[0]
+        .path
+        .pop()
+        .expect("folded layer opening path is non-empty");
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
+        Ok(_) => panic!("wrong folded-layer path length must reject at decode"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("low-degree folded layer path length does not match the statement"),
+        "unexpected folded-layer path-length error: {}",
+        error.message
+    );
 }
 
 fn assert_noncanonical_encoded_proof_rejects(
