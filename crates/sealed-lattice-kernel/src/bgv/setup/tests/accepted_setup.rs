@@ -61,7 +61,7 @@ use self::proof_record_fixtures::{
     trustee_evaluation_key_witness_for_fixture,
 };
 use self::record_rebinding::{
-    private_vss_envelope_commitment_record_root_input,
+    drift_all_occurrences, drift_hash, private_vss_envelope_commitment_record_root_input,
     private_vss_envelope_commitment_set_root_input, rebind_active_static_setup_theorem_certificate,
     rebind_collective_evaluator_key_schedule_root, rebind_collective_he_security_certificate_hash,
     rebind_collective_phase_roots, rebind_collective_private_vss_envelope_commitment_root,

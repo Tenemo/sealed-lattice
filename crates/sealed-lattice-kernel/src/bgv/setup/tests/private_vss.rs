@@ -87,6 +87,47 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
 }
 
 #[test]
+#[ignore = "first-profile recipient-private VSS verification at the full ring degree"]
+fn private_vss_share_envelope_verifier_accepts_first_profile_succinct_private_share_proofs() {
+    let request =
+        proof_shaped_private_vss_share_envelope_request(crate::bgv::profile::POLYNOMIAL_DEGREE);
+
+    let result = verify_private_vss_share_envelope_from_request(&request)
+        .expect("first-profile private VSS envelope verification");
+
+    assert_eq!(result["verifierStatus"], "accepted");
+    assert_eq!(result["refusedObjects"], serde_json::json!([]));
+    assert_eq!(
+        result["verifiedPrivateVssShareProofCount"],
+        serde_json::json!(DATA_PRIMES.len())
+    );
+    assert_eq!(
+        result["limbVerifications"]
+            .as_array()
+            .expect("limb verifications")
+            .len(),
+        DATA_PRIMES.len()
+    );
+    // The recipient-local verification root and envelope hash are the integration
+    // handles a signed VssShareAcceptance commits to, so the first-profile path
+    // produces the same accepted evidence the reduced-ring path does at scale.
+    assert_eq!(
+        result["localVerificationRoot"]
+            .as_str()
+            .expect("local verification root")
+            .len(),
+        128
+    );
+    assert_eq!(
+        result["privateEnvelopeHash"]
+            .as_str()
+            .expect("private envelope hash")
+            .len(),
+        128
+    );
+}
+
+#[test]
 fn private_vss_share_envelope_verifier_refuses_noncanonical_succinct_context() {
     let mut request =
         proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);

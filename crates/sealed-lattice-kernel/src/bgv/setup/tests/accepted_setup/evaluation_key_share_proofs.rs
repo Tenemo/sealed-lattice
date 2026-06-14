@@ -438,6 +438,115 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
 }
 
 #[test]
+fn collective_setup_verifier_refuses_drifted_terminal_certificate_hashes() {
+    // Drifting a present certificate hash and recomputing the outer package hash
+    // must be refused before any missing-object pending, proving the verifier
+    // recomputes each certificate root rather than trusting the package copy.
+    for certificate_hash_field in [
+        "setupCommitmentSecurityCertificateHash",
+        "setupTransportCertificateHash",
+        "setupProofAccountingCertificateHash",
+        "heSecurityCertificateHash",
+        "activeStaticSetupTheoremCertificateHash",
+    ] {
+        let mut package = minimal_collective_setup_package();
+        let bound_hash = package[certificate_hash_field]
+            .as_str()
+            .unwrap_or_else(|| panic!("{certificate_hash_field} must be present"))
+            .to_string();
+        package[certificate_hash_field] = serde_json::json!(drift_hash(&bound_hash));
+        rebind_collective_setup_package_hash(&mut package);
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+        }))
+        .expect("verification response");
+
+        assert_eq!(
+            result["verifierStatus"], "refused",
+            "drifting {certificate_hash_field} must refuse before any missing-object pending",
+        );
+    }
+}
+
+#[test]
+#[ignore = "terminal recomputed-root refusal matrix at profile ring"]
+fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "manual_accepted_setup_refuses_every_recomputed_accepted_root_drift",
+    );
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+    let verify = |candidate: &serde_json::Value| {
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": candidate,
+            "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
+            "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
+            "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
+            "transportedPublicKeyShareMaterial": companions.public_key_share_material,
+            "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
+            "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
+            "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
+            "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
+        }))
+        .expect("verification response")
+    };
+
+    assert_eq!(
+        verify(&package)["verifierStatus"],
+        "accepted",
+        "baseline terminal package must accept before the recomputed-root matrix",
+    );
+
+    // The matrix is driven by the verifier's own accepted-root enumeration, so it
+    // covers exactly the root set the accept response binds: every accepted root,
+    // drifted at every occurrence with the outer package hash recomputed, must be
+    // refused. A root the verifier never recomputes would silently survive here.
+    let accepted_roots =
+        crate::bgv::setup::accepted_setup::accepted_hashes_from_package(&package);
+    let package_hash = package["setupPackageHash"]
+        .as_str()
+        .expect("setup package hash")
+        .to_string();
+
+    let mut unbound_roots = Vec::new();
+    let mut covered_root_count = 0_usize;
+    for root in &accepted_roots {
+        if root == &package_hash {
+            continue;
+        }
+        let mut drifted = package.clone();
+        let occurrences = drift_all_occurrences(&mut drifted, root, &drift_hash(root));
+        assert!(
+            occurrences >= 1,
+            "accepted root {root} was not located in the terminal package graph",
+        );
+        rebind_collective_setup_package_hash(&mut drifted);
+        if verify(&drifted)["verifierStatus"] != "refused" {
+            unbound_roots.push(root.clone());
+        }
+        covered_root_count += 1;
+    }
+    assert!(
+        unbound_roots.is_empty(),
+        "terminal package accepted roots that the verifier does not recompute and refuse: {unbound_roots:?}",
+    );
+    assert!(
+        covered_root_count >= 12,
+        "completeness floor: the terminal accepted package must bind the full first-profile root set, covered {covered_root_count}",
+    );
+
+    // Drifting the outer package hash without recomputation is a package-hash
+    // mismatch, the structural guard the per-root rebinds rely on.
+    let mut drifted_package_hash = package.clone();
+    drifted_package_hash["setupPackageHash"] = serde_json::json!(drift_hash(&package_hash));
+    assert_eq!(
+        verify(&drifted_package_hash)["verifierStatus"],
+        "refused",
+        "drifting the outer setup package hash must be refused",
+    );
+}
+
+#[test]
 #[ignore = "manual accepted setup closure diagnostic"]
 fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift()
  {
