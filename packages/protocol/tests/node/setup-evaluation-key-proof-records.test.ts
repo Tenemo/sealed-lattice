@@ -30,7 +30,10 @@ import {
     type RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
 import { setupProofProfileId } from '#packages/protocol/src/setup/same-secret-consistency-records';
-import type { CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+} from '#tests/support/setup-fixtures';
 
 type JsonRecord = Record<string, unknown>;
 type TrusteeEvaluationKeyProofGeneratorInput =
@@ -44,24 +47,9 @@ const scheduledLevel = 1;
 const ringDegree = 8;
 const digitCount = scheduledLevel + 1;
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-evaluation-key-proof-records',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash('setup-evaluation-key-proof-records');
 
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash(
-        'carry-aware-vss-share-relation-profile',
-    ),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} satisfies CollectiveBgvSetupContext;
+const setupContext = makeSetupContext(fixtureHash);
 
 const requiredGaloisKeySchedule = [
     {

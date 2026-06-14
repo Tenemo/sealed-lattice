@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "531f3305bcd7717846baeb4a8ae4c340445b643e9b203acfd4d2417c2ad744df",
+    "reachableDeclarationHash": "f9f85eae15aef7079bc38f0a2291812c0424fa0fe649fbc283341d397565b37a",
     "runtimeExports": [
         "createBinaryChunkedEvaluationKeyShareMaterialTransport",
         "createBinaryChunkedPublicEvaluationKeyMaterialTransport",

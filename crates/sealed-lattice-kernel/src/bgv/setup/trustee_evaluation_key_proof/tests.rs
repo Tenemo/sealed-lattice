@@ -1538,29 +1538,26 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
     );
 }
 
-// Gated full-ring-degree benchmark. Runs only when the environment variable
-// is set, so it never burdens the default test lane.
+// Manual full-ring-degree benchmark, #[ignore]d so it never burdens the default
+// test lane. Pick a configuration by running the matching wrapper below with
+// --ignored; each calls run_full_ring_benchmark with an explicit level and
+// schedule. Add another wrapper to benchmark a different level or schedule.
 //
-//   SEALED_LATTICE_RUN_SUCCINCT_PROTOTYPE_BENCHMARK=1 \
-//   SEALED_LATTICE_SUCCINCT_PROTOTYPE_LEVEL=15 \
-//   SEALED_LATTICE_SUCCINCT_PROTOTYPE_SCHEDULE=trustee \
 //   cargo test -p sealed-lattice-kernel --release \
-//     trustee_evaluation_key_proof::tests::full_ring_degree_benchmark -- --nocapture
-#[test]
-fn full_ring_degree_benchmark() {
-    if std::env::var("SEALED_LATTICE_RUN_SUCCINCT_PROTOTYPE_BENCHMARK").is_err() {
-        return;
-    }
-    let level = std::env::var("SEALED_LATTICE_SUCCINCT_PROTOTYPE_LEVEL")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(7);
-    let schedule_label = std::env::var("SEALED_LATTICE_SUCCINCT_PROTOTYPE_SCHEDULE")
-        .unwrap_or_else(|_| "round-one".to_string());
-    let key_requests = match schedule_label.as_str() {
+//     full_ring_degree_benchmark_trustee_level_15 -- --ignored --nocapture
+#[derive(Clone, Copy, Debug)]
+enum BenchmarkSchedule {
+    RoundOne,
+    RoundTwo,
+    Galois,
+    Trustee,
+}
+
+fn run_full_ring_benchmark(level: usize, schedule: BenchmarkSchedule) {
+    let key_requests = match schedule {
         // A representative trustee slice: both relinearization rounds plus
         // two full-level rotations and two lower-level return rotations.
-        "trustee" => vec![
+        BenchmarkSchedule::Trustee => vec![
             round_one(level),
             round_two(level),
             rotation(3, level),
@@ -1568,11 +1565,11 @@ fn full_ring_degree_benchmark() {
             rotation(5, level.min(6)),
             rotation(7, level.min(6)),
         ],
-        "round-two" => vec![round_two(level)],
-        "galois" => vec![rotation(3, level)],
-        _ => vec![round_one(level)],
+        BenchmarkSchedule::RoundTwo => vec![round_two(level)],
+        BenchmarkSchedule::Galois => vec![rotation(3, level)],
+        BenchmarkSchedule::RoundOne => vec![round_one(level)],
     };
-    let linkage_commitments = if schedule_label == "trustee" {
+    let linkage_commitments = if matches!(schedule, BenchmarkSchedule::Trustee) {
         Some(level + 1)
     } else {
         None
@@ -1597,7 +1594,7 @@ fn full_ring_degree_benchmark() {
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof).len();
     let limb_count = statement.limb_count();
     let key_count = statement.keys.len();
-    println!("succinct evaluation-key prototype benchmark ({schedule_label})");
+    println!("succinct evaluation-key prototype benchmark ({schedule:?}, level {level})");
     println!("  ring degree:        {POLYNOMIAL_DEGREE}");
     println!("  keys in batch:      {key_count}");
     println!("  active limbs:       {limb_count}");
@@ -1617,6 +1614,30 @@ fn full_ring_degree_benchmark() {
         proof_bytes as f64 / 1024.0 / limb_count as f64,
         proof_bytes as f64 / (1024.0 * 1024.0) / key_count as f64
     );
+}
+
+#[test]
+#[ignore = "manual full-ring succinct proof benchmark"]
+fn full_ring_degree_benchmark_round_one_level_15() {
+    run_full_ring_benchmark(15, BenchmarkSchedule::RoundOne);
+}
+
+#[test]
+#[ignore = "manual full-ring succinct proof benchmark"]
+fn full_ring_degree_benchmark_round_two_level_15() {
+    run_full_ring_benchmark(15, BenchmarkSchedule::RoundTwo);
+}
+
+#[test]
+#[ignore = "manual full-ring succinct proof benchmark"]
+fn full_ring_degree_benchmark_galois_level_15() {
+    run_full_ring_benchmark(15, BenchmarkSchedule::Galois);
+}
+
+#[test]
+#[ignore = "manual full-ring succinct proof benchmark"]
+fn full_ring_degree_benchmark_trustee_level_15() {
+    run_full_ring_benchmark(15, BenchmarkSchedule::Trustee);
 }
 
 #[test]

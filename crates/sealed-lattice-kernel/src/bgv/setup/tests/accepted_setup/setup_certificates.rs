@@ -287,68 +287,6 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
 }
 
 #[test]
-fn collective_setup_verifier_refuses_legacy_proof_accounting_rows() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_legacy_proof_accounting_rows",
-    );
-
-    for (
-        legacy_proof_family,
-        legacy_claim_scope,
-        legacy_verifier_closed_status,
-        legacy_accounting_status,
-    ) in [
-        (
-            "same-secret-linkage-anchor-lnp-tbox",
-            "legacy same-secret LNP/tbox proof route",
-            "legacy-same-secret-proof-route-not-accepted",
-            "legacy-same-secret-proof-accounting-not-accepted",
-        ),
-        (
-            "public-key-share-lnp-tbox",
-            "legacy public-key LNP/tbox proof route",
-            "legacy-public-key-proof-route-not-accepted",
-            "legacy-public-key-proof-accounting-not-accepted",
-        ),
-        (
-            "trustee-evaluation-key-lnp-tbox",
-            "legacy trustee evaluation-key LNP/tbox proof route",
-            "legacy-trustee-evaluation-key-proof-route-not-accepted",
-            "legacy-trustee-evaluation-key-proof-accounting-not-accepted",
-        ),
-    ] {
-        let mut package = minimal_collective_setup_package();
-        package["setupProofAccountingCertificate"]["proofFamilies"]
-            .as_array_mut()
-            .expect("proof family list")
-            .push(serde_json::json!(legacy_proof_family));
-        package["setupProofAccountingCertificate"]["proofFamilyAccounting"]
-            .as_array_mut()
-            .expect("proof family accounting")
-            .push(serde_json::json!({
-                "proofFamily": legacy_proof_family,
-                "claimScope": legacy_claim_scope,
-                "verifierClosedStatus": legacy_verifier_closed_status,
-                "accountingStatus": legacy_accounting_status,
-            }));
-        rebind_setup_proof_accounting_certificate_hash(&mut package);
-        rebind_collective_setup_package_hash(&mut package);
-
-        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .expect("verification response");
-
-        assert_eq!(result["verifierStatus"], "refused");
-        assert_eq!(
-            result["refusedObjects"][0]["reasonCode"],
-            "setupProofAccountingCertificatePayloadMismatch"
-        );
-        assert!(result["acceptedSetupHandoff"].is_null());
-    }
-}
-
-#[test]
 fn collective_setup_verifier_refuses_duplicate_current_proof_accounting_row() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_duplicate_current_proof_accounting_row",

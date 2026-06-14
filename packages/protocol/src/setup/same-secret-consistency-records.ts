@@ -150,6 +150,7 @@ export type SameSecretProofRecord = Readonly<
             readonly proofModelStatus: typeof sameSecretAnchorProofModelStatus;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
+            readonly ringDegree: number;
             readonly sameSecretStatementRoot: ProtocolHash;
             readonly trusteeSecretCommitmentRoot: ProtocolHash;
             readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
@@ -850,6 +851,7 @@ export const createSameSecretProofSet = (
                 ...contextFields(input.setupContext),
                 trusteeIdentity: statementRecord.trusteeIdentity,
                 trusteeRosterPosition: statementRecord.trusteeRosterPosition,
+                ringDegree: input.vssCoefficientCommitmentMaterial.ringDegree,
                 sameSecretStatementRoot:
                     statementRecord.sameSecretStatementRoot,
                 trusteeSecretCommitmentRoot:

@@ -12,13 +12,17 @@ import {
     sameSecretTargetDecryptionBindingPolicy,
     setupCommitmentProfileId,
     setupProofProfileId,
-    type CollectiveBgvSetupContext,
     type SameSecretConsistencyStatementRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientCommitmentRecord,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
+import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+} from '#tests/support/setup-fixtures';
 
 const qSharePrimes = [
     140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
@@ -27,24 +31,11 @@ const ringDegree = 8;
 const participantCount = 3;
 const thresholdDegree = 2;
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-same-secret-consistency-records',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash(
+    'setup-same-secret-consistency-records',
+);
 
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash(
-        'carry-aware-vss-share-relation-profile',
-    ),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} satisfies CollectiveBgvSetupContext;
+const setupContext = makeSetupContext(fixtureHash);
 
 const coefficientMessage = (
     sourceTrusteeRosterPosition: number,
@@ -124,6 +115,7 @@ const acceptedCommitmentSet = (): VssCoefficientCommitmentSet =>
     createVssCoefficientCommitmentBundle({
         setupContext,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+        setupCommitmentComputer,
         qSharePrimes,
         ringDegree,
         participantCount,

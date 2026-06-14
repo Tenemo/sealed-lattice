@@ -328,6 +328,7 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
             readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
+            readonly ringDegree: number;
             readonly publicKeyShareRoot: ProtocolHash;
             readonly publicKeyShareProofRoot: ProtocolHash;
             readonly publicKeyShareMaterialRoot: ProtocolHash;
@@ -3011,6 +3012,7 @@ export const createPublicKeyShareSuccinctProofSet = (
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
+                ringDegree: input.publicKeyShareMaterial.ringDegree,
                 publicKeyShareRoot: shareRecord.publicKeyShareRoot,
                 publicKeyShareProofRoot:
                     proofStatementRecord.publicKeyShareProofRoot,

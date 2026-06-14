@@ -1,10 +1,8 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
     collectForbiddenSetupContributionAssemblyFieldPaths,
     createSetupContributionAssembly,
-    type CollectiveBgvSetupContext,
     type LocalTrusteeSetupStateCommitment,
     type PrivateVssEnvelopeVerificationReference,
     type SetupPhaseParticipantObject,
@@ -12,23 +10,14 @@ import {
     type VssShareAcceptanceRecord,
     type VssShareComplaintRecord,
 } from '#packages/protocol/src/index';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+} from '#tests/support/setup-fixtures';
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-contribution-orchestration',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash('setup-contribution-orchestration');
 
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash('carry-aware'),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} satisfies CollectiveBgvSetupContext;
+const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
 
 const contextFields = {
     ceremonyId: setupContext.ceremonyId,

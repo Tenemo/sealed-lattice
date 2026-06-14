@@ -10,23 +10,14 @@ import {
     privateVssShareSuccinctProofModelStatus,
     privateVssShareSuccinctProofVerificationStatus,
 } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+} from '#tests/support/setup-fixtures';
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-private-vss-mailbox-delivery',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash('setup-private-vss-mailbox-delivery');
 
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash('carry-aware'),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} as const;
+const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
 
 describe('private VSS mailbox delivery', () => {
     it('refuses to build delivery envelopes without private share proof generation', async () => {

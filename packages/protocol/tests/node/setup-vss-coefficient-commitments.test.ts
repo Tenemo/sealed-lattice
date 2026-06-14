@@ -2,7 +2,6 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
-    computeSetupCommitmentFromOpening,
     createBinaryChunkedVssCoefficientCommitmentBundle,
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createStreamingBinaryChunkedVssCoefficientCommitmentBundle,
@@ -14,13 +13,16 @@ import {
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
     setupTransportChunkSizeBytes,
     setupCommitmentRandomnessWidth,
-    setupCommitmentRootPayload,
     vssCoefficientCommitmentMaterialBinaryFormat,
-    type CollectiveBgvSetupContext,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
-    type VssOpeningRandomByteSource,
 } from '#packages/protocol/src/index';
+import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+    makeVssOpeningRandomBytes,
+} from '#tests/support/setup-fixtures';
 
 const qSharePrimes = [
     140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
@@ -29,65 +31,13 @@ const ringDegree = 8;
 const participantCount = 2;
 const thresholdDegree = 2;
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-vss-coefficient-commitments',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash('setup-vss-coefficient-commitments');
 
-const deterministicRandomBytes = (
-    seedLabel: string,
-): VssOpeningRandomByteSource => {
-    const textEncoder = new TextEncoder();
-    let blockIndex = 0;
-    let bufferedBytes = new Uint8Array(0);
-    let bufferedOffset = 0;
+const deterministicRandomBytes = makeVssOpeningRandomBytes(
+    'setup-vss-coefficient-commitments',
+);
 
-    return (byteLength) => {
-        const outputBytes = new Uint8Array(byteLength);
-        let outputOffset = 0;
-        while (outputOffset < byteLength) {
-            if (bufferedOffset >= bufferedBytes.byteLength) {
-                const blockHex = deriveProtocolHash('ActionContextHash', {
-                    fixture: 'setup-vss-coefficient-commitments',
-                    seedLabel,
-                    blockIndex,
-                });
-                bufferedBytes = textEncoder.encode(blockHex);
-                bufferedOffset = 0;
-                blockIndex += 1;
-            }
-            const copyLength = Math.min(
-                byteLength - outputOffset,
-                bufferedBytes.byteLength - bufferedOffset,
-            );
-            outputBytes.set(
-                bufferedBytes.subarray(
-                    bufferedOffset,
-                    bufferedOffset + copyLength,
-                ),
-                outputOffset,
-            );
-            bufferedOffset += copyLength;
-            outputOffset += copyLength;
-        }
-
-        return outputBytes;
-    };
-};
-
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash(
-        'carry-aware-vss-share-relation-profile',
-    ),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} satisfies CollectiveBgvSetupContext;
+const setupContext = makeSetupContext(fixtureHash);
 
 const coefficientMessage = (
     sourceTrusteeRosterPosition: number,
@@ -254,6 +204,7 @@ describe('VSS coefficient commitment builders', () => {
             createVssSourceTrusteeCoefficientCommitmentContribution({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                setupCommitmentComputer,
                 qSharePrimes,
                 ringDegree,
                 participantCount,
@@ -327,6 +278,7 @@ describe('VSS coefficient commitment builders', () => {
         const bundle = createBinaryChunkedVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -372,6 +324,7 @@ describe('VSS coefficient commitment builders', () => {
         const bundle = createVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -394,6 +347,7 @@ describe('VSS coefficient commitment builders', () => {
             createVssSourceTrusteeCoefficientCommitmentContribution({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                setupCommitmentComputer,
                 qSharePrimes,
                 ringDegree,
                 participantCount,
@@ -422,22 +376,15 @@ describe('VSS coefficient commitment builders', () => {
             ),
         );
         expect(firstMaterialRecord?.commitmentRoot).toBe(
-            deriveProtocolHash(
-                'SetupCommitmentRoot',
-                setupCommitmentRootPayload(
-                    computeSetupCommitmentFromOpening({
-                        publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                        qSharePrimes,
-                        sourceRnsLimbIndex: firstOpening.rnsLimbIndex,
-                        sourceMessageModulus: firstOpening.rnsPrime,
-                        shamirCoefficientIndex:
-                            firstOpening.shamirCoefficientIndex,
-                        messageCoefficients: firstOpening.coefficientMessage,
-                        randomnessByColumn: firstOpening.randomnessByColumn,
-                        ringDegree,
-                    }),
-                ),
-            ),
+            setupCommitmentComputer({
+                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                sourceRnsLimbIndex: firstOpening.rnsLimbIndex,
+                sourceMessageModulus: firstOpening.rnsPrime,
+                shamirCoefficientIndex: firstOpening.shamirCoefficientIndex,
+                messageCoefficients: firstOpening.coefficientMessage,
+                randomnessByColumn: firstOpening.randomnessByColumn,
+                ringDegree,
+            }).commitmentRoot,
         );
         expect(
             bundle.privateOpeningMaterialBySourceTrustee[0]
@@ -462,6 +409,7 @@ describe('VSS coefficient commitment builders', () => {
         const bundle = createVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -542,6 +490,7 @@ describe('VSS coefficient commitment builders', () => {
         const embeddedBundle = createVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -555,6 +504,7 @@ describe('VSS coefficient commitment builders', () => {
         const directBundle = createBinaryChunkedVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -617,6 +567,7 @@ describe('VSS coefficient commitment builders', () => {
         const bundleInput = {
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -767,6 +718,7 @@ describe('VSS coefficient commitment builders', () => {
         const bundle = createVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -816,6 +768,7 @@ describe('VSS coefficient commitment builders', () => {
             createVssCoefficientCommitmentBundle({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                setupCommitmentComputer,
                 qSharePrimes,
                 ringDegree,
                 participantCount,
@@ -827,6 +780,7 @@ describe('VSS coefficient commitment builders', () => {
             createVssCoefficientCommitmentBundle({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                setupCommitmentComputer,
                 qSharePrimes,
                 ringDegree,
                 participantCount,
@@ -848,6 +802,7 @@ describe('VSS coefficient commitment builders', () => {
             createVssCoefficientCommitmentBundle({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                setupCommitmentComputer,
                 qSharePrimes,
                 ringDegree,
                 participantCount,
@@ -877,6 +832,7 @@ describe('VSS coefficient commitment builders', () => {
             createVssCoefficientCommitmentBundle({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                setupCommitmentComputer,
                 qSharePrimes,
                 ringDegree,
                 participantCount,

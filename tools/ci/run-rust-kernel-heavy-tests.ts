@@ -1,5 +1,6 @@
 import os from 'node:os';
 
+import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     createLocalRunLog,
     currentProcessExitCode,
@@ -12,23 +13,28 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
 
-// Each mutating heavy accepted-setup test clones the full first-profile
-// evaluation-key proof container package fixture. That fixture embeds every
-// trustee's evaluation-key proof as hex, and each proof is several hundred
-// megabytes of bytes (roughly twice that as hex), so a single clone is many
-// gigabytes and the cargo default of one test thread per core holds enough
-// concurrent clones to exhaust system memory and abort the process. Size the
-// libtest thread pool from currently available memory with a conservative
-// per-test budget, capped by core count, so the suite still runs as parallel as
-// the machine can sustain without thrashing or aborting.
-const approximateGigabytesPerHeavyTest = 20;
-const heavyTestMemoryBudgetFraction = 0.7;
+// Each mutating heavy accepted-setup test holds a multi-gigabyte clone of the
+// first-profile evaluation-key proof container package fixture while it runs, so
+// the cargo default of one test thread per core would hold enough concurrent
+// clones to exhaust system memory and abort the process. Size the libtest thread
+// pool from a fixed fraction of TOTAL system memory, capped by core count, with
+// a per-test budget set above the measured ~12.7 GiB peak. Total memory is used
+// rather than os.freemem() because on Windows the latter reports only
+// immediately-free physical memory (excluding reclaimable cache) and swings with
+// unrelated activity, which previously collapsed the pool to far fewer threads
+// than the machine could sustain. The headroom fraction leaves room for the OS
+// and light concurrent work; a heavy concurrent run (for example a second
+// clone's heavy lane) should be sequenced separately, and the launch banner
+// warns when currently-available memory is below the projected peak.
+const approximateGigabytesPerHeavyTest = 14;
+const heavyTestMemoryHeadroomFraction = 0.6;
 const gigabyte = 1024 ** 3;
+const totalGigabytes = os.totalmem() / gigabyte;
 const availableGigabytes = os.freemem() / gigabyte;
 const memoryBoundedHeavyTestThreadCount = Math.max(
     1,
     Math.floor(
-        (availableGigabytes * heavyTestMemoryBudgetFraction) /
+        (totalGigabytes * heavyTestMemoryHeadroomFraction) /
             approximateGigabytesPerHeavyTest,
     ),
 );
@@ -36,6 +42,8 @@ const heavyAcceptedSetupTestThreadCount = Math.min(
     os.cpus().length,
     memoryBoundedHeavyTestThreadCount,
 );
+const projectedPeakGigabytes =
+    heavyAcceptedSetupTestThreadCount * approximateGigabytesPerHeavyTest;
 
 const rustKernelHeavyTestCommand: CommandInvocation = {
     args: [
@@ -76,18 +84,32 @@ const main = async (): Promise<void> => {
 
     console.log(
         `Rust kernel heavy lane: running with ${heavyAcceptedSetupTestThreadCount} test thread(s) ` +
-            `(memory-bounded; ${availableGigabytes.toFixed(1)} GiB available, ` +
-            `${approximateGigabytesPerHeavyTest} GiB budgeted per test).`,
+            `(sized from ${totalGigabytes.toFixed(1)} GiB total RAM at ` +
+            `${approximateGigabytesPerHeavyTest} GiB/test, ~${projectedPeakGigabytes} GiB projected peak).`,
     );
+    if (availableGigabytes < projectedPeakGigabytes) {
+        console.warn(
+            `  Warning: only ${availableGigabytes.toFixed(1)} GiB is currently available, ` +
+                `below the ~${projectedPeakGigabytes} GiB projected peak. Close other ` +
+                `memory-heavy work (such as a second clone's heavy run) to avoid swapping.`,
+        );
+    }
+
+    const progressReporter = createHeavyTestProgressReporter({
+        label: 'heavy',
+        threadCount: heavyAcceptedSetupTestThreadCount,
+    });
 
     let exitCode: number | undefined;
     try {
         exitCode = await runCommandsInSeries([rustKernelHeavyTestCommand], {
+            observer: progressReporter.observer,
             outputMode: 'inherit',
             runLog,
         });
         process.exitCode = exitCode;
     } finally {
+        progressReporter.stop();
         await runLog?.finish({
             exitCode: exitCode ?? currentProcessExitCode(),
         });

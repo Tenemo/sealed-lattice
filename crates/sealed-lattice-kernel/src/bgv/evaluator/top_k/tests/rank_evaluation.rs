@@ -18,24 +18,28 @@ fn top_k_order_polynomial_masks_unselected_ranks() {
     assert_eq!(&decrypted[..rank_values.len()], &[1, 2, 0, 0, 0]);
 }
 
-// Gated consumed-schedule instrumentation: runs the real packing, batched-pair
+// Manual consumed-schedule instrumentation: runs the real packing, batched-pair
 // rank, and sparse-target pipeline at the selected working level and reports
 // every relinearization level and (rotation, level) pair the evaluator
 // requested, asserting the frozen key schedule covers all of them through
 // truncation. This is the empirical evidence behind the consumed schedule.
+// It is #[ignore]d because the full-pipeline replay at the working level is far
+// too slow for the default lane; run it explicitly with --ignored. To
+// instrument another level, add a wrapper that calls
+// assert_consumed_schedule_within_frozen with that level.
 //
-//   SEALED_LATTICE_RUN_CONSUMED_SCHEDULE_INSTRUMENTATION=1 \
 //   cargo test -p sealed-lattice-kernel --release --lib \
-//     consumed_key_schedule_instrumentation -- --nocapture
+//     consumed_key_schedule_instrumentation -- --ignored --nocapture
 #[test]
+#[ignore = "manual consumed key schedule instrumentation"]
 fn consumed_key_schedule_instrumentation() {
-    if std::env::var("SEALED_LATTICE_RUN_CONSUMED_SCHEDULE_INSTRUMENTATION").is_err() {
-        return;
-    }
-    let working_level = std::env::var("SEALED_LATTICE_CONSUMED_SCHEDULE_WORKING_LEVEL")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(SELECTED_EVALUATOR_WORKING_LEVEL);
+    assert_consumed_schedule_within_frozen(SELECTED_EVALUATOR_WORKING_LEVEL);
+}
+
+// Runs the bounded-domain top-k pipeline at `working_level` and asserts every
+// relinearization level and (rotation, level) pair the evaluator consumes is
+// covered by the frozen key schedule through truncation.
+fn assert_consumed_schedule_within_frozen(working_level: usize) {
     let option_count = 20_usize;
     // First-profile comparison domain: ten ballots with score span nine.
     let score_domain_max = 90_u64;

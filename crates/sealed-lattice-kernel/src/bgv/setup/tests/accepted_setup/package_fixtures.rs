@@ -99,6 +99,37 @@ fn build_collective_setup_package_fixture(
     .package
 }
 
+// The collective setup context shared by the package fixtures. Every fixture
+// builds the same first-profile context shape, so this keeps one definition of
+// it instead of repeating the json! block at each construction site.
+#[allow(clippy::too_many_arguments)]
+fn collective_setup_context_fixture(
+    ceremony_id: &str,
+    manifest_hash: &str,
+    roster_hash: &str,
+    setup_profile_hash: &str,
+    q_share_hash: &str,
+    carry_aware_vss_relation_profile_hash: &str,
+    commitment_profile_hash: &str,
+    setup_epoch: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "ceremonyId": ceremony_id,
+        "manifestHash": manifest_hash,
+        "rosterHash": roster_hash,
+        "setupProfileHash": setup_profile_hash,
+        "qShareHash": q_share_hash,
+        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
+        "commitmentProfileHash": commitment_profile_hash,
+        "setupEpoch": setup_epoch,
+        "participantCount": 10,
+        "qSetupComplete": 10,
+        "qBallotRelease": 10,
+        "qFinal": 10,
+        "qDec": 4,
+    })
+}
+
 fn build_collective_setup_package_fixture_parts(
     vss_material_ring_degree: usize,
     vss_material_ring_degree_status: &str,
@@ -126,21 +157,16 @@ fn build_collective_setup_package_fixture_parts(
         .as_str()
         .expect("commitment profile hash");
     let setup_epoch = "setup-epoch-1";
-    let setup_context = serde_json::json!({
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
-        "setupEpoch": setup_epoch,
-        "participantCount": 10,
-        "qSetupComplete": 10,
-        "qBallotRelease": 10,
-        "qFinal": 10,
-        "qDec": 4,
-    });
+    let setup_context = collective_setup_context_fixture(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+    );
     let mut previous_phase_root = serde_json::Value::Null;
     let phase_transcript = profile["phaseOrder"]
         .as_array()
@@ -1088,21 +1114,16 @@ fn streamed_vss_coefficient_commitments_object(
         "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
     });
-    let setup_context = serde_json::json!({
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
-        "setupEpoch": setup_epoch,
-        "participantCount": 10,
-        "qSetupComplete": 10,
-        "qBallotRelease": 10,
-        "qFinal": 10,
-        "qDec": 4,
-    });
+    let setup_context = collective_setup_context_fixture(
+        ceremony_id,
+        manifest_hash,
+        roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+    );
     begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
         "derivationId": derivation_id,
         "setupContext": setup_context,

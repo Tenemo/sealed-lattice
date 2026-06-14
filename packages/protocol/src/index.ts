@@ -72,7 +72,6 @@ export {
     acceptedBgvSetupQShareHash,
     acceptedBgvSetupQSharePrimes,
     binaryVssCoefficientCommitmentMaterialByteLength,
-    computeSetupCommitmentFromOpening,
     createBinaryChunkedVssCoefficientCommitmentBundle,
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createStreamingBinaryChunkedVssCoefficientCommitmentBundle,

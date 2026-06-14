@@ -14,13 +14,17 @@ import {
     publicKeyShareCoefficientVectorHashDomain,
     publicKeyShareMaterialBinaryFormat,
     setupTransportChunkSizeBytes,
-    type CollectiveBgvSetupContext,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareSet,
     type SameSecretConsistencyStatementSet,
-    type VssOpeningRandomByteSource,
 } from '#packages/protocol/src/index';
+import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+    makeVssOpeningRandomBytes,
+} from '#tests/support/setup-fixtures';
 
 const qSharePrimes = [
     140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
@@ -29,71 +33,19 @@ const ringDegree = 8;
 const participantCount = 2;
 const thresholdDegree = 2;
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-public-key-share-records',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash('setup-public-key-share-records');
 
-const deterministicRandomBytes = (
-    seedLabel: string,
-): VssOpeningRandomByteSource => {
-    const textEncoder = new TextEncoder();
-    let blockIndex = 0;
-    let bufferedBytes = new Uint8Array(0);
-    let bufferedOffset = 0;
+const deterministicRandomBytes = makeVssOpeningRandomBytes(
+    'setup-public-key-share-records',
+);
 
-    return (byteLength) => {
-        const outputBytes = new Uint8Array(byteLength);
-        let outputOffset = 0;
-        while (outputOffset < byteLength) {
-            if (bufferedOffset >= bufferedBytes.byteLength) {
-                bufferedBytes = textEncoder.encode(
-                    deriveProtocolHash('ActionContextHash', {
-                        fixture: 'setup-public-key-share-records',
-                        seedLabel,
-                        blockIndex,
-                    }),
-                );
-                bufferedOffset = 0;
-                blockIndex += 1;
-            }
-            const copyLength = Math.min(
-                byteLength - outputOffset,
-                bufferedBytes.byteLength - bufferedOffset,
-            );
-            outputBytes.set(
-                bufferedBytes.subarray(
-                    bufferedOffset,
-                    bufferedOffset + copyLength,
-                ),
-                outputOffset,
-            );
-            bufferedOffset += copyLength;
-            outputOffset += copyLength;
-        }
-
-        return outputBytes;
-    };
-};
-
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash(
-        'carry-aware-vss-share-relation-profile',
-    ),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} satisfies CollectiveBgvSetupContext;
+const setupContext = makeSetupContext(fixtureHash);
 
 const sameSecretConsistency = (): SameSecretConsistencyStatementSet => {
     const vssCoefficientCommitments = createVssCoefficientCommitmentBundle({
         setupContext,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+        setupCommitmentComputer,
         qSharePrimes,
         ringDegree,
         participantCount,

@@ -89,6 +89,7 @@ import type {
     BgvCollectiveSetupProfileDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -230,6 +231,7 @@ function acceptedVssCoefficientCommitments(
     return createVssCoefficientCommitmentBundle({
         setupContext,
         publicMatrixSeedHash,
+        setupCommitmentComputer,
         qSharePrimes: profile.qShare.primes,
         ringDegree: minimumSuccinctProofFixtureRingDegree,
         participantCount: firstProfileParticipantCount,

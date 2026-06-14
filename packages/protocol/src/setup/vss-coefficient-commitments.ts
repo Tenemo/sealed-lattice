@@ -394,7 +394,7 @@ type VssCoefficientCommitmentBundleInput = {
     readonly thresholdDegree: number;
     readonly sourceTrusteeOpeningStates?: readonly VssSourceTrusteeCoefficientOpeningState[];
     readonly sourceTrusteeOpeningStateProvider?: VssSourceTrusteeCoefficientOpeningStateProvider;
-    readonly setupCommitmentComputer?: SetupCommitmentOpeningComputer;
+    readonly setupCommitmentComputer: SetupCommitmentOpeningComputer;
 };
 
 type VssSourceTrusteeCoefficientCommitmentContributionInput = Omit<
@@ -409,7 +409,7 @@ type VssSourceTrusteeCoefficientCommitmentContributionOptions = Readonly<{
     readonly consumeMaterialRecord?: (
         materialRecord: VssCoefficientCommitmentMaterialRecord,
     ) => void;
-    readonly setupCommitmentComputer?: SetupCommitmentOpeningComputer;
+    readonly setupCommitmentComputer: SetupCommitmentOpeningComputer;
 }>;
 
 type SetupCommitmentOpeningComputation = Readonly<{
@@ -431,7 +431,6 @@ type SetupCommitmentOpeningComputer = (
     }>,
 ) => SetupCommitmentOpeningComputation;
 
-const textEncoder = new TextEncoder();
 const twoToTheSixtyFourth = 1n << 64n;
 const setupContextFieldNames = [
     'ceremonyId',
@@ -788,9 +787,6 @@ const centeredIntegerToResidue = (value: number, modulus: number): number => {
     return Number(residue < 0n ? residue + modulusWide : residue);
 };
 
-const addMod = (left: number, right: number, modulus: number): number =>
-    Number((BigInt(left) + BigInt(right)) % BigInt(modulus));
-
 const coefficientVectorBytes = (
     coefficients: readonly number[],
 ): Uint8Array => {
@@ -1027,277 +1023,6 @@ export const createVssSourceTrusteeCoefficientOpeningStateProvider = (
     };
 };
 
-const structuralMatrixCoefficient = (
-    matrixRowIndex: number,
-    randomnessColumnIndex: number,
-    ringCoefficientPosition: number,
-): number | undefined => {
-    if (
-        matrixRowIndex < setupCommitmentModuleRank &&
-        randomnessColumnIndex > setupCommitmentModuleRank
-    ) {
-        const identityColumnIndex =
-            randomnessColumnIndex - setupCommitmentModuleRank - 1;
-        return Number(
-            identityColumnIndex === matrixRowIndex &&
-                ringCoefficientPosition === 0,
-        );
-    }
-    if (
-        matrixRowIndex === setupCommitmentModuleRank &&
-        randomnessColumnIndex >= setupCommitmentModuleRank
-    ) {
-        return Number(
-            randomnessColumnIndex === setupCommitmentModuleRank &&
-                ringCoefficientPosition === 0,
-        );
-    }
-
-    return undefined;
-};
-
-const sampleCommitmentMatrixResidue = (
-    publicMatrixSeedHash: ProtocolHash,
-    sourceRnsLimbIndex: number,
-    commitmentModulusIndex: number,
-    matrixRowIndex: number,
-    randomnessColumnIndex: number,
-    ringCoefficientPosition: number,
-    modulus: number,
-): number => {
-    let blockIndex = 0;
-    while (true) {
-        const output = hexToBytes(
-            hash512Hex(
-                'sealed-lattice-bdlop-commitment/matrix-coefficient-v1',
-                [
-                    textEncoder.encode(publicMatrixSeedHash),
-                    textEncoder.encode(String(sourceRnsLimbIndex)),
-                    textEncoder.encode(String(commitmentModulusIndex)),
-                    textEncoder.encode(String(matrixRowIndex)),
-                    textEncoder.encode(String(randomnessColumnIndex)),
-                    textEncoder.encode(String(ringCoefficientPosition)),
-                    textEncoder.encode(String(modulus)),
-                    textEncoder.encode(String(blockIndex)),
-                ],
-            ),
-        );
-        for (let offset = 0; offset < output.length; offset += 8) {
-            const word = littleEndianU64(output.subarray(offset, offset + 8));
-            const reducedValue = reduceUnbiasedU64(word, modulus);
-            if (reducedValue !== undefined) {
-                return reducedValue;
-            }
-        }
-        blockIndex += 1;
-    }
-};
-
-const setupCommitmentMatrixCoefficient = (
-    publicMatrixSeedHash: ProtocolHash,
-    sourceRnsLimbIndex: number,
-    commitmentModulusIndex: number,
-    matrixRowIndex: number,
-    randomnessColumnIndex: number,
-    ringCoefficientPosition: number,
-    modulus: number,
-): number => {
-    const structuralCoefficient = structuralMatrixCoefficient(
-        matrixRowIndex,
-        randomnessColumnIndex,
-        ringCoefficientPosition,
-    );
-    if (structuralCoefficient !== undefined) {
-        return structuralCoefficient % modulus;
-    }
-
-    return sampleCommitmentMatrixResidue(
-        publicMatrixSeedHash,
-        sourceRnsLimbIndex,
-        commitmentModulusIndex,
-        matrixRowIndex,
-        randomnessColumnIndex,
-        ringCoefficientPosition,
-        modulus,
-    );
-};
-
-const setupCommitmentMatrixPolynomial = (
-    publicMatrixSeedHash: ProtocolHash,
-    sourceRnsLimbIndex: number,
-    commitmentModulusIndex: number,
-    matrixRowIndex: number,
-    randomnessColumnIndex: number,
-    ringDegree: number,
-    modulus: number,
-): number[] =>
-    Array.from({ length: ringDegree }, (_unused, ringCoefficientPosition) =>
-        setupCommitmentMatrixCoefficient(
-            publicMatrixSeedHash,
-            sourceRnsLimbIndex,
-            commitmentModulusIndex,
-            matrixRowIndex,
-            randomnessColumnIndex,
-            ringCoefficientPosition,
-            modulus,
-        ),
-    );
-
-const negacyclicProduct = (
-    left: readonly number[],
-    right: readonly number[],
-    modulus: number,
-): number[] => {
-    if (left.length !== right.length) {
-        throw new Error('negacyclic product inputs must have the same length.');
-    }
-    const modulusWide = BigInt(modulus);
-    const product = Array.from({ length: left.length }, () => 0n);
-    left.forEach((leftValue, leftIndex) => {
-        right.forEach((rightValue, rightIndex) => {
-            const term = (BigInt(leftValue) * BigInt(rightValue)) % modulusWide;
-            const rawTargetIndex = leftIndex + rightIndex;
-            const targetIndex =
-                rawTargetIndex >= left.length
-                    ? rawTargetIndex - left.length
-                    : rawTargetIndex;
-            product[targetIndex] =
-                rawTargetIndex >= left.length
-                    ? product[targetIndex] - term
-                    : product[targetIndex] + term;
-        });
-    });
-
-    return product.map((coefficient) =>
-        Number(
-            coefficient % modulusWide < 0n
-                ? (coefficient % modulusWide) + modulusWide
-                : coefficient % modulusWide,
-        ),
-    );
-};
-
-export const computeSetupCommitmentFromOpening = (input: {
-    readonly publicMatrixSeedHash: ProtocolHash;
-    readonly qSharePrimes: readonly number[];
-    readonly sourceRnsLimbIndex: number;
-    readonly sourceMessageModulus: number;
-    readonly shamirCoefficientIndex: number;
-    readonly messageCoefficients: readonly number[];
-    readonly randomnessByColumn: readonly (readonly number[])[];
-    readonly ringDegree: number;
-}): SetupCommitmentValue => {
-    assertHashLike(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
-    assertNonNegativeSafeInteger(
-        input.sourceRnsLimbIndex,
-        'sourceRnsLimbIndex',
-    );
-    assertNonNegativeSafeInteger(
-        input.shamirCoefficientIndex,
-        'shamirCoefficientIndex',
-    );
-    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
-    const expectedSourcePrime = input.qSharePrimes[input.sourceRnsLimbIndex];
-    if (expectedSourcePrime === undefined) {
-        throw new Error('sourceRnsLimbIndex is outside Q_share.');
-    }
-    if (input.sourceMessageModulus !== expectedSourcePrime) {
-        throw new Error('sourceMessageModulus must match Q_share.');
-    }
-    assertResidueVector(
-        input.messageCoefficients,
-        input.sourceMessageModulus,
-        input.ringDegree,
-        'messageCoefficients',
-    );
-    assertRandomness(
-        input.randomnessByColumn,
-        input.ringDegree,
-        'randomnessByColumn',
-    );
-
-    const commitmentLimbs = setupCommitmentModulusLimbIndices.map(
-        (commitmentModulusIndex) => {
-            const modulus = input.qSharePrimes[commitmentModulusIndex];
-            if (modulus === undefined) {
-                throw new Error('Commitment modulus limb is missing.');
-            }
-            const messageResidues = input.messageCoefficients.map(
-                (coefficient) => coefficient % modulus,
-            );
-            const randomnessResidues = input.randomnessByColumn.map((column) =>
-                column.map((coefficient) =>
-                    centeredIntegerToResidue(coefficient, modulus),
-                ),
-            );
-            const rows = Array.from(
-                { length: setupCommitmentRowCount },
-                (_unused, matrixRowIndex) => {
-                    const rowAccumulator = Array.from(
-                        { length: input.ringDegree },
-                        () => 0,
-                    );
-                    randomnessResidues.forEach(
-                        (randomnessColumn, randomnessColumnIndex) => {
-                            const matrixPolynomial =
-                                setupCommitmentMatrixPolynomial(
-                                    input.publicMatrixSeedHash,
-                                    input.sourceRnsLimbIndex,
-                                    commitmentModulusIndex,
-                                    matrixRowIndex,
-                                    randomnessColumnIndex,
-                                    input.ringDegree,
-                                    modulus,
-                                );
-                            const product = negacyclicProduct(
-                                matrixPolynomial,
-                                randomnessColumn,
-                                modulus,
-                            );
-                            product.forEach(
-                                (productValue, coefficientIndex) => {
-                                    rowAccumulator[coefficientIndex] = addMod(
-                                        rowAccumulator[coefficientIndex] ?? 0,
-                                        productValue,
-                                        modulus,
-                                    );
-                                },
-                            );
-                        },
-                    );
-                    if (matrixRowIndex === setupCommitmentModuleRank) {
-                        messageResidues.forEach(
-                            (messageValue, coefficientIndex) => {
-                                rowAccumulator[coefficientIndex] = addMod(
-                                    rowAccumulator[coefficientIndex] ?? 0,
-                                    messageValue,
-                                    modulus,
-                                );
-                            },
-                        );
-                    }
-
-                    return rowAccumulator;
-                },
-            );
-
-            return {
-                commitmentModulusIndex,
-                modulus,
-                rows,
-            };
-        },
-    );
-
-    return {
-        sourceRnsLimbIndex: input.sourceRnsLimbIndex,
-        sourceMessageModulus: input.sourceMessageModulus,
-        shamirCoefficientIndex: input.shamirCoefficientIndex,
-        ringDegree: input.ringDegree,
-        commitmentLimbs,
-    };
-};
-
 const setupCommitmentFullValue = (
     commitment: SetupCommitmentValue,
 ): JsonRecord => ({
@@ -1337,61 +1062,18 @@ export const setupCommitmentRootPayload = (
     })),
 });
 
-const publicCommitmentCoefficientVectorHash512 = (
-    commitment: SetupCommitmentValue,
-): string =>
-    coefficientVectorHash512(
-        commitment.commitmentLimbs.flatMap((limb) => limb.rows.flat()),
-        'sealed-lattice-bdlop-commitment/public-commitment-coefficients-v1',
-    );
-
-const commitmentChunkRoot = (
-    commitment: SetupCommitmentValue,
-    commitmentRoot: ProtocolHash,
-): ProtocolHash =>
-    deriveProtocolHash('VssCoefficientCommitmentRoot', {
-        objectType: 'VssCoefficientCommitmentChunkRoot',
-        objectVersion: 1,
-        commitmentProfileId: setupCommitmentProfileId,
-        commitmentRoot,
-        commitmentLimbs: commitment.commitmentLimbs.map((limb) => ({
-            commitmentModulusIndex: limb.commitmentModulusIndex,
-            modulus: limb.modulus,
-            rowCoefficientHash512: limb.rows.map((row) =>
-                coefficientVectorHash512(
-                    row,
-                    'sealed-lattice-bdlop-commitment/row-coefficients-v1',
-                ),
-            ),
-        })),
-    });
-
-const computeSetupCommitmentWithOptionalKernel = (input: {
+const computeSetupCommitmentWithKernel = (input: {
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly qSharePrimes: readonly number[];
     readonly sourceRnsLimbIndex: number;
     readonly sourceMessageModulus: number;
     readonly shamirCoefficientIndex: number;
     readonly messageCoefficients: readonly number[];
     readonly randomnessByColumn: readonly (readonly number[])[];
     readonly ringDegree: number;
-    readonly setupCommitmentComputer?: SetupCommitmentOpeningComputer;
-}): SetupCommitmentOpeningComputation => {
-    if (input.setupCommitmentComputer !== undefined) {
-        return input.setupCommitmentComputer({
-            publicMatrixSeedHash: input.publicMatrixSeedHash,
-            sourceRnsLimbIndex: input.sourceRnsLimbIndex,
-            sourceMessageModulus: input.sourceMessageModulus,
-            shamirCoefficientIndex: input.shamirCoefficientIndex,
-            messageCoefficients: input.messageCoefficients,
-            randomnessByColumn: input.randomnessByColumn,
-            ringDegree: input.ringDegree,
-        });
-    }
-
-    const commitment = computeSetupCommitmentFromOpening({
+    readonly setupCommitmentComputer: SetupCommitmentOpeningComputer;
+}): SetupCommitmentOpeningComputation =>
+    input.setupCommitmentComputer({
         publicMatrixSeedHash: input.publicMatrixSeedHash,
-        qSharePrimes: input.qSharePrimes,
         sourceRnsLimbIndex: input.sourceRnsLimbIndex,
         sourceMessageModulus: input.sourceMessageModulus,
         shamirCoefficientIndex: input.shamirCoefficientIndex,
@@ -1399,19 +1081,6 @@ const computeSetupCommitmentWithOptionalKernel = (input: {
         randomnessByColumn: input.randomnessByColumn,
         ringDegree: input.ringDegree,
     });
-    const commitmentRoot = deriveProtocolHash(
-        'SetupCommitmentRoot',
-        setupCommitmentRootPayload(commitment),
-    );
-
-    return {
-        commitment: setupCommitmentFullValue(commitment),
-        commitmentRoot,
-        commitmentChunkRoot: commitmentChunkRoot(commitment, commitmentRoot),
-        coefficientVectorHash512:
-            publicCommitmentCoefficientVectorHash512(commitment),
-    };
-};
 
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -2747,18 +2416,16 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                     'source trustee coefficientOpenings must cover every declared coordinate.',
                 );
             }
-            const commitmentComputation =
-                computeSetupCommitmentWithOptionalKernel({
-                    publicMatrixSeedHash: input.publicMatrixSeedHash,
-                    qSharePrimes: input.qSharePrimes,
-                    sourceRnsLimbIndex: rnsLimbIndex,
-                    sourceMessageModulus: rnsPrime,
-                    shamirCoefficientIndex,
-                    messageCoefficients: openingState.coefficientMessage,
-                    randomnessByColumn: openingState.randomnessByColumn,
-                    ringDegree: input.ringDegree,
-                    setupCommitmentComputer: options.setupCommitmentComputer,
-                });
+            const commitmentComputation = computeSetupCommitmentWithKernel({
+                publicMatrixSeedHash: input.publicMatrixSeedHash,
+                sourceRnsLimbIndex: rnsLimbIndex,
+                sourceMessageModulus: rnsPrime,
+                shamirCoefficientIndex,
+                messageCoefficients: openingState.coefficientMessage,
+                randomnessByColumn: openingState.randomnessByColumn,
+                ringDegree: input.ringDegree,
+                setupCommitmentComputer: options.setupCommitmentComputer,
+            });
             sourceTrusteePrivateOpenings.push({
                 ...openingState,
                 commitmentRoot: commitmentComputation.commitmentRoot,
@@ -2842,6 +2509,7 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
 ): VssSourceTrusteeCoefficientCommitmentContribution =>
     createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(input, {
         retainMaterialRecords: true,
+        setupCommitmentComputer: input.setupCommitmentComputer,
     });
 
 const sourceTrusteeOpeningMaterialReferenceFromMaterial = (
@@ -2955,6 +2623,7 @@ const sourceTrusteeOpeningMaterialSourceFromProvider = (
                     {
                         setupContext: input.setupContext,
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        setupCommitmentComputer: input.setupCommitmentComputer,
                         qSharePrimes: input.qSharePrimes,
                         ringDegree: input.ringDegree,
                         participantCount: input.participantCount,
@@ -3001,6 +2670,7 @@ export const createVssCoefficientCommitmentBundle = (
                 {
                     setupContext: input.setupContext,
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    setupCommitmentComputer: input.setupCommitmentComputer,
                     qSharePrimes: input.qSharePrimes,
                     ringDegree: input.ringDegree,
                     participantCount: input.participantCount,
@@ -3123,6 +2793,7 @@ export const createBinaryChunkedVssCoefficientCommitmentBundle = (
                 {
                     setupContext: input.setupContext,
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    setupCommitmentComputer: input.setupCommitmentComputer,
                     qSharePrimes: input.qSharePrimes,
                     ringDegree: input.ringDegree,
                     participantCount: input.participantCount,
@@ -3279,6 +2950,7 @@ export const createStreamingBinaryChunkedVssCoefficientCommitmentBundle = (
                 {
                     setupContext: input.setupContext,
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    setupCommitmentComputer: input.setupCommitmentComputer,
                     qSharePrimes: input.qSharePrimes,
                     ringDegree: input.ringDegree,
                     participantCount: input.participantCount,

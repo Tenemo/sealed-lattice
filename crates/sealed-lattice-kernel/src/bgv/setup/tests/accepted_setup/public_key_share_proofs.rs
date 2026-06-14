@@ -43,47 +43,6 @@ fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
 }
 
 #[test]
-fn collective_setup_verifier_refuses_legacy_public_key_lnp_proof_objects() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_legacy_public_key_lnp_proof_objects",
-    );
-
-    for legacy_public_key_proof_field in [
-        "publicKeyShareLnpProofs",
-        "publicKeyShareLnpTboxProofs",
-        "publicKeyShareTboxProofs",
-    ] {
-        let mut package = minimal_collective_setup_package();
-        package[legacy_public_key_proof_field] = serde_json::json!({
-            "objectType": "LegacyPublicKeyShareLnpProofSet",
-            "objectVersion": 1,
-            "proofFamily": "public-key-share",
-            "relationCommitmentHash": valid_hash('8'),
-            "tboxCommitmentPrefixHash": valid_hash('9'),
-        });
-        rebind_collective_setup_package_hash(&mut package);
-
-        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .expect("verification response");
-
-        assert_eq!(result["verifierStatus"], "refused");
-        assert_eq!(
-            result["refusedObjects"][0]["reasonCode"],
-            "acceptedPathForbiddenField"
-        );
-        assert!(
-            result["refusedObjects"][0]["message"]
-                .as_str()
-                .expect("refusal message")
-                .contains(legacy_public_key_proof_field)
-        );
-        assert!(result["acceptedSetupHandoff"].is_null());
-    }
-}
-
-#[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_before_collective_key_material()
  {

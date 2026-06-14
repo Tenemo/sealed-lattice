@@ -5,32 +5,25 @@ import {
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
     createVssCoefficientCommitmentBundle,
     deriveThresholdShareCommitments,
-    type CollectiveBgvSetupContext,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
+import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+} from '#tests/support/setup-fixtures';
 
-const qSharePrimes = [65_537, 114_689, 147_457] as const;
-const ringDegree = 4;
+const qSharePrimes = [
+    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
+] as const;
+const ringDegree = 8;
 const participantCount = 2;
 const thresholdDegree = 2;
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-threshold-share-commitments',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash('setup-threshold-share-commitments');
 
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash('carry-aware'),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} satisfies CollectiveBgvSetupContext;
+const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
 
 const coefficientVectorBytes = (
     coefficients: readonly number[],
@@ -188,6 +181,7 @@ describe('threshold-share commitment derivation', () => {
         const commitmentBundle = createVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -263,6 +257,7 @@ describe('threshold-share commitment derivation', () => {
         const commitmentBundle = createVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,
@@ -291,6 +286,7 @@ describe('threshold-share commitment derivation', () => {
         const commitmentBundle = createVssCoefficientCommitmentBundle({
             setupContext,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            setupCommitmentComputer,
             qSharePrimes,
             ringDegree,
             participantCount,

@@ -10,6 +10,7 @@ import {
     createProtocolSignatureFixture,
 } from '#packages/crypto/tests/support/protocol-signature-fixtures';
 import {
+    acceptedBgvSetupQSharePrimes,
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
     publicKeyShareCoefficientVectorHashDomain,
@@ -163,10 +164,7 @@ const protocolHashFromKernel = (
         value,
     });
 
-const qSharePrimes = [
-    65_537, 65_539, 65_543, 65_551, 65_557, 65_563, 65_579, 65_581, 65_587,
-    65_599, 65_609, 65_617, 65_629, 65_633, 65_647, 65_651, 65_657,
-] as const;
+const qSharePrimes = acceptedBgvSetupQSharePrimes;
 const participantCount = 2;
 const vssFixtureRingDegree = 8;
 const vssFixtureThresholdDegree = 2;
@@ -1128,6 +1126,10 @@ describe('accepted setup public package API in Node', () => {
             createVssCoefficientCommitmentBundle({
                 setupContext: setupContext,
                 publicMatrixSeedHash,
+                setupCommitmentComputer: (commitmentOpeningInput) =>
+                    kernel.computeSetupCommitmentFromOpening(
+                        commitmentOpeningInput,
+                    ),
                 qSharePrimes,
                 ringDegree: vssFixtureRingDegree,
                 participantCount,

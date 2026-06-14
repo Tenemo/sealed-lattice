@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
+import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     createLocalRunLog,
     currentProcessExitCode,
@@ -143,14 +144,21 @@ const main = async (): Promise<void> => {
             }.`,
     );
 
+    const progressReporter = createHeavyTestProgressReporter({
+        label: 'heavy:iterate',
+        threadCount: heavyAcceptedSetupTestThreadCount,
+    });
+
     let exitCode: number | undefined;
     try {
         exitCode = await runCommandsInSeries([cargoCommand], {
+            observer: progressReporter.observer,
             outputMode: 'inherit',
             runLog,
         });
         process.exitCode = exitCode;
     } finally {
+        progressReporter.stop();
         await runLog?.finish({
             exitCode: exitCode ?? currentProcessExitCode(),
         });

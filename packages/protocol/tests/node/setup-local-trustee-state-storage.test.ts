@@ -1,35 +1,20 @@
-import {
-    deriveProtocolHash,
-    encryptLocalTrusteeSetupSealedMaterial,
-} from '@sealed-lattice/crypto';
+import { encryptLocalTrusteeSetupSealedMaterial } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
     collectForbiddenLocalTrusteeSetupStateFieldPaths,
     decryptLocalTrusteeSetupState,
     encryptLocalTrusteeSetupState,
-    type CollectiveBgvSetupContext,
     type LocalTrusteeSetupStateEncryptionInput,
 } from '#packages/protocol/src/index';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+} from '#tests/support/setup-fixtures';
 
-const fixtureHash = (label: string): string =>
-    deriveProtocolHash('ActionContextHash', {
-        fixture: 'setup-local-trustee-state-storage',
-        label,
-    });
+const fixtureHash = makeSetupFixtureHash('setup-local-trustee-state-storage');
 
-const setupContext = {
-    ceremonyId: 'ceremony-1',
-    manifestHash: fixtureHash('manifest'),
-    rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash(
-        'carry-aware-vss-share-relation-profile',
-    ),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
-    setupEpoch: 'setup-epoch-1',
-} satisfies CollectiveBgvSetupContext;
+const setupContext = makeSetupContext(fixtureHash);
 
 const storageInputBase = {
     setupContext,
