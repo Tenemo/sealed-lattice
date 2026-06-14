@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
     PUBLIC_KEY_SHARE_PROOF_FAMILY, PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
@@ -1341,20 +1344,42 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
         material_bindings: &material_bindings,
         transported_constant_commitments: &transported_constant_commitments,
     };
-    let mut seen_roster_positions = BTreeSet::new();
-    let mut proof_roots = Vec::new();
+    let mut roster_position_counts: BTreeMap<u64, usize> = BTreeMap::new();
     for succinct_proof_record in proof_records_array {
-        if let Err(error) = verify_public_key_share_succinct_proof_record(
+        *roster_position_counts
+            .entry(value_u64(succinct_proof_record, "trusteeRosterPosition")?)
+            .or_insert(0) += 1;
+    }
+    // Each succinct proof is independent given the read-only context, so the ten
+    // verify concurrently on native targets; outcomes are collected in record
+    // order so the first refusal matches sequential verification. wasm32 stays
+    // sequential.
+    let verify_record = |succinct_proof_record: &Value| -> CanonicalResult<()> {
+        verify_public_key_share_succinct_proof_record(
             &verification_context,
             succinct_proof_record,
-            &mut seen_roster_positions,
-        ) {
-            return Ok(Some(public_key_share_succinct_proof_refusal(
-                "publicKeyShareSuccinctProofVerificationFailed",
-                error.message,
-                "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
-            )?));
-        }
+            &roster_position_counts,
+        )
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let record_verifications: Vec<CanonicalResult<()>> =
+        proof_records_array.par_iter().map(verify_record).collect();
+    #[cfg(target_arch = "wasm32")]
+    let record_verifications: Vec<CanonicalResult<()>> =
+        proof_records_array.iter().map(verify_record).collect();
+    if let Some(error) = record_verifications
+        .into_iter()
+        .filter_map(Result::err)
+        .next()
+    {
+        return Ok(Some(public_key_share_succinct_proof_refusal(
+            "publicKeyShareSuccinctProofVerificationFailed",
+            error.message,
+            "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
+        )?));
+    }
+    let mut proof_roots = Vec::new();
+    for succinct_proof_record in proof_records_array {
         proof_roots.push(json!({
             "trusteeIdentity": value_string(succinct_proof_record, "trusteeIdentity")?,
             "trusteeRosterPosition": value_u64(succinct_proof_record, "trusteeRosterPosition")?,
@@ -1435,7 +1460,7 @@ struct PublicKeyShareSuccinctProofVerificationContext<'a> {
 fn verify_public_key_share_succinct_proof_record(
     context: &PublicKeyShareSuccinctProofVerificationContext<'_>,
     proof_record: &Value,
-    seen_roster_positions: &mut BTreeSet<u64>,
+    roster_position_counts: &BTreeMap<u64, usize>,
 ) -> CanonicalResult<()> {
     if !proof_record.is_object() {
         return Err(CanonicalError::new(
@@ -1487,7 +1512,12 @@ fn verify_public_key_share_succinct_proof_record(
         }
     }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
-    if !seen_roster_positions.insert(trustee_roster_position) {
+    if roster_position_counts
+        .get(&trustee_roster_position)
+        .copied()
+        .unwrap_or(0)
+        > 1
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "public-key share succinct proof records must have distinct trustee roster positions",

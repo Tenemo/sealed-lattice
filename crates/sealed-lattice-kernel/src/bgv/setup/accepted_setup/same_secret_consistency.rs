@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY, SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
     SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS, SameSecretLinkageStatement,
@@ -730,8 +733,6 @@ pub(super) fn verify_optional_same_secret_proofs(
                 "commonRandomness.publicMatrixSeedHash was required before same-secret proof verification",
             )
         })?;
-    let mut seen_roster_positions = BTreeSet::new();
-    let mut proof_roots = Vec::new();
     let verification_context = SameSecretAnchorProofVerificationContext {
         setup_package,
         request,
@@ -741,18 +742,42 @@ pub(super) fn verify_optional_same_secret_proofs(
         statement_records: &statement_records,
         transported_constant_commitments: &transported_constant_commitments,
     };
+    let mut roster_position_counts: BTreeMap<u64, usize> = BTreeMap::new();
     for proof_record in proof_records {
-        if let Err(error) = verify_same_secret_anchor_proof_record(
+        *roster_position_counts
+            .entry(value_u64(proof_record, "trusteeRosterPosition")?)
+            .or_insert(0) += 1;
+    }
+    // Each anchor proof verifies a multi-megabyte succinct argument and is
+    // independent given the read-only context, so the ten verify concurrently on
+    // native targets; outcomes are collected in record order so the first refusal
+    // matches sequential verification. wasm32 stays sequential.
+    let verify_record = |proof_record: &Value| -> CanonicalResult<()> {
+        verify_same_secret_anchor_proof_record(
             &verification_context,
             proof_record,
-            &mut seen_roster_positions,
-        ) {
-            return Ok(Some(same_secret_proof_refusal(
-                "sameSecretProofVerificationFailed",
-                error.message,
-                "setupPackage.sameSecretProofs.proofRecords",
-            )?));
-        }
+            &roster_position_counts,
+        )
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let record_verifications: Vec<CanonicalResult<()>> =
+        proof_records.par_iter().map(verify_record).collect();
+    #[cfg(target_arch = "wasm32")]
+    let record_verifications: Vec<CanonicalResult<()>> =
+        proof_records.iter().map(verify_record).collect();
+    if let Some(error) = record_verifications
+        .into_iter()
+        .filter_map(Result::err)
+        .next()
+    {
+        return Ok(Some(same_secret_proof_refusal(
+            "sameSecretProofVerificationFailed",
+            error.message,
+            "setupPackage.sameSecretProofs.proofRecords",
+        )?));
+    }
+    let mut proof_roots = Vec::new();
+    for proof_record in proof_records {
         proof_roots.push(json!({
             "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
             "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
@@ -809,7 +834,7 @@ struct SameSecretAnchorProofVerificationContext<'a> {
 fn verify_same_secret_anchor_proof_record(
     context: &SameSecretAnchorProofVerificationContext<'_>,
     proof_record: &Value,
-    seen_roster_positions: &mut BTreeSet<u64>,
+    roster_position_counts: &BTreeMap<u64, usize>,
 ) -> CanonicalResult<()> {
     if !proof_record.is_object() {
         return Err(CanonicalError::new(
@@ -858,7 +883,12 @@ fn verify_same_secret_anchor_proof_record(
         }
     }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
-    if !seen_roster_positions.insert(trustee_roster_position) {
+    if roster_position_counts
+        .get(&trustee_roster_position)
+        .copied()
+        .unwrap_or(0)
+        > 1
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "same-secret proof records must have distinct trustee roster positions",

@@ -21,10 +21,11 @@
 // module is closed: every post-commitment challenge is drawn from the
 // degree-four challenge extension of the limb field, the masked claims are
 // integer-bound across limb fields by a two-prime lift, and every theorem row
-// carries its closure argument with one explicitly named conjecture (the
-// rate-per-query FRI bound), classical Fiat-Shamir accounting, reference-only
-// QROM rows, and a bounded-leakage smudging scope rather than 128-bit
-// zero-knowledge.
+// carries its closure argument with one explicitly named conjecture (the CS25
+// entropy-capacity FRI proximity-gap bound; see accounting.rs for the 2026
+// Option B re-basing off the disproved up-to-capacity conjecture), classical
+// Fiat-Shamir accounting, reference-only QROM rows, and a bounded-leakage
+// smudging scope rather than 128-bit zero-knowledge.
 //
 // Argument shape per limb field F_{q_l} (one trace commitment and one batched
 // FRI instance per limb, shared by every listed key):
@@ -192,8 +193,13 @@ pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // centered two-prime lift is unique and per-claim leakage is the clear bound
 // over the mask bound, about 2^-68. This is not a 128-bit zero-knowledge row.
 pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 92;
-// FRI query count at rate 1/2 under the explicitly conjectured per-query
-// soundness of one half: 2^-168. No grinding is applied.
+// FRI query count at rate 1/2. CHANGE (2026, Option B): the per-query
+// soundness is no longer the disproved one-bit (1 - rho) up-to-capacity bound
+// but the CS25 entropy-capacity bound (about 0.938 bit per query for the prime
+// base field), so 168 queries record about 156 bits before the union allowance
+// and about 140 after it, still clearing 128. The proven BCIKS20 Johnson
+// fallback (half a bit per query) would need roughly 288 queries. See
+// accounting.rs for the full re-basing. No grinding is applied.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
 // The FRI recursion stops once the claimed degree bound reaches this size and
 // the final polynomial is sent in coefficient form.

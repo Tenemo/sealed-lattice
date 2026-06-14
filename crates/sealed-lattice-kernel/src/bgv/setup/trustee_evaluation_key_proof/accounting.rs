@@ -11,12 +11,33 @@ use crate::hashing::derive_protocol_hash;
 // argument inline. The soundness model is classical round-by-round, every
 // post-commitment challenge is drawn from the degree-four challenge extension
 // of the limb field, and the explicitly conjectured input (the per-query FRI
-// bound at rate one half) is named with its insufficient proven fallback at the
-// current query count. QROM rows are reference rows only until a concrete
-// reduction-loss calculation is implemented, and the smudging row is a
-// bounded-leakage statement rather than a 128-bit zero-knowledge claim. The
-// accounting hash is bound into the generate and verify command responses, and
-// package integration binds it into the setup proof accounting certificate.
+// proximity-gap bound at rate one half) is named with its insufficient proven
+// fallback at the current query count.
+//
+// CHANGE (2026, Option B): the named conjecture was re-based onto CS25 "Our
+// Conjecture 3" (mutual correlated agreement up to the q-ary list-decoding
+// capacity for prime fields). The earlier accounting counted one bit per query,
+// the up-to-capacity proximity-gap radius 1 - rho of BCI+23 Conjecture 8.4,
+// which Crites-Stewart (CS25) and BCHKS26 DISPROVED in 2025. The repaired
+// entropy-capacity radius costs about 1/log2(q) of distance over the base limb
+// field, lowering per-query soundness from one bit to about 0.938 bit, so the
+// fixed 168-query count now records about 140 effective bits after the union
+// allowance rather than 144. The proven BCIKS20 Johnson fallback is unchanged.
+//
+// This conjecture is an admissible, claim-bearing soundness foundation under the
+// project's proximity-gap policy: a repaired below-capacity conjecture may carry
+// claim-bearing post-quantum soundness, the disproved up-to-capacity one may not.
+// The residual is a disclosed small-medium research risk, not a claim gap: CS25
+// Our Conjecture 3 is a recent (2025) conjecture and could be weakened by future
+// work, though it is the best-pedigreed standing one (its authors disproved the
+// prior conjecture). The proven BCIKS20 Johnson fallback at a larger query count
+// removes that research risk entirely.
+//
+// QROM rows are reference rows only until a concrete reduction-loss calculation
+// is implemented, and the smudging row is a bounded-leakage statement rather
+// than a 128-bit zero-knowledge claim. The accounting hash is bound into the
+// generate and verify command responses, and package integration binds it into
+// the setup proof accounting certificate.
 pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResult<Value> {
     let trace_size = POLYNOMIAL_DEGREE / TRACE_SPLIT;
     let extension_size = trace_size * DOMAIN_BLOWUP;
@@ -51,8 +72,26 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
         (challenge_field_bits - i64::from(trace_size.ilog2())) * LINCHECK_REPETITIONS as i64;
     let consistency_round_bits =
         CONSISTENCY_COEFFICIENT_BITS as i64 * CONSISTENCY_REPETITIONS as i64;
-    let query_round_bits = LOW_DEGREE_QUERY_COUNT as i64;
-    let proven_fallback_query_bits = query_round_bits / 2;
+    // Query-phase soundness under CS25 "Our Conjecture 3" (mutual correlated
+    // agreement up to the q-ary list-decoding capacity for prime fields). The
+    // older accounting counted one bit per query, the disproved BCI+23
+    // Conjecture 8.4 up-to-capacity radius 1 - rho. CS25 repairs the radius to
+    // the entropy capacity, lowering it by 1/log2(q) + 1/n over a prime base
+    // field. Our batched DEEP-FRI commits columns over the base limb field
+    // (q ~ 2^base_field_bits), so a far word survives one query with
+    // probability rho + 1/base_field_bits ~ 0.522 rather than rho = 1/2, and
+    // per-query soundness is -log2(0.522) ~ 0.938 bit, not one bit. We floor
+    // that to 930/1000 bit per query, a conservative understatement, to stay in
+    // integer arithmetic; at 168 queries this records 156 bits, 140 after the
+    // union allowance, still clearing 128.
+    let entropy_capacity_query_soundness_permille = 930_i64;
+    let query_round_bits =
+        LOW_DEGREE_QUERY_COUNT as i64 * entropy_capacity_query_soundness_permille / 1000;
+    // The proven, unconditional fallback is the BCIKS20 Johnson radius
+    // (square root of the rate, half a bit per query); it is independent of the
+    // conjecture, so it is computed from the raw query count, not from the
+    // re-based query-round bits above.
+    let proven_fallback_query_bits = LOW_DEGREE_QUERY_COUNT as i64 / 2;
     let proven_fallback_effective_soundness_bits = proven_fallback_query_bits - union_budget_bits;
     let proven_fallback_query_count_for_128_bits = 2 * (128 + union_budget_bits);
     let weakest_round_bits = [
@@ -88,9 +127,10 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
         "lowDegreeSoundness": {
             "queryCount": LOW_DEGREE_QUERY_COUNT,
             "foldedFinalCoefficientCount": LOW_DEGREE_FINAL_COEFFICIENT_COUNT,
-            "perQueryBoundModel": "accepted only under the explicitly named one-half per-query FRI conjecture at rate one half",
-            "conjecturedQueryBoundLog2": -(LOW_DEGREE_QUERY_COUNT as i64),
-            "conjectureStatement": "the accepted bound is the standard rate-per-query FRI conjecture; the proven proximity-gap bound (Johnson radius, square root of the rate per query) gives half the bits per query and is the documented fallback at double the query count",
+            "perQueryBoundModel": "claim-bearing under the named CS25 mutual-correlated-agreement FRI conjecture up to the q-ary list-decoding (entropy) capacity for prime fields, the admissible repair of the disproved up-to-capacity conjecture, about 0.938 bit per query at rate one half over the base limb field, floored to 0.930 bit",
+            "conjecturedQueryBoundLog2": -query_round_bits,
+            "conjectureStatement": "re-based in 2026 onto CS25 'Our Conjecture 3': the proximity-gap radius this batched DEEP-FRI relies on is the q-ary list-decoding (entropy) capacity (mutual correlated agreement for prime fields), strictly below the 1 - rho radius of BCI+23 Conjecture 8.4 that Crites-Stewart (CS25) and BCHKS26 disproved in 2025; over the base limb field the entropy-capacity radius costs about one over log2(q) of distance, so per-query soundness is about 0.938 bit and 168 queries record about 156 bits before the union allowance; this repaired below-capacity conjecture is an admissible, claim-bearing soundness foundation under the project's proximity-gap policy, with a disclosed small-medium research risk that it is a recent (2025) conjecture; the proven proximity-gap fallback (BCIKS20 Johnson radius, square root of the rate, half a bit per query) is unconditional, removes that research risk, but needs double the query count to clear 128 bits",
+            "namedConjectureReference": "Crites, Stewart, On Reed-Solomon proximity gaps conjectures (CS25), Our Conjecture 3 (mutual correlated agreement up to the q-ary list-decoding capacity for prime fields); repairs the disproved BCI+23 Conjecture 8.4 up-to-capacity proximity gap",
             "provenBoundReference": "Ben-Sasson, Carmon, Ishai, Kopparty, Saraf, Proximity gaps for Reed-Solomon codes (BCIKS20)",
             "provenFallbackQueryBoundLog2": -proven_fallback_query_bits,
             "provenFallbackEffectiveSoundnessBitsAfterUnion": proven_fallback_effective_soundness_bits,
@@ -100,7 +140,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "grinding": "none-applied: every round bound already clears the target with margin",
             "unionBudgetLog2": union_budget_bits,
             "effectiveSoundnessBitsAfterUnion": effective_soundness_bits,
-            "acceptanceBar": "the conjectured rate-per-query FRI row clears 128 bits after the fixed union allowance; the proven fallback does not clear 128 bits at the current query count and would require the recorded larger query count or a redesigned low-degree check",
+            "acceptanceBar": "the named CS25 entropy-capacity FRI row clears 128 bits after the fixed union allowance (about 140 bits); the proven BCIKS20 Johnson fallback does not clear 128 bits at the current query count and would require the recorded larger query count or a redesigned low-degree check",
             "acceptedUnderNamedFriConjecture": true,
             "acceptedUnderProvenFallback": false,
             "accepted": true,
@@ -186,7 +226,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "soundnessInheritance": "the opening relations are rows of the same batched lincheck and row checks, so their soundness is the linear-relation and consistency rows above",
             "accepted": true,
         },
-        "claimBoundary": "accounting closed for classical succinct-family soundness under the explicitly named rate-per-query FRI conjecture; the proven FRI fallback, QROM reduction loss, and 128-bit zero-knowledge are not accepted by this row, and the smudging statement is scoped to its recorded bounded leakage; rows outside this argument (ceremony transport, roster binding, target decryption) keep their own gates",
+        "claimBoundary": "accounting closed for classical succinct-family soundness under the explicitly named CS25 mutual-correlated-agreement FRI conjecture up to the q-ary list-decoding (entropy) capacity, the admissible claim-bearing repair of the disproved up-to-capacity proximity gap, carrying a disclosed small-medium research risk; the proven BCIKS20 Johnson fallback is the unconditional alternative, the QROM reduction-loss calculation and the full 128-bit zero-knowledge upgrade are separately-tracked refinements not accounted by this row, and the smudging statement is scoped to its recorded bounded leakage; rows outside this argument (ceremony transport, roster binding, target decryption) keep their own gates",
     }))
 }
 

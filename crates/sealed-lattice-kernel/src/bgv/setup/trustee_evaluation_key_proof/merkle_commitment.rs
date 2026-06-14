@@ -50,6 +50,7 @@ impl MerkleTree {
         self.levels.last().expect("levels are non-empty")[0]
     }
 
+    #[cfg(test)]
     pub(super) fn open(&self, leaf_index: usize) -> Vec<[u8; 64]> {
         let mut path = Vec::with_capacity(self.levels.len() - 1);
         let mut index = leaf_index;
@@ -62,6 +63,7 @@ impl MerkleTree {
     }
 }
 
+#[cfg(test)]
 pub(super) fn verify_merkle_opening(
     root: &[u8; 64],
     leaf_index: usize,

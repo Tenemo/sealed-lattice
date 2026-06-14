@@ -1756,7 +1756,16 @@ fn trustee_evaluation_key_proofs_object_inner(
     let checkpoint_resume_enabled =
         terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
     let trustee_proof_batch_size = if terminal_transport.is_some() {
-        1
+        // Full-ring terminal proving: run several provers at once to fill a
+        // modern multi-core workstation instead of strictly one at a time. Each
+        // prover only saturates a few cores through the shared work pool, so size
+        // concurrency to roughly a quarter of the available cores, capped by the
+        // participant count, so concurrent multi-gigabyte prover working sets
+        // scale with (and stay within) the machine's memory.
+        std::thread::available_parallelism()
+            .map(|cores| (cores.get() / 4).max(1))
+            .unwrap_or(TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE)
+            .min(same_secret_proofs.len())
     } else {
         TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
     };

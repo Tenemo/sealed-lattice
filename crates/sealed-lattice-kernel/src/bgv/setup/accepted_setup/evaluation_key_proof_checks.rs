@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
@@ -292,7 +295,12 @@ fn verify_trustee_evaluation_key_proof_set(
             "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
         ));
     }
-    for (record_position, proof_record) in proof_records.iter().enumerate() {
+    // The ten trustee proofs are independent given the read-only shared inputs
+    // above, and each verifies a multi-megabyte succinct argument, so they run
+    // concurrently on native targets. Outcomes are collected in roster order, so
+    // the first failure reported is identical to sequential verification. wasm32
+    // has no shared-memory threads and stays sequential.
+    let verify_record = |record_position: usize, proof_record: &Value| -> CanonicalResult<()> {
         let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
         if trustee_roster_position != record_position as u64 {
             return Err(CanonicalError::new(
@@ -314,8 +322,23 @@ fn verify_trustee_evaluation_key_proof_set(
             &same_secret_proof_bindings,
             &statement,
             request,
-        )?;
-    }
+        )
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let record_verifications: Vec<CanonicalResult<()>> = proof_records
+        .par_iter()
+        .enumerate()
+        .map(|(record_position, proof_record)| verify_record(record_position, proof_record))
+        .collect();
+    #[cfg(target_arch = "wasm32")]
+    let record_verifications: Vec<CanonicalResult<()>> = proof_records
+        .iter()
+        .enumerate()
+        .map(|(record_position, proof_record)| verify_record(record_position, proof_record))
+        .collect();
+    record_verifications
+        .into_iter()
+        .collect::<CanonicalResult<Vec<()>>>()?;
 
     let supplied_root = value_string(proof_set, "trusteeEvaluationKeyProofSetRoot")?;
     let mut root_input = proof_set.clone();
