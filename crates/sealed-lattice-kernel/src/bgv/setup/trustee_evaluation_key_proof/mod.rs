@@ -24,8 +24,9 @@
 // carries its closure argument with one explicitly named conjecture (the CS25
 // entropy-capacity FRI proximity-gap bound; see accounting.rs for the 2026
 // Option B re-basing off the disproved up-to-capacity conjecture), classical
-// Fiat-Shamir accounting, reference-only QROM rows, and a bounded-leakage
-// smudging scope rather than 128-bit zero-knowledge.
+// Fiat-Shamir accounting, a computed QROM reduction loss (CMS19, about 70-bit
+// quantum soundness, scoped by the present-time ceremony-time threat), and a
+// bounded-leakage smudging scope rather than 128-bit zero-knowledge.
 //
 // Argument shape per limb field F_{q_l} (one trace commitment and one batched
 // FRI instance per limb, shared by every listed key):
@@ -145,8 +146,9 @@ pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
 }
 // The model status states the closed accounting on every record. The bound
 // accounting is classical and accepted under the explicitly named FRI
-// conjecture, while QROM loss and 128-bit zero-knowledge remain outside this
-// status until separately closed.
+// conjecture; the QROM reduction loss is computed (CMS19, about 70-bit quantum,
+// present-time threat) but stays below the 128-bit quantum bar, and 128-bit
+// zero-knowledge remains outside this status until separately closed.
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS: &str =
     "succinct-trustee-evaluation-key-argument-accounting-accepted";
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS: &str =

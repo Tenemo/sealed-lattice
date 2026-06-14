@@ -33,11 +33,19 @@ use crate::hashing::derive_protocol_hash;
 // prior conjecture). The proven BCIKS20 Johnson fallback at a larger query count
 // removes that research risk entirely.
 //
-// QROM rows are reference rows only until a concrete reduction-loss calculation
-// is implemented, and the smudging row is a bounded-leakage statement rather
-// than a 128-bit zero-knowledge claim. The accounting hash is bound into the
-// generate and verify command responses, and package integration binds it into
-// the setup proof accounting certificate.
+// QROM rows now carry the computed reduction loss via CMS19 (state-restoration
+// BCS-in-QROM, round-independent O(t^2 * eps + t^3 / 2^lambda)): the Grover
+// square-root halves the classical round-by-round soundness, giving about 70-bit
+// quantum soundness across the instance union (about 78-bit single statement),
+// with the 512-bit SHAKE256 digest contributing about 170-bit (not the
+// bottleneck). This is below the conventional 128-bit quantum bar and is not
+// upgraded to qromAccepted; it is recorded as the stated achieved level, scoped
+// by the present-time threat (a forgery needs a quantum computer of that power
+// running DURING the ceremony, with no harvest-now-decrypt-later exposure). The
+// smudging row is still a bounded-leakage statement rather than a 128-bit
+// zero-knowledge claim. The accounting hash is bound into the generate and
+// verify command responses, and package integration binds it into the setup
+// proof accounting certificate.
 pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResult<Value> {
     let trace_size = POLYNOMIAL_DEGREE / TRACE_SPLIT;
     let extension_size = trace_size * DOMAIN_BLOWUP;
@@ -109,6 +117,19 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     .min()
     .expect("round list is non-empty");
     let effective_soundness_bits = weakest_round_bits - union_budget_bits;
+    // Quantum (QROM) soundness via CMS19 (state-restoration BCS-in-QROM): the
+    // BCS transform of this public-coin round-by-round-sound IOP has QROM
+    // soundness error O(t^2 * eps + t^3 / 2^lambda), independent of the round
+    // count, for an adversary making t quantum random-oracle queries with IOP
+    // round-by-round soundness eps and digest size lambda. The Grover
+    // square-root halves the classical round-by-round soundness (the t^2 * eps
+    // term), and the hash term is the BHT quantum-collision bound on the digest.
+    // The digest is SHAKE256 with a 64-byte output (hashing::hash512), used for
+    // every Merkle leaf, Merkle node, and Fiat-Shamir challenge.
+    let digest_bits = 512_i64;
+    let quantum_soundness_bits = weakest_round_bits / 2;
+    let quantum_soundness_after_union_bits = effective_soundness_bits / 2;
+    let quantum_collision_resistance_bits = digest_bits / 3;
 
     Ok(json!({
         "objectType": "SuccinctEvaluationKeyProofAccounting",
@@ -209,15 +230,30 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "domainSeparation": "labelled absorb and challenge domains with per-limb forks",
             "weakestRoundSoundnessLog2": -weakest_round_bits,
             "effectiveSoundnessBitsAfterUnion": effective_soundness_bits,
-            "qromAccounting": "quantum random-oracle reductions for multi-round Fiat-Shamir are referenced, not accepted as claim-bearing evidence here: the measure-and-reprogram bound of DFM20 with the DFMS19 sigma-protocol predecessor and the DFMS22 commit-and-open treatment must still be instantiated with a concrete reduction-loss calculation before any QROM label is accepted",
+            "qromModel": "the quantum random-oracle reduction loss is computed via CMS19 (Chiesa-Manohar-Spooner, Succinct arguments in the quantum random-oracle model): the BCS transform of a public-coin round-by-round-sound IOP, which this argument is, has QROM soundness error O(t^2 * eps + t^3 / 2^lambda) against an adversary making t quantum random-oracle queries, where eps is the IOP round-by-round soundness error and lambda is the digest size; the bound is independent of the round count, which is why it applies to this roughly seventeen-round FRI argument where the measure-and-reprogram bound (DFM20) carries a round-dependent (2t+1)^(2*rounds) loss that is vacuous at this round count",
+            "qromSoundnessTermModel": "t^2 * eps: the Grover square-root halves the classical round-by-round soundness, so quantum soundness in bits is about half the weakest classical round",
+            "qromHashTermModel": "t^3 / 2^lambda: the BHT quantum-collision bound on the digest, about lambda/3 bits",
+            "digestBits": digest_bits,
+            "digestFunction": "SHAKE256 with a 64-byte output (hashing::hash512), used for every Merkle leaf, Merkle node, and Fiat-Shamir challenge",
+            "quantumCollisionResistanceBitsApproximate": quantum_collision_resistance_bits,
+            "classicalCollisionResistanceBitsApproximate": digest_bits / 2,
+            "achievedQuantumSoundnessBitsApproximate": quantum_soundness_bits,
+            "achievedQuantumSoundnessAfterInstanceUnionBitsApproximate": quantum_soundness_after_union_bits,
+            "achievedQuantumSoundnessCalculation": "the weakest classical round-by-round soundness (the FRI query round, about 156 bits, conjectural under CS25) is halved by the Grover square-root to about 78 bits single-statement; halving the union-effective 140 bits gives about 70 bits across the first profile's instance union; the digest contributes about 170 bits (512 over 3, BHT quantum collision) and is not the bottleneck, so the achieved post-quantum soundness is set by the soundness term, not the hash",
+            "presentTimeThreatScope": "this bound concerns a cheating prover only, and soundness is a present-time property: a setup-proof forgery must be produced during the live ceremony, so exploiting it requires an adversary to operate a fault-tolerant quantum computer capable of roughly two to the seventy random-oracle queries DURING the ceremony itself. There is no harvest-now-decrypt-later exposure, unlike confidentiality: the BGV/RLWE, ML-KEM-768, and ML-DSA-65 confidentiality and authentication layers are the harvest-now surfaces and are post-quantum now. An adversary that does not possess such a quantum computer running at ceremony time cannot exploit this soundness bound, regardless of later quantum progress.",
+            "pathTo128BitQuantumSoundness": "128-bit quantum soundness needs eps <= 2^-256, i.e. 256-bit classical round-by-round soundness on every round (CMS19 proves the t^2 * eps term tight, so the Grover halving is unavoidable); that forces a degree-six challenge extension (about 2^276, since the fold and out-of-domain rounds are single-challenge draws capped by the current 2^184 field), about 276 FRI queries with the column mask doubled, and about 32 consistency repetitions, roughly doubling the proof. This is not chosen; the achieved level above is stated instead.",
             "qromReferences": [
-                "DFM20, The measure-and-reprogram technique 2.0: multi-round Fiat-Shamir and more",
+                "CMS19, Succinct arguments in the quantum random-oracle model (the applicable round-independent BCS-in-QROM bound)",
+                "BCS16, Interactive oracle proofs (the underlying IOP-to-non-interactive-argument compilation)",
+                "DFM20, The measure-and-reprogram technique 2.0: multi-round Fiat-Shamir and more (round-dependent, not the applicable bound at this round count)",
                 "DFMS19, Security of the Fiat-Shamir transformation in the quantum random-oracle model",
                 "DFMS22, Efficient NIZKs and signatures from commit-and-open protocols in the QROM",
             ],
             "classicalRoundByRoundAccepted": true,
+            "qromReductionLossComputed": true,
+            "meetsConventional128BitQuantumBar": false,
             "qromAccepted": false,
-            "qromReductionLossStatus": "not-computed-open-caveat",
+            "qromReductionLossStatus": "computed-cms19-state-restoration-achieved-level-recorded",
         },
         "sameSecretLinkage": {
             "mechanism": "BDLOP constant commitments opened natively over the commitment-modulus fields, bound to the shared secret by the joint cross-limb consistency",
