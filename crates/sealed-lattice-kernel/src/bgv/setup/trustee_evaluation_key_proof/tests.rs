@@ -1,5 +1,6 @@
 use super::proof_codec::{
-    decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
+    FIELD_RESIDUE_BYTE_WIDTH, decode_trustee_evaluation_key_proof,
+    encode_trustee_evaluation_key_proof,
 };
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
@@ -17,6 +18,324 @@ use crate::bgv::setup::commitment::{
     SetupCommitmentValue, setup_commitment_full_value, setup_commitment_root,
 };
 use crate::hashing::derive_protocol_hash;
+
+use std::collections::BTreeSet;
+use std::time::Instant;
+
+use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
+use super::merkle_commitment::LEAF_SALT_BYTES;
+use super::relation::{
+    EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, SameSecretLinkageStatement,
+};
+use super::{
+    COMMITMENT_BOUND_FACTOR, DEEP_POINT_COUNT, DOMAIN_BLOWUP, LOW_DEGREE_FINAL_COEFFICIENT_COUNT,
+    LOW_DEGREE_QUERY_COUNT,
+};
+use crate::bgv::evaluator::records::MAXIMUM_OPTION_COUNT;
+use crate::bgv::evaluator::top_k::{
+    SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
+    packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
+};
+
+// Exact byte accounting of an encoded trustee evaluation-key proof, broken down
+// by component. The formulas mirror `proof_codec::encode_trustee_evaluation_key_proof`
+// exactly and are self-checked in `profile_trustee_proof_size_breakdown` against a
+// real `encode(...).len()`. Sizes are parameterised by `field_element_bytes`,
+// `hash_bytes`, and `salt_bytes` so the same function predicts the effect of a
+// serialization lever (narrower field residues, narrower hashes) before it is
+// implemented. Length-prefix `u64`s are fixed at eight bytes and tracked under
+// `length_prefixes` so they are never confused with field or hash bytes.
+#[derive(Default, Debug, Clone)]
+struct ProofSizeBreakdown {
+    length_prefixes: usize,
+    commitment_roots: usize,
+    masked_consistency_claims: usize,
+    deep_evaluations: usize,
+    low_degree_fold_roots: usize,
+    low_degree_final_coefficients: usize,
+    low_degree_query_pairs: usize,
+    low_degree_query_paths: usize,
+    phase_one_rows: usize,
+    phase_one_paths: usize,
+    phase_two_rows: usize,
+    phase_two_paths: usize,
+    leaf_salts: usize,
+}
+
+impl ProofSizeBreakdown {
+    fn total(&self) -> usize {
+        self.length_prefixes
+            + self.commitment_roots
+            + self.masked_consistency_claims
+            + self.deep_evaluations
+            + self.low_degree_fold_roots
+            + self.low_degree_final_coefficients
+            + self.low_degree_query_pairs
+            + self.low_degree_query_paths
+            + self.phase_one_rows
+            + self.phase_one_paths
+            + self.phase_two_rows
+            + self.phase_two_paths
+            + self.leaf_salts
+    }
+
+    // Bytes that carry field residues (base or extension), i.e. everything a
+    // narrower field encoding would shrink.
+    fn field_element_bytes(&self) -> usize {
+        self.masked_consistency_claims
+            + self.deep_evaluations
+            + self.low_degree_final_coefficients
+            + self.low_degree_query_pairs
+            + self.phase_one_rows
+            + self.phase_two_rows
+    }
+
+    // Bytes that carry Merkle hashes (roots and authentication paths), i.e.
+    // everything a narrower hash digest would shrink.
+    fn hash_bytes(&self) -> usize {
+        self.commitment_roots
+            + self.low_degree_fold_roots
+            + self.low_degree_query_paths
+            + self.phase_one_paths
+            + self.phase_two_paths
+    }
+}
+
+fn committed_fold_count(extension_size: usize) -> usize {
+    let initial_degree_bound = extension_size * COMMITMENT_BOUND_FACTOR / DOMAIN_BLOWUP;
+    let fold_ratio = initial_degree_bound / LOW_DEGREE_FINAL_COEFFICIENT_COUNT;
+    fold_ratio.trailing_zeros() as usize - 1
+}
+
+fn folded_layer_path_length(extension_size: usize, fold_index: usize) -> usize {
+    let leaf_count = extension_size >> (fold_index + 2);
+    leaf_count.trailing_zeros() as usize
+}
+
+fn analyze_proof_size(
+    statement: &TrusteeEvaluationKeyStatement,
+    field_element_bytes: usize,
+    hash_bytes: usize,
+    salt_bytes: usize,
+) -> ProofSizeBreakdown {
+    let extension_element_bytes = CHALLENGE_EXTENSION_DEGREE * field_element_bytes;
+    let mut breakdown = ProofSizeBreakdown::default();
+    // Proof magic plus the limb-count prefix.
+    breakdown.length_prefixes += 8 + 8;
+    for limb_index in 0..statement.limb_count() {
+        let layout = LimbColumnLayout::new(statement, limb_index).expect("limb layout");
+        let trace_size = layout.trace_size;
+        let extension_size = trace_size * DOMAIN_BLOWUP;
+        let tree_depth = extension_size.trailing_zeros() as usize;
+        let phase_one_columns = layout.phase_one_physical_count();
+        let total_columns = phase_one_columns + PHASE_TWO_COLUMN_COUNT;
+        let claim_count = layout.claim_count();
+
+        breakdown.commitment_roots += 2 * hash_bytes;
+        breakdown.masked_consistency_claims += claim_count * field_element_bytes;
+        breakdown.deep_evaluations += DEEP_POINT_COUNT * total_columns * extension_element_bytes;
+
+        // Low-degree (batched FRI) proof.
+        let folds = committed_fold_count(extension_size);
+        breakdown.length_prefixes += 8; // folded-layer-root count
+        breakdown.low_degree_fold_roots += folds * hash_bytes;
+        breakdown.low_degree_final_coefficients +=
+            LOW_DEGREE_FINAL_COEFFICIENT_COUNT * extension_element_bytes;
+        for _query in 0..LOW_DEGREE_QUERY_COUNT {
+            for fold_index in 0..folds {
+                breakdown.low_degree_query_pairs += 2 * extension_element_bytes;
+                breakdown.length_prefixes += 8; // path-length prefix
+                breakdown.low_degree_query_paths +=
+                    folded_layer_path_length(extension_size, fold_index) * hash_bytes;
+            }
+        }
+
+        // Phase (witness/quotient tree) query openings: two coset-pair slots.
+        for _query in 0..LOW_DEGREE_QUERY_COUNT {
+            for _slot in 0..2 {
+                breakdown.phase_one_rows += phase_one_columns * field_element_bytes;
+                breakdown.leaf_salts += salt_bytes;
+                breakdown.phase_one_paths += tree_depth * hash_bytes;
+                breakdown.phase_two_rows += PHASE_TWO_COLUMN_COUNT * extension_element_bytes;
+                breakdown.leaf_salts += salt_bytes;
+                breakdown.phase_two_paths += tree_depth * hash_bytes;
+            }
+        }
+    }
+
+    breakdown
+}
+
+// A statement carrying only the shape the size analyzer reads (key kinds and
+// levels, ring degree, and the linkage commitment count). Component vectors and
+// commitment contents are left empty because `LimbColumnLayout` never reads
+// them, so the full-profile shape can be analyzed at the production ring degree
+// without running the prover or allocating witness material.
+fn shape_only_trustee_statement(
+    schedule: &[(EvaluationKeyShareKind, usize)],
+    ring_degree: usize,
+    linkage_commitment_count: usize,
+) -> TrusteeEvaluationKeyStatement {
+    let keys = schedule
+        .iter()
+        .map(|(kind, level)| EvaluationKeyShareDescriptor {
+            kind: *kind,
+            level: *level,
+            key_switch_domain: "shape-only".to_string(),
+            key_switch_seed_hex: "00".to_string(),
+            component_b_by_digit: Vec::new(),
+            round_one_aggregate_diagonal: Vec::new(),
+        })
+        .collect();
+    let same_secret_linkage = (linkage_commitment_count > 0).then(|| SameSecretLinkageStatement {
+        public_matrix_seed_hash: repeated_hash("00"),
+        commitments: (0..linkage_commitment_count)
+            .map(|index| crate::bgv::setup::commitment::SetupCommitmentValue {
+                source_rns_limb_index: index,
+                source_message_modulus: DATA_PRIMES[index],
+                shamir_coefficient_index: 0,
+                ring_degree,
+                limbs: Vec::new(),
+            })
+            .collect(),
+    });
+    TrusteeEvaluationKeyStatement {
+        context: SuccinctSetupProofContext {
+            proof_family: super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY.to_string(),
+            ceremony_id: "shape-only".to_string(),
+            manifest_hash: repeated_hash("11"),
+            roster_hash: repeated_hash("22"),
+            trustee_identity: "shape-only".to_string(),
+            trustee_roster_position: 0,
+            setup_epoch: "shape-only".to_string(),
+            binding_roots: Vec::new(),
+        },
+        ring_degree,
+        keys,
+        same_secret_linkage,
+        private_vss_share: None,
+    }
+}
+
+// The frozen first-profile evaluation-key schedule shape: relinearization round
+// one and round two plus the deduplicated Galois rotation basis, every key at
+// the selected evaluator working level (mirrors `selected_rotation_schedule_entries`).
+fn full_profile_schedule_shape() -> Vec<(EvaluationKeyShareKind, usize)> {
+    let level = SELECTED_EVALUATOR_WORKING_LEVEL;
+    let mut schedule = vec![
+        (EvaluationKeyShareKind::RelinearizationRoundOne, level),
+        (EvaluationKeyShareKind::RelinearizationRoundTwo, level),
+    ];
+    let mut rotations = BTreeSet::new();
+    for galois_element in direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)
+        .expect("direct score packing basis")
+    {
+        rotations.insert(galois_element);
+    }
+    for galois_element in packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)
+        .expect("packed rank forward basis")
+    {
+        rotations.insert(galois_element);
+    }
+    for galois_element in packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)
+        .expect("packed rank return basis")
+    {
+        rotations.insert(galois_element);
+    }
+    for galois_element in rotations {
+        schedule.push((
+            EvaluationKeyShareKind::GaloisRotation { galois_element },
+            level,
+        ));
+    }
+    schedule
+}
+
+#[test]
+#[ignore = "size profiler: run explicitly to measure proof byte breakdown"]
+fn profile_trustee_proof_size_breakdown() {
+    // 1. Validate the analyzer against a real encoded proof at a small but
+    //    multi-limb, multi-key, linkage-bearing schedule.
+    let validation_ring_degree = 512_usize;
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "5123e0f0",
+        &[
+            round_one(6),
+            round_two(6),
+            rotation(3, 6),
+            rotation(5, 5),
+            rotation(7, 3),
+        ],
+        validation_ring_degree,
+        Some(7),
+    )
+    .expect("development instance");
+
+    let prove_start = Instant::now();
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let prove_elapsed = prove_start.elapsed();
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    let verify_start = Instant::now();
+    verify_evaluation_key_share(&statement, &proof).expect("verify");
+    let verify_elapsed = verify_start.elapsed();
+
+    let measured = analyze_proof_size(&statement, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
+    assert_eq!(
+        measured.total(),
+        encoded.len(),
+        "analyzer must match the real encoded length exactly"
+    );
+    println!(
+        "validation schedule: ring_degree={validation_ring_degree} keys={} limbs={} encoded={} bytes prove={:?} verify={:?}",
+        statement.keys.len(),
+        statement.limb_count(),
+        encoded.len(),
+        prove_elapsed,
+        verify_elapsed,
+    );
+    println!("validation breakdown (8-byte field, 64-byte hash): {measured:#?}");
+
+    // 2. Project the full first-profile shape at the production ring degree.
+    let schedule = full_profile_schedule_shape();
+    let linkage_commitment_count = schedule
+        .iter()
+        .map(|(_, level)| level + 1)
+        .max()
+        .expect("schedule is non-empty");
+    let full = shape_only_trustee_statement(&schedule, POLYNOMIAL_DEGREE, linkage_commitment_count);
+    // Lever 1 baseline (pre-packing eight-byte residues) versus the current
+    // codec width, plus a hypothetical narrower Merkle digest for context.
+    let before_lever_one = analyze_proof_size(&full, 8, 64, LEAF_SALT_BYTES);
+    let current = analyze_proof_size(&full, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
+    let current_with_48_byte_hash =
+        analyze_proof_size(&full, FIELD_RESIDUE_BYTE_WIDTH, 48, LEAF_SALT_BYTES);
+    let mebibyte = 1024.0 * 1024.0;
+    println!(
+        "FULL-N shape: ring_degree={POLYNOMIAL_DEGREE} keys={} limbs={}",
+        full.keys.len(),
+        full.limb_count(),
+    );
+    println!(
+        "FULL-N before lever 1 (8-byte field): total={:.1} MiB | field-element bytes={:.1} MiB | hash bytes={:.1} MiB",
+        before_lever_one.total() as f64 / mebibyte,
+        before_lever_one.field_element_bytes() as f64 / mebibyte,
+        before_lever_one.hash_bytes() as f64 / mebibyte,
+    );
+    println!(
+        "FULL-N current ({FIELD_RESIDUE_BYTE_WIDTH}-byte field): total={:.1} MiB (saved {:.1} MiB, {:.1}% vs lever-1 baseline)",
+        current.total() as f64 / mebibyte,
+        (before_lever_one.total() - current.total()) as f64 / mebibyte,
+        100.0 * (before_lever_one.total() - current.total()) as f64 / before_lever_one.total() as f64,
+    );
+    println!("FULL-N current breakdown: {current:#?}");
+    println!(
+        "FULL-N context: with a 48-byte Merkle digest as well total would be {:.1} MiB ({:.1}% below the lever-1 baseline)",
+        current_with_48_byte_hash.total() as f64 / mebibyte,
+        100.0 * (before_lever_one.total() - current_with_48_byte_hash.total()) as f64
+            / before_lever_one.total() as f64,
+    );
+}
 
 const SMALL_RING_DEGREE: usize = 128;
 const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";

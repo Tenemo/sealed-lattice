@@ -10,7 +10,28 @@ use super::*;
 // the byte stream carries no self-describing lengths except folded-layer
 // opening lengths that are checked against the statement, and trailing bytes
 // are refused.
-const PROOF_MAGIC: &[u8; 8] = b"SLTEKP01";
+const PROOF_MAGIC: &[u8; 8] = b"SLTEKP02";
+
+// Every limb modulus the proof commits over is a profile data prime: a ~2^47
+// value whose residues fit in six little-endian bytes. Field and challenge-
+// extension coordinates are written at exactly that width instead of a full
+// eight-byte u64, dropping the two high zero bytes every residue would otherwise
+// carry. The width is derived from the basis, so it stays correct if the primes
+// change and the const evaluation fails the build if a prime ever no longer
+// fits. Length prefixes and Merkle digests keep their natural widths.
+const fn field_residue_byte_width() -> usize {
+    let mut max_modulus = crate::bgv::profile::DATA_PRIMES[0];
+    let mut index = 1;
+    while index < crate::bgv::profile::DATA_PRIMES.len() {
+        if crate::bgv::profile::DATA_PRIMES[index] > max_modulus {
+            max_modulus = crate::bgv::profile::DATA_PRIMES[index];
+        }
+        index += 1;
+    }
+    let residue_bits = u64::BITS - (max_modulus - 1).leading_zeros();
+    ((residue_bits + 7) / 8) as usize
+}
+pub(super) const FIELD_RESIDUE_BYTE_WIDTH: usize = field_residue_byte_width();
 
 pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyProof) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -19,17 +40,17 @@ pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyP
     for limb_proof in &proof.limb_proofs {
         bytes.extend_from_slice(&limb_proof.witness_tree_root);
         bytes.extend_from_slice(&limb_proof.quotient_tree_root);
-        write_u64_slice(&mut bytes, &limb_proof.masked_consistency_claims);
+        write_field_residue_slice(&mut bytes, &limb_proof.masked_consistency_claims);
         for evaluations in &limb_proof.deep_evaluations {
             write_extension_slice(&mut bytes, evaluations);
         }
         encode_low_degree_proof(&mut bytes, &limb_proof.low_degree);
         for opening in &limb_proof.query_openings {
             for slot in 0..2 {
-                write_u64_slice(&mut bytes, &opening.phase_one_rows[slot]);
+                write_field_residue_slice(&mut bytes, &opening.phase_one_rows[slot]);
                 bytes.extend_from_slice(&opening.phase_one_salts[slot]);
                 write_hash_slice(&mut bytes, &opening.phase_one_paths[slot]);
-                write_u64_slice(&mut bytes, &opening.phase_two_rows[slot]);
+                write_field_residue_slice(&mut bytes, &opening.phase_two_rows[slot]);
                 bytes.extend_from_slice(&opening.phase_two_salts[slot]);
                 write_hash_slice(&mut bytes, &opening.phase_two_paths[slot]);
             }
@@ -252,15 +273,15 @@ fn expected_low_degree_folded_layer_path_length(
     Ok(leaf_count.trailing_zeros() as usize)
 }
 
-fn write_u64_slice(bytes: &mut Vec<u8>, values: &[u64]) {
+fn write_field_residue_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     for value in values {
-        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes.extend_from_slice(&value.to_le_bytes()[..FIELD_RESIDUE_BYTE_WIDTH]);
     }
 }
 
 fn write_extension_slice(bytes: &mut Vec<u8>, values: &[ChallengeExtensionElement]) {
     for value in values {
-        write_u64_slice(bytes, value);
+        write_field_residue_slice(bytes, value);
     }
 }
 
@@ -303,8 +324,11 @@ fn read_u64(bytes: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
     Ok(u64::from_le_bytes(read_array::<8>(bytes, cursor)?))
 }
 
-fn read_base_field_value(bytes: &[u8], cursor: &mut usize, modulus: u64) -> CanonicalResult<u64> {
-    let value = read_u64(bytes, cursor)?;
+fn read_field_residue(bytes: &[u8], cursor: &mut usize, modulus: u64) -> CanonicalResult<u64> {
+    let residue = read_array::<FIELD_RESIDUE_BYTE_WIDTH>(bytes, cursor)?;
+    let mut buffer = [0_u8; 8];
+    buffer[..FIELD_RESIDUE_BYTE_WIDTH].copy_from_slice(&residue);
+    let value = u64::from_le_bytes(buffer);
     if value >= modulus {
         return Err(invalid_succinct_setup_proof(
             "trustee evaluation-key proof contains a noncanonical field residue",
@@ -321,7 +345,7 @@ fn read_base_field_vec(
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
     (0..count)
-        .map(|_| read_base_field_value(bytes, cursor, modulus))
+        .map(|_| read_field_residue(bytes, cursor, modulus))
         .collect()
 }
 
@@ -332,7 +356,7 @@ fn read_extension_element(
 ) -> CanonicalResult<ChallengeExtensionElement> {
     let mut element = [0_u64; CHALLENGE_EXTENSION_DEGREE];
     for coordinate in element.iter_mut() {
-        *coordinate = read_base_field_value(bytes, cursor, modulus)?;
+        *coordinate = read_field_residue(bytes, cursor, modulus)?;
     }
 
     Ok(element)
