@@ -26,6 +26,7 @@ docs/src/content/docs/api/reference/
 # Miscellaneous
 .DS_Store
 __pycache__/
+.ignore
 
 # Temporary files
 logs/

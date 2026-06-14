@@ -101,14 +101,3 @@ export const browserTestLaneDefinitions = {
         projectName: 'browser-mobile',
     },
 } as const satisfies Record<BrowserTestLane, BrowserTestLaneDefinition>;
-
-// Manual desktop-Chromium proof measurement lane. It runs first-profile proof
-// generation inside browser WASM, so it stays out of the default browser test
-// runner and out of check; run it through
-// `pnpm run test:proof-benchmark:browser:desktop`.
-export const browserProofBenchmarkTestTimeoutMs = 30 * 60_000;
-
-export const browserProofBenchmarkLaneDefinition = {
-    include: ['packages/*/tests/browser-proof-benchmark/**/*.browser.test.ts'],
-    projectName: 'browser-proof-benchmark-desktop',
-} as const satisfies BrowserTestLaneDefinition;

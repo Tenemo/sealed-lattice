@@ -5,35 +5,68 @@ pub(super) fn rebind_collective_setup_package_hash(package: &mut serde_json::Val
         .as_object_mut()
         .expect("setup package object")
         .remove("setupPackageHash");
-    package["setupPackageHash"] = serde_json::json!(
-        derive_protocol_hash(
-            "SetupPackageHash",
-            &setup_package_hash_input_for_test(package)
-        )
-        .expect("setup package hash")
-    );
+    // Compute the canonical hash input in place instead of cloning the whole
+    // package. The embedded proof and key-switch material can be multiple
+    // gigabytes, so the previous clone dominated each heavy test's peak memory.
+    // Detaching the large private VSS envelopes (which the hash input excludes),
+    // hashing by reference, and restoring them yields the identical hash without
+    // the copy. Key order is irrelevant because the protocol hash canonicalizes.
+    let detached_envelopes = detach_private_vss_encrypted_envelopes(package);
+    let setup_package_hash =
+        derive_protocol_hash("SetupPackageHash", package).expect("setup package hash");
+    restore_private_vss_encrypted_envelopes(package, detached_envelopes);
+    package["setupPackageHash"] = serde_json::json!(setup_package_hash);
 }
 
-fn setup_package_hash_input_for_test(package: &serde_json::Value) -> serde_json::Value {
-    let mut hash_input = package.clone();
-    hash_input
-        .as_object_mut()
-        .expect("setup package object")
-        .remove("setupPackageHash");
-    if let Some(private_vss_envelope_commitments) = hash_input
+fn detach_private_vss_encrypted_envelopes(
+    package: &mut serde_json::Value,
+) -> Vec<(usize, serde_json::Value)> {
+    let mut detached_envelopes = Vec::new();
+    if let Some(envelope_references) = package
         .get_mut("privateVssEnvelopeCommitments")
         .and_then(serde_json::Value::as_object_mut)
-        && let Some(envelope_references) = private_vss_envelope_commitments
-            .get_mut("envelopeReferences")
-            .and_then(serde_json::Value::as_array_mut)
+        .and_then(|private_vss_envelope_commitments| {
+            private_vss_envelope_commitments.get_mut("envelopeReferences")
+        })
+        .and_then(serde_json::Value::as_array_mut)
     {
-        for envelope_reference in envelope_references {
-            if let Some(envelope_reference_object) = envelope_reference.as_object_mut() {
-                envelope_reference_object.remove("encryptedEnvelope");
+        for (reference_index, envelope_reference) in envelope_references.iter_mut().enumerate() {
+            if let Some(envelope_reference_object) = envelope_reference.as_object_mut()
+                && let Some(encrypted_envelope) =
+                    envelope_reference_object.remove("encryptedEnvelope")
+            {
+                detached_envelopes.push((reference_index, encrypted_envelope));
             }
         }
     }
-    hash_input
+    detached_envelopes
+}
+
+fn restore_private_vss_encrypted_envelopes(
+    package: &mut serde_json::Value,
+    detached_envelopes: Vec<(usize, serde_json::Value)>,
+) {
+    if detached_envelopes.is_empty() {
+        return;
+    }
+    if let Some(envelope_references) = package
+        .get_mut("privateVssEnvelopeCommitments")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|private_vss_envelope_commitments| {
+            private_vss_envelope_commitments.get_mut("envelopeReferences")
+        })
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for (reference_index, encrypted_envelope) in detached_envelopes {
+            if let Some(envelope_reference_object) = envelope_references
+                .get_mut(reference_index)
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                envelope_reference_object
+                    .insert("encryptedEnvelope".to_string(), encrypted_envelope);
+            }
+        }
+    }
 }
 
 pub(super) fn rebind_collective_phase_roots(package: &mut serde_json::Value) {

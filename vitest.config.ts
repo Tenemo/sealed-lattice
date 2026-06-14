@@ -7,8 +7,6 @@ import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
 import {
-    browserProofBenchmarkLaneDefinition,
-    browserProofBenchmarkTestTimeoutMs,
     browserTestLaneDefinitions,
     nodeHookTimeoutMs,
     nodeTestProjectDefinitions,
@@ -157,32 +155,23 @@ const makeNodeProject = ({
 });
 
 type BrowserProjectInput = {
-    readonly fileParallelism?: boolean;
-    readonly hookTimeout?: number;
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
     readonly provider?: ReturnType<typeof playwright>;
-    readonly testTimeout?: number;
 };
 
 const makeBrowserProject = ({
-    fileParallelism,
-    hookTimeout,
     include,
     instances,
     projectName,
     provider = playwright(),
-    testTimeout,
 }: BrowserProjectInput): UserWorkspaceConfig => ({
     plugins: [createPublicPackageResolutionPlugin()],
     resolve: publicPackageTestResolve,
     test: {
         name: projectName,
         include: copyGlobs(include),
-        ...(fileParallelism === undefined ? {} : { fileParallelism }),
-        ...(testTimeout === undefined ? {} : { testTimeout }),
-        ...(hookTimeout === undefined ? {} : { hookTimeout }),
         browser: {
             enabled: true,
             api: {
@@ -226,13 +215,6 @@ export default defineConfig({
             makeBrowserProject({
                 ...browserTestLaneDefinitions.mobile,
                 instances: mobileBrowserInstances,
-            }),
-            makeBrowserProject({
-                ...browserProofBenchmarkLaneDefinition,
-                fileParallelism: false,
-                hookTimeout: browserProofBenchmarkTestTimeoutMs,
-                instances: [{ browser: 'chromium', name: 'chromium-desktop' }],
-                testTimeout: browserProofBenchmarkTestTimeoutMs,
             }),
         ],
     },

@@ -1057,9 +1057,17 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
             }),
         )
         .expect("same-secret proof randomness seed");
-        let proof = prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
-            .expect("same-secret anchor proof");
-        let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+        let statement_hash_hex = to_hex(&statement.statement_hash());
+        let proof_bytes = checkpointed_anchor_proof_bytes(
+            SAME_SECRET_ANCHOR_PROOF_CHECKPOINT_DIRECTORY,
+            &statement_hash_hex,
+            || {
+                let proof =
+                    prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
+                        .expect("same-secret anchor proof");
+                encode_trustee_evaluation_key_proof(&proof)
+            },
+        );
         let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash =
             crate::bgv::setup::trustee_evaluation_key_proof::same_secret_anchor_proof_bytes_hash(
@@ -1091,7 +1099,7 @@ pub(super) fn same_secret_proofs_object(package: &serde_json::Value) -> serde_js
             "sameSecretStatementRoot": statement_record["sameSecretStatementRoot"],
             "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
             "sameSecretProofFamilyBindingRoot": statement_record["sameSecretProofFamilyBindingRoot"],
-            "statementHash": to_hex(&statement.statement_hash()),
+            "statementHash": statement_hash_hex,
             "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
@@ -1937,20 +1945,27 @@ fn build_trustee_evaluation_key_proof_record(
         }),
     )
     .expect("trustee proof randomness seed");
-    let proof =
-        prove_evaluation_key_share(&work_item.statement, &witness, &proof_randomness_seed_hex)
-            .unwrap_or_else(|error| {
-                panic!(
-                    "trustee evaluation-key proof generation failed for trustee {}: {error}; {}",
-                    work_item.trustee_roster_position,
-                    trustee_evaluation_key_fixture_material_mismatch_summary(
-                        work_item.trustee_roster_position,
-                        ring_degree,
-                        &work_item.statement,
-                    )
-                )
-            });
-    let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+    let statement_hash_hex = to_hex(&work_item.statement.statement_hash());
+    let proof_bytes = checkpointed_anchor_proof_bytes(
+        TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY,
+        &statement_hash_hex,
+        || {
+            let proof =
+                prove_evaluation_key_share(&work_item.statement, &witness, &proof_randomness_seed_hex)
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "trustee evaluation-key proof generation failed for trustee {}: {error}; {}",
+                            work_item.trustee_roster_position,
+                            trustee_evaluation_key_fixture_material_mismatch_summary(
+                                work_item.trustee_roster_position,
+                                ring_degree,
+                                &work_item.statement,
+                            )
+                        )
+                    });
+            encode_trustee_evaluation_key_proof(&proof)
+        },
+    );
     terminal_phase(&format!(
         "generated trustee evaluation-key proof trustee {} ({} bytes)",
         work_item.trustee_roster_position,
@@ -1969,6 +1984,82 @@ fn terminal_accepted_setup_checkpoint_resume_enabled() -> bool {
         std::env::var("SEALED_LATTICE_RESUME_TEST_CHECKPOINTS").as_deref(),
         Ok("1")
     )
+}
+
+// Checkpoint subdirectories for the inline anchor proof families. The trustee
+// evaluation-key family already persists its transported proof material under a
+// sibling directory; these two cover the other expensive prover outputs so a
+// resumed run skips re-proving every family, not just the trustee one.
+const SAME_SECRET_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str = "same-secret-anchor-proof-material";
+const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str = "public-key-share-proof-material";
+// The trustee evaluation-key family also persists transported proof material
+// under `trustee-evaluation-key-proof-material` during the terminal-transport
+// flow. This sibling directory is the statement-keyed raw-proof store used by the
+// non-transport container build that the heavy accepted-setup tests consume,
+// which never enters the transported-material resume path.
+const TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
+    "trustee-evaluation-key-anchor-proof-material";
+
+fn anchor_proof_checkpoint_path(
+    family_directory: &str,
+    statement_hash_hex: &str,
+) -> std::path::PathBuf {
+    std::path::PathBuf::from("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store")
+        .join(family_directory)
+        .join(format!("{statement_hash_hex}.bin"))
+}
+
+// Returns the deterministic encoded proof bytes for one inline anchor proof,
+// loading them from an on-disk checkpoint when checkpoint resume is enabled and a
+// matching file exists, and otherwise generating them and persisting them so a
+// later run can skip the prover. The statement hash content-addresses the proof:
+// a changed statement yields a new filename, so a stale proof is never reused,
+// and a witness-only divergence surfaces as a loud verifier rejection rather than
+// a silently accepted wrong proof.
+fn checkpointed_anchor_proof_bytes(
+    family_directory: &str,
+    statement_hash_hex: &str,
+    generate_proof_bytes: impl FnOnce() -> Vec<u8>,
+) -> Vec<u8> {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return generate_proof_bytes();
+    }
+    let path = anchor_proof_checkpoint_path(family_directory, statement_hash_hex);
+    if let Ok(proof_bytes) = std::fs::read(&path) {
+        terminal_phase(&format!(
+            "resumed {family_directory} proof checkpoint {statement_hash_hex}"
+        ));
+        return proof_bytes;
+    }
+    let proof_bytes = generate_proof_bytes();
+    persist_anchor_proof_checkpoint(&path, statement_hash_hex, &proof_bytes);
+
+    proof_bytes
+}
+
+fn persist_anchor_proof_checkpoint(
+    path: &std::path::Path,
+    statement_hash_hex: &str,
+    proof_bytes: &[u8],
+) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    std::fs::create_dir_all(parent).expect("anchor proof checkpoint directory");
+    // Publish atomically through a process-unique temporary file so a concurrent
+    // reader never observes a torn write and parallel writers never collide. If a
+    // sibling process published the identical content first, the rename fails and
+    // the temporary is discarded.
+    let temporary_path = parent.join(format!(
+        "{statement_hash_hex}.{}.partial",
+        std::process::id()
+    ));
+    std::fs::write(&temporary_path, proof_bytes).expect("anchor proof checkpoint write");
+    if std::fs::rename(&temporary_path, path).is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
 }
 
 fn trustee_evaluation_key_record_with_embedded_proof_bytes(
@@ -2462,9 +2553,17 @@ pub(super) fn public_key_share_succinct_proofs_object(
             }),
         )
         .expect("public-key share succinct proof randomness seed");
-        let proof = prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
-            .expect("public-key share succinct proof");
-        let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+        let statement_hash_hex = to_hex(&statement.statement_hash());
+        let proof_bytes = checkpointed_anchor_proof_bytes(
+            PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY,
+            &statement_hash_hex,
+            || {
+                let proof =
+                    prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
+                        .expect("public-key share succinct proof");
+                encode_trustee_evaluation_key_proof(&proof)
+            },
+        );
         let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
@@ -2493,7 +2592,7 @@ pub(super) fn public_key_share_succinct_proofs_object(
             "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
             "sameSecretProofFamilyBindingRoot": same_secret_proof_record["sameSecretProofFamilyBindingRoot"],
             "sameSecretProofRoot": same_secret_proof_record["sameSecretProofRoot"],
-            "statementHash": to_hex(&statement.statement_hash()),
+            "statementHash": statement_hash_hex,
             "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
