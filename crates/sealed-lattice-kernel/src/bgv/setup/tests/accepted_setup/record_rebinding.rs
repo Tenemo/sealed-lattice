@@ -18,6 +18,45 @@ pub(super) fn rebind_collective_setup_package_hash(package: &mut serde_json::Val
     package["setupPackageHash"] = serde_json::json!(setup_package_hash);
 }
 
+/// Flip the leading hex digit of a bound hash so the result stays valid
+/// lowercase hex but no longer equals the value the verifier recomputes.
+pub(super) fn drift_hash(hash: &str) -> String {
+    let mut characters: Vec<char> = hash.chars().collect();
+    if let Some(first) = characters.first_mut() {
+        *first = if *first == '0' { '1' } else { '0' };
+    }
+    characters.into_iter().collect()
+}
+
+/// Replace every string field equal to `target` with `replacement`, returning
+/// the number of substitutions. Drifting a bound root at every occurrence stops
+/// the verifier from falling back to an undrifted copy of the same value.
+pub(super) fn drift_all_occurrences(
+    value: &mut serde_json::Value,
+    target: &str,
+    replacement: &str,
+) -> usize {
+    match value {
+        serde_json::Value::String(text) => {
+            if text == target {
+                *text = replacement.to_string();
+                1
+            } else {
+                0
+            }
+        }
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .map(|item| drift_all_occurrences(item, target, replacement))
+            .sum(),
+        serde_json::Value::Object(map) => map
+            .values_mut()
+            .map(|child| drift_all_occurrences(child, target, replacement))
+            .sum(),
+        _ => 0,
+    }
+}
+
 fn detach_private_vss_encrypted_envelopes(
     package: &mut serde_json::Value,
 ) -> Vec<(usize, serde_json::Value)> {
