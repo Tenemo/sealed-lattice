@@ -178,15 +178,25 @@ fn accepted_setup_test_timing(test_name: &'static str) -> AcceptedSetupTestTimin
     }
 }
 
+// Mirrors FIELD_RESIDUE_BYTE_WIDTH in the trustee proof codec: every data prime
+// is below 2^48, so each committed base-field residue occupies six bytes. The
+// fold-count offset self-check below guards against this drifting from the codec.
+const PROOF_CODEC_FIELD_RESIDUE_BYTES: usize = 6;
+
 fn set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes: &mut [u8]) {
+    // Header (magic plus limb count) and the two commitment roots precede the
+    // first masked consistency claim, which is a six-byte base-field residue.
     const FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET: usize = 8 + 8 + 64 + 64;
-    let end = FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET + 8;
+    let end = FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET + PROOF_CODEC_FIELD_RESIDUE_BYTES;
     assert!(
         proof_bytes.len() >= end,
         "proof bytes must include the first masked consistency claim"
     );
-    proof_bytes[FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET..end]
-        .copy_from_slice(&crate::bgv::profile::DATA_PRIMES[0].to_le_bytes());
+    // Limb zero's claims live mod DATA_PRIMES[0]; writing that modulus as the
+    // residue is noncanonical, since a residue must be strictly below it.
+    proof_bytes[FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET..end].copy_from_slice(
+        &crate::bgv::profile::DATA_PRIMES[0].to_le_bytes()[..PROOF_CODEC_FIELD_RESIDUE_BYTES],
+    );
 }
 
 fn set_first_limb_low_degree_fold_count_to_wrong_value(
@@ -233,11 +243,11 @@ fn set_first_limb_low_degree_fold_count_to_wrong_value(
     let deep_evaluation_bytes = PROOF_CODEC_DEEP_POINT_COUNT
         .checked_mul(total_column_count)
         .and_then(|count| count.checked_mul(PROOF_CODEC_CHALLENGE_EXTENSION_DEGREE))
-        .and_then(|count| count.checked_mul(8))
+        .and_then(|count| count.checked_mul(PROOF_CODEC_FIELD_RESIDUE_BYTES))
         .expect("deep-evaluation byte count");
     let low_degree_fold_count_offset = PROOF_CODEC_HEADER_BYTES
         .checked_add(PROOF_CODEC_ROOT_BYTES_PER_LIMB)
-        .and_then(|offset| offset.checked_add(claim_count * 8))
+        .and_then(|offset| offset.checked_add(claim_count * PROOF_CODEC_FIELD_RESIDUE_BYTES))
         .and_then(|offset| offset.checked_add(deep_evaluation_bytes))
         .expect("low-degree fold-count offset");
     let low_degree_fold_count_end = low_degree_fold_count_offset + 8;

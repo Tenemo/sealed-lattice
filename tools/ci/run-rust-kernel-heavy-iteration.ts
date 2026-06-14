@@ -46,16 +46,18 @@ const heavyIterationTargetDirectory = path.resolve(
     'heavy-iteration',
 );
 
-// Each mutating heavy accepted-setup test holds a clone of the evaluation-key
-// proof container package fixture while it runs. That container embeds the proof
-// and key-switch material as inline hex, so the trustee tests peak very high: a
-// single trustee extra/duplicate test was measured at roughly 57 GiB resident.
-// Size the libtest thread pool from currently available memory with a per-test
-// budget set from that measurement, capped by core count, so a multi-test filter
-// stays within memory rather than thrashing or aborting. A single-test filter
-// simply runs one thread. Lowering this safely (to raise parallelism) needs the
-// container moved off inline hex onto the transported-material representation.
-const approximateGigabytesPerHeavyTest = 30;
+// Each mutating heavy accepted-setup test clones the full evaluation-key proof
+// container package fixture while it runs. That container embeds the proof and
+// key-switch material as inline hex, so a clone is several gigabytes resident,
+// and the package-inflating tests (extra/duplicate refusals) peak highest: a
+// single such test was measured at roughly 57 GiB resident, most of it the shared
+// fixture that concurrent tests reuse rather than a per-test cost multiplied by
+// the thread count. Size the libtest thread pool from currently available memory
+// with the same per-test budget as the gate runner, capped by core count, so a
+// multi-test filter keeps that worst case plus a few normal clones inside memory.
+// A single-test filter simply runs one thread. Raising parallelism safely needs
+// the container moved off inline hex onto the transported-material representation.
+const approximateGigabytesPerHeavyTest = 15;
 const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
 const availableGigabytes = os.freemem() / gigabyte;
@@ -109,6 +111,11 @@ const main = async (): Promise<void> => {
         env: {
             ...process.env,
             CARGO_TARGET_DIR: heavyIterationTargetDirectory,
+            // Force incremental compilation on (this runner's central per-edit
+            // saving) rather than relying on the cargo default, which an inherited
+            // environment or a cargo config could otherwise have disabled. This is
+            // what the "Incremental compilation: on" log line below promises.
+            CARGO_INCREMENTAL: '1',
             // Resume each proof family's corpus from on-disk checkpoints instead
             // of re-running the prover from a cold in-process fixture cache.
             SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',

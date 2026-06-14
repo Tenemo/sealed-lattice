@@ -954,10 +954,16 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     // A batched folded-layer opening whose node count exceeds its per-layer
-    // bound is rejected at decode, before any oversized allocation.
+    // bound by one is rejected at decode, before any oversized allocation. The
+    // bound mirrors the decoder: LOW_DEGREE_QUERY_COUNT openings over a layer of
+    // the given depth.
+    let layout = LimbColumnLayout::new(&statement, 0).expect("limb layout");
+    let extension_size = layout.trace_size * DOMAIN_BLOWUP;
+    let maximum_layer_zero_nodes =
+        LOW_DEGREE_QUERY_COUNT * folded_layer_path_length(extension_size, 0);
     proof.limb_proofs[0].low_degree.layer_batch_openings[0]
         .authentication_nodes
-        .extend(vec![[0_u8; 64]; 200_000]);
+        .resize(maximum_layer_zero_nodes + 1, [0_u8; 64]);
     let encoded = encode_trustee_evaluation_key_proof(&proof);
     let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
         Ok(_) => panic!("an oversized batched opening must reject at decode"),
