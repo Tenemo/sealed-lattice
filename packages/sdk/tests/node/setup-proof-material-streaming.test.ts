@@ -25,14 +25,14 @@ const transportedSameSecretProofMaterial = () =>
         objectType: 'SetupTransportedSameSecretProofMaterialSet',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        setupProofProfileId: 'SealedLattice-SetupProof-v1',
         proofFamily: 'same-secret-linkage-anchor',
         proofMaterials: [
             {
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,
                 setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 proofFamily: 'same-secret-linkage-anchor',
                 proofMaterialRoot: proofHash,
                 chunkSizeBytes: 1_048_576,
@@ -56,13 +56,13 @@ const verifiedSetupProofMaterials = (proofFullObjectHash = proofHash) =>
         objectType: 'VerifiedSetupProofMaterialSet',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        setupProofProfileId: 'SealedLattice-SetupProof-v1',
         proofMaterials: [
             {
                 objectType: 'VerifiedSetupProofMaterial',
                 objectVersion: 1,
                 setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 verificationId: 'caller-supplied-handle',
                 proofFamily: 'same-secret-linkage-anchor',
                 proofMaterialRoot: proofHash,
@@ -96,7 +96,7 @@ describe('setup proof material streaming in the public package', () => {
                         objectType: 'VerifiedSetupProofMaterial',
                         objectVersion: 1,
                         setupProfileId: 'CollectiveBgvSetup-v1',
-                        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                        setupProofProfileId: 'SealedLattice-SetupProof-v1',
                         verificationId: input.verificationId,
                         proofFamily: 'same-secret-linkage-anchor',
                         proofMaterialRoot: proofHash,
@@ -159,7 +159,7 @@ describe('setup proof material streaming in the public package', () => {
             objectType: 'VerifiedSetupProofMaterialSet',
             objectVersion: 1,
             setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             proofMaterials: [
                 expect.objectContaining({
                     objectType: 'VerifiedSetupProofMaterial',

@@ -93,7 +93,6 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
             readonly relinearizationCrpRoot: ProtocolHash;
             readonly galoisKeyCrpRoot: ProtocolHash;
             readonly commitmentMatrixCrpRoot: ProtocolHash;
-            readonly proofMatrixCrpRoot: ProtocolHash;
         }>;
         readonly status: 'deterministic-public-derivations-bound';
         readonly publicDerivationRoot: ProtocolHash;
@@ -425,7 +424,6 @@ const assertPublicDerivationsMatchKernelShape = (
         'relinearizationCrpRoot',
         'galoisKeyCrpRoot',
         'commitmentMatrixCrpRoot',
-        'proofMatrixCrpRoot',
     ] as const) {
         assertProtocolHash(
             crpRoots[fieldName] as string,

@@ -167,27 +167,13 @@ export type SetupCertificates = Readonly<{
 }>;
 
 const setupProfileId = 'CollectiveBgvSetup-v1';
-const setupCommitmentProfileId = 'SealedLattice-BDLOP-LNP-Commitment-v1';
-const setupProofProfileId = 'SealedLattice-LNP-SetupProof-v1';
-const setupProofChallengeDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-challenge-v1';
-const setupProofChallengeSampler =
-    'sealed-lattice-shake256-lazer-autostable-rejection-v1';
-const setupProofChallengeSpace =
-    'fixed-lnp-small-coefficient-polynomial-challenge-set';
-const setupProofChallengeSeedDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-challenge-seed-v1';
-const setupProofChallengeStreamDomain =
-    'sealed-lattice/collective-bgv-setup/lnp-challenge-stream-v1';
+const setupCommitmentProfileId = 'SealedLattice-BDLOP-Commitment-v1';
+const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 const setupProofBytesDomain =
     'sealed-lattice/collective-bgv-setup/succinct-proof-bytes-v1';
 const setupProofSerialization = 'binary';
 const setupProofByteDecoder =
     'sealed-lattice-succinct-setup-proof-byte-decoder-v1';
-const setupProofChallengeSpaceAuditHashNamespace =
-    'SetupProofChallengeSpaceAuditHash';
-const setupProofChallengeDifferenceInvertibilityStatus =
-    'repo-owned-lnp22-small-coefficient-challenge-differences-invertible';
 const setupProofBytesAcceptedStatus =
     'private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting';
 const setupProofFamilies = ['vss-opening-carry'] as const;
@@ -448,66 +434,6 @@ const numberArrayField = (
 
         return item;
     });
-};
-
-const stringArrayField = (
-    value: Readonly<Record<string, unknown>>,
-    fieldName: string,
-    objectPath: string,
-): string[] => {
-    const fieldValue = value[fieldName];
-    if (!Array.isArray(fieldValue)) {
-        throw new TypeError(`${objectPath}.${fieldName} must be an array.`);
-    }
-
-    return fieldValue.map((item, itemIndex) => {
-        if (typeof item !== 'string' || item.length === 0) {
-            throw new TypeError(
-                `${objectPath}.${fieldName}.${String(itemIndex)} must be a non-empty string.`,
-            );
-        }
-
-        return item;
-    });
-};
-
-const proofFamilyNamesFromProfile = (
-    setupProofProfile: Readonly<Record<string, unknown>>,
-): string[] => {
-    const familyProfiles = setupProofProfile.proofFamilies;
-    if (!Array.isArray(familyProfiles)) {
-        throw new TypeError(
-            'setupProfile.setupProofProfile.proofFamilies must be an array.',
-        );
-    }
-
-    return familyProfiles.map((familyProfile, familyIndex) =>
-        stringField(
-            assertObjectRecord(
-                familyProfile,
-                `setupProfile.setupProofProfile.proofFamilies.${String(familyIndex)}`,
-            ),
-            'proofFamily',
-            `setupProfile.setupProofProfile.proofFamilies.${String(familyIndex)}`,
-        ),
-    );
-};
-
-const assertSetupProofFamiliesMatchProfile = (
-    setupProofProfile: Readonly<Record<string, unknown>>,
-): void => {
-    const profileFamilyNames = proofFamilyNamesFromProfile(setupProofProfile);
-    if (
-        profileFamilyNames.length !== setupProofFamilies.length ||
-        profileFamilyNames.some(
-            (familyName, familyIndex) =>
-                familyName !== setupProofFamilies[familyIndex],
-        )
-    ) {
-        throw new Error(
-            'setupProfile.setupProofProfile.proofFamilies must match the accepted setup proof family order.',
-        );
-    }
 };
 
 const assertDerivedHashMatches = (
@@ -858,7 +784,7 @@ const setupCommitmentSecurityCertificateBody = (
         carryAwareVssShareRelationProfileHash:
             setupProfile.carryAwareVssShareRelationProfileHash,
         certificateScope:
-            'first-profile-BDLOP-LNP-commitment-parameters-and-opening-bounds',
+            'first-profile-BDLOP-commitment-parameters-and-opening-bounds',
         acceptedUse: [
             'VSS coefficient commitment records',
             'recipient-local private VSS proof witness checks',
@@ -947,17 +873,6 @@ const setupCommitmentSecurityCertificateBody = (
             referenceRows: [
                 {
                     document:
-                        'LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General',
-                    localReferencePath:
-                        'reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt',
-                    sections: [
-                        'Commitment schemes',
-                        'Module-SIS and Module-LWE problems',
-                        'ABDLOP commitment scheme and proofs of linear relations',
-                    ],
-                },
-                {
-                    document:
                         'FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting',
                     localReferencePath:
                         'reference-documents/FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting.txt',
@@ -992,7 +907,7 @@ const setupCommitmentSecurityCertificateBody = (
                 shortVectorInfinityBoundDecimal: thresholdScalarSum.toString(),
                 status: 'claim-accounting-accepted',
                 accountingBasis:
-                    'accepted Module-SIS binding row under LNP22/FPS25 commitment references and no-wrap threshold-opening bounds',
+                    'accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds',
             },
             {
                 rowId: 'first-profile-module-lwe-hiding-row',
@@ -1004,7 +919,7 @@ const setupCommitmentSecurityCertificateBody = (
                 modulusCeilBits: commitmentModulusProductBits,
                 status: 'claim-accounting-accepted',
                 accountingBasis:
-                    'accepted Module-LWE hiding row under LNP22/FPS25/ACC18 references and recipient-hidden opening leakage boundary',
+                    'accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary',
             },
         ],
         certificateStatus:
@@ -1042,109 +957,13 @@ const setupProofRecordBindingForCertificate = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
 ): JsonRecord => {
     const setupProofProfile = setupProfile.setupProofProfile;
-    const challengeBinding = objectField(
-        setupProofProfile,
-        'challengeBinding',
-        'setupProfile.setupProofProfile',
-    );
-    assertSetupProofFamiliesMatchProfile(setupProofProfile);
-    const verificationPolicy = objectField(
-        setupProofProfile,
-        'verificationPolicy',
-        'setupProfile.setupProofProfile',
-    );
 
     return {
         objectType: 'SetupProofRecordBinding',
         objectVersion: 1,
         setupProfileId,
-        setupProofProfileId: stringField(
-            setupProofProfile,
-            'profileId',
-            'setupProfile.setupProofProfile',
-        ),
+        setupProofProfileId,
         setupProofProfileHash: setupProfile.setupProofProfileHash,
-        proofSystem: stringField(
-            setupProofProfile,
-            'proofSystem',
-            'setupProfile.setupProofProfile',
-        ),
-        challengeDomain: stringField(
-            challengeBinding,
-            'challengeDomain',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeDomainHash: hashField(
-            challengeBinding,
-            'challengeDomainHash',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeBits: numberField(
-            challengeBinding,
-            'challengeBits',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeCount: numberField(
-            challengeBinding,
-            'challengeCount',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeCoefficientBound: numberField(
-            challengeBinding,
-            'challengeCoefficientBound',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        applicationRingDegree: numberField(
-            objectField(
-                setupProofProfile,
-                'relationModel',
-                'setupProfile.setupProofProfile',
-            ),
-            'applicationRingDegree',
-            'setupProfile.setupProofProfile.relationModel',
-        ),
-        lnpTboxProofRingDegree: numberField(
-            challengeBinding,
-            'lnpTboxProofRingDegree',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        lnpTboxChallengeLog2Range: numberField(
-            challengeBinding,
-            'lnpTboxChallengeLog2Range',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        lnpTboxChallengeEncodedBits: numberField(
-            challengeBinding,
-            'lnpTboxChallengeEncodedBits',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        lnpTboxChallengeSpaceBits: numberField(
-            challengeBinding,
-            'lnpTboxChallengeSpaceBits',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeSpace: stringField(
-            challengeBinding,
-            'challengeSpace',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeSampler: stringField(
-            challengeBinding,
-            'challengeSampler',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeSeedDomain: setupProofChallengeSeedDomain,
-        challengeStreamDomain: setupProofChallengeStreamDomain,
-        challengeDifferenceInvertibilityStatus: stringField(
-            challengeBinding,
-            'challengeDifferenceInvertibilityStatus',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
-        challengeDifferenceInvertibilityAccounting: objectField(
-            challengeBinding,
-            'challengeDifferenceInvertibilityAccounting',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ),
         proofBytesDomain: setupProofBytesDomain,
         proofSerialization: setupProofSerialization,
         proofByteDecoder: setupProofByteDecoder,
@@ -1153,16 +972,7 @@ const setupProofRecordBindingForCertificate = (
             'privateVssShareProofAccountingHash',
             'setupProfile.setupProofProfile',
         ),
-        publicKeyShareProofAccountingHash: hashField(
-            setupProofProfile,
-            'publicKeyShareProofAccountingHash',
-            'setupProfile.setupProofProfile',
-        ),
-        proofBytesAcceptedStatus: stringField(
-            verificationPolicy,
-            'proofBytesAcceptedStatus',
-            'setupProfile.setupProofProfile.verificationPolicy',
-        ),
+        proofBytesAcceptedStatus: setupProofBytesAcceptedStatus,
     };
 };
 
@@ -1393,55 +1203,6 @@ const setupProofAccountingCertificateBody = (
             `setupProfile.setupProofProfile.profileId must be ${setupProofProfileId}.`,
         );
     }
-    const challengeBinding = objectField(
-        setupProofProfile,
-        'challengeBinding',
-        'setupProfile.setupProofProfile',
-    );
-    if (
-        stringField(
-            challengeBinding,
-            'challengeDomain',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ) !== setupProofChallengeDomain
-    ) {
-        throw new Error(
-            `setupProfile.setupProofProfile.challengeBinding.challengeDomain must be ${setupProofChallengeDomain}.`,
-        );
-    }
-    if (
-        stringField(
-            challengeBinding,
-            'challengeSampler',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ) !== setupProofChallengeSampler
-    ) {
-        throw new Error(
-            `setupProfile.setupProofProfile.challengeBinding.challengeSampler must be ${setupProofChallengeSampler}.`,
-        );
-    }
-    if (
-        stringField(
-            challengeBinding,
-            'challengeSpace',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ) !== setupProofChallengeSpace
-    ) {
-        throw new Error(
-            `setupProfile.setupProofProfile.challengeBinding.challengeSpace must be ${setupProofChallengeSpace}.`,
-        );
-    }
-    if (
-        stringField(
-            challengeBinding,
-            'challengeDifferenceInvertibilityStatus',
-            'setupProfile.setupProofProfile.challengeBinding',
-        ) !== setupProofChallengeDifferenceInvertibilityStatus
-    ) {
-        throw new Error(
-            `setupProfile.setupProofProfile.challengeBinding.challengeDifferenceInvertibilityStatus must be ${setupProofChallengeDifferenceInvertibilityStatus}.`,
-        );
-    }
     const verificationPolicy = objectField(
         setupProofProfile,
         'verificationPolicy',
@@ -1460,11 +1221,6 @@ const setupProofAccountingCertificateBody = (
     }
     const setupProofRecordBinding =
         setupProofRecordBindingForCertificate(setupProfile);
-    const challengeSpaceAudit = objectField(
-        setupProofProfile,
-        'challengeSpaceAudit',
-        'setupProfile.setupProofProfile',
-    );
     const sameSecretLinkageAnchorProofAccountingHash = deriveProtocolHash(
         succinctSameSecretLinkageAnchorAccountingHashNamespace,
         sameSecretLinkageAnchorProofAccounting,
@@ -1545,37 +1301,6 @@ const setupProofAccountingCertificateBody = (
             publicKeyShareProofAccounting,
             trusteeEvaluationKeyProofAccounting,
         ),
-        challengeAccounting: {
-            transform: 'Fiat-Shamir',
-            challengeDomain: setupProofChallengeDomain,
-            challengeDomainHash: hashField(
-                challengeBinding,
-                'challengeDomainHash',
-                'setupProfile.setupProofProfile.challengeBinding',
-            ),
-            challengeSampler: setupProofChallengeSampler,
-            challengeSpace: setupProofChallengeSpace,
-            challengeDifferenceInvertibilityStatus:
-                setupProofChallengeDifferenceInvertibilityStatus,
-            challengeDifferenceInvertibilityAccounting: objectField(
-                challengeBinding,
-                'challengeDifferenceInvertibilityAccounting',
-                'setupProfile.setupProofProfile.challengeBinding',
-            ),
-            challengeSpaceAudit,
-            challengeSpaceAuditHash: deriveProtocolHash(
-                setupProofChallengeSpaceAuditHashNamespace,
-                challengeSpaceAudit,
-            ),
-            randomOracleModel:
-                'classical Fiat-Shamir transcript accounting is accepted for setup proof-family claim accounting; QROM rows are references until reduction loss is computed',
-            qromStatus: 'qrom-reduction-loss-not-computed-open-caveat',
-            transcriptBinding: stringArrayField(
-                challengeBinding,
-                'transcriptBinding',
-                'setupProfile.setupProofProfile.challengeBinding',
-            ),
-        },
         completionBoundary:
             'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
         certificateStatus:

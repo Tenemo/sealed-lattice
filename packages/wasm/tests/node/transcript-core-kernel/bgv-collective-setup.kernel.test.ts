@@ -1292,20 +1292,7 @@ function acceptedCommonRandomness(
         publicDerivations.publicMatrices.commitmentMatrix.profileStatus,
     ).toBe('commitment-profile-bound');
     expect(
-        publicDerivations.publicMatrices.setupProofMatrix.profileStatus,
-    ).toBe('legacy-lnp-tbox-proof-matrix-audit-bound');
-    expect(
-        publicDerivations.publicMatrices.setupProofMatrix.setupProofProfileHash,
-    ).toEqual(expect.any(String));
-    expect(
-        publicDerivations.publicMatrices.setupProofMatrix.challengeDomainHash,
-    ).toEqual(expect.any(String));
-    expect(
         publicDerivations.publicMatrices.commitmentMatrix.sampledEntries[0]
-            ?.coefficientValue,
-    ).toEqual(expect.any(Number));
-    expect(
-        publicDerivations.publicMatrices.setupProofMatrix.sampledEntries[0]
             ?.coefficientValue,
     ).toEqual(expect.any(Number));
     const commonRandomness: JsonRecord = {
@@ -2046,7 +2033,7 @@ describe('collective BGV setup kernel commands', () => {
         });
         expect(profile.carryAwareVssShareRelationProfileHash).toHaveLength(128);
         expect(profile.commitmentProfile).toMatchObject({
-            objectType: 'BdlopLnpCommitmentProfile',
+            objectType: 'BdlopCommitmentProfile',
         });
         expect(profile.commitmentProfile.messageEncoding).toMatchObject({
             integerEncoding: 'crt-lifted-integer-coefficients',

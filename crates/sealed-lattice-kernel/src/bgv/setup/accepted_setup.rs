@@ -1649,7 +1649,7 @@ fn reject_accepted_setup_forbidden_fields(value: &Value) -> CanonicalResult<()> 
         for field_name in fields.keys() {
             if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     format!(
                         "{field_name} cannot appear as a top-level accepted collective BGV setup field"
                     ),
@@ -1673,7 +1673,7 @@ fn reject_accepted_setup_forbidden_fields_recursively(value: &Value) -> Canonica
                     || field_name_suggests_legacy_external_setup_role(field_name)
                 {
                     return Err(CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
+                        CanonicalErrorCode::InvalidProtocolObject,
                         format!(
                             "{field_name} cannot appear in accepted collective BGV setup material"
                         ),
@@ -1701,7 +1701,7 @@ fn reject_accepted_setup_forbidden_request_fields(request: &Value) -> CanonicalR
             || field_name_suggests_legacy_external_setup_role(field_name)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{field_name} cannot appear in accepted collective BGV setup requests"),
             ));
         }

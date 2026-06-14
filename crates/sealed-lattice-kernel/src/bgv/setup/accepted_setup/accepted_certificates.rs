@@ -230,7 +230,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "qShareHash": q_share_hash()?,
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
-        "certificateScope": "first-profile-BDLOP-LNP-commitment-parameters-and-opening-bounds",
+        "certificateScope": "first-profile-BDLOP-commitment-parameters-and-opening-bounds",
         "acceptedUse": [
             "VSS coefficient commitment records",
             "recipient-local private VSS proof witness checks",

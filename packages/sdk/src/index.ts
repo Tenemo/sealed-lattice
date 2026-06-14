@@ -1580,7 +1580,7 @@ const prepareSetupPackageVerificationInputForKernel = (
         objectType: 'VerifiedSetupProofMaterialSet',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+        setupProofProfileId: 'SealedLattice-SetupProof-v1',
         proofMaterials: verifiedMaterials,
     } as const satisfies VerifiedSetupProofMaterialSet;
 

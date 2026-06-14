@@ -16,7 +16,7 @@ type JsonRecord = Record<string, unknown>;
 
 let vssTransportDerivationCounter = 0;
 
-export const setupCommitmentProfileId = 'SealedLattice-BDLOP-LNP-Commitment-v1';
+export const setupCommitmentProfileId = 'SealedLattice-BDLOP-Commitment-v1';
 const setupCommitmentModuleRank = 2;
 export const setupCommitmentRandomnessWidth = 2 * setupCommitmentModuleRank + 1;
 const setupCommitmentRowCount = setupCommitmentModuleRank + 1;
@@ -1069,7 +1069,7 @@ const sampleCommitmentMatrixResidue = (
     while (true) {
         const output = hexToBytes(
             hash512Hex(
-                'sealed-lattice-bdlop-lnp-commitment/matrix-coefficient-v1',
+                'sealed-lattice-bdlop-commitment/matrix-coefficient-v1',
                 [
                     textEncoder.encode(publicMatrixSeedHash),
                     textEncoder.encode(String(sourceRnsLimbIndex)),
@@ -1331,7 +1331,7 @@ export const setupCommitmentRootPayload = (
         rowCoefficientHash512: limb.rows.map((row) =>
             coefficientVectorHash512(
                 row,
-                'sealed-lattice-bdlop-lnp-commitment/row-coefficients-v1',
+                'sealed-lattice-bdlop-commitment/row-coefficients-v1',
             ),
         ),
     })),
@@ -1342,7 +1342,7 @@ const publicCommitmentCoefficientVectorHash512 = (
 ): string =>
     coefficientVectorHash512(
         commitment.commitmentLimbs.flatMap((limb) => limb.rows.flat()),
-        'sealed-lattice-bdlop-lnp-commitment/public-commitment-coefficients-v1',
+        'sealed-lattice-bdlop-commitment/public-commitment-coefficients-v1',
     );
 
 const commitmentChunkRoot = (
@@ -1360,7 +1360,7 @@ const commitmentChunkRoot = (
             rowCoefficientHash512: limb.rows.map((row) =>
                 coefficientVectorHash512(
                     row,
-                    'sealed-lattice-bdlop-lnp-commitment/row-coefficients-v1',
+                    'sealed-lattice-bdlop-commitment/row-coefficients-v1',
                 ),
             ),
         })),

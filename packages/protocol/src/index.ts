@@ -113,7 +113,6 @@ export {
     collectForbiddenSetupContributionAssemblyFieldPaths,
     createSetupContributionAssembly,
 } from './setup/setup-contribution-orchestration.js';
-export { createSetupCeremonyAssembly } from './setup/setup-ceremony-assembly.js';
 export { createSetupCertificates } from './setup/setup-certificates.js';
 export { deriveThresholdShareCommitments } from './setup/threshold-share-commitments.js';
 export {
@@ -301,12 +300,6 @@ export type {
     SetupContributionAssembly,
     SetupContributionAssemblyInput,
 } from './setup/setup-contribution-orchestration.js';
-export type {
-    SetupCeremonyAssembly,
-    SetupCeremonyAssemblyInput,
-    SetupCeremonyLocalTrusteeState,
-    SetupCeremonyTrusteeInput,
-} from './setup/setup-ceremony-assembly.js';
 export type {
     BgvHeSecurityCertificate,
     BgvRnsProfileForCertificates,

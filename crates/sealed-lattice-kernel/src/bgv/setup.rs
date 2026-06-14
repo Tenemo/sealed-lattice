@@ -220,7 +220,6 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "BGVHeSecurityCertificateHash",
             "BGVSetupParameterCertificateHash",
             "SetupProofRecordBindingHash",
-            "SetupProofChallengeSpaceAuditHash",
             "SetupProofAccountingCertificateHash",
             "SetupKeyCorrectnessCertificateHash",
             "BGVDevelopmentEncryptionFixtureHash",

@@ -143,7 +143,7 @@ describe('private VSS mailbox delivery', () => {
                 objectVersion: 1,
                 proofProfileId:
                     'sealed-lattice-private-vss-share-proof-succinct-v1',
-                setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                 proofVerificationStatus:
@@ -262,7 +262,7 @@ describe('private VSS mailbox delivery', () => {
                     objectVersion: 1,
                     proofProfileId:
                         'sealed-lattice-private-vss-share-proof-succinct-v1',
-                    setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                    setupProofProfileId: 'SealedLattice-SetupProof-v1',
                     proofFamily: 'vss-opening-carry',
                     proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                     proofVerificationStatus:

@@ -536,7 +536,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
         "commitmentProfileHash": profile["commitmentProfileHash"],
         "qShareHash": profile["qShareHash"],
         "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
-        "certificateScope": "first-profile-BDLOP-LNP-commitment-parameters-and-opening-bounds",
+        "certificateScope": "first-profile-BDLOP-commitment-parameters-and-opening-bounds",
         "acceptedUse": [
             "VSS coefficient commitment records",
             "recipient-local private VSS proof witness checks",
@@ -611,15 +611,6 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
             "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
             "referenceRows": [
                 {
-                    "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
-                    "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
-                    "sections": [
-                        "Commitment schemes",
-                        "Module-SIS and Module-LWE problems",
-                        "ABDLOP commitment scheme and proofs of linear relations"
-                    ]
-                },
-                {
                     "document": "FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting",
                     "localReferencePath": "reference-documents/FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting.txt",
                     "sections": [
@@ -648,7 +639,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
                 "status": "claim-accounting-accepted",
-                "accountingBasis": "accepted Module-SIS binding row under LNP22/FPS25 commitment references and no-wrap threshold-opening bounds"
+                "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
                 "rowId": "first-profile-module-lwe-hiding-row",
@@ -659,7 +650,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "status": "claim-accounting-accepted",
-                "accountingBasis": "accepted Module-LWE hiding row under LNP22/FPS25/ACC18 references and recipient-hidden opening leakage boundary"
+                "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
         "certificateStatus": "claim-bearing-setup-commitment-parameter-accounting-accepted",

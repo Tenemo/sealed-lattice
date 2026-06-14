@@ -453,7 +453,7 @@ describe('transcript-core kernel in Node', () => {
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,
                 setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1',
+                setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,

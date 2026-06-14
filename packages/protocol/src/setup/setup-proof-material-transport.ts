@@ -3,7 +3,7 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 type JsonRecord = Record<string, unknown>;
 
-const setupProofProfileId = 'SealedLattice-LNP-SetupProof-v1';
+const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 export const setupProofTransportChunkSizeBytes = 1_048_576;
 
 const textEncoder = new TextEncoder();

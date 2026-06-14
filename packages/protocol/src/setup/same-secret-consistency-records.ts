@@ -22,7 +22,7 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 type JsonRecord = Record<string, unknown>;
 
-export const setupProofProfileId = 'SealedLattice-LNP-SetupProof-v1';
+export const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 export const sameSecretProofFamily = 'same-secret-linkage-anchor';
 const sameSecretAnchorProofBytesHashDomain =
     'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';

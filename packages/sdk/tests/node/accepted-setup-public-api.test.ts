@@ -171,7 +171,7 @@ const participantCount = 2;
 const vssFixtureRingDegree = 8;
 const vssFixtureThresholdDegree = 2;
 const setupTransportChunkSizeBytes = 1_048_576;
-const setupProofProfileId = 'SealedLattice-LNP-SetupProof-v1';
+const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 const requiredGaloisKeySchedule = [
     {
         rotation: 3,

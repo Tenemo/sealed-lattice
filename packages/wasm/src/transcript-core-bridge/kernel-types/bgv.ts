@@ -397,9 +397,9 @@ export type BgvCollectiveSetupProfileDescription = {
     };
     readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
     readonly commitmentProfile: {
-        readonly objectType: 'BdlopLnpCommitmentProfile';
+        readonly objectType: 'BdlopCommitmentProfile';
         readonly objectVersion: 1;
-        readonly profileId: 'SealedLattice-BDLOP-LNP-Commitment-v1';
+        readonly profileId: 'SealedLattice-BDLOP-Commitment-v1';
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly construction: string;
         readonly ring: Readonly<Record<string, unknown>>;
@@ -436,17 +436,14 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly setupProofProfile: {
         readonly objectType: 'SetupProofProfile';
         readonly objectVersion: 1;
-        readonly profileId: 'SealedLattice-LNP-SetupProof-v1';
+        readonly profileId: 'SealedLattice-SetupProof-v1';
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly proofSystem: string;
         readonly proofBackendBoundary: string;
         readonly arbitraryRelationApi: string;
         readonly relationModel: Readonly<Record<string, unknown>>;
-        readonly challengeBinding: Readonly<Record<string, unknown>>;
         readonly witnessBounds: Readonly<Record<string, unknown>>;
         readonly proofFamilies: readonly Readonly<Record<string, unknown>>[];
         readonly proofSerialization: Readonly<Record<string, unknown>>;
-        readonly matrixDerivation: Readonly<Record<string, unknown>>;
         readonly verificationPolicy: Readonly<Record<string, unknown>>;
     };
     readonly setupProofProfileHash: ProtocolHash;
@@ -482,7 +479,7 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly objectType: 'EvaluatorKeyScheduleProfile';
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: 'SealedLattice-LNP-SetupProof-v1';
+        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay';
         readonly packingProfile: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly participantCount: 10;
@@ -555,7 +552,6 @@ export type BgvCollectiveSetupPublicDerivations = {
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly commitmentMatrix: BgvCollectiveSetupPublicMatrix;
-        readonly setupProofMatrix: BgvCollectiveSetupPublicMatrix;
         readonly materializationStatus: 'deterministic-entry-streams-bound';
         readonly publicMatricesRoot: ProtocolHash;
     };
@@ -564,7 +560,6 @@ export type BgvCollectiveSetupPublicDerivations = {
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly galoisKeyCrpRoot: ProtocolHash;
         readonly commitmentMatrixCrpRoot: ProtocolHash;
-        readonly proofMatrixCrpRoot: ProtocolHash;
     };
     readonly status: 'deterministic-public-derivations-bound';
     readonly publicDerivationRoot: ProtocolHash;
