@@ -29,6 +29,9 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
             "keySwitchSeedHex": key_switch_seed_hex,
             "level": level,
             "ringDegree": ring_degree,
+            // The gadget decomposition base is the RNS base itself: for a key at
+            // this level there is exactly one digit per active prime, so the
+            // component matrix is square with digitCount = rnsLimbCount = level + 1.
             "digitCount": level + 1,
             "rnsLimbCount": level + 1,
             "componentVectors": component_vector_entries,

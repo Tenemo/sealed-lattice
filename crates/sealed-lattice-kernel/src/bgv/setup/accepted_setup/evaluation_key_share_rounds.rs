@@ -560,7 +560,10 @@ pub(super) fn relinearization_aggregate_roots_by_level(
     Ok(roots)
 }
 
-// Binds the shared public sampler a to the accepted CRP root and the exact schedule slot, so every trustee derives the same a and no party can choose it adaptively; per-digit and per-modulus sampler inputs domain-separate a across gadget digits and RNS limbs.
+// Binds the shared public sampler a to the accepted CRP root and the exact
+// schedule slot (round and level), so every trustee derives the same a and no
+// party can choose it adaptively; the downstream component-material sampler then
+// expands this single seed per gadget digit and RNS limb.
 pub(super) fn expected_relinearization_key_switch_seed(
     binding: &EvaluationKeyProofCommonBinding,
     round: &str,
