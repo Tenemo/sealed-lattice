@@ -306,15 +306,6 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
             "referenceRows": [
                 {
-                    "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
-                    "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
-                    "sections": [
-                        "Commitment schemes",
-                        "Module-SIS and Module-LWE problems",
-                        "ABDLOP commitment scheme and proofs of linear relations"
-                    ]
-                },
-                {
                     "document": "FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting",
                     "localReferencePath": "reference-documents/FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting.txt",
                     "sections": [
@@ -343,7 +334,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
                 "status": "claim-accounting-accepted",
-                "accountingBasis": "accepted Module-SIS binding row under LNP22/FPS25 commitment references and no-wrap threshold-opening bounds"
+                "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
                 "rowId": "first-profile-module-lwe-hiding-row",
@@ -354,7 +345,7 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "status": "claim-accounting-accepted",
-                "accountingBasis": "accepted Module-LWE hiding row under LNP22/FPS25/ACC18 references and recipient-hidden opening leakage boundary"
+                "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
         "certificateStatus": "claim-bearing-setup-commitment-parameter-accounting-accepted",
@@ -702,33 +693,6 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
         "succinctLeakageAccounting": setup_proof_succinct_leakage_accounting_value()?,
         "fiatShamirTranscriptAccounting": setup_proof_fiat_shamir_transcript_accounting_value()?,
         "proofTheoremAccounting": setup_proof_theorem_accounting_value()?,
-        "challengeAccounting": {
-            "transform": "Fiat-Shamir",
-            "challengeDomain": SETUP_PROOF_CHALLENGE_DOMAIN,
-            "challengeDomainHash": setup_proof_challenge_domain_hash()?,
-            "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
-            "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
-            "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
-            "challengeDifferenceInvertibilityAccounting": super::setup_proof::challenge_difference_invertibility_accounting_value()?,
-            "challengeSpaceAudit": super::setup_proof::setup_proof_challenge_space_audit_value(SETUP_PROOF_LNP_PROOF_RING_DEGREE)?,
-            "challengeSpaceAuditHash": super::setup_proof::setup_proof_challenge_space_audit_hash(
-                SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE,
-                SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-            )?,
-            "scalarRelationChallengePolicy": "per-family scalar relation challenges use 63 bits, capped by signed i128 carried relation arithmetic after the setup commitment no-wrap product moved to three selected limbs with big-integer accounting",
-            "randomOracleModel": "classical Fiat-Shamir transcript accounting is accepted for setup proof-family claim accounting; QROM rows are references until reduction loss is computed",
-            "qromStatus": "qrom-reduction-loss-not-computed-open-caveat",
-            "transcriptBinding": [
-                "setupProfileHash",
-                "manifestHash",
-                "rosterHash",
-                "setupEpoch",
-                "publicMatrixSeedHash",
-                "proofFamily",
-                "statementRoot",
-                "proofChunkRoot"
-            ],
-        },
         "completionBoundary": "claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate",
         "certificateStatus": "succinct-setup-proof-family-classical-accounting-accepted-qrom-open",
         "claimBoundary": "every bound setup proof family carries accepted classical accounting through its succinct-family accounting object under the named FRI conjecture where applicable; QROM reduction loss and 128-bit zero-knowledge are not accepted by this certificate",

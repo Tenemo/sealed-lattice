@@ -70,23 +70,6 @@ pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
         "setupProfileId": setup_profile_id,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "setupProofProfileHash": setup_proof_profile_hash,
-        "proofSystem": "fixed-lnp-linear-relation-subset",
-        "challengeDomain": SETUP_PROOF_CHALLENGE_DOMAIN,
-        "challengeDomainHash": setup_proof_challenge_domain_hash(setup_profile_id)?,
-        "challengeBits": SETUP_PROOF_CHALLENGE_BITS,
-        "challengeCount": SETUP_PROOF_CHALLENGE_COUNT,
-        "challengeCoefficientBound": SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND,
-        "applicationRingDegree": POLYNOMIAL_DEGREE,
-        "lnpTboxProofRingDegree": SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-        "lnpTboxChallengeLog2Range": SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
-        "lnpTboxChallengeEncodedBits": SETUP_PROOF_LNP_CHALLENGE_ENCODED_BITS,
-        "lnpTboxChallengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
-        "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
-        "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
-        "challengeSeedDomain": SETUP_PROOF_CHALLENGE_SEED_DOMAIN,
-        "challengeStreamDomain": SETUP_PROOF_CHALLENGE_STREAM_DOMAIN,
-        "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
-        "challengeDifferenceInvertibilityAccounting": challenge_difference_invertibility_accounting_value()?,
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_BYTE_DECODER,
@@ -232,7 +215,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
     )?;
     let verified_material_set = request.get("verifiedSetupProofMaterials").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "verifiedSetupProofMaterials was required by chunkless transported setup proof material",
         )
     })?;
@@ -242,7 +225,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "verifiedSetupProofMaterials.proofMaterials must list verified setup proof material handles",
             )
         })?;
@@ -263,7 +246,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
         }
         if matching_chunks.is_some() {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "verifiedSetupProofMaterials contains duplicate proof material handles for one proofMaterialRoot",
             ));
         }
@@ -278,13 +261,13 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
             setup_proof_material_verification_id_field(proof_material)?.to_string();
         let stored_material = verified_materials.get(&verification_id).ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "verified setup proof material handle does not match a live stream-verified material",
             )
         })?;
         if stored_material.reference != *proof_material {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "verified setup proof material handle does not match the stream-verified metadata",
             ));
         }
@@ -293,7 +276,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
 
     matching_chunks.ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "verifiedSetupProofMaterials is missing the requested proofMaterialRoot",
         )
     })
@@ -413,7 +396,7 @@ fn read_setup_proof_material_transport_stream_header(
 ) -> CanonicalResult<SetupProofMaterialTransportStreamHeader> {
     if value.get("chunks").is_some() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setup proof material stream header must not contain embedded chunks",
         ));
     }
@@ -459,7 +442,7 @@ fn setup_proof_material_metadata_from_value(
     .any(|field_name| value.get(*field_name).is_some());
     if uses_prefixed_fields && uses_direct_fields {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path} must not mix direct and proof-prefixed chunk metadata"),
         ));
     }
@@ -492,7 +475,7 @@ fn setup_proof_material_metadata_from_value(
     let chunk_size_bytes = u64_field_at(value, chunk_size_field, object_path)?;
     if chunk_size_bytes != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!(
                 "{object_path}.{chunk_size_field} must match the setup proof transport chunk size"
             ),
@@ -542,7 +525,7 @@ fn setup_proof_material_metadata_from_value(
     )?;
     if expected_chunk_root != chunk_root {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!(
                 "{object_path}.{chunk_root_field} does not match the canonical proof chunk manifest"
             ),
@@ -570,13 +553,13 @@ fn setup_proof_material_hash_array(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{object_path}.{field_name} must list every proof material chunk hash"),
             )
         })?;
     if chunk_hash_values.len() != expected_chunk_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path}.{field_name} length must match the chunk count"),
         ));
     }
@@ -584,7 +567,7 @@ fn setup_proof_material_hash_array(
     for (chunk_index, chunk_hash_value) in chunk_hash_values.iter().enumerate() {
         let Some(chunk_hash) = chunk_hash_value.as_str() else {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{object_path}.{field_name}[{chunk_index}] must be a hash string"),
             ));
         };
@@ -605,13 +588,13 @@ fn absorb_setup_proof_material_transport_stream_chunk(
 ) -> CanonicalResult<Value> {
     if chunk_index != session.next_chunk_index {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setup proof material chunks must be absorbed in ascending chunk-index order",
         ));
     }
     if chunk_index >= session.header.metadata.chunk_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setup proof material stream received more chunks than declared",
         ));
     }
@@ -715,7 +698,7 @@ fn finish_setup_proof_material_transport_stream(
 ) -> CanonicalResult<Value> {
     if session.next_chunk_index != session.header.metadata.chunk_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setup proof material stream is missing declared chunks",
         ));
     }
@@ -808,7 +791,7 @@ fn verified_setup_proof_material_reference_value(
 fn verify_verified_setup_proof_material_set_header(value: &Value) -> CanonicalResult<()> {
     let object = value.as_object().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "verifiedSetupProofMaterials must be an object",
         )
     })?;
@@ -823,7 +806,7 @@ fn verify_verified_setup_proof_material_set_header(value: &Value) -> CanonicalRe
         .contains(&field_name.as_str())
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("verifiedSetupProofMaterials contains unexpected field {field_name}"),
             ));
         }
@@ -835,14 +818,14 @@ fn verify_verified_setup_proof_material_set_header(value: &Value) -> CanonicalRe
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("verifiedSetupProofMaterials.{field_name} must be {expected_value}"),
             ));
         }
     }
     if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "verifiedSetupProofMaterials.objectVersion must be 1",
         ));
     }
@@ -856,7 +839,7 @@ fn verify_verified_setup_proof_material_header(
 ) -> CanonicalResult<()> {
     let object = value.as_object().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path} must be an object"),
         )
     })?;
@@ -880,7 +863,7 @@ fn verify_verified_setup_proof_material_header(
         .contains(&field_name.as_str())
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{object_path} contains unexpected field {field_name}"),
             ));
         }
@@ -893,14 +876,14 @@ fn verify_verified_setup_proof_material_header(
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{object_path}.{field_name} must be {expected_value}"),
             ));
         }
     }
     if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path}.objectVersion must be 1"),
         ));
     }
@@ -930,7 +913,7 @@ fn compare_setup_proof_material_metadata(
         || observed.chunk_hashes != expected.chunk_hashes
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!(
                 "{object_path} metadata does not match the stream-verified setup proof material"
             ),
@@ -946,7 +929,7 @@ fn validate_supported_setup_proof_transport_family(
 ) -> CanonicalResult<()> {
     if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path}.proofFamily is not in the setup proof transport profile"),
         ));
     }
@@ -963,7 +946,7 @@ fn setup_proof_material_verification_id_field(value: &Value) -> CanonicalResult<
             .all(|character| character.is_ascii_alphanumeric() || "-_:.".contains(character))
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setup proof material verificationId must be a short ASCII identifier",
         ));
     }
@@ -981,7 +964,7 @@ fn object_field_at<'a>(
         .filter(|field_value| field_value.is_object())
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{object_path}.{field_name} must be an object"),
             )
         })
@@ -997,7 +980,7 @@ fn string_field_at<'a>(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{object_path}.{field_name} must be a string"),
             )
         })
@@ -1009,7 +992,7 @@ fn u64_field_at(value: &Value, field_name: &str, object_path: &str) -> Canonical
         .and_then(Value::as_u64)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{object_path}.{field_name} must be an integer"),
             )
         })

@@ -23,7 +23,7 @@ use crate::{
 
 use super::{accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID, sampling::reduce_unbiased_u64};
 
-pub(super) const SETUP_COMMITMENT_PROFILE_ID: &str = "SealedLattice-BDLOP-LNP-Commitment-v1";
+pub(super) const SETUP_COMMITMENT_PROFILE_ID: &str = "SealedLattice-BDLOP-Commitment-v1";
 pub(super) const SETUP_COMMITMENT_MODULE_RANK: usize = 2;
 pub(super) const SETUP_COMMITMENT_RANDOMNESS_WIDTH: usize = (2 * SETUP_COMMITMENT_MODULE_RANK) + 1;
 pub(super) const SETUP_COMMITMENT_ROW_COUNT: usize = SETUP_COMMITMENT_MODULE_RANK + 1;
@@ -83,7 +83,7 @@ pub(super) struct SetupCommitmentOpeningVerification {
 
 pub(super) fn setup_commitment_profile_value() -> CanonicalResult<Value> {
     Ok(json!({
-        "objectType": "BdlopLnpCommitmentProfile",
+        "objectType": "BdlopCommitmentProfile",
         "objectVersion": 1,
         "profileId": SETUP_COMMITMENT_PROFILE_ID,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
@@ -517,7 +517,7 @@ fn setup_commitment_chunk_root(
                     "rowCoefficientHash512": limb.rows.iter().map(|row| {
                         coefficient_vector_hash512(
                             row,
-                            "sealed-lattice-bdlop-lnp-commitment/row-coefficients-v1",
+                            "sealed-lattice-bdlop-commitment/row-coefficients-v1",
                         )
                     }).collect::<Vec<_>>()
                 })
@@ -536,7 +536,7 @@ fn public_commitment_coefficient_vector_hash512(commitment: &SetupCommitmentValu
 
     coefficient_vector_hash512(
         &coefficients,
-        "sealed-lattice-bdlop-lnp-commitment/public-commitment-coefficients-v1",
+        "sealed-lattice-bdlop-commitment/public-commitment-coefficients-v1",
     )
 }
 
@@ -660,7 +660,7 @@ fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
                 "rowCoefficientHash512": limb.rows.iter().map(|row| {
                     coefficient_vector_hash512(
                         row,
-                        "sealed-lattice-bdlop-lnp-commitment/row-coefficients-v1",
+                        "sealed-lattice-bdlop-commitment/row-coefficients-v1",
                     )
                 }).collect::<Vec<_>>()
             })
@@ -1268,7 +1268,7 @@ fn sample_commitment_matrix_residue(
     loop {
         let block_index_text = block_index.to_string();
         let output = hash512(
-            "sealed-lattice-bdlop-lnp-commitment/matrix-coefficient-v1",
+            "sealed-lattice-bdlop-commitment/matrix-coefficient-v1",
             &[
                 public_matrix_seed_hash.as_bytes(),
                 source_limb_text.as_bytes(),
@@ -1625,7 +1625,7 @@ mod tests {
     fn commitment_profile_binds_crt_lifted_message_space() {
         let profile = setup_commitment_profile_value().expect("profile");
 
-        assert_eq!(profile["objectType"], "BdlopLnpCommitmentProfile");
+        assert_eq!(profile["objectType"], "BdlopCommitmentProfile");
         assert_eq!(
             profile["messageEncoding"]["integerEncoding"],
             "crt-lifted-integer-coefficients"

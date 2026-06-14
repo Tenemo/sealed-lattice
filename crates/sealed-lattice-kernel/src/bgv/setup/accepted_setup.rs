@@ -156,17 +156,10 @@ use super::{
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         EvaluationKeyShareProofFamily, component_b_vectors_from_record,
     },
-    sampling::reduce_unbiased_u64,
     setup_proof::{
-        SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_CHALLENGE_BITS,
-        SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND, SETUP_PROOF_CHALLENGE_COUNT,
-        SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS, SETUP_PROOF_CHALLENGE_DOMAIN,
-        SETUP_PROOF_CHALLENGE_SAMPLER, SETUP_PROOF_CHALLENGE_SPACE, SETUP_PROOF_FAMILIES,
-        SETUP_PROOF_LNP_CHALLENGE_ENCODED_BITS, SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
-        SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS, SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-        SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_PROFILE_ID, SETUP_PROOF_SERIALIZATION,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, setup_proof_material_transport_hashes,
-        verified_setup_proof_material_chunks_from_request,
+        SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_PROFILE_ID,
+        SETUP_PROOF_SERIALIZATION, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        setup_proof_material_transport_hashes, verified_setup_proof_material_chunks_from_request,
     },
     threshold_share_commitments::{
         derive_threshold_share_commitment_set_from_parts,
@@ -276,7 +269,6 @@ const SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE: &str =
     "SetupCommitmentSecurityCertificate";
 const SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE: &str = "SetupProofAccountingCertificate";
 const SETUP_PROOF_RECORD_BINDING_HASH_NAMESPACE: &str = "SetupProofRecordBindingHash";
-const SETUP_PROOF_CHALLENGE_SPACE_AUDIT_HASH_NAMESPACE: &str = "SetupProofChallengeSpaceAuditHash";
 const SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE: &str =
     "SetupProofAccountingCertificateHash";
 const SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE: &str = "SetupKeyCorrectnessCertificate";
@@ -1101,14 +1093,11 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
         "objectVersion": 1,
         "profileId": SETUP_PROOF_PROFILE_ID,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "proofSystem": "fixed-lnp-linear-relation-subset",
         "proofBackendBoundary": "sealed-lattice-rust-wasm-fixed-relations-only",
         "arbitraryRelationApi": "not-exposed",
         "relationModel": {
             "applicationRing": "Z_q[X]/(X^N+1)",
             "applicationRingDegree": POLYNOMIAL_DEGREE,
-            "lnpTboxRing": "Z_qproof[X]/(X^d+1)",
-            "lnpTboxProofRingDegree": SETUP_PROOF_LNP_PROOF_RING_DEGREE,
             "ringDegreeMapping": "full BGV polynomials are mapped into proof-ring polynomial vectors by the fixed isoring split",
             "rnsLimbCount": DATA_PRIMES.len(),
             "qShareHash": q_share_hash()?,
@@ -1117,35 +1106,6 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             "relationForm": "A*witness = target + q_l*carry over lifted integers with explicit no-wrap bounds",
             "limbHandling": "relations are checked per accepted Q_share limb and bind one shared trustee secret where required"
         },
-        "challengeBinding": {
-            "transform": "Fiat-Shamir",
-            "challengeBits": SETUP_PROOF_CHALLENGE_BITS,
-            "challengeCount": SETUP_PROOF_CHALLENGE_COUNT,
-            "challengeDomain": SETUP_PROOF_CHALLENGE_DOMAIN,
-            "challengeDomainHash": setup_proof_challenge_domain_hash()?,
-            "challengeCoefficientBound": SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND,
-            "lnpTboxProofRingDegree": SETUP_PROOF_LNP_PROOF_RING_DEGREE,
-            "lnpTboxChallengeLog2Range": SETUP_PROOF_LNP_CHALLENGE_LOG2_RANGE,
-            "lnpTboxChallengeEncodedBits": SETUP_PROOF_LNP_CHALLENGE_ENCODED_BITS,
-            "lnpTboxChallengeSpaceBits": SETUP_PROOF_LNP_CHALLENGE_SPACE_BITS,
-            "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
-            "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
-            "challengeDifferenceInvertibilityStatus": SETUP_PROOF_CHALLENGE_DIFFERENCE_INVERTIBILITY_STATUS,
-            "challengeDifferenceInvertibilityAccounting": super::setup_proof::challenge_difference_invertibility_accounting_value()?,
-            "challengeDomainScope": "legacy-lnp-tbox-private-vss-challenge-domain-only; accepted same-secret-linkage-anchor, public-key-share, private-vss-share, and trustee-evaluation-key succinct families bind challenge transcript rows inside their per-family accounting objects",
-            "qromStatus": "qrom-reduction-loss-not-computed-open-caveat",
-            "transcriptBinding": [
-                "setupProfileHash",
-                "manifestHash",
-                "rosterHash",
-                "setupEpoch",
-                "publicMatrixSeedHash",
-                "proofFamily",
-                "statementRoot",
-                "proofChunkRoot"
-            ]
-        },
-        "challengeSpaceAudit": super::setup_proof::setup_proof_challenge_space_audit_value(SETUP_PROOF_LNP_PROOF_RING_DEGREE)?,
         "witnessBounds": {
             "trusteeSecret": {
                 "distribution": "coefficientwise-centered-ternary",
@@ -1187,22 +1147,9 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             "statementRootRequired": true,
             "canonicalJsonRole": "root-bound metadata only"
         },
-        "matrixDerivation": {
-            "crpComponent": "proof-matrix-crp",
-            "matrixScope": "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only",
-            "entryStreamEncoding": "xof-unbiased-residue-from-coordinate",
-            "coordinateAxes": [
-                "proofFamily",
-                "rnsLimbIndex",
-                "ringCoefficientPosition"
-            ],
-            "coefficientModulus": "current Q_share limb prime",
-            "sampledEntryPolicy": "profile exposes deterministic coordinate-bound audit samples"
-        },
         "verificationPolicy": {
             "rejectionRules": [
                 "wrong setup-proof profile",
-                "wrong challenge domain",
                 "wrong setup-proof record binding",
                 "wrong statement root",
                 "wrong proof chunk root",
@@ -1213,10 +1160,6 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             "proofBytesAcceptedStatus": SETUP_PROOF_BYTES_ACCEPTED_STATUS
         }
     }))
-}
-
-fn setup_proof_challenge_domain_hash() -> CanonicalResult<String> {
-    super::setup_proof::setup_proof_challenge_domain_hash(COLLECTIVE_BGV_SETUP_PROFILE_ID)
 }
 
 fn setup_proof_record_binding_value() -> CanonicalResult<Value> {

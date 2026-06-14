@@ -33,7 +33,7 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["commitmentProfile"]["objectType"],
-        "BdlopLnpCommitmentProfile"
+        "BdlopCommitmentProfile"
     );
     assert_eq!(
         profile["commitmentProfile"]["assumptions"]["parameterAcceptanceStatus"],
@@ -67,19 +67,7 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["setupProofProfile"]["profileId"],
-        "SealedLattice-LNP-SetupProof-v1"
-    );
-    assert_eq!(
-        profile["setupProofProfile"]["challengeBinding"]["challengeBits"],
-        128
-    );
-    assert_eq!(
-        profile["setupProofProfile"]["challengeBinding"]["challengeDomainScope"],
-        "legacy-lnp-tbox-private-vss-challenge-domain-only; accepted same-secret-linkage-anchor, public-key-share, private-vss-share, and trustee-evaluation-key succinct families bind challenge transcript rows inside their per-family accounting objects"
-    );
-    assert_eq!(
-        profile["setupProofProfile"]["matrixDerivation"]["matrixScope"],
-        "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only"
+        "SealedLattice-SetupProof-v1"
     );
     let setup_proof_families = profile["setupProofProfile"]["proofFamilies"]
         .as_array()
@@ -458,26 +446,6 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     assert_eq!(wrong_matrix_result["verifierStatus"], "refused");
     assert_eq!(
         wrong_matrix_result["refusedObjects"][0]["reasonCode"],
-        "setupPublicDerivationsMismatch"
-    );
-
-    let mut wrong_setup_proof_profile_package = minimal_collective_setup_package();
-    wrong_setup_proof_profile_package["commonRandomness"]["publicDerivations"]["publicMatrices"]
-        ["setupProofMatrix"]["setupProofProfileHash"] = serde_json::json!(valid_hash('4'));
-    rebind_collective_setup_package_hash(&mut wrong_setup_proof_profile_package);
-
-    let wrong_setup_proof_profile_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_setup_proof_profile_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        wrong_setup_proof_profile_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        wrong_setup_proof_profile_result["refusedObjects"][0]["reasonCode"],
         "setupPublicDerivationsMismatch"
     );
 }

@@ -471,7 +471,7 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
             "objectType": "SetupTransportedSameSecretProofMaterial",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "proofMaterialRoot": proof_record["proofMaterialRoot"],
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -497,7 +497,7 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         "objectType": "SetupTransportedSameSecretProofMaterialSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "proofMaterials": proof_materials,
     })
@@ -562,7 +562,7 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
             "proofMaterialRoot": proof_record["proofMaterialRoot"],
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -589,7 +589,7 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
         "objectType": "SetupTransportedPublicKeyShareProofMaterialSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
         "proofMaterials": proof_materials,
     })
@@ -724,7 +724,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "componentMaterials": evaluation_key_transport_sinks.component_materials.clone(),
     });
     package["trusteeEvaluationKeyProofs"] =
@@ -752,7 +752,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "trustee-evaluation-key",
         "proofMaterials": evaluation_key_transport_sinks.proof_materials,
     });
@@ -987,7 +987,7 @@ pub(super) fn move_first_trustee_evaluation_key_proof_bytes_to_transport(
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "trustee-evaluation-key",
         "proofMaterials": [proof_material],
     })
@@ -1153,7 +1153,7 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
             "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE,
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": proof_family.proof_family(),
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "trusteeIdentity": proof_record["trusteeIdentity"],
@@ -1199,7 +1199,7 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "componentMaterials": [component_material],
     })
 }
@@ -1253,7 +1253,7 @@ fn move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_record["proofMaterialRoot"],

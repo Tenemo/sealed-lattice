@@ -202,7 +202,7 @@ pub(super) const LOW_DEGREE_FINAL_COEFFICIENT_COUNT: usize = 8;
 pub(super) const MINIMUM_TRACE_SIZE: usize = 64;
 
 fn invalid_succinct_setup_proof(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 // Residue of a signed integer in [0, modulus).

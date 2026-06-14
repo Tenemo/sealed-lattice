@@ -251,7 +251,6 @@ pub(super) fn derive_collective_bgv_setup_public_derivations(
             "relinearizationCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "relinearization-crp")?,
             "galoisKeyCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "galois-key-crp")?,
             "commitmentMatrixCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "commitment-matrix-crp")?,
-            "proofMatrixCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "proof-matrix-crp")?,
         },
         "status": "deterministic-public-derivations-bound",
     });
@@ -305,14 +304,12 @@ pub(super) fn derive_bgv_public_a_polynomial(
 
 fn derive_setup_public_matrices(public_matrix_seed_hash: &str) -> CanonicalResult<Value> {
     let commitment_matrix = derive_setup_commitment_matrix(public_matrix_seed_hash)?;
-    let setup_proof_matrix = derive_setup_proof_matrix(public_matrix_seed_hash)?;
     let mut public_matrices = json!({
         "objectType": "SetupPublicMatrixMaterial",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "commitmentMatrix": commitment_matrix,
-        "setupProofMatrix": setup_proof_matrix,
         "materializationStatus": "deterministic-entry-streams-bound",
     });
     let public_matrices_root = derive_protocol_hash("SetupPublicDerivationRoot", &public_matrices)?;
@@ -356,144 +353,12 @@ fn derive_setup_commitment_matrix(public_matrix_seed_hash: &str) -> CanonicalRes
     Ok(matrix)
 }
 
-fn derive_setup_proof_matrix(public_matrix_seed_hash: &str) -> CanonicalResult<Value> {
-    let crp_root = setup_public_derivation_root(public_matrix_seed_hash, "proof-matrix-crp")?;
-    let sampled_entries = proof_matrix_sampled_entries(public_matrix_seed_hash)?;
-    let mut matrix = json!({
-        "objectType": "SetupPublicMatrix",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "matrixKind": "setupProof",
-        "profileId": SETUP_PROOF_PROFILE_ID,
-        "profileStatus": "legacy-lnp-tbox-proof-matrix-audit-bound",
-        "setupProofProfileHash": setup_proof_profile_hash()?,
-        "challengeDomainHash": setup_proof_challenge_domain_hash()?,
-        "challengeDomainScope": "legacy-lnp-tbox-private-vss-challenge-domain-only",
-        "challengeBits": SETUP_PROOF_CHALLENGE_BITS,
-        "challengeCount": SETUP_PROOF_CHALLENGE_COUNT,
-        "challengeCoefficientBound": SETUP_PROOF_CHALLENGE_COEFFICIENT_BOUND,
-        "challengeSpace": SETUP_PROOF_CHALLENGE_SPACE,
-        "challengeSampler": SETUP_PROOF_CHALLENGE_SAMPLER,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "crpRoot": crp_root,
-        "coordinateAxes": [
-            "proofFamily",
-            "rnsLimbIndex",
-            "ringCoefficientPosition"
-        ],
-        "legacyLnpTboxProofFamilies": SETUP_PROOF_FAMILIES,
-        "matrixScope": "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only; accepted succinct-family matrix and transcript claims are bound by the per-family accounting objects",
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "ringDegree": POLYNOMIAL_DEGREE,
-        "entryStreamEncoding": "xof-unbiased-residue-from-coordinate",
-        "sampledEntries": sampled_entries,
-    });
-    let matrix_root = derive_protocol_hash("SetupPublicDerivationRoot", &matrix)?;
-    matrix["matrixRoot"] = Value::String(matrix_root);
-
-    Ok(matrix)
-}
-
 fn commitment_matrix_sampled_entries(public_matrix_seed_hash: &str) -> CanonicalResult<Vec<Value>> {
     let limb_indices = [0_usize, DATA_PRIMES.len() - 1];
     setup_commitment_matrix_sampled_entries(
         public_matrix_seed_hash,
         &limb_indices,
         &sample_positions(),
-    )
-}
-
-fn proof_matrix_sampled_entries(public_matrix_seed_hash: &str) -> CanonicalResult<Vec<Value>> {
-    let limb_indices = [0_usize, DATA_PRIMES.len() - 1];
-    let mut entries = Vec::new();
-    for proof_family in SETUP_PROOF_FAMILIES {
-        for limb_index in limb_indices {
-            for ring_coefficient_position in sample_positions() {
-                let coordinate = json!({
-                    "proofFamily": proof_family,
-                    "rnsLimbIndex": limb_index,
-                    "rnsPrime": DATA_PRIMES[limb_index],
-                    "ringCoefficientPosition": ring_coefficient_position,
-                });
-                let entry_derivation_hash = setup_public_matrix_entry_hash(
-                    public_matrix_seed_hash,
-                    "setupProof",
-                    &coordinate,
-                )?;
-                let coefficient_value = setup_proof_matrix_coefficient(
-                    public_matrix_seed_hash,
-                    proof_family,
-                    limb_index,
-                    ring_coefficient_position,
-                    DATA_PRIMES[limb_index],
-                )?;
-                entries.push(json!({
-                    "coordinate": coordinate,
-                    "coefficientValue": coefficient_value,
-                    "entryDerivationHash": entry_derivation_hash,
-                }));
-            }
-        }
-    }
-
-    Ok(entries)
-}
-
-fn setup_proof_matrix_coefficient(
-    public_matrix_seed_hash: &str,
-    proof_family: &str,
-    rns_limb_index: usize,
-    ring_coefficient_position: usize,
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    let rns_limb_text = rns_limb_index.to_string();
-    let position_text = ring_coefficient_position.to_string();
-    let modulus_text = modulus.to_string();
-    let mut block_index = 0_u64;
-    loop {
-        let block_index_text = block_index.to_string();
-        let output = hash512(
-            "sealed-lattice-lnp-setup-proof/matrix-coefficient-v1",
-            &[
-                public_matrix_seed_hash.as_bytes(),
-                proof_family.as_bytes(),
-                rns_limb_text.as_bytes(),
-                position_text.as_bytes(),
-                modulus_text.as_bytes(),
-                block_index_text.as_bytes(),
-            ],
-        );
-        for chunk in output.chunks_exact(8) {
-            let mut word = [0_u8; 8];
-            word.copy_from_slice(chunk);
-            if let Some(reduced_value) = reduce_unbiased_u64(u64::from_le_bytes(word), modulus) {
-                return Ok(reduced_value);
-            }
-        }
-        block_index = block_index.checked_add(1).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setup-proof matrix sampling block index overflow",
-            )
-        })?;
-    }
-}
-
-fn setup_public_matrix_entry_hash(
-    public_matrix_seed_hash: &str,
-    matrix_kind: &str,
-    coordinate: &Value,
-) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupPublicDerivationRoot",
-        &json!({
-            "objectType": "SetupPublicMatrixEntryDerivation",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-            "matrixKind": matrix_kind,
-            "coordinate": coordinate,
-        }),
     )
 }
 

@@ -61,29 +61,6 @@ fn collective_setup_verifier_refuses_commitment_security_certificate_hash_drift(
 }
 
 #[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_setup_proof_accounting_certificate() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_setup_proof_accounting_certificate",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["setupProofAccountingCertificate"]["challengeAccounting"]["qromStatus"] =
-        serde_json::json!("externally-reviewed");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupProofAccountingCertificatePayloadMismatch"
-    );
-}
-
-#[test]
 fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     let certificate =
         setup_proof_accounting_certificate_value().expect("setup proof accounting certificate");
@@ -409,14 +386,10 @@ fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
         "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
     );
 
-    let model_row_mutations: [fn(&mut serde_json::Value); 4] = [
+    let model_row_mutations: [fn(&mut serde_json::Value); 3] = [
         |package| {
             package["setupProofAccountingCertificate"]["fiatShamirTranscriptAccounting"]["qromReductionStatus"] =
                 serde_json::json!("qrom-reduction-loss-accepted-for-final-claim");
-        },
-        |package| {
-            package["setupProofAccountingCertificate"]["challengeAccounting"]["qromStatus"] =
-                serde_json::json!("qrom-reduction-loss-computed-and-accepted");
         },
         |package| {
             package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] =
@@ -446,29 +419,6 @@ fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
         );
         assert!(result["acceptedSetupHandoff"].is_null());
     }
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_proof_challenge_audit_hash_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_setup_proof_challenge_audit_hash_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["setupProofAccountingCertificate"]["challengeAccounting"]["challengeSpaceAuditHash"] =
-        serde_json::json!(valid_hash('5'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupProofAccountingCertificatePayloadMismatch"
-    );
 }
 
 #[test]

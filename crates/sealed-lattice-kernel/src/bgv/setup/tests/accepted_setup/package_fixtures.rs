@@ -532,7 +532,7 @@ fn setup_commitment_security_certificate_fixture(profile: &serde_json::Value) ->
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProfileHash": profile["setupProfileHash"],
-        "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
+        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "commitmentProfileHash": profile["commitmentProfileHash"],
         "qShareHash": profile["qShareHash"],
         "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
@@ -1051,7 +1051,7 @@ fn vss_coefficient_commitments_object(
         "setupProfileHash": setup_profile_hash,
         "qShareHash": q_share_hash,
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
+        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -1386,7 +1386,7 @@ fn same_secret_consistency_object(
             "objectType": "SameSecretProofFamilyBinding",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
             "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",
@@ -1435,8 +1435,8 @@ fn same_secret_consistency_object(
             "objectType": "TrusteeSecretCommitment",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -1461,8 +1461,8 @@ fn same_secret_consistency_object(
             "objectType": "SameSecretConsistencyStatement",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "proofVerificationStatus": "anchor-proof-verification-pending",
             "ceremonyId": ceremony_id,
@@ -1504,8 +1504,8 @@ fn same_secret_consistency_object(
         "objectType": "SameSecretConsistencyStatementSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "commitmentProfileId": "SealedLattice-BDLOP-LNP-Commitment-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "proofVerificationStatus": "anchor-proof-verification-pending",
         "ceremonyId": ceremony_id,
@@ -1661,7 +1661,7 @@ fn public_key_shares_object(
             "objectType": "PublicKeyShare",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -1697,7 +1697,7 @@ fn public_key_shares_object(
         "objectType": "PublicKeyShareSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofBindingStatus": "public-key-share-proof-required",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
@@ -1764,7 +1764,7 @@ fn public_key_share_proofs_object(
             "objectType": "PublicKeyShareProof",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
             "proofVerificationStatus": "succinct-proof-verification-pending",
             "ceremonyId": ceremony_id,
@@ -1802,7 +1802,7 @@ fn public_key_share_proofs_object(
         "objectType": "PublicKeyShareProofSet",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
         "proofVerificationStatus": "succinct-proof-verification-pending",
         "ceremonyId": ceremony_id,
@@ -1854,7 +1854,7 @@ fn evaluator_key_schedule_object(
         "objectType": "EvaluatorKeySchedule",
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-LNP-SetupProof-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -2535,36 +2535,6 @@ fn common_randomness_object(
         public_derivations["publicMatrices"]["commitmentMatrix"]["matrixKind"],
         "commitment"
     );
-    assert_eq!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["matrixKind"],
-        "setupProof"
-    );
-    assert_eq!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["profileStatus"],
-        "legacy-lnp-tbox-proof-matrix-audit-bound"
-    );
-    assert_eq!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["challengeDomainScope"],
-        "legacy-lnp-tbox-private-vss-challenge-domain-only"
-    );
-    assert_eq!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["matrixScope"],
-        "legacy-lnp-tbox-private-vss-proof-matrix-sampled-entry-audit-only; accepted succinct-family matrix and transcript claims are bound by the per-family accounting objects"
-    );
-    assert_eq!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["legacyLnpTboxProofFamilies"],
-        serde_json::json!(["vss-opening-carry"])
-    );
-    assert!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["setupProofProfileHash"]
-            .as_str()
-            .is_some()
-    );
-    assert!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["challengeDomainHash"]
-            .as_str()
-            .is_some()
-    );
     assert!(
         public_derivations["publicMatrices"]["commitmentMatrix"]["sampledEntries"]
             .as_array()
@@ -2574,12 +2544,6 @@ fn common_randomness_object(
     );
     assert!(
         public_derivations["publicMatrices"]["commitmentMatrix"]["sampledEntries"][0]
-            ["coefficientValue"]
-            .as_u64()
-            .is_some()
-    );
-    assert!(
-        public_derivations["publicMatrices"]["setupProofMatrix"]["sampledEntries"][0]
             ["coefficientValue"]
             .as_u64()
             .is_some()
