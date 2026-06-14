@@ -1,6 +1,6 @@
 use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
 use super::low_degree_proof::{LowDegreePairOpening, LowDegreeProof, LowDegreeQueryOpening};
-use super::merkle_commitment::LEAF_SALT_BYTES;
+use super::merkle_commitment::{BatchedMerkleOpening, LEAF_SALT_BYTES};
 use super::prover::{LimbProof, PhaseQueryOpening, SuccinctEvaluationKeyProof};
 use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TrusteeEvaluationKeyStatement};
 use super::*;
@@ -10,7 +10,28 @@ use super::*;
 // the byte stream carries no self-describing lengths except folded-layer
 // opening lengths that are checked against the statement, and trailing bytes
 // are refused.
-const PROOF_MAGIC: &[u8; 8] = b"SLTEKP01";
+const PROOF_MAGIC: &[u8; 8] = b"SLTEKP02";
+
+// Every limb modulus the proof commits over is a profile data prime: a ~2^47
+// value whose residues fit in six little-endian bytes. Field and challenge-
+// extension coordinates are written at exactly that width instead of a full
+// eight-byte u64, dropping the two high zero bytes every residue would otherwise
+// carry. The width is derived from the basis, so it stays correct if the primes
+// change and the const evaluation fails the build if a prime ever no longer
+// fits. Length prefixes and Merkle digests keep their natural widths.
+const fn field_residue_byte_width() -> usize {
+    let mut max_modulus = crate::bgv::profile::DATA_PRIMES[0];
+    let mut index = 1;
+    while index < crate::bgv::profile::DATA_PRIMES.len() {
+        if crate::bgv::profile::DATA_PRIMES[index] > max_modulus {
+            max_modulus = crate::bgv::profile::DATA_PRIMES[index];
+        }
+        index += 1;
+    }
+    let residue_bits = u64::BITS - (max_modulus - 1).leading_zeros();
+    ((residue_bits + 7) / 8) as usize
+}
+pub(super) const FIELD_RESIDUE_BYTE_WIDTH: usize = field_residue_byte_width();
 
 pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyProof) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -19,21 +40,21 @@ pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyP
     for limb_proof in &proof.limb_proofs {
         bytes.extend_from_slice(&limb_proof.witness_tree_root);
         bytes.extend_from_slice(&limb_proof.quotient_tree_root);
-        write_u64_slice(&mut bytes, &limb_proof.masked_consistency_claims);
+        write_field_residue_slice(&mut bytes, &limb_proof.masked_consistency_claims);
         for evaluations in &limb_proof.deep_evaluations {
             write_extension_slice(&mut bytes, evaluations);
         }
         encode_low_degree_proof(&mut bytes, &limb_proof.low_degree);
         for opening in &limb_proof.query_openings {
             for slot in 0..2 {
-                write_u64_slice(&mut bytes, &opening.phase_one_rows[slot]);
+                write_field_residue_slice(&mut bytes, &opening.phase_one_rows[slot]);
                 bytes.extend_from_slice(&opening.phase_one_salts[slot]);
-                write_hash_slice(&mut bytes, &opening.phase_one_paths[slot]);
-                write_u64_slice(&mut bytes, &opening.phase_two_rows[slot]);
+                write_field_residue_slice(&mut bytes, &opening.phase_two_rows[slot]);
                 bytes.extend_from_slice(&opening.phase_two_salts[slot]);
-                write_hash_slice(&mut bytes, &opening.phase_two_paths[slot]);
             }
         }
+        write_batched_opening(&mut bytes, &limb_proof.witness_batch_opening);
+        write_batched_opening(&mut bytes, &limb_proof.quotient_batch_opening);
     }
 
     bytes
@@ -85,10 +106,8 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
         for _ in 0..LOW_DEGREE_QUERY_COUNT {
             let mut phase_one_rows = [Vec::new(), Vec::new()];
             let mut phase_one_salts = [Vec::new(), Vec::new()];
-            let mut phase_one_paths = [Vec::new(), Vec::new()];
             let mut phase_two_rows = [Vec::new(), Vec::new()];
             let mut phase_two_salts = [Vec::new(), Vec::new()];
-            let mut phase_two_paths = [Vec::new(), Vec::new()];
             for slot in 0..2 {
                 phase_one_rows[slot] = read_base_field_vec(
                     bytes,
@@ -97,7 +116,6 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
                     modulus,
                 )?;
                 phase_one_salts[slot] = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
-                phase_one_paths[slot] = read_hash_vec(bytes, &mut cursor, tree_depth)?;
                 phase_two_rows[slot] = read_base_field_vec(
                     bytes,
                     &mut cursor,
@@ -105,17 +123,21 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
                     modulus,
                 )?;
                 phase_two_salts[slot] = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
-                phase_two_paths[slot] = read_hash_vec(bytes, &mut cursor, tree_depth)?;
             }
             query_openings.push(PhaseQueryOpening {
                 phase_one_rows,
                 phase_one_salts,
-                phase_one_paths,
                 phase_two_rows,
                 phase_two_salts,
-                phase_two_paths,
             });
         }
+        // Each phase tree opens at most two positions per query, so the batched
+        // authentication node count cannot exceed two paths' worth per query.
+        let phase_batch_node_bound = 2 * LOW_DEGREE_QUERY_COUNT * tree_depth;
+        let witness_batch_opening =
+            read_batched_opening(bytes, &mut cursor, phase_batch_node_bound)?;
+        let quotient_batch_opening =
+            read_batched_opening(bytes, &mut cursor, phase_batch_node_bound)?;
         limb_proofs.push(LimbProof {
             witness_tree_root,
             quotient_tree_root,
@@ -123,6 +145,8 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
             deep_evaluations,
             low_degree,
             query_openings,
+            witness_batch_opening,
+            quotient_batch_opening,
         });
     }
     if cursor != bytes.len() {
@@ -141,9 +165,10 @@ fn encode_low_degree_proof(bytes: &mut Vec<u8>, low_degree: &LowDegreeProof) {
     for query_opening in &low_degree.query_openings {
         for pair_opening in &query_opening.folded_layer_pairs {
             write_extension_slice(bytes, &pair_opening.pair);
-            bytes.extend_from_slice(&(pair_opening.path.len() as u64).to_le_bytes());
-            write_hash_slice(bytes, &pair_opening.path);
         }
+    }
+    for layer_opening in &low_degree.layer_batch_openings {
+        write_batched_opening(bytes, layer_opening);
     }
 }
 
@@ -167,32 +192,28 @@ fn decode_low_degree_proof(
     let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
     for _ in 0..LOW_DEGREE_QUERY_COUNT {
         let mut folded_layer_pairs = Vec::with_capacity(fold_count);
-        for fold_index in 0..fold_count {
+        for _fold_index in 0..fold_count {
             let first = read_extension_element(bytes, cursor, modulus)?;
             let second = read_extension_element(bytes, cursor, modulus)?;
-            let path_length = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
-                invalid_succinct_setup_proof("low-degree path length does not fit usize")
-            })?;
-            let expected_path_length =
-                expected_low_degree_folded_layer_path_length(initial_domain_size, fold_index)?;
-            if path_length != expected_path_length {
-                return Err(invalid_succinct_setup_proof(
-                    "low-degree folded layer path length does not match the statement",
-                ));
-            }
-            let path = read_hash_vec(bytes, cursor, path_length)?;
-            folded_layer_pairs.push(LowDegreePairOpening {
-                pair: [first, second],
-                path,
-            });
+            folded_layer_pairs.push(LowDegreePairOpening { pair: [first, second] });
         }
         query_openings.push(LowDegreeQueryOpening { folded_layer_pairs });
+    }
+    let mut layer_batch_openings = Vec::with_capacity(fold_count);
+    for fold_index in 0..fold_count {
+        // Each query opens one leaf per layer, so the batched node count cannot
+        // exceed one path's worth per query at that layer's depth.
+        let layer_depth =
+            expected_low_degree_folded_layer_path_length(initial_domain_size, fold_index)?;
+        let maximum_nodes = LOW_DEGREE_QUERY_COUNT * layer_depth;
+        layer_batch_openings.push(read_batched_opening(bytes, cursor, maximum_nodes)?);
     }
 
     Ok(LowDegreeProof {
         folded_layer_roots,
         final_coefficients,
         query_openings,
+        layer_batch_openings,
     })
 }
 
@@ -252,15 +273,15 @@ fn expected_low_degree_folded_layer_path_length(
     Ok(leaf_count.trailing_zeros() as usize)
 }
 
-fn write_u64_slice(bytes: &mut Vec<u8>, values: &[u64]) {
+fn write_field_residue_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     for value in values {
-        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes.extend_from_slice(&value.to_le_bytes()[..FIELD_RESIDUE_BYTE_WIDTH]);
     }
 }
 
 fn write_extension_slice(bytes: &mut Vec<u8>, values: &[ChallengeExtensionElement]) {
     for value in values {
-        write_u64_slice(bytes, value);
+        write_field_residue_slice(bytes, value);
     }
 }
 
@@ -268,6 +289,36 @@ fn write_hash_slice(bytes: &mut Vec<u8>, hashes: &[[u8; 64]]) {
     for hash in hashes {
         bytes.extend_from_slice(hash);
     }
+}
+
+fn write_batched_opening(bytes: &mut Vec<u8>, opening: &BatchedMerkleOpening) {
+    bytes.extend_from_slice(&(opening.authentication_nodes.len() as u64).to_le_bytes());
+    write_hash_slice(bytes, &opening.authentication_nodes);
+}
+
+// The node count is self-describing because it depends on the queried positions,
+// which the decoder does not replay. It is bounded against `maximum_nodes` (a
+// per-tree upper bound the caller derives from the query count and tree depth)
+// so a malformed proof cannot force an oversized allocation; the verifier then
+// rejects any count that does not reconstruct the committed root.
+fn read_batched_opening(
+    bytes: &[u8],
+    cursor: &mut usize,
+    maximum_nodes: usize,
+) -> CanonicalResult<BatchedMerkleOpening> {
+    let node_count = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
+        invalid_succinct_setup_proof("batched opening node count does not fit usize")
+    })?;
+    if node_count > maximum_nodes {
+        return Err(invalid_succinct_setup_proof(
+            "batched opening node count exceeds the statement bound",
+        ));
+    }
+    let authentication_nodes = read_hash_vec(bytes, cursor, node_count)?;
+
+    Ok(BatchedMerkleOpening {
+        authentication_nodes,
+    })
 }
 
 fn read_array<const BYTES: usize>(
@@ -303,8 +354,11 @@ fn read_u64(bytes: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
     Ok(u64::from_le_bytes(read_array::<8>(bytes, cursor)?))
 }
 
-fn read_base_field_value(bytes: &[u8], cursor: &mut usize, modulus: u64) -> CanonicalResult<u64> {
-    let value = read_u64(bytes, cursor)?;
+fn read_field_residue(bytes: &[u8], cursor: &mut usize, modulus: u64) -> CanonicalResult<u64> {
+    let residue = read_array::<FIELD_RESIDUE_BYTE_WIDTH>(bytes, cursor)?;
+    let mut buffer = [0_u8; 8];
+    buffer[..FIELD_RESIDUE_BYTE_WIDTH].copy_from_slice(&residue);
+    let value = u64::from_le_bytes(buffer);
     if value >= modulus {
         return Err(invalid_succinct_setup_proof(
             "trustee evaluation-key proof contains a noncanonical field residue",
@@ -321,7 +375,7 @@ fn read_base_field_vec(
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
     (0..count)
-        .map(|_| read_base_field_value(bytes, cursor, modulus))
+        .map(|_| read_field_residue(bytes, cursor, modulus))
         .collect()
 }
 
@@ -332,7 +386,7 @@ fn read_extension_element(
 ) -> CanonicalResult<ChallengeExtensionElement> {
     let mut element = [0_u64; CHALLENGE_EXTENSION_DEGREE];
     for coordinate in element.iter_mut() {
-        *coordinate = read_base_field_value(bytes, cursor, modulus)?;
+        *coordinate = read_field_residue(bytes, cursor, modulus)?;
     }
 
     Ok(element)
