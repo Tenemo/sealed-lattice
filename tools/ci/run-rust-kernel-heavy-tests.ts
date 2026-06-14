@@ -13,15 +13,21 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
 
 // Each mutating heavy accepted-setup test clones the full first-profile
-// evaluation-key proof container package fixture. That fixture embeds every
-// trustee's evaluation-key proof as hex, and each proof is several hundred
-// megabytes of bytes (roughly twice that as hex), so a single clone is many
-// gigabytes and the cargo default of one test thread per core holds enough
-// concurrent clones to exhaust system memory and abort the process. Size the
-// libtest thread pool from currently available memory with a conservative
-// per-test budget, capped by core count, so the suite still runs as parallel as
-// the machine can sustain without thrashing or aborting.
-const approximateGigabytesPerHeavyTest = 20;
+// evaluation-key proof container package fixture, which embeds every trustee's
+// evaluation-key proof as inline hex, so a clone is several gigabytes resident.
+// The cargo default of one thread per core would hold enough concurrent clones
+// to exhaust system memory and abort the process. Size the libtest pool from
+// currently free memory with a per-test budget, capped by core count. The budget
+// is set from the worst case rather than the steady-state average: a single
+// package-inflating test (the extra/duplicate refusals, which add proofs to
+// their clone) was measured at roughly 57 GiB resident, most of it the shared
+// fixture that concurrent tests reuse, so the bound must keep that worst case
+// plus a few normal clones (about seven gigabytes marginal each) inside free
+// memory. At this budget a typical 88 GiB-free machine runs four threads, up
+// from three; pushing higher needs an empirical peak measurement, and the real
+// lever for using all cores is moving the container off inline hex onto the
+// transported-material representation, which would shrink the per-clone cost.
+const approximateGigabytesPerHeavyTest = 15;
 const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
 const availableGigabytes = os.freemem() / gigabyte;

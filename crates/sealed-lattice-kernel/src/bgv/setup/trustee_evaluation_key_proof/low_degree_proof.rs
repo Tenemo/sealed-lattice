@@ -3,7 +3,10 @@ use super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower}
 use super::*;
 use crate::bgv::modular_arithmetic::{inverse_mod, pow_mod};
 use fiat_shamir_transcript::FiatShamirTranscript;
-use merkle_commitment::{MerkleTree, leaf_hash, verify_merkle_opening};
+use merkle_commitment::{
+    BatchedMerkleOpening, MerkleTree, consistent_sorted_leaves, leaf_hash, sorted_unique_indices,
+    verify_merkle_batch,
+};
 
 // Batched FRI low-degree argument at rate 1/2. The initial layer is the
 // lambda-batched DEEP quotient codeword over the extension coset; it is not
@@ -31,16 +34,19 @@ pub(super) struct LowDegreeProof {
     pub(super) folded_layer_roots: Vec<[u8; 64]>,
     pub(super) final_coefficients: Vec<ChallengeExtensionElement>,
     pub(super) query_openings: Vec<LowDegreeQueryOpening>,
+    // One batched authentication opening per committed folded layer, covering
+    // every query's pair leaf in that layer at once.
+    pub(super) layer_batch_openings: Vec<BatchedMerkleOpening>,
 }
 
 pub(super) struct LowDegreeQueryOpening {
-    // One (pair, Merkle path) entry per committed folded layer.
+    // One pair entry per committed folded layer; the pair leaves are
+    // authenticated together through `LowDegreeProof::layer_batch_openings`.
     pub(super) folded_layer_pairs: Vec<LowDegreePairOpening>,
 }
 
 pub(super) struct LowDegreePairOpening {
     pub(super) pair: [ChallengeExtensionElement; 2],
-    pub(super) path: Vec<[u8; 64]>,
 }
 
 fn fold_count(parameters: &LowDegreeParameters) -> usize {
@@ -221,26 +227,33 @@ pub(super) fn prove_low_degree(
                 LOW_DEGREE_QUERY_COUNT,
             );
             let mut query_openings = Vec::with_capacity(query_positions.len());
+            let mut layer_opened_indices = vec![Vec::new(); trees.len()];
             for query_position in &query_positions {
                 let mut folded_layer_pairs = Vec::with_capacity(trees.len());
                 let mut position = *query_position;
-                for (layer, tree) in layers[1..].iter().zip(trees.iter()) {
+                for (layer_ordinal, layer) in layers[1..].iter().enumerate() {
                     let half = layer.len() / 2;
                     let pair_index = position % half;
                     folded_layer_pairs.push(LowDegreePairOpening {
                         pair: [layer[pair_index], layer[pair_index + half]],
-                        path: tree.open(pair_index),
                     });
+                    layer_opened_indices[layer_ordinal].push(pair_index);
                     position = pair_index;
                 }
                 query_openings.push(LowDegreeQueryOpening { folded_layer_pairs });
             }
+            let layer_batch_openings = trees
+                .iter()
+                .zip(layer_opened_indices)
+                .map(|(tree, indices)| tree.open_batch(&sorted_unique_indices(indices)))
+                .collect();
 
             return Ok((
                 LowDegreeProof {
                     folded_layer_roots,
                     final_coefficients,
                     query_openings,
+                    layer_batch_openings,
                 },
                 query_positions,
             ));
@@ -265,6 +278,7 @@ pub(super) fn verify_low_degree(
     if proof.folded_layer_roots.len() + 1 != total_folds
         || proof.final_coefficients.len() != LOW_DEGREE_FINAL_COEFFICIENT_COUNT
         || proof.query_openings.len() != LOW_DEGREE_QUERY_COUNT
+        || proof.layer_batch_openings.len() + 1 != total_folds
     {
         return Err(invalid_succinct_setup_proof(
             "low-degree proof shape does not match the declared parameters",
@@ -293,6 +307,7 @@ pub(super) fn verify_low_degree(
         LOW_DEGREE_QUERY_COUNT,
     );
     let inverse_two = inverse_mod(2, modulus)?;
+    let mut layer_opened_leaves: Vec<Vec<(usize, [u8; 64])>> = vec![Vec::new(); total_folds - 1];
     for (query_ordinal, (query_position, opening)) in query_positions
         .iter()
         .zip(proof.query_openings.iter())
@@ -333,16 +348,7 @@ pub(super) fn verify_low_degree(
                 let slot = value_position / half;
                 let pair_opening = &opening.folded_layer_pairs[fold_index];
                 let leaf = leaf_hash(pair_index, &[], &flatten_extension_pair(&pair_opening.pair));
-                if !verify_merkle_opening(
-                    &proof.folded_layer_roots[fold_index],
-                    pair_index,
-                    &leaf,
-                    &pair_opening.path,
-                ) {
-                    return Err(invalid_succinct_setup_proof(
-                        "low-degree folded layer opening failed Merkle verification",
-                    ));
-                }
+                layer_opened_leaves[fold_index].push((pair_index, leaf));
                 if pair_opening.pair[slot] != folded_value {
                     return Err(invalid_succinct_setup_proof(
                         "low-degree fold does not match the committed folded layer",
@@ -364,6 +370,30 @@ pub(super) fn verify_low_degree(
                     ));
                 }
             }
+        }
+    }
+
+    // Authenticate every folded layer's queried pair leaves against its root in
+    // one batched opening per layer, after the fold checks have re-derived them.
+    for (fold_index, batch_opening) in proof.layer_batch_openings.iter().enumerate() {
+        let layer_leaf_count = parameters.initial_domain_size >> (fold_index + 2);
+        let layer_depth = layer_leaf_count.trailing_zeros() as usize;
+        let Some(layer_leaves) =
+            consistent_sorted_leaves(layer_opened_leaves[fold_index].iter().copied())
+        else {
+            return Err(invalid_succinct_setup_proof(
+                "low-degree folded layer opens one position to two values",
+            ));
+        };
+        if !verify_merkle_batch(
+            &proof.folded_layer_roots[fold_index],
+            layer_depth,
+            &layer_leaves,
+            batch_opening,
+        ) {
+            return Err(invalid_succinct_setup_proof(
+                "low-degree folded layer opening failed Merkle verification",
+            ));
         }
     }
 

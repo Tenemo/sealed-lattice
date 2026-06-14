@@ -17,19 +17,24 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 // that make the default `cargo test` cycle slow:
 //
 //   1. A throwaway `--target-dir` forces a full optimized rebuild of the whole
-//      dependency graph every run. This runner pins one persistent target
-//      directory so only the edited crate recompiles after the first build, and
-//      it keeps that directory separate from `target/` so it never contends with
-//      a concurrently running gate for the cargo build lock.
+//      dependency graph every run (~44s here). This runner pins one persistent
+//      target directory, kept separate from `target/` so it never contends with
+//      a concurrently running gate for the cargo build lock. The first build is
+//      full; after that, re-running an unchanged test recompiles nothing, and an
+//      edit recompiles incrementally (measured ~16s versus ~44s for a full
+//      rebuild). Incremental compilation is deliberately left enabled: it is the
+//      single biggest per-edit saving, and a compiler cache such as sccache does
+//      not help here because the dominant cost is the one large kernel crate,
+//      which an edit always invalidates and which does not cache across target
+//      directories anyway.
 //   2. A fresh process re-runs the prover for the entire proof corpus because
 //      the in-process `OnceLock` fixture cache starts cold. This runner enables
 //      the deterministic on-disk proof checkpoints so each family's corpus loads
 //      from `temp/test-checkpoints/` instead of being re-proved, and it runs the
 //      selected tests in a single cargo invocation so they share one warm corpus.
-//
-// When `sccache` is installed it is wired in as the compiler cache so even the
-// first build in the pinned directory reuses dependency compilations shared with
-// every other target directory on the machine.
+//      This only helps generation-bound tests (the trustee family); the heavy
+//      tests are otherwise dominated by proof verification, which nothing here
+//      changes.
 
 const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
 
@@ -42,15 +47,18 @@ const heavyIterationTargetDirectory = path.resolve(
     'heavy-iteration',
 );
 
-// Each mutating heavy accepted-setup test holds a clone of the evaluation-key
-// proof container package fixture while it runs. Size the libtest thread pool
-// from currently available memory with a conservative per-test budget, capped by
-// core count, so a full-filter run stays as parallel as the machine can sustain
-// without thrashing or aborting. A single-test filter simply runs one thread.
-// This is lower than the gate runner's budget because the package-hash rebinder
-// no longer clones the whole package; tune it down further once a warm run has
-// confirmed the measured per-test peak.
-const approximateGigabytesPerHeavyTest = 12;
+// Each mutating heavy accepted-setup test clones the full evaluation-key proof
+// container package fixture while it runs. That container embeds the proof and
+// key-switch material as inline hex, so a clone is several gigabytes resident,
+// and the package-inflating tests (extra/duplicate refusals) peak highest: a
+// single such test was measured at roughly 57 GiB resident, most of it the shared
+// fixture that concurrent tests reuse rather than a per-test cost multiplied by
+// the thread count. Size the libtest thread pool from currently available memory
+// with the same per-test budget as the gate runner, capped by core count, so a
+// multi-test filter keeps that worst case plus a few normal clones inside memory.
+// A single-test filter simply runs one thread. Raising parallelism safely needs
+// the container moved off inline hex onto the transported-material representation.
+const approximateGigabytesPerHeavyTest = 15;
 const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
 const availableGigabytes = os.freemem() / gigabyte;
@@ -66,19 +74,6 @@ const heavyAcceptedSetupTestThreadCount = Math.min(
     memoryBoundedHeavyTestThreadCount,
 );
 
-const sccacheIsAvailable = (): boolean => {
-    try {
-        const probe = spawnSync('sccache', ['--version'], {
-            shell: true,
-            stdio: 'ignore',
-        });
-
-        return probe.status === 0;
-    } catch {
-        return false;
-    }
-};
-
 const parseTestFilters = (commandArguments: readonly string[]): string[] => {
     const filters = commandArguments.filter(
         (argument) => !argument.startsWith('-'),
@@ -91,7 +86,6 @@ const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     const commandArguments = removeRunLogArguments(rawArguments);
     const testFilters = parseTestFilters(commandArguments);
-    const useSccache = sccacheIsAvailable();
 
     const runLog = runLogDisabledByArguments(rawArguments)
         ? undefined
@@ -117,15 +111,15 @@ const main = async (): Promise<void> => {
         description: `cargo test ${testFilters.join(' ')} (warm iteration)`,
         env: {
             ...process.env,
-            // sccache cannot cache incremental artifacts, and the pinned target
-            // directory makes incremental rebuilds redundant with the cache, so
-            // disabling it keeps the compiler-cache path clean.
-            CARGO_INCREMENTAL: '0',
             CARGO_TARGET_DIR: heavyIterationTargetDirectory,
+            // Force incremental compilation on (this runner's central per-edit
+            // saving) rather than relying on the cargo default, which an inherited
+            // environment or a cargo config could otherwise have disabled. This is
+            // what the "Incremental compilation: on" log line below promises.
+            CARGO_INCREMENTAL: '1',
             // Resume each proof family's corpus from on-disk checkpoints instead
             // of re-running the prover from a cold in-process fixture cache.
             SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
-            ...(useSccache ? { RUSTC_WRAPPER: 'sccache' } : {}),
         },
         logFileSlug: 'cargo-test-heavy-accepted-setup-iteration',
     };
@@ -138,9 +132,7 @@ const main = async (): Promise<void> => {
     );
     console.log(
         `Pinned target directory: ${heavyIterationTargetDirectory}. ` +
-            `Checkpoint resume: on. Compiler cache: ${
-                useSccache ? 'sccache' : 'off (sccache not found)'
-            }.`,
+            `Incremental compilation: on. Checkpoint resume: on.`,
     );
 
     let exitCode: number | undefined;

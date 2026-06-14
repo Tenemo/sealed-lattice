@@ -4,7 +4,9 @@ use super::extension_field::{
 };
 use super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::low_degree_proof::{LowDegreeParameters, verify_low_degree};
-use super::merkle_commitment::{LEAF_SALT_BYTES, leaf_hash, verify_merkle_opening};
+use super::merkle_commitment::{
+    LEAF_SALT_BYTES, consistent_sorted_leaves, leaf_hash, verify_merkle_batch,
+};
 use super::prover::{
     LimbProof, SuccinctEvaluationKeyProof, barycentric_weights, build_limb_public_vectors,
     draw_limb_challenges, global_claim_id, sample_deep_points, trace_vanishing_at_extension,
@@ -254,6 +256,8 @@ fn verify_limb(
         Ok(accumulated)
     };
 
+    let mut witness_leaves: Vec<(usize, [u8; 64])> = Vec::new();
+    let mut quotient_leaves: Vec<(usize, [u8; 64])> = Vec::new();
     verify_low_degree(
         &mut transcript,
         &low_degree_parameters,
@@ -274,32 +278,25 @@ fn verify_limb(
                     "query opening shape does not match the column layout",
                 ));
             }
+            // Record both phase leaves at each queried position; the trees are
+            // authenticated in one batched opening each after the fold checks.
             for (slot, position) in [pair_index, pair_index + half].into_iter().enumerate() {
-                let phase_one_leaf = leaf_hash(
+                witness_leaves.push((
                     position,
-                    &opening.phase_one_salts[slot],
-                    &opening.phase_one_rows[slot],
-                );
-                let phase_two_leaf = leaf_hash(
+                    leaf_hash(
+                        position,
+                        &opening.phase_one_salts[slot],
+                        &opening.phase_one_rows[slot],
+                    ),
+                ));
+                quotient_leaves.push((
                     position,
-                    &opening.phase_two_salts[slot],
-                    &opening.phase_two_rows[slot],
-                );
-                if !verify_merkle_opening(
-                    &limb_proof.witness_tree_root,
-                    position,
-                    &phase_one_leaf,
-                    &opening.phase_one_paths[slot],
-                ) || !verify_merkle_opening(
-                    &limb_proof.quotient_tree_root,
-                    position,
-                    &phase_two_leaf,
-                    &opening.phase_two_paths[slot],
-                ) {
-                    return Err(invalid_succinct_setup_proof(
-                        "query opening failed Merkle verification",
-                    ));
-                }
+                    leaf_hash(
+                        position,
+                        &opening.phase_two_salts[slot],
+                        &opening.phase_two_rows[slot],
+                    ),
+                ));
             }
             Ok([
                 reconstruct_batch_value(
@@ -314,7 +311,44 @@ fn verify_limb(
                 )?,
             ])
         },
-    )
+    )?;
+
+    // Authenticate both phase trees against their roots with one batched opening
+    // each. A position opened to two different rows across queries is rejected
+    // here, so binding is exactly as strong as an independent path per slot.
+    let phase_tree_depth = extension_size.trailing_zeros() as usize;
+    let Some(witness_sorted_leaves) = consistent_sorted_leaves(witness_leaves) else {
+        return Err(invalid_succinct_setup_proof(
+            "witness tree opens one position to two values",
+        ));
+    };
+    if !verify_merkle_batch(
+        &limb_proof.witness_tree_root,
+        phase_tree_depth,
+        &witness_sorted_leaves,
+        &limb_proof.witness_batch_opening,
+    ) {
+        return Err(invalid_succinct_setup_proof(
+            "witness tree query openings failed batched Merkle verification",
+        ));
+    }
+    let Some(quotient_sorted_leaves) = consistent_sorted_leaves(quotient_leaves) else {
+        return Err(invalid_succinct_setup_proof(
+            "quotient tree opens one position to two values",
+        ));
+    };
+    if !verify_merkle_batch(
+        &limb_proof.quotient_tree_root,
+        phase_tree_depth,
+        &quotient_sorted_leaves,
+        &limb_proof.quotient_batch_opening,
+    ) {
+        return Err(invalid_succinct_setup_proof(
+            "quotient tree query openings failed batched Merkle verification",
+        ));
+    }
+
+    Ok(())
 }
 
 // Cross-limb integer consistency on the masked claims: every limb publishes
