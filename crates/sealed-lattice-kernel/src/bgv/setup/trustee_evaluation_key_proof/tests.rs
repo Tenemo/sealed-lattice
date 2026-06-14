@@ -99,6 +99,12 @@ impl ProofSizeBreakdown {
             + self.phase_one_paths
             + self.phase_two_paths
     }
+
+    // The per-query authentication path bytes that a batched opening replaces
+    // with one shared node set per tree (the roots are unaffected).
+    fn path_bytes(&self) -> usize {
+        self.low_degree_query_paths + self.phase_one_paths + self.phase_two_paths
+    }
 }
 
 fn committed_fold_count(extension_size: usize) -> usize {
@@ -254,9 +260,10 @@ fn full_profile_schedule_shape() -> Vec<(EvaluationKeyShareKind, usize)> {
 #[test]
 #[ignore = "size profiler: run explicitly to measure proof byte breakdown"]
 fn profile_trustee_proof_size_breakdown() {
-    // 1. Validate the analyzer against a real encoded proof at a small but
-    //    multi-limb, multi-key, linkage-bearing schedule.
-    let validation_ring_degree = 512_usize;
+    // A multi-limb, multi-key, linkage-bearing schedule at a near-full ring
+    // degree, so the batched-path node sharing (which depends only on the query
+    // count and tree depth, not the key count) matches the full-size ratio.
+    let measurement_ring_degree = 16_384_usize;
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "5123e0f0",
         &[
@@ -266,7 +273,7 @@ fn profile_trustee_proof_size_breakdown() {
             rotation(5, 5),
             rotation(7, 3),
         ],
-        validation_ring_degree,
+        measurement_ring_degree,
         Some(7),
     )
     .expect("development instance");
@@ -280,23 +287,59 @@ fn profile_trustee_proof_size_breakdown() {
     verify_evaluation_key_share(&statement, &proof).expect("verify");
     let verify_elapsed = verify_start.elapsed();
 
-    let measured = analyze_proof_size(&statement, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
-    assert_eq!(
-        measured.total(),
-        encoded.len(),
-        "analyzer must match the real encoded length exactly"
+    // The analyzer models the pre-batch encoding (one independent Merkle path per
+    // opened leaf), so it equals the size the proof would have without lever 2.
+    // The real encoded proof carries batched openings, so the difference is the
+    // measured batching saving; batching only ever removes bytes.
+    let independent_paths =
+        analyze_proof_size(&statement, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
+    assert!(
+        encoded.len() <= independent_paths.total(),
+        "batched encoding must not exceed the independent-path encoding"
     );
+    let actual_batched_node_bytes: usize = proof
+        .limb_proofs
+        .iter()
+        .map(|limb| {
+            (limb.witness_batch_opening.authentication_nodes.len()
+                + limb.quotient_batch_opening.authentication_nodes.len()
+                + limb
+                    .low_degree
+                    .layer_batch_openings
+                    .iter()
+                    .map(|opening| opening.authentication_nodes.len())
+                    .sum::<usize>())
+                * 64
+        })
+        .sum();
+    let measured_saving = independent_paths.total() - encoded.len();
+    let batched_node_ratio =
+        actual_batched_node_bytes as f64 / independent_paths.path_bytes() as f64;
     println!(
-        "validation schedule: ring_degree={validation_ring_degree} keys={} limbs={} encoded={} bytes prove={:?} verify={:?}",
+        "measurement schedule: ring_degree={measurement_ring_degree} keys={} limbs={} prove={:?} verify={:?}",
         statement.keys.len(),
         statement.limb_count(),
-        encoded.len(),
         prove_elapsed,
         verify_elapsed,
     );
-    println!("validation breakdown (8-byte field, 64-byte hash): {measured:#?}");
+    println!(
+        "independent-path encoding {} bytes (paths {} bytes) -> batched encoding {} bytes (batched nodes {} bytes): saved {} bytes ({:.1}%); batched nodes are {:.1}% of the independent path bytes",
+        independent_paths.total(),
+        independent_paths.path_bytes(),
+        encoded.len(),
+        actual_batched_node_bytes,
+        measured_saving,
+        100.0 * measured_saving as f64 / independent_paths.total() as f64,
+        100.0 * batched_node_ratio,
+    );
 
-    // 2. Project the full first-profile shape at the production ring degree.
+    // Full first-profile shape at the production ring degree. The analyzer gives
+    // the exact independent-path (post lever 1) size; the batched size is
+    // estimated by scaling its path bytes by the measured node ratio. The
+    // measurement ring is one binary level shallower than full size, and deeper
+    // trees share proportionally fewer interior nodes (only the top log2(leaves)
+    // levels overlap), so the true full-size batched total is marginally above
+    // this estimate; the gate run records the exact value.
     let schedule = full_profile_schedule_shape();
     let linkage_commitment_count = schedule
         .iter()
@@ -304,12 +347,10 @@ fn profile_trustee_proof_size_breakdown() {
         .max()
         .expect("schedule is non-empty");
     let full = shape_only_trustee_statement(&schedule, POLYNOMIAL_DEGREE, linkage_commitment_count);
-    // Lever 1 baseline (pre-packing eight-byte residues) versus the current
-    // codec width, plus a hypothetical narrower Merkle digest for context.
     let before_lever_one = analyze_proof_size(&full, 8, 64, LEAF_SALT_BYTES);
-    let current = analyze_proof_size(&full, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
-    let current_with_48_byte_hash =
-        analyze_proof_size(&full, FIELD_RESIDUE_BYTE_WIDTH, 48, LEAF_SALT_BYTES);
+    let full_independent = analyze_proof_size(&full, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
+    let estimated_full_batched = full_independent.total() as f64
+        - full_independent.path_bytes() as f64 * (1.0 - batched_node_ratio);
     let mebibyte = 1024.0 * 1024.0;
     println!(
         "FULL-N shape: ring_degree={POLYNOMIAL_DEGREE} keys={} limbs={}",
@@ -317,22 +358,22 @@ fn profile_trustee_proof_size_breakdown() {
         full.limb_count(),
     );
     println!(
-        "FULL-N before lever 1 (8-byte field): total={:.1} MiB | field-element bytes={:.1} MiB | hash bytes={:.1} MiB",
+        "FULL-N before lever 1 (8-byte field, independent paths): {:.1} MiB",
         before_lever_one.total() as f64 / mebibyte,
-        before_lever_one.field_element_bytes() as f64 / mebibyte,
-        before_lever_one.hash_bytes() as f64 / mebibyte,
     );
     println!(
-        "FULL-N current ({FIELD_RESIDUE_BYTE_WIDTH}-byte field): total={:.1} MiB (saved {:.1} MiB, {:.1}% vs lever-1 baseline)",
-        current.total() as f64 / mebibyte,
-        (before_lever_one.total() - current.total()) as f64 / mebibyte,
-        100.0 * (before_lever_one.total() - current.total()) as f64 / before_lever_one.total() as f64,
+        "FULL-N after lever 1 (6-byte field, independent paths): {:.1} MiB | field bytes {:.1} MiB | hash bytes {:.1} MiB (of which paths {:.1} MiB)",
+        full_independent.total() as f64 / mebibyte,
+        full_independent.field_element_bytes() as f64 / mebibyte,
+        full_independent.hash_bytes() as f64 / mebibyte,
+        full_independent.path_bytes() as f64 / mebibyte,
     );
-    println!("FULL-N current breakdown: {current:#?}");
     println!(
-        "FULL-N context: with a 48-byte Merkle digest as well total would be {:.1} MiB ({:.1}% below the lever-1 baseline)",
-        current_with_48_byte_hash.total() as f64 / mebibyte,
-        100.0 * (before_lever_one.total() - current_with_48_byte_hash.total()) as f64
+        "FULL-N after lever 2 (estimated batched paths): ~{:.1} MiB ({:.1}% below lever 1, {:.1}% below the original 8-byte baseline); exact value from the gate run",
+        estimated_full_batched / mebibyte,
+        100.0 * (full_independent.total() as f64 - estimated_full_batched)
+            / full_independent.total() as f64,
+        100.0 * (before_lever_one.total() as f64 - estimated_full_batched)
             / before_lever_one.total() as f64,
     );
 }
@@ -912,20 +953,21 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     .expect("development instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_pairs[0]
-        .path
-        .pop()
-        .expect("folded layer opening path is non-empty");
+    // A batched folded-layer opening whose node count exceeds its per-layer
+    // bound is rejected at decode, before any oversized allocation.
+    proof.limb_proofs[0].low_degree.layer_batch_openings[0]
+        .authentication_nodes
+        .extend(vec![[0_u8; 64]; 200_000]);
     let encoded = encode_trustee_evaluation_key_proof(&proof);
     let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
-        Ok(_) => panic!("wrong folded-layer path length must reject at decode"),
+        Ok(_) => panic!("an oversized batched opening must reject at decode"),
         Err(error) => error,
     };
     assert!(
         error
             .message
-            .contains("low-degree folded layer path length does not match the statement"),
-        "unexpected folded-layer path-length error: {}",
+            .contains("batched opening node count exceeds the statement bound"),
+        "unexpected batched-opening error: {}",
         error.message
     );
 }

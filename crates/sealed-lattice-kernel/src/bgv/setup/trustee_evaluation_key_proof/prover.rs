@@ -4,7 +4,9 @@ use super::extension_field::{
 };
 use super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::low_degree_proof::{LowDegreeParameters, LowDegreeProof, prove_low_degree};
-use super::merkle_commitment::{LEAF_SALT_BYTES, MerkleTree, leaf_hash};
+use super::merkle_commitment::{
+    BatchedMerkleOpening, LEAF_SALT_BYTES, MerkleTree, leaf_hash, sorted_unique_indices,
+};
 use super::relation::{
     BaseColumnDomain, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, SumcheckErrorWeights,
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
@@ -41,17 +43,21 @@ pub(super) struct LimbProof {
     pub(super) deep_evaluations: Vec<Vec<ChallengeExtensionElement>>,
     pub(super) low_degree: LowDegreeProof,
     pub(super) query_openings: Vec<PhaseQueryOpening>,
+    // One batched authentication opening per phase tree, covering every queried
+    // position and its coset partner at once instead of an independent path per
+    // query slot.
+    pub(super) witness_batch_opening: BatchedMerkleOpening,
+    pub(super) quotient_batch_opening: BatchedMerkleOpening,
 }
 
 // Openings of both phase trees at the queried extension pair positions,
-// including the leaf salts.
+// including the leaf salts. The authentication nodes live in the per-tree
+// batched openings on `LimbProof`, not here.
 pub(super) struct PhaseQueryOpening {
     pub(super) phase_one_rows: [Vec<u64>; 2],
     pub(super) phase_one_salts: [Vec<u8>; 2],
-    pub(super) phase_one_paths: [Vec<[u8; 64]>; 2],
     pub(super) phase_two_rows: [Vec<u64>; 2],
     pub(super) phase_two_salts: [Vec<u8>; 2],
-    pub(super) phase_two_paths: [Vec<[u8; 64]>; 2],
 }
 
 struct SaltedTree {
@@ -1212,10 +1218,6 @@ fn prove_limb(
                 commitment.salted.salt(*position).to_vec(),
                 commitment.salted.salt(*position + half).to_vec(),
             ],
-            phase_one_paths: [
-                commitment.salted.tree.open(*position),
-                commitment.salted.tree.open(*position + half),
-            ],
             phase_two_rows: [
                 collect_row(&phase_two_columns, *position),
                 collect_row(&phase_two_columns, *position + half),
@@ -1224,12 +1226,17 @@ fn prove_limb(
                 phase_two_salted.salt(*position).to_vec(),
                 phase_two_salted.salt(*position + half).to_vec(),
             ],
-            phase_two_paths: [
-                phase_two_salted.tree.open(*position),
-                phase_two_salted.tree.open(*position + half),
-            ],
         })
         .collect::<Vec<_>>();
+    // Both phase trees are opened at the same queried positions and their coset
+    // partners, so one batched opening per tree authenticates every query slot.
+    let phase_opened_indices = sorted_unique_indices(
+        query_positions
+            .iter()
+            .flat_map(|position| [*position, *position + half]),
+    );
+    let witness_batch_opening = commitment.salted.tree.open_batch(&phase_opened_indices);
+    let quotient_batch_opening = phase_two_salted.tree.open_batch(&phase_opened_indices);
 
     Ok(LimbProof {
         witness_tree_root: commitment.salted.tree.root(),
@@ -1238,6 +1245,8 @@ fn prove_limb(
         deep_evaluations,
         low_degree,
         query_openings,
+        witness_batch_opening,
+        quotient_batch_opening,
     })
 }
 
