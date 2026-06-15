@@ -39,7 +39,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         );
     });
 
-    it.each([3, 19, 20, 30, 40, 50])(
+    it.each([3, 19, 20])(
         'reconstructs for supported roster size %d using threshold profile',
         (rosterSize) => {
             const thresholdProfile = deriveThresholdProfile({

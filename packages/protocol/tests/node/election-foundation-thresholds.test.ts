@@ -16,7 +16,7 @@ const rosterHash = 'b'.repeat(128);
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 const pollSpec = {
     duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
-    maxRosterSize: 50,
+    maxRosterSize: 20,
     minRosterSize: 10,
     options: ['Alpha', 'Beta'],
     pollId: 'threshold-profile-test',
@@ -37,7 +37,7 @@ const retiredThresholdDecryptionProfileId =
     'unsupported-target-decryption-profile-v0';
 
 const expectFeasibleThresholds = (rosterSize: number): void => {
-    const decryptionThreshold = Math.floor((rosterSize - 1) / 3) + 1;
+    const decryptionThreshold = Math.floor(rosterSize / 3) + 1;
     const profile = deriveThresholdProfile({
         casualMicroRosterAcknowledged: rosterSize < 10,
         dynamicRosterProfileCertificateHash:
@@ -47,9 +47,9 @@ const expectFeasibleThresholds = (rosterSize: number): void => {
         rosterSize,
         targetBoundShareSelectionProfile: {
             ...targetBoundShareSelectionProfile,
-            decryptionShareQuorum: decryptionThreshold + 2,
+            decryptionShareQuorum: rosterSize,
             minimumSharesForInterpolation: decryptionThreshold,
-            minimumArrivalsForRobustDecode: decryptionThreshold + 2,
+            minimumArrivalsForRobustDecode: rosterSize,
         },
     });
 
@@ -77,52 +77,24 @@ describe('election foundation threshold profiles', () => {
             privacyCorruptionBound: 3,
             threshold: 4,
             activeFaultBound: 2,
-            releaseQuorum: 10,
+            releaseQuorum: 11,
         },
         {
             rosterSize: 16,
             privacyCorruptionBound: 5,
             threshold: 6,
             activeFaultBound: 3,
-            releaseQuorum: 11,
+            releaseQuorum: 16,
         },
         {
             rosterSize: 20,
             privacyCorruptionBound: 6,
             threshold: 7,
             activeFaultBound: 4,
-            releaseQuorum: 14,
-        },
-        {
-            rosterSize: 21,
-            privacyCorruptionBound: 6,
-            threshold: 7,
-            activeFaultBound: 4,
-            releaseQuorum: 14,
-        },
-        {
-            rosterSize: 30,
-            privacyCorruptionBound: 9,
-            threshold: 10,
-            activeFaultBound: 6,
             releaseQuorum: 20,
         },
-        {
-            rosterSize: 40,
-            privacyCorruptionBound: 13,
-            threshold: 14,
-            activeFaultBound: 8,
-            releaseQuorum: 27,
-        },
-        {
-            rosterSize: 50,
-            privacyCorruptionBound: 16,
-            threshold: 17,
-            activeFaultBound: 10,
-            releaseQuorum: 34,
-        },
     ])(
-        'derives strict less-than-one-third thresholds for roster size $rosterSize',
+        'derives structural one-third thresholds for roster size $rosterSize',
         ({
             rosterSize,
             privacyCorruptionBound,
@@ -152,13 +124,13 @@ describe('election foundation threshold profiles', () => {
         },
     );
 
-    it('keeps roster size 30 at privacy corruption bound 9 under strict less-than-one-third', () => {
+    it('keeps roster size 18 at privacy corruption bound 6 under structural one-third', () => {
         expect(
-            deriveThresholdProfile({ rosterSize: 30 }).privacyCorruptionBound,
-        ).toBe(9);
+            deriveThresholdProfile({ rosterSize: 18 }).privacyCorruptionBound,
+        ).toBe(6);
     });
 
-    it.each([...casualMicroRosterSizes, 10, 11, 16, 20, 21, 30, 40, 50])(
+    it.each([...casualMicroRosterSizes, 10, 11, 16, 20])(
         'keeps threshold feasibility invariants for roster size %d',
         (rosterSize) => {
             expectFeasibleThresholds(rosterSize);
@@ -181,13 +153,13 @@ describe('election foundation threshold profiles', () => {
     );
 
     it.each([
-        { rosterSize: 3, threshold: 1 },
+        { rosterSize: 3, threshold: 2 },
         { rosterSize: 4, threshold: 2 },
         { rosterSize: 5, threshold: 2 },
-        { rosterSize: 6, threshold: 2 },
+        { rosterSize: 6, threshold: 3 },
         { rosterSize: 7, threshold: 3 },
         { rosterSize: 8, threshold: 3 },
-        { rosterSize: 9, threshold: 3 },
+        { rosterSize: 9, threshold: 4 },
     ])(
         'marks acknowledged roster size $rosterSize as a non-claim casual micro-roster',
         ({ rosterSize, threshold }) => {
@@ -282,7 +254,7 @@ describe('election foundation threshold profiles', () => {
         );
     });
 
-    it.each([11, 16, 20, 21, 50])(
+    it.each([11, 16, 20])(
         'marks roster size %d as a certified dynamic profile',
         (rosterSize) => {
             const profile = deriveThresholdProfile({
@@ -299,7 +271,7 @@ describe('election foundation threshold profiles', () => {
         },
     );
 
-    it.each([11, 16, 19, 20, 21, 50])(
+    it.each([11, 16, 19, 20])(
         'marks roster size %d as uncertified without dynamic evidence',
         (rosterSize) => {
             const profile = deriveThresholdProfile({ rosterSize });
@@ -316,9 +288,9 @@ describe('election foundation threshold profiles', () => {
         },
     );
 
-    it('rejects roster sizes above fifty', () => {
-        expect(() => deriveThresholdProfile({ rosterSize: 51 })).toThrow(
-            'Roster size must be at most 50.',
+    it('rejects roster sizes above twenty', () => {
+        expect(() => deriveThresholdProfile({ rosterSize: 21 })).toThrow(
+            'Roster size must be at most 20.',
         );
     });
 

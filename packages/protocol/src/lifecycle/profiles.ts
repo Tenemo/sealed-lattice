@@ -12,8 +12,8 @@ export {
     targetBoundShareSelectionProfileId,
 } from '@sealed-lattice/types';
 
-export const strictLessThanOneThirdModel = {
-    kind: 'StrictLessThanOneThird',
+export const structuralOneThirdModel = {
+    kind: 'StructuralOneThird',
 } as const satisfies HeBackendCorruptionModel;
 
 export const defaultScoreDomain = {
@@ -39,10 +39,10 @@ export const defaultSmallRosterPolicy =
 
 // Roster-size landmarks:
 //  3  - absolute minimum supported roster.
-//  10 - the first claim profile roster size.
-//  20 - larger stress profile, claim-bearing only with dynamic evidence.
-//  50 - hard maximum supported roster.
+//  10 - the first (and only) end-to-end closure profile roster size.
+//  20 - hard maximum supported roster; the parameterized upper bound for which
+//       code paths exist but no end-to-end/runtime evidence is claimed yet.
 export const minimumSupportedRosterSize = 3;
 export const minimumDynamicRosterSize = 10;
 export const firstProfileRosterSize = 10;
-export const maximumSupportedRosterSize = 50;
+export const maximumSupportedRosterSize = 20;

@@ -231,7 +231,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             code: 'InvalidRosterBounds',
             field: 'minRosterSize',
             message:
-                'Roster bounds must be integer bounds in 3..50 with minRosterSize not greater than maxRosterSize.',
+                'Roster bounds must be integer bounds in 3..20 with minRosterSize not greater than maxRosterSize.',
         });
     }
 

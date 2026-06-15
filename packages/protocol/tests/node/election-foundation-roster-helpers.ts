@@ -37,7 +37,7 @@ import {
 export const createRosterPollSpec = (): PollSpec => {
     const validation = validatePollSpec({
         duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
-        maxRosterSize: 50,
+        maxRosterSize: 20,
         minRosterSize: 3,
         options: Array.from(
             { length: 20 },

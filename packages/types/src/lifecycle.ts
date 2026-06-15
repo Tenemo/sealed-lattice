@@ -5,7 +5,7 @@ export type ResultClaimLabel = 'fullyVerified';
 /** Backend corruption model used when deriving threshold profiles. */
 export type HeBackendCorruptionModel =
     | {
-          readonly kind: 'StrictLessThanOneThird';
+          readonly kind: 'StructuralOneThird';
       }
     | {
           readonly kind: 'CertifiedCustom';
