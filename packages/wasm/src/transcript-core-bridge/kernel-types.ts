@@ -8,6 +8,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import type {
+    BgvAcceptedSetupHandoff,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,
@@ -49,6 +50,7 @@ import type {
     BgvTransportedVssCoefficientCommitmentMaterialReference,
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
     BgvVerifiedTransportedVssMaterialRelease,
+    DirectBallotAcceptedPublicKeyMaterial,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -92,6 +94,7 @@ export type {
     BgvTransportedVssCoefficientCommitmentMaterialReference,
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
     BgvVerifiedTransportedVssMaterialRelease,
+    DirectBallotAcceptedPublicKeyMaterial,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -649,7 +652,10 @@ type TranscriptCoreKernelCommand =
           };
           readonly ballots: readonly {
               readonly voterIdentity: string;
+              readonly voterRosterPosition: number;
               readonly actionContextHash: string;
+              readonly recoveryEpoch: number;
+              readonly deviceEpoch: number;
               readonly scores: readonly number[];
               readonly oneHotWitnesses?: readonly (readonly number[])[];
           }[];
@@ -657,6 +663,44 @@ type TranscriptCoreKernelCommand =
           readonly topCounts?: readonly number[];
           readonly publicEvaluationKeyMaterial?: unknown;
           readonly targetFinalityPolicyHash?: string;
+      }
+    | {
+          readonly command: 'CreateDirectEncryptedBallotPackages';
+          readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+          readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+          readonly ballotEncryptionRandomness: {
+              readonly source:
+                  | 'fresh-csprng'
+                  | 'development-deterministic-fixture';
+              readonly encryptionSeedHexes: readonly string[];
+          };
+          readonly proofMaskRandomness: {
+              readonly source:
+                  | 'fresh-csprng'
+                  | 'development-deterministic-fixture';
+              readonly ballotProofRandomnessHexes: readonly string[];
+          };
+          readonly ballots: readonly {
+              readonly voterIdentity: string;
+              readonly voterRosterPosition: number;
+              readonly actionContextHash: string;
+              readonly recoveryEpoch: number;
+              readonly deviceEpoch: number;
+              readonly scores: readonly number[];
+              readonly oneHotWitnesses?: readonly (readonly number[])[];
+          }[];
+      }
+    | {
+          readonly command: 'VerifyDirectEncryptedBallotPackage';
+          readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+          readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+          readonly encryptedBallotPackage: unknown;
+          readonly proofChunks: readonly {
+              readonly chunkIndex: number;
+              readonly byteLength: number;
+              readonly chunkHash: string;
+              readonly bytesHex: string;
+          }[];
       };
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

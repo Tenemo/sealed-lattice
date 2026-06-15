@@ -5,9 +5,11 @@ use super::*;
 static DIRECT_BALLOT_SCORE_ENCODING_BASIS: OnceLock<Vec<Vec<u64>>> = OnceLock::new();
 
 pub(super) fn direct_ballot_witness_vector(
+    statement_hash: &[u8; 64],
+    public_key: &BgvPublicKey,
     ballot: &DirectEncryptedBallot,
 ) -> CanonicalResult<DirectBallotWitnessVector> {
-    Ok(DirectBallotWitnessVector {
+    let mut witness_vector = DirectBallotWitnessVector {
         randomizer_coefficients: ballot
             .encryption_witness
             .randomizer_coefficients
@@ -34,7 +36,17 @@ pub(super) fn direct_ballot_witness_vector(
             .map(|coefficient| BigInt::from(*coefficient))
             .collect(),
         one_hot_coefficients: direct_ballot_one_hot_coefficients(ballot)?,
-    })
+        bgv_no_wrap_carry_scalars: Vec::new(),
+    };
+    witness_vector.bgv_no_wrap_carry_scalars =
+        direct_ballot_projected_bgv_witness_no_wrap_carry_scalars(
+            statement_hash,
+            public_key,
+            ballot,
+            &witness_vector,
+        )?;
+
+    Ok(witness_vector)
 }
 
 pub(super) fn direct_ballot_encoding_carry_coefficients(
@@ -114,6 +126,21 @@ pub(super) fn direct_ballot_score_encoding_basis() -> CanonicalResult<&'static [
 }
 
 pub(super) fn validate_direct_ballot_witness_vector_shape(
+    witness_vector: &DirectBallotWitnessVector,
+) -> CanonicalResult<()> {
+    validate_direct_ballot_witness_vector_base_shape(witness_vector)?;
+    if witness_vector.bgv_no_wrap_carry_scalars.len()
+        != direct_ballot_projected_bgv_no_wrap_carry_scalar_count()
+    {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation projected BGV no-wrap carry response must have one scalar per projected row",
+        ));
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_direct_ballot_witness_vector_base_shape(
     witness_vector: &DirectBallotWitnessVector,
 ) -> CanonicalResult<()> {
     for (label, polynomial) in [

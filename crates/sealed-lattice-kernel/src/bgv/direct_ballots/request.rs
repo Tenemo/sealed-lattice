@@ -137,7 +137,10 @@ pub(super) fn direct_encrypted_ballot_hash(
     let package_json = canonical_json(&json!({
             "setupPackageHash": setup_package_hash(setup_package)?,
             "voterIdentity": ballot.voter_identity,
+            "voterRosterPosition": ballot.voter_roster_position,
             "actionContextHash": ballot.action_context_hash,
+            "recoveryEpoch": ballot.recovery_epoch,
+            "deviceEpoch": ballot.device_epoch,
             "ciphertextRoot": ciphertext_root,
             "ciphertextCanonicalByteLength": ciphertext_canonical_byte_length
     }))?;
@@ -192,8 +195,11 @@ pub(super) fn read_ballots(
             }
             Ok(DirectBallotInput {
                 voter_identity: required_string_field(ballot, "voterIdentity")?.to_string(),
+                voter_roster_position: required_usize_field(ballot, "voterRosterPosition")?,
                 action_context_hash: required_string_field(ballot, "actionContextHash")?
                     .to_string(),
+                recovery_epoch: required_u64_field(ballot, "recoveryEpoch")?,
+                device_epoch: required_u64_field(ballot, "deviceEpoch")?,
                 scores: required_u64_array(ballot, "scores")?,
                 one_hot_witnesses: optional_one_hot_witnesses(ballot)?,
                 encryption_seed_hex: ballot_encryption_randomness
@@ -378,11 +384,18 @@ pub(super) fn validate_direct_ballot_batch_order(
     ballots: &[DirectBallotInput],
 ) -> CanonicalResult<()> {
     let mut previous_voter_identity: Option<&str> = None;
+    let mut voter_roster_positions = BTreeSet::new();
     for ballot in ballots {
         if previous_voter_identity == Some(ballot.voter_identity.as_str()) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "direct encrypted ballot batch contains a duplicate voter identity",
+            ));
+        }
+        if !voter_roster_positions.insert(ballot.voter_roster_position) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "direct encrypted ballot batch contains a duplicate voter roster position",
             ));
         }
         if previous_voter_identity.is_some_and(|previous| previous > ballot.voter_identity.as_str())
@@ -522,6 +535,28 @@ pub(super) fn read_u64_value(value: &Value) -> CanonicalResult<u64> {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "expected an unsigned integer",
+        )
+    })
+}
+
+pub(super) fn required_u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
+    value
+        .get(field_name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{field_name} must be a non-negative integer"),
+            )
+        })
+}
+
+pub(super) fn required_usize_field(value: &Value, field_name: &str) -> CanonicalResult<usize> {
+    let raw_value = required_u64_field(value, field_name)?;
+    usize::try_from(raw_value).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{field_name} does not fit usize"),
         )
     })
 }

@@ -343,6 +343,14 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
             "commonRandomness was required before accepted public-key runtime loading",
         )
     })?;
+
+    accepted_setup_collective_public_key_from_material(common_randomness, aggregate_object)
+}
+
+pub(crate) fn accepted_setup_collective_public_key_from_material(
+    common_randomness: &Value,
+    aggregate_object: &Value,
+) -> CanonicalResult<BgvPublicKey> {
     let public_matrix_seed_hash = value_string(common_randomness, "publicMatrixSeedHash")?;
     if value_string(aggregate_object, "publicMatrixSeedHash")? != public_matrix_seed_hash {
         return Err(CanonicalError::new(

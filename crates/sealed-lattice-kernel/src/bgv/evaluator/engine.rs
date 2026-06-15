@@ -118,6 +118,11 @@ pub(crate) struct BgvPublicKey {
     public_a: Vec<Vec<u64>>,
 }
 
+pub(crate) struct BgvPublicKeyComponents {
+    pub(crate) component_zero_coefficients_by_modulus: Vec<Vec<u64>>,
+    pub(crate) component_one_coefficients_by_modulus: Vec<Vec<u64>>,
+}
+
 impl BgvPublicKey {
     pub(crate) fn from_components(
         public_b: Vec<Vec<u64>>,
@@ -127,6 +132,17 @@ impl BgvPublicKey {
         validate_public_key_component_shape(&public_a, "component one")?;
 
         Ok(Self { public_b, public_a })
+    }
+
+    pub(crate) fn public_key_components(&self) -> (&[Vec<u64>], &[Vec<u64>]) {
+        (&self.public_b, &self.public_a)
+    }
+
+    pub(crate) fn into_components(self) -> BgvPublicKeyComponents {
+        BgvPublicKeyComponents {
+            component_zero_coefficients_by_modulus: self.public_b,
+            component_one_coefficients_by_modulus: self.public_a,
+        }
     }
 
     #[cfg(test)]
@@ -151,7 +167,6 @@ impl BgvPublicKey {
             .0)
     }
 
-    #[cfg(test)]
     pub(crate) fn encrypt_coefficients_with_witness(
         &self,
         plaintext_coefficients: &[u64],
@@ -174,7 +189,9 @@ impl BgvPublicKey {
 #[derive(Clone)]
 pub(crate) struct DevelopmentBgvKey {
     secret: Vec<i64>,
+    #[cfg(test)]
     public_b: Vec<Vec<u64>>,
+    #[cfg(test)]
     public_a: Vec<Vec<u64>>,
 }
 
@@ -190,12 +207,17 @@ impl DevelopmentBgvKey {
                 "BGV evaluator collective secret width must match the polynomial degree",
             ));
         }
+        #[cfg(test)]
         let BgvPublicKey { public_b, public_a } =
             BgvPublicKey::from_components(public_b, public_a)?;
+        #[cfg(not(test))]
+        BgvPublicKey::from_components(public_b, public_a)?;
 
         Ok(Self {
             secret,
+            #[cfg(test)]
             public_b,
+            #[cfg(test)]
             public_a,
         })
     }
@@ -294,7 +316,9 @@ impl DevelopmentBgvKey {
 
         Ok(Self {
             secret,
+            #[cfg(test)]
             public_b,
+            #[cfg(test)]
             public_a,
         })
     }
@@ -303,6 +327,7 @@ impl DevelopmentBgvKey {
         &self.secret
     }
 
+    #[cfg(test)]
     pub(crate) fn public_key_components(&self) -> (&[Vec<u64>], &[Vec<u64>]) {
         (&self.public_b, &self.public_a)
     }
@@ -332,6 +357,7 @@ impl DevelopmentBgvKey {
             .0)
     }
 
+    #[cfg(test)]
     pub(crate) fn encrypt_coefficients_with_witness(
         &self,
         plaintext_coefficients: &[u64],

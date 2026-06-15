@@ -271,6 +271,12 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
 fn passive_setup_payload_validation_rejects_evaluator_binding_mutations() {
     let package = setup_package();
     for field_name in [
+        "batchEncoderHash",
+        "batchLayoutBindingHash",
+        "ballotScoreEncodingProfileHash",
+        "encryptedBallotLayoutHash",
+        "directBallotReservedSlotRuleHash",
+        "directBallotEncoderMatrixRoot",
         "evaluatorBindingContextHash",
         "encryptedBallotAggregateLayoutHash",
         "directAggregateLayoutHash",

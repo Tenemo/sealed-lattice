@@ -77,6 +77,36 @@ pub(super) fn validate_setup_package_internal_bindings(
         &encrypted_ballot_aggregate_layout_hash()?,
         "encrypted ballot aggregate layout hash",
     )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "ballotScoreEncodingProfileHash"],
+        &ballot_score_encoding_profile_hash()?,
+        "ballot score encoding profile hash",
+    )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "encryptedBallotLayoutHash"],
+        &encrypted_ballot_layout_hash()?,
+        "encrypted ballot layout hash",
+    )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "directBallotReservedSlotRuleHash"],
+        &direct_ballot_reserved_slot_rule_hash()?,
+        "direct ballot reserved slot rule hash",
+    )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "directBallotEncoderMatrixRoot"],
+        &direct_ballot_encoder_matrix_root()?,
+        "direct ballot encoder matrix root",
+    )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "arithmeticCertificateHash"],
+        &direct_ballot_arithmetic_certificate_hash()?,
+        "direct ballot arithmetic certificate hash",
+    )?;
     let expected_evaluator_bindings =
         passive_setup_evaluator_context_bindings(value_at_path(setup_package, &["setupInputs"])?)?;
     for (field_name, description) in [

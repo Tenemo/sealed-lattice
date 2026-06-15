@@ -1,7 +1,9 @@
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import { deriveProtocolHash, hash512Hex } from '#packages/crypto/src/index';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 import type {
+    BgvAcceptedSetupHandoff,
     BgvPassiveSetupPackage,
+    DirectBallotAcceptedPublicKeyMaterial,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
 } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
@@ -18,6 +20,25 @@ const wasmKernelUrl = new URL(
 );
 
 export const directBallotSetupSeed = 'direct-encrypted-ballot-node-wasm-seed';
+
+const textEncoder = new TextEncoder();
+const publicKeyShareCoefficientVectorHashDomain =
+    'sealed-lattice-bgv-rns/public-key-share-coefficient-vector-v1';
+
+const hexToBytes = (hexValue: string): Uint8Array => {
+    if (hexValue.length % 2 !== 0 || /[^0-9a-f]/u.test(hexValue)) {
+        throw new Error('hex value must be lowercase and byte-aligned.');
+    }
+
+    return Uint8Array.from(
+        { length: hexValue.length / 2 },
+        (_unusedByte, byteIndex) =>
+            Number.parseInt(
+                hexValue.slice(byteIndex * 2, byteIndex * 2 + 2),
+                16,
+            ),
+    );
+};
 
 const createFreshRandomnessHex = (): string => {
     const cryptoProvider = globalThis.crypto;
@@ -80,6 +101,97 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly replayTimeMilliseconds: string;
 };
 
+export type DirectEncryptedBallotProofChunkManifest = {
+    readonly objectType: 'BallotProofChunkManifest';
+    readonly objectVersion: 1;
+    readonly proofByteLength: number;
+    readonly chunkSizeBytes: number;
+    readonly chunkCount: number;
+    readonly chunkHashList: readonly string[];
+    readonly chunkMerkleRoot: string;
+    readonly proofFullBytesHash: string;
+    readonly statementHash: string;
+    readonly ciphertextRoot: string;
+    readonly voterIdentity: string;
+    readonly voterRosterPosition: number;
+    readonly actionContextHash: string;
+    readonly setupPackageRoot: string;
+    readonly proofProfileHash: string;
+};
+
+export type DirectEncryptedBallotCiphertextLimbRoot = {
+    readonly componentIndex: number;
+    readonly limbIndex: number;
+    readonly modulus: number;
+    readonly limbRoot: string;
+};
+
+export type DirectEncryptedBallotCiphertextTransport = {
+    readonly encoding: 'sealed-lattice-bgv-rns-canonical-ciphertext-v1';
+    readonly canonicalByteLength: number;
+    readonly canonicalBytesHex: string;
+    readonly ciphertextRoot: string;
+    readonly ciphertextLimbRoots: readonly DirectEncryptedBallotCiphertextLimbRoot[];
+};
+
+export type DirectEncryptedBallotSignaturePlaceholder = {
+    readonly objectType: 'DevelopmentEncryptedBallotPackageSignaturePlaceholder';
+    readonly objectVersion: 1;
+    readonly status: 'not supplied in the internal development command';
+    readonly expectedSignerRole: 'Voter';
+    readonly signedObjectRoot: string;
+    readonly voterIdentity: string;
+    readonly voterRosterPosition: number;
+    readonly contextHash: string;
+    readonly setupPackageRoot: string;
+    readonly ciphertextRoot: string;
+    readonly proofStatementHash: string;
+    readonly proofChunkRoot: string;
+};
+
+export type DirectEncryptedBallotPackage = {
+    readonly objectType: 'EncryptedBallotPackage';
+    readonly objectVersion: 1;
+    readonly ceremonyId: string;
+    readonly manifestHash: string;
+    readonly rosterHash: string;
+    readonly thresholdProfileHash: string;
+    readonly setupPackageRoot: string;
+    readonly setupProfileHash: string;
+    readonly voterIdentity: string;
+    readonly voterRosterPosition: number;
+    readonly actionContextHash: string;
+    readonly recoveryEpoch: number;
+    readonly deviceEpoch: number;
+    readonly bgvProfileHash: string;
+    readonly batchEncoderHash: string;
+    readonly batchLayoutBindingHash: string;
+    readonly ballotScoreEncodingProfileHash: string;
+    readonly encryptedBallotLayoutHash: string;
+    readonly directBallotReservedSlotRuleHash: string;
+    readonly directBallotEncoderMatrixRoot: string;
+    readonly witnessPartitionProfileHash: string;
+    readonly arithmeticCertificateHash: string;
+    readonly collectivePublicKeyRoot: string;
+    readonly bgvPublicKeyRoot: string;
+    readonly ciphertextRoot: string;
+    readonly ciphertextTransport: DirectEncryptedBallotCiphertextTransport;
+    readonly proofProfileHash: string;
+    readonly proofStatementHash: string;
+    readonly proofChunkManifest: DirectEncryptedBallotProofChunkManifest;
+    readonly proofFullBytesHash: string;
+    readonly proofChunkRoot: string;
+    readonly packageRoot: string;
+    readonly signature: DirectEncryptedBallotSignaturePlaceholder;
+};
+
+export type DirectEncryptedBallotProofChunk = {
+    readonly chunkIndex: number;
+    readonly byteLength: number;
+    readonly chunkHash: string;
+    readonly bytesHex: string;
+};
+
 export type DirectEncryptedBallotResult = {
     readonly operation: 'runDirectEncryptedBallot';
     readonly profile: {
@@ -107,6 +219,8 @@ export type DirectEncryptedBallotResult = {
         readonly proofCount: number;
         readonly rnsLimbCount: number;
         readonly responseEncoding: string;
+        readonly bgvCommitmentEncoding: string;
+        readonly projectedBgvRelationProjectionsPerLimbComponent: number;
         readonly responsePolynomialDegree: number;
         readonly sharedResponsePolynomialCount: number;
         readonly proofSizeBytes: number;
@@ -120,14 +234,19 @@ export type DirectEncryptedBallotResult = {
             readonly challengeBits: number;
             readonly nominalChallengeBits: number;
             readonly proofModelAccepted: boolean;
+            readonly projectedBgvRelationProjectionsPerLimbComponent: number;
+            readonly projectedBgvRelationCommitmentScalars: number;
+            readonly projectedBgvNoWrapCarryResponseScalars: number;
             readonly weakestCheckedRelation: string;
             readonly weakestRelationEffectiveBitsPerCheck: number;
             readonly supportRelationModulusBits: number;
+            readonly supportProjectionCountPerPartition: number;
             readonly classicalSoundnessBitsAfterSupportUnionBound:
                 | number
                 | null;
             readonly maskCoefficientBits: number;
             readonly responseCoefficientBytes: number;
+            readonly projectedBgvNoWrapCarryResponseBytes: number;
             readonly supportCheckCount: number;
             readonly supportMaximumDegree: number;
             readonly supportUnionLossBits: number;
@@ -152,9 +271,13 @@ export type DirectEncryptedBallotResult = {
             readonly transportedProofBytesHash: string;
             readonly firstProofChunkMerkleRoot: string;
             readonly firstProofChunkHashes: readonly string[];
-            readonly firstProofPublicTransportHash: string;
+            readonly firstProofChunkManifestRoot: string;
+            readonly firstProofChunkManifest: DirectEncryptedBallotProofChunkManifest;
+            readonly firstEncryptedBallotPackageRoot: string;
+            readonly firstEncryptedBallotPackage: DirectEncryptedBallotPackage;
             readonly firstProofStatementHash: string;
             readonly proofProfileHash: string;
+            readonly arithmeticCertificateHash: string;
         };
         readonly proofMaskRandomness: {
             readonly source:
@@ -177,6 +300,57 @@ export type DirectEncryptedBallotResult = {
         | string
         | DirectEncryptedBallotEvaluatorReplayResult
         | readonly DirectEncryptedBallotEvaluatorReplayResult[];
+};
+
+export type DirectEncryptedBallotPackageCreationResult = {
+    readonly operation: 'createDirectEncryptedBallotPackages';
+    readonly profile: DirectEncryptedBallotResult['profile'];
+    readonly ballotLayout: DirectEncryptedBallotResult['ballotLayout'];
+    readonly input: DirectEncryptedBallotResult['input'];
+    readonly encryptedBallots: DirectEncryptedBallotResult['encryptedBallots'];
+    readonly encryptedBallotPackages: readonly {
+        readonly ballotIndex: number;
+        readonly voterIdentity: string;
+        readonly voterRosterPosition: number;
+        readonly actionContextHash: string;
+        readonly encryptedBallotHash: string;
+        readonly ciphertextRoot: string;
+        readonly ciphertextCanonicalByteLength: number;
+        readonly statementHash: string;
+        readonly proofBytesHash: string;
+        readonly proofChunkManifestRoot: string;
+        readonly encryptedBallotPackageRoot: string;
+        readonly proofChunkManifest: DirectEncryptedBallotProofChunkManifest;
+        readonly proofChunks: readonly DirectEncryptedBallotProofChunk[];
+        readonly encryptedBallotPackage: DirectEncryptedBallotPackage;
+    }[];
+    readonly packageCreation: {
+        readonly setupHandoffRoot: string;
+        readonly setupBoundary: string;
+        readonly witnessBoundary: string;
+        readonly proofBytesRetention: string;
+        readonly claimBoundary: string;
+    };
+    readonly proofAttempt: DirectEncryptedBallotResult['proofAttempt'];
+    readonly decision: string;
+};
+
+export type DirectEncryptedBallotPackageVerificationResult = {
+    readonly operation: 'verifyDirectEncryptedBallotPackage';
+    readonly verificationStatus: string;
+    readonly acceptedSetupHandoffRoot: string;
+    readonly packageRoot: string;
+    readonly ciphertextRoot: string;
+    readonly proofStatementHash: string;
+    readonly verifiedStatementHash: string;
+    readonly proofBytesHash: string;
+    readonly proofChunkRoot: string;
+    readonly proofSizeBytes: number;
+    readonly proofChunkCount: number;
+    readonly relationCommitmentHash: string;
+    readonly challenge: string;
+    readonly signatureStatus: string;
+    readonly claimBoundary: string;
 };
 
 export const createDirectBallotSetupPackage = (
@@ -213,6 +387,643 @@ export const createDirectBallotSetupPackage = (
         setupSeed: directBallotSetupSeed,
     });
 
+function directBallotWitnessPartitionProfileHash(
+    kernel: TranscriptCoreKernel,
+    profile: ReturnType<TranscriptCoreKernel['describeBgvRnsProfile']>,
+): string {
+    return kernel.deriveProtocolHash({
+        namespace: 'DirectBallotWitnessPartitionProfileHash',
+        value: {
+            objectType: 'DirectBallotWitnessPartitionProfile',
+            objectVersion: 1,
+            statementId: 'BallotValidityStatement-v1',
+            proofProfileId: 'direct-encrypted-ballot-validity-relation-v1',
+            sourceRingDegree: profile.profile.polynomialDegree,
+            plaintextModulus: profile.profile.plaintextModulus,
+            dataPrimeCount: profile.profile.dataPrimes.length,
+            optionCount: 20,
+            scoreBucketCount: 10,
+            responseEncodingOrder: [
+                'randomizerPolynomial',
+                'firstErrorPolynomial',
+                'secondErrorPolynomial',
+                'encodingCarryPolynomial',
+                'scoreScalars',
+                'oneHotBucketScalarsByOption',
+                'projectedBgvNoWrapCarryScalars',
+            ],
+            privateWitnessPartitions: [
+                {
+                    partitionId: 'scoreScalars',
+                    valueKind: 'bounded integer scalar per option',
+                    scalarCount: 20,
+                    minimum: 1,
+                    maximum: 10,
+                    responseOrder: 4,
+                    maskDomain:
+                        'sealed-lattice/direct-encrypted-ballot/relation-mask-scalar-v1',
+                    maskVectorIndex: 4,
+                    packageRetention: 'not retained',
+                },
+                {
+                    partitionId: 'oneHotBucketScalarsByOption',
+                    valueKind:
+                        'one-hot score bucket scalar per option and bucket',
+                    rowCount: 20,
+                    columnCount: 10,
+                    entrySet: [0, 1],
+                    rowSum: 1,
+                    responseOrder: 5,
+                    maskDomain:
+                        'sealed-lattice/direct-encrypted-ballot/relation-mask-scalar-v1',
+                    firstMaskVectorIndex: 5,
+                    packageRetention: 'not retained',
+                },
+                {
+                    partitionId: 'encodedPlaintextPolynomial',
+                    valueKind: 'batch-encoded score polynomial',
+                    coefficientCount: profile.profile.polynomialDegree,
+                    source: 'Encode_p(score slots, reserved zero slots, batch encoder profile)',
+                    constraint:
+                        'linked to scoreScalars through encodingCarryPolynomial',
+                    responseOrder: 'derived, not separately encoded',
+                    packageRetention: 'not retained',
+                },
+                {
+                    partitionId: 'randomizerPolynomial',
+                    valueKind: 'signed integer polynomial',
+                    coefficientCount: profile.profile.polynomialDegree,
+                    support: 'ternary {-1,0,1}',
+                    responseOrder: 0,
+                    maskDomain:
+                        'sealed-lattice/direct-encrypted-ballot/relation-mask-v1',
+                    maskVectorIndex: 0,
+                    packageRetention: 'not retained',
+                },
+                {
+                    partitionId: 'firstErrorPolynomial',
+                    valueKind: 'signed integer polynomial',
+                    coefficientCount: profile.profile.polynomialDegree,
+                    support: 'centered binomial eta-2 range [-2,2]',
+                    responseOrder: 1,
+                    maskDomain:
+                        'sealed-lattice/direct-encrypted-ballot/relation-mask-v1',
+                    maskVectorIndex: 1,
+                    packageRetention: 'not retained',
+                },
+                {
+                    partitionId: 'secondErrorPolynomial',
+                    valueKind: 'signed integer polynomial',
+                    coefficientCount: profile.profile.polynomialDegree,
+                    support: 'centered binomial eta-2 range [-2,2]',
+                    responseOrder: 2,
+                    maskDomain:
+                        'sealed-lattice/direct-encrypted-ballot/relation-mask-v1',
+                    maskVectorIndex: 2,
+                    packageRetention: 'not retained',
+                },
+                {
+                    partitionId: 'encodingCarryPolynomial',
+                    valueKind: 'signed integer polynomial',
+                    coefficientCount: profile.profile.polynomialDegree,
+                    relation:
+                        'raw encoder linear combination minus encoded plaintext, divided by plaintext modulus',
+                    responseOrder: 3,
+                    maskDomain:
+                        'sealed-lattice/direct-encrypted-ballot/relation-mask-v1',
+                    maskVectorIndex: 3,
+                    packageRetention: 'not retained',
+                },
+                {
+                    partitionId: 'projectedBgvNoWrapCarryScalars',
+                    valueKind:
+                        'signed integer carry scalar per statement-derived projected BGV row',
+                    scalarCount: profile.profile.dataPrimes.length * 2 * 3,
+                    responseOrder: 6,
+                    responseCoefficientBytes: 64,
+                    relation:
+                        'integer lift of each projected BGV encryption row, with the existing projected residue commitment used as the no-wrap remainder',
+                    currentInternalProofEncoding:
+                        'encoded in the binary response after one-hot bucket scalars',
+                    packageRetention: 'not retained',
+                },
+            ],
+            privateMaterialPolicy: {
+                packageRetention:
+                    'scores, one-hot rows, encoded plaintext, encryption randomness, errors, carries, and masks are not retained in public packages',
+                publicVerificationInputs:
+                    'accepted setup handoff, accepted public-key material, package fields, canonical ciphertext bytes, statement hash, and public proof chunks',
+            },
+        },
+    });
+}
+
+const directBallotRelationProofProfileHash = (
+    kernel: TranscriptCoreKernel,
+): string => {
+    const profile = kernel.describeBgvRnsProfile();
+    const witnessPartitionProfileHash = directBallotWitnessPartitionProfileHash(
+        kernel,
+        profile,
+    );
+    const arithmeticCertificateHash =
+        profile.directBallotArithmeticCertificateHash;
+
+    return kernel.deriveProtocolHash({
+        namespace: 'BallotValidityProofProfileHash',
+        value: {
+            profileId: 'direct-encrypted-ballot-validity-relation-v1',
+            statementVersion: 3,
+            witnessPartitionProfileHash,
+            arithmeticCertificateHash,
+            proofEncoding: 'binary relation transcript',
+            challengeBits: 192,
+            challengeDomain:
+                'sealed-lattice/direct-encrypted-ballot/relation-challenge-v1',
+            proofBytesDomain:
+                'sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1',
+            projectedBgvRelationProjectionsPerLimbComponent: 3,
+            proofModelStatus:
+                'internal relation proof with appended committed trace proof; claim soundness and zero-knowledge accounting are not accepted',
+            relation:
+                'statement-derived projected BGV all-limb encryption rows with projected no-wrap carry scalars, score encoding, one-hot constraints, random-projected support checks, and a salted masked committed trace proof for support rows, encoder carry bit/slack range, score rows, projected BGV field rows, and cross-prime no-wrap carry linkage',
+            sourceRingDegree: profile.profile.polynomialDegree,
+            dataPrimeCount: profile.profile.dataPrimes.length,
+        },
+    });
+};
+
+const directBallotSetupHandoffTestHash = (
+    _kernel: TranscriptCoreKernel,
+    label: string,
+): string =>
+    hash512Hex(
+        'sealed-lattice/direct-encrypted-ballot/setup-handoff-test-root-v1',
+        [textEncoder.encode(directBallotSetupSeed), textEncoder.encode(label)],
+    );
+
+const directBallotCreationPolicy = (
+    kernel: TranscriptCoreKernel,
+): BgvAcceptedSetupHandoff['directBallotEncryptionHandoff']['supportedBallotCreationPolicy'] => {
+    const profile = kernel.describeBgvRnsProfile();
+    const witnessPartitionProfileHash = directBallotWitnessPartitionProfileHash(
+        kernel,
+        profile,
+    );
+    const arithmeticCertificateHash =
+        profile.directBallotArithmeticCertificateHash;
+
+    return {
+        objectType: 'DirectEncryptedBallotCreationPolicy',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        acceptedPackageObjectType: 'EncryptedBallotPackage',
+        validityStatementId: 'BallotValidityStatement-v1',
+        proofProfileHash: directBallotRelationProofProfileHash(kernel),
+        bgvProfileHash: profile.profileHash,
+        canonicalCiphertextConventionHash:
+            profile.canonicalCiphertextConventionHash,
+        batchEncoderHash: profile.batchEncoderHash,
+        batchLayoutBindingHash: profile.batchLayoutBindingHash,
+        ballotScoreEncodingProfileHash: profile.ballotScoreEncodingProfileHash,
+        encryptedBallotLayoutHash: profile.encryptedBallotLayoutHash,
+        directBallotReservedSlotRuleHash:
+            profile.directBallotReservedSlotRuleHash,
+        directBallotEncoderMatrixRoot: profile.directBallotEncoderMatrixRoot,
+        witnessPartitionProfileHash,
+        arithmeticCertificateHash,
+        optionCount: 20,
+        scoreDomain: {
+            minimum: 1,
+            maximum: 10,
+            bucketCount: 10,
+            unsetUiValue: 1,
+        },
+        reservedSlotRule: profile.directBallotReservedSlotRule,
+        plaintextModulus: 65537,
+        randomnessBoundary:
+            'platform CSPRNG material is required; caller-supplied seeds, fixture-labelled randomness, overlapping randomness, and reused randomness are refused',
+        creatorReturnPolicy:
+            'accepted ballot creation returns public package data, proof chunks, public roots, timing, memory, and proof-size reports only',
+        forbiddenPackageFields: [
+            'scoreHash',
+            'plaintextScores',
+            'scoreCommitment',
+            'encryptionRandomness',
+            'proofWitness',
+            'proofRandomnessSeed',
+            'fixtureSeed',
+            'oracleResult',
+            'developmentPlaintext',
+        ],
+    };
+};
+
+type PassivePublicKeyCoefficientTable = {
+    readonly modulus: number;
+    readonly componentZeroCoefficientsLeHex: string;
+    readonly coefficientByteLength: number;
+};
+
+type DirectBallotAcceptedPublicKeyMaterialWithoutHandoffRoot = Omit<
+    DirectBallotAcceptedPublicKeyMaterial,
+    'acceptedSetupHandoffRoot'
+>;
+
+const isJsonRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isPassivePublicKeyCoefficientTable = (
+    value: unknown,
+): value is PassivePublicKeyCoefficientTable =>
+    isJsonRecord(value) &&
+    Number.isSafeInteger(value.modulus) &&
+    typeof value.componentZeroCoefficientsLeHex === 'string' &&
+    Number.isSafeInteger(value.coefficientByteLength);
+
+const passivePublicKeyCoefficientTables = (
+    setupPublicMaterial: BgvPassiveSetupPackage,
+): readonly PassivePublicKeyCoefficientTable[] => {
+    const coefficientMaterial =
+        setupPublicMaterial.collectivePublicKey.coefficientMaterial;
+    if (!isJsonRecord(coefficientMaterial)) {
+        throw new Error('passive setup public key coefficient tables missing.');
+    }
+    const coefficientTables = coefficientMaterial.coefficientTables;
+    if (
+        !Array.isArray(coefficientTables) ||
+        !coefficientTables.every(isPassivePublicKeyCoefficientTable)
+    ) {
+        throw new Error('passive setup public key coefficient tables missing.');
+    }
+
+    return coefficientTables;
+};
+
+const acceptedDirectBallotBgvPublicKeyRoot = (
+    kernel: TranscriptCoreKernel,
+    acceptedPublicKeyMaterial: Pick<
+        DirectBallotAcceptedPublicKeyMaterial,
+        'commonRandomness' | 'collectivePublicKey'
+    >,
+): string => {
+    const profile = kernel.describeBgvRnsProfile();
+
+    return kernel.deriveProtocolHash({
+        namespace: 'BGVPublicKeyRoot',
+        value: {
+            objectType: 'AcceptedBgvPublicKeyRootBinding',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            bgvProfileHash: profile.profileHash,
+            collectivePublicKeyRoot:
+                acceptedPublicKeyMaterial.collectivePublicKey
+                    .collectivePublicKeyRoot,
+            publicMatrixSeedHash:
+                acceptedPublicKeyMaterial.commonRandomness.publicMatrixSeedHash,
+            publicAPolynomialRoot:
+                acceptedPublicKeyMaterial.collectivePublicKey
+                    .publicAPolynomialRoot,
+            publicKeyShareMaterialSetRoot:
+                acceptedPublicKeyMaterial.collectivePublicKey
+                    .publicKeyShareMaterialSetRoot,
+            publicKeyShareSuccinctProofSetRoot:
+                acceptedPublicKeyMaterial.collectivePublicKey
+                    .publicKeyShareSuccinctProofSetRoot,
+            aggregateCoefficientVectorHashesByLimb:
+                acceptedPublicKeyMaterial.collectivePublicKey.aggregateCoefficientVectorsByLimb.map(
+                    (aggregateLimb) => ({
+                        rnsLimbIndex: aggregateLimb.rnsLimbIndex,
+                        rnsPrime: aggregateLimb.rnsPrime,
+                        component: aggregateLimb.component,
+                        coefficientByteLength:
+                            aggregateLimb.coefficientByteLength,
+                        coefficientVectorHash512:
+                            aggregateLimb.coefficientVectorHash512,
+                    }),
+                ),
+        },
+    });
+};
+
+const acceptedSetupHandoffForAcceptedPublicKeyMaterial = (
+    kernel: TranscriptCoreKernel,
+    acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterialWithoutHandoffRoot,
+): BgvAcceptedSetupHandoff => {
+    const profile = kernel.describeBgvRnsProfile();
+    const supportedBallotCreationPolicy = directBallotCreationPolicy(kernel);
+    const witnessPartitionProfileHash = directBallotWitnessPartitionProfileHash(
+        kernel,
+        profile,
+    );
+    const supportedBallotCreationPolicyHash = kernel.deriveProtocolHash({
+        namespace: 'DirectEncryptedBallotCreationPolicyHash',
+        value: supportedBallotCreationPolicy,
+    });
+    const handoffWithoutRoot = {
+        objectType: 'CollectiveBgvAcceptedSetupHandoff',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        ceremonyId: acceptedPublicKeyMaterial.ceremonyId,
+        manifestHash: acceptedPublicKeyMaterial.manifestHash,
+        rosterHash: acceptedPublicKeyMaterial.rosterHash,
+        thresholdProfileHash: acceptedPublicKeyMaterial.thresholdProfileHash,
+        setupProfileHash: acceptedPublicKeyMaterial.setupProfileHash,
+        qShareHash: acceptedPublicKeyMaterial.qShareHash,
+        commitmentProfileHash: acceptedPublicKeyMaterial.commitmentProfileHash,
+        setupEpoch: acceptedPublicKeyMaterial.setupEpoch,
+        setupPackageHash: acceptedPublicKeyMaterial.setupPackageHash,
+        directBallotEncryptionHandoff: {
+            status: 'accepted-collective-public-key-root-bound-for-direct-ballot-encryption',
+            collectivePublicKeyRoot:
+                acceptedPublicKeyMaterial.collectivePublicKeyRoot,
+            bgvPublicKeyRoot: acceptedPublicKeyMaterial.bgvPublicKeyRoot,
+            bgvProfileHash: profile.profileHash,
+            canonicalCiphertextConventionHash:
+                profile.canonicalCiphertextConventionHash,
+            batchEncoderHash: profile.batchEncoderHash,
+            batchLayoutBindingHash: profile.batchLayoutBindingHash,
+            ballotScoreEncodingProfileHash:
+                profile.ballotScoreEncodingProfileHash,
+            encryptedBallotLayoutHash: profile.encryptedBallotLayoutHash,
+            directBallotReservedSlotRuleHash:
+                acceptedPublicKeyMaterial.directBallotReservedSlotRuleHash,
+            directBallotEncoderMatrixRoot:
+                acceptedPublicKeyMaterial.directBallotEncoderMatrixRoot,
+            witnessPartitionProfileHash,
+            arithmeticCertificateHash:
+                profile.directBallotArithmeticCertificateHash,
+            ballotValidityProofProfileHash:
+                directBallotRelationProofProfileHash(kernel),
+            publicKeyShareMaterialSetRoot:
+                acceptedPublicKeyMaterial.publicKeyShareMaterialSetRoot,
+            publicKeyShareSuccinctProofSetRoot:
+                acceptedPublicKeyMaterial.publicKeyShareSuccinctProofSetRoot,
+            acceptedPublicKeyMaterial: {
+                materialSource:
+                    'accepted public-key share material with accepted public-key share proofs',
+                collectivePublicKeyRoot:
+                    acceptedPublicKeyMaterial.collectivePublicKeyRoot,
+                bgvPublicKeyRoot: acceptedPublicKeyMaterial.bgvPublicKeyRoot,
+                publicKeyShareMaterialSetRoot:
+                    acceptedPublicKeyMaterial.publicKeyShareMaterialSetRoot,
+                publicKeyShareSuccinctProofSetRoot:
+                    acceptedPublicKeyMaterial.publicKeyShareSuccinctProofSetRoot,
+            },
+            supportedBallotCreationPolicy,
+            supportedBallotCreationPolicyHash,
+        },
+        publicAggregationHandoff: {
+            status: 'accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root',
+            thresholdShareCommitmentRoot: directBallotSetupHandoffTestHash(
+                kernel,
+                'threshold share commitment root',
+            ),
+        },
+        boundedEvaluatorReplayHandoff: {
+            status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule',
+            evaluatorKeyScheduleRoot: directBallotSetupHandoffTestHash(
+                kernel,
+                'evaluator key schedule root',
+            ),
+            relinearizationKeyShareRoundsRoot: directBallotSetupHandoffTestHash(
+                kernel,
+                'relinearization key share rounds root',
+            ),
+            trusteeEvaluationKeyProofSetRoot: directBallotSetupHandoffTestHash(
+                kernel,
+                'trustee evaluation key proof set root',
+            ),
+            evaluationKeySetHash: directBallotSetupHandoffTestHash(
+                kernel,
+                'evaluation key set hash',
+            ),
+        },
+        futureTargetDecryptionHandoff: {
+            status: 'target decryption remains downstream',
+            targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
+            claimBoundary:
+                'target decryption remains downstream and any target-decryption readiness claim is refused until Q_target, smudging, C1-C4, and decryption-share proof closure exist',
+        },
+        certificateRoots: {
+            setupCommitmentSecurityCertificateHash:
+                directBallotSetupHandoffTestHash(
+                    kernel,
+                    'setup commitment security certificate hash',
+                ),
+            setupTransportCertificateHash: directBallotSetupHandoffTestHash(
+                kernel,
+                'setup transport certificate hash',
+            ),
+            setupProofAccountingCertificateHash:
+                directBallotSetupHandoffTestHash(
+                    kernel,
+                    'setup proof accounting certificate hash',
+                ),
+            setupKeyCorrectnessCertificateHash:
+                directBallotSetupHandoffTestHash(
+                    kernel,
+                    'setup key correctness certificate hash',
+                ),
+            activeStaticSetupTheoremCertificateHash:
+                directBallotSetupHandoffTestHash(
+                    kernel,
+                    'active static setup theorem certificate hash',
+                ),
+            heSecurityCertificateHash: directBallotSetupHandoffTestHash(
+                kernel,
+                'HE security certificate hash',
+            ),
+        },
+    } satisfies Omit<BgvAcceptedSetupHandoff, 'acceptedSetupHandoffRoot'>;
+
+    return {
+        ...handoffWithoutRoot,
+        acceptedSetupHandoffRoot: kernel.deriveProtocolHash({
+            namespace: 'AcceptedSetupHandoffRoot',
+            value: handoffWithoutRoot,
+        }),
+    };
+};
+
+export const acceptedDirectBallotPublicMaterialForSetupPublicMaterial = (
+    kernel: TranscriptCoreKernel,
+    setupPublicMaterial: BgvPassiveSetupPackage,
+): {
+    readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+    readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+} => {
+    const profile = kernel.describeBgvRnsProfile();
+    const publicMatrixSeedHash = directBallotSetupHandoffTestHash(
+        kernel,
+        'accepted public matrix seed hash',
+    );
+    const publicDerivations = kernel.deriveCollectiveBgvSetupPublicDerivations({
+        publicMatrixSeedHash,
+    });
+    const publicKeyShareMaterialSetRoot = directBallotSetupHandoffTestHash(
+        kernel,
+        'public key share material set root',
+    );
+    const publicKeyShareSuccinctProofSetRoot = directBallotSetupHandoffTestHash(
+        kernel,
+        'public key share succinct proof set root',
+    );
+    const ballotValidityProofProfileHash =
+        directBallotRelationProofProfileHash(kernel);
+    const aggregateCoefficientVectorsByLimb = passivePublicKeyCoefficientTables(
+        setupPublicMaterial,
+    ).map((coefficientTable, rnsLimbIndex) => {
+        if (
+            coefficientTable.modulus !==
+            profile.profile.dataPrimes[rnsLimbIndex]
+        ) {
+            throw new Error(
+                'passive setup public key coefficient table order mismatch.',
+            );
+        }
+        const coefficientBytes = hexToBytes(
+            coefficientTable.componentZeroCoefficientsLeHex,
+        );
+
+        return {
+            rnsLimbIndex,
+            rnsPrime: coefficientTable.modulus,
+            component: 'b' as const,
+            coefficientByteLength: coefficientTable.coefficientByteLength,
+            coefficientVectorHash512: hash512Hex(
+                publicKeyShareCoefficientVectorHashDomain,
+                [coefficientBytes],
+            ),
+            coefficientsLeHex: coefficientTable.componentZeroCoefficientsLeHex,
+        };
+    });
+    const collectivePublicKeyWithoutRoot = {
+        objectType: 'CollectivePublicKey' as const,
+        objectVersion: 1 as const,
+        setupProfileId: 'CollectiveBgvSetup-v1' as const,
+        setupProofProfileId: 'SealedLattice-SetupProof-v1',
+        proofFamily: 'public-key-share',
+        proofVerificationStatus:
+            'succinct-public-key-share-argument-verified-with-accepted-proof-accounting',
+        proofModelStatus:
+            'succinct-public-key-share-argument-accounting-accepted',
+        aggregationStatus:
+            'succinct-proof-aggregated-with-accepted-setup-proof-accounting',
+        materialEncoding: 'embedded-full-collective-public-key-coefficients',
+        ceremonyId: setupPublicMaterial.setupInputs.ceremonyId,
+        manifestHash: setupPublicMaterial.setupInputs.manifestHash,
+        rosterHash: setupPublicMaterial.setupInputs.rosterHash,
+        setupProfileHash: profile.profileHash,
+        qShareHash: directBallotSetupHandoffTestHash(kernel, 'q share hash'),
+        carryAwareVssShareRelationProfileHash: directBallotSetupHandoffTestHash(
+            kernel,
+            'carry-aware VSS share relation profile hash',
+        ),
+        commitmentProfileHash: directBallotSetupHandoffTestHash(
+            kernel,
+            'commitment profile hash',
+        ),
+        setupEpoch: 'direct-ballot-test-setup-epoch',
+        participantCount: 10,
+        rnsLimbCount: profile.profile.dataPrimes.length,
+        ringDegree: profile.profile.polynomialDegree,
+        publicMatrixSeedHash,
+        publicKeyCrpRoot: publicDerivations.crpRoots.publicKeyCrpRoot,
+        publicAPolynomialRoot:
+            publicDerivations.bgvPublicA.publicPolynomialRoot,
+        sameSecretConsistencyRoot: directBallotSetupHandoffTestHash(
+            kernel,
+            'same secret consistency root',
+        ),
+        sameSecretProofSetRoot: directBallotSetupHandoffTestHash(
+            kernel,
+            'same secret proof set root',
+        ),
+        sameSecretProofFamilyBindingRoot: directBallotSetupHandoffTestHash(
+            kernel,
+            'same secret proof family binding root',
+        ),
+        publicKeyShareSetRoot: directBallotSetupHandoffTestHash(
+            kernel,
+            'public key share set root',
+        ),
+        publicKeyShareProofSetRoot: directBallotSetupHandoffTestHash(
+            kernel,
+            'public key share proof set root',
+        ),
+        publicKeyShareMaterialSetRoot,
+        publicKeyShareSuccinctProofSetRoot,
+        sourceShareMaterialRoots: [],
+        aggregateCoefficientVectorsByLimb,
+    };
+    const collectivePublicKey = {
+        ...collectivePublicKeyWithoutRoot,
+        collectivePublicKeyRoot: kernel.deriveProtocolHash({
+            namespace: 'CollectivePublicKeyRoot',
+            value: collectivePublicKeyWithoutRoot,
+        }),
+    };
+    const acceptedPublicKeyMaterialWithoutBgvRoot = {
+        objectType: 'DirectBallotAcceptedPublicKeyMaterial' as const,
+        objectVersion: 1 as const,
+        setupProfileId: 'CollectiveBgvSetup-v1' as const,
+        ceremonyId: setupPublicMaterial.setupInputs.ceremonyId,
+        manifestHash: setupPublicMaterial.setupInputs.manifestHash,
+        rosterHash: setupPublicMaterial.setupInputs.rosterHash,
+        thresholdProfileHash:
+            setupPublicMaterial.setupInputs.thresholdProfileHash,
+        setupProfileHash: profile.profileHash,
+        qShareHash: directBallotSetupHandoffTestHash(kernel, 'q share hash'),
+        commitmentProfileHash: directBallotSetupHandoffTestHash(
+            kernel,
+            'commitment profile hash',
+        ),
+        setupEpoch: 'direct-ballot-test-setup-epoch',
+        setupPackageHash: setupPublicMaterial.setupPackageHash,
+        bgvProfileHash: profile.profileHash,
+        batchEncoderHash: profile.batchEncoderHash,
+        batchLayoutBindingHash: profile.batchLayoutBindingHash,
+        ballotScoreEncodingProfileHash: profile.ballotScoreEncodingProfileHash,
+        encryptedBallotLayoutHash: profile.encryptedBallotLayoutHash,
+        directBallotReservedSlotRuleHash:
+            profile.directBallotReservedSlotRuleHash,
+        directBallotEncoderMatrixRoot: profile.directBallotEncoderMatrixRoot,
+        arithmeticCertificateHash:
+            profile.directBallotArithmeticCertificateHash,
+        ballotValidityProofProfileHash,
+        collectivePublicKeyRoot: collectivePublicKey.collectivePublicKeyRoot,
+        publicKeyShareMaterialSetRoot,
+        publicKeyShareSuccinctProofSetRoot,
+        commonRandomness: {
+            publicMatrixSeedHash,
+            publicDerivations,
+        },
+        collectivePublicKey,
+    };
+    const acceptedPublicKeyMaterialWithoutHandoffRoot = {
+        ...acceptedPublicKeyMaterialWithoutBgvRoot,
+        bgvPublicKeyRoot: acceptedDirectBallotBgvPublicKeyRoot(
+            kernel,
+            acceptedPublicKeyMaterialWithoutBgvRoot,
+        ),
+    } satisfies DirectBallotAcceptedPublicKeyMaterialWithoutHandoffRoot;
+    const acceptedSetupHandoff =
+        acceptedSetupHandoffForAcceptedPublicKeyMaterial(
+            kernel,
+            acceptedPublicKeyMaterialWithoutHandoffRoot,
+        );
+
+    return {
+        acceptedPublicKeyMaterial: {
+            ...acceptedPublicKeyMaterialWithoutHandoffRoot,
+            acceptedSetupHandoffRoot:
+                acceptedSetupHandoff.acceptedSetupHandoffRoot,
+        },
+        acceptedSetupHandoff,
+    };
+};
+
 export const directBallotActionContextHash = (): string =>
     deriveProtocolHash('ActionContextHash', {
         action: 'direct encrypted ballot node wasm smoke',
@@ -220,7 +1031,10 @@ export const directBallotActionContextHash = (): string =>
 
 export type DirectEncryptedBallotInput = {
     readonly voterIdentity: string;
+    readonly voterRosterPosition: number;
     readonly actionContextHash: string;
+    readonly recoveryEpoch: number;
+    readonly deviceEpoch: number;
     readonly scores: readonly number[];
 };
 
@@ -245,10 +1059,13 @@ export const createDirectBallotInputs = (
         { length: ballotCount },
         (_unusedBallot, ballotIndex) => ({
             voterIdentity: `voter-node-wasm-${String(ballotIndex + 1).padStart(2, '0')}`,
+            voterRosterPosition: ballotIndex,
             actionContextHash: deriveProtocolHash('ActionContextHash', {
                 action: 'direct encrypted ballot node wasm smoke',
                 ballotIndex,
             }),
+            recoveryEpoch: 0,
+            deviceEpoch: 0,
             scores: directBallotScores.map((_unusedScore, optionIndex) => {
                 const score = ((optionIndex + ballotIndex) % 10) + 1;
 
@@ -261,7 +1078,10 @@ export const createDirectBallotInputs = (
 const defaultDirectBallotInputs = (): readonly DirectEncryptedBallotInput[] => [
     {
         voterIdentity: 'voter-node-wasm-1',
+        voterRosterPosition: 0,
         actionContextHash: directBallotActionContextHash(),
+        recoveryEpoch: 0,
+        deviceEpoch: 0,
         scores: directBallotScores,
     },
 ];
@@ -459,3 +1279,49 @@ export const runDirectEncryptedBallot = (input: {
         ballots,
     });
 };
+
+export const createDirectEncryptedBallotPackages = (input: {
+    readonly ballots?: readonly DirectEncryptedBallotInput[];
+    readonly ballotEncryptionSeedHexes?: readonly string[];
+    readonly ballotProofRandomnessHexes?: readonly string[];
+    readonly developmentRandomnessOverrideAcknowledged?: boolean;
+    readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+    readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+}): Promise<DirectEncryptedBallotPackageCreationResult> => {
+    const ballots = input.ballots ?? defaultDirectBallotInputs();
+
+    return runInternalKernelCommand<DirectEncryptedBallotPackageCreationResult>(
+        {
+            command: 'CreateDirectEncryptedBallotPackages',
+            acceptedPublicKeyMaterial: input.acceptedPublicKeyMaterial,
+            acceptedSetupHandoff: input.acceptedSetupHandoff,
+            ballotEncryptionRandomness: createBallotEncryptionRandomness({
+                ballotCount: ballots.length,
+                ballotEncryptionSeedHexes: input.ballotEncryptionSeedHexes,
+                developmentRandomnessOverrideAcknowledged:
+                    input.developmentRandomnessOverrideAcknowledged,
+            }),
+            proofMaskRandomness: createProofMaskRandomness({
+                ballotCount: ballots.length,
+                ballotProofRandomnessHexes: input.ballotProofRandomnessHexes,
+                developmentRandomnessOverrideAcknowledged:
+                    input.developmentRandomnessOverrideAcknowledged,
+            }),
+            ballots,
+        },
+    );
+};
+
+export const verifyDirectEncryptedBallotPackage = (input: {
+    readonly encryptedBallotPackage: DirectEncryptedBallotPackage;
+    readonly proofChunks: readonly DirectEncryptedBallotProofChunk[];
+    readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+    readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+}): Promise<DirectEncryptedBallotPackageVerificationResult> =>
+    runInternalKernelCommand<DirectEncryptedBallotPackageVerificationResult>({
+        command: 'VerifyDirectEncryptedBallotPackage',
+        acceptedPublicKeyMaterial: input.acceptedPublicKeyMaterial,
+        acceptedSetupHandoff: input.acceptedSetupHandoff,
+        encryptedBallotPackage: input.encryptedBallotPackage,
+        proofChunks: input.proofChunks,
+    });

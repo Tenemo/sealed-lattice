@@ -29,7 +29,7 @@ const fn field_residue_byte_width() -> usize {
         index += 1;
     }
     let residue_bits = u64::BITS - (max_modulus - 1).leading_zeros();
-    ((residue_bits + 7) / 8) as usize
+    residue_bits.div_ceil(8) as usize
 }
 pub(super) const FIELD_RESIDUE_BYTE_WIDTH: usize = field_residue_byte_width();
 

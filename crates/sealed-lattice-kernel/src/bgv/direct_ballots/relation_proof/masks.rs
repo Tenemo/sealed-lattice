@@ -2,37 +2,38 @@ use super::*;
 
 pub(super) fn sample_direct_ballot_relation_mask_vector(
     statement_hash: &[u8; 64],
-    ciphertext_root: &str,
+    public_key: &BgvPublicKey,
+    ballot: &DirectEncryptedBallot,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<DirectBallotWitnessVector> {
-    Ok(DirectBallotWitnessVector {
+    let mut mask_vector = DirectBallotWitnessVector {
         randomizer_coefficients: sample_direct_ballot_relation_mask_polynomial(
             statement_hash,
-            ciphertext_root,
+            &ballot.ciphertext_root,
             proof_randomness_seed_hex,
             0,
         )?,
         error_zero_coefficients: sample_direct_ballot_relation_mask_polynomial(
             statement_hash,
-            ciphertext_root,
+            &ballot.ciphertext_root,
             proof_randomness_seed_hex,
             1,
         )?,
         error_one_coefficients: sample_direct_ballot_relation_mask_polynomial(
             statement_hash,
-            ciphertext_root,
+            &ballot.ciphertext_root,
             proof_randomness_seed_hex,
             2,
         )?,
         encoding_carry_coefficients: sample_direct_ballot_relation_mask_polynomial(
             statement_hash,
-            ciphertext_root,
+            &ballot.ciphertext_root,
             proof_randomness_seed_hex,
             3,
         )?,
         score_coefficients: sample_direct_ballot_relation_mask_scalars(
             statement_hash,
-            ciphertext_root,
+            &ballot.ciphertext_root,
             proof_randomness_seed_hex,
             4,
             DIRECT_BALLOT_OPTION_COUNT,
@@ -41,14 +42,23 @@ pub(super) fn sample_direct_ballot_relation_mask_vector(
             .map(|option_index| {
                 sample_direct_ballot_relation_mask_scalars(
                     statement_hash,
-                    ciphertext_root,
+                    &ballot.ciphertext_root,
                     proof_randomness_seed_hex,
                     5 + option_index,
                     DIRECT_BALLOT_SCORE_BUCKET_COUNT,
                 )
             })
             .collect::<CanonicalResult<Vec<_>>>()?,
-    })
+        bgv_no_wrap_carry_scalars: Vec::new(),
+    };
+    mask_vector.bgv_no_wrap_carry_scalars = direct_ballot_projected_bgv_mask_no_wrap_carry_scalars(
+        statement_hash,
+        public_key,
+        ballot,
+        &mask_vector,
+    )?;
+
+    Ok(mask_vector)
 }
 
 pub(super) fn sample_direct_ballot_relation_mask_scalars(

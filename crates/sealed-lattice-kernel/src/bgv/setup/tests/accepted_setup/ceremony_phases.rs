@@ -9,6 +9,13 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     assert_eq!(profile["setupProfileId"], "CollectiveBgvSetup-v1");
     assert_eq!(profile["objectType"], "SetupPackage");
     assert_eq!(profile["participantCount"], 10);
+    assert_eq!(
+        profile["thresholdProfile"]["objectType"],
+        "CollectiveBgvSetupThresholdProfile"
+    );
+    assert_eq!(profile["thresholdProfile"]["ballotReleaseQuorum"], 10);
+    assert_eq!(profile["thresholdProfile"]["decryptionThreshold"], 4);
+    assert!(profile["thresholdProfileHash"].as_str().is_some());
     assert_eq!(profile["qSetupComplete"], 10);
     assert_eq!(profile["qBallotRelease"], 10);
     assert_eq!(profile["qFinal"], 10);

@@ -52,6 +52,13 @@ pub(super) fn direct_ballot_relation_response_vector(
                 )
             })
             .collect::<CanonicalResult<Vec<_>>>()?,
+        bgv_no_wrap_carry_scalars: response_polynomial_with_width(
+            &mask_vector.bgv_no_wrap_carry_scalars,
+            &witness_vector.bgv_no_wrap_carry_scalars,
+            challenge,
+            "direct ballot projected BGV no-wrap carry response",
+            DIRECT_BALLOT_PROJECTED_BGV_NO_WRAP_CARRY_RESPONSE_BYTES,
+        )?,
     })
 }
 
@@ -60,6 +67,22 @@ pub(super) fn response_polynomial(
     witness_polynomial: &[BigInt],
     challenge: &BigInt,
     label: &str,
+) -> CanonicalResult<Vec<BigInt>> {
+    response_polynomial_with_width(
+        mask_polynomial,
+        witness_polynomial,
+        challenge,
+        label,
+        DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES,
+    )
+}
+
+pub(super) fn response_polynomial_with_width(
+    mask_polynomial: &[BigInt],
+    witness_polynomial: &[BigInt],
+    challenge: &BigInt,
+    label: &str,
+    byte_width: usize,
 ) -> CanonicalResult<Vec<BigInt>> {
     if mask_polynomial.len() != witness_polynomial.len() {
         return Err(invalid_direct_ballot_relation_proof(format!(
@@ -76,7 +99,7 @@ pub(super) fn response_polynomial(
         .zip(witness_polynomial.iter())
         .map(|(mask_coefficient, witness_coefficient)| {
             let response = mask_coefficient + challenge * witness_coefficient;
-            validate_signed_bigint_fixed_width(&response, label)?;
+            validate_signed_bigint_fixed_width(&response, byte_width, label)?;
             Ok(response)
         })
         .collect()

@@ -9,6 +9,7 @@ mod encoding;
 pub(crate) mod evaluator;
 mod modular_arithmetic;
 mod ntt;
+mod polynomial_iop;
 mod rns;
 mod serialization;
 mod setup;

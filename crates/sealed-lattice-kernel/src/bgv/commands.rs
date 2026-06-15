@@ -3,6 +3,11 @@ use serde_json::{Value, json};
 use crate::{
     bgv::{
         base_conversion::convert_plaintext_lifted_basis,
+        direct_ballots::{
+            direct_ballot_arithmetic_certificate_hash, direct_ballot_arithmetic_certificate_value,
+            direct_ballot_encoder_matrix_root, direct_ballot_encoder_matrix_value,
+            direct_ballot_reserved_slot_rule_hash, direct_ballot_reserved_slot_rule_value,
+        },
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         profile::{
             BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_hash,
@@ -61,6 +66,12 @@ pub(crate) fn describe_bgv_rns_profile() -> CanonicalResult<Value> {
         "batchLayoutBindingHash": batch_layout_binding_hash()?,
         "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
         "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
+        "directBallotReservedSlotRule": direct_ballot_reserved_slot_rule_value()?,
+        "directBallotReservedSlotRuleHash": direct_ballot_reserved_slot_rule_hash()?,
+        "directBallotEncoderMatrix": direct_ballot_encoder_matrix_value()?,
+        "directBallotEncoderMatrixRoot": direct_ballot_encoder_matrix_root()?,
+        "directBallotArithmeticCertificate": direct_ballot_arithmetic_certificate_value()?,
+        "directBallotArithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?,
         "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
         "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
         "directComparisonProfileHash": direct_comparison_profile_hash()?,

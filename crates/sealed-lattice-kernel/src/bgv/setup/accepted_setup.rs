@@ -85,9 +85,9 @@ use self::private_vss_envelopes::{
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 use self::public_key_share_material::{
-    PublicKeyShareMaterialBinding, public_key_share_material_uses_transport,
-    verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
-    verify_public_key_share_material_set,
+    PublicKeyShareMaterialBinding, accepted_setup_collective_public_key_from_material,
+    public_key_share_material_uses_transport, verify_collective_public_key_material,
+    verify_collective_public_key_pair_consistency, verify_public_key_share_material_set,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_material_root;
@@ -172,6 +172,13 @@ use super::{
     },
 };
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
+use crate::bgv::direct_ballots::{
+    DIRECT_BALLOT_MAXIMUM_SCORE, DIRECT_BALLOT_MINIMUM_SCORE, DIRECT_BALLOT_OPTION_COUNT,
+    DIRECT_BALLOT_SCORE_BUCKET_COUNT, direct_ballot_arithmetic_certificate_hash,
+    direct_ballot_encoder_matrix_root, direct_ballot_relation_proof_profile_hash,
+    direct_ballot_reserved_slot_rule_hash, direct_ballot_reserved_slot_rule_value,
+    direct_ballot_witness_partition_profile_hash,
+};
 use crate::bgv::evaluator::top_k::{
     SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
@@ -485,6 +492,8 @@ pub(crate) fn describe_collective_bgv_setup_profile() -> CanonicalResult<Value> 
         "sharingDomain": "per-rns-prime",
         "completionRule": "full-roster",
         "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "thresholdProfile": accepted_setup_threshold_profile_value(),
+        "thresholdProfileHash": accepted_setup_threshold_profile_hash()?,
         "qSetupComplete": FIRST_PROFILE_SETUP_COMPLETION_QUORUM,
         "qBallotRelease": FIRST_PROFILE_BALLOT_RELEASE_QUORUM,
         "qFinal": FIRST_PROFILE_FINALITY_QUORUM,
@@ -596,6 +605,29 @@ pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
 
     derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)
+}
+
+pub(crate) fn public_bgv_key_from_accepted_setup_public_key_material(
+    accepted_public_key_material: &Value,
+) -> CanonicalResult<BgvPublicKey> {
+    let common_randomness = accepted_public_key_material
+        .get("commonRandomness")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "acceptedPublicKeyMaterial.commonRandomness is required",
+            )
+        })?;
+    let collective_public_key = accepted_public_key_material
+        .get("collectivePublicKey")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "acceptedPublicKeyMaterial.collectivePublicKey is required",
+            )
+        })?;
+
+    accepted_setup_collective_public_key_from_material(common_randomness, collective_public_key)
 }
 
 fn verify_collective_setup_package(
@@ -876,6 +908,28 @@ pub(super) fn accepted_setup_profile_hash() -> CanonicalResult<String> {
 
 pub(super) fn accepted_q_share_hash() -> CanonicalResult<String> {
     q_share_hash()
+}
+
+fn accepted_setup_threshold_profile_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "CollectiveBgvSetupThresholdProfileHash",
+        &accepted_setup_threshold_profile_value(),
+    )
+}
+
+fn accepted_setup_threshold_profile_value() -> Value {
+    json!({
+        "objectType": "CollectiveBgvSetupThresholdProfile",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "setupCompletionQuorum": FIRST_PROFILE_SETUP_COMPLETION_QUORUM,
+        "ballotReleaseQuorum": FIRST_PROFILE_BALLOT_RELEASE_QUORUM,
+        "finalityQuorum": FIRST_PROFILE_FINALITY_QUORUM,
+        "decryptionThreshold": FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "completionRule": "full-roster",
+        "livenessModel": "secure-with-abort",
+    })
 }
 
 fn setup_profile_hash() -> CanonicalResult<String> {
@@ -1460,6 +1514,56 @@ fn accepted_setup_verification_response(setup_package: &Value) -> CanonicalResul
     Ok(response)
 }
 
+pub(crate) fn direct_ballot_creation_policy_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "DirectEncryptedBallotCreationPolicyHash",
+        &direct_ballot_creation_policy_value()?,
+    )
+}
+
+pub(crate) fn direct_ballot_creation_policy_value() -> CanonicalResult<Value> {
+    Ok(json!({
+        "objectType": "DirectEncryptedBallotCreationPolicy",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "acceptedPackageObjectType": "EncryptedBallotPackage",
+        "validityStatementId": "BallotValidityStatement-v1",
+        "proofProfileHash": direct_ballot_relation_proof_profile_hash()?,
+        "bgvProfileHash": profile_hash()?,
+        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
+        "batchEncoderHash": batch_encoder_hash()?,
+        "batchLayoutBindingHash": batch_layout_binding_hash()?,
+        "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
+        "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
+        "directBallotReservedSlotRuleHash": direct_ballot_reserved_slot_rule_hash()?,
+        "directBallotEncoderMatrixRoot": direct_ballot_encoder_matrix_root()?,
+        "witnessPartitionProfileHash": direct_ballot_witness_partition_profile_hash()?,
+        "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?,
+        "optionCount": DIRECT_BALLOT_OPTION_COUNT,
+        "scoreDomain": {
+            "minimum": DIRECT_BALLOT_MINIMUM_SCORE,
+            "maximum": DIRECT_BALLOT_MAXIMUM_SCORE,
+            "bucketCount": DIRECT_BALLOT_SCORE_BUCKET_COUNT,
+            "unsetUiValue": DIRECT_BALLOT_MINIMUM_SCORE,
+        },
+        "reservedSlotRule": direct_ballot_reserved_slot_rule_value()?,
+        "plaintextModulus": PLAINTEXT_MODULUS,
+        "randomnessBoundary": "platform CSPRNG material is required; caller-supplied seeds, fixture-labelled randomness, overlapping randomness, and reused randomness are refused",
+        "creatorReturnPolicy": "accepted ballot creation returns public package data, proof chunks, public roots, timing, memory, and proof-size reports only",
+        "forbiddenPackageFields": [
+            "scoreHash",
+            "plaintextScores",
+            "scoreCommitment",
+            "encryptionRandomness",
+            "proofWitness",
+            "proofRandomnessSeed",
+            "fixtureSeed",
+            "oracleResult",
+            "developmentPlaintext"
+        ],
+    }))
+}
+
 fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value> {
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -1483,6 +1587,7 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
+        "thresholdProfileHash": accepted_setup_threshold_profile_hash()?,
         "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
         "qShareHash": value_string(setup_context, "qShareHash")?,
         "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
@@ -1495,6 +1600,22 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
                 "collectivePublicKey",
                 "collectivePublicKeyRoot",
             )?,
+            "bgvPublicKeyRoot": package_nested_hash(
+                setup_package,
+                "collectivePublicKey",
+                "bgvPublicKeyRoot",
+            )?,
+            "bgvProfileHash": profile_hash()?,
+            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
+            "batchEncoderHash": batch_encoder_hash()?,
+            "batchLayoutBindingHash": batch_layout_binding_hash()?,
+            "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
+            "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
+            "directBallotReservedSlotRuleHash": direct_ballot_reserved_slot_rule_hash()?,
+            "directBallotEncoderMatrixRoot": direct_ballot_encoder_matrix_root()?,
+            "witnessPartitionProfileHash": direct_ballot_witness_partition_profile_hash()?,
+            "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?,
+            "ballotValidityProofProfileHash": direct_ballot_relation_proof_profile_hash()?,
             "publicKeyShareMaterialSetRoot": package_nested_hash(
                 setup_package,
                 "publicKeyShareMaterial",
@@ -1505,6 +1626,31 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
                 "publicKeyShareSuccinctProofs",
                 "publicKeyShareSuccinctProofSetRoot",
             )?,
+            "acceptedPublicKeyMaterial": {
+                "materialSource": "accepted public-key share material with accepted public-key share proofs",
+                "collectivePublicKeyRoot": package_nested_hash(
+                    setup_package,
+                    "collectivePublicKey",
+                    "collectivePublicKeyRoot",
+                )?,
+                "bgvPublicKeyRoot": package_nested_hash(
+                    setup_package,
+                    "collectivePublicKey",
+                    "bgvPublicKeyRoot",
+                )?,
+                "publicKeyShareMaterialSetRoot": package_nested_hash(
+                    setup_package,
+                    "publicKeyShareMaterial",
+                    "publicKeyShareMaterialSetRoot",
+                )?,
+                "publicKeyShareSuccinctProofSetRoot": package_nested_hash(
+                    setup_package,
+                    "publicKeyShareSuccinctProofs",
+                    "publicKeyShareSuccinctProofSetRoot",
+                )?,
+            },
+            "supportedBallotCreationPolicy": direct_ballot_creation_policy_value()?,
+            "supportedBallotCreationPolicyHash": direct_ballot_creation_policy_hash()?,
         },
         "publicAggregationHandoff": {
             "status": "accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root",

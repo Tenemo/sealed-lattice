@@ -2,13 +2,13 @@ use super::*;
 
 pub(super) fn encrypt_direct_ballot(
     setup_package: &Value,
-    evaluator_key: &DevelopmentBgvKey,
+    public_key: &BgvPublicKey,
     ballot: DirectBallotInput,
 ) -> CanonicalResult<DirectEncryptedBallot> {
     validate_direct_ballot_input(&ballot)?;
     let slots = direct_ballot_slots(&ballot.scores);
     let plaintext_coefficients = encode_slots_to_coefficients(&slots)?;
-    let (ciphertext, encryption_witness) = evaluator_key
+    let (ciphertext, encryption_witness) = public_key
         .encrypt_coefficients_with_witness(&plaintext_coefficients, &ballot.encryption_seed_hex)?;
     let ciphertext_root = ciphertext_object_root(&ciphertext)?;
     let ciphertext_canonical_bytes_hex = ciphertext_canonical_bytes_hex(&ciphertext)?;
@@ -104,8 +104,8 @@ pub(super) fn validate_one_hot_witnesses(
     Ok(())
 }
 
-pub(super) fn validate_direct_ballot_preflight(
-    evaluator_key: &DevelopmentBgvKey,
+pub(super) fn validate_direct_ballot_public_preflight(
+    public_key: &BgvPublicKey,
     ballot: &DirectEncryptedBallot,
 ) -> CanonicalResult<()> {
     if ballot.slots.len() != POLYNOMIAL_DEGREE {
@@ -123,6 +123,14 @@ pub(super) fn validate_direct_ballot_preflight(
             "direct encrypted ballot reserved slots must be zero",
         ));
     }
+    validate_encryption_witness_support(&ballot.encryption_witness)?;
+    validate_all_limb_encryption_relation(public_key, ballot)
+}
+
+pub(super) fn validate_direct_ballot_development_preflight(
+    evaluator_key: &DevelopmentBgvKey,
+    ballot: &DirectEncryptedBallot,
+) -> CanonicalResult<()> {
     let decrypted_slots = evaluator_key.decrypt_to_slots(&ballot.ciphertext)?;
     if decrypted_slots[..DIRECT_BALLOT_OPTION_COUNT] != ballot.input.scores[..] {
         return Err(CanonicalError::new(
@@ -139,8 +147,8 @@ pub(super) fn validate_direct_ballot_preflight(
             "direct encrypted ballot decrypts to a non-zero reserved slot",
         ));
     }
-    validate_encryption_witness_support(&ballot.encryption_witness)?;
-    validate_all_limb_encryption_relation(evaluator_key, ballot)
+
+    Ok(())
 }
 
 // Support bounds: the randomizer is ternary {-1,0,1} and both errors are centered-binomial eta = 2 in [-2,2]; these are the bounds the relation proof certifies and they bound the decryption noise.
@@ -189,10 +197,10 @@ pub(super) fn validate_signed_support(
 }
 
 pub(super) fn validate_all_limb_encryption_relation(
-    evaluator_key: &DevelopmentBgvKey,
+    public_key: &BgvPublicKey,
     ballot: &DirectEncryptedBallot,
 ) -> CanonicalResult<()> {
-    let (public_component_zero, public_component_one) = evaluator_key.public_key_components();
+    let (public_component_zero, public_component_one) = public_key.public_key_components();
     if ballot.ciphertext.components.len() != 2
         || ballot.ciphertext.components[0].len() != DATA_PRIMES.len()
         || ballot.ciphertext.components[1].len() != DATA_PRIMES.len()

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    acceptedDirectBallotPublicMaterialForSetupPublicMaterial,
+    createDirectEncryptedBallotPackages,
     createDirectBallotInputs,
     createDirectBallotSetupPackage,
     runDirectEncryptedBallot,
+    verifyDirectEncryptedBallotPackage,
 } from './direct-encrypted-ballot';
 
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
@@ -25,12 +28,12 @@ describe('direct encrypted ballot kernel command', () => {
             proofCount: 1,
             rnsLimbCount: 17,
         });
-        expect(result.proofAttempt.proofGate).toContain('yellow');
+        expect(result.proofAttempt.proofGate).toContain('red');
         expect(result.proofAttempt).toMatchObject({
             timingStatus: 'not measured on wasm32-unknown-unknown',
         });
         expect(result.proofAttempt.coverage).toContain(
-            'all RNS limb encryption equations',
+            'projected BGV rows and projected no-wrap carry rows for every RNS limb component',
         );
         expect(result.proofAttempt.challengeSoundness).toContain(
             'claim soundness is not accepted',
@@ -112,13 +115,39 @@ describe('direct encrypted ballot kernel command', () => {
             result.proofAttempt.proofTransport.firstProofChunkHashes[0],
         ).toHaveLength(128);
         expect(
-            result.proofAttempt.proofTransport.firstProofPublicTransportHash,
+            result.proofAttempt.proofTransport.firstProofChunkManifestRoot,
         ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .objectType,
+        ).toBe('BallotProofChunkManifest');
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .statementHash,
+        ).toBe(result.proofAttempt.proofTransport.firstProofStatementHash);
+        expect(
+            result.proofAttempt.proofTransport.firstEncryptedBallotPackageRoot,
+        ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.firstEncryptedBallotPackage
+                .objectType,
+        ).toBe('EncryptedBallotPackage');
+        expect(
+            result.proofAttempt.proofTransport.firstEncryptedBallotPackage
+                .proofChunkRoot,
+        ).toBe(result.proofAttempt.proofTransport.firstProofChunkManifestRoot);
+        expect(
+            result.proofAttempt.proofTransport.firstEncryptedBallotPackage
+                .proofStatementHash,
+        ).toBe(result.proofAttempt.proofTransport.firstProofStatementHash);
         expect(
             result.proofAttempt.proofTransport.firstProofStatementHash,
         ).toHaveLength(128);
         expect(
             result.proofAttempt.proofTransport.proofProfileHash,
+        ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.arithmeticCertificateHash,
         ).toHaveLength(128);
         expect(result.proofAttempt.proofMaskRandomness).toMatchObject({
             source: 'fresh-csprng',
@@ -128,10 +157,13 @@ describe('direct encrypted ballot kernel command', () => {
         expect(result.proofAttempt.proofMaskRandomness.retention).toContain(
             'not returned',
         );
-        expect(result.proofAttempt.proofSizeBytes).toBeGreaterThan(10_000_000);
-        expect(result.proofAttempt.proofSizeBytes).toBeLessThanOrEqual(
-            20_000_000,
+        expect(result.proofAttempt.proofSizeBytes).toBeGreaterThan(
+            result.proofAttempt.proofTransport.chunkSizeBytes * 30,
         );
+        expect(result.proofAttempt.proofSizeBytes).toBeLessThanOrEqual(
+            result.proofAttempt.proofTransport.chunkSizeBytes * 31,
+        );
+        expect(result.proofAttempt.proofTransport.chunksPerProof).toBe(31);
         expect(result.proofAttempt.verifiedProofSizeBytes).toBe(
             result.proofAttempt.proofSizeBytes,
         );
@@ -139,8 +171,14 @@ describe('direct encrypted ballot kernel command', () => {
             result.proofAttempt.proofSizeBytes,
         );
         expect(result.proofAttempt.responseEncoding).toBe(
-            'full BGV-degree signed response polynomials plus direct ballot score scalars',
+            'full BGV-degree signed response polynomials, direct ballot score scalars, one-hot scalars, and projected BGV no-wrap carry scalars',
         );
+        expect(result.proofAttempt.bgvCommitmentEncoding).toBe(
+            'statement-derived projected scalar commitments',
+        );
+        expect(
+            result.proofAttempt.projectedBgvRelationProjectionsPerLimbComponent,
+        ).toBe(3);
         expect(result.proofAttempt.responsePolynomialDegree).toBeGreaterThan(
             64,
         );
@@ -175,6 +213,177 @@ describe('direct encrypted ballot kernel command', () => {
             setupProfileId:
                 'sealed-lattice-bgv-rns-passive-full-roster-setup-v1',
         } satisfies Partial<BgvPassiveSetupPackage>);
+    });
+
+    it('creates public encrypted ballot packages without setup private witness through Node/WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const setupPublicMaterial = createDirectBallotSetupPackage(kernel);
+        const { acceptedPublicKeyMaterial, acceptedSetupHandoff } =
+            acceptedDirectBallotPublicMaterialForSetupPublicMaterial(
+                kernel,
+                setupPublicMaterial,
+            );
+        const result = await createDirectEncryptedBallotPackages({
+            acceptedPublicKeyMaterial,
+            acceptedSetupHandoff,
+        });
+
+        expect(result.operation).toBe('createDirectEncryptedBallotPackages');
+        expect(result.input.ballotCount).toBe(1);
+        expect(result.encryptedBallotPackages).toHaveLength(1);
+        expect(result).not.toHaveProperty('aggregation');
+        expect(result).not.toHaveProperty('evaluatorReplay');
+        expect(result.packageCreation.witnessBoundary).toContain(
+            'does not accept setupPackage',
+        );
+        expect(result.packageCreation.setupHandoffRoot).toBe(
+            acceptedSetupHandoff.acceptedSetupHandoffRoot,
+        );
+        expect(result.packageCreation.proofBytesRetention).toContain(
+            'returned as chunk records',
+        );
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .directBallotReservedSlotRuleHash,
+        ).toBe(acceptedPublicKeyMaterial.directBallotReservedSlotRuleHash);
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .directBallotEncoderMatrixRoot,
+        ).toBe(acceptedPublicKeyMaterial.directBallotEncoderMatrixRoot);
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .witnessPartitionProfileHash,
+        ).toHaveLength(128);
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .arithmeticCertificateHash,
+        ).toBe(acceptedPublicKeyMaterial.arithmeticCertificateHash);
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .ballotValidityProofProfileHash,
+        ).toBe(acceptedPublicKeyMaterial.ballotValidityProofProfileHash);
+
+        const packageRecord = result.encryptedBallotPackages[0];
+        if (packageRecord === undefined) {
+            throw new Error('public package result did not return a package.');
+        }
+
+        expect(packageRecord.proofChunkManifest.objectType).toBe(
+            'BallotProofChunkManifest',
+        );
+        expect(packageRecord.encryptedBallotPackage.objectType).toBe(
+            'EncryptedBallotPackage',
+        );
+        expect(packageRecord.statementHash).toBe(
+            result.proofAttempt.proofTransport.firstProofStatementHash,
+        );
+        expect(packageRecord.proofBytesHash).toBe(
+            result.proofAttempt.proofBytesHash,
+        );
+        expect(packageRecord.proofChunkManifestRoot).toBe(
+            result.proofAttempt.proofTransport.firstProofChunkManifestRoot,
+        );
+        expect(packageRecord.encryptedBallotPackageRoot).toBe(
+            result.proofAttempt.proofTransport.firstEncryptedBallotPackageRoot,
+        );
+        expect(packageRecord.encryptedBallotPackage.proofChunkRoot).toBe(
+            packageRecord.proofChunkManifestRoot,
+        );
+        expect(packageRecord.encryptedBallotPackage.proofStatementHash).toBe(
+            packageRecord.statementHash,
+        );
+        expect(
+            packageRecord.encryptedBallotPackage.batchLayoutBindingHash,
+        ).toBe(acceptedPublicKeyMaterial.batchLayoutBindingHash);
+        expect(
+            packageRecord.encryptedBallotPackage.ballotScoreEncodingProfileHash,
+        ).toBe(acceptedPublicKeyMaterial.ballotScoreEncodingProfileHash);
+        expect(
+            packageRecord.encryptedBallotPackage.encryptedBallotLayoutHash,
+        ).toBe(acceptedPublicKeyMaterial.encryptedBallotLayoutHash);
+        expect(
+            packageRecord.encryptedBallotPackage
+                .directBallotReservedSlotRuleHash,
+        ).toBe(acceptedPublicKeyMaterial.directBallotReservedSlotRuleHash);
+        expect(
+            packageRecord.encryptedBallotPackage.directBallotEncoderMatrixRoot,
+        ).toBe(acceptedPublicKeyMaterial.directBallotEncoderMatrixRoot);
+        expect(
+            packageRecord.encryptedBallotPackage.witnessPartitionProfileHash,
+        ).toBe(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .witnessPartitionProfileHash,
+        );
+        expect(
+            packageRecord.encryptedBallotPackage.arithmeticCertificateHash,
+        ).toBe(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .arithmeticCertificateHash,
+        );
+        expect(packageRecord.encryptedBallotPackage.proofProfileHash).toBe(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .ballotValidityProofProfileHash,
+        );
+        expect(packageRecord.encryptedBallotPackage).not.toHaveProperty(
+            'proofStatement',
+        );
+        expect(packageRecord.encryptedBallotPackage.signature).toMatchObject({
+            objectType: 'DevelopmentEncryptedBallotPackageSignaturePlaceholder',
+            signedObjectRoot: packageRecord.encryptedBallotPackageRoot,
+            proofStatementHash: packageRecord.statementHash,
+            proofChunkRoot: packageRecord.proofChunkManifestRoot,
+        });
+        expect(
+            result.encryptedBallots.ballotEncryptionRandomness,
+        ).toMatchObject({
+            source: 'fresh-csprng',
+            ballotEncryptionRandomnessCount: 1,
+        });
+        expect(result.proofAttempt.proofMaskRandomness).toMatchObject({
+            source: 'fresh-csprng',
+            ballotProofRandomnessCount: 1,
+        });
+        expect(result.proofAttempt.proofTransport.chunksPerProof).toBe(
+            packageRecord.proofChunkManifest.chunkCount,
+        );
+        expect(packageRecord.proofChunks).toHaveLength(
+            packageRecord.proofChunkManifest.chunkCount,
+        );
+        expect(packageRecord.proofChunks[0]?.bytesHex).toHaveLength(
+            packageRecord.proofChunkManifest.chunkSizeBytes * 2,
+        );
+
+        const verification = await verifyDirectEncryptedBallotPackage({
+            acceptedPublicKeyMaterial,
+            acceptedSetupHandoff,
+            encryptedBallotPackage: packageRecord.encryptedBallotPackage,
+            proofChunks: packageRecord.proofChunks,
+        });
+
+        expect(verification.operation).toBe(
+            'verifyDirectEncryptedBallotPackage',
+        );
+        expect(verification.verificationStatus).toContain('setup handoff');
+        expect(verification.acceptedSetupHandoffRoot).toBe(
+            acceptedSetupHandoff.acceptedSetupHandoffRoot,
+        );
+        expect(verification.packageRoot).toBe(
+            packageRecord.encryptedBallotPackageRoot,
+        );
+        expect(verification.proofStatementHash).toBe(
+            packageRecord.statementHash,
+        );
+        expect(verification.verifiedStatementHash).toBe(
+            packageRecord.statementHash,
+        );
+        expect(verification.proofBytesHash).toBe(packageRecord.proofBytesHash);
+        expect(verification.proofChunkRoot).toBe(
+            packageRecord.proofChunkManifestRoot,
+        );
+        expect(verification.proofChunkCount).toBe(
+            packageRecord.proofChunkManifest.chunkCount,
+        );
+        expect(verification.claimBoundary).toContain('development evidence');
     });
 
     it('rejects duplicate voter identities before proof generation through Node/WASM', async () => {

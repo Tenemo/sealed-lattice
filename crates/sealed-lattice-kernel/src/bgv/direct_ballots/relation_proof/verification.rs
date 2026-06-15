@@ -2,21 +2,28 @@ use super::*;
 
 pub(in crate::bgv::direct_ballots) fn verify_direct_ballot_relation_proof(
     setup_package: &Value,
-    evaluator_key: &DevelopmentBgvKey,
+    public_key: &BgvPublicKey,
     ballot: &DirectEncryptedBallot,
     proof_bytes: &[u8],
 ) -> CanonicalResult<DirectBallotRelationProofVerification> {
     let expected_statement_hash =
-        direct_ballot_relation_statement_hash(setup_package, evaluator_key, ballot)?;
+        direct_ballot_relation_statement_hash(setup_package, public_key, ballot)?;
     let parsed_proof = parse_direct_ballot_relation_proof(proof_bytes, &expected_statement_hash)?;
-    verify_direct_ballot_relation_response(
-        evaluator_key,
+    verify_direct_ballot_relation_response(DirectBallotRelationResponseVerificationInput {
+        statement_hash: &expected_statement_hash,
+        public_key,
         ballot,
-        &parsed_proof.challenge,
-        &parsed_proof.bgv_relation_commitments,
-        &parsed_proof.score_linear_commitment,
-        &parsed_proof.support_commitment,
-        &parsed_proof.response_vector,
+        challenge: &parsed_proof.challenge,
+        bgv_relation_commitments: &parsed_proof.bgv_relation_commitments,
+        score_linear_commitment: &parsed_proof.score_linear_commitment,
+        support_commitment: &parsed_proof.support_commitment,
+        response_vector: &parsed_proof.response_vector,
+    })?;
+    verify_direct_ballot_committed_trace_proof_bytes(
+        &expected_statement_hash,
+        public_key,
+        ballot,
+        &parsed_proof.committed_trace_proof_bytes,
     )?;
 
     Ok(DirectBallotRelationProofVerification {

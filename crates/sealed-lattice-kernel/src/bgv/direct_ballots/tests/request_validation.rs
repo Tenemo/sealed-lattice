@@ -7,6 +7,7 @@ fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
         .map(|ballot_index| {
             json!({
                 "voterIdentity": format!("voter-{}", ballot_index + 1),
+                "voterRosterPosition": ballot_index,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({
@@ -14,6 +15,8 @@ fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
                         "ballotIndex": ballot_index
                     }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     10, 9, 8, 7, 6,
                     5, 4, 3, 2, 1,
@@ -50,10 +53,13 @@ fn direct_encrypted_ballot_command_rejects_missing_ballot_encryption_randomness(
         "ballots": [
             {
                 "voterIdentity": "voter-missing-encryption-randomness",
+                "voterRosterPosition": 0,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot missing encryption randomness test" }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     10, 9, 8, 7, 6,
                     5, 4, 3, 2, 1,
@@ -82,10 +88,13 @@ fn direct_encrypted_ballot_command_rejects_ballot_embedded_encryption_seed() {
         "ballots": [
             {
                 "voterIdentity": "voter-embedded-encryption-seed",
+                "voterRosterPosition": 0,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot embedded encryption seed test" }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "encryptionSeedHex": direct_ballot_test_randomness_hex("legacy-ballot-seed", 0),
                 "scores": [
                     10, 9, 8, 7, 6,
@@ -205,10 +214,13 @@ fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
         "ballots": [
             {
                 "voterIdentity": "duplicate-voter",
+                "voterRosterPosition": 0,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot duplicate test", "ballotIndex": 0 }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     10, 9, 8, 7, 6,
                     5, 4, 3, 2, 1,
@@ -218,10 +230,13 @@ fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
             },
             {
                 "voterIdentity": "duplicate-voter",
+                "voterRosterPosition": 1,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot duplicate test", "ballotIndex": 1 }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     1, 2, 3, 4, 5,
                     6, 7, 8, 9, 10,
@@ -249,10 +264,13 @@ fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
         "ballots": [
             {
                 "voterIdentity": "voter-b",
+                "voterRosterPosition": 1,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot order test", "ballotIndex": 0 }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     10, 9, 8, 7, 6,
                     5, 4, 3, 2, 1,
@@ -262,10 +280,13 @@ fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
             },
             {
                 "voterIdentity": "voter-a",
+                "voterRosterPosition": 0,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot order test", "ballotIndex": 1 }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     1, 2, 3, 4, 5,
                     6, 7, 8, 9, 10,
@@ -293,10 +314,13 @@ fn direct_encrypted_ballot_command_rejects_invalid_score_before_proof_generation
         "ballots": [
             {
                 "voterIdentity": "voter-invalid-score",
+                "voterRosterPosition": 0,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot invalid score test" }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     10, 9, 8, 7, 6,
                     5, 4, 3, 11, 1,
@@ -324,10 +348,13 @@ fn direct_encrypted_ballot_command_rejects_wrong_setup_seed() {
         "ballots": [
             {
                 "voterIdentity": "voter-wrong-key",
+                "voterRosterPosition": 0,
                 "actionContextHash": derive_protocol_hash(
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot wrong key test" }),
                 ).expect("action hash"),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "scores": [
                     10, 9, 8, 7, 6,
                     5, 4, 3, 2, 1,
@@ -345,6 +372,111 @@ fn direct_encrypted_ballot_command_rejects_wrong_setup_seed() {
             .message
             .contains("private setup witness seed commitment")
     );
+}
+
+#[test]
+fn direct_encrypted_ballot_public_package_command_rejects_private_development_fields() {
+    let setup_package = setup_package();
+    let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
+    for field_name in [
+        "setupPrivateWitness",
+        "topCount",
+        "topCounts",
+        "publicEvaluationKeyMaterial",
+        "targetFinalityPolicyHash",
+    ] {
+        let mut request = json!({
+            "acceptedPublicKeyMaterial": public_material_fixture.accepted_public_key_material.clone(),
+            "acceptedSetupHandoff": public_material_fixture.accepted_setup_handoff.clone(),
+            "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
+            "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
+            "ballots": [
+                direct_ballot_test_ballot_json("voter-public-package-rejection", 0)
+            ]
+        });
+        request[field_name] = match field_name {
+            "setupPrivateWitness" => json!({ "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED }),
+            "topCount" => json!(1),
+            "topCounts" => json!([1, 2]),
+            "publicEvaluationKeyMaterial" => json!({ "material": "not accepted here" }),
+            "targetFinalityPolicyHash" => json!("a".repeat(128)),
+            _ => unreachable!("all public package rejection fields are covered"),
+        };
+
+        let error = create_direct_encrypted_ballot_packages(&request)
+            .expect_err("public package command must reject private development field");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(
+            error
+                .message
+                .contains(&format!("does not accept {field_name}")),
+            "unexpected error message: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn direct_encrypted_ballot_public_package_command_rejects_raw_setup_package_field() {
+    let error = create_direct_encrypted_ballot_packages(&json!({
+        "setupPackage": setup_package_not_reached(),
+        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
+        "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
+        "ballots": [
+            direct_ballot_test_ballot_json("voter-public-package-raw-setup-rejection", 0)
+        ]
+    }))
+    .expect_err("public package command must reject raw setupPackage field");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("acceptedPublicKeyMaterial"));
+    assert!(error.message.contains("acceptedSetupHandoff"));
+}
+
+#[test]
+fn direct_encrypted_ballot_public_package_command_rejects_passive_setup_material_field() {
+    let setup_package = setup_package();
+    let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
+
+    let error = create_direct_encrypted_ballot_packages(&json!({
+        "setupPublicMaterial": setup_package,
+        "acceptedPublicKeyMaterial": public_material_fixture.accepted_public_key_material,
+        "acceptedSetupHandoff": public_material_fixture.accepted_setup_handoff,
+        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
+        "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
+        "ballots": [
+            direct_ballot_test_ballot_json("voter-public-package-passive-setup-rejection", 0)
+        ]
+    }))
+    .expect_err("public package command must reject passive setupPublicMaterial");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("setupPublicMaterial"));
+    assert!(error.message.contains("acceptedPublicKeyMaterial"));
+}
+
+#[test]
+fn direct_encrypted_ballot_public_package_command_rejects_mismatched_handoff_root() {
+    let setup_package = setup_package();
+    let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
+    let mut accepted_setup_handoff = public_material_fixture.accepted_setup_handoff;
+    accepted_setup_handoff["directBallotEncryptionHandoff"]["bgvPublicKeyRoot"] =
+        json!("0".repeat(128));
+
+    let error = create_direct_encrypted_ballot_packages(&json!({
+        "acceptedPublicKeyMaterial": public_material_fixture.accepted_public_key_material,
+        "acceptedSetupHandoff": accepted_setup_handoff,
+        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
+        "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
+        "ballots": [
+            direct_ballot_test_ballot_json("voter-public-package-handoff-rejection", 0)
+        ]
+    }))
+    .expect_err("public package command must reject mismatched handoff roots");
+
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(error.message.contains("acceptedSetupHandoffRoot"));
 }
 
 #[test]

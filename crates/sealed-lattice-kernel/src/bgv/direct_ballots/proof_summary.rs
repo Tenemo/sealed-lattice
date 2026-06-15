@@ -12,7 +12,7 @@ pub(super) struct DirectBallotRelationProofSummary {
     pub(super) verified_challenge: String,
     pub(super) relation_commitment_bytes: usize,
     pub(super) response_bytes: usize,
-    pub(super) relation_commitment_polynomial_count: usize,
+    pub(super) relation_commitment_scalar_count: usize,
     pub(super) shared_response_polynomial_count: usize,
     pub(super) shared_response_scalar_count: usize,
     pub(super) proof_gate: &'static str,
@@ -21,7 +21,11 @@ pub(super) struct DirectBallotRelationProofSummary {
     pub(super) proof_chunk_count: usize,
     pub(super) proof_chunk_merkle_root: String,
     pub(super) proof_chunk_hashes: Vec<String>,
-    pub(super) public_proof_transport_hash: String,
+    pub(super) proof_chunks: Vec<Value>,
+    pub(super) proof_chunk_manifest_root: String,
+    pub(super) proof_chunk_manifest: Value,
+    pub(super) encrypted_ballot_package_root: String,
+    pub(super) encrypted_ballot_package: Value,
 }
 
 pub(super) struct DirectBallotBinaryProofTransport {
@@ -31,7 +35,11 @@ pub(super) struct DirectBallotBinaryProofTransport {
     pub(super) chunk_count: usize,
     pub(super) chunk_merkle_root: String,
     pub(super) chunk_hashes: Vec<String>,
-    pub(super) public_transport_hash: String,
+    pub(super) proof_chunks: Vec<Value>,
+    pub(super) proof_chunk_manifest_root: String,
+    pub(super) proof_chunk_manifest: Value,
+    pub(super) encrypted_ballot_package_root: String,
+    pub(super) encrypted_ballot_package: Value,
 }
 
 impl DirectBallotRelationProofSummary {
@@ -52,8 +60,7 @@ impl DirectBallotRelationProofSummary {
             verified_challenge: proof_verification.challenge,
             relation_commitment_bytes: proof_generation.relation_commitment_bytes,
             response_bytes: proof_generation.response_bytes,
-            relation_commitment_polynomial_count: proof_generation
-                .relation_commitment_polynomial_count,
+            relation_commitment_scalar_count: proof_generation.relation_commitment_scalar_count,
             shared_response_polynomial_count: proof_generation.shared_response_polynomial_count,
             shared_response_scalar_count: proof_generation.shared_response_scalar_count,
             proof_gate: proof_generation.proof_gate,
@@ -62,7 +69,11 @@ impl DirectBallotRelationProofSummary {
             proof_chunk_count: proof_transport.chunk_count,
             proof_chunk_merkle_root: proof_transport.chunk_merkle_root,
             proof_chunk_hashes: proof_transport.chunk_hashes,
-            public_proof_transport_hash: proof_transport.public_transport_hash,
+            proof_chunks: proof_transport.proof_chunks,
+            proof_chunk_manifest_root: proof_transport.proof_chunk_manifest_root,
+            proof_chunk_manifest: proof_transport.proof_chunk_manifest,
+            encrypted_ballot_package_root: proof_transport.encrypted_ballot_package_root,
+            encrypted_ballot_package: proof_transport.encrypted_ballot_package,
         }
     }
 }

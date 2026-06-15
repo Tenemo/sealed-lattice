@@ -23,13 +23,14 @@ pub(super) fn chunk_count_for_bytes(
 
 pub(super) fn transport_direct_ballot_binary_proof(
     setup_package: &Value,
+    public_key: &BgvPublicKey,
     ballot: &DirectEncryptedBallot,
     statement_hash: &str,
     proof_bytes: &[u8],
     expected_proof_bytes_hash: &str,
     proof_bytes_hash: fn(&[u8]) -> String,
-    label: &str,
 ) -> CanonicalResult<DirectBallotBinaryProofTransport> {
+    let label = "direct ballot relation proof";
     if proof_bytes.is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -40,6 +41,7 @@ pub(super) fn transport_direct_ballot_binary_proof(
         chunk_count_for_bytes(proof_bytes.len(), DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES)?;
     let mut transported_proof_bytes = Vec::with_capacity(proof_bytes.len());
     let mut chunk_hashes = Vec::with_capacity(chunk_count);
+    let mut proof_chunks = Vec::with_capacity(chunk_count);
     let mut observed_chunk_count = 0_usize;
     for (chunk_index, chunk) in proof_bytes
         .chunks(DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES)
@@ -65,11 +67,15 @@ pub(super) fn transport_direct_ballot_binary_proof(
                 format!("{label} transport chunk count overflowed"),
             )
         })?;
-        chunk_hashes.push(direct_ballot_proof_chunk_hash(
-            expected_proof_bytes_hash,
-            chunk_index,
-            chunk,
-        )?);
+        let chunk_hash =
+            direct_ballot_proof_chunk_hash(expected_proof_bytes_hash, chunk_index, chunk)?;
+        chunk_hashes.push(chunk_hash.clone());
+        proof_chunks.push(json!({
+            "chunkIndex": chunk_index,
+            "byteLength": chunk.len(),
+            "chunkHash": chunk_hash,
+            "bytesHex": to_hex(chunk),
+        }));
     }
     if observed_chunk_count != chunk_count {
         return Err(CanonicalError::new(
@@ -88,25 +94,29 @@ pub(super) fn transport_direct_ballot_binary_proof(
         &transported_proof_bytes,
         DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
     )?;
-    verify_direct_ballot_public_proof_transport(
-        &transported_proof_bytes,
-        expected_proof_bytes_hash,
-        &chunk_hashes,
-        DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
-        &chunk_merkle_root,
-    )?;
-    let public_transport_hash =
-        direct_ballot_public_proof_transport_hash(DirectBallotPublicProofTransportHashInput {
+    let proof_chunk_manifest =
+        direct_ballot_proof_chunk_manifest(DirectBallotProofChunkManifestInput {
             setup_package,
             ballot,
-            statement_hash,
-            proof_bytes_hash: expected_proof_bytes_hash,
+            proof_statement_hash: statement_hash,
+            proof_full_bytes_hash: expected_proof_bytes_hash,
             proof_byte_length: proof_bytes.len(),
             chunk_size_bytes: DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
             chunk_count,
             chunk_hashes: &chunk_hashes,
             chunk_merkle_root: &chunk_merkle_root,
         })?;
+    verify_direct_ballot_proof_chunk_manifest(
+        &proof_chunk_manifest.value,
+        &transported_proof_bytes,
+    )?;
+    let proof_statement = direct_ballot_validity_statement(setup_package, public_key, ballot)?;
+    let encrypted_ballot_package = direct_ballot_encrypted_package(
+        setup_package,
+        ballot,
+        &proof_statement,
+        &proof_chunk_manifest,
+    )?;
 
     Ok(DirectBallotBinaryProofTransport {
         proof_size_bytes: transported_proof_bytes.len(),
@@ -115,7 +125,11 @@ pub(super) fn transport_direct_ballot_binary_proof(
         chunk_count,
         chunk_merkle_root,
         chunk_hashes,
-        public_transport_hash,
+        proof_chunks,
+        proof_chunk_manifest_root: proof_chunk_manifest.root,
+        proof_chunk_manifest: proof_chunk_manifest.value,
+        encrypted_ballot_package_root: encrypted_ballot_package.root,
+        encrypted_ballot_package: encrypted_ballot_package.value,
     })
 }
 
@@ -133,58 +147,6 @@ pub(super) fn direct_ballot_proof_chunk_hash(
             chunk,
         ],
     ))
-}
-
-pub(super) struct DirectBallotPublicProofTransportHashInput<'a> {
-    setup_package: &'a Value,
-    ballot: &'a DirectEncryptedBallot,
-    statement_hash: &'a str,
-    proof_bytes_hash: &'a str,
-    proof_byte_length: usize,
-    chunk_size_bytes: usize,
-    chunk_count: usize,
-    chunk_hashes: &'a [String],
-    chunk_merkle_root: &'a str,
-}
-
-pub(super) fn direct_ballot_public_proof_transport_hash(
-    input: DirectBallotPublicProofTransportHashInput<'_>,
-) -> CanonicalResult<String> {
-    validate_direct_ballot_hash_hex(input.statement_hash, "statementHash")?;
-    validate_direct_ballot_hash_hex(input.proof_bytes_hash, "proofBytesHash")?;
-    validate_direct_ballot_hash_hex(input.chunk_merkle_root, "proofChunkMerkleRoot")?;
-    let collective_public_key_root = required_string_path(
-        input.setup_package,
-        &["collectivePublicKey", "collectivePublicKeyRoot"],
-    )?;
-    let ballot_layout_hash = required_string_path(
-        input.setup_package,
-        &["profileBindings", "encryptedBallotLayoutHash"],
-    )?;
-    let proof_profile_hash = direct_ballot_relation_proof_profile_hash()?;
-
-    derive_protocol_hash(
-        "ProofBytesHash",
-        &json!({
-            "objectType": "DirectEncryptedBallotProofTransport",
-            "objectVersion": 1,
-            "proofByteLength": input.proof_byte_length,
-            "chunkSizeBytes": input.chunk_size_bytes,
-            "chunkCount": input.chunk_count,
-            "chunkHashes": input.chunk_hashes,
-            "chunkMerkleRoot": input.chunk_merkle_root,
-            "fullProofHash": input.proof_bytes_hash,
-            "statementHash": input.statement_hash,
-            "ciphertextRoot": input.ballot.ciphertext_root,
-            "voterIdentity": input.ballot.input.voter_identity,
-            "actionContextHash": input.ballot.input.action_context_hash,
-            "profileId": PROFILE_ID,
-            "profileHash": profile_hash()?,
-            "collectivePublicKeyRoot": collective_public_key_root,
-            "ballotLayoutHash": ballot_layout_hash,
-            "proofProfileHash": proof_profile_hash,
-        }),
-    )
 }
 
 pub(super) fn verify_direct_ballot_public_proof_transport(

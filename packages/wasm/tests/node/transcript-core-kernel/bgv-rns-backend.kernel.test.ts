@@ -74,6 +74,13 @@ describe('BGV-RNS backend kernel commands', () => {
             readonly encryptedBallotAggregateLayoutHash: string;
             readonly directComparisonProfileHash: string;
         };
+        const directBallotEncoderMatrix = profile.directBallotEncoderMatrix as {
+            readonly basisVectorHashes: readonly {
+                readonly optionIndex: number;
+                readonly sourceSlotIndex: number;
+                readonly basisVectorHash: string;
+            }[];
+        };
 
         expect(profile.profile).toMatchObject({
             profileId: 'sealed-lattice-bgv-rns-v1',
@@ -88,6 +95,19 @@ describe('BGV-RNS backend kernel commands', () => {
             ['profileHash', profile.profileHash],
             ['batchEncoderHash', profile.batchEncoderHash],
             ['batchLayoutBindingHash', profile.batchLayoutBindingHash],
+            [
+                'ballotScoreEncodingProfileHash',
+                profile.ballotScoreEncodingProfileHash,
+            ],
+            ['encryptedBallotLayoutHash', profile.encryptedBallotLayoutHash],
+            [
+                'directBallotReservedSlotRuleHash',
+                profile.directBallotReservedSlotRuleHash,
+            ],
+            [
+                'directBallotEncoderMatrixRoot',
+                profile.directBallotEncoderMatrixRoot,
+            ],
             ['directAggregateLayoutHash', profile.directAggregateLayoutHash],
             [
                 'directComparisonProfileHash',
@@ -110,6 +130,38 @@ describe('BGV-RNS backend kernel commands', () => {
             scoreBucketCount: 10,
             scalarOnlyAggregateLayout: false,
         });
+        expect(profile.directBallotReservedSlotRule).toMatchObject({
+            objectType: 'DirectBallotReservedSlotRule',
+            objectVersion: 1,
+            optionCount: 20,
+            scoreSlotCount: 20,
+            reservedSlotStartInclusive: 20,
+            reservedSlotEndExclusive: 32_768,
+            reservedSlotCount: 32_748,
+            plaintextModulus: 65_537,
+            polynomialDegree: 32_768,
+        });
+        expect(profile.directBallotEncoderMatrix).toMatchObject({
+            objectType: 'DirectBallotEncoderMatrix',
+            objectVersion: 1,
+            encoderId: 'BGVBatchEncode_65537-v1',
+            profileHash: profile.profileHash,
+            reservedSlotRuleHash: profile.directBallotReservedSlotRuleHash,
+            optionCount: 20,
+            scoreSlotCount: 20,
+            plaintextModulus: 65_537,
+            polynomialDegree: 32_768,
+        });
+        expect(directBallotEncoderMatrix.basisVectorHashes).toHaveLength(20);
+        expect(directBallotEncoderMatrix.basisVectorHashes[0]).toMatchObject({
+            optionIndex: 0,
+            sourceSlotIndex: 0,
+        });
+        expectProtocolHash(
+            directBallotEncoderMatrix.basisVectorHashes[0]?.basisVectorHash ??
+                '',
+            'first direct ballot encoder basis vector hash',
+        );
         expect(operationRegistry.allowedEvaluatorOpsHash).toBe(
             profile.allowedEvaluatorOpsHash,
         );

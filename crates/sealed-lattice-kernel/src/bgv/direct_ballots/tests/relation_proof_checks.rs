@@ -4,9 +4,12 @@ use super::*;
 fn direct_ballot_shared_rns_relation_proof_verifies() {
     let fixture = direct_ballot_relation_proof_fixture();
 
+    validate_direct_ballot_public_preflight(&fixture.public_key, &fixture.encrypted_ballot)
+        .expect("public-key preflight");
+
     let proof_verification = verify_direct_ballot_relation_proof(
         &fixture.setup_package,
-        &fixture.evaluator_key,
+        &fixture.public_key,
         &fixture.encrypted_ballot,
         &fixture.proof_generation.proof_bytes,
     )
@@ -24,6 +27,24 @@ fn direct_ballot_shared_rns_relation_proof_verifies() {
 }
 
 #[test]
+fn direct_ballot_public_preflight_rejects_ciphertext_from_different_public_key() {
+    let setup_package = setup_package();
+    let public_key = public_bgv_key_from_passive_setup_package(&setup_package).expect("public key");
+    let wrong_setup_package = setup_package_with_seed("direct-encrypted-ballot-wrong-seed");
+    let wrong_public_key =
+        public_bgv_key_from_passive_setup_package(&wrong_setup_package).expect("wrong public key");
+    let encrypted_ballot =
+        encrypt_direct_ballot(&setup_package, &wrong_public_key, valid_ballot_input())
+            .expect("encrypted ballot");
+
+    let error = validate_direct_ballot_public_preflight(&public_key, &encrypted_ballot)
+        .expect_err("ciphertext encrypted under a different public key must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("RNS limb 0 c0 relation failed"));
+}
+
+#[test]
 fn direct_ballot_shared_rns_relation_proof_rejects_last_limb_ciphertext_mutation() {
     let fixture = direct_ballot_relation_proof_fixture();
     let mut encrypted_ballot = fixture.encrypted_ballot.clone();
@@ -37,7 +58,7 @@ fn direct_ballot_shared_rns_relation_proof_rejects_last_limb_ciphertext_mutation
 
     let error = verify_direct_ballot_relation_proof(
         &fixture.setup_package,
-        &fixture.evaluator_key,
+        &fixture.public_key,
         &encrypted_ballot,
         &fixture.proof_generation.proof_bytes,
     )
@@ -61,11 +82,11 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
     // offset's specific reason. Folding the offsets into one table keeps every
     // offset-and-message assertion while dropping four copies of the identical
     // clone-mutate-verify body.
-    let single_bit_mutation_cases: [(&str, usize, &str); 4] = [
+    let single_bit_mutation_cases: [(&str, usize, &str); 5] = [
         (
             "randomizer response",
             direct_ballot_relation_response_offset(proof_bytes),
-            "randomizer support check failed",
+            "randomizer projected support check failed",
         ),
         (
             "score response",
@@ -77,6 +98,11 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
             score_response_offset
                 + DIRECT_BALLOT_OPTION_COUNT * direct_ballot_response_coefficient_bytes(),
             "direct ballot score proof option 0",
+        ),
+        (
+            "projected BGV no-wrap carry response",
+            direct_ballot_projected_bgv_no_wrap_response_offset(proof_bytes),
+            "direct ballot projected BGV no-wrap relation limb 0 component zero projection 0 failed",
         ),
         (
             "relation commitment",
@@ -91,7 +117,7 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
 
         let error = match verify_direct_ballot_relation_proof(
             &fixture.setup_package,
-            &fixture.evaluator_key,
+            &fixture.public_key,
             &fixture.encrypted_ballot,
             &mutated_proof_bytes,
         ) {
@@ -113,42 +139,32 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
 }
 
 #[test]
-fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_witness() {
+fn direct_ballot_relation_proof_generation_rejects_linear_consistent_non_boolean_one_hot_witness() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let public_key = public_bgv_key_from_passive_setup_package(&setup_package).expect("public key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
+        encrypt_direct_ballot(&setup_package, &public_key, valid_ballot_input())
             .expect("encrypted ballot");
     let mut one_hot_witnesses = one_hot_witnesses_for_scores(&encrypted_ballot.input.scores);
     one_hot_witnesses[0] = vec![0, 0, 0, 0, 0, 0, 0, 65536, 2, 0];
     encrypted_ballot.input.one_hot_witnesses = Some(one_hot_witnesses);
     let proof_randomness_seed_hex =
         direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
-    let proof_generation = generate_direct_ballot_relation_proof(
+    let error = match generate_direct_ballot_relation_proof(
         &setup_package,
-        &evaluator_key,
+        &public_key,
         &encrypted_ballot,
         &proof_randomness_seed_hex,
-    )
-    .expect("proof generation");
-
-    let error = verify_direct_ballot_relation_proof(
-        &setup_package,
-        &evaluator_key,
-        &encrypted_ballot,
-        &proof_generation.proof_bytes,
-    )
-    .expect_err("non-Boolean one-hot witness must reject");
+    ) {
+        Ok(_) => panic!("non-Boolean one-hot witness must reject during proof generation"),
+        Err(error) => error,
+    };
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(
         error
             .message
-            .contains("one-hot Booleanity option 0 support check failed")
+            .contains("committed one-hot Booleanity row failed at option 0 bucket 7")
     );
 }
 
@@ -156,15 +172,12 @@ fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_wi
 fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
     let fixture = direct_ballot_relation_proof_fixture();
     let wrong_setup_package = setup_package_with_seed("direct-encrypted-ballot-wrong-seed");
-    let wrong_evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &wrong_setup_package,
-        "direct-encrypted-ballot-wrong-seed",
-    )
-    .expect("wrong evaluator key");
+    let wrong_public_key =
+        public_bgv_key_from_passive_setup_package(&wrong_setup_package).expect("wrong public key");
 
     let error = verify_direct_ballot_relation_proof(
         &wrong_setup_package,
-        &wrong_evaluator_key,
+        &wrong_public_key,
         &fixture.encrypted_ballot,
         &fixture.proof_generation.proof_bytes,
     )
@@ -177,13 +190,9 @@ fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
 #[test]
 fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let public_key = public_bgv_key_from_passive_setup_package(&setup_package).expect("public key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
+        encrypt_direct_ballot(&setup_package, &public_key, valid_ballot_input())
             .expect("encrypted ballot");
     let last_limb_index = DATA_PRIMES.len() - 1;
     encrypted_ballot.ciphertext.components[0][last_limb_index][0] = add_mod(
@@ -193,7 +202,7 @@ fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
     )
     .expect("mutated residue");
 
-    let error = validate_all_limb_encryption_relation(&evaluator_key, &encrypted_ballot)
+    let error = validate_all_limb_encryption_relation(&public_key, &encrypted_ballot)
         .expect_err("last limb mutation must reject");
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
@@ -203,17 +212,13 @@ fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
 #[test]
 fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let public_key = public_bgv_key_from_passive_setup_package(&setup_package).expect("public key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
+        encrypt_direct_ballot(&setup_package, &public_key, valid_ballot_input())
             .expect("encrypted ballot");
     encrypted_ballot.plaintext_coefficients[0] += 1;
 
-    let error = validate_all_limb_encryption_relation(&evaluator_key, &encrypted_ballot)
+    let error = validate_all_limb_encryption_relation(&public_key, &encrypted_ballot)
         .expect_err("different plaintext witness must reject");
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
@@ -223,13 +228,9 @@ fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
 #[test]
 fn direct_ballot_support_rejects_out_of_range_randomizer() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let public_key = public_bgv_key_from_passive_setup_package(&setup_package).expect("public key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
+        encrypt_direct_ballot(&setup_package, &public_key, valid_ballot_input())
             .expect("encrypted ballot");
     encrypted_ballot.encryption_witness.randomizer_coefficients[0] = 2;
 

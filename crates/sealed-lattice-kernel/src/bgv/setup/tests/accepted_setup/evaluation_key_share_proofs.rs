@@ -407,6 +407,95 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
         "accepted terminal setup response must carry a handoff root"
     );
+    let accepted_handoff = &result["acceptedSetupHandoff"];
+    assert!(
+        accepted_handoff["thresholdProfileHash"].as_str().is_some(),
+        "accepted setup handoff must bind the threshold profile used by ballot packages"
+    );
+    let direct_ballot_handoff = &accepted_handoff["directBallotEncryptionHandoff"];
+    assert_eq!(
+        direct_ballot_handoff["collectivePublicKeyRoot"],
+        package["collectivePublicKey"]["collectivePublicKeyRoot"]
+    );
+    assert_eq!(
+        direct_ballot_handoff["bgvPublicKeyRoot"],
+        package["collectivePublicKey"]["bgvPublicKeyRoot"]
+    );
+    assert_eq!(
+        direct_ballot_handoff["bgvProfileHash"],
+        crate::bgv::profile::profile_hash().expect("BGV profile hash")
+    );
+    assert_eq!(
+        direct_ballot_handoff["batchEncoderHash"],
+        crate::bgv::profile::batch_encoder_hash().expect("batch encoder hash")
+    );
+    assert_eq!(
+        direct_ballot_handoff["encryptedBallotLayoutHash"],
+        crate::bgv::profile::encrypted_ballot_layout_hash().expect("encrypted ballot layout hash")
+    );
+    assert_eq!(
+        direct_ballot_handoff["ballotValidityProofProfileHash"],
+        crate::bgv::direct_ballots::direct_ballot_relation_proof_profile_hash()
+            .expect("direct ballot proof profile hash")
+    );
+    assert_eq!(
+        direct_ballot_handoff["arithmeticCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_arithmetic_certificate_hash()
+            .expect("direct ballot arithmetic certificate hash")
+    );
+    assert_eq!(
+        direct_ballot_handoff["acceptedPublicKeyMaterial"]["publicKeyShareMaterialSetRoot"],
+        package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
+    );
+    let ballot_creation_policy = &direct_ballot_handoff["supportedBallotCreationPolicy"];
+    assert_eq!(
+        ballot_creation_policy["acceptedPackageObjectType"],
+        "EncryptedBallotPackage"
+    );
+    assert_eq!(
+        ballot_creation_policy["validityStatementId"],
+        "BallotValidityStatement-v1"
+    );
+    assert_eq!(
+        ballot_creation_policy["arithmeticCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_arithmetic_certificate_hash()
+            .expect("direct ballot arithmetic certificate hash")
+    );
+    assert_eq!(ballot_creation_policy["optionCount"], 20);
+    assert_eq!(ballot_creation_policy["scoreDomain"]["minimum"], 1);
+    assert_eq!(ballot_creation_policy["scoreDomain"]["maximum"], 10);
+    assert_eq!(ballot_creation_policy["scoreDomain"]["bucketCount"], 10);
+    assert_eq!(ballot_creation_policy["plaintextModulus"], 65_537);
+    for forbidden_field_name in [
+        "scoreHash",
+        "plaintextScores",
+        "encryptionRandomness",
+        "proofWitness",
+        "fixtureSeed",
+        "developmentPlaintext",
+    ] {
+        assert!(
+            ballot_creation_policy["forbiddenPackageFields"]
+                .as_array()
+                .expect("forbidden package fields")
+                .iter()
+                .any(|field_name| field_name.as_str() == Some(forbidden_field_name)),
+            "ballot creation policy must forbid {forbidden_field_name}"
+        );
+    }
+    let handoff_json =
+        serde_json::to_string(accepted_handoff).expect("accepted setup handoff JSON");
+    for forbidden_fragment in [
+        "setupSeed",
+        "setupPrivateWitness",
+        "proofRandomnessSeedHex",
+        "developmentPlaintext",
+    ] {
+        assert!(
+            !handoff_json.contains(forbidden_fragment),
+            "accepted setup handoff must not contain {forbidden_fragment}"
+        );
+    }
 }
 
 #[test]

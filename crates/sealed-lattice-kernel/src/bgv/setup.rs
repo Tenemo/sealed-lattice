@@ -32,8 +32,10 @@ mod vss;
 mod tests;
 
 pub(crate) use accepted_setup::{
-    derive_collective_bgv_setup_public_derivations_from_request,
-    describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
+    COLLECTIVE_BGV_SETUP_PROFILE_ID, derive_collective_bgv_setup_public_derivations_from_request,
+    describe_collective_bgv_setup_profile, direct_ballot_creation_policy_hash,
+    direct_ballot_creation_policy_value, public_bgv_key_from_accepted_setup_public_key_material,
+    verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
@@ -76,6 +78,10 @@ use crate::{
     bgv::{
         coefficient_codec::{
             coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
+        },
+        direct_ballots::{
+            direct_ballot_arithmetic_certificate_hash, direct_ballot_encoder_matrix_root,
+            direct_ballot_reserved_slot_rule_hash,
         },
         encoding::encode_batch_plaintext_slots,
         evaluator::{
@@ -394,6 +400,14 @@ pub(crate) fn validate_private_setup_seed_from_passive_setup_package(
     Ok(())
 }
 
+pub(crate) fn public_bgv_key_from_passive_setup_package(
+    setup_package: &Value,
+) -> CanonicalResult<BgvPublicKey> {
+    validation::validate_setup_package_shape(setup_package)?;
+    validation::validate_setup_package_internal_bindings(setup_package)?;
+    public_bgv_key_from_validated_passive_setup_package(setup_package)
+}
+
 pub(crate) fn development_evaluator_key_from_passive_setup_package(
     setup_package: &Value,
     private_setup_seed: &str,
@@ -416,24 +430,33 @@ pub(crate) fn development_evaluator_key_from_passive_setup_package(
             &private_setup_seed_hash,
             &participant_identities,
         );
+    let public_key = public_bgv_key_from_validated_passive_setup_package(setup_package)?;
+    let public_key_components = public_key.into_components();
+
+    DevelopmentBgvKey::from_collective_components(
+        collective_secret_coefficients,
+        public_key_components.component_zero_coefficients_by_modulus,
+        public_key_components.component_one_coefficients_by_modulus,
+    )
+}
+
+fn public_bgv_key_from_validated_passive_setup_package(
+    setup_package: &Value,
+) -> CanonicalResult<BgvPublicKey> {
     let collective_public_key_coefficients =
         key_material::collective_public_key_coefficients_by_modulus_from_setup_package(
             setup_package,
         )?;
-    let public_b = collective_public_key_coefficients
+    let public_component_zero = collective_public_key_coefficients
         .iter()
         .map(|coefficients| coefficients.component_zero_coefficients.clone())
         .collect::<Vec<_>>();
-    let public_a = collective_public_key_coefficients
+    let public_component_one = collective_public_key_coefficients
         .iter()
         .map(|coefficients| coefficients.component_one_coefficients.clone())
         .collect::<Vec<_>>();
 
-    DevelopmentBgvKey::from_collective_components(
-        collective_secret_coefficients,
-        public_b,
-        public_a,
-    )
+    BgvPublicKey::from_components(public_component_zero, public_component_one)
 }
 
 use input::read_passive_setup_input;

@@ -169,6 +169,12 @@ export type BgvRnsProfileDescription = {
     readonly batchLayoutBindingHash: ProtocolHash;
     readonly ballotScoreEncodingProfileHash: ProtocolHash;
     readonly encryptedBallotLayoutHash: ProtocolHash;
+    readonly directBallotReservedSlotRule: unknown;
+    readonly directBallotReservedSlotRuleHash: ProtocolHash;
+    readonly directBallotEncoderMatrix: unknown;
+    readonly directBallotEncoderMatrixRoot: ProtocolHash;
+    readonly directBallotArithmeticCertificate: unknown;
+    readonly directBallotArithmeticCertificateHash: ProtocolHash;
     readonly encryptedBallotAggregateProfileHash: ProtocolHash;
     readonly directAggregateLayoutHash: ProtocolHash;
     readonly directComparisonProfileHash: ProtocolHash;
@@ -371,6 +377,19 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly sharingDomain: 'per-rns-prime';
     readonly completionRule: 'full-roster';
     readonly participantCount: 10;
+    readonly thresholdProfile: Readonly<{
+        readonly objectType: 'CollectiveBgvSetupThresholdProfile';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly participantCount: 10;
+        readonly setupCompletionQuorum: 10;
+        readonly ballotReleaseQuorum: 10;
+        readonly finalityQuorum: 10;
+        readonly decryptionThreshold: 4;
+        readonly completionRule: 'full-roster';
+        readonly livenessModel: 'secure-with-abort';
+    }>;
+    readonly thresholdProfileHash: ProtocolHash;
     readonly qSetupComplete: 10;
     readonly qBallotRelease: 10;
     readonly qFinal: 10;
@@ -610,6 +629,7 @@ export type BgvAcceptedSetupHandoff = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
     readonly setupProfileHash: ProtocolHash;
     readonly qShareHash: ProtocolHash;
     readonly commitmentProfileHash: ProtocolHash;
@@ -618,8 +638,58 @@ export type BgvAcceptedSetupHandoff = {
     readonly directBallotEncryptionHandoff: {
         readonly status: 'accepted-collective-public-key-root-bound-for-direct-ballot-encryption';
         readonly collectivePublicKeyRoot: ProtocolHash;
+        readonly bgvPublicKeyRoot: ProtocolHash;
+        readonly bgvProfileHash: ProtocolHash;
+        readonly canonicalCiphertextConventionHash: ProtocolHash;
+        readonly batchEncoderHash: ProtocolHash;
+        readonly batchLayoutBindingHash: ProtocolHash;
+        readonly ballotScoreEncodingProfileHash: ProtocolHash;
+        readonly encryptedBallotLayoutHash: ProtocolHash;
+        readonly directBallotReservedSlotRuleHash: ProtocolHash;
+        readonly directBallotEncoderMatrixRoot: ProtocolHash;
+        readonly witnessPartitionProfileHash: ProtocolHash;
+        readonly arithmeticCertificateHash: ProtocolHash;
+        readonly ballotValidityProofProfileHash: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
+        readonly acceptedPublicKeyMaterial: Readonly<{
+            readonly materialSource: string;
+            readonly collectivePublicKeyRoot: ProtocolHash;
+            readonly bgvPublicKeyRoot: ProtocolHash;
+            readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+            readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
+        }>;
+        readonly supportedBallotCreationPolicy: Readonly<{
+            readonly objectType: 'DirectEncryptedBallotCreationPolicy';
+            readonly objectVersion: 1;
+            readonly setupProfileId: 'CollectiveBgvSetup-v1';
+            readonly acceptedPackageObjectType: 'EncryptedBallotPackage';
+            readonly validityStatementId: 'BallotValidityStatement-v1';
+            readonly proofProfileHash: ProtocolHash;
+            readonly bgvProfileHash: ProtocolHash;
+            readonly canonicalCiphertextConventionHash: ProtocolHash;
+            readonly batchEncoderHash: ProtocolHash;
+            readonly batchLayoutBindingHash: ProtocolHash;
+            readonly ballotScoreEncodingProfileHash: ProtocolHash;
+            readonly encryptedBallotLayoutHash: ProtocolHash;
+            readonly directBallotReservedSlotRuleHash: ProtocolHash;
+            readonly directBallotEncoderMatrixRoot: ProtocolHash;
+            readonly witnessPartitionProfileHash: ProtocolHash;
+            readonly arithmeticCertificateHash: ProtocolHash;
+            readonly optionCount: 20;
+            readonly scoreDomain: Readonly<{
+                readonly minimum: 1;
+                readonly maximum: 10;
+                readonly bucketCount: 10;
+                readonly unsetUiValue: 1;
+            }>;
+            readonly reservedSlotRule: unknown;
+            readonly plaintextModulus: 65537;
+            readonly randomnessBoundary: string;
+            readonly creatorReturnPolicy: string;
+            readonly forbiddenPackageFields: readonly string[];
+        }>;
+        readonly supportedBallotCreationPolicyHash: ProtocolHash;
     };
     readonly publicAggregationHandoff: {
         readonly status: 'accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root';
@@ -647,6 +717,59 @@ export type BgvAcceptedSetupHandoff = {
         readonly heSecurityCertificateHash: ProtocolHash;
     };
     readonly acceptedSetupHandoffRoot: ProtocolHash;
+};
+
+export type DirectBallotAcceptedPublicKeyMaterial = {
+    readonly objectType: 'DirectBallotAcceptedPublicKeyMaterial';
+    readonly objectVersion: 1;
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly setupProfileHash: ProtocolHash;
+    readonly qShareHash: ProtocolHash;
+    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupEpoch: string;
+    readonly setupPackageHash: ProtocolHash;
+    readonly acceptedSetupHandoffRoot: ProtocolHash;
+    readonly bgvProfileHash: ProtocolHash;
+    readonly batchEncoderHash: ProtocolHash;
+    readonly batchLayoutBindingHash: ProtocolHash;
+    readonly ballotScoreEncodingProfileHash: ProtocolHash;
+    readonly encryptedBallotLayoutHash: ProtocolHash;
+    readonly directBallotReservedSlotRuleHash: ProtocolHash;
+    readonly directBallotEncoderMatrixRoot: ProtocolHash;
+    readonly arithmeticCertificateHash: ProtocolHash;
+    readonly ballotValidityProofProfileHash: ProtocolHash;
+    readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly bgvPublicKeyRoot: ProtocolHash;
+    readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+    readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
+    readonly commonRandomness: Readonly<{
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly publicDerivations: BgvCollectiveSetupPublicDerivations;
+    }>;
+    readonly collectivePublicKey: BgvJsonRecord &
+        Readonly<{
+            readonly objectType: 'CollectivePublicKey';
+            readonly objectVersion: 1;
+            readonly setupProfileId: 'CollectiveBgvSetup-v1';
+            readonly publicMatrixSeedHash: ProtocolHash;
+            readonly publicAPolynomialRoot: ProtocolHash;
+            readonly collectivePublicKeyRoot: ProtocolHash;
+            readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+            readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
+            readonly aggregateCoefficientVectorsByLimb: readonly (BgvJsonRecord &
+                Readonly<{
+                    readonly rnsLimbIndex: number;
+                    readonly rnsPrime: number;
+                    readonly component: 'b';
+                    readonly coefficientByteLength: number;
+                    readonly coefficientVectorHash512: string;
+                    readonly coefficientsLeHex: string;
+                }>)[];
+        }>;
 };
 
 export type BgvCollectiveSetupVerification = {
