@@ -79,12 +79,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
-        "statusLabels": [
-            "CollectivePublicKeyShareAggregationBound",
-            "BgvPublicKeyCoefficientMaterialBound",
-            "BgvAlgebraicPublicKeyProofMissing",
-            "NoExternallySuppliedSetupMaterialSecretReconstruction"
-        ],
     }))
 }
 

@@ -2,7 +2,6 @@ import { canonicalJson } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ProtocolHash,
-    ProtocolVerificationStatusLabel,
     RefusalRecord,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
@@ -361,10 +360,6 @@ const verifyRosterManifestTranscriptUnchecked = (
     }
 
     const forkEvidence = boardResult.forkEvidence;
-    const statusLabels: readonly ProtocolVerificationStatusLabel[] =
-        conflictingManifest === undefined && forkEvidence === undefined
-            ? []
-            : ['boardForkSuspected', 'boardEvidencePublished', 'forkDetected'];
     if (conflictingManifest !== undefined) {
         refusedObjects.push(
             createRefusal(
@@ -380,7 +375,6 @@ const verifyRosterManifestTranscriptUnchecked = (
 
     return {
         ok: transcriptAccepted,
-        statusLabels,
         acceptedHashes: transcriptAccepted
             ? uniqueStrings([
                   ...boardResult.acceptedHashes,
@@ -414,7 +408,6 @@ export const verifyRosterManifestTranscript = (
     } catch {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

@@ -125,12 +125,6 @@ impl TranscriptCoreStatus {
             Self::TranscriptCoreVerified => 1,
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::TranscriptCoreVerified => "TranscriptCoreVerified",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,8 +172,6 @@ pub struct TranscriptCoreAnalysis {
     pub chunk_root: String,
     #[serde(rename = "chunkSize")]
     pub chunk_size: u64,
-    #[serde(rename = "statusLabels")]
-    pub status_labels: Vec<&'static str>,
     pub title: String,
     pub sequence: u64,
     #[serde(rename = "payloadHex")]

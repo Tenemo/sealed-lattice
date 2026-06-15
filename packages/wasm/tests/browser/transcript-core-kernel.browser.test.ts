@@ -42,7 +42,6 @@ describe('transcript-core kernel in browsers', () => {
             objectHash512:
                 foundationTranscriptCoreFixture.expectedObjectHash512,
             chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
-            statusLabels: foundationTranscriptCoreFixture.expectedStatusLabels,
         });
     });
 

@@ -71,11 +71,6 @@ pub(super) fn generate_target_decryption_share(
         "shareEquation": TARGET_SHARE_EQUATION,
         "shareRoot": share_root,
         "sharePayload": payload,
-        "statusLabels": [
-            "TargetBoundPartDecComputed",
-            "AcceptedTargetContextBound",
-            "ShareProofCertificationPending"
-        ],
     }))
 }
 

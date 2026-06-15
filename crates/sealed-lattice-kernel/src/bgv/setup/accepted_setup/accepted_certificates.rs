@@ -1413,21 +1413,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
         },
         "acceptedForDirectEvaluatorReplay": post_quantum_accepted && classical_accepted,
         "acceptedForTargetDecryption": false,
-        "statusLabels": if post_quantum_accepted && classical_accepted {
-            vec![
-                "HEStandardPostQuantum128Accepted",
-                "HEStandardClassical128Accepted",
-                "DataBasisLargestExposedModulusAccepted",
-                "DirectSetupEvaluatorHeParameterBoundaryAccepted",
-                "SpecialPrimeNotPubliclyExposedOnAcceptedPath",
-                "TargetDecryptionReadinessRefusedUntilQTargetCertificate",
-            ]
-        } else {
-            vec![
-                "HEStandardSecurityRejected",
-                "DataBasisLargestExposedModulusRejected",
-            ]
-        },
     }))
 }
 

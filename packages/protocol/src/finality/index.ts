@@ -1,7 +1,6 @@
 import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
 import type {
     ConflictingHeadEvidence,
-    ProtocolVerificationStatusLabel,
     RefusalRecord,
     TargetFinalityRecord,
     TargetFinalityVerification,
@@ -587,17 +586,6 @@ const verifyTargetFinalityUnchecked = (
     const forkEvidence = finalityForkEvidence ?? boardResult.forkEvidence;
     const equivocatingWitnessIdentities =
         forkEvidence?.equivocatingWitnessIdentities ?? [];
-    const statusLabels: readonly ProtocolVerificationStatusLabel[] =
-        forkEvidence === undefined
-            ? []
-            : uniqueStrings([
-                  'boardForkSuspected',
-                  'boardEvidencePublished',
-                  'forkDetected',
-                  ...(equivocatingWitnessIdentities.length > 0
-                      ? (['witnessEquivocationEvidence'] as const)
-                      : []),
-              ]);
     const acceptedHashes = uniqueStrings([
         ...boardResult.acceptedHashes,
         input.record.targetFinalityRecordHash,
@@ -610,7 +598,6 @@ const verifyTargetFinalityUnchecked = (
 
     return {
         ok: finalityAccepted,
-        statusLabels,
         acceptedHashes: finalityAccepted ? acceptedHashes : [],
         refusedObjects:
             forkEvidence === undefined
@@ -650,7 +637,6 @@ export const verifyTargetFinality = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

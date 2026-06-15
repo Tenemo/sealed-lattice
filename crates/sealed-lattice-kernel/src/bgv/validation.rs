@@ -29,9 +29,6 @@ pub(crate) fn bgv_profile_rejection(
         "acceptedHashes": [],
         "refusedObjects": [refused_object],
         "unresolvedReason": "BGVProfileRejected",
-        "statusLabels": [
-            "BGVProfileRejected"
-        ],
     })
 }
 
@@ -68,11 +65,6 @@ pub(crate) fn validate_plaintext_hex(
         "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
         "plaintextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
-        "statusLabels": [
-            "BGVProfileVerified",
-            "CoefficientDomainCanonical",
-            "PlaintextRootBound"
-        ],
     }))
 }
 
@@ -124,11 +116,6 @@ pub(crate) fn validate_ciphertext_hex(
         "layoutHash": first.encrypted_ballot_aggregate_layout_hash,
         "ciphertextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
-        "statusLabels": [
-            "BGVProfileVerified",
-            "CoefficientDomainCanonical",
-            "CiphertextRootBound"
-        ],
     }))
 }
 

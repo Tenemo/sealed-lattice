@@ -613,7 +613,6 @@ export const verifyRosterExternalAcceptance = (
 
         return {
             ok: refusedObjects.length === 0,
-            statusLabels: refusedObjects.length === 0 ? ['rosterFrozen'] : [],
             acceptedHashes:
                 refusedObjects.length === 0
                     ? [acceptance.rosterExternalAcceptanceHash]
@@ -627,7 +626,6 @@ export const verifyRosterExternalAcceptance = (
     } catch {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

@@ -39,7 +39,6 @@ const requiredPublicFunctions = [
         'deriveFrozenRosterProfile',
         publicApiRuntimeRecord.deriveFrozenRosterProfile,
     ],
-    ['deriveLifecycleLabels', publicApiRuntimeRecord.deriveLifecycleLabels],
     ['derivePollSpecHash', publicApiRuntimeRecord.derivePollSpecHash],
     ['deriveThresholdProfile', publicApiRuntimeRecord.deriveThresholdProfile],
     [
@@ -185,7 +184,6 @@ describe('election foundation public package API in Node', () => {
             label: 'TranscriptCoreVerified',
             objectHash512: transcriptCoreFixture.expectedObjectHash512,
             chunkRoot: transcriptCoreFixture.expectedChunkRoot,
-            statusLabels: ['TranscriptCoreVerified'],
         });
     });
 });

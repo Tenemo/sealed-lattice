@@ -62,8 +62,6 @@ pub struct GoldenTranscriptCoreFixture {
     pub expected_chunk_root: String,
     #[serde(rename = "chunkSize")]
     pub chunk_size: u64,
-    #[serde(rename = "expectedStatusLabels")]
-    pub expected_status_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -208,11 +206,6 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
     }
     let canonical_bytes = decode_hex(&fixture.canonical_bytes_hex)?;
     let analysis = analyze_canonical_object(&canonical_bytes, fixture.chunk_size)?;
-    let status_labels: Vec<String> = analysis
-        .status_labels
-        .iter()
-        .map(|label| (*label).to_string())
-        .collect();
 
     compare_fixture_value(
         "objectType",
@@ -269,18 +262,11 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         fixture.expected_chunk_root.as_str(),
         analysis.chunk_root.as_str(),
     )?;
-    compare_fixture_value(
-        "expectedStatusLabels",
-        fixture.expected_status_labels.as_slice(),
-        status_labels.as_slice(),
-    )?;
-
     Ok(json!({
         "verified": true,
         "caseName": fixture.case_name,
         "objectHash512": analysis.object_hash512,
         "chunkRoot": analysis.chunk_root,
-        "statusLabels": analysis.status_labels,
     }))
 }
 
@@ -344,11 +330,6 @@ fn build_golden_fixture(
         expected_object_hash512: analysis.object_hash512,
         expected_chunk_root: analysis.chunk_root,
         chunk_size: analysis.chunk_size,
-        expected_status_labels: analysis
-            .status_labels
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
     })
 }
 

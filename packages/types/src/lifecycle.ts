@@ -1,6 +1,4 @@
 import type { ProtocolHash } from './protocol-hash.js';
-/** Result claim labels used after decryption and verification complete. */
-export type ResultClaimLabel = 'fullyVerified';
 
 /** Backend corruption model used when deriving threshold profiles. */
 export type HeBackendCorruptionModel =
@@ -219,95 +217,10 @@ export type LifecycleState =
     | 'outsideClaim'
     | 'forkDetected';
 
-/** Primary non-failure status label shown for lifecycle progress. */
-export type PrimaryStatusLabel =
-    | 'ballotProofsVerified'
-    | 'ballotSubmitted'
-    | 'encryptedBallotAggregateComputed'
-    | 'encryptedBallotsSelected'
-    | 'evaluatorReplayed'
-    | 'forkDetected'
-    | 'fullyVerified'
-    | 'outsideClaim'
-    | 'pending'
-    | 'resultDecoded'
-    | 'rosterFrozen'
-    | 'targetAccepted';
-
-/** Failure status label shown when transcript or profile checks cannot proceed. */
-export type FailureStatusLabel =
-    | 'ballotProofsMissing'
-    | 'boardEvidencePublished'
-    | 'boardForkSuspected'
-    | 'evaluatorReplayMissing'
-    | 'forkDetected'
-    | 'missingDecryptionShares'
-    | 'missingTargetFinality'
-    | 'outsideMeasuredRuntimeProfile'
-    | 'rejectedBallotProofProfile'
-    | 'rejectedBoardFinalityProfile'
-    | 'rejectedEvaluatorReplayProfile'
-    | 'setupIncomplete'
-    | 'turnoutFloorNotReached'
-    | 'unsupportedBackendProfile'
-    | 'unsupportedBgvProfile'
-    | 'unsupportedMobileProfile'
-    | 'unsupportedTargetDecryptionProfile'
-    | 'witnessEquivocationEvidence';
-
-/** Mode or caveat status label attached to lifecycle outputs. */
-export type ModeStatusLabel =
-    | 'activeMaliciousClosure'
-    | 'casualMicroRoster'
-    | 'directEncryptedBallotPath'
-    | 'longRunningCryptographicCheck'
-    | 'measuredRuntimeProfile'
-    | 'mobileReplayProfile'
-    | 'targetDecryptionClosure';
-
 /** Allowed lifecycle transition edge. */
 export type LifecycleTransition = {
     readonly from: LifecycleState;
     readonly to: LifecycleState;
-};
-
-/** Input used to derive lifecycle, failure, and mode labels. */
-export type LifecycleLabelInput = {
-    readonly lifecycleState: LifecycleState;
-    readonly thresholdProfile: ThresholdProfile;
-    readonly securityProfileIds?: readonly string[];
-    readonly localRosterAccepted?: boolean;
-    readonly ownBallotSubmitted?: boolean;
-    readonly witnessEquivocationEvidence?: boolean;
-    readonly targetFinalityNotReached?: boolean;
-    readonly ballotProofsMissing?: boolean;
-    readonly evaluatorReplayMissing?: boolean;
-    readonly backendProfileRejected?: boolean;
-    readonly bgvProfileRejected?: boolean;
-    readonly ballotProofProfileRejected?: boolean;
-    readonly evaluatorReplayProfileRejected?: boolean;
-    readonly targetDecryptionProfileRejected?: boolean;
-    readonly decryptionThresholdNotReached?: boolean;
-    readonly boardFinalityProfileRejected?: boolean;
-    readonly runtimeProfileRejected?: boolean;
-    readonly outsideMeasuredRuntimeProfile?: boolean;
-    readonly measuredRuntimeProfile?: boolean;
-    readonly mobileReplayEvidencePresent?: boolean;
-    readonly longRunningCryptographicCheck?: boolean;
-    readonly runtimeClaimGatePassed?: boolean;
-    readonly directProofTransportPresent?: boolean;
-    readonly targetDecryptionCertificatePresent?: boolean;
-    readonly targetDecryptionClosureApplied?: boolean;
-    readonly activeMaliciousClosureApplied?: boolean;
-    readonly decodedResultLayoutVerified?: boolean;
-};
-
-/** Derived lifecycle labels for device-facing status presentation. */
-export type LifecycleLabels = {
-    readonly primary: readonly PrimaryStatusLabel[];
-    readonly failures: readonly FailureStatusLabel[];
-    readonly modes: readonly ModeStatusLabel[];
-    readonly resultClaimLabels: readonly ResultClaimLabel[];
 };
 
 /** Public protocol action checked by capability helpers. */

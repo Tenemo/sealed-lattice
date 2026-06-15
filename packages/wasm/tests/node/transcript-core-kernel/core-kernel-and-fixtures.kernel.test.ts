@@ -516,7 +516,6 @@ describe('transcript-core kernel in Node', () => {
             objectHash512:
                 foundationTranscriptCoreFixture.expectedObjectHash512,
             chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
-            statusLabels: foundationTranscriptCoreFixture.expectedStatusLabels,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
             verified: true,

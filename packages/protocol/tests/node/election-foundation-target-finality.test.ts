@@ -296,9 +296,6 @@ describe('target finality', () => {
         expect(verification.ok).toBe(false);
         expect(verification.acceptedHashes).toEqual([]);
         expect(verification.targetFinalityRecordHash).toBeUndefined();
-        expect(verification.statusLabels).toEqual(
-            expect.arrayContaining(['witnessEquivocationEvidence']),
-        );
         expect(verification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),
         );

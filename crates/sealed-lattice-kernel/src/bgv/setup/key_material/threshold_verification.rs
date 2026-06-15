@@ -58,10 +58,5 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
         "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": threshold_share_verification_key_hash,
         "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
-        "statusLabels": [
-            "ThresholdVerificationMaterialBound",
-            "PassiveSetupVerificationScopeOnly",
-            "TargetDecryptionVerificationRootsBound"
-        ],
     }))
 }

@@ -31,7 +31,6 @@ type BoardInclusionEvidence = BoardEvidence & {
 
 type SignedBoardShellVerificationBase = {
     readonly ok: boolean;
-    readonly statusLabels: BoardConsistencyVerification['statusLabels'];
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence: BoardConsistencyVerification['forkEvidence'];
@@ -108,7 +107,6 @@ export const buildSignedBoardShellVerificationBase = (
     },
 ): SignedBoardShellVerificationBase => ({
     ok: evidence.refusedObjects.length === 0,
-    statusLabels: evidence.boardResult.statusLabels,
     acceptedHashes:
         evidence.refusedObjects.length === 0 ? evidence.acceptedHashes : [],
     refusedObjects: evidence.refusedObjects,

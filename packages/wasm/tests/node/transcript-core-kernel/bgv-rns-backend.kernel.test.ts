@@ -8,7 +8,6 @@ import {
 type BgvProfileRejected = {
     readonly ok: false;
     readonly unresolvedReason: 'BGVProfileRejected';
-    readonly statusLabels: readonly string[];
     readonly refusedObjects: readonly {
         readonly code: 'BGVProfileRejected';
         readonly reasonCode: string;
@@ -25,7 +24,6 @@ const expectBgvProfileRejected = (
         unresolvedReason: 'BGVProfileRejected',
     });
     const rejection = value as BgvProfileRejected;
-    expect(rejection.statusLabels).toContain('BGVProfileRejected');
     expect(
         rejection.refusedObjects.some(
             (refusedObject) => refusedObject.code === 'BGVProfileRejected',
@@ -158,9 +156,6 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(encoded.canonicalByteLength).toBe(90_441);
         expect(encoded.batchLayoutBindingHash).toBe(
             profile.batchLayoutBindingHash,
-        );
-        expect(encoded.statusLabels).toContain(
-            'DirectEncryptedBallotAggregateLayoutBound',
         );
         expect(encoded.sampledSlots).toEqual(
             expect.arrayContaining([
@@ -303,7 +298,6 @@ describe('BGV-RNS backend kernel commands', () => {
             BgvProfileRejected
         >;
 
-        expect(fixture.statusLabels).toContain('NotEncryptionEvidence');
         expectProtocolHash(fixture.ciphertextRoot, 'ciphertext root');
         expectProtocolHash(
             fixture.canonicalBytesHash512,
@@ -352,9 +346,6 @@ describe('BGV-RNS backend kernel commands', () => {
         );
         expect(baseConversion.convertedPlaintextRoot).not.toBe(
             baseConversion.sourcePlaintextRoot,
-        );
-        expect(baseConversion.statusLabels).toContain(
-            'GenericKeySwitchSurfaceNotExported',
         );
     });
 });

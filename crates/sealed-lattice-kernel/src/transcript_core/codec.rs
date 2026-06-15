@@ -287,7 +287,6 @@ pub fn analyze_canonical_object(
         object_hash512: object_root(bytes),
         chunk_root: chunk_root(bytes, chunk_size_usize)?,
         chunk_size,
-        status_labels: vec![object.status.label()],
         title: object.title,
         sequence: object.sequence,
         payload_hex: encode_hex(&object.payload),

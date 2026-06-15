@@ -189,7 +189,6 @@ export type BgvObjectValidation = {
     readonly plaintextRoot?: ProtocolHash;
     readonly ciphertextRoot?: ProtocolHash;
     readonly canonicalBytesHash512: string;
-    readonly statusLabels: readonly string[];
 };
 
 export type BgvCanonicalObjectAnalysis = {
@@ -200,7 +199,6 @@ export type BgvCanonicalObjectAnalysis = {
     readonly level: number;
     readonly coefficientCount: number;
     readonly layoutHash: ProtocolHash;
-    readonly statusLabels: readonly string[];
 };
 
 export type BgvProfileRejection = {
@@ -214,7 +212,6 @@ export type BgvProfileRejection = {
         readonly objectHash?: ProtocolHash;
     }[];
     readonly unresolvedReason: 'BGVProfileRejected';
-    readonly statusLabels: readonly string[];
 };
 
 export type BgvEvaluatorOperationValidation =
@@ -223,7 +220,6 @@ export type BgvEvaluatorOperationValidation =
           readonly operation: 'validateBgvEvaluatorOperation';
           readonly acceptedOperation: string;
           readonly allowedEvaluatorOpsHash: ProtocolHash;
-          readonly statusLabels: readonly string[];
       }
     | BgvProfileRejection;
 
@@ -247,7 +243,6 @@ export type BgvBatchPlaintextEncoding = {
         readonly value: number;
     }[];
     readonly validation: BgvObjectValidation;
-    readonly statusLabels: readonly string[];
     readonly canonicalBytesHex?: string;
 };
 
@@ -258,7 +253,6 @@ export type BgvCiphertextConventionFixture = {
     readonly canonicalByteLength: number;
     readonly componentCount: number;
     readonly validation: BgvObjectValidation;
-    readonly statusLabels: readonly string[];
     readonly canonicalBytesHex?: string;
 };
 
@@ -274,7 +268,6 @@ export type BgvBaseConversionFixture = {
         readonly position: number;
         readonly value: number;
     }[];
-    readonly statusLabels: readonly string[];
 };
 
 export type BgvPassiveSetupParticipantInput =
@@ -308,7 +301,6 @@ export type BgvPassiveSetupPackage = {
         readonly collectivePublicKeyRoot: ProtocolHash;
         readonly collectivePublicKeyCoefficientRoot: ProtocolHash;
         readonly bgvPublicKeyRoot: ProtocolHash;
-        readonly statusLabels: readonly string[];
         readonly record: unknown;
         readonly coefficientMaterial: unknown;
     };
@@ -320,7 +312,6 @@ export type BgvPassiveSetupPackage = {
         readonly keySwitchKeyRoot: ProtocolHash;
         readonly keySwitchDecompositionHash: ProtocolHash;
         readonly rotationKeyRoots: readonly unknown[];
-        readonly statusLabels: readonly string[];
         readonly record: unknown;
         readonly rotSet: unknown;
     };
@@ -334,7 +325,6 @@ export type BgvPassiveSetupPackage = {
         readonly targetPartDecImplemented: boolean;
         readonly targetC1C4StatusAccepted: boolean;
     };
-    readonly statusLabels: readonly string[];
     readonly nonClaims: readonly string[];
 };
 
@@ -344,7 +334,6 @@ export type BgvPassiveSetupVerification = {
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly unknown[];
     readonly unresolvedReason: string | null;
-    readonly statusLabels: readonly string[];
 };
 
 export type BgvCollectiveSetupProfileDescription = {
@@ -929,7 +918,6 @@ export type BgvLocalTrusteeSetupStateVerification = {
     readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
     readonly storageProfile: 'encrypted-local-device-state-required';
     readonly deletionBoundary: 'after-private-vss-aggregation';
-    readonly statusLabels: readonly string[];
 };
 
 export type BgvTargetCiphertextPairInput = {
@@ -952,7 +940,6 @@ export type BgvTargetDecryptionShare = Readonly<
         readonly targetShareProfileHash: ProtocolHash;
         readonly shareRoot: ProtocolHash;
         readonly sharePayload: unknown;
-        readonly statusLabels: readonly string[];
     }
 >;
 
@@ -976,5 +963,4 @@ export type BgvTargetDecryptionResult = {
     readonly decodedTargetIds: readonly number[];
     readonly decodedTargetOrders: readonly number[];
     readonly decryptScaling: number;
-    readonly statusLabels: readonly string[];
 };

@@ -210,7 +210,6 @@ export const verifyCastReceiptShell = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
@@ -444,7 +443,6 @@ export const verifyCloseRecordShell = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

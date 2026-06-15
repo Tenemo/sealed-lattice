@@ -4,9 +4,6 @@ export type BaseClaimProfile = 'FoundationTranscript';
 /** Security closure claimed by transcript-core fixtures. */
 export type TranscriptCoreSecurityClosure = 'FoundationOnly';
 
-/** Successful transcript-core status label returned by fixture verification. */
-export type TranscriptCoreStatusLabel = 'TranscriptCoreVerified';
-
 /** Top-level transcript-core verification label for accepted and rejected fixtures. */
 export type TranscriptCoreVerificationLabel =
     | 'TranscriptCoreVerified'
@@ -65,7 +62,6 @@ export type GoldenTranscriptCoreFixture = {
     readonly expectedObjectHash512: string;
     readonly expectedChunkRoot: string;
     readonly chunkSize: number;
-    readonly expectedStatusLabels: readonly TranscriptCoreStatusLabel[];
 };
 
 /** Negative transcript-core fixture expected to fail canonical decoding. */
@@ -97,7 +93,6 @@ export type TranscriptCoreAnalysis = {
     readonly objectHash512: string;
     readonly chunkRoot: string;
     readonly chunkSize: number;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
     readonly title: string;
     readonly sequence: number;
     readonly payloadHex: string;
@@ -111,7 +106,6 @@ export type GoldenTranscriptCoreFixtureVerification = {
     readonly caseName: string;
     readonly objectHash512: string;
     readonly chunkRoot: string;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
 };
 
 /** Verification result for a malformed transcript-core fixture. */
@@ -130,7 +124,6 @@ export type TranscriptCoreFixtureVerification =
 export type TranscriptCoreVerificationResult = {
     readonly caseName: string;
     readonly label: TranscriptCoreVerificationLabel;
-    readonly statusLabels: readonly TranscriptCoreStatusLabel[];
     readonly objectHash512?: string;
     readonly chunkRoot?: string;
     readonly rejection?: {

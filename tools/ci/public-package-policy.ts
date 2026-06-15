@@ -119,7 +119,6 @@ export const vendoredProtocolRuntimeModules = [
     'finality/index.ts',
     'foundation/index.ts',
     'lifecycle/capabilities.ts',
-    'lifecycle/labels.ts',
     'lifecycle/lifecycle.ts',
     'lifecycle/poll-spec.ts',
     'lifecycle/profiles.ts',
@@ -179,10 +178,6 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'lifecycle/capabilities.js',
         exports: ['evaluateActionCapability'],
-    },
-    {
-        source: 'lifecycle/labels.js',
-        exports: ['deriveLifecycleLabels'],
     },
     {
         source: 'lifecycle/lifecycle.js',

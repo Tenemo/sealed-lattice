@@ -125,11 +125,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
         Value::String(PUBLIC_EVALUATION_KEY_COMPONENT_ENCODING.to_string());
     material["relinearizationKeys"] = Value::Array(relinearization_keys);
     material["rotationKeys"] = Value::Array(rotation_keys);
-    material["statusLabels"] = json!([
-        "PublicEvaluationKeyMaterialGenerated",
-        "SetupPrivateWitnessNotExported",
-        "EvaluationKeyRootBound"
-    ]);
     let public_material_hash = derive_protocol_hash("EvaluationKeySetHash", &material)?;
     material["publicEvaluationKeyMaterialHash"] = Value::String(public_material_hash);
 
@@ -203,11 +198,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
         "relinearizationKeyCount": 1,
         "rotationKeyCount": rotation_keys.len(),
         "rawSecretMaterialExported": false,
-        "statusLabels": [
-            "PreparedPublicEvaluationKeyMaterialGenerated",
-            "SetupPrivateWitnessNotExported",
-            "EvaluationKeyRootBound"
-        ],
     });
 
     Ok(PreparedPassiveSetupPublicEvaluationKeys {

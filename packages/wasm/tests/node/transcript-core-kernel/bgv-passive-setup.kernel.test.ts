@@ -21,7 +21,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
             readonly setupProfileId: string;
             readonly reservedRootsAndHashes: readonly string[];
-            readonly statusLabels: readonly string[];
         };
 
         expect(objectModel.setupProfileId).toBe(
@@ -35,9 +34,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'EvaluationKeySizeProfileHash',
                 'ThresholdShareVerificationKeyRoot',
             ]),
-        );
-        expect(objectModel.statusLabels).toContain(
-            'PassiveBgvSetupCanonicalObjectModelFrozen',
         );
     });
 
@@ -67,16 +63,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
 
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
-        expect(setup.statusLabels).toEqual(
-            expect.arrayContaining([
-                'PassiveBgvSetupGenerated',
-                'CollectivePublicKeyRootBound',
-                'EvaluationKeyRootBound',
-                'PassiveSetupInputReady',
-                'DirectEvaluatorReplayHeSecurityAccepted',
-                'FinalTargetSecurityPendingTargetModulus',
-            ]),
-        );
         expect(setup.nonClaims).toContain('TargetShareProofNotCertified');
         expect(setup.targetDecryptionStatus).toMatchObject({
             targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
@@ -133,9 +119,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             ok: true,
             operation: 'verifyBgvPassiveSetupPackage',
         });
-        expect(verification.statusLabels).toContain(
-            'PassiveBgvSetupPackageVerified',
-        );
     });
 
     it('refuses wrong expected roots and mutated canonical bindings', async () => {
@@ -196,12 +179,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             rawSecretMaterialExported: false,
         });
         expect((material.rotationKeys as readonly unknown[]).length).toBe(0);
-        expect(material.statusLabels).toEqual(
-            expect.arrayContaining([
-                'PublicEvaluationKeyMaterialGenerated',
-                'SetupPrivateWitnessNotExported',
-            ]),
-        );
         expect(
             Object.prototype.hasOwnProperty.call(
                 material,

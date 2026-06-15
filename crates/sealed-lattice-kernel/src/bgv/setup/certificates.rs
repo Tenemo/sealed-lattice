@@ -121,16 +121,6 @@ pub(super) fn setup_certificates(
         "evaluationKeySizeProfileHash": evaluation_key_size_profile_hash,
         "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
         "developmentEncryptionFixtureHash": development_encryption_fixture["fixtureHash"],
-        "statusLabels": [
-            "ActualSecretDistributionRecorded",
-            "ActualErrorDistributionRecorded",
-            "PublicRlweSampleCountsRecorded",
-            "LargestExposedModulusAcceptedForDirectEvaluatorReplay",
-            "DirectEvaluatorReplayHeSecurityAccepted",
-            "TargetThresholdDecryptabilityCompatibilityRecorded",
-            "EvaluationKeySizeCertificateRecorded",
-            "FinalTargetSecurityPendingQTarget"
-        ],
     }))
 }
 
@@ -262,19 +252,6 @@ fn he_security_certificate_for_setup_profile(
         },
         "targetModulusStatus": "target-decryption-Q-target-not-part-of-direct-evaluator-replay-closure",
         "acceptedForDirectEvaluatorReplay": post_quantum_accepted && classical_accepted,
-        "statusLabels": if post_quantum_accepted && classical_accepted {
-            vec![
-                "HEStandardPostQuantum128Accepted",
-                "HEStandardClassical128Accepted",
-                "DataBasisLargestExposedModulusAccepted",
-                "SpecialPrimeNotPubliclyExposedOnAcceptedPath",
-            ]
-        } else {
-            vec![
-                "HEStandardSecurityRejected",
-                "DataBasisLargestExposedModulusRejected",
-            ]
-        },
     }))
 }
 
@@ -497,14 +474,6 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "semanticDecryptionPolicy": "only an accepted target ciphertext after target finality and evaluator replay may request target decryption",
         "aggregateCiphertextPolicy": "direct encrypted ballot aggregate ciphertexts are target-key compatible but never authorized semantic decryption targets",
         "downstreamProtocolStatus": "TargetShareProofAndC1C4CertificationStillDownstream",
-        "statusLabels": [
-            "TargetThresholdDecryptabilityCompatibilityCertified",
-            "CollectivePublicKeyRootBound",
-            "ThresholdVerificationMaterialBound",
-            "DecryptableBgvCiphertextConvention",
-            "TargetPartDecAndRecombinationImplemented",
-            "TargetShareProofAndC1C4CertificationStillDownstream"
-        ],
     }))
 }
 

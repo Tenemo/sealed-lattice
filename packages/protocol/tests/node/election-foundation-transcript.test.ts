@@ -125,9 +125,6 @@ describe('integrated election foundation transcript', () => {
                 'supported-phone mobile runtime evidence',
             ]),
         );
-        expect(verification.statusLabels).not.toEqual(
-            expect.arrayContaining(['fullyVerified']),
-        );
     });
 
     it('rejects integrated foundation mutations with structured refusals', () => {

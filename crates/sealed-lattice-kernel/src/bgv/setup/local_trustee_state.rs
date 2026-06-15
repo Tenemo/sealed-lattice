@@ -102,11 +102,6 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
         "exportPolicy": LOCAL_STATE_EXPORT_POLICY,
         "storageProfile": LOCAL_STATE_STORAGE_PROFILE,
         "deletionBoundary": DELETION_BOUNDARY,
-        "statusLabels": [
-            "LocalTrusteeSetupStateCommitmentVerified",
-            "RawSourceTrusteeShareOpeningDeletionRecorded",
-            "RootsOnlyStateExport"
-        ],
     }))
 }
 

@@ -184,20 +184,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "targetPartDecImplemented": true,
             "targetC1C4StatusAccepted": false,
         },
-        "statusLabels": [
-            "PassiveBgvSetupGenerated",
-            "PassiveSetupDevelopmentFixtureOnly",
-            "FullRosterSetupMaterialGenerated",
-            "CollectivePublicKeyRootBound",
-            "BgvPublicKeyCoefficientMaterialBound",
-            "ThresholdVerificationMaterialBound",
-            "EvaluationKeyRootBound",
-            "TargetDecryptionSetupMaterialMatched",
-            "TargetPartDecAndRecombinationImplemented",
-            "PassiveSetupInputReady",
-            "DirectEvaluatorReplayHeSecurityAccepted",
-            "FinalTargetSecurityPendingTargetModulus"
-        ],
         "nonClaims": [
             "ActiveMaliciousSetupProofMissing",
             "BgvAlgebraicPublicKeyProofMissing",

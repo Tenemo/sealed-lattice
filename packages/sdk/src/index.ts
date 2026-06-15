@@ -1,7 +1,6 @@
 import {
     createSetupPackageVerificationInput as createSetupPackageVerificationInputInternal,
     deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
-    deriveLifecycleLabels as deriveLifecycleLabelsInternal,
     deriveFrozenRosterProfile as deriveFrozenRosterProfileInternal,
     derivePollSpecHash as derivePollSpecHashInternal,
     deriveThresholdProfile as deriveThresholdProfileInternal,
@@ -49,8 +48,6 @@ import type {
     FutureProtocolOperationResult,
     FoundationTranscriptInput,
     FoundationTranscriptVerification,
-    LifecycleLabelInput,
-    LifecycleLabels,
     LifecycleTransition,
     PollSpecInput,
     PollSpecValidation,
@@ -102,7 +99,6 @@ export type {
     ElectionManifest,
     DecryptionShareFilteringMode,
     DecryptionShareSelectionRule,
-    FailureStatusLabel,
     FoundationTranscriptComponentResults,
     FoundationTranscriptInput,
     FoundationTranscriptVerification,
@@ -114,8 +110,6 @@ export type {
     GoldenTranscriptCoreFixtureVerification,
     HeBackendCorruptionModel,
     InclusionProof,
-    LifecycleLabelInput,
-    LifecycleLabels,
     LifecycleState,
     LifecycleTransition,
     MalformedObjectFixture,
@@ -124,19 +118,16 @@ export type {
     ManifestPolicyHashes,
     MlDsaSignatureMode,
     MlDsaSignatureProfile,
-    ModeStatusLabel,
     PollSpec,
     PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     PollSpecValidationErrorCode,
-    PrimaryStatusLabel,
     ProtocolAction,
     ProtocolHash,
     ProtocolObjectType,
     ProtocolRefusalCode,
     ProtocolSignatureEnvelope,
-    ProtocolVerificationStatusLabel,
     RecoveryEpochMapEntry,
     RecoveryEpochUpdate,
     RecoveryEpochVerification,
@@ -145,7 +136,6 @@ export type {
     RefusalReason,
     RefusalRecord,
     RegistrationEntry,
-    ResultClaimLabel,
     RosterExternalAcceptance,
     RosterExternalAcceptanceVerification,
     RosterExternalAcceptanceVerificationInput,
@@ -176,7 +166,6 @@ export type {
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
     TranscriptCoreSecurityClosure,
-    TranscriptCoreStatusLabel,
     TranscriptCoreVerificationLabel,
     TranscriptCoreVerificationResult,
     TrusteeSetupEntry,
@@ -377,11 +366,6 @@ export const isValidLifecycleTransition = (
     transition: LifecycleTransition,
 ): boolean => isValidLifecycleTransitionInternal(transition);
 
-/** Derives user-facing lifecycle, failure, and mode labels for one state. */
-export const deriveLifecycleLabels = (
-    input: LifecycleLabelInput,
-): LifecycleLabels => deriveLifecycleLabelsInternal(input);
-
 /** Evaluates whether a protocol action is allowed in the current context. */
 export const evaluateActionCapability = (
     action: ProtocolAction,
@@ -395,7 +379,6 @@ const unavailableFutureProtocolOperation = (
     operation: string,
 ): FutureProtocolOperationResult => ({
     ok: false,
-    statusLabels: [],
     acceptedHashes: [],
     refusedObjects: [
         {
@@ -724,7 +707,6 @@ export const verifyTranscriptCoreFixture = async (
         return {
             caseName: verification.caseName,
             label: 'TranscriptCoreRejected',
-            statusLabels: [],
             rejection: {
                 code: verification.expectedErrorCode,
             },
@@ -736,6 +718,5 @@ export const verifyTranscriptCoreFixture = async (
         label: 'TranscriptCoreVerified',
         objectHash512: verification.objectHash512,
         chunkRoot: verification.chunkRoot,
-        statusLabels: verification.statusLabels,
     };
 };

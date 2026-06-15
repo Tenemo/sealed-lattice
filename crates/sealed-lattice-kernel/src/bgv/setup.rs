@@ -222,11 +222,6 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "EncryptedComparisonInputHash",
             "EncryptedSparseTargetProjectionHash"
         ],
-        "statusLabels": [
-            "PassiveBgvSetupCanonicalObjectModelFrozen",
-            "PassiveSetupOnly",
-            "TargetDecryptionSetupMaterialMatchedOnly"
-        ],
     }))
 }
 
@@ -327,18 +322,6 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
         ],
         "refusedObjects": [],
         "unresolvedReason": null,
-        "statusLabels": [
-            "PassiveBgvSetupPackageVerified",
-            "PassiveSetupDevelopmentFixtureOnly",
-            "CollectivePublicKeyRootBound",
-            "BgvPublicKeyCoefficientMaterialBound",
-            "ThresholdVerificationMaterialBound",
-            "EvaluationKeyRootBound",
-            "PassiveSetupInputReady",
-            "BgvAlgebraicPublicKeyProofMissing",
-            "DirectEvaluatorReplayHeSecurityAccepted",
-            "FinalTargetSecurityPendingTargetModulus"
-        ],
     }))
 }
 

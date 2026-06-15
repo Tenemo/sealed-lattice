@@ -77,11 +77,5 @@ pub(in crate::bgv::setup) fn evaluation_keys(
         "keySwitchKeyRoot": material_binding.key_switch_key_root,
         "rotationKeyRoots": material_binding.rotation_key_roots,
         "evaluationKeyRoot": evaluation_key_root,
-        "statusLabels": [
-            "RelinearizationKeyMaterialStreamBound",
-            "RotationKeyMaterialStreamBound",
-            "KeySwitchMaterialStreamBound",
-            "SelectedRotSetBound"
-        ],
     }))
 }

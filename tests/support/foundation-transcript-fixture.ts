@@ -255,7 +255,6 @@ export const createFoundationTranscriptCoreFixture = (
             transcriptCoreChunkSize,
         ),
         expectedObjectHash512: transcriptCoreObjectRoot(canonicalBytes),
-        expectedStatusLabels: ['TranscriptCoreVerified'],
         fixtureVersion: 1,
         heSetupProofProfileId: noHeSetupProofProfileId,
         kind: 'golden-transcript-core',

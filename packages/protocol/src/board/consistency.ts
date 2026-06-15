@@ -2,7 +2,6 @@ import type {
     BoardConsistencyInput,
     BoardConsistencyVerification,
     ConflictingHeadEvidence,
-    ProtocolVerificationStatusLabel,
     RefusalRecord,
 } from '@sealed-lattice/types';
 
@@ -169,14 +168,9 @@ const verifyBoardConsistencyUnchecked = (
         suppliedForkEvidence ?? findConflictingHeads(input.signedBoardHeads);
     const boardAccepted =
         refusedObjects.length === 0 && discoveredForkEvidence === undefined;
-    const statusLabels: readonly ProtocolVerificationStatusLabel[] =
-        discoveredForkEvidence === undefined
-            ? []
-            : ['boardForkSuspected', 'boardEvidencePublished', 'forkDetected'];
 
     return {
         ok: refusedObjects.length === 0 && discoveredForkEvidence === undefined,
-        statusLabels,
         acceptedHashes: boardAccepted
             ? uniqueStrings([
                   ...input.signedBoardHeads.map((head) => head.headHash),
@@ -211,7 +205,6 @@ export const verifyBoardConsistency = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

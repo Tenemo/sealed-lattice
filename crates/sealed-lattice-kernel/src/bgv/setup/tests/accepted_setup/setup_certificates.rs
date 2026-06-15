@@ -360,15 +360,6 @@ fn he_security_certificate_accepts_direct_setup_evaluator_parameter_boundary() {
         certificate["errorDistribution"]["certificateStatus"],
         "accepted-for-direct-evaluator-replay-HE-parameter-boundary"
     );
-    assert!(
-        certificate["statusLabels"]
-            .as_array()
-            .expect("HE certificate status labels")
-            .iter()
-            .any(|label| label
-                .as_str()
-                .is_some_and(|text| text == "DirectSetupEvaluatorHeParameterBoundaryAccepted"))
-    );
 }
 
 #[test]

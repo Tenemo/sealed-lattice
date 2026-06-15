@@ -699,7 +699,6 @@ export type LocalTrusteeSetupStateVerification = Readonly<{
     readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
     readonly storageProfile: 'encrypted-local-device-state-required';
     readonly deletionBoundary: 'after-private-vss-aggregation';
-    readonly statusLabels: readonly string[];
 }>;
 
 export type RestoredLocalTrusteeSetupState = Readonly<{

@@ -150,7 +150,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
     ) {
         return {
             ok: refusedObjects.length === 0,
-            statusLabels: [],
             acceptedHashes: [input.actionContext.actionContextHash],
             refusedObjects,
         };
@@ -166,7 +165,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
     ) {
         return {
             ok: refusedObjects.length === 0,
-            statusLabels: [],
             acceptedHashes: [input.actionContext.actionContextHash],
             refusedObjects,
         };
@@ -183,7 +181,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
 
     return {
         ok: false,
-        statusLabels: [],
         acceptedHashes: [],
         refusedObjects,
     };
@@ -197,7 +194,6 @@ export const isActionCurrentForRecoveryEpoch = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
@@ -435,7 +431,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
 
     return {
         ok: refusedObjects.length === 0,
-        statusLabels: boardResult.statusLabels,
         acceptedHashes:
             refusedObjects.length === 0
                 ? [
@@ -467,7 +462,6 @@ export const verifyRecoveryEpochUpdate = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

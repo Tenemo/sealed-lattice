@@ -90,11 +90,6 @@ pub(super) fn recombine_target_decryption_shares(
         "decodedTargetIds": decoded_target_ids,
         "decodedTargetOrders": decoded_target_orders,
         "decryptScaling": 1,
-        "statusLabels": [
-            "TargetBoundRecombinationComputed",
-            "AcceptedTargetContextBound",
-            "ShareProofCertificationPending"
-        ],
     }))
 }
 

@@ -152,11 +152,5 @@ pub(super) fn development_encryption_fixture(
     Ok(json!({
         "fixture": fixture_record,
         "fixtureHash": fixture_hash,
-        "statusLabels": [
-            "DevelopmentEncryptionFixtureBound",
-            "CollectivePublicKeyRootBound",
-            "NotDirectProofEvidence",
-            "NotEvaluatorReplayClosureEvidence"
-        ],
     }))
 }

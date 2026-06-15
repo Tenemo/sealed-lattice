@@ -269,7 +269,6 @@ const deriveValidatedFirstValidOrderUnchecked = (
 
     return {
         ok: refusedObjects.length === 0,
-        statusLabels: [],
         acceptedHashes: uniqueStrings([
             firstValidOrderHash,
             ...orderedCandidates.map((candidate) => candidate.objectHash),
@@ -289,7 +288,6 @@ export const deriveValidatedFirstValidOrder = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

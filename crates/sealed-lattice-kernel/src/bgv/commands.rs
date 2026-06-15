@@ -98,9 +98,6 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
             "operation": "validateBgvEvaluatorOperation",
             "acceptedOperation": operation_name,
             "allowedEvaluatorOpsHash": crate::bgv::profile::allowed_operation_registry_hash()?,
-            "statusLabels": [
-                "BGVEvaluatorOperationAllowed"
-            ],
         }));
     }
 
@@ -288,12 +285,6 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
         "sampledSlots": sample_positions(&encoded.slots),
         "sampledCoefficientsModPlaintext": sample_positions(&encoded.coefficients_mod_plaintext),
         "validation": validation,
-        "statusLabels": [
-            "BGVBatchEncoded",
-            "DirectEncryptedBallotAggregateLayoutBound",
-            "NativeDecodeRoundTripMatched",
-            "PlaintextRootBound"
-        ],
     });
     if include_canonical_bytes_hex {
         value["canonicalBytesHex"] = Value::String(canonical_bytes_hex(&canonical_bytes));
@@ -356,11 +347,6 @@ pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
         "canonicalByteLength": canonical_bytes.len(),
         "componentCount": 2,
         "validation": validation,
-        "statusLabels": [
-            "CiphertextConventionFixture",
-            "NotEncryptionEvidence",
-            "CiphertextRootBound"
-        ],
     });
     if request
         .get("includeCanonicalBytesHex")
@@ -395,10 +381,6 @@ pub(crate) fn generate_bgv_base_conversion_fixture_from_request(
         "convertedBasisId": converted.basis_id,
         "convertedModulusCount": converted.moduli.len(),
         "sampledConvertedResidues": sample_positions(&converted.residues_by_modulus[1]),
-        "statusLabels": [
-            "PlaintextLiftedBaseConversion",
-            "GenericKeySwitchSurfaceNotExported"
-        ],
     }))
 }
 
@@ -414,10 +396,6 @@ pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> Cano
         "level": object.components[0].level,
         "coefficientCount": object.components[0].coefficient_count,
         "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
-        "statusLabels": [
-            "BGVCanonicalObjectParsed",
-            "CoefficientDomainCanonical"
-        ],
     }))
 }
 
@@ -514,14 +492,6 @@ mod tests {
         .expect("encode command");
         assert_eq!(encoded["validation"]["ok"], true);
         assert!(
-            encoded["statusLabels"]
-                .as_array()
-                .expect("labels")
-                .contains(&serde_json::json!(
-                    "DirectEncryptedBallotAggregateLayoutBound"
-                ))
-        );
-        assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({
                 "slots": [1, 2, 3],
                 "level": 0
@@ -592,18 +562,11 @@ mod tests {
 
     #[test]
     fn commands_produce_convention_and_base_conversion_fixtures_without_claiming_encryption() {
-        let ciphertext =
-            generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
-                "leftSlots": [1, 2, 3],
-                "rightSlots": [4, 5, 6]
-            }))
-            .expect("ciphertext fixture");
-        assert!(
-            ciphertext["statusLabels"]
-                .as_array()
-                .expect("labels")
-                .contains(&serde_json::json!("NotEncryptionEvidence"))
-        );
+        generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
+            "leftSlots": [1, 2, 3],
+            "rightSlots": [4, 5, 6]
+        }))
+        .expect("ciphertext fixture");
 
         let base_conversion =
             generate_bgv_base_conversion_fixture_from_request(&serde_json::json!({
