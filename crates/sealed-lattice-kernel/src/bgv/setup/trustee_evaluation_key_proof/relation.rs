@@ -1518,10 +1518,16 @@ impl LimbColumnLayout {
         let linkage_randomness_columns = statement.linkage_randomness_count(limb_index);
         let private_vss_randomness_columns = statement.private_vss_randomness_count(limb_index);
         let ring_degree = statement.ring_degree;
+        // The mask columns are sized from the number of published consistency
+        // claims, so this must mirror consistency_vector_count() exactly. For
+        // private VSS the message (Shamir coefficient) columns carry no
+        // consistency claim (they are pinned by the opening rows plus the
+        // opening-randomness consistency), so the count is the carry plus the
+        // opening-randomness columns, not the full logical column count. Sizing
+        // the masks from the logical column count instead would commit unused
+        // mask columns for claims that are never published.
         let consistency_vector_count = match family_shape {
-            SuccinctSetupProofFamilyShape::PrivateVssShare => {
-                private_vss_coefficient_columns + 1 + private_vss_randomness_columns
-            }
+            SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
             _ => {
                 1 + total_error_columns
                     + if linkage_randomness_columns > 0 {
@@ -1565,7 +1571,13 @@ impl LimbColumnLayout {
         self.family_shape == SuccinctSetupProofFamilyShape::PrivateVssShare
     }
 
-    fn private_vss_logical_columns(&self) -> usize {
+    // Every private-VSS logical witness column committed in the trace: the
+    // message (Shamir coefficient) columns, the carry column, and the
+    // opening-randomness columns. This is the trace width and the length of the
+    // opening lincheck (`publics.linkage`). It deliberately exceeds
+    // consistency_vector_count(), which now claims only the carry and randomness
+    // columns; the message columns remain witnesses pinned by the opening rows.
+    pub(super) fn private_vss_logical_columns(&self) -> usize {
         if self.private_vss_active() {
             self.private_vss_coefficient_columns + 1 + self.private_vss_randomness_columns
         } else {
@@ -1586,7 +1598,18 @@ impl LimbColumnLayout {
     // then the linkage negative indicator and opening-randomness vectors.
     pub(super) fn consistency_vector_count(&self) -> usize {
         if self.private_vss_active() {
-            self.private_vss_logical_columns()
+            // The message (Shamir coefficient) columns are intentionally NOT
+            // consistency-claimed. They are pinned across the commitment fields
+            // by the per-field opening rows plus the ternary opening-randomness
+            // consistency: with the randomness fixed to one integer r* across the
+            // fields, each opening row forces the message to the residues of the
+            // single integer (t - A*r*)_msg, so a masked message consistency
+            // claim would only add zero-knowledge leakage with no soundness gain.
+            // Only the carry and the opening-randomness columns carry consistency
+            // claims. This intentionally diverges from private_vss_logical_columns(),
+            // which still counts the message columns because they remain witness
+            // columns for the opening and share relations (the opening lincheck).
+            1 + self.private_vss_randomness_columns
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()
         }
@@ -1957,12 +1980,17 @@ pub(super) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                 let alpha_value = &consistency_alpha[claim_alpha_index];
                 claim_alpha_index += 1;
                 for half in 0..TRACE_SPLIT {
-                    let witness_value = private_vss_column_value::<Domain>(
-                        column_values,
-                        layout,
-                        consistency_vector,
-                        half,
-                    );
+                    // Consistency vectors are [carry, opening-randomness...]; the
+                    // message columns carry no consistency claim (see
+                    // consistency_vector_count), so index zero is the carry and
+                    // the rest are the opening-randomness columns. This order must
+                    // match the prover's signed_vectors in global_claim_integers.
+                    let witness_value = if consistency_vector == 0 {
+                        column_values[layout.physical_private_vss_carry(half)]
+                    } else {
+                        column_values
+                            [layout.physical_private_vss_randomness(consistency_vector - 1, half)]
+                    };
                     let consistency_product =
                         domain.value_mul(&publics.consistency[repetition][half], &witness_value);
                     accumulated = tower.add(
@@ -2495,12 +2523,14 @@ pub(crate) fn generate_development_trustee_ceremony_slice(
 // Centered bound for a published masked consistency claim: the clear sum is
 // bounded by max witness magnitude * ring degree * (2^bits - 1), and the
 // smudging mask lies in [0, 2^CLAIM_MASK_DIGIT_COUNT).
-// Family-aware clear bound: the private-VSS family uses message_bound (the
-// source prime, about 2^47); every other family uses 2 (centered-binomial
-// magnitude). The mask is one-sided in [0, 2^CLAIM_MASK_DIGIT_COUNT), so the
-// centered claim lies in [-clear_bound, mask_bound + clear_bound]. NOTE: the
-// disclosed smudging figure in accounting.rs does not use this family-aware
-// bound and under-reports private-VSS leakage (see the known-issue note there).
+// Family-aware clear bound: the private-VSS family masks only the carry and the
+// ternary opening-randomness columns (its message columns carry no consistency
+// claim; see consistency_vector_count), so its witness bound is the lifted carry
+// bound (about 2^11); every other family uses 2 (centered-binomial magnitude).
+// The mask is one-sided in [0, 2^CLAIM_MASK_DIGIT_COUNT), so the centered claim
+// lies in [-clear_bound, mask_bound + clear_bound]. The disclosed smudging
+// figure in accounting.rs recomputes from this same carry-driven family bound,
+// so the relation bound and the disclosed leakage figure agree by construction.
 pub(super) fn masked_claim_bounds(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<(i128, i128)> {
@@ -2508,16 +2538,17 @@ pub(super) fn masked_claim_bounds(
     let coefficient_bound = (1_i128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
     let witness_bound = match &statement.private_vss_share {
         Some(private_vss_share) => {
-            let message_bound = i128::from(private_vss_share.source_message_modulus)
-                .checked_sub(1)
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof("private VSS source modulus underflowed")
-                })?;
+            // The message (Shamir coefficient) columns no longer carry a masked
+            // consistency claim: they are pinned by the opening rows plus the
+            // opening-randomness consistency (see consistency_vector_count), so
+            // the published masked claims range only over the carry and the
+            // ternary opening-randomness columns. The lifted carry bound
+            // dominates the magnitude-one randomness, so it is the witness bound.
             let carry_bound = private_vss_share_lifted_carry_bound(
                 private_vss_share.recipient_roster_position,
                 private_vss_share.coefficient_commitments.len(),
             )?;
-            message_bound.max(carry_bound).max(1)
+            carry_bound.max(1)
         }
         None => 2,
     };

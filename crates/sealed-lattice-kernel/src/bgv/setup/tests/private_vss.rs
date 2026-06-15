@@ -253,6 +253,133 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
     );
 }
 
+// Decisive Option A soundness gate. Option A drops the per-field consistency
+// claims on the Shamir coefficient message columns, leaving the commitment
+// opening lincheck as the message column's only binding. This test confirms that
+// binding is load-bearing: a coefficient message that disagrees with what its
+// commitment opens to cannot be packaged into an accepted proof. The tamper
+// keeps the recipient-share Shamir relation satisfied (so the witness-relation
+// self-check and shape checks pass) and leaves the randomness, the carry, and the
+// commitments themselves intact; only the witness message diverges from the zero
+// message the commitment binds. Proof construction enforces exactly the lincheck
+// the verifier checks, so an inconsistent message is rejected at the sumcheck/
+// lincheck stage. If this ever succeeded, the message would be unbound and Option
+// A would be unsound, requiring a revert to a message-binding consistency claim.
+// The honest baseline (identical setup, untampered) is covered by
+// private_vss_succinct_proof_verifier_accepts_canonical_record above.
+#[test]
+fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_opening() {
+    let ring_degree = PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE;
+    let request = private_vss_share_envelope_request(ring_degree);
+    let setup_context = request["setupContext"].clone();
+    let public_matrix_seed_hash = request["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let private_envelope = &request["privateEnvelope"];
+    let private_envelope_aad_hash = private_envelope["privateEnvelopeAadHash"]
+        .as_str()
+        .expect("private envelope AAD hash");
+    let source_trustee_commitment_root = private_envelope["sourceTrusteeCommitmentRoot"]
+        .as_str()
+        .expect("source trustee commitment root");
+    let limb_opening = &private_envelope["rnsShareOpenings"][0];
+    let rns_prime = limb_opening["rnsPrime"].as_u64().expect("RNS prime");
+
+    let opening_randomness_by_shamir_index = (0..4_u64)
+        .map(|shamir_coefficient_index| {
+            randomness_fixture(0, shamir_coefficient_index, ring_degree)
+        })
+        .collect::<Vec<_>>();
+    // The commitments bind the honest, all-zero coefficient messages.
+    let coefficient_commitments = opening_randomness_by_shamir_index
+        .iter()
+        .enumerate()
+        .map(|(shamir_coefficient_index, opening_randomness)| {
+            compute_setup_commitment_for_tests(
+                public_matrix_seed_hash,
+                0,
+                rns_prime,
+                shamir_coefficient_index as u64,
+                &vec![0_u128; ring_degree],
+                opening_randomness,
+                ring_degree,
+            )
+            .expect("zero coefficient commitment")
+        })
+        .collect::<Vec<_>>();
+    let coefficient_commitment_roots = coefficient_commitments
+        .iter()
+        .map(|commitment| setup_commitment_root(commitment).expect("commitment root"))
+        .collect::<Vec<_>>();
+
+    // Tamper the constant-term message of the first Shamir coefficient at one
+    // position. The constant term contributes with trustee-point power one, so the
+    // recipient share at that position must move by the same amount to keep the
+    // witness Shamir relation satisfied; the carry stays zero. The commitments
+    // above still bind the zero message, so the only inconsistency in the witness
+    // is between the message column and its commitment opening.
+    let tampered_message: u64 = 1;
+    let mut coefficient_messages_by_shamir_index = vec![vec![0_u64; ring_degree]; 4];
+    coefficient_messages_by_shamir_index[0][0] = tampered_message;
+    let mut share_values = vec![0_u64; ring_degree];
+    share_values[0] = tampered_message;
+    let share_values_hash = derive_protocol_hash(
+        "PrivateVssLocalVerificationRoot",
+        &serde_json::json!({
+            "objectType": "PrivateVssShareValueVector",
+            "objectVersion": 1,
+            "rnsLimbIndex": 0,
+            "rnsPrime": rns_prime,
+            "shareValues": share_values,
+        }),
+    )
+    .expect("share values hash");
+    let proof_randomness_seed_hex = derive_protocol_hash(
+        "PrivateVssLocalVerificationRoot",
+        &serde_json::json!({
+            "fixture": "private-vss-succinct-proof-tampered-message",
+            "rnsLimbIndex": 0,
+        }),
+    )
+    .expect("private VSS proof randomness seed");
+
+    let generation =
+        private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
+            setup_context: &setup_context,
+            public_matrix_seed_hash,
+            private_envelope_aad_hash,
+            source_trustee_identity: "trustee-0",
+            source_trustee_roster_position: 0,
+            recipient_identity: "trustee-2",
+            recipient_roster_position: 2,
+            source_trustee_commitment_root,
+            rns_limb_index: 0,
+            rns_prime,
+            ring_degree,
+            coefficient_commitment_roots: &coefficient_commitment_roots,
+            share_values: &share_values,
+            share_values_hash: &share_values_hash,
+            coefficient_commitments: &coefficient_commitments,
+            witness: &PrivateVssShareSuccinctProofWitness {
+                coefficient_messages_by_shamir_index,
+                opening_randomness_by_shamir_index,
+                carry_witnesses: vec![0_i128; ring_degree],
+            },
+            proof_randomness_seed_hex: &proof_randomness_seed_hex,
+        });
+
+    let error = generation.expect_err(
+        "a coefficient message that disagrees with its commitment opening must be refused: \
+         the opening lincheck binds the message column even though it carries no consistency claim",
+    );
+    assert!(
+        error.message.contains("sumcheck"),
+        "the rejection must come from the commitment-opening lincheck (the batched sumcheck claim), \
+         not an earlier shape or share-relation check; got: {}",
+        error.message
+    );
+}
+
 #[test]
 fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_share_proofs() {
     let mut request =

@@ -29,8 +29,8 @@ use super::relation::{
     SameSecretLinkageStatement,
 };
 use super::{
-    COMMITMENT_BOUND_FACTOR, DEEP_POINT_COUNT, DOMAIN_BLOWUP, LOW_DEGREE_FINAL_COEFFICIENT_COUNT,
-    LOW_DEGREE_QUERY_COUNT,
+    COMMITMENT_BOUND_FACTOR, CONSISTENCY_REPETITIONS, DEEP_POINT_COUNT, DOMAIN_BLOWUP,
+    LOW_DEGREE_FINAL_COEFFICIENT_COUNT, LOW_DEGREE_QUERY_COUNT,
 };
 use crate::bgv::evaluator::records::MAXIMUM_OPTION_COUNT;
 use crate::bgv::evaluator::top_k::{
@@ -1684,6 +1684,57 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
     );
 }
 
+// Option A invariant: the private-VSS message (Shamir coefficient) columns are
+// committed witnesses (they appear in the logical column set and the opening
+// lincheck) but they carry no cross-field consistency claim. Only the carry and
+// the opening-randomness columns are claimed, so the consistency set is exactly
+// the logical set minus the message columns. This is what bounds the disclosed
+// smudging leakage to the carry-driven figure instead of the full-range message
+// figure. If the consistency set ever silently re-includes the message columns,
+// the leakage accounting and the mask sizing both regress, so pin the shape.
+#[test]
+fn private_vss_consistency_set_excludes_committed_message_columns() {
+    let statement = private_vss_statement_for_context_tests();
+    let layout = LimbColumnLayout::new(&statement, 0).expect("limb layout");
+
+    // The context statement carries four Shamir coefficient commitments, so the
+    // message columns genuinely exist and the exclusion is non-trivial.
+    assert_eq!(
+        layout.private_vss_coefficient_columns, 4,
+        "context statement should expose the four Shamir coefficient message columns"
+    );
+    assert!(
+        layout.private_vss_randomness_columns > 0,
+        "context statement should expose opening-randomness columns"
+    );
+
+    // The committed (logical) column set is messages + carry + randomness.
+    assert_eq!(
+        layout.private_vss_logical_columns(),
+        layout.private_vss_coefficient_columns + 1 + layout.private_vss_randomness_columns
+    );
+
+    // The consistency-claimed set is only carry + randomness; the message
+    // columns are excluded.
+    assert_eq!(
+        layout.consistency_vector_count(),
+        1 + layout.private_vss_randomness_columns,
+        "the consistency set must be the carry plus the opening-randomness columns only"
+    );
+    assert_eq!(
+        layout.private_vss_logical_columns() - layout.consistency_vector_count(),
+        layout.private_vss_coefficient_columns,
+        "exactly the message columns are committed without a consistency claim"
+    );
+
+    // The published claim count, which sizes the masks and the alpha challenges,
+    // tracks the reduced consistency set, not the full logical set.
+    assert_eq!(
+        layout.claim_count(),
+        layout.consistency_vector_count() * CONSISTENCY_REPETITIONS
+    );
+}
+
 #[test]
 fn statement_hash_length_delimits_setup_epoch_and_linkage_seed() {
     let (mut first_statement, _) = generate_development_trustee_instance_with_linkage(
@@ -1924,11 +1975,14 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
 
 #[test]
 fn private_vss_share_accounting_discloses_family_aware_leakage() {
-    // The recipient-private VSS family masks full-range Shamir message residues,
-    // so its disclosed smudging leakage must be the family-aware figure (clear
-    // bound about 2^70, per-claim about 2^-22, total about 2^-5), not the
-    // magnitude-two centered-binomial figure inherited from the base accounting.
-    // This guards against the override silently reverting to the inherited row.
+    // The recipient-private VSS family masks only its carry and ternary
+    // opening-randomness columns; its message columns are pinned cross-field by
+    // the opening rows plus randomness consistency and carry no consistency claim.
+    // So its disclosed smudging leakage must be the carry-driven family-aware
+    // figure (clear bound about 2^34, per-claim about 2^-58, total about 2^-41),
+    // not the magnitude-two centered-binomial figure inherited from the base
+    // accounting, and not the message-driven 2^-22 of the pre-Option-A variant.
+    // This guards against the override silently reverting to either.
     let private_vss = super::accounting::succinct_private_vss_share_accounting_value()
         .expect("private VSS accounting value");
     let eval_key = super::accounting::succinct_evaluation_key_proof_accounting_value()
@@ -1937,15 +1991,15 @@ fn private_vss_share_accounting_discloses_family_aware_leakage() {
     let private_vss_smudging = &private_vss["zeroKnowledge"]["smudgingBudget"];
     assert_eq!(
         private_vss_smudging["clearClaimBoundBits"],
-        serde_json::json!(70)
+        serde_json::json!(34)
     );
     assert_eq!(
         private_vss_smudging["perClaimStatisticalDistanceLog2"],
-        serde_json::json!(-22)
+        serde_json::json!(-58)
     );
     assert_eq!(
         private_vss_smudging["totalLeakageLog2Approximate"],
-        serde_json::json!(-5)
+        serde_json::json!(-41)
     );
     assert_eq!(
         private_vss_smudging["leakageDominatingFamily"],
@@ -1965,7 +2019,8 @@ fn private_vss_share_accounting_discloses_family_aware_leakage() {
 
     // The override must actually differ from the inherited magnitude-two row:
     // the eval-key family stays about 2^-68 per claim, the private-VSS family is
-    // exactly 46 bits weaker.
+    // exactly 10 bits weaker (carry-driven 2^-58), still the leakage-dominating
+    // family but only mildly, not the 46 bits the message-masking variant cost.
     let eval_key_per_claim =
         eval_key["zeroKnowledge"]["smudgingBudget"]["perClaimStatisticalDistanceLog2"]
             .as_i64()
@@ -1974,11 +2029,11 @@ fn private_vss_share_accounting_discloses_family_aware_leakage() {
         .as_i64()
         .expect("private VSS per-claim leakage");
     assert_eq!(eval_key_per_claim, -68);
-    assert_eq!(private_vss_per_claim - eval_key_per_claim, 46);
+    assert_eq!(private_vss_per_claim - eval_key_per_claim, 10);
 
     // The two-prime integer-binding clear bound is corrected away from the
-    // inherited magnitude-two value (2 * N * (2^8 - 1) = 16711680) to the real
-    // full-range-message bound, so the disclosed window margin is honest; the
+    // inherited magnitude-two value (2 * N * (2^8 - 1) = 16711680) to the
+    // carry-driven family bound, so the disclosed window margin is honest; the
     // eval-key family keeps the magnitude-two value.
     assert_ne!(
         private_vss["crossLimbConsistency"]["integerBinding"]["clearClaimBound"],

@@ -403,14 +403,18 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     // Family-aware leakage accounting. The migrated base blocks are computed for
     // magnitude-two centered-binomial witnesses (clear claim bound about 2^24,
     // per-claim statistical distance about 2^-68). The recipient-private VSS
-    // family instead publishes masked claims over full-range Shamir message
-    // residues, each bounded by the source limb prime (about 2^47) -- the same
-    // bound masked_claim_bounds in relation.rs feeds into the verifier's
-    // two-prime lift -- so its real clear claim bound is about 2^70 and its real
-    // per-claim leakage about 2^-22 (about 2^-5 across the first profile's
-    // ~2^17 claims). The smudging and integer-binding rows are recomputed from
-    // that real bound below so the disclosed figures are honest for this family
-    // rather than inheriting the centered-binomial figure.
+    // family masks only the carry and the ternary opening-randomness columns: its
+    // message (Shamir coefficient) columns carry no consistency claim because the
+    // per-field opening rows plus the opening-randomness consistency already pin
+    // them across the commitment fields (see consistency_vector_count in
+    // relation.rs), so masking them would add leakage with no soundness gain. Its
+    // clear claim bound is therefore carry-driven (about 2^34) and its real
+    // per-claim leakage about 2^-58 (about 2^-41 across the first profile's ~2^17
+    // claims) -- still the leakage-dominating family of the four, but only mildly,
+    // not by the ~46 bits the message-masking variant cost. The smudging and
+    // integer-binding rows are recomputed from that carry bound below, sourced
+    // from the same helper masked_claim_bounds uses, so the disclosed figures stay
+    // honest and cannot diverge from the relation bound.
     let mut accounting = migrated_family_accounting(
         "SuccinctPrivateVssShareAccounting",
         super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
@@ -439,24 +443,33 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
         );
     }
 
-    // Recompute the disclosed clear claim bound from the worst-case full-range
-    // message residue: the largest accepted data prime minus one (the source
-    // limb modulus a Shamir coefficient is reduced into), times the ring degree
-    // times the per-coefficient bound, mirroring the private-VSS branch of
-    // masked_claim_bounds in relation.rs at profile scale. The first-profile
-    // lifted carry bound (about 2^11) is dominated by the message bound and does
-    // not raise it. This yields a clear bound about 2^70, so per-claim leakage
-    // about 2^-22 and total about 2^-5.
-    let largest_message_bound = u128::from(
-        DATA_PRIMES
-            .iter()
-            .copied()
-            .max()
-            .expect("the data basis is non-empty"),
-    ) - 1;
+    // Recompute the disclosed clear claim bound from the witnesses that actually
+    // carry a masked consistency claim. The message (Shamir coefficient) columns
+    // do NOT: they are pinned across the commitment fields by the per-field
+    // opening rows plus the opening-randomness consistency (see
+    // consistency_vector_count in relation.rs), so the published masked claims
+    // range only over the carry and the ternary opening-randomness columns. The
+    // lifted carry bound dominates the magnitude-one randomness, so the clear
+    // bound is the worst-case carry bound times the ring degree times the
+    // per-coefficient bound, mirroring the private-VSS branch of
+    // masked_claim_bounds. Worst case over the first profile: the recipient
+    // trustee point is largest at the last roster position (participant count ten
+    // minus one) and the Shamir coefficient count is the decryption threshold
+    // (four). Sourcing the carry bound from the same helper masked_claim_bounds
+    // uses keeps the relation bound and the disclosed figure from diverging. This
+    // yields a clear bound about 2^34, so per-claim leakage about 2^-58 and total
+    // about 2^-41.
+    const FIRST_PROFILE_LARGEST_RECIPIENT_ROSTER_POSITION: u64 = 9;
+    const FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT: usize = 4;
+    let worst_case_carry_bound =
+        u128::try_from(super::relation::private_vss_share_lifted_carry_bound(
+            FIRST_PROFILE_LARGEST_RECIPIENT_ROSTER_POSITION,
+            FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT,
+        )?)
+        .expect("the lifted carry bound is positive");
     let consistency_coefficient_bound = u128::from((1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1);
     let private_vss_clear_claim_bound =
-        largest_message_bound * POLYNOMIAL_DEGREE as u128 * consistency_coefficient_bound;
+        worst_case_carry_bound * POLYNOMIAL_DEGREE as u128 * consistency_coefficient_bound;
     let private_vss_clear_claim_bound_bits = i64::from(private_vss_clear_claim_bound.ilog2()) + 1;
     let per_claim_leakage_log2 = private_vss_clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64;
     let claim_budget_log2 = 17_i64;
@@ -472,13 +485,13 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
                 "perClaimStatisticalDistanceLog2": per_claim_leakage_log2,
                 "clearClaimBoundBits": private_vss_clear_claim_bound_bits,
                 "maskDigitCount": CLAIM_MASK_DIGIT_COUNT,
-                "leakageStatement": "the recipient-private VSS family masks full-range Shamir message residues, each bounded by the source limb prime (the largest accepted data prime, about two to the forty-seven) rather than a magnitude-two centered-binomial error, so the clear claim bound is about two to the seventy and the shared ninety-two-bit smudging mask hides each published claim only to a per-claim statistical distance of about two to the minus twenty-two; across the first profile's about two to the seventeen claims the total statistical distance is about two to the minus five, so this is the leakage-dominating family among the four accepted setup proof families and is materially weaker than the about two to the minus sixty-eight per-claim, about two to the minus fifty-one total figure of the magnitude-two centered-binomial families; the bound says nothing about quantities outside the published claims",
+                "leakageStatement": "the recipient-private VSS family masks only its carry and ternary opening-randomness columns; its full-range Shamir message columns carry no consistency claim because the per-field commitment opening rows plus the opening-randomness consistency already pin each message to one integer's residues across the commitment fields, so masking the messages would add leakage with no soundness gain. The masked claims are therefore bounded by the lifted carry bound (about two to the eleven) rather than the source limb prime, so the clear claim bound is about two to the thirty-four and the shared ninety-two-bit smudging mask hides each published claim to a per-claim statistical distance of about two to the minus fifty-eight; across the first profile's about two to the seventeen claims the total statistical distance is about two to the minus forty-one. This is still the leakage-dominating family among the four accepted setup proof families, but only mildly so relative to the about two to the minus sixty-eight per-claim, about two to the minus fifty-one total figure of the magnitude-two centered-binomial families; the bound says nothing about quantities outside the published claims",
                 "claimBudgetLog2Approximate": claim_budget_log2,
                 "totalLeakageLog2Approximate": total_leakage_log2,
                 "leakageDominatingFamily": true,
                 "acceptedForBoundedLeakagePrototype": true,
                 "acceptedFor128BitZeroKnowledge": false,
-                "strongZeroKnowledgeUpgrade": "a negligible per-claim leakage would require widening the smudging mask well beyond ninety-two bits, which the current two-prime cross-limb integer lift cannot host together with the about two-to-the-seventy message window; it needs a wider three-prime lift and a correspondingly larger mask, then re-deriving this accounting; that structural upgrade is deferred and is not an accepted row here",
+                "strongZeroKnowledgeUpgrade": "matching the magnitude-two families' about two to the minus sixty-eight per-claim would require widening the smudging mask beyond ninety-two bits, which the two-prime cross-limb integer lift cannot host (twice the mask-plus-clear bound would exceed the about two-to-the-ninety-four two-prime window); that needs a wider three-prime lift, which the three commitment fields cannot provide while keeping a consistency check field, so it would require a fourth commitment field (a commitment-profile change) and re-deriving this accounting; that structural upgrade is deferred and is not an accepted row here, and the carry-driven about two to the minus fifty-eight already achieved makes it low priority",
             }),
         );
     }
@@ -496,7 +509,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
         integer_binding.insert(
             "twoPrimeWindowRule".to_string(),
             Value::String(
-                "the product of the two smallest data primes (about two to the ninety-four) exceeds twice the mask-plus-clear claim bound (about two to the ninety-three for this family's full-range message claims) by only about one bit, so the centered two-prime lift is unique but with a thin margin; a wider mask would not fit this window and would require a three-prime lift"
+                "the product of the two smallest data primes (about two to the ninety-four) exceeds twice the mask-plus-clear claim bound (about two to the ninety-three, dominated by the ninety-two-bit mask now that the clear bound is the carry-driven about two to the thirty-four rather than the full-range message bound) by only about one bit, so the centered two-prime lift is unique but with a thin margin set by the mask; widening the mask would not fit this window and would require a wider lift"
                     .to_string(),
             ),
         );

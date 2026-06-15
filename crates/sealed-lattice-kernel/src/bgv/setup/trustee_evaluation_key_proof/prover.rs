@@ -275,15 +275,25 @@ pub(super) fn global_claim_id(
     ((1 + total_error_vectors + linkage_position) * CONSISTENCY_REPETITIONS + repetition) as u64
 }
 
-// Logical witness vectors in local layout order as residue vectors mod q:
-// the secret, the active keys' error vectors, and in the commitment fields
-// the negative indicator and the per-commitment opening-randomness columns.
+// Logical witness vectors in local layout order as residue vectors mod q. For
+// private VSS: the Shamir coefficient messages, the carry, and the
+// per-coefficient opening-randomness columns. For the standard family: the
+// secret, the active keys' error vectors, and in the commitment fields the
+// negative indicator and the per-commitment opening-randomness columns. This is
+// the full trace width, which for private VSS exceeds consistency_vector_count()
+// because the message columns are committed witnesses without a consistency
+// claim.
 fn logical_witness_residues(
     witness: &TrusteeEvaluationKeyWitness,
     layout: &LimbColumnLayout,
     modulus: u64,
 ) -> Vec<Vec<u64>> {
-    let mut vectors = Vec::with_capacity(layout.consistency_vector_count());
+    let logical_column_count = if layout.private_vss_active() {
+        layout.private_vss_logical_columns()
+    } else {
+        layout.consistency_vector_count()
+    };
+    let mut vectors = Vec::with_capacity(logical_column_count);
     if layout.private_vss_active() {
         for coefficient_messages in &witness.private_vss_coefficient_messages_by_shamir_index {
             vectors.push(
@@ -1496,9 +1506,13 @@ fn global_claim_integers(
 ) -> Vec<i128> {
     let mut signed_vectors: Vec<&[i64]> = Vec::new();
     if statement.private_vss_share.is_some() {
-        for messages in &witness.private_vss_coefficient_messages_by_shamir_index {
-            signed_vectors.push(messages);
-        }
+        // The message (Shamir coefficient) columns carry no consistency claim:
+        // they are pinned across the commitment fields by the opening rows plus
+        // the opening-randomness consistency, so masking them would only add
+        // zero-knowledge leakage with no soundness gain. Only the carry and the
+        // opening-randomness columns are claimed. This order must match
+        // consistency_vector_count and the consistency loop in relation.rs
+        // ([carry, opening-randomness...]).
         signed_vectors.push(&witness.private_vss_carry_witnesses);
         for randomness_columns in &witness.private_vss_opening_randomness_by_shamir_index {
             for column in randomness_columns {
