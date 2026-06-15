@@ -5,6 +5,11 @@ import type {
     BgvCollectiveSetupProfileDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+// Single source of truth shared with the Rust kernel test
+// (trustee_evaluation_key_proof::tests): byte-identical succinct-setup statement
+// hashes pinned across the TS/WASM and Rust provers. Edit the values in the JSON
+// and run `pnpm run vectors:generate` after an intended encoding change.
+import expectedStatementHashes from '#test-vectors/succinct-setup-statement-hashes.json';
 
 type JsonRecord = Record<string, unknown>;
 type TrusteeProofInput = Parameters<
@@ -20,18 +25,6 @@ const proofRandomnessSeedHex =
     '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
 const proofRandomnessNonceHex =
     'ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100';
-
-// These vectors are the same constants asserted in the Rust kernel tests; they pin canonical statement-hash agreement across the TS/WASM and Rust provers, so a mismatch means a cross-implementation encoding drift, not a fixture refresh.
-const expectedStatementHashes = {
-    sameSecret:
-        'c300200cb9bde4e95f2129ad4c07ca6fa22a2c236278be5f0be474095f604d3afd0613c791e807dc4e4d942f202ea4f5cac20d5a93745eab3d87abf05a3cf4ee',
-    publicKeyShare:
-        '108d59c7677c2007c43910828650f4a93d7555c63041e5865dcc906ca3b6e114456c85fc963165929bc676aac063307b69ecc18c3abcfa6f0f91a6bbcdff861e',
-    privateVssShare:
-        'b01e9ec950e257fed5974196c7eda5696e4da96b4b0e3478483c5020f930ee672e49b34cd4e9e88f7b2d27aec11be7c7b44ebae68280168d30ed8c99e7cf8475',
-    trusteeEvaluationKey:
-        '11fce9a48c01d57c8b08e2816a9a7704623775fcfdf5afca029ec4d2c32f5c2f070e567c2042e6554f6bbb3f46fe75a4711b8b52ab6626509e0ecd10f307bef0',
-} as const;
 
 const repeatedHash = (bytePair: string): string => bytePair.repeat(64);
 

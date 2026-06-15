@@ -51,13 +51,6 @@ pub(super) fn verify_same_secret_consistency(
             "setupPackage.sameSecretConsistency",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_same_secret_set_field(statement_set) {
-        return Ok(Some(same_secret_refusal(
-            "sameSecretConsistencyUnexpectedField",
-            format!("sameSecretConsistency contains unexpected field {unexpected_field}"),
-            format!("setupPackage.sameSecretConsistency.{unexpected_field}"),
-        )?));
-    }
     if statement_set.get("objectType").and_then(Value::as_str)
         != Some(SAME_SECRET_CONSISTENCY_OBJECT_TYPE)
     {
@@ -254,13 +247,6 @@ fn verify_same_secret_statement_record(
             "sameSecretStatementNotObject",
             "same-secret statement records must be objects",
             "setupPackage.sameSecretConsistency.statementRecords",
-        )?));
-    }
-    if let Some(unexpected_field) = unexpected_same_secret_statement_field(statement_record) {
-        return Ok(Some(same_secret_refusal(
-            "sameSecretStatementUnexpectedField",
-            format!("same-secret statement contains unexpected field {unexpected_field}"),
-            format!("setupPackage.sameSecretConsistency.statementRecords.{unexpected_field}"),
         )?));
     }
     if statement_record.get("objectType").and_then(Value::as_str)
@@ -600,13 +586,6 @@ pub(super) fn verify_optional_same_secret_proofs(
             "setupPackage.sameSecretProofs",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_same_secret_proof_set_field(proof_set) {
-        return Ok(Some(same_secret_proof_refusal(
-            "sameSecretProofSetUnexpectedField",
-            format!("sameSecretProofs contains unexpected field {unexpected_field}"),
-            format!("setupPackage.sameSecretProofs.{unexpected_field}"),
-        )?));
-    }
     if proof_set.get("objectType").and_then(Value::as_str) != Some("SameSecretProofSet") {
         return Ok(Some(same_secret_proof_refusal(
             "sameSecretProofSetTypeMismatch",
@@ -843,12 +822,6 @@ fn verify_same_secret_anchor_proof_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "same-secret proof records must be objects",
-        ));
-    }
-    if let Some(unexpected_field) = unexpected_same_secret_proof_record_field(proof_record) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("same-secret proof contains unexpected field {unexpected_field}"),
         ));
     }
     if proof_record.get("objectType").and_then(Value::as_str) != Some("SameSecretProof") {
@@ -1268,16 +1241,6 @@ fn transported_same_secret_proof_material_chunks(
 }
 
 fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> CanonicalResult<()> {
-    if let Some(unexpected_field) =
-        unexpected_transported_same_secret_proof_material_set_field(value)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "transportedSameSecretProofMaterial contains unexpected field {unexpected_field}"
-            ),
-        ));
-    }
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE),
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
@@ -1302,14 +1265,6 @@ fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> Ca
 }
 
 fn verify_transported_same_secret_proof_material_header(value: &Value) -> CanonicalResult<()> {
-    if let Some(unexpected_field) = unexpected_transported_same_secret_proof_material_field(value) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "transported same-secret proof material contains unexpected field {unexpected_field}"
-            ),
-        ));
-    }
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE),
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
@@ -1366,16 +1321,6 @@ fn transported_same_secret_proof_chunks(value: &Value) -> CanonicalResult<Vec<Ve
     }
     let mut chunks = Vec::with_capacity(expected_chunk_count);
     for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        if let Some(unexpected_field) =
-            unexpected_transported_same_secret_proof_chunk_field(chunk_value)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "transported same-secret proof chunk contains unexpected field {unexpected_field}"
-                ),
-            ));
-        }
         let observed_chunk_index = value_u64(chunk_value, "chunkIndex")?;
         if observed_chunk_index != expected_chunk_index as u64 {
             return Err(CanonicalError::new(
@@ -1807,187 +1752,6 @@ pub(super) fn same_secret_proof_family_binding_root() -> CanonicalResult<String>
         "SameSecretProofFamilyBindingRoot",
         &same_secret_proof_family_binding_value(),
     )
-}
-
-fn unexpected_same_secret_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "commitmentProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "thresholdDegree",
-            "vssCoefficientCommitmentRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "trusteeSecretCommitmentRoots",
-            "statementRecords",
-            "sameSecretConsistencyRoot",
-            "proofAccountingHash",
-        ],
-    )
-}
-
-fn unexpected_same_secret_statement_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "commitmentProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "vssSourceTrusteeCommitmentRoot",
-            "constantCoefficientCommitmentRoots",
-            "trusteeSecretCommitmentRoot",
-            "boundSecretDependentProofFamilies",
-            "genericKeySwitchBindingPolicy",
-            "targetDecryptionBindingPolicy",
-            "sameSecretProofFamilyBindingRoot",
-            "sameSecretRelation",
-            "sameSecretStatementRoot",
-        ],
-    )
-}
-
-fn unexpected_same_secret_proof_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "commitmentProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "proofAccountingHash",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "vssCoefficientCommitmentMaterialRoot",
-            "sameSecretProofRoots",
-            "proofRecords",
-            "sameSecretProofSetRoot",
-        ],
-    )
-}
-
-fn unexpected_same_secret_proof_record_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "commitmentProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "ringDegree",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "statementHash",
-            "proofSizeBytes",
-            "proofBytesHash",
-            "proofBytesEncoding",
-            "proofMaterialRoot",
-            "proofChunkSizeBytes",
-            "proofChunkCount",
-            "proofTotalByteLength",
-            "proofFullObjectHash",
-            "proofChunkRoot",
-            "proofChunkHashes",
-            "proofBytesHex",
-            "sameSecretProofRoot",
-        ],
-    )
-}
-
-fn unexpected_transported_same_secret_proof_material_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofMaterials",
-        ],
-    )
-}
-
-fn unexpected_transported_same_secret_proof_material_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofMaterialRoot",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkHashes",
-            "chunkRoot",
-            "chunks",
-        ],
-    )
-}
-
-fn unexpected_transported_same_secret_proof_chunk_field(value: &Value) -> Option<String> {
-    unexpected_field(value, &["chunkIndex", "bytesHex"])
 }
 
 fn same_secret_refusal(

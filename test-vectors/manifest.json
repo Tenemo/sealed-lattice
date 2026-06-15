@@ -20,6 +20,10 @@
     {
       "path": "plaintext-oracle/top-k.json",
       "sha256": "b8582beb7a1767cb9e9b87ce0ea86dc60b2f69b876ea45855ca15be01adda442"
+    },
+    {
+      "path": "succinct-setup-statement-hashes.json",
+      "sha256": "999be81c4b1e1e90adc149fa66058c47703cee876e98f2eab978c5a7e2b02dec"
     }
   ]
 }

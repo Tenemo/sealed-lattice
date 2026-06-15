@@ -30,13 +30,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
     if rounds.as_object().is_some_and(serde_json::Map::is_empty) {
         return Ok(None);
     }
-    if let Some(unexpected_field) = unexpected_relinearization_key_share_rounds_field(rounds) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "relinearizationKeyShareRoundsUnexpectedField",
-            format!("relinearizationKeyShareRounds contains unexpected field {unexpected_field}"),
-            format!("setupPackage.relinearizationKeyShareRounds.{unexpected_field}"),
-        )?));
-    }
     if rounds.get("objectType").and_then(Value::as_str)
         != Some(RELINEARIZATION_KEY_SHARE_ROUNDS_OBJECT_TYPE)
     {
@@ -746,14 +739,6 @@ fn verify_relinearization_round_one_record(
         RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE,
         "relinearization-key-share",
     )?;
-    if let Some(unexpected_field) = unexpected_relinearization_round_one_record_field(record) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "relinearization round-one record contains unexpected field {unexpected_field}"
-            ),
-        ));
-    }
     let level = value_u64(record, "level")?;
     let trustee_roster_position = value_u64(record, "trusteeRosterPosition")?;
     verify_evaluation_key_record_common_bindings(
@@ -811,14 +796,6 @@ fn verify_relinearization_round_two_record(
         RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE,
         "relinearization-key-share",
     )?;
-    if let Some(unexpected_field) = unexpected_relinearization_round_two_record_field(record) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "relinearization round-two record contains unexpected field {unexpected_field}"
-            ),
-        ));
-    }
     let level = value_u64(record, "level")?;
     let trustee_roster_position = value_u64(record, "trusteeRosterPosition")?;
     verify_evaluation_key_record_common_bindings(
@@ -894,12 +871,6 @@ fn verify_galois_key_share_batch(
         GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE,
         "galois-key-share",
     )?;
-    if let Some(unexpected_field) = unexpected_galois_key_share_batch_field(batch) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("Galois key share batch contains unexpected field {unexpected_field}"),
-        ));
-    }
     let trustee_roster_position = value_u64(batch, "trusteeRosterPosition")?;
     if !seen_roster_positions.insert(trustee_roster_position) {
         return Err(CanonicalError::new(
@@ -999,14 +970,6 @@ fn verify_galois_key_share_material_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "Galois key share material record must be an object",
-        ));
-    }
-    if let Some(unexpected_field) = unexpected_galois_key_share_material_field(material_record) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "Galois key share material record contains unexpected field {unexpected_field}"
-            ),
         ));
     }
     if material_record.get("objectType").and_then(Value::as_str)
@@ -1184,205 +1147,4 @@ fn verify_evaluation_key_record_common_bindings(
     }
 
     Ok(())
-}
-
-const EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES: &[&str] = &[
-    "keySwitchMaterialEncoding",
-    "keySwitchDomain",
-    "keySwitchSeedHex",
-    "ringDegree",
-    "keySwitchComponentVectorRoot",
-    "keySwitchComponentVectors",
-    "keySwitchComponentMaterialRoot",
-    "keySwitchComponentChunkSizeBytes",
-    "keySwitchComponentChunkCount",
-    "keySwitchComponentTotalByteLength",
-    "keySwitchComponentFullObjectHash",
-    "keySwitchComponentChunkRoot",
-    "keySwitchComponentChunkHashes",
-];
-
-fn unexpected_field_outside(
-    value: &Value,
-    base_field_names: &[&str],
-    extra_field_names: &[&str],
-) -> Option<String> {
-    let mut allowed = base_field_names.to_vec();
-    allowed.extend_from_slice(extra_field_names);
-    unexpected_field(value, &allowed)
-}
-
-fn unexpected_relinearization_key_share_rounds_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "evaluatorKeyScheduleRoot",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofSetRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSetRoot",
-            "publicKeyShareSuccinctProofSetRoot",
-            "relinearizationCrpRoot",
-            "relinearizationLevelSchedule",
-            "roundOneAggregateRoots",
-            "roundOneRecords",
-            "roundTwoAggregateRoots",
-            "roundTwoRecords",
-            "relinearizationKeyShareRoundsRoot",
-        ],
-    )
-}
-
-fn unexpected_relinearization_round_one_record_field(value: &Value) -> Option<String> {
-    unexpected_field_outside(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "level",
-            "evaluatorKeyScheduleRoot",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofSetRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSuccinctProofSetRoot",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "sameSecretProofRoot",
-            "relinearizationCrpRoot",
-            "roundOneShareRoot",
-            "roundOneRecordRoot",
-        ],
-        EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES,
-    )
-}
-
-fn unexpected_relinearization_round_two_record_field(value: &Value) -> Option<String> {
-    unexpected_field_outside(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "level",
-            "evaluatorKeyScheduleRoot",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofSetRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSuccinctProofSetRoot",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "sameSecretProofRoot",
-            "relinearizationCrpRoot",
-            "roundOneShareRoot",
-            "roundOneRecordRoot",
-            "roundOneAggregateRoot",
-            "roundTwoShareRoot",
-            "roundTwoRecordRoot",
-        ],
-        EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES,
-    )
-}
-
-fn unexpected_galois_key_share_batch_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "evaluatorKeyScheduleRoot",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofSetRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSuccinctProofSetRoot",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "sameSecretProofRoot",
-            "galoisKeyCrpRoot",
-            "requiredGaloisSetHash",
-            "requiredGaloisKeySchedule",
-            "galoisKeyShareRoots",
-            "galoisKeyShareMaterialRecords",
-            "galoisKeyShareBatchRoot",
-        ],
-    )
-}
-
-fn unexpected_galois_key_share_material_field(value: &Value) -> Option<String> {
-    unexpected_field_outside(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "rotation",
-            "level",
-            "galoisKeyShareRoot",
-        ],
-        EVALUATION_KEY_COMPONENT_MATERIAL_FIELD_NAMES,
-    )
 }

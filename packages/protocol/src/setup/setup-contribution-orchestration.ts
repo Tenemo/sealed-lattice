@@ -86,33 +86,6 @@ const contextFieldNames = [
     'setupEpoch',
 ] as const;
 
-const forbiddenContributionFieldNames = new Set([
-    'rawSecret',
-    'rawSecretShare',
-    'rawAggregateThresholdShare',
-    'rawVssOpening',
-    'rawShamirShare',
-    'rawShamirShares',
-    'rawShare',
-    'rawShares',
-    'proofWitness',
-    'proofWitnesses',
-    'setupSeed',
-    'setupPrivateWitness',
-    'privateSetupSeedHash',
-    'decryptionShareWitness',
-    'coefficientMessage',
-    'randomnessByColumn',
-    'shareValues',
-    'aggregateOpening',
-    'aggregateOpeningColumns',
-    'openingColumnsDecimal',
-    'carryWitnessesDecimal',
-    'privateEnvelope',
-    'privateEnvelopes',
-    'coefficientOpenings',
-]);
-
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
@@ -184,35 +157,6 @@ const assertTrusteeMatches = (
             `${objectPath}.${rosterPositionFieldName} must match trusteeRosterPosition.`,
         );
     }
-};
-
-export const collectForbiddenSetupContributionAssemblyFieldPaths = (
-    value: unknown,
-    objectPath = 'setupContributionAssembly',
-): string[] => {
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenSetupContributionAssemblyFieldPaths(
-                item,
-                `${objectPath}.${String(itemIndex)}`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
-        const fieldPath = `${objectPath}.${fieldName}`;
-        if (forbiddenContributionFieldNames.has(fieldName)) {
-            return [fieldPath];
-        }
-
-        return collectForbiddenSetupContributionAssemblyFieldPaths(
-            fieldValue,
-            fieldPath,
-        );
-    });
 };
 
 const phaseObjectRoots = (
@@ -467,15 +411,6 @@ export const createSetupContributionAssembly = (
         SetupContributionAssembly,
         'setupContributionRoot'
     >;
-    const forbiddenFieldPaths =
-        collectForbiddenSetupContributionAssemblyFieldPaths(
-            assemblyWithoutRoot,
-        );
-    if (forbiddenFieldPaths.length > 0) {
-        throw new Error(
-            `setupContributionAssembly includes forbidden raw local state fields: ${forbiddenFieldPaths.join(', ')}`,
-        );
-    }
 
     return {
         ...assemblyWithoutRoot,

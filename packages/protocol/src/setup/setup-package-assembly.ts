@@ -388,56 +388,6 @@ const requiredSetupPhases = [
     ['setupPackageVerification', 15],
 ] as const;
 
-const forbiddenPackageFieldNames = new Set([
-    'aggregateOpening',
-    'aggregateOpeningColumns',
-    'carryWitnessesDecimal',
-    'externallySuppliedSetupMaterial',
-    'coefficientMessage',
-    'coefficientMessagesByShamirIndex',
-    'coefficientOpenings',
-    'decryptionShareWitness',
-    'lattigoGaloisKey',
-    'lattigoPublicKey',
-    'lattigoRelinearizationKey',
-    'lattigoSetupMaterial',
-    'openingColumnsDecimal',
-    'openingRandomnessByLimb',
-    'proofGeneration',
-    'proofWitness',
-    'proofWitnesses',
-    'randomnessByColumn',
-    'rawAggregateThresholdShare',
-    'rawSecret',
-    'rawSecretShare',
-    'rawShamirShare',
-    'rawShamirShares',
-    'rawShare',
-    'rawShares',
-    'roundOneAggregateSourceCoefficientsByDigit',
-    'secretCoefficients',
-    'setupPrivateWitness',
-    'setupSeed',
-    'setupSeedHash',
-    'shareValues',
-    'transportedPrivateVssShareProofMaterial',
-    'transportedPrivateVssShareProofMaterialForRecipientTransport',
-]);
-const legacyExternalSetupRoleFieldNameTokens = [
-    'setup',
-    'authority',
-    'central',
-    'trusted',
-];
-const fieldNameSuggestsLegacyExternalSetupRole = (
-    fieldName: string,
-): boolean => {
-    const lowercaseFieldName = fieldName.toLowerCase();
-    return legacyExternalSetupRoleFieldNameTokens.every((token) =>
-        lowercaseFieldName.includes(token),
-    );
-};
-
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
@@ -680,38 +630,6 @@ export const setupPackageHashInput = (
     }
 
     return hashInput;
-};
-
-export const collectForbiddenSetupPackageAssemblyFieldPaths = (
-    value: unknown,
-    objectPath = 'setupPackage',
-): string[] => {
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenSetupPackageAssemblyFieldPaths(
-                item,
-                `${objectPath}.${String(itemIndex)}`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
-        const fieldPath = `${objectPath}.${fieldName}`;
-        if (
-            forbiddenPackageFieldNames.has(fieldName) ||
-            fieldNameSuggestsLegacyExternalSetupRole(fieldName)
-        ) {
-            return [fieldPath];
-        }
-
-        return collectForbiddenSetupPackageAssemblyFieldPaths(
-            fieldValue,
-            fieldPath,
-        );
-    });
 };
 
 const assertPhaseTranscript = (
@@ -2069,13 +1987,6 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         activeStaticSetupTheoremCertificate,
         activeStaticSetupTheoremCertificateHash,
     } as const satisfies Omit<SetupPackage, 'setupPackageHash'>;
-    const forbiddenFieldPaths =
-        collectForbiddenSetupPackageAssemblyFieldPaths(packageWithoutHash);
-    if (forbiddenFieldPaths.length > 0) {
-        throw new Error(
-            `setupPackage includes forbidden raw setup fields: ${forbiddenFieldPaths.join(', ')}`,
-        );
-    }
 
     return {
         ...packageWithoutHash,

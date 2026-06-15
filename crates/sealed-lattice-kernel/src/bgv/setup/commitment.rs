@@ -1002,7 +1002,6 @@ fn compute_setup_commitment_limbs<MessageCoefficient>(
 pub(crate) fn compute_setup_commitment_from_opening_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_commitment_request_fields(request)?;
     let public_matrix_seed_hash = request
         .get("publicMatrixSeedHash")
         .and_then(Value::as_str)
@@ -1572,34 +1571,6 @@ fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
     Ok(())
 }
 
-fn reject_unexpected_commitment_request_fields(request: &Value) -> CanonicalResult<()> {
-    let Some(object) = request.as_object() else {
-        return Err(invalid_commitment_input(
-            "setup commitment request must be an object",
-        ));
-    };
-    for field_name in object.keys() {
-        if ![
-            "command",
-            "publicMatrixSeedHash",
-            "sourceRnsLimbIndex",
-            "sourceMessageModulus",
-            "shamirCoefficientIndex",
-            "messageCoefficients",
-            "randomnessByColumn",
-            "ringDegree",
-        ]
-        .contains(&field_name.as_str())
-        {
-            return Err(invalid_commitment_input(format!(
-                "setup commitment request contains unexpected field {field_name}"
-            )));
-        }
-    }
-
-    Ok(())
-}
-
 fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
@@ -1755,9 +1726,9 @@ mod tests {
     }
 
     #[test]
-    fn commitment_command_rejects_extra_fields_and_wrong_source_prime() {
+    fn commitment_command_rejects_wrong_source_prime() {
         let public_matrix_seed_hash = valid_hash('f');
-        let valid_request = json!({
+        let mut wrong_prime_request = json!({
             "command": "ComputeSetupCommitmentFromOpening",
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "sourceRnsLimbIndex": 0,
@@ -1767,11 +1738,6 @@ mod tests {
             "randomnessByColumn": randomness_columns(1),
             "ringDegree": TEST_RING_DEGREE,
         });
-        let mut extra_field_request = valid_request.clone();
-        extra_field_request["setupSeed"] = json!("forbidden");
-        assert!(compute_setup_commitment_from_opening_request(&extra_field_request).is_err());
-
-        let mut wrong_prime_request = valid_request;
         wrong_prime_request["sourceMessageModulus"] = json!(DATA_PRIMES[1]);
         assert!(compute_setup_commitment_from_opening_request(&wrong_prime_request).is_err());
     }

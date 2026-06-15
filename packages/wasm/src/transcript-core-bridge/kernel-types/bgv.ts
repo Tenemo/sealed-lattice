@@ -251,17 +251,6 @@ export type BgvBatchPlaintextEncoding = {
     readonly canonicalBytesHex?: string;
 };
 
-export type BgvReferenceOracleRejection = {
-    readonly ok: false;
-    readonly artifactKind: string;
-    readonly acceptedAsProtocolEvidence: false;
-    readonly statusLabels: readonly string[];
-    readonly refusedObjects: readonly {
-        readonly code: string;
-        readonly message: string;
-    }[];
-};
-
 export type BgvCiphertextConventionFixture = {
     readonly profileHash: ProtocolHash;
     readonly ciphertextRoot: ProtocolHash;
@@ -337,9 +326,6 @@ export type BgvPassiveSetupPackage = {
     };
     readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
-    readonly externallySuppliedSetupMaterialBoundary: Readonly<
-        Record<string, unknown>
-    >;
     readonly targetDecryptionStatus: {
         readonly targetDecryptionProfileId: string;
         readonly targetDecryptionProfileHash: ProtocolHash;

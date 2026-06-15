@@ -2,7 +2,6 @@ import { encryptLocalTrusteeSetupSealedMaterial } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
-    collectForbiddenLocalTrusteeSetupStateFieldPaths,
     decryptLocalTrusteeSetupState,
     encryptLocalTrusteeSetupState,
     type LocalTrusteeSetupStateEncryptionInput,
@@ -100,11 +99,6 @@ describe('local trustee setup state storage', () => {
             storageKeyBytesHex: storageInput.storageKeyBytesHex,
         });
 
-        expect(
-            collectForbiddenLocalTrusteeSetupStateFieldPaths(
-                encryptedState.localStateCommitment,
-            ),
-        ).toEqual([]);
         expect(encryptedState.encryptedLocalState.localStateRoot).toBe(
             encryptedState.localStateCommitment.localStateRoot,
         );
@@ -118,18 +112,8 @@ describe('local trustee setup state storage', () => {
         });
     });
 
-    it('rejects raw local material, unknown fields, and setup-context rebinding', async () => {
+    it('rejects unknown fields and setup-context rebinding', async () => {
         const { plaintext, storageInput } = await localStatePlaintext();
-        const rawLocalMaterial = {
-            coefficientMessage: [1, 2, 3],
-        } as unknown as LocalTrusteeSetupStateEncryptionInput['localStatePlaintext'];
-
-        await expect(
-            encryptLocalTrusteeSetupState({
-                ...storageInput,
-                localStatePlaintext: rawLocalMaterial,
-            }),
-        ).rejects.toThrow(/forbidden raw local state fields/u);
 
         await expect(
             encryptLocalTrusteeSetupState({

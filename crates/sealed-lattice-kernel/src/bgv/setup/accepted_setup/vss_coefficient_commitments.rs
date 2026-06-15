@@ -448,22 +448,6 @@ fn verify_binary_vss_material_transport_metadata(material_set: &Value) -> Canoni
             "binary VSS material transport metadata must be an object",
         ));
     }
-    if let Some(unexpected_field) = unexpected_field(
-        transport,
-        &[
-            "transportProfileId",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkRoot",
-        ],
-    ) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("binary VSS material transport contains unexpected field {unexpected_field}"),
-        ));
-    }
     if transport.get("transportProfileId").and_then(Value::as_str)
         != Some(SETUP_TRANSPORT_PROFILE_ID)
     {

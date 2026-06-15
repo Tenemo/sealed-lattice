@@ -31,7 +31,6 @@ import type {
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
     BgvProfileRejection,
-    BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
@@ -74,7 +73,6 @@ export type {
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
     BgvProfileRejection,
-    BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
@@ -339,9 +337,6 @@ export type TranscriptCoreKernel = {
     validateBgvEvaluatorOperation(input: {
         readonly operation: string;
     }): BgvEvaluatorOperationValidation;
-    rejectBgvReferenceOracleArtifact(input: {
-        readonly artifact: unknown;
-    }): BgvReferenceOracleRejection;
 };
 
 type TranscriptCoreKernelCommand =
@@ -624,10 +619,6 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'AnalyzeBgvCanonicalObject';
           readonly canonicalBytesHex: string;
-      }
-    | {
-          readonly command: 'RejectBgvReferenceOracleArtifact';
-          readonly artifact: unknown;
       }
     | {
           readonly command: 'RunDirectEncryptedBallot';

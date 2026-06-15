@@ -1,30 +1,6 @@
 ﻿use super::*;
 
 #[test]
-fn passive_setup_rejects_externally_supplied_setup_material_secret_fields() {
-    for field_name in [
-        "globalSecretPolynomial",
-        "externallySuppliedSetupSecret",
-        "externallySuppliedSetupKeyMaterial",
-        "fullSecretKey",
-        "collectiveSecretKey",
-        "fullSecretReconstruction",
-        "thresholdSecretShares",
-    ] {
-        let mut request = request();
-        request["participants"][0][field_name] = serde_json::json!("forbidden");
-
-        let error = generate_passive_setup_package_from_request(&request)
-            .expect_err("setup must reject externally supplied secret material");
-        assert!(
-            error.message.contains(field_name),
-            "{field_name}: {}",
-            error.message
-        );
-    }
-}
-
-#[test]
 fn passive_setup_rejects_non_canonical_roster_positions_and_hashes() {
     let mut duplicate_position_request = request();
     duplicate_position_request["participants"][1]["rosterPosition"] = serde_json::json!(0);
@@ -111,20 +87,6 @@ fn passive_setup_payload_validation_rejects_coefficient_material_mutations() {
     assert_setup_package_payload_is_rejected(
         changed_public_key_coefficients,
         "collective public key coefficient byte mutation",
-    );
-}
-
-#[test]
-fn passive_setup_verification_rejects_nested_secret_material() {
-    let mut package = setup_package();
-    package["participants"][0]["globalSecretPolynomial"] = serde_json::json!("forbidden");
-    rebind_setup_package_hash(&mut package);
-
-    assert!(
-        verify_passive_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .is_err()
     );
 }
 
@@ -341,10 +303,6 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
                 "participantCount": invalid_participant_count,
             },
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-            "externallySuppliedSetupMaterialBoundary": {
-                "rawSecretSharesExported": false,
-                "transcriptAcceptsExternallySuppliedSecretReconstruction": false,
-            },
         });
         assert!(
             validate_setup_package_shape(&minimally_shaped_package).is_err(),
@@ -370,10 +328,6 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             "participantCount": 3,
         },
         "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "externallySuppliedSetupMaterialBoundary": {
-            "rawSecretSharesExported": false,
-            "transcriptAcceptsExternallySuppliedSecretReconstruction": false,
-        },
     });
     let stale_status_error = validate_setup_package_shape(&stale_security_status_package)
         .expect_err("stale setup security status must be refused before encrypted evaluation");

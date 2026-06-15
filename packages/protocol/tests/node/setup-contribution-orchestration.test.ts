@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    collectForbiddenSetupContributionAssemblyFieldPaths,
     createSetupContributionAssembly,
     type LocalTrusteeSetupStateCommitment,
     type PrivateVssEnvelopeVerificationReference,
@@ -166,9 +165,6 @@ describe('setup contribution orchestration', () => {
             fixtureHash('complaint-root'),
         ]);
         expect(assembly.setupContributionRoot).toHaveLength(128);
-        expect(
-            collectForbiddenSetupContributionAssemblyFieldPaths(assembly),
-        ).toEqual([]);
     });
 
     it('rejects contribution records bound to a different trustee', () => {

@@ -176,12 +176,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "evaluationKeys": evaluation_keys,
         "developmentEncryptionFixture": development_encryption_fixture,
         "certificates": certificates,
-        "externallySuppliedSetupMaterialBoundary": {
-            "transcriptAcceptsExternallySuppliedSecretReconstruction": false,
-            "externallySuppliedSecretFixtureMayProduceAcceptedRoots": false,
-            "rawSecretSharesExported": false,
-            "forbiddenRequestFields": forbidden_setup_field_names(),
-        },
         "targetDecryptionStatus": {
             "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,

@@ -19,13 +19,6 @@ pub(super) fn verify_evaluator_key_schedule(
             "setupPackage.evaluatorKeySchedule",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_evaluator_key_schedule_field(schedule) {
-        return Ok(Some(evaluator_key_schedule_refusal(
-            "evaluatorKeyScheduleUnexpectedField",
-            format!("evaluatorKeySchedule contains unexpected field {unexpected_field}"),
-            format!("setupPackage.evaluatorKeySchedule.{unexpected_field}"),
-        )?));
-    }
     if schedule.get("objectType").and_then(Value::as_str)
         != Some(EVALUATOR_KEY_SCHEDULE_OBJECT_TYPE)
     {
@@ -269,41 +262,6 @@ pub(super) fn verify_context_fields_match(
     }
 
     Ok(())
-}
-
-fn unexpected_evaluator_key_schedule_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "publicMatrixSeedHash",
-            "relinearizationCrpRoot",
-            "galoisKeyCrpRoot",
-            "sameSecretConsistencyRoot",
-            "publicKeyShareSetRoot",
-            "publicKeyShareProofSetRoot",
-            "relinearizationLevelSchedule",
-            "requiredGaloisKeySchedule",
-            "requiredGaloisSetHash",
-            "genericKeySwitchPolicy",
-            "genericKeySwitchProofStatus",
-            "scheduleBindingStatus",
-            "evaluatorKeyScheduleRoot",
-        ],
-    )
 }
 
 fn evaluator_key_schedule_refusal(

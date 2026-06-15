@@ -23,7 +23,6 @@ import type {
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
     BgvProfileRejection,
-    BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
@@ -646,13 +645,6 @@ export const createTranscriptCoreKernelLoader = (
                     >({
                         command: 'AnalyzeBgvCanonicalObject',
                         canonicalBytesHex: input.canonicalBytesHex,
-                    }),
-                rejectBgvReferenceOracleArtifact: (
-                    input,
-                ): BgvReferenceOracleRejection =>
-                    executeCommand<BgvReferenceOracleRejection>({
-                        command: 'RejectBgvReferenceOracleArtifact',
-                        artifact: input.artifact,
                     }),
             };
         })().catch((error: unknown) => {

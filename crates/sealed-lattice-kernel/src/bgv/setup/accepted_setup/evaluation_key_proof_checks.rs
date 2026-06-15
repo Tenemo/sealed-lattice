@@ -104,12 +104,6 @@ fn verify_trustee_evaluation_key_proof_set(
     request: &Value,
     proof_set: &Value,
 ) -> CanonicalResult<()> {
-    if let Some(unexpected_field) = unexpected_trustee_evaluation_key_proof_set_field(proof_set) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("trusteeEvaluationKeyProofs contains unexpected field {unexpected_field}"),
-        ));
-    }
     if proof_set.get("objectType").and_then(Value::as_str)
         != Some(TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE)
         || proof_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
@@ -373,14 +367,6 @@ fn verify_trustee_evaluation_key_proof_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "trustee evaluation-key proof record must be an object",
-        ));
-    }
-    if let Some(unexpected_field) = unexpected_trustee_evaluation_key_proof_field(proof_record) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "trustee evaluation-key proof record contains unexpected field {unexpected_field}"
-            ),
         ));
     }
     if proof_record.get("objectType").and_then(Value::as_str)
@@ -1351,87 +1337,4 @@ fn read_verified_trustee_evaluation_key_proof_material_chunks(
     }
 
     Ok(chunks)
-}
-
-fn unexpected_trustee_evaluation_key_proof_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "proofAccountingHash",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "evaluatorKeyScheduleRoot",
-            "requiredGaloisSetHash",
-            "keySwitchDecompositionHash",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofSetRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSetRoot",
-            "publicKeyShareSuccinctProofSetRoot",
-            "relinearizationCrpRoot",
-            "galoisKeyCrpRoot",
-            "publicMatrixSeedHash",
-            "relinearizationKeyShareRoundsRoot",
-            "galoisKeyShareBatchRoots",
-            "proofRecords",
-            "trusteeEvaluationKeyProofSetRoot",
-        ],
-    )
-}
-
-fn unexpected_trustee_evaluation_key_proof_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "sameSecretProofRoot",
-            "statementHash",
-            "keyCount",
-            "proofSizeBytes",
-            "proofBytesHash",
-            "proofBytesHex",
-            "proofBytesEncoding",
-            "proofMaterialRoot",
-            "proofChunkSizeBytes",
-            "proofChunkCount",
-            "proofTotalByteLength",
-            "proofFullObjectHash",
-            "proofChunkRoot",
-            "proofChunkHashes",
-            "trusteeEvaluationKeyProofRoot",
-        ],
-    )
 }

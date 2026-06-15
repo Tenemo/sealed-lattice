@@ -73,13 +73,6 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_collective_public_key_field(aggregate_object) {
-        return Ok(Some(public_key_share_proof_refusal(
-            "collectivePublicKeyUnexpectedField",
-            format!("collectivePublicKey contains unexpected field {unexpected_field}"),
-            format!("setupPackage.collectivePublicKey.{unexpected_field}"),
-        )?));
-    }
     if aggregate_object.get("objectType").and_then(Value::as_str)
         != Some(COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE)
     {
@@ -1314,12 +1307,6 @@ pub(super) fn verify_public_key_share_material_set(
             "publicKeyShareMaterial must be a root-bound object",
         ));
     }
-    if let Some(unexpected_field) = unexpected_public_key_share_material_set_field(material_set) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("publicKeyShareMaterial contains unexpected field {unexpected_field}"),
-        ));
-    }
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE)
     {
@@ -1463,14 +1450,6 @@ fn verify_public_key_share_material_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "public-key share material records must be objects",
-        ));
-    }
-    if let Some(unexpected_field) =
-        unexpected_public_key_share_material_record_field(material_record)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("public-key share material contains unexpected field {unexpected_field}"),
         ));
     }
     if material_record.get("objectType").and_then(Value::as_str)
@@ -1650,113 +1629,4 @@ fn verify_public_key_share_material_record(
         public_key_share_material_root,
         coefficients_by_limb,
     })
-}
-
-fn unexpected_public_key_share_material_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofModelStatus",
-            "materialEncoding",
-            "binaryFormat",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "ringDegree",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "publicKeyShareSetRoot",
-            "publicKeyShareMaterialRoots",
-            "shareMaterialRecords",
-            "transport",
-            "publicKeyShareMaterialSetRoot",
-        ],
-    )
-}
-
-fn unexpected_public_key_share_material_record_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofModelStatus",
-            "materialEncoding",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "rnsLimbCount",
-            "ringDegree",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "publicKeyShareRoot",
-            "shareCoefficientVectorsByLimb",
-            "publicKeyShareMaterialRoot",
-        ],
-    )
-}
-
-fn unexpected_collective_public_key_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "aggregationStatus",
-            "materialEncoding",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "ringDegree",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofSetRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSetRoot",
-            "publicKeyShareProofSetRoot",
-            "publicKeyShareMaterialSetRoot",
-            "publicKeyShareSuccinctProofSetRoot",
-            "sourceShareMaterialRoots",
-            "aggregateCoefficientVectorsByLimb",
-            "collectivePublicKeyRoot",
-        ],
-    )
 }

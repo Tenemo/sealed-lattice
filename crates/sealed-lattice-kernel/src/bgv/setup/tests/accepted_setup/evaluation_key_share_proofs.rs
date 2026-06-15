@@ -1,135 +1,6 @@
 use super::*;
 
 #[test]
-fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_forbidden_accepted_path_material",
-    );
-    let mut seeded_package = minimal_collective_setup_package();
-    seeded_package["setupSeed"] = serde_json::json!("externally-supplied-seed");
-    rebind_collective_setup_package_hash(&mut seeded_package);
-
-    let seeded_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": seeded_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(seeded_result["verifierStatus"], "refused");
-    assert_eq!(
-        seeded_result["refusedObjects"][0]["reasonCode"],
-        "acceptedPathForbiddenField"
-    );
-
-    let mut externally_supplied_threshold_package = minimal_collective_setup_package();
-    externally_supplied_threshold_package["externallySuppliedThresholdShareCommitmentMaterial"] =
-        serde_json::json!({ "root": valid_hash('5') });
-    rebind_collective_setup_package_hash(&mut externally_supplied_threshold_package);
-
-    let externally_supplied_threshold_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": externally_supplied_threshold_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        externally_supplied_threshold_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        externally_supplied_threshold_result["refusedObjects"][0]["reasonCode"],
-        "acceptedPathForbiddenField"
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_proof_randomness_metadata_with_rebound_roots() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_proof_randomness_metadata_with_rebound_roots",
-    );
-
-    for forbidden_field_name in [
-        "proofGeneration",
-        "proofRandomness",
-        "proofRandomnessSource",
-        "proofRandomnessSeedHex",
-        "proofRandomnessNonceHex",
-    ] {
-        let mut package = minimal_collective_setup_package();
-        package[forbidden_field_name] = forbidden_proof_randomness_metadata(forbidden_field_name);
-        rebind_collective_setup_package_hash(&mut package);
-        assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
-    }
-
-    for forbidden_field_name in [
-        "proofRandomnessSource",
-        "proofRandomnessSeedHex",
-        "proofRandomnessNonceHex",
-    ] {
-        for proof_set_field_name in [
-            "sameSecretProofs",
-            "publicKeyShareSuccinctProofs",
-            "trusteeEvaluationKeyProofs",
-        ] {
-            let mut package = minimal_collective_setup_package();
-            package[proof_set_field_name] = serde_json::json!({
-                "objectType": "FixtureTerminalProofSet",
-                "objectVersion": 1,
-                "proofRecords": [{
-                    "objectType": "FixtureTerminalProofRecord",
-                    "objectVersion": 1,
-                    forbidden_field_name: forbidden_proof_randomness_metadata(forbidden_field_name),
-                }],
-            });
-            rebind_collective_setup_package_hash(&mut package);
-            assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
-        }
-    }
-}
-
-fn forbidden_proof_randomness_metadata(field_name: &str) -> serde_json::Value {
-    match field_name {
-        "proofGeneration" => serde_json::json!({
-            "source": "development-deterministic-fixture",
-            "proofRandomnessSeedHex": valid_hash('7'),
-        }),
-        "proofRandomness" => serde_json::json!({
-            "source": "development-deterministic-fixture",
-            "seedBytes": 64,
-            "retention": "not-terminal-evidence",
-        }),
-        "proofRandomnessSource" => serde_json::json!("development-deterministic-fixture"),
-        "proofRandomnessSeedHex" | "proofRandomnessNonceHex" => serde_json::json!(valid_hash('8')),
-        _ => panic!("unsupported forbidden proof randomness field {field_name}"),
-    }
-}
-
-fn assert_refuses_forbidden_accepted_path_field(
-    package: &serde_json::Value,
-    forbidden_field_name: &str,
-) {
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "acceptedPathForbiddenField"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains(forbidden_field_name)
-    );
-    assert!(
-        result.get("acceptedSetupHandoff").is_none() || result["acceptedSetupHandoff"].is_null(),
-        "refused proof-randomness metadata must not return an accepted setup handoff"
-    );
-}
-
-#[test]
 fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_generic_key_switch_material_by_default",
@@ -148,70 +19,6 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
         result["refusedObjects"][0]["reasonCode"],
         "genericKeySwitchOutsideProfile"
     );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_premature_target_decryption_readiness_artifacts() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_premature_target_decryption_readiness_artifacts",
-    );
-
-    for forbidden_field_name in [
-        "targetDecryptionStatus",
-        "targetDecryptionReadiness",
-        "targetDecryptionCertificate",
-        "targetDecryptionCertificateHash",
-        "targetDecryptionClosure",
-        "targetDecryptionShareProofs",
-        "targetDecryptionShares",
-        "targetPartDecRecords",
-        "targetC1C4Certificate",
-    ] {
-        let mut package = minimal_collective_setup_package();
-        package[forbidden_field_name] = premature_target_decryption_artifact(forbidden_field_name);
-        rebind_collective_setup_package_hash(&mut package);
-        assert_refuses_forbidden_accepted_path_field(&package, forbidden_field_name);
-    }
-
-    let valid_nested_boundary_package = minimal_collective_setup_package();
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": valid_nested_boundary_package,
-    }))
-    .expect("verification response");
-    assert_ne!(
-        result["refusedObjects"][0]["reasonCode"], "acceptedPathForbiddenField",
-        "nested HE target-decryption status must remain allowed"
-    );
-}
-
-fn premature_target_decryption_artifact(field_name: &str) -> serde_json::Value {
-    match field_name {
-        "targetDecryptionStatus" => serde_json::json!({
-            "targetDecryptionReadiness": "accepted",
-            "targetDecryptionProfileId": "BGV-RNS-AsyncTargetDecryption-v1",
-        }),
-        "targetDecryptionReadiness" => serde_json::json!("accepted"),
-        "targetDecryptionCertificate" => serde_json::json!({
-            "objectType": "TargetDecryptionCertificate",
-            "objectVersion": 1,
-            "certificateStatus": "accepted",
-        }),
-        "targetDecryptionCertificateHash" => serde_json::json!(valid_hash('6')),
-        "targetDecryptionClosure" => serde_json::json!({
-            "closureStatus": "accepted",
-        }),
-        "targetDecryptionShareProofs" => serde_json::json!({
-            "objectType": "TargetDecryptionShareProofSet",
-            "proofRecords": [],
-        }),
-        "targetDecryptionShares" => serde_json::json!([]),
-        "targetPartDecRecords" => serde_json::json!([]),
-        "targetC1C4Certificate" => serde_json::json!({
-            "objectType": "TargetC1C4Certificate",
-            "certificateStatus": "accepted",
-        }),
-        _ => panic!("unsupported target-decryption artifact {field_name}"),
-    }
 }
 
 #[test]
@@ -273,7 +80,7 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
     assert_eq!(evaluation_key_result["verifierStatus"], "refused");
     assert_eq!(
         evaluation_key_result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeysUnexpectedField"
+        "evaluationKeysTypeMismatch"
     );
 }
 

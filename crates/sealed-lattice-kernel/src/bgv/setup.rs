@@ -102,15 +102,10 @@ use crate::{
         },
         setup_helpers::{
             array_at_path, bool_at_path, compare_derived_hash, compare_expected_string,
-            compare_hash_at_path, compare_string_at_path, forbidden_setup_field_names,
-            hash_at_path, integer_at_path, read_hash_field, read_non_empty_string,
-            read_optional_u64, read_optional_usize, reject_forbidden_setup_fields,
-            reject_forbidden_setup_fields_for_context,
-            reject_forbidden_setup_package_secret_fields,
-            reject_forbidden_setup_package_secret_fields_for_context, string_at_path,
-            unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
+            compare_hash_at_path, compare_string_at_path, hash_at_path, integer_at_path,
+            read_hash_field, read_non_empty_string, read_optional_u64, read_optional_usize,
+            string_at_path, unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
         },
-        validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
@@ -227,11 +222,6 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "EncryptedComparisonInputHash",
             "EncryptedSparseTargetProjectionHash"
         ],
-        "externallySuppliedSetupMaterialBoundary": {
-            "transcriptAcceptsExternallySuppliedSecretReconstruction": false,
-            "externallySuppliedSecretFixtureMayProduceAcceptedRoots": false,
-            "rawSecretSharesExported": false
-        },
         "statusLabels": [
             "PassiveBgvSetupCanonicalObjectModelFrozen",
             "PassiveSetupOnly",
@@ -243,39 +233,12 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
 pub(crate) fn generate_passive_setup_package_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "ceremonyId",
-            "manifestHash",
-            "participants",
-            "rosterHash",
-            "setupSeed",
-            "thresholdProfileHash",
-        ],
-        "generateBgvPassiveSetup",
-    )?;
-    reject_forbidden_setup_fields(request)?;
     let input = read_passive_setup_input(request)?;
 
     build_passive_setup_package(&input)
 }
 
 pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "expectedCollectivePublicKeyRoot",
-            "expectedEvaluationKeyRoot",
-            "expectedManifestHash",
-            "expectedRosterHash",
-            "expectedRotSetHash",
-            "expectedSetupPackageHash",
-            "setupPackage",
-        ],
-        "verifyBgvPassiveSetup",
-    )?;
-    reject_forbidden_setup_fields(request)?;
     let setup_package = request.get("setupPackage").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

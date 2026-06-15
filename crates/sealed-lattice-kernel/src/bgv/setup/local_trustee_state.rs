@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::{profile::DATA_PRIMES, validation::reject_unexpected_bgv_request_fields},
+    bgv::profile::DATA_PRIMES,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_protocol_hash,
 };
@@ -21,32 +21,6 @@ const LOCAL_STATE_EXPORT_POLICY: &str = "roots-only-no-raw-share-or-opening-expo
 const LOCAL_STATE_STORAGE_PROFILE: &str = "encrypted-local-device-state-required";
 const DELETION_BOUNDARY: &str = "after-private-vss-aggregation";
 
-const FORBIDDEN_LOCAL_STATE_FIELD_NAMES: &[&str] = &[
-    "rawSecret",
-    "rawSecretShare",
-    "rawAggregateThresholdShare",
-    "rawVssOpening",
-    "rawShamirShare",
-    "rawShamirShares",
-    "rawShare",
-    "rawShares",
-    "proofWitness",
-    "proofWitnesses",
-    "setupSeed",
-    "setupPrivateWitness",
-    "privateSetupSeedHash",
-    "decryptionShareWitness",
-    "coefficientMessage",
-    "randomnessByColumn",
-    "shareValues",
-    "aggregateOpening",
-    "aggregateOpeningColumns",
-    "openingColumnsDecimal",
-    "carryWitnessesDecimal",
-    "privateEnvelope",
-    "privateEnvelopes",
-];
-
 const DELETED_MATERIAL_CLASSES: &[&str] = &[
     "raw-per-source-trustee-vss-shares",
     "raw-per-source-trustee-vss-openings",
@@ -63,13 +37,6 @@ const RETAINED_MATERIAL_CLASSES: &[&str] = &[
 pub(crate) fn verify_local_trustee_setup_state_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["setupContext", "localStateCommitment"],
-        "verifyLocalTrusteeSetupState",
-    )?;
-    reject_forbidden_local_state_fields(request, "request")?;
-
     let setup_context = object_field(request, "setupContext")?;
     verify_setup_context(setup_context)?;
     let local_state = object_field(request, "localStateCommitment")?;
@@ -215,35 +182,6 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
             "localStateCommitment.objectVersion must be 1",
         ));
     }
-    reject_unexpected_fields(
-        local_state,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "trusteePoint",
-            "thresholdShareCommitmentRecipientRoot",
-            "aggregateThresholdShareRoot",
-            "issuedVssAcceptanceRoot",
-            "issuedVssComplaintRoots",
-            "deletionReceiptRoot",
-            "deletionReceipt",
-            "exportPolicy",
-            "storageProfile",
-            "localStateRoot",
-        ],
-        "localStateCommitment",
-    )?;
     compare_context_fields(local_state, setup_context, "localStateCommitment")?;
     if local_state.get("setupProfileId").and_then(Value::as_str)
         != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
@@ -291,29 +229,6 @@ fn verify_deletion_receipt(
             "deletionReceipt.objectVersion must be 1",
         ));
     }
-    reject_unexpected_fields(
-        deletion_receipt,
-        &[
-            "objectType",
-            "objectVersion",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "trusteePoint",
-            "deletionBoundary",
-            "deletedMaterialClasses",
-            "retainedMaterialClasses",
-            "deletionReceiptRoot",
-        ],
-        "deletionReceipt",
-    )?;
     compare_context_fields(deletion_receipt, setup_context, "deletionReceipt")?;
     if deletion_receipt.get("trusteeIdentity") != local_state.get("trusteeIdentity")
         || deletion_receipt.get("trusteeRosterPosition") != local_state.get("trusteeRosterPosition")
@@ -367,58 +282,6 @@ fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
         .ok_or_else(|| invalid_local_state_input("localStateCommitment must be an object"))?;
     object.remove("localStateRoot");
     derive_protocol_hash("LocalTrusteeSetupStateRoot", &root_input)
-}
-
-fn reject_forbidden_local_state_fields(value: &Value, object_path: &str) -> CanonicalResult<()> {
-    match value {
-        Value::Array(items) => {
-            for (index, item) in items.iter().enumerate() {
-                reject_forbidden_local_state_fields(item, &format!("{object_path}[{index}]"))?;
-            }
-        }
-        Value::Object(fields) => {
-            for (field_name, field_value) in fields {
-                if FORBIDDEN_LOCAL_STATE_FIELD_NAMES.contains(&field_name.as_str()) {
-                    return Err(invalid_local_state_input(format!(
-                        "{object_path}.{field_name} is raw local trustee material and cannot appear in a roots-only state commitment"
-                    )));
-                }
-                reject_forbidden_local_state_fields(
-                    field_value,
-                    &format!("{object_path}.{field_name}"),
-                )?;
-            }
-        }
-        _ => {}
-    }
-
-    Ok(())
-}
-
-fn reject_unexpected_fields(
-    value: &Value,
-    allowed_fields: &[&str],
-    object_path: &str,
-) -> CanonicalResult<()> {
-    let object = value
-        .as_object()
-        .ok_or_else(|| invalid_local_state_input(format!("{object_path} must be an object")))?;
-    for field_name in object.keys() {
-        if !allowed_fields.contains(&field_name.as_str()) {
-            return Err(invalid_local_state_input(format!(
-                "{object_path}.{field_name} is not allowed by the local trustee state schema"
-            )));
-        }
-    }
-    for field_name in allowed_fields {
-        if !object.contains_key(*field_name) {
-            return Err(invalid_local_state_input(format!(
-                "{object_path}.{field_name} is required by the local trustee state schema"
-            )));
-        }
-    }
-
-    Ok(())
 }
 
 fn compare_context_fields(

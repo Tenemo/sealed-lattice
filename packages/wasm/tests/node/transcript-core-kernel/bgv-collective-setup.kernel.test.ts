@@ -16,10 +16,7 @@ import {
     createEvaluatorKeySchedule,
     type EvaluatorKeySchedule,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
-import {
-    collectForbiddenLocalTrusteeSetupStateFieldPaths,
-    createLocalTrusteeSetupStateCommitment,
-} from '#packages/protocol/src/setup/local-trustee-setup-state';
+import { createLocalTrusteeSetupStateCommitment } from '#packages/protocol/src/setup/local-trustee-setup-state';
 import {
     createPrivateVssMailboxDeliverySetFromReferences,
     createPrivateVssMailboxSourceTrusteeDeliveryReferences,
@@ -2457,11 +2454,6 @@ describe('collective BGV setup kernel commands', () => {
             issuedVssComplaintRoots: [validHash('5'), validHash('6')],
         });
 
-        expect(
-            collectForbiddenLocalTrusteeSetupStateFieldPaths(
-                localStateCommitment,
-            ),
-        ).toEqual([]);
         expect(
             kernel.verifyLocalTrusteeSetupState({
                 setupContext,

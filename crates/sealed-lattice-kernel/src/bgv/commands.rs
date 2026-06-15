@@ -42,10 +42,7 @@ use crate::{
             verify_private_vss_share_envelope_from_request,
             verify_trustee_evaluation_key_proof_from_request,
         },
-        validation::{
-            bgv_profile_rejection, reject_reference_oracle_artifact,
-            reject_unexpected_bgv_request_fields, validate_ciphertext_hex, validate_plaintext_hex,
-        },
+        validation::{bgv_profile_rejection, validate_ciphertext_hex, validate_plaintext_hex},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -242,16 +239,6 @@ pub(crate) fn generate_bgv_evaluation_key_material_from_request(
 }
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "includeCanonicalBytesHex",
-            "layoutBinding",
-            "level",
-            "slots",
-        ],
-        "encodeBgvBatchPlaintext",
-    )?;
     validate_batch_layout_binding(request)?;
     let slots = read_slots(request)?;
     let level = request
@@ -334,11 +321,6 @@ fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
 }
 
 pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["canonicalBytesHex", "expectedPlaintextRoot"],
-        "validateBgvPlaintextObject",
-    )?;
     let canonical_bytes_hex = read_string_field(request, "canonicalBytesHex")?;
     let expected_plaintext_root = request.get("expectedPlaintextRoot").and_then(Value::as_str);
 
@@ -346,11 +328,6 @@ pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalR
 }
 
 pub(crate) fn validate_bgv_ciphertext_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["canonicalBytesHex", "expectedCiphertextRoot"],
-        "validateBgvCiphertextObject",
-    )?;
     let canonical_bytes_hex = read_string_field(request, "canonicalBytesHex")?;
     let expected_ciphertext_root = request
         .get("expectedCiphertextRoot")
@@ -362,11 +339,6 @@ pub(crate) fn validate_bgv_ciphertext_from_request(request: &Value) -> Canonical
 pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["includeCanonicalBytesHex", "leftSlots", "rightSlots"],
-        "generateBgvCiphertextConventionFixture",
-    )?;
     let left_slots = read_named_slots(request, "leftSlots")?;
     let right_slots = read_named_slots(request, "rightSlots")?;
     let left = encode_batch_plaintext_slots(&left_slots, 0)?;
@@ -404,7 +376,6 @@ pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
 pub(crate) fn generate_bgv_base_conversion_fixture_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(request, &["slots"], "generateBgvBaseConversionFixture")?;
     let slots = read_slots(request)?;
     let encoded = encode_batch_plaintext_slots(&slots, 0)?;
     let converted = convert_plaintext_lifted_basis(&encoded.polynomial, BgvBasisKind::Extended, 1)?;
@@ -431,19 +402,7 @@ pub(crate) fn generate_bgv_base_conversion_fixture_from_request(
     }))
 }
 
-pub(crate) fn reject_bgv_reference_oracle_artifact_from_request(request: &Value) -> Value {
-    let fallback_artifact = json!({ "artifactKind": "unspecified" });
-    let artifact = request.get("artifact").unwrap_or(&fallback_artifact);
-
-    reject_reference_oracle_artifact(artifact)
-}
-
 pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["canonicalBytesHex"],
-        "analyzeBgvCanonicalObject",
-    )?;
     let canonical_bytes_hex = read_string_field(request, "canonicalBytesHex")?;
     let object = parse_bgv_object_hex(canonical_bytes_hex)?;
 

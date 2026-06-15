@@ -13,7 +13,6 @@ use crate::{
     bgv::{
         coefficient_codec::coefficient_vector_hash512,
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
-        validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint},
     hashing::{HASH512_PREIMAGE_PREFIX, derive_protocol_hash, hash512_hex, to_hex},
@@ -116,17 +115,6 @@ struct ThresholdLimbCommitment {
 pub(crate) fn derive_threshold_share_commitments_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupContext",
-            "publicMatrixSeedHash",
-            "sourceTrusteeCoefficientCommitmentRecords",
-            "coefficientCommitments",
-        ],
-        "deriveThresholdShareCommitments",
-    )?;
-
     let setup_context = object_field(request, "setupContext")?;
     let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
     let source_trustee_record_values =
@@ -182,18 +170,6 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
 pub(crate) fn derive_threshold_share_commitments_from_transport_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupContext",
-            "publicMatrixSeedHash",
-            "vssCoefficientCommitmentRoot",
-            "sourceTrusteeCoefficientCommitmentRecords",
-            "transportedVssCoefficientCommitmentMaterial",
-        ],
-        "deriveThresholdShareCommitmentsFromTransport",
-    )?;
-
     let setup_context = object_field(request, "setupContext")?;
     let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
     let vss_coefficient_commitment_root =
@@ -271,17 +247,6 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
 pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "derivationId",
-            "setupContext",
-            "publicMatrixSeedHash",
-            "transportedVssCoefficientCommitmentMaterial",
-        ],
-        "beginThresholdShareCommitmentsFromTransportStream",
-    )?;
-
     let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
     let setup_context = object_field(request, "setupContext")?;
     let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
@@ -351,11 +316,6 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
 pub(crate) fn abort_threshold_share_commitment_transport_derivation_stream_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["derivationId"],
-        "abortThresholdShareCommitmentsFromTransportStream",
-    )?;
     let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
     let sessions = vss_transport_derivation_sessions();
     let mut sessions = sessions.lock().map_err(|_| {
@@ -375,11 +335,6 @@ pub(crate) fn abort_threshold_share_commitment_transport_derivation_stream_reque
 pub(crate) fn absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["derivationId", "chunkIndex", "bytesHex"],
-        "absorbThresholdShareCommitmentsFromTransportStreamChunk",
-    )?;
     let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
     let chunk_index = usize_field(request, "chunkIndex")?;
     let bytes_hex = string_field(request, "bytesHex")?;
@@ -406,15 +361,6 @@ pub(crate) fn absorb_threshold_share_commitment_transport_derivation_stream_chun
 pub(crate) fn finish_threshold_share_commitment_transport_derivation_stream_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "derivationId",
-            "vssCoefficientCommitmentRoot",
-            "sourceTrusteeCoefficientCommitmentRecords",
-        ],
-        "finishThresholdShareCommitmentsFromTransportStream",
-    )?;
     let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
     let vss_coefficient_commitment_root =
         hash_string_field(request, "vssCoefficientCommitmentRoot")?.to_string();
@@ -451,7 +397,6 @@ pub(crate) fn with_verified_transported_vss_material<T>(
     verified_material_reference: &Value,
     callback: impl FnOnce(&VerifiedTransportedVssMaterial) -> CanonicalResult<T>,
 ) -> CanonicalResult<T> {
-    reject_unexpected_verified_material_reference_fields(verified_material_reference)?;
     if verified_material_reference
         .get("objectType")
         .and_then(Value::as_str)
@@ -532,11 +477,6 @@ pub(crate) fn with_verified_transported_vss_material<T>(
 pub(crate) fn release_verified_transported_vss_material_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["verificationId"],
-        "releaseVerifiedTransportedVssMaterial",
-    )?;
     let verification_id = derivation_stream_id_field(request, "verificationId")?.to_string();
     let verified_materials = vss_transport_verified_materials();
     let mut verified_materials = verified_materials.lock().map_err(|_| {
@@ -578,52 +518,6 @@ fn verified_transported_vss_material_reference_value(
         "transportFullObjectHash": hashes.full_object_hash,
         "transportChunkRoot": hashes.chunk_root,
     })
-}
-
-fn reject_unexpected_verified_material_reference_fields(value: &Value) -> CanonicalResult<()> {
-    let Some(object) = value.as_object() else {
-        return Err(invalid_threshold_commitment_input(
-            "verifiedVssCoefficientCommitmentMaterial must be an object",
-        ));
-    };
-    for field_name in object.keys() {
-        if ![
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "verificationId",
-            "materialBinaryFormat",
-            "publicMatrixSeedHash",
-            "vssCoefficientCommitmentRoot",
-            "vssCoefficientCommitmentMaterialRoot",
-            "thresholdShareCommitmentRoot",
-            "transportProfileId",
-            "transportChunkSizeBytes",
-            "transportChunkCount",
-            "transportTotalByteLength",
-            "transportFullObjectHash",
-            "transportChunkRoot",
-        ]
-        .contains(&field_name.as_str())
-        {
-            return Err(invalid_threshold_commitment_input(format!(
-                "verifiedVssCoefficientCommitmentMaterial contains unexpected field {field_name}"
-            )));
-        }
-    }
-    if value.get("materialBinaryFormat").and_then(Value::as_str) != Some(VSS_MATERIAL_BINARY_FORMAT)
-    {
-        return Err(invalid_threshold_commitment_input(
-            "verified VSS material must use the accepted binary format",
-        ));
-    }
-    if value.get("transportProfileId").and_then(Value::as_str) != Some(SETUP_TRANSPORT_PROFILE_ID) {
-        return Err(invalid_threshold_commitment_input(
-            "verified VSS material transportProfileId must match the setup transport profile",
-        ));
-    }
-
-    Ok(())
 }
 
 fn absorb_threshold_share_commitment_transport_chunk(
@@ -932,18 +826,6 @@ fn verify_observed_transport_commitment_roots(
 pub(crate) fn verify_constant_vss_commitments_from_transport_request(
     request: &Value,
 ) -> CanonicalResult<VerifiedTransportedConstantVssCommitments> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupContext",
-            "publicMatrixSeedHash",
-            "vssCoefficientCommitmentRoot",
-            "sourceTrusteeCoefficientCommitmentRecords",
-            "transportedVssCoefficientCommitmentMaterial",
-        ],
-        "verifyConstantVssCommitmentsFromTransport",
-    )?;
-
     let setup_context = object_field(request, "setupContext")?;
     let public_matrix_seed_hash = hash_string_field(request, "publicMatrixSeedHash")?;
     let vss_coefficient_commitment_root =
@@ -1691,7 +1573,7 @@ pub(crate) fn setup_vss_material_transport_hashes(
 }
 
 fn read_transport_material(value: &Value) -> CanonicalResult<TransportedMaterialChunks> {
-    let manifest = read_transport_material_manifest(value, true)?;
+    let manifest = read_transport_material_manifest(value)?;
     let chunk_values = array_field(value, "chunks")?;
     if chunk_values.len() != manifest.chunk_count {
         return Err(invalid_threshold_commitment_input(
@@ -1737,11 +1619,7 @@ fn read_transport_material(value: &Value) -> CanonicalResult<TransportedMaterial
     Ok(TransportedMaterialChunks { manifest, chunks })
 }
 
-fn read_transport_material_manifest(
-    value: &Value,
-    allow_embedded_chunks: bool,
-) -> CanonicalResult<TransportedMaterialManifest> {
-    reject_unexpected_transport_material_fields(value, allow_embedded_chunks)?;
+fn read_transport_material_manifest(value: &Value) -> CanonicalResult<TransportedMaterialManifest> {
     if value.get("objectType").and_then(Value::as_str) != Some(VSS_MATERIAL_BINARY_OBJECT_TYPE) {
         return Err(invalid_threshold_commitment_input(
             "transportedVssCoefficientCommitmentMaterial.objectType must be SetupTransportedVssCoefficientCommitmentMaterial",
@@ -1810,7 +1688,6 @@ fn read_transport_material_manifest(
 fn read_transport_material_stream_header(
     value: &Value,
 ) -> CanonicalResult<TransportedMaterialStreamHeader> {
-    reject_unexpected_transport_material_fields(value, false)?;
     if value.get("objectType").and_then(Value::as_str) != Some(VSS_MATERIAL_BINARY_OBJECT_TYPE) {
         return Err(invalid_threshold_commitment_input(
             "transportedVssCoefficientCommitmentMaterial.objectType must be SetupTransportedVssCoefficientCommitmentMaterial",
@@ -1892,40 +1769,6 @@ fn read_transport_material_stream_header(
         total_byte_length,
         expected_manifest,
     })
-}
-
-fn reject_unexpected_transport_material_fields(
-    value: &Value,
-    allow_embedded_chunks: bool,
-) -> CanonicalResult<()> {
-    let Some(object) = value.as_object() else {
-        return Err(invalid_threshold_commitment_input(
-            "transportedVssCoefficientCommitmentMaterial must be an object",
-        ));
-    };
-    for field_name in object.keys() {
-        let is_known_field = [
-            "objectType",
-            "objectVersion",
-            "binaryFormat",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkHashes",
-            "chunkRoot",
-            "chunks",
-        ]
-        .contains(&field_name.as_str());
-        let is_allowed_field = is_known_field && (allow_embedded_chunks || field_name != "chunks");
-        if !is_allowed_field {
-            return Err(invalid_threshold_commitment_input(format!(
-                "transportedVssCoefficientCommitmentMaterial contains unexpected field {field_name}"
-            )));
-        }
-    }
-
-    Ok(())
 }
 
 fn validate_transport_manifest_shape(

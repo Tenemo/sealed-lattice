@@ -21,7 +21,6 @@ use super::*;
 use crate::bgv::profile::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
 use crate::bgv::setup::setup_proof::SETUP_PROOF_PROFILE_ID;
-use crate::bgv::validation::reject_unexpected_bgv_request_fields;
 use crate::hashing::{derive_protocol_hash, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
@@ -90,23 +89,6 @@ fn family_accounting_value(shape: SuccinctSetupProofFamilyShape) -> CanonicalRes
 pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "context",
-            "ringDegree",
-            "keys",
-            "sameSecretLinkage",
-            "secretCoefficients",
-            "errorCoefficientsByKey",
-            "negativeIndicatorCoefficients",
-            "openingRandomnessByLimb",
-            "proofRandomnessSource",
-            "proofRandomnessSeedHex",
-            "proofRandomnessNonceHex",
-        ],
-        "generateTrusteeEvaluationKeyProof",
-    )?;
     let statement = statement_from_request(request)?;
     let secret_coefficients = read_i64_array(request, "secretCoefficients")?;
     let error_coefficients_by_key = match request.get("errorCoefficientsByKey") {
@@ -227,17 +209,6 @@ fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalRes
 pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "context",
-            "ringDegree",
-            "keys",
-            "sameSecretLinkage",
-            "proofBytesHex",
-        ],
-        "verifyTrusteeEvaluationKeyProof",
-    )?;
     let statement = statement_from_request(request)?;
     let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;

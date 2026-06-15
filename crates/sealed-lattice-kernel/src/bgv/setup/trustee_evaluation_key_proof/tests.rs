@@ -384,10 +384,19 @@ fn profile_trustee_proof_size_breakdown() {
 const SMALL_RING_DEGREE: usize = 128;
 const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 const PROOF_RANDOMNESS_NONCE: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
-const SAME_SECRET_STATEMENT_HASH_VECTOR: &str = "c300200cb9bde4e95f2129ad4c07ca6fa22a2c236278be5f0be474095f604d3afd0613c791e807dc4e4d942f202ea4f5cac20d5a93745eab3d87abf05a3cf4ee";
-const PUBLIC_KEY_SHARE_STATEMENT_HASH_VECTOR: &str = "108d59c7677c2007c43910828650f4a93d7555c63041e5865dcc906ca3b6e114456c85fc963165929bc676aac063307b69ecc18c3abcfa6f0f91a6bbcdff861e";
-const PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR: &str = "b01e9ec950e257fed5974196c7eda5696e4da96b4b0e3478483c5020f930ee672e49b34cd4e9e88f7b2d27aec11be7c7b44ebae68280168d30ed8c99e7cf8475";
-const TRUSTEE_EVALUATION_KEY_STATEMENT_HASH_VECTOR: &str = "11fce9a48c01d57c8b08e2816a9a7704623775fcfdf5afca029ec4d2c32f5c2f070e567c2042e6554f6bbb3f46fe75a4711b8b52ab6626509e0ecd10f307bef0";
+// The four succinct-setup statement-hash vectors are the single source of truth
+// shared with the TS/WASM kernel test (bgv-succinct-setup-statement-hashes),
+// pinning byte-identical statement hashes across the Rust and TS provers. The
+// values live in test-vectors/succinct-setup-statement-hashes.json; after an
+// intended encoding change, regenerate them there and run
+// `pnpm run vectors:generate`, rather than editing copies in two languages.
+fn expected_statement_hash_vectors() -> serde_json::Value {
+    serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test-vectors/succinct-setup-statement-hashes.json"
+    )))
+    .expect("succinct-setup statement-hash vectors must parse")
+}
 
 fn round_one(level: usize) -> (EvaluationKeyShareKind, usize) {
     (EvaluationKeyShareKind::RelinearizationRoundOne, level)
@@ -1398,15 +1407,16 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
             .as_str()
             .expect("trustee evaluation-key hash"),
     );
+    let expected_statement_hashes = expected_statement_hash_vectors();
     assert_eq!(same_secret["proofFamily"], "same-secret-linkage-anchor");
     assert_eq!(
         same_secret["statementHash"],
-        SAME_SECRET_STATEMENT_HASH_VECTOR
+        expected_statement_hashes["sameSecret"]
     );
     assert_eq!(public_key["proofFamily"], "public-key-share");
     assert_eq!(
         public_key["statementHash"],
-        PUBLIC_KEY_SHARE_STATEMENT_HASH_VECTOR
+        expected_statement_hashes["publicKeyShare"]
     );
     assert_eq!(
         private_vss["privateVssShareProof"]["proofFamily"],
@@ -1414,7 +1424,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
     );
     assert_eq!(
         private_vss["privateVssShareProof"]["statementHash"],
-        PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR
+        expected_statement_hashes["privateVssShare"]
     );
     assert_eq!(
         trustee_evaluation_key["proofFamily"],
@@ -1422,7 +1432,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
     );
     assert_eq!(
         trustee_evaluation_key["statementHash"],
-        TRUSTEE_EVALUATION_KEY_STATEMENT_HASH_VECTOR
+        expected_statement_hashes["trusteeEvaluationKey"]
     );
 }
 

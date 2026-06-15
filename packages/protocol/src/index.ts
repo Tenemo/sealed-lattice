@@ -88,7 +88,6 @@ export {
     vssCoefficientCommitmentMaterialBinaryFormat,
 } from './setup/vss-coefficient-commitments.js';
 export {
-    collectForbiddenLocalTrusteeSetupStateFieldPaths,
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     createLocalTrusteeSetupStateCommitment,
     deletedLocalTrusteeSetupMaterialClasses,
@@ -108,14 +107,10 @@ export {
     createCommonRandomnessReveal,
     createSetupCommonRandomness,
 } from './setup/common-randomness-records.js';
-export {
-    collectForbiddenSetupContributionAssemblyFieldPaths,
-    createSetupContributionAssembly,
-} from './setup/setup-contribution-orchestration.js';
+export { createSetupContributionAssembly } from './setup/setup-contribution-orchestration.js';
 export { createSetupCertificates } from './setup/setup-certificates.js';
 export { deriveThresholdShareCommitments } from './setup/threshold-share-commitments.js';
 export {
-    collectForbiddenSetupPackageAssemblyFieldPaths,
     createSetupPackage,
     createSetupPackageVerificationInput,
     setupPackageHashInput,

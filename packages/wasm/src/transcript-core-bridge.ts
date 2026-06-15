@@ -12,7 +12,6 @@ export type {
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
     BgvPrivateVssShareEnvelopeVerification,
-    BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvThresholdShareCommitmentDerivation,
     TranscriptCoreKernel,

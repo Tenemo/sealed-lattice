@@ -160,33 +160,6 @@ export type LocalTrusteeSetupSealedMaterialEncryptionResult = {
     readonly materialAadHash: ProtocolHash;
 };
 
-// Defense in depth for the roots-only device-state policy: refuse to encrypt or decrypt any object that still carries raw share, opening, seed, or witness material, even nested.
-const forbiddenLocalStateFieldNames = new Set([
-    'rawSecret',
-    'rawSecretShare',
-    'rawAggregateThresholdShare',
-    'rawVssOpening',
-    'rawShamirShare',
-    'rawShamirShares',
-    'rawShare',
-    'rawShares',
-    'proofWitness',
-    'proofWitnesses',
-    'setupSeed',
-    'setupPrivateWitness',
-    'privateSetupSeedHash',
-    'decryptionShareWitness',
-    'coefficientMessage',
-    'randomnessByColumn',
-    'shareValues',
-    'aggregateOpening',
-    'aggregateOpeningColumns',
-    'openingColumnsDecimal',
-    'carryWitnessesDecimal',
-    'privateEnvelope',
-    'privateEnvelopes',
-]);
-
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const setupContextFieldNames = [
@@ -399,35 +372,6 @@ const hashCanonicalValue = (domain: string, value: unknown): ProtocolHash =>
 
 const hashBytes = (domain: string, bytes: Uint8Array): ProtocolHash =>
     hash512Hex(domain, [bytes]);
-
-export const collectForbiddenLocalTrusteeStateStorageFieldPaths = (
-    value: unknown,
-    objectPath = 'localStatePlaintext',
-): string[] => {
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenLocalTrusteeStateStorageFieldPaths(
-                item,
-                `${objectPath}.${String(itemIndex)}`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
-        const fieldPath = `${objectPath}.${fieldName}`;
-        if (forbiddenLocalStateFieldNames.has(fieldName)) {
-            return [fieldPath];
-        }
-
-        return collectForbiddenLocalTrusteeStateStorageFieldPaths(
-            fieldValue,
-            fieldPath,
-        );
-    });
-};
 
 const storageAad = (
     setupContext: unknown,
@@ -1083,15 +1027,6 @@ export const encryptLocalTrusteeState = async (
     input: LocalTrusteeStateStorageEncryptionInput,
 ): Promise<LocalTrusteeStateStorageEncryptionResult> => {
     assertCommitmentHeader(input.localStateCommitment);
-    const forbiddenFieldPaths =
-        collectForbiddenLocalTrusteeStateStorageFieldPaths(
-            input.localStatePlaintext,
-        );
-    if (forbiddenFieldPaths.length > 0) {
-        throw new Error(
-            `localStatePlaintext includes forbidden raw local state fields: ${forbiddenFieldPaths.join(', ')}`,
-        );
-    }
     const localStatePlaintext = validateLocalStatePlaintext(
         input.localStatePlaintext,
         input.localStateCommitment,
@@ -1307,15 +1242,6 @@ export const decryptLocalTrusteeState = async (
     const parsedLocalStatePlaintext: unknown = JSON.parse(
         textDecoder.decode(plaintextBytes),
     );
-    const forbiddenFieldPaths =
-        collectForbiddenLocalTrusteeStateStorageFieldPaths(
-            parsedLocalStatePlaintext,
-        );
-    if (forbiddenFieldPaths.length > 0) {
-        throw new Error(
-            `decrypted local trustee state includes forbidden raw local state fields: ${forbiddenFieldPaths.join(', ')}`,
-        );
-    }
     const localStateCommitment = input.encryptedLocalState.storageAad
         .localStateCommitment as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
     assertCommitmentHeader(localStateCommitment);

@@ -46,13 +46,6 @@ pub(super) fn verify_public_evaluation_key_set(
             Vec::new(),
         )?));
     }
-    if let Some(unexpected_field) = unexpected_public_evaluation_key_set_field(evaluation_keys) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysUnexpectedField",
-            format!("evaluationKeys contains unexpected field {unexpected_field}"),
-            format!("setupPackage.evaluationKeys.{unexpected_field}"),
-        )?));
-    }
     if evaluation_keys.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_EVALUATION_KEY_SET_OBJECT_TYPE)
     {
@@ -1839,53 +1832,6 @@ fn validate_key_switch_component_shape(
     }
 
     Ok(())
-}
-
-fn unexpected_public_evaluation_key_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "assemblyStatus",
-            "materialEncoding",
-            "materialSource",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "evaluatorKeyScheduleRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSuccinctProofSetRoot",
-            "relinearizationKeyShareRoundsRoot",
-            "relinearizationLevelSchedule",
-            "relinearizationKeyRoots",
-            "requiredGaloisSetHash",
-            "requiredGaloisKeySchedule",
-            "galoisKeyShareBatchRoots",
-            "galoisKeyRoots",
-            "genericKeySwitchKeyRoots",
-            "rawKeyBytesEmbedded",
-            "verifierGeneratedKeyMaterial",
-            "publicEvaluationKeyMaterialEncoding",
-            "publicEvaluationKeyMaterialRoot",
-            "publicEvaluationKeyMaterialChunkSizeBytes",
-            "publicEvaluationKeyMaterialChunkCount",
-            "publicEvaluationKeyMaterialTotalByteLength",
-            "publicEvaluationKeyMaterialFullObjectHash",
-            "publicEvaluationKeyMaterialChunkRoot",
-            "publicEvaluationKeyMaterialChunkHashes",
-            "evaluationKeySetHash",
-        ],
-    )
 }
 
 pub(super) fn evaluation_key_material_refusal(

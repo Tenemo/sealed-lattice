@@ -225,33 +225,6 @@ fn validate_private_vss_share_statement_material(
 }
 
 fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalResult<()> {
-    reject_unexpected_fields(
-        proof_record,
-        &[
-            "objectType",
-            "objectVersion",
-            "proofProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofBytesEncoding",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "proofAccountingHash",
-            "proofStatementRoot",
-            "statementHash",
-            "proofSizeBytes",
-            "proofBytesHash",
-            "proofMaterialRoot",
-            "proofChunkSizeBytes",
-            "proofChunkCount",
-            "proofTotalByteLength",
-            "proofFullObjectHash",
-            "proofChunkRoot",
-            "proofChunkHashes",
-            "proofBytesHex",
-        ],
-        "private VSS share proof",
-    )?;
     expect_string_field(
         proof_record,
         "objectType",
@@ -556,18 +529,6 @@ fn transported_private_vss_share_proof_material_chunks(
 fn verify_transported_private_vss_share_proof_material_set_header(
     value: &Value,
 ) -> CanonicalResult<()> {
-    reject_unexpected_fields(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofMaterials",
-        ],
-        "transportedPrivateVssShareProofMaterial",
-    )?;
     for (field_name, expected_value) in [
         (
             "objectType",
@@ -595,25 +556,6 @@ fn verify_transported_private_vss_share_proof_material_set_header(
 fn verify_transported_private_vss_share_proof_material_header(
     value: &Value,
 ) -> CanonicalResult<()> {
-    reject_unexpected_fields(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofMaterialRoot",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkHashes",
-            "chunkRoot",
-            "chunks",
-        ],
-        "transported private VSS share proof material",
-    )?;
     for (field_name, expected_value) in [
         ("objectType", PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE),
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
@@ -663,11 +605,6 @@ fn transported_private_vss_share_proof_chunks(value: &Value) -> CanonicalResult<
     }
     let mut chunks = Vec::with_capacity(expected_chunk_count);
     for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        reject_unexpected_fields(
-            chunk_value,
-            &["chunkIndex", "bytesHex"],
-            "transported private VSS share proof chunk",
-        )?;
         let observed_chunk_index = value_u64(chunk_value, "chunkIndex")?;
         if observed_chunk_index != expected_chunk_index as u64 {
             return Err(invalid_private_vss_share_proof(
@@ -957,28 +894,6 @@ fn expect_string_field(
 ) -> CanonicalResult<()> {
     if value.get(field_name).and_then(Value::as_str) != Some(expected) {
         return Err(invalid_private_vss_share_proof(message));
-    }
-
-    Ok(())
-}
-
-fn reject_unexpected_fields(
-    value: &Value,
-    allowed_fields: &[&str],
-    label: &str,
-) -> CanonicalResult<()> {
-    let Some(fields) = value.as_object() else {
-        return Err(invalid_private_vss_share_proof(format!(
-            "{label} must be a JSON object"
-        )));
-    };
-    if let Some(unexpected_field) = fields
-        .keys()
-        .find(|field_name| !allowed_fields.contains(&field_name.as_str()))
-    {
-        return Err(invalid_private_vss_share_proof(format!(
-            "{label} contains unexpected field {unexpected_field}"
-        )));
     }
 
     Ok(())

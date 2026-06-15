@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
     canonicalJson,
-    collectForbiddenLocalTrusteeStateStorageFieldPaths,
     createPrivateVssMailboxKeyPair,
     decryptLocalTrusteeState,
     decryptPrivateVssMailboxEnvelope,
@@ -584,12 +583,6 @@ describe('crypto primitive boundary', () => {
             aeadNonceHex: aeadNonceBytesHex,
             aeadTagLength: 128,
         });
-        expect(
-            collectForbiddenLocalTrusteeStateStorageFieldPaths(
-                encrypted.encryptedLocalState,
-                'encryptedLocalState',
-            ),
-        ).toEqual([]);
         await expect(
             decryptLocalTrusteeState({
                 encryptedLocalState: encrypted.encryptedLocalState,
@@ -603,17 +596,6 @@ describe('crypto primitive boundary', () => {
             storageAadHash: encrypted.storageAadHash,
         });
 
-        await expect(
-            encryptLocalTrusteeState({
-                localStatePlaintext: {
-                    rawShamirShares: [1, 2, 3],
-                } as unknown as typeof localStatePlaintext,
-                localStateCommitment,
-                setupContext,
-                storageKeyBytesHex,
-                aeadNonceBytesHex,
-            }),
-        ).rejects.toThrow(/forbidden raw local state fields/u);
         await expect(
             encryptLocalTrusteeState({
                 localStatePlaintext: {

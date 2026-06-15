@@ -438,15 +438,6 @@ fn verify_transport_certificate_body(
             "setupPackage.setupTransportCertificate",
         )));
     }
-    if let Some(unexpected_field) =
-        unexpected_setup_transport_certificate_field(transport_certificate)
-    {
-        return Ok(Err(Refusal::new(
-            "transportCertificateUnexpectedField",
-            format!("setupTransportCertificate contains unexpected field {unexpected_field}"),
-            format!("setupPackage.setupTransportCertificate.{unexpected_field}"),
-        )));
-    }
     for (field_name, expected_value, reason_code, message) in [
         (
             "objectType",
@@ -647,56 +638,6 @@ fn verify_transport_certificate_body(
     }
 
     Ok(Ok(()))
-}
-
-fn unexpected_setup_transport_certificate_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "transportProfileId",
-            "setupTransportProfileHash",
-            "largeObjectEncoding",
-            "chunking",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "storageQuotaBytes",
-            "largestSingleBufferBytes",
-            "copyCountLimit",
-            "streamVerificationOrder",
-            "resumePolicy",
-            "lazyLoadingPolicy",
-            "transportedObjects",
-            "chunkHashes",
-            "chunkRoot",
-            "fullObjectHash",
-            "setupTransportCertificateHash",
-        ],
-    )
-}
-
-fn unexpected_setup_transported_object_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "objectName",
-            "objectRole",
-            "objectRoot",
-            "byteLength",
-            "chunkStartIndex",
-            "chunkCount",
-            "chunkRoot",
-            "chunkHashes",
-            "fullObjectHash",
-            "encoding",
-            "loadingPolicy",
-        ],
-    )
 }
 
 fn verify_setup_transported_objects(
@@ -904,15 +845,6 @@ fn setup_transported_object_binding(
             "transportedObjectNotObject",
             "setupTransportCertificate.transportedObjects entries must be root-bound objects",
             format!("setupPackage.setupTransportCertificate.transportedObjects[{object_index}]"),
-        )));
-    }
-    if let Some(unexpected_field) = unexpected_setup_transported_object_field(transported_object) {
-        return Ok(Err(Refusal::new(
-            "transportedObjectUnexpectedField",
-            format!("setup transported object contains unexpected field {unexpected_field}"),
-            format!(
-                "setupPackage.setupTransportCertificate.transportedObjects[{object_index}].{unexpected_field}"
-            ),
         )));
     }
     let object_path =
@@ -1638,25 +1570,6 @@ fn verify_binary_vss_material_transport_reference(
             "setupPackage.vssCoefficientCommitmentMaterial.transport",
         )));
     };
-    if let Some(unexpected_field) = unexpected_field(
-        transport,
-        &[
-            "transportProfileId",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkRoot",
-        ],
-    ) {
-        return Ok(Err(Refusal::new(
-            "vssMaterialTransportReferenceUnexpectedField",
-            format!(
-                "vssCoefficientCommitmentMaterial.transport contains unexpected field {unexpected_field}"
-            ),
-            format!("setupPackage.vssCoefficientCommitmentMaterial.transport.{unexpected_field}"),
-        )));
-    }
     if transport_object
         .get("transportProfileId")
         .and_then(Value::as_str)

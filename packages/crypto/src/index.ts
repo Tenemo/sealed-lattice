@@ -25,7 +25,6 @@ export {
     privateVssMailboxEncryptionProfileId,
 } from './private-vss-mailbox.js';
 export {
-    collectForbiddenLocalTrusteeStateStorageFieldPaths,
     decryptLocalTrusteeState,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,

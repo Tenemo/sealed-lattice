@@ -20,7 +20,6 @@ use participant_checks::validate_participant_setup_records;
 pub(super) fn validate_setup_package_internal_bindings(
     setup_package: &Value,
 ) -> CanonicalResult<()> {
-    reject_forbidden_setup_package_secret_fields(setup_package)?;
     let profile_hash = profile_hash()?;
     let backend_profile_hash = backend_profile_hash()?;
     compare_string_at_path(
@@ -216,24 +215,6 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "passive BGV setup package must not claim target decryption C1-C4 certification",
-        ));
-    }
-    if bool_at_path(
-        setup_package,
-        &[
-            "externallySuppliedSetupMaterialBoundary",
-            "transcriptAcceptsExternallySuppliedSecretReconstruction",
-        ],
-    )? || bool_at_path(
-        setup_package,
-        &[
-            "externallySuppliedSetupMaterialBoundary",
-            "rawSecretSharesExported",
-        ],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must not claim externally supplied secret reconstruction or raw share export",
         ));
     }
     if string_at_path(

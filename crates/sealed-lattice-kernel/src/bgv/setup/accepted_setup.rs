@@ -326,40 +326,6 @@ const ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES: &[&str] = &[
     "trustee-evaluation-key",
 ];
 
-const ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES: &[&str] = &[
-    "setupSeed",
-    "setupSeedHash",
-    "privateSetupSeedHash",
-    "setupPrivateWitness",
-    "externallySuppliedSetupMaterialBoundary",
-    "externallySuppliedSetupMaterial",
-    "lattigoSetupMaterial",
-    "lattigoPublicKey",
-    "lattigoRelinearizationKey",
-    "lattigoGaloisKey",
-    "proofGeneration",
-    "proofRandomness",
-    "proofRandomnessNonceHex",
-    "proofRandomnessSeedHex",
-    "proofRandomnessSource",
-    "externallySuppliedThresholdShareCommitments",
-    "externallySuppliedThresholdShareCommitmentMaterial",
-    "externallySuppliedUnverifiedThresholdShareCommitments",
-];
-
-const ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES: &[&str] = &[
-    "targetDecryptionStatus",
-    "targetDecryptionReadiness",
-    "targetDecryptionCertificate",
-    "targetDecryptionCertificateHash",
-    "targetDecryptionClosure",
-    "targetDecryptionClosureCertificate",
-    "targetDecryptionShareProofs",
-    "targetDecryptionShares",
-    "targetPartDecRecords",
-    "targetC1C4Certificate",
-];
-
 const REQUIRED_PHASES: &[(&str, u64)] = &[
     ("rosterFreeze", 1),
     ("setupIntent", 2),
@@ -521,36 +487,12 @@ pub(crate) fn describe_collective_bgv_setup_profile() -> CanonicalResult<Value> 
         "requiredFinalObjects": REQUIRED_FINAL_OBJECTS,
         "genericKeySwitchPolicy": "refused-unless-explicitly-required-by-frozen-evaluator-schedule",
         "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
-        "forbiddenAcceptedPathFields": ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES,
-        "topLevelForbiddenAcceptedPathFields": ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES,
     }))
 }
 
 pub(crate) fn verify_collective_bgv_setup_package_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "expectedManifestHash",
-            "expectedRosterHash",
-            "expectedSetupPackageHash",
-            "setupPackage",
-            "transportedPublicKeyShareMaterial",
-            "transportedPublicKeyShareProofMaterial",
-            "transportedEvaluationKeyShareProofMaterial",
-            "transportedEvaluationKeyShareComponentMaterial",
-            "transportedPublicEvaluationKeyMaterial",
-            "transportedSameSecretProofMaterial",
-            "transportedVssCoefficientCommitmentMaterial",
-            "verifiedSetupProofMaterials",
-            "verifiedVssCoefficientCommitmentMaterial",
-        ],
-        "verifyCollectiveBgvSetupPackage",
-    )?;
-    reject_forbidden_setup_fields_for_context(request, "accepted collective BGV setup")?;
-    reject_accepted_setup_forbidden_request_fields(request)?;
-
     let setup_package = request.get("setupPackage").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -579,11 +521,6 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
 pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["publicMatrixSeedHash"],
-        "deriveCollectiveBgvSetupPublicDerivations",
-    )?;
     let public_matrix_seed_hash = request
         .get("publicMatrixSeedHash")
         .and_then(Value::as_str)
@@ -636,36 +573,6 @@ fn verify_collective_setup_package(
             "setupPackage.setupProfileId",
         );
     }
-    if let Err(error) = reject_forbidden_setup_package_secret_fields_for_context(
-        setup_package,
-        "accepted collective BGV setup verification",
-    ) {
-        return Ok(VerificationFlow::Stop(verification_response(
-            VerifierStatus::Refused,
-            None,
-            Vec::new(),
-            vec![Refusal::new(
-                "secretMaterialPresent",
-                error.message,
-                "setupPackage".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-    if let Err(error) = reject_accepted_setup_forbidden_fields(setup_package) {
-        return Ok(VerificationFlow::Stop(verification_response(
-            VerifierStatus::Refused,
-            None,
-            Vec::new(),
-            vec![Refusal::new(
-                "acceptedPathForbiddenField",
-                error.message,
-                "setupPackage".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-
     if let Some(response) = verify_setup_package_hash(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -1249,17 +1156,6 @@ fn setup_package_declares_public_runtime_material(setup_package: &Value) -> bool
             .is_some_and(|evaluation_keys| !evaluation_keys.is_empty())
 }
 
-fn unexpected_field(value: &Value, allowed_fields: &[&str]) -> Option<String> {
-    value
-        .as_object()
-        .and_then(|fields| {
-            fields
-                .keys()
-                .find(|field_name| !allowed_fields.contains(&field_name.as_str()))
-        })
-        .cloned()
-}
-
 fn array_value<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
     value
         .get(field_name)
@@ -1639,67 +1535,4 @@ fn phase_order_value() -> Value {
             })
             .collect(),
     )
-}
-
-fn reject_accepted_setup_forbidden_fields(value: &Value) -> CanonicalResult<()> {
-    if let Some(fields) = value.as_object() {
-        for field_name in fields.keys() {
-            if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidProtocolObject,
-                    format!(
-                        "{field_name} cannot appear as a top-level accepted collective BGV setup field"
-                    ),
-                ));
-            }
-        }
-    }
-    reject_accepted_setup_forbidden_fields_recursively(value)
-}
-
-fn reject_accepted_setup_forbidden_fields_recursively(value: &Value) -> CanonicalResult<()> {
-    match value {
-        Value::Array(items) => {
-            for item in items {
-                reject_accepted_setup_forbidden_fields_recursively(item)?;
-            }
-        }
-        Value::Object(fields) => {
-            for (field_name, field_value) in fields {
-                if ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str()) {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::InvalidProtocolObject,
-                        format!(
-                            "{field_name} cannot appear in accepted collective BGV setup material"
-                        ),
-                    ));
-                }
-                reject_accepted_setup_forbidden_fields_recursively(field_value)?;
-            }
-        }
-        _ => {}
-    }
-
-    Ok(())
-}
-
-fn reject_accepted_setup_forbidden_request_fields(request: &Value) -> CanonicalResult<()> {
-    let Some(request_object) = request.as_object() else {
-        return Ok(());
-    };
-    for field_name in request_object.keys() {
-        if field_name == "setupPackage" || field_name == "command" {
-            continue;
-        }
-        if ACCEPTED_SETUP_TOP_LEVEL_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
-            || ACCEPTED_SETUP_FORBIDDEN_FIELD_NAMES.contains(&field_name.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                format!("{field_name} cannot appear in accepted collective BGV setup requests"),
-            ));
-        }
-    }
-
-    Ok(())
 }

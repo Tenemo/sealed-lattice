@@ -21,9 +21,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
             readonly setupProfileId: string;
             readonly reservedRootsAndHashes: readonly string[];
-            readonly externallySuppliedSetupMaterialBoundary: {
-                readonly transcriptAcceptsExternallySuppliedSecretReconstruction: boolean;
-            };
             readonly statusLabels: readonly string[];
         };
 
@@ -39,10 +36,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'ThresholdShareVerificationKeyRoot',
             ]),
         );
-        expect(
-            objectModel.externallySuppliedSetupMaterialBoundary
-                .transcriptAcceptsExternallySuppliedSecretReconstruction,
-        ).toBe(false);
         expect(objectModel.statusLabels).toContain(
             'PassiveBgvSetupCanonicalObjectModelFrozen',
         );
@@ -145,33 +138,10 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         );
     });
 
-    it('refuses externally-supplied-setup-material setup fields and wrong expected roots', async () => {
+    it('refuses wrong expected roots and mutated canonical bindings', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
 
-        for (const fieldName of [
-            'globalSecretPolynomial',
-            'externallySuppliedSetupSecret',
-            'externallySuppliedSetupKeyMaterial',
-            'fullSecretKey',
-            'collectiveSecretKey',
-            'fullSecretReconstruction',
-            'thresholdSecretShares',
-        ]) {
-            expect(() =>
-                kernel.generateBgvPassiveSetup({
-                    ...setupRequest,
-                    participants: [
-                        {
-                            ...setupRequest.participants[0],
-                            [fieldName]: 'forbidden',
-                        },
-                        setupRequest.participants[1],
-                        setupRequest.participants[2],
-                    ],
-                }),
-            ).toThrow(TranscriptCoreKernelCommandError);
-        }
         expect(() =>
             kernel.verifyBgvPassiveSetup({
                 setupPackage: setup,

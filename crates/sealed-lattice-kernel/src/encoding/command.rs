@@ -44,7 +44,6 @@ enum TranscriptCoreCommand {
     GenerateBgvCiphertextConventionFixture,
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
-    RejectBgvReferenceOracleArtifact,
     RunDirectEncryptedBallot,
     GenerateBgvTargetDecryptionShare,
     RecombineBgvTargetDecryptionShares,
@@ -236,7 +235,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
-        | TranscriptCoreCommand::RejectBgvReferenceOracleArtifact
         | TranscriptCoreCommand::RunDirectEncryptedBallot
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
         | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
@@ -344,9 +342,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::AnalyzeBgvCanonicalObject => {
             crate::bgv::commands::analyze_bgv_canonical_object_from_request(request)
-        }
-        TranscriptCoreCommand::RejectBgvReferenceOracleArtifact => {
-            Ok(crate::bgv::commands::reject_bgv_reference_oracle_artifact_from_request(request))
         }
         TranscriptCoreCommand::RunDirectEncryptedBallot => {
             crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)

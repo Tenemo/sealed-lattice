@@ -294,16 +294,6 @@ fn transported_public_key_share_proof_material_chunks(
 fn verify_transported_public_key_share_proof_material_set_header(
     value: &Value,
 ) -> CanonicalResult<()> {
-    if let Some(unexpected_field) =
-        unexpected_transported_public_key_share_proof_material_set_field(value)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "transportedPublicKeyShareProofMaterial contains unexpected field {unexpected_field}"
-            ),
-        ));
-    }
     for (field_name, expected_value) in [
         (
             "objectType",
@@ -333,16 +323,6 @@ fn verify_transported_public_key_share_proof_material_set_header(
 }
 
 fn verify_transported_public_key_share_proof_material_header(value: &Value) -> CanonicalResult<()> {
-    if let Some(unexpected_field) =
-        unexpected_transported_public_key_share_proof_material_field(value)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "transported public-key share succinct proof material contains unexpected field {unexpected_field}"
-            ),
-        ));
-    }
     for (field_name, expected_value) in [
         ("objectType", PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE),
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
@@ -399,16 +379,6 @@ fn transported_public_key_share_proof_chunks(value: &Value) -> CanonicalResult<V
     }
     let mut chunks = Vec::with_capacity(expected_chunk_count);
     for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        if let Some(unexpected_field) =
-            unexpected_transported_public_key_share_proof_chunk_field(chunk_value)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "transported public-key share succinct proof chunk contains unexpected field {unexpected_field}"
-                ),
-            ));
-        }
         let observed_chunk_index = value_u64(chunk_value, "chunkIndex")?;
         if observed_chunk_index != expected_chunk_index as u64 {
             return Err(CanonicalError::new(
@@ -471,47 +441,6 @@ fn verify_transported_public_key_share_proof_material_hashes(
     Ok(())
 }
 
-fn unexpected_transported_public_key_share_proof_material_set_field(
-    value: &Value,
-) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofMaterials",
-        ],
-    )
-}
-
-fn unexpected_transported_public_key_share_proof_material_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofMaterialRoot",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkHashes",
-            "chunkRoot",
-            "chunks",
-        ],
-    )
-}
-
-fn unexpected_transported_public_key_share_proof_chunk_field(value: &Value) -> Option<String> {
-    unexpected_field(value, &["chunkIndex", "bytesHex"])
-}
-
 pub(super) fn verify_public_key_shares(setup_package: &Value) -> CanonicalResult<Option<Value>> {
     let Some(share_set) = setup_package.get("publicKeyShares") else {
         return Ok(Some(verification_response(
@@ -527,13 +456,6 @@ pub(super) fn verify_public_key_shares(setup_package: &Value) -> CanonicalResult
             "publicKeySharesNotObject",
             "publicKeyShares must be a root-bound object, not an array or scalar",
             "setupPackage.publicKeyShares",
-        )?));
-    }
-    if let Some(unexpected_field) = unexpected_public_key_share_set_field(share_set) {
-        return Ok(Some(public_key_share_refusal(
-            "publicKeyShareSetUnexpectedField",
-            format!("publicKeyShares contains unexpected field {unexpected_field}"),
-            format!("setupPackage.publicKeyShares.{unexpected_field}"),
         )?));
     }
     if share_set.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_SET_OBJECT_TYPE)
@@ -706,13 +628,6 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_public_key_share_field(share_record) {
-        return Ok(Some(public_key_share_refusal(
-            "publicKeyShareUnexpectedField",
-            format!("public-key share contains unexpected field {unexpected_field}"),
-            format!("setupPackage.publicKeyShares.shareRecords.{unexpected_field}"),
-        )?));
-    }
     if share_record.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_OBJECT_TYPE)
     {
         return Ok(Some(public_key_share_refusal(
@@ -880,13 +795,6 @@ pub(super) fn verify_public_key_share_proofs(
             "publicKeyShareProofsNotObject",
             "publicKeyShareProofs must be a root-bound object, not an array or scalar",
             "setupPackage.publicKeyShareProofs",
-        )?));
-    }
-    if let Some(unexpected_field) = unexpected_public_key_share_proof_set_field(proof_set) {
-        return Ok(Some(public_key_share_proof_refusal(
-            "publicKeyShareProofSetUnexpectedField",
-            format!("publicKeyShareProofs contains unexpected field {unexpected_field}"),
-            format!("setupPackage.publicKeyShareProofs.{unexpected_field}"),
         )?));
     }
     if proof_set.get("objectType").and_then(Value::as_str)
@@ -1211,14 +1119,6 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_public_key_share_succinct_proof_set_field(proof_set)
-    {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
-            "publicKeyShareSuccinctProofSetUnexpectedField",
-            format!("publicKeyShareSuccinctProofs contains unexpected field {unexpected_field}"),
-            format!("setupPackage.publicKeyShareSuccinctProofs.{unexpected_field}"),
-        )?));
-    }
     if proof_set.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE)
     {
@@ -1468,14 +1368,6 @@ fn verify_public_key_share_succinct_proof_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "public-key share succinct proof records must be objects",
-        ));
-    }
-    if let Some(unexpected_field) =
-        unexpected_public_key_share_succinct_proof_record_field(proof_record)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("public-key share succinct proof contains unexpected field {unexpected_field}"),
         ));
     }
     if proof_record.get("objectType").and_then(Value::as_str)
@@ -1830,13 +1722,6 @@ fn verify_public_key_share_proof_record(
             "setupPackage.publicKeyShareProofs.proofRecords",
         )?));
     }
-    if let Some(unexpected_field) = unexpected_public_key_share_proof_field(proof_record) {
-        return Ok(Some(public_key_share_proof_refusal(
-            "publicKeyShareProofUnexpectedField",
-            format!("public-key share proof contains unexpected field {unexpected_field}"),
-            format!("setupPackage.publicKeyShareProofs.proofRecords.{unexpected_field}"),
-        )?));
-    }
     if proof_record.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_KEY_SHARE_PROOF_OBJECT_TYPE)
     {
@@ -2185,218 +2070,6 @@ fn public_key_share_bindings_from_package(
     }
 
     Ok(bindings)
-}
-
-fn unexpected_public_key_share_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofBindingStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "sameSecretConsistencyRoot",
-            "publicKeyShareRoots",
-            "shareRecords",
-            "publicKeyShareSetRoot",
-        ],
-    )
-}
-
-fn unexpected_public_key_share_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "shareComponent",
-            "rnsLimbCount",
-            "shareCoefficientVectorHash512ByLimb",
-            "proofBindingStatus",
-            "publicKeyShareRoot",
-        ],
-    )
-}
-
-fn unexpected_public_key_share_proof_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "sameSecretConsistencyRoot",
-            "publicKeyShareSetRoot",
-            "publicKeyShareProofRoots",
-            "proofRecords",
-            "publicKeyShareProofSetRoot",
-        ],
-    )
-}
-
-fn unexpected_public_key_share_proof_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "publicKeyShareRoot",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "rnsLimbCount",
-            "errorSupport",
-            "proofBytesStatus",
-            "publicKeyShareProofRoot",
-        ],
-    )
-}
-
-fn unexpected_public_key_share_succinct_proof_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "proofAccountingHash",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "participantCount",
-            "rnsLimbCount",
-            "publicMatrixSeedHash",
-            "publicKeyCrpRoot",
-            "publicAPolynomialRoot",
-            "sameSecretConsistencyRoot",
-            "sameSecretProofSetRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "publicKeyShareSetRoot",
-            "publicKeyShareProofSetRoot",
-            "publicKeyShareMaterialSetRoot",
-            "publicKeyShareSuccinctProofRoots",
-            "proofRecords",
-            "publicKeyShareSuccinctProofSetRoot",
-        ],
-    )
-}
-
-fn unexpected_public_key_share_succinct_proof_record_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofFamily",
-            "proofVerificationStatus",
-            "proofModelStatus",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "ringDegree",
-            "publicKeyShareRoot",
-            "publicKeyShareProofRoot",
-            "publicKeyShareMaterialRoot",
-            "sameSecretStatementRoot",
-            "trusteeSecretCommitmentRoot",
-            "sameSecretProofFamilyBindingRoot",
-            "sameSecretProofRoot",
-            "statementHash",
-            "proofSizeBytes",
-            "proofBytesHash",
-            "proofBytesEncoding",
-            "proofMaterialRoot",
-            "proofChunkSizeBytes",
-            "proofChunkCount",
-            "proofTotalByteLength",
-            "proofFullObjectHash",
-            "proofChunkRoot",
-            "proofChunkHashes",
-            "proofBytesHex",
-            "publicKeyShareSuccinctProofRoot",
-        ],
-    )
 }
 
 fn public_key_share_refusal(

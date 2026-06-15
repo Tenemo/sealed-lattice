@@ -43,10 +43,9 @@ use crate::{
             validate_passive_setup_package_for_encrypted_evaluation,
         },
         setup_helpers::{
-            array_at_path, bool_at_path, hash_at_path, reject_forbidden_setup_fields,
-            string_at_path, unsigned_at_path, usize_at_path, value_at_path,
+            array_at_path, bool_at_path, hash_at_path, string_at_path, unsigned_at_path,
+            usize_at_path, value_at_path,
         },
-        validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_protocol_hash,

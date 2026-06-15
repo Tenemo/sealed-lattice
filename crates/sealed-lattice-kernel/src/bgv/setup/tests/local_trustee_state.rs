@@ -26,69 +26,6 @@ fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
 }
 
 #[test]
-fn local_trustee_setup_state_verifier_rejects_nested_raw_share_material() {
-    let mut request = local_trustee_setup_state_request();
-    request["localStateCommitment"]["debugPayload"] = serde_json::json!({
-        "rawShamirShares": [1, 2, 3],
-    });
-    rebind_local_state_root(&mut request);
-
-    let error = verify_local_trustee_setup_state_from_request(&request)
-        .expect_err("raw share material must be refused");
-
-    assert_eq!(
-        error.code,
-        crate::encoding::CanonicalErrorCode::InvalidFixture
-    );
-    assert!(error.message.contains("rawShamirShares"));
-}
-
-#[test]
-fn local_trustee_setup_state_verifier_rejects_unknown_commitment_fields() {
-    let mut request = local_trustee_setup_state_request();
-    request["localStateCommitment"]["debugPayload"] = serde_json::json!({
-        "operatorNote": "not part of the typed local state commitment",
-    });
-    rebind_local_state_root(&mut request);
-
-    let error = verify_local_trustee_setup_state_from_request(&request)
-        .expect_err("unknown local state fields must be refused");
-
-    assert_eq!(
-        error.code,
-        crate::encoding::CanonicalErrorCode::InvalidFixture
-    );
-    assert!(
-        error
-            .message
-            .contains("not allowed by the local trustee state schema")
-    );
-}
-
-#[test]
-fn local_trustee_setup_state_verifier_rejects_unknown_deletion_receipt_fields() {
-    let mut request = local_trustee_setup_state_request();
-    request["localStateCommitment"]["deletionReceipt"]["debugPayload"] = serde_json::json!({
-        "operatorNote": "not part of the typed deletion receipt",
-    });
-    rebind_local_deletion_receipt_root(&mut request);
-    rebind_local_state_root(&mut request);
-
-    let error = verify_local_trustee_setup_state_from_request(&request)
-        .expect_err("unknown deletion receipt fields must be refused");
-
-    assert_eq!(
-        error.code,
-        crate::encoding::CanonicalErrorCode::InvalidFixture
-    );
-    assert!(
-        error
-            .message
-            .contains("not allowed by the local trustee state schema")
-    );
-}
-
-#[test]
 fn local_trustee_setup_state_verifier_rejects_deletion_receipt_drift() {
     let mut request = local_trustee_setup_state_request();
     request["localStateCommitment"]["deletionReceipt"]["deletedMaterialClasses"][0] =

@@ -327,7 +327,7 @@ describe('BGV-RNS backend kernel commands', () => {
         });
     });
 
-    it('keeps base conversion and oracle material inside the BGV boundary', async () => {
+    it('keeps base conversion material inside the BGV boundary', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const baseConversionResult = kernel.generateBgvBaseConversionFixture({
             slots: [7, 8, 9, 65_536],
@@ -337,12 +337,6 @@ describe('BGV-RNS backend kernel commands', () => {
             typeof baseConversionResult,
             BgvProfileRejected
         >;
-        const oracleRejection = kernel.rejectBgvReferenceOracleArtifact({
-            artifact: {
-                artifactKind: 'lattigo-development-oracle-vector',
-                protocolEvidence: false,
-            },
-        });
 
         expect(baseConversion).toMatchObject({
             convertedBasisId: 'sealed-lattice-bgv-rns-extended-basis-v1',
@@ -361,17 +355,6 @@ describe('BGV-RNS backend kernel commands', () => {
         );
         expect(baseConversion.statusLabels).toContain(
             'GenericKeySwitchSurfaceNotExported',
-        );
-        expect(oracleRejection).toMatchObject({
-            ok: false,
-            acceptedAsProtocolEvidence: false,
-        });
-        expect(oracleRejection.statusLabels).toEqual(
-            expect.arrayContaining([
-                'ReferenceOracleRejected',
-                'LattigoSerializationRejected',
-                'RuntimeOracleDependencyRejected',
-            ]),
         );
     });
 });

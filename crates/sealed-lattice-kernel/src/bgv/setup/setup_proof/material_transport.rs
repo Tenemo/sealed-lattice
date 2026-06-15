@@ -6,8 +6,7 @@ use std::{
 };
 
 use crate::{
-    bgv::setup::accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID,
-    bgv::validation::reject_unexpected_bgv_request_fields, transcript_core::decode_hex,
+    bgv::setup::accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID, transcript_core::decode_hex,
 };
 
 const VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE: &str = "VerifiedSetupProofMaterialSet";
@@ -82,12 +81,6 @@ pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
 pub(crate) fn begin_setup_proof_material_transport_stream_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["verificationId", "transportedSetupProofMaterial"],
-        "beginSetupProofMaterialTransportStream",
-    )?;
-
     let verification_id = setup_proof_material_verification_id_field(request)?.to_string();
     let transported_material = object_field_at(
         request,
@@ -147,11 +140,6 @@ pub(crate) fn begin_setup_proof_material_transport_stream_request(
 pub(crate) fn absorb_setup_proof_material_transport_stream_chunk_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["verificationId", "chunkIndex", "bytesHex"],
-        "absorbSetupProofMaterialTransportStreamChunk",
-    )?;
     let verification_id = setup_proof_material_verification_id_field(request)?.to_string();
     let chunk_index = usize_field_at(request, "chunkIndex", "chunkIndex")?;
     let bytes_hex = string_field_at(request, "bytesHex", "bytesHex")?;
@@ -179,11 +167,6 @@ pub(crate) fn absorb_setup_proof_material_transport_stream_chunk_request(
 pub(crate) fn finish_setup_proof_material_transport_stream_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["verificationId"],
-        "finishSetupProofMaterialTransportStream",
-    )?;
     let verification_id = setup_proof_material_verification_id_field(request)?.to_string();
     let sessions = setup_proof_material_transport_stream_sessions();
     let mut sessions = sessions.lock().map_err(|_| {

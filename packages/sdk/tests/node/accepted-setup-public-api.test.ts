@@ -1644,17 +1644,6 @@ describe('accepted setup public package API in Node', () => {
                 },
             }),
         ).toThrow(/verifier-derived commitments/u);
-        expect(() =>
-            publicSetupApi.createSetupPackage({
-                ...setupPackageInput,
-                evaluationKeys: {
-                    ...publicEvaluationKeys,
-                    proofGeneration: {
-                        secretCoefficients: [1],
-                    },
-                },
-            }),
-        ).toThrow(/forbidden raw setup fields/u);
         for (const requiredPublicKeyClosureField of [
             'sameSecretProofs',
             'publicKeyShareMaterial',

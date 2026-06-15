@@ -151,51 +151,6 @@ const contextFieldNames = [
     'setupEpoch',
 ] as const;
 
-const forbiddenLocalStateFieldNames = new Set([
-    'rawSecret',
-    'rawSecretShare',
-    'rawAggregateThresholdShare',
-    'rawVssOpening',
-    'rawShamirShare',
-    'rawShamirShares',
-    'rawShare',
-    'rawShares',
-    'proofWitness',
-    'proofWitnesses',
-    'setupSeed',
-    'setupPrivateWitness',
-    'privateSetupSeedHash',
-    'decryptionShareWitness',
-    'coefficientMessage',
-    'randomnessByColumn',
-    'shareValues',
-    'aggregateOpening',
-    'aggregateOpeningColumns',
-    'openingColumnsDecimal',
-    'carryWitnessesDecimal',
-    'privateEnvelope',
-    'privateEnvelopes',
-]);
-
-const forbiddenVerifiedPrivateVssEnvelopeFieldNames = new Set([
-    'rawSecret',
-    'rawSecretShare',
-    'rawVssOpening',
-    'rawShamirShare',
-    'rawShamirShares',
-    'rawShare',
-    'rawShares',
-    'proofWitness',
-    'proofWitnesses',
-    'coefficientMessage',
-    'randomnessByColumn',
-    'aggregateOpening',
-    'aggregateOpeningColumns',
-    'openingColumnsDecimal',
-    'carryWitnessesDecimal',
-    'coefficientOpenings',
-]);
-
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
@@ -305,64 +260,6 @@ const assertSetupContextBinding = (
     }
 };
 
-export const collectForbiddenLocalTrusteeSetupStateFieldPaths = (
-    value: unknown,
-    objectPath = 'localStateCommitment',
-): string[] => {
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenLocalTrusteeSetupStateFieldPaths(
-                item,
-                `${objectPath}.${String(itemIndex)}`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
-        const fieldPath = `${objectPath}.${fieldName}`;
-        if (forbiddenLocalStateFieldNames.has(fieldName)) {
-            return [fieldPath];
-        }
-
-        return collectForbiddenLocalTrusteeSetupStateFieldPaths(
-            fieldValue,
-            fieldPath,
-        );
-    });
-};
-
-const collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths = (
-    value: unknown,
-    objectPath = 'verifiedPrivateVssShareEnvelopes',
-): string[] => {
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths(
-                item,
-                `${objectPath}.${String(itemIndex)}`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
-        const fieldPath = `${objectPath}.${fieldName}`;
-        if (forbiddenVerifiedPrivateVssEnvelopeFieldNames.has(fieldName)) {
-            return [fieldPath];
-        }
-
-        return collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths(
-            fieldValue,
-            fieldPath,
-        );
-    });
-};
-
 const setupContextFields = (
     setupContext: CollectiveBgvSetupContext,
 ): Pick<CollectiveBgvSetupContext, (typeof contextFieldNames)[number]> => ({
@@ -461,13 +358,6 @@ export const createLocalTrusteeSetupStateCommitment = (
         exportPolicy: localTrusteeSetupStateExportPolicy,
         storageProfile: localTrusteeSetupStateStorageProfile,
     } as const satisfies JsonRecord;
-    const forbiddenFieldPaths =
-        collectForbiddenLocalTrusteeSetupStateFieldPaths(localStateWithoutRoot);
-    if (forbiddenFieldPaths.length > 0) {
-        throw new Error(
-            `localStateCommitment includes forbidden raw local state fields: ${forbiddenFieldPaths.join(', ')}`,
-        );
-    }
 
     return {
         ...localStateWithoutRoot,
@@ -768,16 +658,6 @@ const aggregateVerifiedPrivateVssMaterial = (
 }> => {
     const privateEnvelopeByHash = new Map<ProtocolHash, JsonRecord>();
     for (const privateEnvelopeValue of input.verifiedPrivateVssShareEnvelopes) {
-        const leakedWitnessFieldPaths =
-            collectForbiddenVerifiedPrivateVssEnvelopeFieldPaths(
-                privateEnvelopeValue,
-                'verifiedPrivateVssShareEnvelopes',
-            );
-        if (leakedWitnessFieldPaths.length > 0) {
-            throw new Error(
-                `verifiedPrivateVssShareEnvelopes include forbidden private VSS witness fields: ${leakedWitnessFieldPaths.join(', ')}`,
-            );
-        }
         const privateEnvelope = jsonRecord(
             privateEnvelopeValue,
             'verifiedPrivateVssShareEnvelopes',

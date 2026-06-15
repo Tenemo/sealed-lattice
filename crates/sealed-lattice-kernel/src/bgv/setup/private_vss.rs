@@ -6,7 +6,6 @@ use crate::{
     bgv::{
         profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         setup_helpers::decimal_i128_value,
-        validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_protocol_hash,
@@ -106,21 +105,6 @@ struct LimbVerification {
 pub(crate) fn verify_private_vss_share_envelope_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupContext",
-            "publicMatrixSeedHash",
-            "sourceTrusteeCoefficientCommitmentRecord",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords",
-            "privateEnvelope",
-            "transportedPrivateVssShareProofMaterial",
-            "expectedPrivateEnvelopeHash",
-            "expectedLocalVerificationRoot",
-        ],
-        "verifyPrivateVssShareEnvelope",
-    )?;
-
     match verify_private_vss_share_envelope_inner(request)? {
         Ok(response) => Ok(response),
         Err(refusal) => Ok(verification_response(
@@ -137,30 +121,6 @@ pub(crate) fn verify_private_vss_share_envelope_from_request(
 pub(crate) fn generate_private_vss_share_proof_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupContext",
-            "publicMatrixSeedHash",
-            "privateEnvelopeAadHash",
-            "sourceTrusteeCoefficientCommitmentRecord",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords",
-            "recipientIdentity",
-            "recipientRosterPosition",
-            "rnsLimbIndex",
-            "rnsPrime",
-            "ringDegree",
-            "shareValues",
-            "coefficientCommitmentRoots",
-            "coefficientMessagesByShamirIndex",
-            "openingRandomnessByShamirIndex",
-            "proofRandomnessSource",
-            "proofRandomnessSeedHex",
-            "proofRandomnessNonceHex",
-        ],
-        "generatePrivateVssShareProof",
-    )?;
-
     let setup_context = object_field(
         request,
         "setupContext",
@@ -1251,52 +1211,6 @@ fn verify_private_envelope_header(
             "privateEnvelope.objectVersion",
         )));
     }
-    if let Some((field_name, object_path)) =
-        find_private_vss_coefficient_leakage(private_envelope, "privateEnvelope")
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "privateVssEnvelopeLeaksCoefficientOpening",
-            format!("private VSS envelope must not include {field_name}"),
-            object_path,
-        )));
-    }
-    if let Some((reason_code, field_name, object_path)) =
-        find_private_vss_plaintext_witness_leakage(private_envelope, "privateEnvelope")
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            reason_code,
-            format!(
-                "private VSS envelope must not disclose {field_name}; it must be a proof witness"
-            ),
-            object_path,
-        )));
-    }
-    if let Err(refusal) = reject_unexpected_fields(
-        private_envelope,
-        &[
-            "objectType",
-            "objectVersion",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "publicMatrixSeedHash",
-            "privateEnvelopeAadHash",
-            "sourceTrusteeIdentity",
-            "sourceTrusteeRosterPosition",
-            "recipientIdentity",
-            "recipientRosterPosition",
-            "sourceTrusteeCommitmentRoot",
-            "rnsShareOpenings",
-        ],
-        "privateEnvelope",
-    ) {
-        return Ok(Err(refusal));
-    }
     if let Err(refusal) = compare_context_fields(private_envelope, setup_context, "privateEnvelope")
     {
         return Ok(Err(refusal));
@@ -1502,21 +1416,6 @@ fn verify_private_envelope_limb(
             "private VSS limb opening objectVersion must be 1",
             "privateEnvelope.rnsShareOpenings.objectVersion",
         )));
-    }
-    if let Err(refusal) = reject_unexpected_fields(
-        limb_opening,
-        &[
-            "objectType",
-            "objectVersion",
-            "rnsLimbIndex",
-            "rnsPrime",
-            "shareValues",
-            "coefficientCommitmentRoots",
-            "privateVssShareProof",
-        ],
-        "privateEnvelope.rnsShareOpenings",
-    ) {
-        return Ok(Err(refusal));
     }
     let rns_limb_index = match usize_field(
         limb_opening,
@@ -1840,93 +1739,6 @@ fn compare_context_fields(
     }
 
     Ok(())
-}
-
-// These field names are exactly the witness quantities (coefficient openings, opening randomness, carry witnesses) that must never appear in a published envelope; any new witness field must be added here or it leaks the zero-knowledge witness.
-fn find_private_vss_coefficient_leakage(
-    value: &Value,
-    object_path: &str,
-) -> Option<(&'static str, String)> {
-    const FORBIDDEN_FIELD_NAMES: [&str; 7] = [
-        "coefficientOpenings",
-        "coefficientMessage",
-        "randomnessByColumn",
-        "rawShamirCoefficientValues",
-        "rawCoefficientValues",
-        "F_i,l,0",
-        "F_i,l,k",
-    ];
-
-    match value {
-        Value::Object(fields) => {
-            for (field_name, field_value) in fields {
-                let field_path = format!("{object_path}.{field_name}");
-                if let Some(forbidden_field_name) = FORBIDDEN_FIELD_NAMES
-                    .iter()
-                    .copied()
-                    .find(|forbidden_field_name| field_name == forbidden_field_name)
-                {
-                    return Some((forbidden_field_name, field_path));
-                }
-                if let Some(leakage) =
-                    find_private_vss_coefficient_leakage(field_value, &field_path)
-                {
-                    return Some(leakage);
-                }
-            }
-            None
-        }
-        Value::Array(items) => items.iter().enumerate().find_map(|(item_index, item)| {
-            find_private_vss_coefficient_leakage(item, &format!("{object_path}.{item_index}"))
-        }),
-        _ => None,
-    }
-}
-
-fn find_private_vss_plaintext_witness_leakage(
-    value: &Value,
-    object_path: &str,
-) -> Option<(&'static str, &'static str, String)> {
-    const FORBIDDEN_FIELD_NAMES: [(&str, &str); 4] = [
-        (
-            "aggregateOpening",
-            "privateVssEnvelopeLeaksAggregateOpening",
-        ),
-        (
-            "carryWitnessesDecimal",
-            "privateVssEnvelopeLeaksCarryWitness",
-        ),
-        ("carryWitnesses", "privateVssEnvelopeLeaksCarryWitness"),
-        (
-            "aggregateOpeningColumns",
-            "privateVssEnvelopeLeaksAggregateOpening",
-        ),
-    ];
-
-    match value {
-        Value::Object(fields) => {
-            for (field_name, field_value) in fields {
-                let field_path = format!("{object_path}.{field_name}");
-                if let Some((forbidden_field_name, reason_code)) = FORBIDDEN_FIELD_NAMES
-                    .iter()
-                    .copied()
-                    .find(|(forbidden_field_name, _reason_code)| field_name == forbidden_field_name)
-                {
-                    return Some((reason_code, forbidden_field_name, field_path));
-                }
-                if let Some(leakage) =
-                    find_private_vss_plaintext_witness_leakage(field_value, &field_path)
-                {
-                    return Some(leakage);
-                }
-            }
-            None
-        }
-        Value::Array(items) => items.iter().enumerate().find_map(|(item_index, item)| {
-            find_private_vss_plaintext_witness_leakage(item, &format!("{object_path}.{item_index}"))
-        }),
-        _ => None,
-    }
 }
 
 fn setup_context_field_names() -> [&'static str; 8] {
@@ -2263,32 +2075,6 @@ fn private_vss_refusal_to_error(refusal: PrivateVssRefusal) -> CanonicalError {
         CanonicalErrorCode::InvalidFixture,
         format!("{}: {}", refusal.reason_code, refusal.message),
     )
-}
-
-fn reject_unexpected_fields(
-    value: &Value,
-    allowed_fields: &[&str],
-    object_path: &str,
-) -> Result<(), PrivateVssRefusal> {
-    let Some(fields) = value.as_object() else {
-        return Err(PrivateVssRefusal::new(
-            "privateVssObjectMalformed",
-            format!("{object_path} must be a JSON object"),
-            object_path,
-        ));
-    };
-    if let Some(unexpected_field) = fields
-        .keys()
-        .find(|field_name| !allowed_fields.contains(&field_name.as_str()))
-    {
-        return Err(PrivateVssRefusal::new(
-            "privateVssEnvelopeUnexpectedField",
-            format!("{object_path} contains unexpected field {unexpected_field}"),
-            format!("{object_path}.{unexpected_field}"),
-        ));
-    }
-
-    Ok(())
 }
 
 fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {

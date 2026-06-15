@@ -74,10 +74,7 @@ pub(crate) fn evaluation_key_seeds_from_passive_setup_package(
 pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let generated = generate_passive_setup_public_evaluation_keys_from_request(
-        request,
-        "generateBgvEvaluationKeyMaterial",
-    )?;
+    let generated = generate_passive_setup_public_evaluation_keys_from_request(request)?;
     let setup_package = value_at_path(request, &["setupPackage"])?;
     let seed_material = evaluation_key_seeds_from_passive_setup_package(
         setup_package,
@@ -141,19 +138,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
 
 pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
     request: &Value,
-    command_name: &str,
 ) -> CanonicalResult<PreparedPassiveSetupPublicEvaluationKeys> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupPackage",
-            "setupPrivateWitness",
-            "workingLevel",
-            "rotationKeys",
-        ],
-        command_name,
-    )?;
-    reject_forbidden_setup_fields(request)?;
     let setup_package = value_at_path(request, &["setupPackage"])?;
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
@@ -241,7 +226,6 @@ pub(crate) fn public_evaluation_keys_from_material(
 ) -> CanonicalResult<PassiveSetupPublicEvaluationKeys> {
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
-    reject_forbidden_public_evaluation_key_material_secret_fields(material)?;
     compare_string_at_path(
         material,
         &["objectType"],
@@ -395,35 +379,6 @@ pub(crate) fn public_evaluation_keys_from_material(
         relinearization_key,
         rotation_keys,
     })
-}
-
-fn reject_forbidden_public_evaluation_key_material_secret_fields(
-    value: &Value,
-) -> CanonicalResult<()> {
-    reject_forbidden_setup_package_secret_fields(value)?;
-    match value {
-        Value::Array(items) => {
-            for item in items {
-                reject_forbidden_public_evaluation_key_material_secret_fields(item)?;
-            }
-        }
-        Value::Object(fields) => {
-            for (field_name, field_value) in fields {
-                if field_name == "setupPrivateWitness" || field_name == "privateSetupSeedHash" {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        format!(
-                            "{field_name} must not be present in public evaluation-key material"
-                        ),
-                    ));
-                }
-                reject_forbidden_public_evaluation_key_material_secret_fields(field_value)?;
-            }
-        }
-        _ => {}
-    }
-
-    Ok(())
 }
 
 pub(super) fn read_public_evaluation_key_rotation_requests(

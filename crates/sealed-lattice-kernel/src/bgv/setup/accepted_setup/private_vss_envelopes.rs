@@ -106,15 +106,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
             "setupPackage.privateVssEnvelopeCommitments",
         )?));
     }
-    if let Some(unexpected_field) =
-        unexpected_private_vss_envelope_commitment_set_field(commitment_set)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeCommitmentSetUnexpectedField",
-            format!("privateVssEnvelopeCommitments contains unexpected field {unexpected_field}"),
-            format!("setupPackage.privateVssEnvelopeCommitments.{unexpected_field}"),
-        )?));
-    }
     if commitment_set.get("objectType").and_then(Value::as_str)
         != Some(PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE)
     {
@@ -803,18 +794,6 @@ fn private_vss_envelope_binding_from_reference(
             )));
         }
     }
-    if let Some(unexpected_field) =
-        unexpected_private_vss_envelope_commitment_reference_field(envelope_reference)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferenceUnexpectedField",
-            format!("private VSS envelope commitment contains unexpected field {unexpected_field}"),
-            format!(
-                "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.{unexpected_field}"
-            ),
-        )));
-    }
-
     let expected_aad = private_vss_envelope_aad_value(
         setup_context,
         public_matrix_seed_hash,
@@ -945,17 +924,6 @@ fn verify_encrypted_private_vss_envelope(
             "privateVssEncryptedEnvelopeNotObject",
             "encryptedEnvelope must be a root-bound object",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope",
-        )));
-    }
-    if let Some(unexpected_field) =
-        unexpected_encrypted_private_vss_envelope_field(encrypted_envelope)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeUnexpectedField",
-            format!("encrypted private VSS envelope contains unexpected field {unexpected_field}"),
-            format!(
-                "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.{unexpected_field}"
-            ),
         )));
     }
     if encrypted_envelope.get("objectType").and_then(Value::as_str)
@@ -1258,115 +1226,5 @@ fn private_vss_envelope_refusal(
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
         Vec::new(),
-    )
-}
-
-fn unexpected_private_vss_envelope_commitment_set_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "mailboxEncryptionProfileId",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "publicMatrixSeedHash",
-            "vssCoefficientCommitmentRoot",
-            "participantCount",
-            "envelopeCount",
-            "deliveryPhaseNumber",
-            "verificationPhaseNumber",
-            "envelopeReferences",
-            "privateVssEnvelopeCommitmentRoot",
-        ],
-    )
-}
-
-fn unexpected_private_vss_envelope_commitment_reference_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "mailboxEncryptionProfileId",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "publicMatrixSeedHash",
-            "vssCoefficientCommitmentRoot",
-            "sourceTrusteeIdentity",
-            "sourceTrusteeRosterPosition",
-            "recipientIdentity",
-            "recipientRosterPosition",
-            "sourceTrusteeCommitmentRoot",
-            "envelopeSequenceNumber",
-            "deliveryPhaseNumber",
-            "verificationPhaseNumber",
-            "privateEnvelopeHash",
-            "encryptedEnvelopeHash",
-            "privateEnvelopeAad",
-            "privateEnvelopeAadHash",
-            "encryptedEnvelope",
-            "recipientMailboxPublicKeyHash",
-            "localVerificationRoot",
-            "openingVerificationStatus",
-            "privateEnvelopeCommitmentRoot",
-        ],
-    )
-}
-
-fn unexpected_encrypted_private_vss_envelope_field(value: &Value) -> Option<String> {
-    unexpected_field(
-        value,
-        &[
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "mailboxEncryptionProfileId",
-            "ciphertextContentType",
-            "ceremonyId",
-            "manifestHash",
-            "rosterHash",
-            "setupProfileHash",
-            "qShareHash",
-            "carryAwareVssShareRelationProfileHash",
-            "commitmentProfileHash",
-            "setupEpoch",
-            "publicMatrixSeedHash",
-            "vssCoefficientCommitmentRoot",
-            "sourceTrusteeIdentity",
-            "sourceTrusteeRosterPosition",
-            "recipientIdentity",
-            "recipientRosterPosition",
-            "sourceTrusteeCommitmentRoot",
-            "envelopeSequenceNumber",
-            "deliveryPhaseNumber",
-            "verificationPhaseNumber",
-            "privateEnvelopeHash",
-            "privateEnvelopeAad",
-            "privateEnvelopeAadHash",
-            "recipientMailboxPublicKeyHash",
-            "recipientMailboxPublicKeyBytesHash",
-            "kemCiphertextBytesHex",
-            "kemCiphertextHash",
-            "aeadNonceHex",
-            "ciphertextBytesHex",
-            "ciphertextBytesHash",
-            "ciphertextByteLength",
-            "plaintextByteLength",
-            "aeadTagLength",
-            "encryptedEnvelopeHash",
-        ],
     )
 }

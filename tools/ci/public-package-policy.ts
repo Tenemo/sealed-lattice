@@ -22,7 +22,6 @@ export const forbiddenTypeExports = [
     'BgvPassiveSetupParticipantInput',
     'BgvPassiveSetupVerification',
     'BgvPublicEvaluationKeyMaterial',
-    'BgvReferenceOracleRejection',
     'DirectEncryptedBallotProofWitness',
     'DirectEncryptedBallotWitness',
     'EvaluationKeyProofCommonInput',

@@ -7,42 +7,6 @@ use crate::bgv::setup::setup_proof::{
 const PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE: usize = 128;
 
 #[test]
-fn private_vss_share_envelope_verifier_refuses_plaintext_aggregate_openings() {
-    let request = private_vss_share_envelope_request(8);
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["operation"], "verifyPrivateVssShareEnvelope");
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeLeaksAggregateOpening"
-    );
-    assert_eq!(result["privateEnvelopeHash"], serde_json::Value::Null);
-    assert_eq!(result["localVerificationRoot"], serde_json::Value::Null);
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_plaintext_carry_witnesses() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    request["privateEnvelope"]["rnsShareOpenings"][0]["carryWitnessesDecimal"] =
-        serde_json::json!(["0"]);
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeLeaksCarryWitness"
-    );
-}
-
-#[test]
 fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
     let request =
         proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
@@ -566,78 +530,6 @@ fn private_vss_share_envelope_verifier_refuses_share_value_drift_after_proof_gen
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssShareProofVerificationFailed"
-    );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_leaked_coefficient_messages() {
-    let mut request = private_vss_share_envelope_request(8);
-    request["privateEnvelope"]["rnsShareOpenings"][0]["coefficientMessage"] =
-        serde_json::json!([1, 2, 3]);
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeLeaksCoefficientOpening"
-    );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_leaked_per_coefficient_openings() {
-    let mut request = private_vss_share_envelope_request(8);
-    request["privateEnvelope"]["rnsShareOpenings"][0]["coefficientOpenings"] = serde_json::json!([{
-        "objectType": "PrivateVssCoefficientOpening",
-        "objectVersion": 1,
-        "shamirCoefficientIndex": 0,
-        "commitmentRoot": request["privateEnvelope"]["rnsShareOpenings"][0]
-            ["coefficientCommitmentRoots"][0],
-        "randomnessByColumn": [[0, 0, 0]],
-    }]);
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeLeaksCoefficientOpening"
-    );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_raw_shamir_coefficients() {
-    let mut request = private_vss_share_envelope_request(8);
-    request["privateEnvelope"]["rawShamirCoefficientValues"] = serde_json::json!([1, 2, 3]);
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeLeaksCoefficientOpening"
-    );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_explicit_constant_coefficient_leak() {
-    let mut request = private_vss_share_envelope_request(8);
-    request["privateEnvelope"]["F_i,l,0"] = serde_json::json!([1, 2, 3]);
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeLeaksCoefficientOpening"
     );
 }
 

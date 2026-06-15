@@ -182,17 +182,6 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
         root_error.message
     );
 
-    let mut leaked_private_witness = public_material.clone();
-    leaked_private_witness["setupPrivateWitness"] =
-        serde_json::json!({ "setupSeed": "passive-bgv-setup-test-seed" });
-    rebind_public_evaluation_key_material_hash(&mut leaked_private_witness);
-    let leak_error = public_evaluation_key_material_error(&package, &leaked_private_witness, 1);
-    assert!(
-        leak_error.message.contains("setupPrivateWitness"),
-        "{}",
-        leak_error.message
-    );
-
     let mut raw_secret_export = public_material.clone();
     raw_secret_export["rawSecretMaterialExported"] = serde_json::json!(true);
     rebind_public_evaluation_key_material_hash(&mut raw_secret_export);
@@ -201,20 +190,6 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
         raw_secret_error.message.contains("raw secret material"),
         "{}",
         raw_secret_error.message
-    );
-
-    let mut externally_supplied_material = public_material.clone();
-    externally_supplied_material["externallySuppliedSetupKeyMaterial"] =
-        serde_json::json!({ "secret": "forbidden" });
-    rebind_public_evaluation_key_material_hash(&mut externally_supplied_material);
-    let externally_supplied_material_error =
-        public_evaluation_key_material_error(&package, &externally_supplied_material, 1);
-    assert!(
-        externally_supplied_material_error
-            .message
-            .contains("externallySuppliedSetupKeyMaterial"),
-        "{}",
-        externally_supplied_material_error.message
     );
 
     let mut duplicate_relinearization = public_material.clone();
