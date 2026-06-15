@@ -1,46 +1,74 @@
 use super::*;
 
-pub(super) fn append_unrequested_setup_transport_object(package: &mut serde_json::Value) {
-    let extra_object_root = derive_protocol_hash(
+// One synthetic single-chunk transport object's hash triple, derived from a
+// fixture label so each unrequested or unreferenced transport sidecar reuses the
+// same derivation shape. The root field name varies per sidecar (object,
+// proof-material, or component-material root), so it is a parameter; the full
+// object and chunk hashes use fixed `full-object-hash` and `chunk-hash` field
+// labels exactly as the per-sidecar derivations did before.
+struct SyntheticTransportObjectHashes {
+    object_root: String,
+    full_object_hash: String,
+    chunk_hash: String,
+    chunk_root: String,
+}
+
+fn synthetic_transport_object_hashes(
+    fixture_label: &str,
+    root_field_name: &str,
+) -> SyntheticTransportObjectHashes {
+    let object_root = derive_protocol_hash(
         "SetupTransportFullObjectSetHash",
         &serde_json::json!({
-            "fixture": "unrequested-setup-transport-object",
-            "field": "object-root",
+            "fixture": fixture_label,
+            "field": root_field_name,
         }),
     )
-    .expect("extra setup transport object root");
-    let extra_full_object_hash = derive_protocol_hash(
+    .expect("synthetic setup transport object root");
+    let full_object_hash = derive_protocol_hash(
         "SetupTransportFullObjectSetHash",
         &serde_json::json!({
-            "fixture": "unrequested-setup-transport-object",
+            "fixture": fixture_label,
             "field": "full-object-hash",
         }),
     )
-    .expect("extra setup transport full object hash");
-    let extra_chunk_hash = derive_protocol_hash(
+    .expect("synthetic setup transport full object hash");
+    let chunk_hash = derive_protocol_hash(
         "SetupTransportChunkManifestRoot",
         &serde_json::json!({
-            "fixture": "unrequested-setup-transport-object",
+            "fixture": fixture_label,
             "field": "chunk-hash",
         }),
     )
-    .expect("extra setup transport chunk hash");
-    let extra_chunk_root = setup_transport_chunk_manifest_root_fixture(
+    .expect("synthetic setup transport chunk hash");
+    let chunk_root = setup_transport_chunk_manifest_root_fixture(
         1,
         1,
-        std::slice::from_ref(&extra_chunk_hash),
-        &extra_full_object_hash,
+        std::slice::from_ref(&chunk_hash),
+        &full_object_hash,
     );
+
+    SyntheticTransportObjectHashes {
+        object_root,
+        full_object_hash,
+        chunk_hash,
+        chunk_root,
+    }
+}
+
+pub(super) fn append_unrequested_setup_transport_object(package: &mut serde_json::Value) {
+    let hashes =
+        synthetic_transport_object_hashes("unrequested-setup-transport-object", "object-root");
     append_setup_transport_certificate_object(
         package,
         SetupTransportCertificateObjectFixture {
             object_name: "unrequestedSetupMaterial",
             object_role: "unrequested-setup-material",
-            object_root: extra_object_root,
+            object_root: hashes.object_root,
             byte_length: 1,
-            full_object_hash: extra_full_object_hash,
-            chunk_root: extra_chunk_root,
-            chunk_hashes: vec![extra_chunk_hash],
+            full_object_hash: hashes.full_object_hash,
+            chunk_root: hashes.chunk_root,
+            chunk_hashes: vec![hashes.chunk_hash],
         },
     );
 }
@@ -48,35 +76,9 @@ pub(super) fn append_unrequested_setup_transport_object(package: &mut serde_json
 pub(super) fn append_unreferenced_same_secret_transport_sidecar(
     package: &mut serde_json::Value,
 ) -> serde_json::Value {
-    let proof_material_root = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
-            "fixture": "unreferenced-same-secret-proof-material",
-            "field": "proof-material-root",
-        }),
-    )
-    .expect("unreferenced proof material root");
-    let full_object_hash = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
-            "fixture": "unreferenced-same-secret-proof-material",
-            "field": "full-object-hash",
-        }),
-    )
-    .expect("unreferenced proof full object hash");
-    let chunk_hash = derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &serde_json::json!({
-            "fixture": "unreferenced-same-secret-proof-material",
-            "field": "chunk-hash",
-        }),
-    )
-    .expect("unreferenced proof chunk hash");
-    let chunk_root = setup_transport_chunk_manifest_root_fixture(
-        1,
-        1,
-        std::slice::from_ref(&chunk_hash),
-        &full_object_hash,
+    let hashes = synthetic_transport_object_hashes(
+        "unreferenced-same-secret-proof-material",
+        "proof-material-root",
     );
 
     append_setup_transport_certificate_object(
@@ -84,21 +86,21 @@ pub(super) fn append_unreferenced_same_secret_transport_sidecar(
         SetupTransportCertificateObjectFixture {
             object_name: "sameSecretProofMaterial",
             object_role: "same-secret-proof-material",
-            object_root: proof_material_root.clone(),
+            object_root: hashes.object_root.clone(),
             byte_length: 1,
-            full_object_hash: full_object_hash.clone(),
-            chunk_root: chunk_root.clone(),
-            chunk_hashes: vec![chunk_hash.clone()],
+            full_object_hash: hashes.full_object_hash.clone(),
+            chunk_root: hashes.chunk_root.clone(),
+            chunk_hashes: vec![hashes.chunk_hash.clone()],
         },
     );
 
     serde_json::json!({
         "proofMaterials": [{
-            "proofMaterialRoot": proof_material_root,
+            "proofMaterialRoot": hashes.object_root,
             "totalByteLength": 1_u64,
-            "fullObjectHash": full_object_hash,
-            "chunkRoot": chunk_root,
-            "chunkHashes": [chunk_hash],
+            "fullObjectHash": hashes.full_object_hash,
+            "chunkRoot": hashes.chunk_root,
+            "chunkHashes": [hashes.chunk_hash],
         }],
     })
 }
@@ -106,35 +108,9 @@ pub(super) fn append_unreferenced_same_secret_transport_sidecar(
 pub(super) fn append_unreferenced_evaluation_key_component_transport_sidecar(
     package: &mut serde_json::Value,
 ) -> serde_json::Value {
-    let material_root = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
-            "fixture": "unreferenced-evaluation-key-component-material",
-            "field": "component-material-root",
-        }),
-    )
-    .expect("unreferenced component material root");
-    let full_object_hash = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
-            "fixture": "unreferenced-evaluation-key-component-material",
-            "field": "full-object-hash",
-        }),
-    )
-    .expect("unreferenced component full object hash");
-    let chunk_hash = derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &serde_json::json!({
-            "fixture": "unreferenced-evaluation-key-component-material",
-            "field": "chunk-hash",
-        }),
-    )
-    .expect("unreferenced component chunk hash");
-    let chunk_root = setup_transport_chunk_manifest_root_fixture(
-        1,
-        1,
-        std::slice::from_ref(&chunk_hash),
-        &full_object_hash,
+    let hashes = synthetic_transport_object_hashes(
+        "unreferenced-evaluation-key-component-material",
+        "component-material-root",
     );
 
     append_setup_transport_certificate_object(
@@ -142,21 +118,21 @@ pub(super) fn append_unreferenced_evaluation_key_component_transport_sidecar(
         SetupTransportCertificateObjectFixture {
             object_name: "evaluationKeyShareComponentMaterial",
             object_role: "evaluation-key-share-component-material",
-            object_root: material_root.clone(),
+            object_root: hashes.object_root.clone(),
             byte_length: 1,
-            full_object_hash: full_object_hash.clone(),
-            chunk_root: chunk_root.clone(),
-            chunk_hashes: vec![chunk_hash.clone()],
+            full_object_hash: hashes.full_object_hash.clone(),
+            chunk_root: hashes.chunk_root.clone(),
+            chunk_hashes: vec![hashes.chunk_hash.clone()],
         },
     );
 
     serde_json::json!({
         "componentMaterials": [{
-            "keySwitchComponentMaterialRoot": material_root,
+            "keySwitchComponentMaterialRoot": hashes.object_root,
             "totalByteLength": 1_u64,
-            "fullObjectHash": full_object_hash,
-            "chunkRoot": chunk_root,
-            "chunkHashes": [chunk_hash],
+            "fullObjectHash": hashes.full_object_hash,
+            "chunkRoot": hashes.chunk_root,
+            "chunkHashes": [hashes.chunk_hash],
         }],
     })
 }

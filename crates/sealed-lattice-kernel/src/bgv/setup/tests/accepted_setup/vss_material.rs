@@ -5,36 +5,22 @@ fn collective_setup_verifier_refuses_malformed_vss_commitment_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_vss_commitment_records",
     );
-    let mut array_package = minimal_collective_setup_package();
-    array_package["vssCoefficientCommitments"] = serde_json::json!([]);
-    rebind_collective_setup_package_hash(&mut array_package);
-
-    let array_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": array_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(array_result["verifierStatus"], "refused");
-    assert_eq!(
-        array_result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentsNotObject"
+    assert_minimal_collective_setup_package_refused(
+        "VSS coefficient commitments replaced with an array",
+        |package| {
+            package["vssCoefficientCommitments"] = serde_json::json!([]);
+        },
+        "vssCoefficientCommitmentsNotObject",
     );
 
-    let mut wrong_limb_package = minimal_collective_setup_package();
-    wrong_limb_package["vssCoefficientCommitments"]["sourceTrusteeRecords"][0]["coefficientCommitments"]
-        [0]["rnsPrime"] = serde_json::json!(65_537);
-    rebind_collective_vss_commitment_roots(&mut wrong_limb_package);
-    rebind_collective_setup_package_hash(&mut wrong_limb_package);
-
-    let wrong_limb_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": wrong_limb_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(wrong_limb_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_limb_result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentRnsPrimeMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "VSS coefficient commitment with a wrong RNS prime",
+        |package| {
+            package["vssCoefficientCommitments"]["sourceTrusteeRecords"][0]["coefficientCommitments"]
+                [0]["rnsPrime"] = serde_json::json!(65_537);
+            rebind_collective_vss_commitment_roots(package);
+        },
+        "vssCoefficientCommitmentRnsPrimeMismatch",
     );
 }
 
@@ -43,37 +29,22 @@ fn collective_setup_verifier_refuses_malformed_threshold_commitment_material() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_threshold_commitment_material",
     );
-    let mut array_package = minimal_collective_setup_package();
-    array_package["vssCoefficientCommitmentMaterial"] = serde_json::json!([]);
-    rebind_collective_setup_package_hash(&mut array_package);
-
-    let array_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": array_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(array_result["verifierStatus"], "refused");
-    assert_eq!(
-        array_result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialNotObject"
+    assert_minimal_collective_setup_package_refused(
+        "VSS coefficient commitment material replaced with an array",
+        |package| {
+            package["vssCoefficientCommitmentMaterial"] = serde_json::json!([]);
+        },
+        "vssCoefficientCommitmentMaterialNotObject",
     );
 
-    let mut tampered_material_package = minimal_collective_setup_package();
-    tampered_material_package["vssCoefficientCommitmentMaterial"]["coefficientCommitments"][0]["commitment"]
-        ["commitmentLimbs"][0]["rows"][0][0] = serde_json::json!(42);
-    rebind_collective_vss_coefficient_commitment_material_root(&mut tampered_material_package);
-    rebind_collective_setup_package_hash(&mut tampered_material_package);
-
-    let tampered_material_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": tampered_material_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(tampered_material_result["verifierStatus"], "refused");
-    assert_eq!(
-        tampered_material_result["refusedObjects"][0]["reasonCode"],
-        "thresholdShareCommitmentDerivationMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "tampered VSS coefficient commitment material limb row",
+        |package| {
+            package["vssCoefficientCommitmentMaterial"]["coefficientCommitments"][0]["commitment"]
+                ["commitmentLimbs"][0]["rows"][0][0] = serde_json::json!(42);
+            rebind_collective_vss_coefficient_commitment_material_root(package);
+        },
+        "thresholdShareCommitmentDerivationMismatch",
     );
 }
 
@@ -82,22 +53,14 @@ fn collective_setup_verifier_refuses_tampered_threshold_share_commitments() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_tampered_threshold_share_commitments",
     );
-    let mut tampered_threshold_package = minimal_collective_setup_package();
-    tampered_threshold_package["thresholdShareCommitments"]["recipientRecords"][0]["limbCommitments"]
-        [0]["ringDegreeStatus"] = serde_json::json!("profile-ring");
-    rebind_collective_threshold_share_commitment_root(&mut tampered_threshold_package);
-    rebind_collective_setup_package_hash(&mut tampered_threshold_package);
-
-    let tampered_threshold_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": tampered_threshold_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(tampered_threshold_result["verifierStatus"], "refused");
-    assert_eq!(
-        tampered_threshold_result["refusedObjects"][0]["reasonCode"],
-        "thresholdShareCommitmentSetMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "tampered threshold share commitment ring-degree status",
+        |package| {
+            package["thresholdShareCommitments"]["recipientRecords"][0]["limbCommitments"][0]["ringDegreeStatus"] =
+                serde_json::json!("profile-ring");
+            rebind_collective_threshold_share_commitment_root(package);
+        },
+        "thresholdShareCommitmentSetMismatch",
     );
 }
 
@@ -250,226 +213,94 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments",
     );
-    let mut array_package = minimal_collective_setup_package();
-    array_package["privateVssEnvelopeCommitments"] = serde_json::json!([]);
-    rebind_collective_setup_package_hash(&mut array_package);
-
-    let array_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": array_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(array_result["verifierStatus"], "refused");
-    assert_eq!(
-        array_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeCommitmentsNotObject"
+    assert_minimal_collective_setup_package_refused(
+        "private VSS envelope commitments replaced with an array",
+        |package| {
+            package["privateVssEnvelopeCommitments"] = serde_json::json!([]);
+        },
+        "privateVssEnvelopeCommitmentsNotObject",
     );
 
-    let mut wrong_aad_package = minimal_collective_setup_package();
-    wrong_aad_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["privateEnvelopeAadHash"] =
-        serde_json::json!(valid_hash('4'));
-    rebind_collective_private_vss_envelope_commitment_root(&mut wrong_aad_package);
-    rebind_collective_setup_package_hash(&mut wrong_aad_package);
-
-    let wrong_aad_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": wrong_aad_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(wrong_aad_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_aad_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeAadHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS envelope AAD hash",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["privateEnvelopeAadHash"] =
+                serde_json::json!(valid_hash('4'));
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "privateVssEnvelopeAadHashMismatch",
     );
 
-    let mut wrong_encrypted_hash_package = minimal_collective_setup_package();
-    wrong_encrypted_hash_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelopeHash"] =
-        serde_json::json!(valid_hash('6'));
-    rebind_collective_private_vss_envelope_commitment_root(&mut wrong_encrypted_hash_package);
-    rebind_collective_setup_package_hash(&mut wrong_encrypted_hash_package);
-
-    let wrong_encrypted_hash_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_encrypted_hash_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_encrypted_hash_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_encrypted_hash_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEncryptedEnvelopeHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS encrypted envelope hash",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelopeHash"] =
+                serde_json::json!(valid_hash('6'));
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "privateVssEncryptedEnvelopeHashMismatch",
     );
 
-    let mut wrong_encrypted_binding_package = minimal_collective_setup_package();
-    wrong_encrypted_binding_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
-        ["ciphertextContentType"] = serde_json::json!("wrong-private-vss-envelope");
-    rebind_collective_private_vss_envelope_commitment_root(&mut wrong_encrypted_binding_package);
-    rebind_collective_setup_package_hash(&mut wrong_encrypted_binding_package);
-
-    let wrong_encrypted_binding_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_encrypted_binding_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_encrypted_binding_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_encrypted_binding_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEncryptedEnvelopeBindingMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS encrypted envelope binding",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
+                ["ciphertextContentType"] = serde_json::json!("wrong-private-vss-envelope");
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "privateVssEncryptedEnvelopeBindingMismatch",
     );
 
-    let mut wrong_kem_ciphertext_hash_package = minimal_collective_setup_package();
-    wrong_kem_ciphertext_hash_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
-        ["kemCiphertextHash"] = serde_json::json!(valid_hash('9'));
-    rebind_first_private_vss_encrypted_envelope_hash(&mut wrong_kem_ciphertext_hash_package);
-    rebind_collective_private_vss_envelope_commitment_root(&mut wrong_kem_ciphertext_hash_package);
-    rebind_collective_setup_package_hash(&mut wrong_kem_ciphertext_hash_package);
-
-    let wrong_kem_ciphertext_hash_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_kem_ciphertext_hash_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        wrong_kem_ciphertext_hash_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        wrong_kem_ciphertext_hash_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEncryptedEnvelopeKemCiphertextHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS encrypted envelope KEM ciphertext hash",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
+                ["kemCiphertextHash"] = serde_json::json!(valid_hash('9'));
+            rebind_first_private_vss_encrypted_envelope_hash(package);
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "privateVssEncryptedEnvelopeKemCiphertextHashMismatch",
     );
 
-    let mut wrong_ciphertext_bytes_hash_package = minimal_collective_setup_package();
-    wrong_ciphertext_bytes_hash_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]
-        ["encryptedEnvelope"]["ciphertextBytesHash"] = serde_json::json!(valid_hash('8'));
-    rebind_first_private_vss_encrypted_envelope_hash(&mut wrong_ciphertext_bytes_hash_package);
-    rebind_collective_private_vss_envelope_commitment_root(
-        &mut wrong_ciphertext_bytes_hash_package,
-    );
-    rebind_collective_setup_package_hash(&mut wrong_ciphertext_bytes_hash_package);
-
-    let wrong_ciphertext_bytes_hash_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_ciphertext_bytes_hash_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        wrong_ciphertext_bytes_hash_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        wrong_ciphertext_bytes_hash_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEncryptedEnvelopeCiphertextBytesHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS encrypted envelope ciphertext bytes hash",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
+                ["ciphertextBytesHash"] = serde_json::json!(valid_hash('8'));
+            rebind_first_private_vss_encrypted_envelope_hash(package);
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "privateVssEncryptedEnvelopeCiphertextBytesHashMismatch",
     );
 
-    let mut wrong_mailbox_key_package = minimal_collective_setup_package();
-    wrong_mailbox_key_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["recipientMailboxPublicKeyHash"] =
-        serde_json::json!(valid_hash('7'));
-    rebind_collective_private_vss_envelope_commitment_root(&mut wrong_mailbox_key_package);
-    rebind_collective_setup_package_hash(&mut wrong_mailbox_key_package);
-
-    let wrong_mailbox_key_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_mailbox_key_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_mailbox_key_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_mailbox_key_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeMailboxPublicKeyMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS envelope recipient mailbox public-key hash",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["recipientMailboxPublicKeyHash"] =
+                serde_json::json!(valid_hash('7'));
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "privateVssEnvelopeMailboxPublicKeyMismatch",
     );
 
-    let mut wrong_mailbox_key_bytes_package = minimal_collective_setup_package();
-    wrong_mailbox_key_bytes_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
-        ["recipientMailboxPublicKeyBytesHash"] = serde_json::json!(valid_hash('3'));
-    rebind_first_private_vss_encrypted_envelope_hash(&mut wrong_mailbox_key_bytes_package);
-    rebind_collective_private_vss_envelope_commitment_root(&mut wrong_mailbox_key_bytes_package);
-    rebind_collective_setup_package_hash(&mut wrong_mailbox_key_bytes_package);
-
-    let wrong_mailbox_key_bytes_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_mailbox_key_bytes_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_mailbox_key_bytes_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_mailbox_key_bytes_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEncryptedEnvelopeMailboxPublicKeyBytesHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS encrypted envelope recipient mailbox public-key bytes hash",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
+                ["recipientMailboxPublicKeyBytesHash"] = serde_json::json!(valid_hash('3'));
+            rebind_first_private_vss_encrypted_envelope_hash(package);
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "privateVssEncryptedEnvelopeMailboxPublicKeyBytesHashMismatch",
     );
 
-    let mut wrong_root_package = minimal_collective_setup_package();
-    wrong_root_package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"] =
-        serde_json::json!(valid_hash('5'));
-    rebind_collective_setup_package_hash(&mut wrong_root_package);
-
-    let wrong_root_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": wrong_root_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(wrong_root_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_root_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeCommitmentRootMismatch"
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_private_vss_proof_sidecars_in_public_package() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_private_vss_proof_sidecars_in_public_package",
-    );
-    let mut transported_private_proof_package = minimal_collective_setup_package();
-    transported_private_proof_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["transportedPrivateVssShareProofMaterial"] = serde_json::json!({
-        "objectType": "SetupTransportedPrivateVssShareProofMaterialSet",
-        "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "proofFamily": "vss-opening-carry",
-        "proofMaterials": [],
-    });
-    rebind_collective_setup_package_hash(&mut transported_private_proof_package);
-
-    let transported_private_proof_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": transported_private_proof_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        transported_private_proof_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        transported_private_proof_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeForbiddenProofSidecar"
-    );
-    assert!(transported_private_proof_result["acceptedSetupHandoff"].is_null());
-
-    let mut legacy_private_proof_package = minimal_collective_setup_package();
-    legacy_private_proof_package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["tboxCommitmentPrefixHash"] =
-        serde_json::json!(valid_hash('7'));
-    rebind_collective_setup_package_hash(&mut legacy_private_proof_package);
-
-    let legacy_private_proof_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": legacy_private_proof_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(legacy_private_proof_result["verifierStatus"], "refused");
-    assert_eq!(
-        legacy_private_proof_result["refusedObjects"][0]["reasonCode"],
-        "privateVssEnvelopeForbiddenProofSidecar"
-    );
-    assert!(
-        legacy_private_proof_result["refusedObjects"][0]["objectPath"]
-            .as_str()
-            .expect("object path")
-            .contains("tboxCommitmentPrefixHash")
+    assert_minimal_collective_setup_package_refused(
+        "wrong private VSS envelope commitment root",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"] =
+                serde_json::json!(valid_hash('5'));
+        },
+        "privateVssEnvelopeCommitmentRootMismatch",
     );
 }
 
@@ -478,176 +309,102 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_vss_share_acceptance_records",
     );
-    let mut array_package = minimal_collective_setup_package();
-    array_package["vssShareAcceptances"] = serde_json::json!([]);
-    rebind_collective_setup_package_hash(&mut array_package);
-
-    let array_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": array_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(array_result["verifierStatus"], "refused");
-    assert_eq!(
-        array_result["refusedObjects"][0]["reasonCode"],
-        "vssShareAcceptancesNotObject"
+    assert_minimal_collective_setup_package_refused(
+        "VSS share acceptances replaced with an array",
+        |package| {
+            package["vssShareAcceptances"] = serde_json::json!([]);
+        },
+        "vssShareAcceptancesNotObject",
     );
 
-    let mut wrong_source_trustee_root_package = minimal_collective_setup_package();
-    wrong_source_trustee_root_package["vssShareAcceptances"]["acceptanceRecords"][0]["sourceTrusteeCommitmentRoot"] =
-        serde_json::json!(valid_hash('3'));
-    rebind_collective_vss_acceptance_root(&mut wrong_source_trustee_root_package);
-    rebind_collective_setup_package_hash(&mut wrong_source_trustee_root_package);
-
-    let wrong_source_trustee_root_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_source_trustee_root_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        wrong_source_trustee_root_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        wrong_source_trustee_root_result["refusedObjects"][0]["reasonCode"],
-        "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong VSS share acceptance source trustee commitment root",
+        |package| {
+            package["vssShareAcceptances"]["acceptanceRecords"][0]["sourceTrusteeCommitmentRoot"] =
+                serde_json::json!(valid_hash('3'));
+            rebind_collective_vss_acceptance_root(package);
+        },
+        "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch",
     );
 
-    let mut envelope_local_verification_drift_package = minimal_collective_setup_package();
-    envelope_local_verification_drift_package["privateVssEnvelopeCommitments"]["envelopeReferences"]
-        [0]["localVerificationRoot"] = serde_json::json!(valid_hash('9'));
-    rebind_first_private_vss_envelope_commitment_record_root(
-        &mut envelope_local_verification_drift_package,
+    assert_minimal_collective_setup_package_refused_without_handoff(
+        "drifted private VSS envelope local verification root",
+        |package| {
+            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["localVerificationRoot"] =
+                serde_json::json!(valid_hash('9'));
+            rebind_first_private_vss_envelope_commitment_record_root(package);
+            rebind_collective_private_vss_envelope_commitment_root(package);
+        },
+        "vssShareAcceptancePrivateEnvelopeRootMismatch",
     );
-    rebind_collective_private_vss_envelope_commitment_root(
-        &mut envelope_local_verification_drift_package,
+
+    assert_minimal_collective_setup_package_refused_without_handoff(
+        "wrong VSS share acceptance local verification root",
+        |package| {
+            package["vssShareAcceptances"]["acceptanceRecords"][0]["localVerificationRoot"] =
+                serde_json::json!(valid_hash('4'));
+            rebind_collective_vss_acceptance_root(package);
+        },
+        "vssShareAcceptanceLocalVerificationRootMismatch",
     );
-    rebind_collective_setup_package_hash(&mut envelope_local_verification_drift_package);
 
-    let envelope_local_verification_drift_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": envelope_local_verification_drift_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        envelope_local_verification_drift_result["verifierStatus"],
-        "refused"
+    assert_minimal_collective_setup_package_refused_without_handoff(
+        "wrong VSS share acceptance private envelope hash",
+        |package| {
+            package["vssShareAcceptances"]["acceptanceRecords"][0]["privateEnvelopeHash"] =
+                serde_json::json!(valid_hash('8'));
+            rebind_collective_vss_acceptance_root(package);
+        },
+        "vssShareAcceptancePrivateEnvelopeHashMismatch",
     );
-    assert_eq!(
-        envelope_local_verification_drift_result["refusedObjects"][0]["reasonCode"],
-        "vssShareAcceptancePrivateEnvelopeRootMismatch"
+
+    assert_minimal_collective_setup_package_refused_without_handoff(
+        "wrong VSS share acceptance verification status",
+        |package| {
+            package["vssShareAcceptances"]["acceptanceRecords"][0]["verificationStatus"] =
+                serde_json::json!("pending-local-private-vss-opening");
+            rebind_collective_vss_acceptance_root(package);
+        },
+        "vssShareAcceptanceStatusMismatch",
     );
-    assert!(envelope_local_verification_drift_result["acceptedSetupHandoff"].is_null());
 
-    let mut wrong_local_verification_package = minimal_collective_setup_package();
-    wrong_local_verification_package["vssShareAcceptances"]["acceptanceRecords"][0]["localVerificationRoot"] =
-        serde_json::json!(valid_hash('4'));
-    rebind_collective_vss_acceptance_root(&mut wrong_local_verification_package);
-    rebind_collective_setup_package_hash(&mut wrong_local_verification_package);
-
-    let wrong_local_verification_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_local_verification_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_local_verification_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_local_verification_result["refusedObjects"][0]["reasonCode"],
-        "vssShareAcceptanceLocalVerificationRootMismatch"
-    );
-    assert!(wrong_local_verification_result["acceptedSetupHandoff"].is_null());
-
-    let mut wrong_private_envelope_hash_package = minimal_collective_setup_package();
-    wrong_private_envelope_hash_package["vssShareAcceptances"]["acceptanceRecords"][0]["privateEnvelopeHash"] =
-        serde_json::json!(valid_hash('8'));
-    rebind_collective_vss_acceptance_root(&mut wrong_private_envelope_hash_package);
-    rebind_collective_setup_package_hash(&mut wrong_private_envelope_hash_package);
-
-    let wrong_private_envelope_hash_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_private_envelope_hash_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        wrong_private_envelope_hash_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        wrong_private_envelope_hash_result["refusedObjects"][0]["reasonCode"],
-        "vssShareAcceptancePrivateEnvelopeHashMismatch"
-    );
-    assert!(wrong_private_envelope_hash_result["acceptedSetupHandoff"].is_null());
-
-    let mut wrong_verification_status_package = minimal_collective_setup_package();
-    wrong_verification_status_package["vssShareAcceptances"]["acceptanceRecords"][0]["verificationStatus"] =
-        serde_json::json!("pending-local-private-vss-opening");
-    rebind_collective_vss_acceptance_root(&mut wrong_verification_status_package);
-    rebind_collective_setup_package_hash(&mut wrong_verification_status_package);
-
-    let wrong_verification_status_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_verification_status_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        wrong_verification_status_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        wrong_verification_status_result["refusedObjects"][0]["reasonCode"],
-        "vssShareAcceptanceStatusMismatch"
-    );
-    assert!(wrong_verification_status_result["acceptedSetupHandoff"].is_null());
-
-    let mut tampered_signature_package = minimal_collective_setup_package();
-    let acceptance_record =
-        &mut tampered_signature_package["vssShareAcceptances"]["acceptanceRecords"][0];
-    let signature_envelope = acceptance_record
-        .get_mut("signatureEnvelope")
-        .expect("signature envelope");
-    let signature_bytes_hex = signature_envelope["signatureBytesHex"]
-        .as_str()
-        .expect("signature bytes")
-        .to_string();
-    let replacement_prefix = if signature_bytes_hex.starts_with("00") {
-        "01"
-    } else {
-        "00"
-    };
-    let mut tampered_signature_bytes_hex = signature_bytes_hex;
-    tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
-    signature_envelope["signatureBytesHex"] = serde_json::json!(tampered_signature_bytes_hex);
-    let signature_envelope_hash = derive_protocol_hash(
-        "ProtocolSignatureEnvelopeHash",
-        &serde_json::json!({
-            "profile": signature_envelope["profile"],
-            "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-            "publicKeyHash": signature_envelope["publicKeyHash"],
-            "signatureBytesHex": signature_envelope["signatureBytesHex"],
-            "signedRoot": signature_envelope["signedRoot"],
-        }),
-    )
-    .expect("signature envelope hash");
-    signature_envelope["signatureHash"] = serde_json::json!(signature_envelope_hash.clone());
-    acceptance_record["signatureEnvelopeHash"] = serde_json::json!(signature_envelope_hash);
-    rebind_collective_vss_acceptance_root(&mut tampered_signature_package);
-    rebind_collective_setup_package_hash(&mut tampered_signature_package);
-
-    let tampered_signature_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": tampered_signature_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(tampered_signature_result["verifierStatus"], "refused");
-    assert_eq!(
-        tampered_signature_result["refusedObjects"][0]["reasonCode"],
-        "InvalidSignature"
+    assert_minimal_collective_setup_package_refused(
+        "tampered VSS share acceptance signature",
+        |package| {
+            let acceptance_record = &mut package["vssShareAcceptances"]["acceptanceRecords"][0];
+            let signature_envelope = acceptance_record
+                .get_mut("signatureEnvelope")
+                .expect("signature envelope");
+            let signature_bytes_hex = signature_envelope["signatureBytesHex"]
+                .as_str()
+                .expect("signature bytes")
+                .to_string();
+            let replacement_prefix = if signature_bytes_hex.starts_with("00") {
+                "01"
+            } else {
+                "00"
+            };
+            let mut tampered_signature_bytes_hex = signature_bytes_hex;
+            tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
+            signature_envelope["signatureBytesHex"] =
+                serde_json::json!(tampered_signature_bytes_hex);
+            let signature_envelope_hash = derive_protocol_hash(
+                "ProtocolSignatureEnvelopeHash",
+                &serde_json::json!({
+                    "profile": signature_envelope["profile"],
+                    "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
+                    "publicKeyHash": signature_envelope["publicKeyHash"],
+                    "signatureBytesHex": signature_envelope["signatureBytesHex"],
+                    "signedRoot": signature_envelope["signedRoot"],
+                }),
+            )
+            .expect("signature envelope hash");
+            signature_envelope["signatureHash"] =
+                serde_json::json!(signature_envelope_hash.clone());
+            acceptance_record["signatureEnvelopeHash"] = serde_json::json!(signature_envelope_hash);
+            rebind_collective_vss_acceptance_root(package);
+        },
+        "InvalidSignature",
     );
 }
 
@@ -665,10 +422,7 @@ fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
     );
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_setup_package(package);
 
     assert_eq!(result["ok"], false);
     assert_eq!(result["verifierStatus"], "aborted");
@@ -691,83 +445,66 @@ fn collective_setup_verifier_refuses_malformed_vss_complaint_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_vss_complaint_records",
     );
-    let mut wrong_source_trustee_root_package = minimal_collective_setup_package();
-    wrong_source_trustee_root_package["vssComplaints"] = vss_complaints_object(
-        &wrong_source_trustee_root_package["setupContext"],
-        &wrong_source_trustee_root_package["privateVssEnvelopeCommitments"],
-        &wrong_source_trustee_root_package["vssCoefficientCommitments"],
-        0,
-        1,
-    );
-    wrong_source_trustee_root_package["vssComplaints"]["complaintRecords"][0]["sourceTrusteeCommitmentRoot"] =
-        serde_json::json!(valid_hash('3'));
-    rebind_collective_vss_complaint_root(&mut wrong_source_trustee_root_package);
-    rebind_collective_setup_package_hash(&mut wrong_source_trustee_root_package);
-
-    let wrong_source_trustee_root_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_source_trustee_root_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(
-        wrong_source_trustee_root_result["verifierStatus"],
-        "refused"
-    );
-    assert_eq!(
-        wrong_source_trustee_root_result["refusedObjects"][0]["reasonCode"],
-        "vssComplaintSourceTrusteeCommitmentRootMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong VSS complaint source trustee commitment root",
+        |package| {
+            package["vssComplaints"] = vss_complaints_object(
+                &package["setupContext"],
+                &package["privateVssEnvelopeCommitments"],
+                &package["vssCoefficientCommitments"],
+                0,
+                1,
+            );
+            package["vssComplaints"]["complaintRecords"][0]["sourceTrusteeCommitmentRoot"] =
+                serde_json::json!(valid_hash('3'));
+            rebind_collective_vss_complaint_root(package);
+        },
+        "vssComplaintSourceTrusteeCommitmentRootMismatch",
     );
 
-    let mut tampered_signature_package = minimal_collective_setup_package();
-    tampered_signature_package["vssComplaints"] = vss_complaints_object(
-        &tampered_signature_package["setupContext"],
-        &tampered_signature_package["privateVssEnvelopeCommitments"],
-        &tampered_signature_package["vssCoefficientCommitments"],
-        0,
-        1,
-    );
-    let complaint_record = &mut tampered_signature_package["vssComplaints"]["complaintRecords"][0];
-    let signature_envelope = complaint_record
-        .get_mut("signatureEnvelope")
-        .expect("signature envelope");
-    let signature_bytes_hex = signature_envelope["signatureBytesHex"]
-        .as_str()
-        .expect("signature bytes")
-        .to_string();
-    let replacement_prefix = if signature_bytes_hex.starts_with("00") {
-        "01"
-    } else {
-        "00"
-    };
-    let mut tampered_signature_bytes_hex = signature_bytes_hex;
-    tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
-    signature_envelope["signatureBytesHex"] = serde_json::json!(tampered_signature_bytes_hex);
-    let signature_envelope_hash = derive_protocol_hash(
-        "ProtocolSignatureEnvelopeHash",
-        &serde_json::json!({
-            "profile": signature_envelope["profile"],
-            "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-            "publicKeyHash": signature_envelope["publicKeyHash"],
-            "signatureBytesHex": signature_envelope["signatureBytesHex"],
-            "signedRoot": signature_envelope["signedRoot"],
-        }),
-    )
-    .expect("signature envelope hash");
-    signature_envelope["signatureHash"] = serde_json::json!(signature_envelope_hash.clone());
-    complaint_record["signatureEnvelopeHash"] = serde_json::json!(signature_envelope_hash);
-    rebind_collective_vss_complaint_root(&mut tampered_signature_package);
-    rebind_collective_setup_package_hash(&mut tampered_signature_package);
-
-    let tampered_signature_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": tampered_signature_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(tampered_signature_result["verifierStatus"], "refused");
-    assert_eq!(
-        tampered_signature_result["refusedObjects"][0]["reasonCode"],
-        "InvalidSignature"
+    assert_minimal_collective_setup_package_refused(
+        "tampered VSS complaint signature",
+        |package| {
+            package["vssComplaints"] = vss_complaints_object(
+                &package["setupContext"],
+                &package["privateVssEnvelopeCommitments"],
+                &package["vssCoefficientCommitments"],
+                0,
+                1,
+            );
+            let complaint_record = &mut package["vssComplaints"]["complaintRecords"][0];
+            let signature_envelope = complaint_record
+                .get_mut("signatureEnvelope")
+                .expect("signature envelope");
+            let signature_bytes_hex = signature_envelope["signatureBytesHex"]
+                .as_str()
+                .expect("signature bytes")
+                .to_string();
+            let replacement_prefix = if signature_bytes_hex.starts_with("00") {
+                "01"
+            } else {
+                "00"
+            };
+            let mut tampered_signature_bytes_hex = signature_bytes_hex;
+            tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
+            signature_envelope["signatureBytesHex"] =
+                serde_json::json!(tampered_signature_bytes_hex);
+            let signature_envelope_hash = derive_protocol_hash(
+                "ProtocolSignatureEnvelopeHash",
+                &serde_json::json!({
+                    "profile": signature_envelope["profile"],
+                    "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
+                    "publicKeyHash": signature_envelope["publicKeyHash"],
+                    "signatureBytesHex": signature_envelope["signatureBytesHex"],
+                    "signedRoot": signature_envelope["signedRoot"],
+                }),
+            )
+            .expect("signature envelope hash");
+            signature_envelope["signatureHash"] =
+                serde_json::json!(signature_envelope_hash.clone());
+            complaint_record["signatureEnvelopeHash"] = serde_json::json!(signature_envelope_hash);
+            rebind_collective_vss_complaint_root(package);
+        },
+        "InvalidSignature",
     );
 }

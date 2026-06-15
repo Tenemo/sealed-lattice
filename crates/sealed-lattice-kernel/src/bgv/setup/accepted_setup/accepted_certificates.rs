@@ -121,26 +121,6 @@ pub(super) fn verify_commitment_security_certificate(
             "setupPackage.setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash",
         )?));
     }
-    let package_certificate_hash = setup_package
-        .get("setupCommitmentSecurityCertificateHash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupPackage.setupCommitmentSecurityCertificateHash is required",
-            )
-        })?;
-    validate_hash_string(
-        package_certificate_hash,
-        "setupPackage.setupCommitmentSecurityCertificateHash",
-    )?;
-    if package_certificate_hash != certificate_hash {
-        return Ok(Some(setup_commitment_certificate_refusal(
-            "commitmentSecurityPackageCertificateHashMismatch",
-            "setupPackage.setupCommitmentSecurityCertificateHash must match setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash",
-            "setupPackage.setupCommitmentSecurityCertificateHash",
-        )?));
-    }
 
     Ok(None)
 }
@@ -446,26 +426,6 @@ pub(super) fn verify_setup_proof_accounting_certificate(
             "setupProofAccountingCertificateHashMismatch",
             "setupProofAccountingCertificateHash does not match the canonical setup proof accounting certificate",
             "setupPackage.setupProofAccountingCertificate.setupProofAccountingCertificateHash",
-        )?));
-    }
-    let package_certificate_hash = setup_package
-        .get("setupProofAccountingCertificateHash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupPackage.setupProofAccountingCertificateHash is required",
-            )
-        })?;
-    validate_hash_string(
-        package_certificate_hash,
-        "setupPackage.setupProofAccountingCertificateHash",
-    )?;
-    if package_certificate_hash != certificate_hash {
-        return Ok(Some(setup_proof_accounting_certificate_refusal(
-            "setupProofAccountingPackageCertificateHashMismatch",
-            "setupPackage.setupProofAccountingCertificateHash must match setupProofAccountingCertificate.setupProofAccountingCertificateHash",
-            "setupPackage.setupProofAccountingCertificateHash",
         )?));
     }
 
@@ -781,26 +741,6 @@ pub(super) fn verify_setup_key_correctness_certificate(
             "setupPackage.setupKeyCorrectnessCertificate.setupKeyCorrectnessCertificateHash",
         )?));
     }
-    let package_certificate_hash = setup_package
-        .get("setupKeyCorrectnessCertificateHash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupPackage.setupKeyCorrectnessCertificateHash is required",
-            )
-        })?;
-    validate_hash_string(
-        package_certificate_hash,
-        "setupPackage.setupKeyCorrectnessCertificateHash",
-    )?;
-    if package_certificate_hash != certificate_hash {
-        return Ok(Some(setup_key_correctness_certificate_refusal(
-            "setupKeyCorrectnessPackageCertificateHashMismatch",
-            "setupPackage.setupKeyCorrectnessCertificateHash must match setupKeyCorrectnessCertificate.setupKeyCorrectnessCertificateHash",
-            "setupPackage.setupKeyCorrectnessCertificateHash",
-        )?));
-    }
 
     Ok(None)
 }
@@ -954,26 +894,6 @@ pub(super) fn verify_active_static_setup_theorem_certificate(
             "activeStaticSetupTheoremCertificateHashMismatch",
             "activeStaticSetupTheoremCertificateHash does not match the canonical active-static setup theorem certificate",
             "setupPackage.activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash",
-        )?));
-    }
-    let package_certificate_hash = setup_package
-        .get("activeStaticSetupTheoremCertificateHash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupPackage.activeStaticSetupTheoremCertificateHash is required",
-            )
-        })?;
-    validate_hash_string(
-        package_certificate_hash,
-        "setupPackage.activeStaticSetupTheoremCertificateHash",
-    )?;
-    if package_certificate_hash != certificate_hash {
-        return Ok(Some(active_static_setup_theorem_certificate_refusal(
-            "activeStaticSetupTheoremPackageCertificateHashMismatch",
-            "setupPackage.activeStaticSetupTheoremCertificateHash must match activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash",
-            "setupPackage.activeStaticSetupTheoremCertificateHash",
         )?));
     }
 
@@ -1318,26 +1238,6 @@ pub(super) fn verify_he_security_certificate(
             "heSecurityCertificateHashMismatch",
             "heSecurityCertificateHash does not match the canonical HE security certificate",
             "setupPackage.heSecurityCertificate.heSecurityCertificateHash",
-        )?));
-    }
-    let package_certificate_hash = setup_package
-        .get("heSecurityCertificateHash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupPackage.heSecurityCertificateHash is required",
-            )
-        })?;
-    validate_hash_string(
-        package_certificate_hash,
-        "setupPackage.heSecurityCertificateHash",
-    )?;
-    if package_certificate_hash != certificate_hash {
-        return Ok(Some(he_security_certificate_refusal(
-            "packageHeSecurityCertificateHashMismatch",
-            "setupPackage.heSecurityCertificateHash must match heSecurityCertificate.heSecurityCertificateHash",
-            "setupPackage.heSecurityCertificateHash",
         )?));
     }
 

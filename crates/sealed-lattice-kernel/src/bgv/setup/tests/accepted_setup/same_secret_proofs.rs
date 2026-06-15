@@ -5,58 +5,34 @@ fn collective_setup_verifier_refuses_malformed_same_secret_statements() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_same_secret_statements",
     );
-    let mut wrong_constant_package = minimal_collective_setup_package();
-    wrong_constant_package["sameSecretConsistency"]["statementRecords"][0]["constantCoefficientCommitmentRoots"]
-        [0]["commitmentRoot"] = serde_json::json!(valid_hash('4'));
-    rebind_collective_same_secret_statement_roots(&mut wrong_constant_package);
-    rebind_collective_setup_package_hash(&mut wrong_constant_package);
-
-    let wrong_constant_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_constant_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_constant_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_constant_result["refusedObjects"][0]["reasonCode"],
-        "sameSecretConstantCommitmentRootMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong same-secret constant coefficient commitment root",
+        |package| {
+            package["sameSecretConsistency"]["statementRecords"][0]["constantCoefficientCommitmentRoots"]
+                [0]["commitmentRoot"] = serde_json::json!(valid_hash('4'));
+            rebind_collective_same_secret_statement_roots(package);
+        },
+        "sameSecretConstantCommitmentRootMismatch",
     );
 
-    let mut wrong_statement_root_package = minimal_collective_setup_package();
-    wrong_statement_root_package["sameSecretConsistency"]["statementRecords"][0]["sameSecretStatementRoot"] =
-        serde_json::json!(valid_hash('5'));
-    rebind_collective_same_secret_consistency_root(&mut wrong_statement_root_package);
-    rebind_collective_setup_package_hash(&mut wrong_statement_root_package);
-
-    let wrong_statement_root_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_statement_root_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_statement_root_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_statement_root_result["refusedObjects"][0]["reasonCode"],
-        "sameSecretStatementRootMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong same-secret statement root",
+        |package| {
+            package["sameSecretConsistency"]["statementRecords"][0]["sameSecretStatementRoot"] =
+                serde_json::json!(valid_hash('5'));
+            rebind_collective_same_secret_consistency_root(package);
+        },
+        "sameSecretStatementRootMismatch",
     );
 
-    let mut wrong_family_binding_package = minimal_collective_setup_package();
-    wrong_family_binding_package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"] =
-        serde_json::json!(valid_hash('6'));
-    rebind_collective_same_secret_consistency_root(&mut wrong_family_binding_package);
-    rebind_collective_setup_package_hash(&mut wrong_family_binding_package);
-
-    let wrong_family_binding_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_family_binding_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_family_binding_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_family_binding_result["refusedObjects"][0]["reasonCode"],
-        "sameSecretProofFamilyBindingRootMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong same-secret proof family binding root",
+        |package| {
+            package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"] =
+                serde_json::json!(valid_hash('6'));
+            rebind_collective_same_secret_consistency_root(package);
+        },
+        "sameSecretProofFamilyBindingRootMismatch",
     );
 }
 
@@ -72,7 +48,10 @@ fn collective_setup_verifier_refuses_rebound_malformed_same_secret_anchor_commit
         .as_array_mut()
         .expect("same-secret constant commitment roots")
         .pop();
-    assert_same_secret_anchor_commitment_set_mismatch(missing_commitment_package);
+    assert_same_secret_anchor_commitment_set_mismatch(
+        "missing same-secret anchor commitment",
+        missing_commitment_package,
+    );
 
     let mut extra_commitment_package = minimal_collective_setup_package();
     let extra_commitment = extra_commitment_package["sameSecretConsistency"]["statementRecords"][0]
@@ -83,7 +62,10 @@ fn collective_setup_verifier_refuses_rebound_malformed_same_secret_anchor_commit
         .as_array_mut()
         .expect("same-secret constant commitment roots")
         .push(extra_commitment);
-    assert_same_secret_anchor_commitment_set_mismatch(extra_commitment_package);
+    assert_same_secret_anchor_commitment_set_mismatch(
+        "extra same-secret anchor commitment",
+        extra_commitment_package,
+    );
 
     let mut reordered_commitment_package = minimal_collective_setup_package();
     reordered_commitment_package["sameSecretConsistency"]["statementRecords"][0]
@@ -91,7 +73,10 @@ fn collective_setup_verifier_refuses_rebound_malformed_same_secret_anchor_commit
         .as_array_mut()
         .expect("same-secret constant commitment roots")
         .swap(0, 1);
-    assert_same_secret_anchor_commitment_set_mismatch(reordered_commitment_package);
+    assert_same_secret_anchor_commitment_set_mismatch(
+        "reordered same-secret anchor commitments",
+        reordered_commitment_package,
+    );
 
     let mut duplicated_commitment_package = minimal_collective_setup_package();
     let duplicated_commitment =
@@ -100,31 +85,40 @@ fn collective_setup_verifier_refuses_rebound_malformed_same_secret_anchor_commit
             .clone();
     duplicated_commitment_package["sameSecretConsistency"]["statementRecords"][0]["constantCoefficientCommitmentRoots"]
         [1] = duplicated_commitment;
-    assert_same_secret_anchor_commitment_set_mismatch(duplicated_commitment_package);
+    assert_same_secret_anchor_commitment_set_mismatch(
+        "duplicated same-secret anchor commitment",
+        duplicated_commitment_package,
+    );
 
     let mut wrong_limb_commitment_package = minimal_collective_setup_package();
     wrong_limb_commitment_package["sameSecretConsistency"]["statementRecords"][0]["constantCoefficientCommitmentRoots"]
         [0]["rnsLimbIndex"] = serde_json::json!(1);
-    assert_same_secret_anchor_commitment_set_mismatch(wrong_limb_commitment_package);
+    assert_same_secret_anchor_commitment_set_mismatch(
+        "wrong same-secret anchor commitment RNS limb index",
+        wrong_limb_commitment_package,
+    );
 }
 
-fn assert_same_secret_anchor_commitment_set_mismatch(mut package: serde_json::Value) {
+fn assert_same_secret_anchor_commitment_set_mismatch(
+    case_label: &str,
+    mut package: serde_json::Value,
+) {
     rebind_collective_same_secret_statement_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_setup_package(package);
 
-    assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "sameSecretConstantCommitmentRootMismatch"
+        result["verifierStatus"], "refused",
+        "{case_label}: unexpected verifier result: {result}"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"], "sameSecretConstantCommitmentRootMismatch",
+        "{case_label}: unexpected refusal reason code: {result}"
     );
     assert!(
         result.get("acceptedSetupHandoff").is_none(),
-        "refused same-secret anchor packages must not return an accepted setup handoff"
+        "{case_label}: refused same-secret anchor packages must not return an accepted setup handoff"
     );
 }
 

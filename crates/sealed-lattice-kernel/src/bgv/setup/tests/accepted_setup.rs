@@ -280,6 +280,94 @@ fn set_first_limb_low_degree_fold_count_to_wrong_value(
     );
 }
 
+// Runs the collective BGV setup verifier over a setup package and returns the
+// verification response. Wraps the request envelope and the infallible-response
+// expectation that every accepted-setup rejection test repeats verbatim.
+fn verify_collective_setup_package(package: serde_json::Value) -> serde_json::Value {
+    verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response")
+}
+
+// Asserts that the verifier refuses a setup package with the expected first
+// refused-object reason code. The case label is carried into every assertion
+// message so a table-driven caller still pinpoints which mutation failed, and
+// the full response is printed on mismatch to keep failures diagnosable.
+fn assert_collective_setup_package_refused(
+    case_label: &str,
+    package: serde_json::Value,
+    expected_reason_code: &str,
+) {
+    let result = verify_collective_setup_package(package);
+    assert_eq!(
+        result["verifierStatus"], "refused",
+        "{case_label}: unexpected verifier result: {result}"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
+        "{case_label}: unexpected refusal reason code: {result}"
+    );
+}
+
+// Like assert_collective_setup_package_refused, but also asserts that the
+// refusal carries no accepted setup handoff. Used by the rejection cases that
+// must additionally prove a refused package never produces a terminal handoff.
+fn assert_collective_setup_package_refused_without_handoff(
+    case_label: &str,
+    package: serde_json::Value,
+    expected_reason_code: &str,
+) {
+    let result = verify_collective_setup_package(package);
+    assert_eq!(
+        result["verifierStatus"], "refused",
+        "{case_label}: unexpected verifier result: {result}"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
+        "{case_label}: unexpected refusal reason code: {result}"
+    );
+    assert!(
+        result["acceptedSetupHandoff"].is_null(),
+        "{case_label}: refused package must not return an accepted setup handoff: {result}"
+    );
+}
+
+// Builds the minimal collective setup package, applies a single labeled
+// mutation (which performs any record-level rebinds it needs), rebinds the
+// outer package hash, and asserts the verifier refuses with the expected reason
+// code. This captures the "mutate one field, expect a specific refusal" shape
+// shared by the fast accepted-setup rejection tests while keeping each case a
+// distinct, individually labeled mutation closure.
+fn assert_minimal_collective_setup_package_refused(
+    case_label: &str,
+    mutate: impl FnOnce(&mut serde_json::Value),
+    expected_reason_code: &str,
+) {
+    let mut package = minimal_collective_setup_package();
+    mutate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+    assert_collective_setup_package_refused(case_label, package, expected_reason_code);
+}
+
+// Like assert_minimal_collective_setup_package_refused, but also asserts the
+// refusal carries no accepted setup handoff, for cases that must prove the
+// terminal handoff stays withheld on rejection.
+fn assert_minimal_collective_setup_package_refused_without_handoff(
+    case_label: &str,
+    mutate: impl FnOnce(&mut serde_json::Value),
+    expected_reason_code: &str,
+) {
+    let mut package = minimal_collective_setup_package();
+    mutate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+    assert_collective_setup_package_refused_without_handoff(
+        case_label,
+        package,
+        expected_reason_code,
+    );
+}
+
 // Shared elapsed-clock logger for the terminal accepted-setup fixture phases.
 pub(super) fn terminal_phase(message: &str) {
     static TERMINAL_PHASE_CLOCK: std::sync::OnceLock<std::time::Instant> =

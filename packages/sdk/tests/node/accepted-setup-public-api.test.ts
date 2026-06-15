@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import * as publicApiRuntime from '../../dist/index.js';
+import {
+    createSetupPackageVerificationInput,
+    verifyPrivateVssShare,
+    verifySetupPackage,
+} from '../../dist/index.js';
 import { loadTranscriptCoreKernel } from '../../dist/kernel.js';
+import * as internalSetupFlow from '../support/internal-setup-flow.js';
 
 import { hash512Hex } from '#packages/crypto/src/index';
 import {
@@ -96,7 +101,16 @@ type PublicSetupApi = {
     ) => Promise<Record<string, unknown>>;
 };
 
-const publicSetupApi = publicApiRuntime as unknown as PublicSetupApi;
+// The setup-assembly builders are demoted out of the public verifier-only SDK and now live
+// in the relocated test-support module; the verifier path stays on the published dist surface.
+// The test still builds a package through the relocated internal flow and verifies it through
+// the public verifier path.
+const publicSetupApi = {
+    ...internalSetupFlow,
+    createSetupPackageVerificationInput,
+    verifyPrivateVssShare,
+    verifySetupPackage,
+} as unknown as PublicSetupApi;
 const loadPublicTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     loadTranscriptCoreKernel;
 const trusteeIdentity = 'trustee-0';

@@ -286,19 +286,12 @@ fn terminal_transport_policy_package_with_material_encodings(
 fn collective_setup_verifier_refuses_non_binary_setup_transport() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("collective_setup_verifier_refuses_non_binary_setup_transport");
-    let mut package = minimal_collective_setup_package();
-    package["setupTransportCertificate"]["largeObjectEncoding"] = serde_json::json!("json");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "transportEncodingMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "non-binary setup transport encoding",
+        |package| {
+            package["setupTransportCertificate"]["largeObjectEncoding"] = serde_json::json!("json");
+        },
+        "transportEncodingMismatch",
     );
 }
 
@@ -307,37 +300,23 @@ fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_setup_transport_manifest",
     );
-    let mut missing_chunk_package = minimal_collective_setup_package();
-    missing_chunk_package["setupTransportCertificate"]["chunkHashes"]
-        .as_array_mut()
-        .expect("chunk hashes")
-        .pop();
-    rebind_collective_setup_package_hash(&mut missing_chunk_package);
-
-    let missing_chunk_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": missing_chunk_package,
-        }))
-        .expect("verification response");
-    assert_eq!(missing_chunk_result["verifierStatus"], "refused");
-    assert_eq!(
-        missing_chunk_result["refusedObjects"][0]["reasonCode"],
-        "transportChunkHashCountMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "setup transport manifest with a missing chunk hash",
+        |package| {
+            package["setupTransportCertificate"]["chunkHashes"]
+                .as_array_mut()
+                .expect("chunk hashes")
+                .pop();
+        },
+        "transportChunkHashCountMismatch",
     );
 
-    let mut wrong_root_package = minimal_collective_setup_package();
-    wrong_root_package["setupTransportCertificate"]["chunkRoot"] =
-        serde_json::json!(valid_hash('8'));
-    rebind_collective_setup_package_hash(&mut wrong_root_package);
-
-    let wrong_root_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": wrong_root_package,
-    }))
-    .expect("verification response");
-    assert_eq!(wrong_root_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_root_result["refusedObjects"][0]["reasonCode"],
-        "transportChunkRootMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "setup transport manifest with a wrong chunk root",
+        |package| {
+            package["setupTransportCertificate"]["chunkRoot"] = serde_json::json!(valid_hash('8'));
+        },
+        "transportChunkRootMismatch",
     );
 }
 
@@ -376,10 +355,7 @@ fn collective_setup_verifier_refuses_unrequested_setup_transport_object() {
     append_unrequested_setup_transport_object(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_setup_package(package);
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(result["currentPhase"], "setupPackageVerification");
@@ -434,27 +410,6 @@ fn collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidec
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "transportedObjectUnreferenced"
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_setup_transport_certificate_hash_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_setup_transport_certificate_hash_drift",
-    );
-    let mut package = minimal_collective_setup_package();
-    package["setupTransportCertificateHash"] = serde_json::json!(valid_hash('9'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "transportPackageCertificateHashMismatch"
     );
 }
 

@@ -808,21 +808,30 @@ mod tests {
     #[test]
     fn relinearized_product_supports_a_second_multiplication() {
         let key = shared_key();
-        let a = at_test_level(&key.encrypt_slots(&[2, 3, 4], "ksk03").expect("a"));
-        let b = at_test_level(&key.encrypt_slots(&[1, 5, 2], "ksk04").expect("b"));
+        let first_factor = at_test_level(
+            &key.encrypt_slots(&[2, 3, 4], "ksk03")
+                .expect("first factor"),
+        );
+        let second_factor = at_test_level(
+            &key.encrypt_slots(&[1, 5, 2], "ksk04")
+                .expect("second factor"),
+        );
         let relinearization_key =
             generate_relinearization_key(key, TEST_LEVEL, "relin-seed").expect("relin key");
         let first = relinearize(
-            &ciphertext_tensor(&a, &b).expect("ab"),
+            &ciphertext_tensor(&first_factor, &second_factor).expect("first times second"),
             &relinearization_key,
         )
-        .expect("relinearize ab");
-        let c = at_test_level(&key.encrypt_slots(&[3, 2, 4], "ksk05").expect("c"));
+        .expect("relinearize first times second");
+        let third_factor = at_test_level(
+            &key.encrypt_slots(&[3, 2, 4], "ksk05")
+                .expect("third factor"),
+        );
         let second = relinearize(
-            &ciphertext_tensor(&first, &c).expect("abc"),
+            &ciphertext_tensor(&first, &third_factor).expect("product with third factor"),
             &relinearization_key,
         )
-        .expect("relinearize abc");
+        .expect("relinearize product with third factor");
         assert_eq!(
             key.decrypt_to_slots(&second).expect("decrypt")[..3].to_vec(),
             vec![6, 30, 32]

@@ -219,87 +219,8 @@ export const vendoredProtocolRuntimeEntryExports = [
         ],
     },
     {
-        source: 'setup/local-trustee-setup-state.js',
-        exports: [
-            'createEncryptedLocalTrusteeSetupStateFromVerifiedShares',
-            'decryptLocalTrusteeSetupState',
-        ],
-        runtimeFacadeExports: [
-            'exportEncryptedLocalTrusteeSetupState',
-            'restoreLocalTrusteeSetupState',
-        ],
-    },
-    {
-        source: 'setup/common-randomness-records.js',
-        exports: [
-            'createCommonRandomnessCommit',
-            'createCommonRandomnessReveal',
-            'createSetupCommonRandomness',
-        ],
-    },
-    {
-        source: 'setup/public-key-share-records.js',
-        exports: [
-            'createBinaryChunkedPublicKeyShareMaterialTransport',
-            'createBinaryChunkedPublicKeyShareProofMaterialTransport',
-            'createPublicKeyShareMaterialSet',
-            'createPublicKeyShareProofSet',
-            'createPublicKeyShareSet',
-            'createPublicKeyShareSuccinctProofSet',
-        ],
-    },
-    {
-        source: 'setup/same-secret-consistency-records.js',
-        exports: [
-            'createBinaryChunkedSameSecretProofMaterialTransport',
-            'createSameSecretProofSet',
-        ],
-    },
-    {
-        source: 'setup/evaluator-key-schedule.js',
-        exports: ['createEvaluatorKeySchedule'],
-    },
-    {
-        source: 'setup/evaluation-key-proof-records.js',
-        exports: [
-            'createBinaryChunkedEvaluationKeyShareMaterialTransport',
-            'createBinaryChunkedPublicEvaluationKeyMaterialTransport',
-            'createGaloisKeyShareBatches',
-            'createPublicEvaluationKeySet',
-            'createRelinearizationKeyShareRounds',
-        ],
-    },
-    {
-        source: 'setup/setup-contribution-orchestration.js',
-        exports: ['createSetupContributionAssembly'],
-        runtimeFacadeExports: ['createSetupContribution'],
-    },
-    {
-        source: 'setup/setup-certificates.js',
-        exports: ['createSetupCertificates'],
-    },
-    {
         source: 'setup/setup-package-assembly.js',
-        exports: ['createSetupPackage', 'createSetupPackageVerificationInput'],
-    },
-    {
-        source: 'setup/setup-phase-records.js',
-        exports: [
-            'createSetupPhaseParticipantObject',
-            'createSetupPhaseRecord',
-        ],
-        runtimeFacadeExports: ['createSetupIntent', 'createSetupPhaseRecord'],
-    },
-    {
-        source: 'setup/vss-share-verification-records.js',
-        exports: [
-            'createVssShareAcceptanceRecord',
-            'createVssShareComplaintRecordFromLocalVerification',
-        ],
-        runtimeFacadeExports: [
-            'createVssShareAcceptance',
-            'createVssComplaint',
-        ],
+        exports: ['createSetupPackageVerificationInput'],
     },
 ] as const satisfies readonly VendoredProtocolRuntimeEntryExport[];
 

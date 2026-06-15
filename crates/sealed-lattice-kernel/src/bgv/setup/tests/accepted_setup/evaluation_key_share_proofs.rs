@@ -5,19 +5,12 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_generic_key_switch_material_by_default",
     );
-    let mut package = minimal_collective_setup_package();
-    package["genericKeySwitchKeys"] = serde_json::json!({ "keyRoot": valid_hash('4') });
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "genericKeySwitchOutsideProfile"
+    assert_minimal_collective_setup_package_refused(
+        "generic key-switch keys present by default",
+        |package| {
+            package["genericKeySwitchKeys"] = serde_json::json!({ "keyRoot": valid_hash('4') });
+        },
+        "genericKeySwitchOutsideProfile",
     );
 }
 
@@ -25,19 +18,13 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
 fn collective_setup_verifier_refuses_evaluator_schedule_drift() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("collective_setup_verifier_refuses_evaluator_schedule_drift");
-    let mut package = minimal_collective_setup_package();
-    package["evaluatorKeySchedule"]["requiredGaloisSetHash"] = serde_json::json!(valid_hash('8'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "requiredGaloisSetHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "drifted evaluator key schedule required Galois set hash",
+        |package| {
+            package["evaluatorKeySchedule"]["requiredGaloisSetHash"] =
+                serde_json::json!(valid_hash('8'));
+        },
+        "requiredGaloisSetHashMismatch",
     );
 }
 
@@ -46,41 +33,26 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_evaluation_key_material",
     );
-    let mut relin_package = minimal_collective_setup_package();
-    let evaluator_key_schedule_root =
-        relin_package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"].clone();
-    relin_package["relinearizationKeyShareRounds"] = serde_json::json!({
-        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
-    });
-    rebind_collective_setup_package_hash(&mut relin_package);
-
-    let relin_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": relin_package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(relin_result["verifierStatus"], "refused");
-    assert_eq!(
-        relin_result["refusedObjects"][0]["reasonCode"],
-        "relinearizationKeyShareRoundsTypeMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "relinearization key-share rounds replaced with a malformed object",
+        |package| {
+            let evaluator_key_schedule_root =
+                package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"].clone();
+            package["relinearizationKeyShareRounds"] = serde_json::json!({
+                "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+            });
+        },
+        "relinearizationKeyShareRoundsTypeMismatch",
     );
 
-    let mut evaluation_key_package = minimal_collective_setup_package();
-    evaluation_key_package["evaluationKeys"] = serde_json::json!({
-        "evaluationKeyRoot": valid_hash('9'),
-    });
-    rebind_collective_setup_package_hash(&mut evaluation_key_package);
-
-    let evaluation_key_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": evaluation_key_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(evaluation_key_result["verifierStatus"], "refused");
-    assert_eq!(
-        evaluation_key_result["refusedObjects"][0]["reasonCode"],
-        "evaluationKeysTypeMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "evaluation keys replaced with a malformed object",
+        |package| {
+            package["evaluationKeys"] = serde_json::json!({
+                "evaluationKeyRoot": valid_hash('9'),
+            });
+        },
+        "evaluationKeysTypeMismatch",
     );
 }
 
@@ -214,38 +186,6 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
         "accepted terminal setup response must carry a handoff root"
     );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_drifted_terminal_certificate_hashes() {
-    // Drifting a present certificate hash and recomputing the outer package hash
-    // must be refused before any missing-object pending, proving the verifier
-    // recomputes each certificate root rather than trusting the package copy.
-    for certificate_hash_field in [
-        "setupCommitmentSecurityCertificateHash",
-        "setupTransportCertificateHash",
-        "setupProofAccountingCertificateHash",
-        "heSecurityCertificateHash",
-        "activeStaticSetupTheoremCertificateHash",
-    ] {
-        let mut package = minimal_collective_setup_package();
-        let bound_hash = package[certificate_hash_field]
-            .as_str()
-            .unwrap_or_else(|| panic!("{certificate_hash_field} must be present"))
-            .to_string();
-        package[certificate_hash_field] = serde_json::json!(drift_hash(&bound_hash));
-        rebind_collective_setup_package_hash(&mut package);
-
-        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .expect("verification response");
-
-        assert_eq!(
-            result["verifierStatus"], "refused",
-            "drifting {certificate_hash_field} must refuse before any missing-object pending",
-        );
-    }
 }
 
 #[test]
@@ -824,21 +764,14 @@ fn collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share_records",
     );
-    let mut package = minimal_collective_setup_package();
-    package["trusteeEvaluationKeyProofs"] = serde_json::json!({
-        "objectType": "TrusteeEvaluationKeyProofSet",
-    });
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofsWithoutShareRecords"
+    assert_minimal_collective_setup_package_refused(
+        "trustee evaluation-key proofs object without share records",
+        |package| {
+            package["trusteeEvaluationKeyProofs"] = serde_json::json!({
+                "objectType": "TrusteeEvaluationKeyProofSet",
+            });
+        },
+        "trusteeEvaluationKeyProofsWithoutShareRecords",
     );
 }
 

@@ -5,40 +5,24 @@ fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_public_key_share_statements",
     );
-    let mut wrong_public_a_package = minimal_collective_setup_package();
-    wrong_public_a_package["publicKeyShares"]["shareRecords"][0]["publicAPolynomialRoot"] =
-        serde_json::json!(valid_hash('8'));
-    rebind_collective_public_key_share_roots(&mut wrong_public_a_package);
-    rebind_collective_setup_package_hash(&mut wrong_public_a_package);
-
-    let wrong_public_a_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_public_a_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_public_a_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_public_a_result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareCommonBindingMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong public-key share public-a polynomial root",
+        |package| {
+            package["publicKeyShares"]["shareRecords"][0]["publicAPolynomialRoot"] =
+                serde_json::json!(valid_hash('8'));
+            rebind_collective_public_key_share_roots(package);
+        },
+        "publicKeyShareCommonBindingMismatch",
     );
 
-    let mut wrong_proof_binding_package = minimal_collective_setup_package();
-    wrong_proof_binding_package["publicKeyShareProofs"]["proofRecords"][0]["sameSecretStatementRoot"] =
-        serde_json::json!(valid_hash('9'));
-    rebind_collective_public_key_share_proof_roots(&mut wrong_proof_binding_package);
-    rebind_collective_setup_package_hash(&mut wrong_proof_binding_package);
-
-    let wrong_proof_binding_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_proof_binding_package,
-        }))
-        .expect("verification response");
-
-    assert_eq!(wrong_proof_binding_result["verifierStatus"], "refused");
-    assert_eq!(
-        wrong_proof_binding_result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareProofBindingMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "wrong public-key share proof same-secret statement binding",
+        |package| {
+            package["publicKeyShareProofs"]["proofRecords"][0]["sameSecretStatementRoot"] =
+                serde_json::json!(valid_hash('9'));
+            rebind_collective_public_key_share_proof_roots(package);
+        },
+        "publicKeyShareProofBindingMismatch",
     );
 }
 
@@ -890,19 +874,12 @@ fn collective_setup_verifier_refuses_public_key_material_before_proof_verificati
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_public_key_material_before_proof_verification",
     );
-    let mut package = minimal_collective_setup_package();
-    package["collectivePublicKeyRoot"] = serde_json::json!(valid_hash('8'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyMaterialBeforeProofVerification"
+    assert_minimal_collective_setup_package_refused(
+        "collective public-key root present before proof verification",
+        |package| {
+            package["collectivePublicKeyRoot"] = serde_json::json!(valid_hash('8'));
+        },
+        "publicKeyMaterialBeforeProofVerification",
     );
 }
 

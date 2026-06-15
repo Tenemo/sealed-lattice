@@ -8,10 +8,7 @@ fn collective_setup_verifier_refuses_wrong_q_share_prime_list() {
     package["qShare"]["primes"][0] = serde_json::json!(65_537);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_setup_package(package);
 
     assert_eq!(result["verifierStatus"], "outsideProfile");
     assert_eq!(result["refusedObjects"][0]["reasonCode"], "qShareMismatch");
@@ -22,41 +19,13 @@ fn collective_setup_verifier_refuses_malformed_commitment_security_certificate()
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_commitment_security_certificate",
     );
-    let mut package = minimal_collective_setup_package();
-    package["setupCommitmentSecurityCertificate"]["aggregateOpeningBounds"]["thresholdShareOpeningInfinityBound"] =
-        serde_json::json!(11_109_u64);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "commitmentSecurityCertificatePayloadMismatch"
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_commitment_security_certificate_hash_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_commitment_security_certificate_hash_drift",
-    );
-    let mut package = minimal_collective_setup_package();
-    package["setupCommitmentSecurityCertificateHash"] = serde_json::json!(valid_hash('8'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "commitmentSecurityPackageCertificateHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "malformed commitment security certificate opening bound",
+        |package| {
+            package["setupCommitmentSecurityCertificate"]["aggregateOpeningBounds"]["thresholdShareOpeningInfinityBound"] =
+                serde_json::json!(11_109_u64);
+        },
+        "commitmentSecurityCertificatePayloadMismatch",
     );
 }
 
@@ -291,32 +260,28 @@ fn collective_setup_verifier_refuses_duplicate_current_proof_accounting_row() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_duplicate_current_proof_accounting_row",
     );
-    let mut package = minimal_collective_setup_package();
-    let duplicate_public_key_accounting_row =
-        package["setupProofAccountingCertificate"]["proofFamilyAccounting"][2].clone();
-    package["setupProofAccountingCertificate"]["proofFamilies"]
-        .as_array_mut()
-        .expect("proof family list")
-        .push(serde_json::json!("public-key-share"));
-    package["setupProofAccountingCertificate"]["proofFamilyAccounting"]
-        .as_array_mut()
-        .expect("proof family accounting")
-        .push(duplicate_public_key_accounting_row);
-    rebind_setup_proof_accounting_certificate_hash(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupProofAccountingCertificatePayloadMismatch"
+    assert_minimal_collective_setup_package_refused_without_handoff(
+        "duplicate current proof accounting row",
+        |package| {
+            let duplicate_public_key_accounting_row =
+                package["setupProofAccountingCertificate"]["proofFamilyAccounting"][2].clone();
+            package["setupProofAccountingCertificate"]["proofFamilies"]
+                .as_array_mut()
+                .expect("proof family list")
+                .push(serde_json::json!("public-key-share"));
+            package["setupProofAccountingCertificate"]["proofFamilyAccounting"]
+                .as_array_mut()
+                .expect("proof family accounting")
+                .push(duplicate_public_key_accounting_row);
+            rebind_setup_proof_accounting_certificate_hash(package);
+        },
+        "setupProofAccountingCertificatePayloadMismatch",
     );
-    assert!(result["acceptedSetupHandoff"].is_null());
 }
+
+// A labeled non-claim proof-model row mutation: the case label and the closure
+// that upgrades one accounting flag the verifier must reject.
+type LabeledProofModelRowMutation = (&'static str, fn(&mut serde_json::Value));
 
 #[test]
 fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
@@ -327,83 +292,53 @@ fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
         "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
     );
 
-    let model_row_mutations: [fn(&mut serde_json::Value); 3] = [
-        |package| {
+    let model_row_mutations: [LabeledProofModelRowMutation; 3] = [
+        ("upgraded Fiat-Shamir QROM reduction status", |package| {
             package["setupProofAccountingCertificate"]["fiatShamirTranscriptAccounting"]["qromReductionStatus"] =
                 serde_json::json!("qrom-reduction-loss-accepted-for-final-claim");
-        },
-        |package| {
-            package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] =
-                serde_json::json!("128-bit zero-knowledge accepted for every setup proof family");
-        },
-        |package| {
-            package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]["zeroKnowledge"]
-                ["smudgingBudget"]["acceptedFor128BitZeroKnowledge"] = serde_json::json!(true);
-        },
+        }),
+        (
+            "upgraded succinct leakage zero-knowledge scope",
+            |package| {
+                package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] = serde_json::json!(
+                    "128-bit zero-knowledge accepted for every setup proof family"
+                );
+            },
+        ),
+        (
+            "upgraded trustee evaluation-key smudging budget 128-bit zero-knowledge flag",
+            |package| {
+                package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]
+                    ["zeroKnowledge"]["smudgingBudget"]["acceptedFor128BitZeroKnowledge"] =
+                    serde_json::json!(true);
+            },
+        ),
     ];
 
-    for mutate_model_row in model_row_mutations {
-        let mut package = minimal_collective_setup_package();
-        mutate_model_row(&mut package);
-        rebind_setup_proof_accounting_certificate_hash(&mut package);
-        rebind_collective_setup_package_hash(&mut package);
-
-        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .expect("verification response");
-
-        assert_eq!(result["verifierStatus"], "refused");
-        assert_eq!(
-            result["refusedObjects"][0]["reasonCode"],
-            "setupProofAccountingCertificatePayloadMismatch"
+    for (case_label, mutate_model_row) in model_row_mutations {
+        assert_minimal_collective_setup_package_refused_without_handoff(
+            case_label,
+            |package| {
+                mutate_model_row(package);
+                rebind_setup_proof_accounting_certificate_hash(package);
+            },
+            "setupProofAccountingCertificatePayloadMismatch",
         );
-        assert!(result["acceptedSetupHandoff"].is_null());
     }
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_proof_accounting_certificate_hash_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_setup_proof_accounting_certificate_hash_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["setupProofAccountingCertificateHash"] = serde_json::json!(valid_hash('6'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupProofAccountingPackageCertificateHashMismatch"
-    );
 }
 
 #[test]
 fn collective_setup_verifier_checks_he_security_certificate() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("collective_setup_verifier_checks_he_security_certificate");
-    let mut package = minimal_collective_setup_package();
-    package["heSecurityCertificate"]["assessedRing"]["largestExposedBasisClass"] =
-        serde_json::json!("Q_extended");
-    rebind_collective_he_security_certificate_hash(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "heSecurityCertificateMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "HE security certificate with an exposed extended basis class",
+        |package| {
+            package["heSecurityCertificate"]["assessedRing"]["largestExposedBasisClass"] =
+                serde_json::json!("Q_extended");
+            rebind_collective_he_security_certificate_hash(package);
+        },
+        "heSecurityCertificateMismatch",
     );
 }
 
@@ -433,27 +368,6 @@ fn he_security_certificate_accepts_direct_setup_evaluator_parameter_boundary() {
             .any(|label| label
                 .as_str()
                 .is_some_and(|text| text == "DirectSetupEvaluatorHeParameterBoundaryAccepted"))
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_he_security_certificate_hash_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_he_security_certificate_hash_drift",
-    );
-    let mut package = minimal_collective_setup_package();
-    package["heSecurityCertificateHash"] = serde_json::json!(valid_hash('7'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "packageHeSecurityCertificateHashMismatch"
     );
 }
 
@@ -615,29 +529,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_
 }
 
 #[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_package_hash_drift()
-{
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_package_hash_drift",
-    );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
-    package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(valid_hash('9'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupKeyCorrectnessPackageCertificateHashMismatch"
-    );
-}
-
-#[test]
 fn collective_setup_verifier_requires_active_static_setup_theorem_certificate() {
     let mut package = minimal_collective_setup_package();
     package
@@ -650,10 +541,7 @@ fn collective_setup_verifier_requires_active_static_setup_theorem_certificate() 
         .remove("activeStaticSetupTheoremCertificateHash");
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_setup_package(package);
 
     assert_eq!(result["verifierStatus"], "pending");
     assert!(
@@ -716,57 +604,25 @@ fn active_static_setup_theorem_certificate_records_accepted_claim_boundary() {
 
 #[test]
 fn collective_setup_verifier_checks_active_static_setup_theorem_certificate() {
-    let mut package = minimal_collective_setup_package();
-    package["activeStaticSetupTheoremCertificate"]["claimBoundary"]["completionBoundary"] =
-        serde_json::json!("external-review-required");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "activeStaticSetupTheoremCertificatePayloadMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "active-static setup theorem certificate with a weakened completion boundary",
+        |package| {
+            package["activeStaticSetupTheoremCertificate"]["claimBoundary"]["completionBoundary"] =
+                serde_json::json!("external-review-required");
+        },
+        "activeStaticSetupTheoremCertificatePayloadMismatch",
     );
 }
 
 #[test]
 fn collective_setup_verifier_refuses_active_static_setup_theorem_certificate_hash_drift() {
-    let mut package = minimal_collective_setup_package();
-    package["activeStaticSetupTheoremCertificate"]["activeStaticSetupTheoremCertificateHash"] =
-        serde_json::json!(valid_hash('a'));
-    package["activeStaticSetupTheoremCertificateHash"] = serde_json::json!(valid_hash('a'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "activeStaticSetupTheoremCertificateHashMismatch"
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_active_static_setup_theorem_package_hash_drift() {
-    let mut package = minimal_collective_setup_package();
-    package["activeStaticSetupTheoremCertificateHash"] = serde_json::json!(valid_hash('b'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "activeStaticSetupTheoremPackageCertificateHashMismatch"
+    assert_minimal_collective_setup_package_refused(
+        "drifted active-static setup theorem certificate self-hash",
+        |package| {
+            package["activeStaticSetupTheoremCertificate"]["activeStaticSetupTheoremCertificateHash"] =
+                serde_json::json!(valid_hash('a'));
+            package["activeStaticSetupTheoremCertificateHash"] = serde_json::json!(valid_hash('a'));
+        },
+        "activeStaticSetupTheoremCertificateHashMismatch",
     );
 }

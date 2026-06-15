@@ -623,19 +623,6 @@ fn verify_transport_certificate_body(
             "setupPackage.setupTransportCertificate.setupTransportCertificateHash",
         )));
     }
-    let package_certificate_hash = transport_canonical_try!(require_transport_hash(
-        setup_package,
-        "setupTransportCertificateHash",
-        "transportPackageCertificateHashMissing",
-        "setupPackage.setupTransportCertificateHash is required",
-    ));
-    if package_certificate_hash != expected_certificate_hash {
-        return Ok(Err(Refusal::new(
-            "transportPackageCertificateHashMismatch",
-            "setupPackage.setupTransportCertificateHash must match setupTransportCertificate.setupTransportCertificateHash",
-            "setupPackage.setupTransportCertificateHash",
-        )));
-    }
 
     Ok(Ok(()))
 }

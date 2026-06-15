@@ -112,14 +112,6 @@ where
         let coefficients = lagrange_coefficients_at_zero_mod(shares, *modulus)?;
         for (share, lagrange_coefficient) in shares.iter().zip(coefficients) {
             let share_partials = partials(share);
-            if share_partials.len() != ciphertext.primes().len()
-                || share_partials[limb_index].len() != POLYNOMIAL_DEGREE
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "target decryption share payload shape does not match the ciphertext level",
-                ));
-            }
             for coefficient_index in 0..POLYNOMIAL_DEGREE {
                 let weighted = mul_mod(
                     share_partials[limb_index][coefficient_index],

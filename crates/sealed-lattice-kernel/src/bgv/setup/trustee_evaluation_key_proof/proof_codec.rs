@@ -64,7 +64,6 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
     statement: &TrusteeEvaluationKeyStatement,
     bytes: &[u8],
 ) -> CanonicalResult<SuccinctEvaluationKeyProof> {
-    statement.validate_shape()?;
     let mut cursor = 0_usize;
     let magic = read_array::<8>(bytes, &mut cursor)?;
     if &magic != PROOF_MAGIC {

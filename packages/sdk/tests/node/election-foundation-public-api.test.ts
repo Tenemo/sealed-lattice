@@ -55,87 +55,8 @@ const requiredPublicFunctions = [
         publicApiRuntimeRecord.evaluateActionCapability,
     ],
     [
-        'createCommonRandomnessCommit',
-        publicApiRuntimeRecord.createCommonRandomnessCommit,
-    ],
-    [
-        'createCommonRandomnessReveal',
-        publicApiRuntimeRecord.createCommonRandomnessReveal,
-    ],
-    [
-        'createEvaluatorKeySchedule',
-        publicApiRuntimeRecord.createEvaluatorKeySchedule,
-    ],
-    [
-        'createGaloisKeyShareBatches',
-        publicApiRuntimeRecord.createGaloisKeyShareBatches,
-    ],
-    [
-        'createPublicEvaluationKeySet',
-        publicApiRuntimeRecord.createPublicEvaluationKeySet,
-    ],
-    [
-        'createPublicKeyShareProofSet',
-        publicApiRuntimeRecord.createPublicKeyShareProofSet,
-    ],
-    [
-        'createBinaryChunkedSameSecretProofMaterialTransport',
-        publicApiRuntimeRecord.createBinaryChunkedSameSecretProofMaterialTransport,
-    ],
-    [
-        'createSameSecretProofSet',
-        publicApiRuntimeRecord.createSameSecretProofSet,
-    ],
-    [
-        'createPublicKeyShareMaterialSet',
-        publicApiRuntimeRecord.createPublicKeyShareMaterialSet,
-    ],
-    [
-        'createBinaryChunkedPublicKeyShareMaterialTransport',
-        publicApiRuntimeRecord.createBinaryChunkedPublicKeyShareMaterialTransport,
-    ],
-    [
-        'createBinaryChunkedPublicKeyShareProofMaterialTransport',
-        publicApiRuntimeRecord.createBinaryChunkedPublicKeyShareProofMaterialTransport,
-    ],
-    [
-        'createBinaryChunkedEvaluationKeyShareMaterialTransport',
-        publicApiRuntimeRecord.createBinaryChunkedEvaluationKeyShareMaterialTransport,
-    ],
-    [
-        'createBinaryChunkedPublicEvaluationKeyMaterialTransport',
-        publicApiRuntimeRecord.createBinaryChunkedPublicEvaluationKeyMaterialTransport,
-    ],
-    [
-        'createPublicKeyShareSuccinctProofSet',
-        publicApiRuntimeRecord.createPublicKeyShareSuccinctProofSet,
-    ],
-    ['createPublicKeyShareSet', publicApiRuntimeRecord.createPublicKeyShareSet],
-    [
-        'createRelinearizationKeyShareRounds',
-        publicApiRuntimeRecord.createRelinearizationKeyShareRounds,
-    ],
-    ['createSetupCertificates', publicApiRuntimeRecord.createSetupCertificates],
-    ['createSetupPackage', publicApiRuntimeRecord.createSetupPackage],
-    [
         'createSetupPackageVerificationInput',
         publicApiRuntimeRecord.createSetupPackageVerificationInput,
-    ],
-    [
-        'createSetupCommonRandomness',
-        publicApiRuntimeRecord.createSetupCommonRandomness,
-    ],
-    ['createSetupContribution', publicApiRuntimeRecord.createSetupContribution],
-    ['createSetupIntent', publicApiRuntimeRecord.createSetupIntent],
-    ['createSetupPhaseRecord', publicApiRuntimeRecord.createSetupPhaseRecord],
-    [
-        'createVssShareAcceptance',
-        publicApiRuntimeRecord.createVssShareAcceptance,
-    ],
-    ['createVssComplaint', publicApiRuntimeRecord.createVssComplaint],
-    [
-        'exportEncryptedLocalTrusteeSetupState',
-        publicApiRuntimeRecord.exportEncryptedLocalTrusteeSetupState,
     ],
     [
         'isActionCurrentForRecoveryEpoch',
@@ -167,10 +88,6 @@ const requiredPublicFunctions = [
     [
         'verifyTranscriptCoreFixture',
         publicApiRuntimeRecord.verifyTranscriptCoreFixture,
-    ],
-    [
-        'restoreLocalTrusteeSetupState',
-        publicApiRuntimeRecord.restoreLocalTrusteeSetupState,
     ],
     ['verifySetupPackage', publicApiRuntimeRecord.verifySetupPackage],
     ['verifyPrivateVssShare', publicApiRuntimeRecord.verifyPrivateVssShare],

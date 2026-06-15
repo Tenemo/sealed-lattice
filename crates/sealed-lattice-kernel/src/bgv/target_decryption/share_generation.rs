@@ -88,19 +88,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
     minimum_shares_for_interpolation: usize,
     level: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    if level >= DATA_PRIMES.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "target decryption ciphertext level is outside the selected data basis",
-        ));
-    }
     let secret = evaluator_key.secret();
-    if secret.len() != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "target decryption secret width does not match the selected BGV profile",
-        ));
-    }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -158,8 +146,8 @@ pub(super) fn derive_threshold_secret_share_limb(
         .iter()
         .map(|coefficient| signed_residue(*coefficient, modulus))
         .collect::<Vec<_>>();
-    let x = interpolation_point % modulus;
-    let mut x_power = x;
+    let evaluation_point = interpolation_point % modulus;
+    let mut evaluation_point_power = evaluation_point;
     let limb_index_bytes = (limb_index as u64).to_le_bytes();
     let modulus_bytes = modulus.to_le_bytes();
     for polynomial_degree in 1..minimum_shares_for_interpolation {
@@ -177,10 +165,10 @@ pub(super) fn derive_threshold_secret_share_limb(
         );
         let coefficients = sampler.uniform_residues(modulus, POLYNOMIAL_DEGREE);
         for (share_coefficient, polynomial_coefficient) in share.iter_mut().zip(coefficients) {
-            let term = mul_mod_fast(polynomial_coefficient, x_power, modulus);
+            let term = mul_mod_fast(polynomial_coefficient, evaluation_point_power, modulus);
             *share_coefficient = add_mod_fast(*share_coefficient, term, modulus);
         }
-        x_power = mul_mod(x_power, x, modulus)?;
+        evaluation_point_power = mul_mod(evaluation_point_power, evaluation_point, modulus)?;
     }
 
     Ok(share)

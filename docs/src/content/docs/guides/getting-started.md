@@ -50,9 +50,7 @@ const thresholdProfile = deriveThresholdProfile({
 
 ```typescript
 import {
-    createSetupContribution,
     createSetupPackageVerificationInput,
-    createVssShareAcceptance,
     deriveThresholdProfile,
     validatePollSpec,
     verifyBoardConsistency,
@@ -72,7 +70,7 @@ These helpers are useful for current development verification and package integr
 - threshold and frozen roster profile derivation
 - lifecycle label, lifecycle transition, and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
-- narrow accepted-setup helpers for setup intent records, setup phase records, common-randomness records, private VSS share verification, signed VSS acceptance and complaint records, roots-only setup contributions, proof-material records, binary setup-material transports, public-only setup package verification input construction, setup package verification, encrypted local trustee setup state export, and restore-after-restart validation
+- narrow accepted-setup verifier helpers for private VSS share verification, public-only setup package verification input construction, and setup package verification
 - transcript-core fixture verification through the bundled Rust/WASM kernel
 - package-boundary and public API smoke coverage
 
