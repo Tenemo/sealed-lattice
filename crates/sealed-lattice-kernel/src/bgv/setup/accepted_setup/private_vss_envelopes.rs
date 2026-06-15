@@ -449,8 +449,7 @@ fn private_vss_envelope_bindings_from_set(
         )));
     };
     let roster = super::accepted_roster_from_setup_context(setup_context);
-    let expected_envelope_count =
-        (roster.participant_count * roster.participant_count) as usize;
+    let expected_envelope_count = (roster.participant_count * roster.participant_count) as usize;
     if envelope_references.len() != expected_envelope_count {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeReferenceCountMismatch",
@@ -699,8 +698,8 @@ fn private_vss_envelope_binding_from_reference(
     }
     // Source-major sequence number uniquely identifying the ordered (source, recipient) envelope; it is bound into the AEAD associated data to prevent cross-pair ciphertext replay.
     let roster = super::accepted_roster_from_setup_context(setup_context);
-    let expected_sequence_number = source_trustee_roster_position * roster.participant_count
-        + recipient_roster_position;
+    let expected_sequence_number =
+        source_trustee_roster_position * roster.participant_count + recipient_roster_position;
     if envelope_reference
         .get("envelopeSequenceNumber")
         .and_then(Value::as_u64)

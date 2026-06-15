@@ -335,9 +335,8 @@ pub(super) fn verify_vss_coefficient_commitment_material(
             "setupPackage.vssCoefficientCommitmentMaterial.rnsLimbCount",
         )?));
     }
-    let expected_material_count = (roster.participant_count
-        * roster.decryption_threshold) as usize
-        * DATA_PRIMES.len();
+    let expected_material_count =
+        (roster.participant_count * roster.decryption_threshold) as usize * DATA_PRIMES.len();
     if material_set
         .get("materialRecordCount")
         .and_then(Value::as_u64)
@@ -611,8 +610,7 @@ fn verify_vss_source_trustee_commitment_record(
         )?));
     };
     let roster = super::accepted_roster_from_setup_context(setup_context);
-    let expected_coefficient_count =
-        DATA_PRIMES.len() * roster.decryption_threshold as usize;
+    let expected_coefficient_count = DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if coefficient_commitments.len() != expected_coefficient_count {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentCountMismatch",

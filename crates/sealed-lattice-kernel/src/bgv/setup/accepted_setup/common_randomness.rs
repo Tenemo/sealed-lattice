@@ -227,8 +227,10 @@ fn verify_public_derivations(
             Vec::new(),
         )?));
     };
-    let expected_public_derivations =
-        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash, decryption_threshold)?;
+    let expected_public_derivations = derive_collective_bgv_setup_public_derivations(
+        public_matrix_seed_hash,
+        decryption_threshold,
+    )?;
     if public_derivations != &expected_public_derivations {
         return Ok(Some(common_randomness_refusal(
             "setupPublicDerivationsMismatch",
@@ -245,7 +247,8 @@ pub(super) fn derive_collective_bgv_setup_public_derivations(
     decryption_threshold: u64,
 ) -> CanonicalResult<Value> {
     let bgv_public_a = derive_bgv_public_a_polynomial(public_matrix_seed_hash)?;
-    let public_matrices = derive_setup_public_matrices(public_matrix_seed_hash, decryption_threshold)?;
+    let public_matrices =
+        derive_setup_public_matrices(public_matrix_seed_hash, decryption_threshold)?;
     let mut derivations = json!({
         "objectType": "SetupPublicDerivations",
         "objectVersion": 1,

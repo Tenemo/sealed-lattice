@@ -735,8 +735,7 @@ pub(super) fn verify_vss_share_acceptances(
         )?));
     };
     let roster = super::accepted_roster_from_package(setup_package);
-    let expected_acceptance_count =
-        (roster.participant_count * roster.participant_count) as usize;
+    let expected_acceptance_count = (roster.participant_count * roster.participant_count) as usize;
     if acceptance_records.len() != expected_acceptance_count {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptanceCountMismatch",

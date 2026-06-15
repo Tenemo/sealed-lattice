@@ -200,8 +200,9 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         &source_trustee_bindings,
         &transport.chunks,
     )?;
-    let material_record_count =
-        roster.participant_count as usize * DATA_PRIMES.len() * roster.decryption_threshold as usize;
+    let material_record_count = roster.participant_count as usize
+        * DATA_PRIMES.len()
+        * roster.decryption_threshold as usize;
     let material_set = transported_vss_material_set_value(
         setup_context,
         public_matrix_seed_hash,
@@ -686,8 +687,10 @@ fn finish_threshold_share_commitment_transport_stream(
         &source_trustee_bindings,
         &derivation.observed_commitment_roots,
     )?;
-    let material_record_count =
-        vss_material_record_count(roster.participant_count, roster.decryption_threshold as usize);
+    let material_record_count = vss_material_record_count(
+        roster.participant_count,
+        roster.decryption_threshold as usize,
+    );
     let hashes = SetupVssMaterialTransportHashes {
         full_object_hash,
         chunk_hashes: session.observed_chunk_hashes,
@@ -789,7 +792,10 @@ fn verify_observed_transport_commitment_roots(
     observed_commitment_roots: &BTreeMap<(u64, usize, u64), String>,
 ) -> CanonicalResult<()> {
     if observed_commitment_roots.len()
-        != vss_material_record_count(roster.participant_count, roster.decryption_threshold as usize)
+        != vss_material_record_count(
+            roster.participant_count,
+            roster.decryption_threshold as usize,
+        )
     {
         return Err(invalid_threshold_commitment_input(
             "transport stream did not observe every accepted VSS commitment coordinate",
@@ -867,8 +873,9 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
         &source_trustee_bindings,
         &transport.chunks,
     )?;
-    let material_record_count =
-        roster.participant_count as usize * DATA_PRIMES.len() * roster.decryption_threshold as usize;
+    let material_record_count = roster.participant_count as usize
+        * DATA_PRIMES.len()
+        * roster.decryption_threshold as usize;
     let material_set = transported_vss_material_set_value(
         setup_context,
         public_matrix_seed_hash,
@@ -2310,8 +2317,9 @@ fn accumulate_transport_threshold_commitments(
                 invalid_threshold_commitment_input("recipient roster position does not fit usize")
             })?;
         let trustee_point = canonical_trustee_point(recipient_roster_position_usize, rns_prime)?;
-        let scalar = shamir_coefficient_scalars(trustee_point, roster.decryption_threshold as usize)?
-            [shamir_coefficient_index as usize];
+        let scalar =
+            shamir_coefficient_scalars(trustee_point, roster.decryption_threshold as usize)?
+                [shamir_coefficient_index as usize];
         let accumulator_key = (recipient_roster_position, rns_limb_index);
         match accumulators.get_mut(&accumulator_key) {
             Some(accumulator) => {
@@ -2452,6 +2460,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
     Ok(commitment_set)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn transported_vss_material_set_value(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
@@ -2786,8 +2795,9 @@ fn verify_coefficient_commitment_material(
     roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
 ) -> CanonicalResult<BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>> {
-    let expected_count =
-        roster.participant_count as usize * DATA_PRIMES.len() * roster.decryption_threshold as usize;
+    let expected_count = roster.participant_count as usize
+        * DATA_PRIMES.len()
+        * roster.decryption_threshold as usize;
     if commitment_material_values.len() != expected_count {
         return Err(invalid_threshold_commitment_input(
             "coefficientCommitments must contain full public commitment material for every source trustee, Q_share limb, and Shamir coefficient",

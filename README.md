@@ -29,6 +29,8 @@ mobile-compatible runtime evidence fails to close.
 
 The first claim-bearing mobile profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. That profile is not closed yet.
 
+The implementation is parameterized for any roster size `3 <= n <= 20` (deriving `q_dec = floor(n/3) + 1` and full-roster quorums `= n`), but `n = 10` is the only benchmarked, mobile-certified, claim-bearing profile. No runtime, security, or mobile evidence is claimed for `n != 10` until those profiles receive their own certificates and measurements.
+
 ## Current package boundary
 
 The public package currently exposes development verification helpers while the full voting API is being built and verified. These cover poll specification and threshold derivation, lifecycle and transcript checks, foundation transcript verification through the bundled Rust/WASM kernel, and a set of narrow development helpers for the collective BGV setup ceremony (setup intent, common-randomness commit/reveal, recipient-local private VSS verification, signed VSS acceptances and complaints, setup contribution and certificate assembly, encrypted local trustee state export and restore, and setup package verification). Reserved complete-protocol entry points fail closed until their claim gates are actually implemented.
