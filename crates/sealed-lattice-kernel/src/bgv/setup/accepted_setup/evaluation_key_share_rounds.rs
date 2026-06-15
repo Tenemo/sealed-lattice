@@ -52,6 +52,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
             "setupContext was required before relinearization share-record verification",
         )
     })?;
+    let roster = super::accepted_roster_from_package(setup_package);
     if let Err(error) =
         verify_context_fields_match(rounds, setup_context, "relinearizationKeyShareRounds")
     {
@@ -83,7 +84,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
         }
     }
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if rounds.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
@@ -147,7 +148,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
     let round_one_records = array_value(rounds, "roundOneRecords")?;
     let round_two_records = array_value(rounds, "roundTwoRecords")?;
-    let expected_record_count = expected_levels.len() * FIRST_PROFILE_PARTICIPANT_COUNT as usize;
+    let expected_record_count = expected_levels.len() * roster.participant_count as usize;
     if round_one_records.len() != expected_record_count
         || round_two_records.len() != expected_record_count
     {
@@ -365,6 +366,7 @@ pub(super) fn verify_galois_key_share_batches(
     setup_package: &Value,
     _request: &Value,
 ) -> CanonicalResult<Option<Value>> {
+    let roster = super::accepted_roster_from_package(setup_package);
     let Some(batches) = setup_package.get("galoisKeyShareBatches") else {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
@@ -384,7 +386,7 @@ pub(super) fn verify_galois_key_share_batches(
     if batches.is_empty() {
         return Ok(None);
     }
-    if batches.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if batches.len() != roster.participant_count as usize {
         return Ok(Some(evaluation_key_material_refusal(
             "galoisKeyShareBatchCountMismatch",
             "galoisKeyShareBatches must contain one batch per trustee",

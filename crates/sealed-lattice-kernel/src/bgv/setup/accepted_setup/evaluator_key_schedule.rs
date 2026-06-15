@@ -41,6 +41,7 @@ pub(super) fn verify_evaluator_key_schedule(
             "setupContext was required before evaluator-key schedule verification",
         )
     })?;
+    let roster = super::accepted_roster_from_package(setup_package);
     if let Err(error) = verify_context_fields_match(schedule, setup_context, "evaluatorKeySchedule")
     {
         return Ok(Some(evaluator_key_schedule_refusal(
@@ -74,7 +75,7 @@ pub(super) fn verify_evaluator_key_schedule(
         }
     }
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if schedule.get(field_name).and_then(Value::as_u64) != Some(expected_value) {

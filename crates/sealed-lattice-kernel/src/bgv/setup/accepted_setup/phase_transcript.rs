@@ -167,6 +167,7 @@ fn verify_phase_object_binding(
             "setupContext was required before phase transcript verification",
         )
     })?;
+    let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, context_field_name) in [
         ("ceremonyId", "ceremonyId"),
         ("manifestHash", "manifestHash"),
@@ -265,7 +266,7 @@ fn verify_phase_object_binding(
             format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
         )?));
     };
-    if participant_phase_objects.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if participant_phase_objects.len() != roster.participant_count as usize {
         return Ok(Some(phase_refusal(
             phase_identifier,
             "phaseParticipantObjectCountMismatch",
@@ -306,6 +307,7 @@ fn verify_participant_phase_object(
     phase_number: u64,
     setup_context: &Value,
 ) -> CanonicalResult<Option<Value>> {
+    let roster = super::accepted_roster_from_setup_context(setup_context);
     if !participant_phase_object.is_object() {
         return Ok(Some(phase_refusal(
             phase_identifier,
@@ -414,7 +416,7 @@ fn verify_participant_phase_object(
             format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
         )?));
     };
-    if roster_position >= FIRST_PROFILE_PARTICIPANT_COUNT {
+    if roster_position >= roster.participant_count {
         return Ok(Some(phase_refusal(
             phase_identifier,
             "phaseRosterPositionOutsideProfile",

@@ -734,8 +734,9 @@ pub(super) fn verify_vss_share_acceptances(
             Vec::new(),
         )?));
     };
+    let roster = super::accepted_roster_from_package(setup_package);
     let expected_acceptance_count =
-        (FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_PARTICIPANT_COUNT) as usize;
+        (roster.participant_count * roster.participant_count) as usize;
     if acceptance_records.len() != expected_acceptance_count {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptanceCountMismatch",

@@ -33,7 +33,6 @@ const PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "PrivateVssShareEnvelope";
 const PRIVATE_VSS_LIMB_OPENING_OBJECT_TYPE: &str = "PrivateVssShareLimbOpening";
 const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
-const FIRST_PROFILE_DECRYPTION_THRESHOLD: usize = 4;
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 
@@ -261,13 +260,15 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "coefficientCommitmentRoots must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    if coefficient_commitment_roots.len() != FIRST_PROFILE_DECRYPTION_THRESHOLD {
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    if coefficient_commitment_roots.len() != roster.decryption_threshold as usize {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "coefficientCommitmentRoots must bind every first-profile Shamir coefficient",
         ));
     }
-    let mut coefficient_commitment_values = Vec::with_capacity(FIRST_PROFILE_DECRYPTION_THRESHOLD);
+    let mut coefficient_commitment_values =
+        Vec::with_capacity(roster.decryption_threshold as usize);
     for (shamir_coefficient_index, commitment_root) in
         coefficient_commitment_roots.iter().enumerate()
     {
@@ -318,6 +319,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         rns_prime,
         recipient_roster_position,
         ring_degree,
+        roster.decryption_threshold as usize,
         &share_values,
         &coefficient_messages_by_shamir_index,
     )?;
@@ -665,8 +667,9 @@ fn verify_private_vss_share_envelope_inner(
     response["ringDegree"] = json!(ring_degree);
     response["ringDegreeStatus"] = json!(ring_degree_status);
     response["verifiedRnsLimbCount"] = json!(DATA_PRIMES.len());
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
     response["verifiedShamirCoefficientCommitmentCount"] =
-        json!(DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD);
+        json!(DATA_PRIMES.len() * roster.decryption_threshold as usize);
     response["verifiedPrivateVssShareProofCount"] = json!(DATA_PRIMES.len());
 
     Ok(Ok(response))
@@ -854,7 +857,8 @@ fn verify_source_trustee_commitment_record(
         Ok(coefficient_commitments) => coefficient_commitments,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let expected_coefficient_count = DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let expected_coefficient_count = DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if coefficient_commitments.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
             "sourceTrusteeCoefficientCommitmentCountMismatch",
@@ -903,7 +907,7 @@ fn verify_source_trustee_commitment_record(
             Ok(shamir_coefficient_index) => shamir_coefficient_index,
             Err(refusal) => return Ok(Err(refusal)),
         };
-        if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+        if shamir_coefficient_index >= roster.decryption_threshold {
             return Ok(Err(PrivateVssRefusal::new(
                 "sourceTrusteeCoefficientShamirIndexInvalid",
                 "source trustee coefficient commitment shamirCoefficientIndex is outside the accepted threshold degree",
@@ -970,7 +974,8 @@ fn verify_coefficient_commitment_material_records(
     public_matrix_seed_hash: &str,
     source_trustee_binding: &SourceTrusteeCommitmentBinding,
 ) -> CanonicalResult<CoefficientCommitmentMaterialRecordsVerification> {
-    let expected_coefficient_count = DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let expected_coefficient_count = DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if material_records.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
             "sourceTrusteeCommitmentMaterialCountMismatch",
@@ -1004,7 +1009,7 @@ fn verify_coefficient_commitment_material_records(
     }
 
     for rns_limb_index in 0..DATA_PRIMES.len() {
-        for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+        for shamir_coefficient_index in 0..roster.decryption_threshold {
             if !bindings.contains_key(&(rns_limb_index, shamir_coefficient_index)) {
                 return Ok(Err(PrivateVssRefusal::new(
                     "sourceTrusteeCommitmentMaterialCoverageMismatch",
@@ -1111,7 +1116,8 @@ fn verify_coefficient_commitment_material_record(
         Ok(shamir_coefficient_index) => shamir_coefficient_index,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    if shamir_coefficient_index >= roster.decryption_threshold {
         return Ok(Err(PrivateVssRefusal::new(
             "sourceTrusteeCommitmentMaterialShamirIndexInvalid",
             "coefficient commitment material shamirCoefficientIndex is outside the accepted threshold degree",
@@ -1474,7 +1480,8 @@ fn verify_private_envelope_limb(
         Ok(coefficient_commitment_roots) => coefficient_commitment_roots,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    if coefficient_commitment_roots.len() != FIRST_PROFILE_DECRYPTION_THRESHOLD {
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    if coefficient_commitment_roots.len() != roster.decryption_threshold as usize {
         return Ok(Err(PrivateVssRefusal::new(
             "privateVssCoefficientCommitmentRootCountMismatch",
             "private VSS limb opening must bind every Shamir coefficient commitment root",
@@ -1482,7 +1489,8 @@ fn verify_private_envelope_limb(
         )));
     }
 
-    let mut coefficient_commitment_values = Vec::with_capacity(FIRST_PROFILE_DECRYPTION_THRESHOLD);
+    let mut coefficient_commitment_values =
+        Vec::with_capacity(roster.decryption_threshold as usize);
     for (shamir_coefficient_index, commitment_root) in
         coefficient_commitment_roots.iter().enumerate()
     {
@@ -1608,6 +1616,7 @@ fn local_verification_record(
     ring_degree_status: &str,
     limb_verifications: &[LimbVerification],
 ) -> CanonicalResult<Value> {
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
     Ok(json!({
         "objectType": "PrivateVssLocalVerification",
         "objectVersion": 1,
@@ -1678,7 +1687,7 @@ fn local_verification_record(
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
         "verifiedRnsLimbCount": limb_verifications.len(),
-        "verifiedShamirCoefficientCommitmentCount": limb_verifications.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "verifiedShamirCoefficientCommitmentCount": limb_verifications.len() * roster.decryption_threshold as usize,
         "verifiedPrivateVssShareProofCount": limb_verifications.len(),
         "limbVerificationRoots": limb_verifications
             .iter()
@@ -1981,10 +1990,11 @@ fn derive_private_vss_carry_witnesses(
     rns_prime: u64,
     recipient_roster_position: u64,
     ring_degree: usize,
+    decryption_threshold: usize,
     share_values: &[u64],
     coefficient_messages_by_shamir_index: &[Vec<u64>],
 ) -> CanonicalResult<Vec<i128>> {
-    if coefficient_messages_by_shamir_index.len() != FIRST_PROFILE_DECRYPTION_THRESHOLD {
+    if coefficient_messages_by_shamir_index.len() != decryption_threshold {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "coefficientMessagesByShamirIndex must contain every first-profile Shamir coefficient",

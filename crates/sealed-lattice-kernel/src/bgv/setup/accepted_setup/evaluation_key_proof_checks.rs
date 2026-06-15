@@ -119,6 +119,7 @@ fn verify_trustee_evaluation_key_proof_set(
             "setupContext was required before trustee evaluation-key proof verification",
         )
     })?;
+    let roster = super::accepted_roster_from_package(setup_package);
     verify_context_fields_match(proof_set, setup_context, "trusteeEvaluationKeyProofs")?;
     // These status strings are claim-gate labels: exact-matching them is what refuses fixture-backed or non-succinct records.
     for (field_name, expected_value) in [
@@ -151,7 +152,7 @@ fn verify_trustee_evaluation_key_proof_set(
         ));
     }
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
@@ -284,7 +285,7 @@ fn verify_trustee_evaluation_key_proof_set(
     )?;
 
     let proof_records = array_value(proof_set, "proofRecords")?;
-    if proof_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if proof_records.len() != roster.participant_count as usize {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
@@ -788,6 +789,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
     setup_package: &Value,
     transported_key_switch_component_material: Option<&Value>,
 ) -> CanonicalResult<BTreeMap<u64, Vec<Vec<u64>>>> {
+    let roster = super::accepted_roster_from_package(setup_package);
     let rounds = setup_package
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
@@ -845,7 +847,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
     }
     let mut aggregate_diagonals_by_level = BTreeMap::new();
     for (level, (aggregate, contribution_count)) in aggregates_by_level {
-        if contribution_count != FIRST_PROFILE_PARTICIPANT_COUNT {
+        if contribution_count != roster.participant_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 "round-one aggregate requires one component contribution per trustee",

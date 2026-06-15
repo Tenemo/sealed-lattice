@@ -1922,6 +1922,74 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
     );
 }
 
+#[test]
+fn private_vss_share_accounting_discloses_family_aware_leakage() {
+    // The recipient-private VSS family masks full-range Shamir message residues,
+    // so its disclosed smudging leakage must be the family-aware figure (clear
+    // bound about 2^70, per-claim about 2^-22, total about 2^-5), not the
+    // magnitude-two centered-binomial figure inherited from the base accounting.
+    // This guards against the override silently reverting to the inherited row.
+    let private_vss = super::accounting::succinct_private_vss_share_accounting_value()
+        .expect("private VSS accounting value");
+    let eval_key = super::accounting::succinct_evaluation_key_proof_accounting_value()
+        .expect("eval-key accounting value");
+
+    let private_vss_smudging = &private_vss["zeroKnowledge"]["smudgingBudget"];
+    assert_eq!(
+        private_vss_smudging["clearClaimBoundBits"],
+        serde_json::json!(70)
+    );
+    assert_eq!(
+        private_vss_smudging["perClaimStatisticalDistanceLog2"],
+        serde_json::json!(-22)
+    );
+    assert_eq!(
+        private_vss_smudging["totalLeakageLog2Approximate"],
+        serde_json::json!(-5)
+    );
+    assert_eq!(
+        private_vss_smudging["leakageDominatingFamily"],
+        serde_json::json!(true)
+    );
+    // Bounded-leakage prototype scope is retained and honestly paired with the
+    // explicit not-128-bit-zero-knowledge flag, matching the other families; the
+    // honesty is in the disclosed numbers, not in flipping the gate.
+    assert_eq!(
+        private_vss_smudging["acceptedForBoundedLeakagePrototype"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        private_vss_smudging["acceptedFor128BitZeroKnowledge"],
+        serde_json::json!(false)
+    );
+
+    // The override must actually differ from the inherited magnitude-two row:
+    // the eval-key family stays about 2^-68 per claim, the private-VSS family is
+    // exactly 46 bits weaker.
+    let eval_key_per_claim =
+        eval_key["zeroKnowledge"]["smudgingBudget"]["perClaimStatisticalDistanceLog2"]
+            .as_i64()
+            .expect("eval-key per-claim leakage");
+    let private_vss_per_claim = private_vss_smudging["perClaimStatisticalDistanceLog2"]
+        .as_i64()
+        .expect("private VSS per-claim leakage");
+    assert_eq!(eval_key_per_claim, -68);
+    assert_eq!(private_vss_per_claim - eval_key_per_claim, 46);
+
+    // The two-prime integer-binding clear bound is corrected away from the
+    // inherited magnitude-two value (2 * N * (2^8 - 1) = 16711680) to the real
+    // full-range-message bound, so the disclosed window margin is honest; the
+    // eval-key family keeps the magnitude-two value.
+    assert_ne!(
+        private_vss["crossLimbConsistency"]["integerBinding"]["clearClaimBound"],
+        serde_json::json!("16711680")
+    );
+    assert_eq!(
+        eval_key["crossLimbConsistency"]["integerBinding"]["clearClaimBound"],
+        serde_json::json!("16711680")
+    );
+}
+
 // Manual full-ring-degree benchmark, #[ignore]d so it never burdens the default
 // test lane. Pick a configuration by running the matching wrapper below with
 // --ignored; each calls run_full_ring_benchmark with an explicit level and

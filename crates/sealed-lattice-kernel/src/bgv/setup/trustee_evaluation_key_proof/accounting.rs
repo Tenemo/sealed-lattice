@@ -33,11 +33,14 @@ use crate::hashing::derive_protocol_hash;
 // prior conjecture). The proven BCIKS20 Johnson fallback at a larger query count
 // removes that research risk entirely.
 //
-// QROM rows are reference rows only until a concrete reduction-loss calculation
-// is implemented, and the smudging row is a bounded-leakage statement rather
-// than a 128-bit zero-knowledge claim. The accounting hash is bound into the
-// generate and verify command responses, and package integration binds it into
-// the setup proof accounting certificate.
+// The QROM row now carries the computed CMS19 reduction loss (state-restoration
+// framework): the achieved quantum soundness is the Grover square-root of the
+// classical round-by-round soundness, about seventy bits after the instance
+// union, recorded with the present-time-threat scope and kept below the
+// conventional 128-bit-quantum bar, so qromAccepted stays false. The smudging
+// row is a bounded-leakage statement rather than a 128-bit zero-knowledge claim.
+// The accounting hash is bound into the generate and verify command responses,
+// and package integration binds it into the setup proof accounting certificate.
 pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResult<Value> {
     let trace_size = POLYNOMIAL_DEGREE / TRACE_SPLIT;
     let extension_size = trace_size * DOMAIN_BLOWUP;
@@ -56,10 +59,12 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     // centered-binomial errors) times the ring degree times the coefficient
     // bound; the smudging mask spans CLAIM_MASK_DIGIT_COUNT binary digits.
     let consistency_coefficient_bound = (1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1;
-    // Clear consistency sums are bounded by max witness magnitude (2 for
-    // centered-binomial errors) times the ring degree times the per-coefficient
-    // bound; this is correct for the eval-key family but is reused unchanged by
-    // migrated families (see the private-VSS known-issue note).
+    // Witness magnitude two is the centered-binomial error bound, exact for the
+    // three magnitude-two families (trustee-evaluation-key,
+    // same-secret-linkage-anchor, public-key-share). The recipient-private VSS
+    // family masks full-range message residues instead and overrides this clear
+    // bound and the derived smudging row with a family-aware bound in
+    // succinct_private_vss_share_accounting_value.
     let clear_claim_bound =
         2_u128 * POLYNOMIAL_DEGREE as u128 * u128::from(consistency_coefficient_bound);
     // Ceiling of the clear bound's bit length, again the conservative side.
@@ -109,6 +114,16 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     .min()
     .expect("round list is non-empty");
     let effective_soundness_bits = weakest_round_bits - union_budget_bits;
+    // Computed CMS19 QROM accounting. The t^2 * eps soundness term breaks at
+    // t about eps^(-1/2), so the achieved quantum soundness is the Grover
+    // square-root (half in bits) of the classical round-by-round soundness; it
+    // is derived from the same classical variables so the two can never drift.
+    // The t^3 / 2^lambda hash term is BHT quantum collision search on the
+    // SHAKE256 512-bit digest, about a third of the digest in bits.
+    let achieved_quantum_soundness_bits = weakest_round_bits / 2;
+    let achieved_quantum_soundness_after_union_bits = effective_soundness_bits / 2;
+    let digest_bits = 512_i64;
+    let quantum_collision_resistance_bits = digest_bits / 3;
 
     Ok(json!({
         "objectType": "SuccinctEvaluationKeyProofAccounting",
@@ -209,15 +224,27 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "domainSeparation": "labelled absorb and challenge domains with per-limb forks",
             "weakestRoundSoundnessLog2": -weakest_round_bits,
             "effectiveSoundnessBitsAfterUnion": effective_soundness_bits,
-            "qromAccounting": "quantum random-oracle reductions for multi-round Fiat-Shamir are referenced, not accepted as claim-bearing evidence here: the measure-and-reprogram bound of DFM20 with the DFMS19 sigma-protocol predecessor and the DFMS22 commit-and-open treatment must still be instantiated with a concrete reduction-loss calculation before any QROM label is accepted",
+            "qromModel": "CMS19 (Chiesa-Manohar-Spooner, Succinct arguments in the quantum random-oracle model): the BCS-compiled public-coin IOP is analysed in the QROM via the state-restoration / instability framework, the granularity that fits this construction; the measure-and-reprogram line (DFM20/DFMS19/DFMS22) is the wrong tool at about seventeen rounds and is kept only as lineage",
+            "qromBound": "eps_QROM = O(t^2 * eps + t^3 / 2^lambda), tight up to small factors (CMS19 Theorem 3; Micali Theorem 6.1; BCS in section 8), for t quantum random-oracle queries, round-by-round soundness eps, and digest size lambda; the bound is independent of the round count",
+            "digestBits": digest_bits,
+            "quantumCollisionResistanceBitsApproximate": quantum_collision_resistance_bits,
+            "achievedQuantumSoundnessBitsApproximate": achieved_quantum_soundness_bits,
+            "achievedQuantumSoundnessAfterInstanceUnionBitsApproximate": achieved_quantum_soundness_after_union_bits,
+            "achievedQuantumSoundnessCalculation": "the t^2 * eps soundness term breaks at t about eps^(-1/2), so the achieved quantum soundness is the Grover square-root (half in bits) of the classical round-by-round soundness: achievedQuantumSoundnessBitsApproximate halves the weakest single-statement round and achievedQuantumSoundnessAfterInstanceUnionBitsApproximate halves the union-effective classical soundness; the t^3 / 2^lambda hash term gives quantumCollisionResistanceBitsApproximate (about the digest over three, BHT quantum collision search) on the 512-bit digest, well above the soundness term, so the soundness term sets the level; classical security is unchanged, and the achieved quantum level stacks on the named CS25 FRI proximity-gap conjecture, so it is conjectural rather than proven",
+            "presentTimeThreatScope": "a soundness break requires a cheating prover to forge a setup proof at proving time, so a fault-tolerant quantum computer of about 2^70 query capability must exist and run during the live ceremony; this is not a harvest-now-decrypt-later surface (the confidentiality and authentication layers, BGV/RLWE, ML-KEM-768 transport, ML-DSA-65 signatures, are post-quantum now), and an adversary without a large fault-tolerant quantum computer at ceremony time cannot exploit this bound regardless of later quantum progress; this is an explicitly-stated present-time-threat position for a non-production prototype",
+            "pathTo128BitQuantumSoundness": "not chosen: CMS19 proves the t^2 * eps term tight, so the Grover halving is unavoidable and 128-bit quantum would need 256-bit classical round-by-round on every round, forcing a degree-six challenge extension (about 2^276), about 276 FRI queries with a doubled column mask, and about 32 consistency repetitions, roughly doubling the proof; the 512-bit digest is already adequate and Grover-discounted grinding cannot close the gap",
             "qromReferences": [
-                "DFM20, The measure-and-reprogram technique 2.0: multi-round Fiat-Shamir and more",
-                "DFMS19, Security of the Fiat-Shamir transformation in the quantum random-oracle model",
-                "DFMS22, Efficient NIZKs and signatures from commit-and-open protocols in the QROM",
+                "CMS19, Chiesa, Manohar, Spooner, Succinct arguments in the quantum random-oracle model (governing reduction)",
+                "BCS16, Ben-Sasson, Chiesa, Spooner, Interactive oracle proofs (the BCS transform)",
+                "GMW25, A simplified round-by-round soundness proof of FRI (the round-by-round soundness CMS19 consumes)",
+                "DFM20, The measure-and-reprogram technique 2.0: multi-round Fiat-Shamir and more (lineage, wrong granularity at this round count)",
+                "DFMS19, Security of the Fiat-Shamir transformation in the quantum random-oracle model (lineage)",
+                "DFMS22, Efficient NIZKs and signatures from commit-and-open protocols in the QROM (lineage)",
             ],
             "classicalRoundByRoundAccepted": true,
+            "qromReductionLossComputed": true,
+            "meetsConventional128BitQuantumBar": false,
             "qromAccepted": false,
-            "qromReductionLossStatus": "not-computed-open-caveat",
         },
         "sameSecretLinkage": {
             "mechanism": "BDLOP constant commitments opened natively over the commitment-modulus fields, bound to the shared secret by the joint cross-limb consistency",
@@ -251,10 +278,11 @@ fn migrated_family_accounting(
     family_relation_rows: Value,
     wasm_browser_measurement: Value,
 ) -> CanonicalResult<Value> {
-    // Note: this carries the base eval-key smudgingBudget block
-    // (perClaimStatisticalDistanceLog2 about -68) unchanged into every migrated
-    // family. That figure is only correct for families whose witnesses are
-    // centered-binomial errors of magnitude 2; see the known-issue note on
+    // Note: this carries the base smudgingBudget and integer-binding blocks
+    // (perClaimStatisticalDistanceLog2 about -68, clear claim bound about 2^24)
+    // into every migrated family. That figure is exact for the magnitude-two
+    // centered-binomial families; the recipient-private VSS family overrides
+    // both blocks with a family-aware full-range-message bound in
     // succinct_private_vss_share_accounting_value.
     let mut accounting = succinct_evaluation_key_proof_accounting_value()?;
     let accounting_fields = accounting
@@ -372,16 +400,17 @@ pub(crate) fn succinct_public_key_share_accounting_hash() -> CanonicalResult<Str
 // coefficient openings plus the lifted recipient-share relation with hidden
 // carry columns over the setup commitment fields.
 pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<Value> {
-    // KNOWN ISSUE (leakage accounting): this family inherits the smudgingBudget
-    // from succinct_evaluation_key_proof_accounting_value via
-    // migrated_family_accounting, whose perClaimStatisticalDistanceLog2 is
-    // computed from clear_claim_bound about 2^24 (centered-binomial magnitude
-    // 2). The private-VSS family's real masked claim uses message_bound about
-    // the source prime (about 2^47) per masked_claim_bounds in relation.rs, so
-    // its true clear bound is about 2^70 and true per-claim leakage about
-    // 2^-22, not the disclosed about 2^-68. The masking math is family-correct;
-    // only the disclosed and bound accounting figure under-reports. Fix:
-    // recompute clear_claim_bound per family from masked_claim_bounds.
+    // Family-aware leakage accounting. The migrated base blocks are computed for
+    // magnitude-two centered-binomial witnesses (clear claim bound about 2^24,
+    // per-claim statistical distance about 2^-68). The recipient-private VSS
+    // family instead publishes masked claims over full-range Shamir message
+    // residues, each bounded by the source limb prime (about 2^47) -- the same
+    // bound masked_claim_bounds in relation.rs feeds into the verifier's
+    // two-prime lift -- so its real clear claim bound is about 2^70 and its real
+    // per-claim leakage about 2^-22 (about 2^-5 across the first profile's
+    // ~2^17 claims). The smudging and integer-binding rows are recomputed from
+    // that real bound below so the disclosed figures are honest for this family
+    // rather than inheriting the centered-binomial figure.
     let mut accounting = migrated_family_accounting(
         "SuccinctPrivateVssShareAccounting",
         super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
@@ -405,6 +434,69 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
             "limbFields".to_string(),
             Value::String(
                 "one instance per setup commitment field; the lifted carry relation is checked over the commitment-field CRT window"
+                    .to_string(),
+            ),
+        );
+    }
+
+    // Recompute the disclosed clear claim bound from the worst-case full-range
+    // message residue: the largest accepted data prime minus one (the source
+    // limb modulus a Shamir coefficient is reduced into), times the ring degree
+    // times the per-coefficient bound, mirroring the private-VSS branch of
+    // masked_claim_bounds in relation.rs at profile scale. The first-profile
+    // lifted carry bound (about 2^11) is dominated by the message bound and does
+    // not raise it. This yields a clear bound about 2^70, so per-claim leakage
+    // about 2^-22 and total about 2^-5.
+    let largest_message_bound = u128::from(
+        DATA_PRIMES
+            .iter()
+            .copied()
+            .max()
+            .expect("the data basis is non-empty"),
+    ) - 1;
+    let consistency_coefficient_bound = u128::from((1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1);
+    let private_vss_clear_claim_bound =
+        largest_message_bound * POLYNOMIAL_DEGREE as u128 * consistency_coefficient_bound;
+    let private_vss_clear_claim_bound_bits = i64::from(private_vss_clear_claim_bound.ilog2()) + 1;
+    let per_claim_leakage_log2 = private_vss_clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64;
+    let claim_budget_log2 = 17_i64;
+    let total_leakage_log2 = per_claim_leakage_log2 + claim_budget_log2;
+
+    if let Some(zero_knowledge) = accounting_fields
+        .get_mut("zeroKnowledge")
+        .and_then(Value::as_object_mut)
+    {
+        zero_knowledge.insert(
+            "smudgingBudget".to_string(),
+            json!({
+                "perClaimStatisticalDistanceLog2": per_claim_leakage_log2,
+                "clearClaimBoundBits": private_vss_clear_claim_bound_bits,
+                "maskDigitCount": CLAIM_MASK_DIGIT_COUNT,
+                "leakageStatement": "the recipient-private VSS family masks full-range Shamir message residues, each bounded by the source limb prime (the largest accepted data prime, about two to the forty-seven) rather than a magnitude-two centered-binomial error, so the clear claim bound is about two to the seventy and the shared ninety-two-bit smudging mask hides each published claim only to a per-claim statistical distance of about two to the minus twenty-two; across the first profile's about two to the seventeen claims the total statistical distance is about two to the minus five, so this is the leakage-dominating family among the four accepted setup proof families and is materially weaker than the about two to the minus sixty-eight per-claim, about two to the minus fifty-one total figure of the magnitude-two centered-binomial families; the bound says nothing about quantities outside the published claims",
+                "claimBudgetLog2Approximate": claim_budget_log2,
+                "totalLeakageLog2Approximate": total_leakage_log2,
+                "leakageDominatingFamily": true,
+                "acceptedForBoundedLeakagePrototype": true,
+                "acceptedFor128BitZeroKnowledge": false,
+                "strongZeroKnowledgeUpgrade": "a negligible per-claim leakage would require widening the smudging mask well beyond ninety-two bits, which the current two-prime cross-limb integer lift cannot host together with the about two-to-the-seventy message window; it needs a wider three-prime lift and a correspondingly larger mask, then re-deriving this accounting; that structural upgrade is deferred and is not an accepted row here",
+            }),
+        );
+    }
+
+    if let Some(integer_binding) = accounting_fields
+        .get_mut("crossLimbConsistency")
+        .and_then(Value::as_object_mut)
+        .and_then(|cross_limb| cross_limb.get_mut("integerBinding"))
+        .and_then(Value::as_object_mut)
+    {
+        integer_binding.insert(
+            "clearClaimBound".to_string(),
+            Value::String(private_vss_clear_claim_bound.to_string()),
+        );
+        integer_binding.insert(
+            "twoPrimeWindowRule".to_string(),
+            Value::String(
+                "the product of the two smallest data primes (about two to the ninety-four) exceeds twice the mask-plus-clear claim bound (about two to the ninety-three for this family's full-range message claims) by only about one bit, so the centered two-prime lift is unique but with a thin margin; a wider mask would not fit this window and would require a three-prime lift"
                     .to_string(),
             ),
         );

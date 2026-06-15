@@ -216,7 +216,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     );
     assert_eq!(
         fiat_shamir_accounting["qromReductionStatus"],
-        "qrom-reduction-loss-not-computed-classical-transcript-accounting-only"
+        "qrom-reduction-loss-computed-cms19-classical-accepted-quantum-soundness-recorded-not-128-bit-accepted"
     );
     assert_eq!(
         fiat_shamir_accounting["familyAccountingHashes"]["privateVssShare"],

@@ -731,7 +731,10 @@ fn verify_setup_transported_objects(
         "vssCoefficientCommitmentMaterial",
         "vssCoefficientCommitmentMaterialRoot",
     )?;
-    let expected_vss_material_byte_length = setup_transport_vss_material_byte_length()?;
+    // TODO(dynamic-roster sweep): thread the validated roster from the setup
+    // context so n != 10 transport verifies; first-closure keeps n = 10 exact.
+    let expected_vss_material_byte_length =
+        setup_transport_vss_material_byte_length_for_roster(&first_closure_roster_parameters())?;
     let expected_vss_chunk_count = setup_transport_chunk_count(expected_vss_material_byte_length)?;
     let Some(vss_object) = transported_objects.iter().find(|transported_object| {
         transported_object.object_name == SETUP_TRANSPORTED_VSS_MATERIAL_NAME
@@ -1793,12 +1796,16 @@ pub(super) fn setup_transport_chunk_manifest_root(
     )
 }
 
-pub(super) fn setup_transport_vss_material_byte_length() -> CanonicalResult<u64> {
+pub(super) fn setup_transport_vss_material_byte_length_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<u64> {
+    let participant_count = roster.participant_count;
+    let decryption_threshold = roster.decryption_threshold;
     let mut header = Vec::new();
     header.extend(b"SLVSSMAT");
     crate::encoding::append_varuint(&mut header, 1);
-    crate::encoding::append_varuint(&mut header, FIRST_PROFILE_PARTICIPANT_COUNT);
-    crate::encoding::append_varuint(&mut header, FIRST_PROFILE_DECRYPTION_THRESHOLD);
+    crate::encoding::append_varuint(&mut header, participant_count);
+    crate::encoding::append_varuint(&mut header, decryption_threshold);
     crate::encoding::append_varuint(&mut header, DATA_PRIMES.len() as u64);
     crate::encoding::append_varuint(&mut header, POLYNOMIAL_DEGREE as u64);
     crate::encoding::append_varuint(
@@ -1807,10 +1814,10 @@ pub(super) fn setup_transport_vss_material_byte_length() -> CanonicalResult<u64>
     );
     crate::encoding::append_varuint(&mut header, SETUP_COMMITMENT_ROW_COUNT as u64);
 
-    let coordinate_byte_length = (0..FIRST_PROFILE_PARTICIPANT_COUNT)
+    let coordinate_byte_length = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             (0..DATA_PRIMES.len()).flat_map(move |rns_limb_index| {
-                (0..FIRST_PROFILE_DECRYPTION_THRESHOLD).map(move |shamir_coefficient_index| {
+                (0..decryption_threshold).map(move |shamir_coefficient_index| {
                     let mut coordinate_bytes = Vec::new();
                     crate::encoding::append_varuint(
                         &mut coordinate_bytes,
@@ -1836,9 +1843,7 @@ pub(super) fn setup_transport_vss_material_byte_length() -> CanonicalResult<u64>
                 + (SETUP_COMMITMENT_ROW_COUNT as u64 * POLYNOMIAL_DEGREE as u64 * 8)
         })
         .sum::<u64>();
-    let material_record_count = FIRST_PROFILE_PARTICIPANT_COUNT
-        * DATA_PRIMES.len() as u64
-        * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+    let material_record_count = participant_count * DATA_PRIMES.len() as u64 * decryption_threshold;
 
     Ok(header.len() as u64
         + coordinate_byte_length

@@ -99,10 +99,11 @@ pub(super) fn verify_same_secret_consistency(
             )?));
         }
     }
+    let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
-        ("thresholdDegree", FIRST_PROFILE_DECRYPTION_THRESHOLD),
+        ("thresholdDegree", roster.decryption_threshold),
     ] {
         if statement_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
@@ -162,7 +163,7 @@ pub(super) fn verify_same_secret_consistency(
             Vec::new(),
         )?));
     };
-    if statement_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if statement_records.len() != roster.participant_count as usize {
         return Ok(Some(same_secret_refusal(
             "sameSecretStatementCountMismatch",
             "sameSecretConsistency.statementRecords must contain one statement per trustee",
@@ -637,8 +638,9 @@ pub(super) fn verify_optional_same_secret_proofs(
             )?));
         }
     }
+    let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
@@ -698,7 +700,7 @@ pub(super) fn verify_optional_same_secret_proofs(
             "setupPackage.sameSecretProofs.proofRecords",
         )?));
     };
-    if proof_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if proof_records.len() != roster.participant_count as usize {
         return Ok(Some(same_secret_proof_refusal(
             "sameSecretProofCountMismatch",
             "sameSecretProofs.proofRecords must contain one proof per trustee",

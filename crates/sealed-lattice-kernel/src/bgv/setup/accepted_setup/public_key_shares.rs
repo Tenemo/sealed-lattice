@@ -500,8 +500,9 @@ pub(super) fn verify_public_key_shares(setup_package: &Value) -> CanonicalResult
             )?));
         }
     }
+    let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if share_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
@@ -546,7 +547,7 @@ pub(super) fn verify_public_key_shares(setup_package: &Value) -> CanonicalResult
             Vec::new(),
         )?));
     };
-    if share_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if share_records.len() != roster.participant_count as usize {
         return Ok(Some(public_key_share_refusal(
             "publicKeyShareCountMismatch",
             "publicKeyShares.shareRecords must contain one share per trustee",
@@ -844,8 +845,9 @@ pub(super) fn verify_public_key_share_proofs(
             )?));
         }
     }
+    let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
@@ -909,7 +911,7 @@ pub(super) fn verify_public_key_share_proofs(
             "setupPackage.publicKeyShareProofs.proofRecords",
         )?));
     };
-    if proof_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if proof_records.len() != roster.participant_count as usize {
         return Ok(Some(public_key_share_proof_refusal(
             "publicKeyShareProofCountMismatch",
             "publicKeyShareProofs.proofRecords must contain one proof statement per trustee",
@@ -1165,8 +1167,9 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
             )?));
         }
     }
+    let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
@@ -1227,7 +1230,7 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
         )?));
     };
-    if proof_records_array.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if proof_records_array.len() != roster.participant_count as usize {
         return Ok(Some(public_key_share_succinct_proof_refusal(
             "publicKeyShareSuccinctProofCountMismatch",
             "publicKeyShareSuccinctProofs.proofRecords must contain one proof per trustee",

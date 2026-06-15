@@ -112,7 +112,7 @@ use self::threshold_share_commitment_checks::{
     validate_verified_vss_material_matches_package, verify_threshold_share_commitments,
 };
 use self::transport_policy::{
-    setup_transport_chunk_manifest_root, setup_transport_vss_material_byte_length,
+    setup_transport_chunk_manifest_root, setup_transport_vss_material_byte_length_for_roster,
     verify_transport_certificate,
 };
 use self::vss_coefficient_commitments::{
@@ -261,6 +261,76 @@ const FIRST_PROFILE_SETUP_COMPLETION_QUORUM: u64 = 10;
 const FIRST_PROFILE_BALLOT_RELEASE_QUORUM: u64 = 10;
 const FIRST_PROFILE_FINALITY_QUORUM: u64 = 10;
 const FIRST_PROFILE_DECRYPTION_THRESHOLD: u64 = 4;
+// Supported parameterized roster range. The first closure profile (n = 10) is
+// the only benchmarked, mobile-certified, claim-bearing instance; the verifier
+// accepts any 3 <= n <= 20 by deriving the canonical quorums and threshold from
+// the roster size, but no runtime/security/mobile evidence is claimed for
+// n != 10 until those profiles receive their own certificates and measurements.
+pub(super) const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
+pub(super) const MAXIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 20;
+
+/// Validated roster parameters for a collective BGV setup profile. Every field
+/// is a pure function of `participant_count`, so the profile hash is a roster
+/// family: distinct per n, byte-identical to the historical first-profile
+/// binding at n = 10.
+#[derive(Clone, Copy)]
+pub(super) struct AcceptedRosterParameters {
+    pub(super) participant_count: u64,
+    pub(super) setup_completion_quorum: u64,
+    pub(super) ballot_release_quorum: u64,
+    pub(super) finality_quorum: u64,
+    pub(super) decryption_threshold: u64,
+}
+
+/// q_dec = floor(n / 3) + 1: the structural one-third privacy bound plus one
+/// (the stronger-privacy, non-degenerate convention; at n = 3 this is 2-of-3,
+/// never 1-of-3). Setup, ballot release, and finality are full-roster (= n)
+/// under the secure-with-abort model.
+pub(super) const fn decryption_threshold_for_participant_count(participant_count: u64) -> u64 {
+    participant_count / 3 + 1
+}
+
+pub(super) const fn participant_count_is_supported(participant_count: u64) -> bool {
+    participant_count >= MINIMUM_SUPPORTED_PARTICIPANT_COUNT
+        && participant_count <= MAXIMUM_SUPPORTED_PARTICIPANT_COUNT
+}
+
+pub(super) fn roster_parameters_from_participant_count(
+    participant_count: u64,
+) -> AcceptedRosterParameters {
+    AcceptedRosterParameters {
+        participant_count,
+        setup_completion_quorum: participant_count,
+        ballot_release_quorum: participant_count,
+        finality_quorum: participant_count,
+        decryption_threshold: decryption_threshold_for_participant_count(participant_count),
+    }
+}
+
+pub(super) fn first_closure_roster_parameters() -> AcceptedRosterParameters {
+    roster_parameters_from_participant_count(FIRST_PROFILE_PARTICIPANT_COUNT)
+}
+
+/// Roster parameters for the roster size declared in a verified setup context.
+/// `verify_context` validates `participantCount` (range and derived quorums)
+/// before any sub-verifier runs, so reading it back here is safe; the
+/// first-closure fallback keeps callers total if the context is absent.
+pub(super) fn accepted_roster_from_setup_context(
+    setup_context: &Value,
+) -> AcceptedRosterParameters {
+    let participant_count = setup_context
+        .get("participantCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(FIRST_PROFILE_PARTICIPANT_COUNT);
+    roster_parameters_from_participant_count(participant_count)
+}
+
+pub(super) fn accepted_roster_from_package(setup_package: &Value) -> AcceptedRosterParameters {
+    setup_package
+        .get("setupContext")
+        .map(accepted_roster_from_setup_context)
+        .unwrap_or_else(first_closure_roster_parameters)
+}
 const SETUP_TRANSPORT_PROFILE_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
 const SETUP_TRANSPORT_CERTIFICATE_OBJECT_TYPE: &str = "SetupTransportCertificate";
 const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
@@ -532,7 +602,13 @@ pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
         })?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
 
-    derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)
+    // The standalone public-derivation command carries no setup context, so it
+    // falls back to the first-closure roster decryption threshold, mirroring
+    // accepted_roster_from_package when no setupContext is present.
+    derive_collective_bgv_setup_public_derivations(
+        public_matrix_seed_hash,
+        FIRST_PROFILE_DECRYPTION_THRESHOLD,
+    )
 }
 
 fn verify_collective_setup_package(
@@ -786,28 +862,37 @@ pub(super) fn accepted_q_share_hash() -> CanonicalResult<String> {
 }
 
 fn setup_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash("CollectiveBgvSetupProfileHash", &setup_profile_binding()?)
+    setup_profile_hash_for_roster(&first_closure_roster_parameters())
 }
 
-fn setup_profile_binding() -> CanonicalResult<Value> {
+pub(super) fn setup_profile_hash_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "CollectiveBgvSetupProfileHash",
+        &setup_profile_binding(roster)?,
+    )
+}
+
+fn setup_profile_binding(roster: &AcceptedRosterParameters) -> CanonicalResult<Value> {
     Ok(json!({
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "adversaryModel": "active-static",
         "livenessModel": "secure-with-abort",
         "sharingModel": "recipient-verified-vss",
         "sharingDomain": "per-rns-prime",
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
-        "qSetupComplete": FIRST_PROFILE_SETUP_COMPLETION_QUORUM,
-        "qBallotRelease": FIRST_PROFILE_BALLOT_RELEASE_QUORUM,
-        "qFinal": FIRST_PROFILE_FINALITY_QUORUM,
-        "qDec": FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "participantCount": roster.participant_count,
+        "qSetupComplete": roster.setup_completion_quorum,
+        "qBallotRelease": roster.ballot_release_quorum,
+        "qFinal": roster.finality_quorum,
+        "qDec": roster.decryption_threshold,
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
         "privateVssShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
         "publicKeyShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
-        "setupTransportProfileHash": setup_transport_profile_hash()?,
-        "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
+        "setupTransportProfileHash": setup_transport_profile_hash_for_roster(roster)?,
+        "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash_for_roster(roster)?,
     }))
 }
 
@@ -816,16 +901,28 @@ pub(super) fn setup_proof_profile_hash() -> CanonicalResult<String> {
 }
 
 fn setup_transport_profile_hash() -> CanonicalResult<String> {
+    setup_transport_profile_hash_for_roster(&first_closure_roster_parameters())
+}
+
+fn setup_transport_profile_hash_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<String> {
     derive_protocol_hash(
         "SetupTransportProfileHash",
-        &setup_transport_profile_value()?,
+        &setup_transport_profile_value_for_roster(roster)?,
     )
 }
 
 fn evaluator_key_schedule_profile_hash() -> CanonicalResult<String> {
+    evaluator_key_schedule_profile_hash_for_roster(&first_closure_roster_parameters())
+}
+
+fn evaluator_key_schedule_profile_hash_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<String> {
     derive_protocol_hash(
         "EvaluatorKeyScheduleProfileHash",
-        &evaluator_key_schedule_profile_value()?,
+        &evaluator_key_schedule_profile_value_for_roster(roster)?,
     )
 }
 
@@ -877,6 +974,12 @@ fn public_vss_commitment_material_size_profile_value() -> CanonicalResult<Value>
 }
 
 fn setup_transport_profile_value() -> CanonicalResult<Value> {
+    setup_transport_profile_value_for_roster(&first_closure_roster_parameters())
+}
+
+fn setup_transport_profile_value_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupTransportProfile",
         "objectVersion": 1,
@@ -895,13 +998,19 @@ fn setup_transport_profile_value() -> CanonicalResult<Value> {
             {
                 "objectName": SETUP_TRANSPORTED_VSS_MATERIAL_NAME,
                 "objectRole": SETUP_TRANSPORTED_VSS_MATERIAL_ROLE,
-                "minimumByteLength": setup_transport_vss_material_byte_length()?,
+                "minimumByteLength": setup_transport_vss_material_byte_length_for_roster(roster)?,
             }
         ],
     }))
 }
 
 fn evaluator_key_schedule_profile_value() -> CanonicalResult<Value> {
+    evaluator_key_schedule_profile_value_for_roster(&first_closure_roster_parameters())
+}
+
+fn evaluator_key_schedule_profile_value_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<Value> {
     let required_galois_key_schedule = expected_required_galois_key_schedule()?;
     let required_galois_set_hash =
         expected_required_galois_set_hash(&required_galois_key_schedule)?;
@@ -913,7 +1022,7 @@ fn evaluator_key_schedule_profile_value() -> CanonicalResult<Value> {
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "evaluatorProfile": EVALUATOR_REPLAY_PROFILE_LABEL,
         "packingProfile": EVALUATOR_PACKING_PROFILE_LABEL,
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "relinearizationLevelSchedule": expected_relinearization_level_schedule(),
         "requiredGaloisKeySchedule": required_galois_key_schedule,

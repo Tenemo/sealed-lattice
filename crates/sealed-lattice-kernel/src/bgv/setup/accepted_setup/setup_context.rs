@@ -130,31 +130,42 @@ pub(super) fn verify_context(
         }
     }
 
-    let expected_setup_profile_hash = setup_profile_hash()?;
-    if setup_context
-        .get("setupProfileHash")
-        .and_then(Value::as_str)
-        != Some(expected_setup_profile_hash.as_str())
-    {
+    // Roster parameters: accept any supported roster size 3 <= n <= 20 by
+    // deriving the canonical full-roster quorums and decryption threshold from
+    // participantCount. n != 10 is implementation-supported but not
+    // benchmarked, not mobile-certified, and not part of the first end-to-end
+    // closure profile (n = 10).
+    let Some(participant_count) = setup_context
+        .get("participantCount")
+        .and_then(Value::as_u64)
+    else {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupIntent"),
+            vec!["setupContext.participantCount".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    if !participant_count_is_supported(participant_count) {
         return Ok(Some(verification_response(
             VerifierStatus::OutsideProfile,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
-                "setupProfileHashMismatch",
-                "setupContext.setupProfileHash does not match CollectiveBgvSetup-v1",
-                "setupPackage.setupContext.setupProfileHash".to_string(),
+                "participantCountOutsideSupportedRange",
+                "setupContext.participantCount must be a supported roster size in 3..=20",
+                "setupPackage.setupContext.participantCount".to_string(),
             )],
             Vec::new(),
         )?));
     }
-
+    let roster = roster_parameters_from_participant_count(participant_count);
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
-        ("qSetupComplete", FIRST_PROFILE_SETUP_COMPLETION_QUORUM),
-        ("qBallotRelease", FIRST_PROFILE_BALLOT_RELEASE_QUORUM),
-        ("qFinal", FIRST_PROFILE_FINALITY_QUORUM),
-        ("qDec", FIRST_PROFILE_DECRYPTION_THRESHOLD),
+        ("qSetupComplete", roster.setup_completion_quorum),
+        ("qBallotRelease", roster.ballot_release_quorum),
+        ("qFinal", roster.finality_quorum),
+        ("qDec", roster.decryption_threshold),
     ] {
         match setup_context.get(field_name).and_then(Value::as_u64) {
             Some(actual_value) if actual_value == expected_value => {}
@@ -164,9 +175,9 @@ pub(super) fn verify_context(
                     Some("setupIntent"),
                     Vec::new(),
                     vec![Refusal::new(
-                        "firstProfileParameterMismatch",
+                        "rosterParameterMismatch",
                         format!(
-                            "setupContext.{field_name} does not match the first accepted profile"
+                            "setupContext.{field_name} does not match the value derived from participantCount"
                         ),
                         format!("setupPackage.setupContext.{field_name}"),
                     )],
@@ -183,6 +194,24 @@ pub(super) fn verify_context(
                 )?));
             }
         }
+    }
+    let expected_setup_profile_hash = setup_profile_hash_for_roster(&roster)?;
+    if setup_context
+        .get("setupProfileHash")
+        .and_then(Value::as_str)
+        != Some(expected_setup_profile_hash.as_str())
+    {
+        return Ok(Some(verification_response(
+            VerifierStatus::OutsideProfile,
+            Some("setupIntent"),
+            Vec::new(),
+            vec![Refusal::new(
+                "setupProfileHashMismatch",
+                "setupContext.setupProfileHash does not match the roster-derived CollectiveBgvSetup-v1 profile",
+                "setupPackage.setupContext.setupProfileHash".to_string(),
+            )],
+            Vec::new(),
+        )?));
     }
     if setup_context.get("qShareHash").and_then(Value::as_str) != Some(q_share_hash()?.as_str()) {
         return Ok(Some(verification_response(

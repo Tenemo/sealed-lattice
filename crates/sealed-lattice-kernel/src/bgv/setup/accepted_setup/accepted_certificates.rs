@@ -570,7 +570,7 @@ fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Valu
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "accountingStatus": "succinct-family-classical-fiat-shamir-accounting-bound-per-family",
-        "qromReductionStatus": "qrom-reduction-loss-not-computed-classical-transcript-accounting-only",
+        "qromReductionStatus": "qrom-reduction-loss-computed-cms19-classical-accepted-quantum-soundness-recorded-not-128-bit-accepted",
         "familyAccountingHashes": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
@@ -919,6 +919,7 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
         )
     })?;
     let evaluation_keys_declared = setup_package_declares_public_runtime_material(setup_package);
+    let roster = super::accepted_roster_from_setup_context(setup_context);
 
     Ok(json!({
         "objectType": ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE,
@@ -935,13 +936,13 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
         "adversaryModel": {
             "corruptionTiming": "active-static",
             "maliciousBehavior": "arbitrary-invalid-public-setup-artifacts-and-abort",
-            "secretConfidentialityCorruptTrusteeBound": FIRST_PROFILE_DECRYPTION_THRESHOLD - 1,
+            "secretConfidentialityCorruptTrusteeBound": roster.decryption_threshold - 1,
             "fullRosterSetupCompletionRequired": true,
         },
         "livenessModel": {
             "model": "secure-with-abort",
-            "setupCompletionQuorum": FIRST_PROFILE_SETUP_COMPLETION_QUORUM,
-            "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+            "setupCompletionQuorum": roster.setup_completion_quorum,
+            "participantCount": roster.participant_count,
             "acceptedAbortEvents": [
                 "missing required setup phase object",
                 "malformed public setup object",

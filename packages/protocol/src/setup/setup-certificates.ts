@@ -1140,7 +1140,7 @@ const setupProofFiatShamirTranscriptAccounting = (
     accountingStatus:
         'succinct-family-classical-fiat-shamir-accounting-bound-per-family',
     qromReductionStatus:
-        'qrom-reduction-loss-not-computed-classical-transcript-accounting-only',
+        'qrom-reduction-loss-computed-cms19-classical-accepted-quantum-soundness-recorded-not-128-bit-accepted',
     familyAccountingHashes: {
         sameSecretLinkageAnchor: sameSecretLinkageAnchorProofAccountingHash,
         publicKeyShare: publicKeyShareProofAccountingHash,

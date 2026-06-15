@@ -95,7 +95,8 @@ pub(super) fn verify_vss_coefficient_commitments(
             Vec::new(),
         )?));
     };
-    if source_trustee_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    let roster = super::accepted_roster_from_package(setup_package);
+    if source_trustee_records.len() != roster.participant_count as usize {
         return Ok(Some(vss_commitment_refusal(
             "vssSourceTrusteeCommitmentCountMismatch",
             "vssCoefficientCommitments.sourceTrusteeRecords must contain one record for every trustee",
@@ -308,8 +309,9 @@ pub(super) fn verify_vss_coefficient_commitment_material(
             "setupPackage.vssCoefficientCommitmentMaterial.vssCoefficientCommitmentRoot",
         )?));
     }
+    let roster = super::accepted_roster_from_package(setup_package);
     if material_set.get("participantCount").and_then(Value::as_u64)
-        != Some(FIRST_PROFILE_PARTICIPANT_COUNT)
+        != Some(roster.participant_count)
     {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialParticipantCountMismatch",
@@ -318,7 +320,7 @@ pub(super) fn verify_vss_coefficient_commitment_material(
         )?));
     }
     if material_set.get("thresholdDegree").and_then(Value::as_u64)
-        != Some(FIRST_PROFILE_DECRYPTION_THRESHOLD)
+        != Some(roster.decryption_threshold)
     {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialThresholdMismatch",
@@ -333,8 +335,8 @@ pub(super) fn verify_vss_coefficient_commitment_material(
             "setupPackage.vssCoefficientCommitmentMaterial.rnsLimbCount",
         )?));
     }
-    let expected_material_count = (FIRST_PROFILE_PARTICIPANT_COUNT
-        * FIRST_PROFILE_DECRYPTION_THRESHOLD) as usize
+    let expected_material_count = (roster.participant_count
+        * roster.decryption_threshold) as usize
         * DATA_PRIMES.len();
     if material_set
         .get("materialRecordCount")
@@ -608,8 +610,9 @@ fn verify_vss_source_trustee_commitment_record(
             Vec::new(),
         )?));
     };
+    let roster = super::accepted_roster_from_setup_context(setup_context);
     let expected_coefficient_count =
-        DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD as usize;
+        DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if coefficient_commitments.len() != expected_coefficient_count {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentCountMismatch",
@@ -781,7 +784,8 @@ fn verify_vss_coefficient_commitment_record(
             "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.shamirCoefficientIndex",
         )?));
     };
-    if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD {
+    let roster = super::accepted_roster_from_setup_context(setup_context);
+    if shamir_coefficient_index >= roster.decryption_threshold {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentShamirIndexInvalid",
             "VSS coefficient commitment shamirCoefficientIndex is outside the first-profile threshold degree",

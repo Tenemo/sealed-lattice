@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn first_profile_setup_profile_hash_is_byte_stable() {
+    // Byte-identity guard for the n=10 closure profile. Parameterizing the
+    // collective setup profile for dynamic roster sizes (3..20) must keep the
+    // n=10 CollectiveBgvSetupProfileHash unchanged, so the accepted n=10 proof
+    // corpus stays valid without re-proving. A drift here means a binding shape
+    // or value changed for n=10.
+    // This pin tracks the full n=10 binding, which includes the proof-accounting
+    // sub-hashes; if those certificates change, re-pin to the new n=10 value.
+    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    assert_eq!(
+        profile["setupProfileHash"]
+            .as_str()
+            .expect("setup profile hash"),
+        "9cf860d1fda000135c7cf0721ac24d47a4238e6a318d591ff00c8648bb5a560ce92b54dcd54f80642edf129a1117778e3c03093a3a8894d16d946d7b6824f597",
+    );
+}
+
+#[test]
 fn collective_setup_profile_exposes_first_profile_state_machine() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("collective_setup_profile_exposes_first_profile_state_machine");

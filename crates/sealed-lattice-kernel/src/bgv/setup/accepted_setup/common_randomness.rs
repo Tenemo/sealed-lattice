@@ -46,6 +46,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
     if let Some(response) = verify_common_randomness_context(common_randomness, setup_context)? {
         return Ok(Some(response));
     }
+    let roster = super::accepted_roster_from_package(setup_package);
 
     let Some(commit_records) = common_randomness
         .get("commitRecords")
@@ -71,14 +72,14 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             Vec::new(),
         )?));
     };
-    if commit_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if commit_records.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
             "commonRandomnessCommitCountMismatch",
             "commonRandomness.commitRecords must contain one commit per participant",
             "setupPackage.commonRandomness.commitRecords",
         )?));
     }
-    if reveal_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if reveal_records.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
             "commonRandomnessRevealCountMismatch",
             "commonRandomness.revealRecords must contain one reveal per participant",
@@ -132,7 +133,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             )?));
         }
     }
-    if ordered_reveal_hashes.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if ordered_reveal_hashes.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
             "commonRandomnessRevealCoverageMismatch",
             "commonRandomness.revealRecords must cover the full first-profile roster",
@@ -169,9 +170,11 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             "setupPackage.commonRandomness.publicMatrixSeedHash",
         )?));
     }
-    if let Some(response) =
-        verify_public_derivations(common_randomness, &expected_public_matrix_seed_hash)?
-    {
+    if let Some(response) = verify_public_derivations(
+        common_randomness,
+        &expected_public_matrix_seed_hash,
+        roster.decryption_threshold,
+    )? {
         return Ok(Some(response));
     }
 
@@ -213,6 +216,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
 fn verify_public_derivations(
     common_randomness: &Value,
     public_matrix_seed_hash: &str,
+    decryption_threshold: u64,
 ) -> CanonicalResult<Option<Value>> {
     let Some(public_derivations) = common_randomness.get("publicDerivations") else {
         return Ok(Some(verification_response(
@@ -224,7 +228,7 @@ fn verify_public_derivations(
         )?));
     };
     let expected_public_derivations =
-        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)?;
+        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash, decryption_threshold)?;
     if public_derivations != &expected_public_derivations {
         return Ok(Some(common_randomness_refusal(
             "setupPublicDerivationsMismatch",
@@ -238,9 +242,10 @@ fn verify_public_derivations(
 
 pub(super) fn derive_collective_bgv_setup_public_derivations(
     public_matrix_seed_hash: &str,
+    decryption_threshold: u64,
 ) -> CanonicalResult<Value> {
     let bgv_public_a = derive_bgv_public_a_polynomial(public_matrix_seed_hash)?;
-    let public_matrices = derive_setup_public_matrices(public_matrix_seed_hash)?;
+    let public_matrices = derive_setup_public_matrices(public_matrix_seed_hash, decryption_threshold)?;
     let mut derivations = json!({
         "objectType": "SetupPublicDerivations",
         "objectVersion": 1,
@@ -304,8 +309,12 @@ pub(super) fn derive_bgv_public_a_polynomial(
     Ok(public_a)
 }
 
-fn derive_setup_public_matrices(public_matrix_seed_hash: &str) -> CanonicalResult<Value> {
-    let commitment_matrix = derive_setup_commitment_matrix(public_matrix_seed_hash)?;
+fn derive_setup_public_matrices(
+    public_matrix_seed_hash: &str,
+    decryption_threshold: u64,
+) -> CanonicalResult<Value> {
+    let commitment_matrix =
+        derive_setup_commitment_matrix(public_matrix_seed_hash, decryption_threshold)?;
     let mut public_matrices = json!({
         "objectType": "SetupPublicMatrixMaterial",
         "objectVersion": 1,
@@ -320,7 +329,10 @@ fn derive_setup_public_matrices(public_matrix_seed_hash: &str) -> CanonicalResul
     Ok(public_matrices)
 }
 
-fn derive_setup_commitment_matrix(public_matrix_seed_hash: &str) -> CanonicalResult<Value> {
+fn derive_setup_commitment_matrix(
+    public_matrix_seed_hash: &str,
+    decryption_threshold: u64,
+) -> CanonicalResult<Value> {
     let crp_root = setup_public_derivation_root(public_matrix_seed_hash, "commitment-matrix-crp")?;
     let sampled_entries = commitment_matrix_sampled_entries(public_matrix_seed_hash)?;
     let mut matrix = json!({
@@ -344,7 +356,7 @@ fn derive_setup_commitment_matrix(public_matrix_seed_hash: &str) -> CanonicalRes
             "ringCoefficientPosition"
         ],
         "rnsLimbCount": DATA_PRIMES.len(),
-        "shamirCoefficientCount": FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "shamirCoefficientCount": decryption_threshold,
         "ringDegree": POLYNOMIAL_DEGREE,
         "entryStreamEncoding": "xof-unbiased-residue-from-coordinate",
         "sampledEntries": sampled_entries,
@@ -500,6 +512,7 @@ fn verify_common_randomness_participant_record_shape(
     object_type: &str,
     object_path: &str,
 ) -> CanonicalResult<()> {
+    let roster = super::accepted_roster_from_setup_context(setup_context);
     if !record.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -557,7 +570,7 @@ fn verify_common_randomness_participant_record_shape(
             format!("{object_type}.rosterPosition is required"),
         ));
     };
-    if roster_position >= FIRST_PROFILE_PARTICIPANT_COUNT {
+    if roster_position >= roster.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{object_type}.rosterPosition is outside the first accepted profile"),

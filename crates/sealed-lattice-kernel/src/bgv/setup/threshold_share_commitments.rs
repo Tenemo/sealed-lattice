@@ -21,7 +21,8 @@ use crate::{
 
 use super::{
     accepted_setup::{
-        COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash, accepted_setup_profile_hash,
+        AcceptedRosterParameters, COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash,
+        accepted_roster_from_setup_context, accepted_setup_profile_hash,
     },
     commitment::{
         SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_PROFILE_ID,
@@ -33,8 +34,6 @@ use super::{
     vss::carry_aware_vss_share_relation_profile_hash,
 };
 
-const FIRST_PROFILE_PARTICIPANT_COUNT: usize = 10;
-const FIRST_PROFILE_DECRYPTION_THRESHOLD: usize = 4;
 const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_OBJECT_TYPE: &str = "VssCoefficientCommitment";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
@@ -120,6 +119,7 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
     let source_trustee_record_values =
         array_field(request, "sourceTrusteeCoefficientCommitmentRecords")?;
     let commitment_material_values = array_field(request, "coefficientCommitments")?;
+    let roster = accepted_roster_from_setup_context(setup_context);
 
     let threshold_share_commitments = derive_threshold_share_commitment_set_from_parts(
         setup_context,
@@ -158,10 +158,10 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
-        "thresholdDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD,
-        "derivedLimbCommitmentCount": FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len(),
+        "thresholdDegree": roster.decryption_threshold,
+        "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
         "thresholdShareCommitmentRoot": threshold_share_commitment_root,
         "thresholdShareCommitments": threshold_share_commitments,
     }))
@@ -181,10 +181,12 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
 
     verify_setup_context(setup_context)?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let roster = accepted_roster_from_setup_context(setup_context);
     let source_trustee_bindings = verify_source_trustee_commitment_records(
         source_trustee_record_values,
         setup_context,
         public_matrix_seed_hash,
+        &roster,
     )?;
     let transport = read_transport_material(transported_material)?;
     let hashes =
@@ -194,16 +196,18 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
     let derivation = derive_threshold_share_commitment_set_from_transport_bytes(
         setup_context,
         public_matrix_seed_hash,
+        &roster,
         &source_trustee_bindings,
         &transport.chunks,
     )?;
     let material_record_count =
-        FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+        roster.participant_count as usize * DATA_PRIMES.len() * roster.decryption_threshold as usize;
     let material_set = transported_vss_material_set_value(
         setup_context,
         public_matrix_seed_hash,
         derivation.ring_degree,
         derivation.ring_degree_status,
+        &roster,
         material_record_count,
         vss_coefficient_commitment_root,
         &hashes,
@@ -225,10 +229,10 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "ringDegree": derivation.ring_degree,
         "ringDegreeStatus": derivation.ring_degree_status,
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
-        "thresholdDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD,
-        "derivedLimbCommitmentCount": FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len(),
+        "thresholdDegree": roster.decryption_threshold,
+        "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
         "transport": {
             "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -255,6 +259,7 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
 
     verify_setup_context(setup_context)?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let roster = accepted_roster_from_setup_context(setup_context);
     let transport_header = read_transport_material_stream_header(transported_material)?;
     let sessions = vss_transport_derivation_sessions();
     let mut sessions = sessions.lock().map_err(|_| {
@@ -294,7 +299,7 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
             full_object_hasher,
             next_chunk_index: 0,
             observed_total_byte_length: 0,
-            parser: StreamingVssThresholdMaterialParser::new(),
+            parser: StreamingVssThresholdMaterialParser::new(roster),
         },
     );
 
@@ -637,10 +642,12 @@ fn finish_threshold_share_commitment_transport_stream(
         vss_coefficient_commitment_root,
         "vssCoefficientCommitmentRoot",
     )?;
+    let roster = accepted_roster_from_setup_context(&session.setup_context);
     let source_trustee_bindings = verify_source_trustee_commitment_records(
         source_trustee_record_values,
         &session.setup_context,
         &session.public_matrix_seed_hash,
+        &roster,
     )?;
     if session.next_chunk_index != session.transport_header.chunk_count {
         return Err(invalid_threshold_commitment_input(
@@ -675,10 +682,12 @@ fn finish_threshold_share_commitment_transport_stream(
         .parser
         .finish(&session.setup_context, &session.public_matrix_seed_hash)?;
     verify_observed_transport_commitment_roots(
+        &roster,
         &source_trustee_bindings,
         &derivation.observed_commitment_roots,
     )?;
-    let material_record_count = vss_material_record_count();
+    let material_record_count =
+        vss_material_record_count(roster.participant_count, roster.decryption_threshold as usize);
     let hashes = SetupVssMaterialTransportHashes {
         full_object_hash,
         chunk_hashes: session.observed_chunk_hashes,
@@ -690,6 +699,7 @@ fn finish_threshold_share_commitment_transport_stream(
         &session.public_matrix_seed_hash,
         derivation.ring_degree,
         derivation.ring_degree_status,
+        &roster,
         material_record_count,
         vss_coefficient_commitment_root,
         &hashes,
@@ -753,10 +763,10 @@ fn finish_threshold_share_commitment_transport_stream(
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "ringDegree": derivation.ring_degree,
         "ringDegreeStatus": derivation.ring_degree_status,
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
-        "thresholdDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD,
-        "derivedLimbCommitmentCount": FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len(),
+        "thresholdDegree": roster.decryption_threshold,
+        "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
         "transport": {
             "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -774,15 +784,18 @@ fn finish_threshold_share_commitment_transport_stream(
 }
 
 fn verify_observed_transport_commitment_roots(
+    roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     observed_commitment_roots: &BTreeMap<(u64, usize, u64), String>,
 ) -> CanonicalResult<()> {
-    if observed_commitment_roots.len() != vss_material_record_count() {
+    if observed_commitment_roots.len()
+        != vss_material_record_count(roster.participant_count, roster.decryption_threshold as usize)
+    {
         return Err(invalid_threshold_commitment_input(
             "transport stream did not observe every accepted VSS commitment coordinate",
         ));
     }
-    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for source_trustee_roster_position in 0..roster.participant_count {
         let source_trustee_binding = source_trustee_bindings
             .get(&source_trustee_roster_position)
             .ok_or_else(|| {
@@ -791,7 +804,7 @@ fn verify_observed_transport_commitment_roots(
                 )
             })?;
         for rns_limb_index in 0..DATA_PRIMES.len() {
-            for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+            for shamir_coefficient_index in 0..roster.decryption_threshold {
                 let observed_commitment_root = observed_commitment_roots
                     .get(&(
                         source_trustee_roster_position,
@@ -837,10 +850,12 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
 
     verify_setup_context(setup_context)?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let roster = accepted_roster_from_setup_context(setup_context);
     let source_trustee_bindings = verify_source_trustee_commitment_records(
         source_trustee_record_values,
         setup_context,
         public_matrix_seed_hash,
+        &roster,
     )?;
     let transport = read_transport_material(transported_material)?;
     let hashes =
@@ -848,16 +863,18 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
     compare_transport_hashes(&transport, &hashes)?;
 
     let constant_material = read_constant_vss_commitments_from_transport_bytes(
+        &roster,
         &source_trustee_bindings,
         &transport.chunks,
     )?;
     let material_record_count =
-        FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+        roster.participant_count as usize * DATA_PRIMES.len() * roster.decryption_threshold as usize;
     let material_set = transported_vss_material_set_value(
         setup_context,
         public_matrix_seed_hash,
         constant_material.ring_degree,
         constant_material.ring_degree_status,
+        &roster,
         material_record_count,
         vss_coefficient_commitment_root,
         &hashes,
@@ -879,15 +896,18 @@ pub(crate) fn derive_threshold_share_commitment_set_from_parts(
 ) -> CanonicalResult<Value> {
     verify_setup_context(setup_context)?;
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
+    let roster = accepted_roster_from_setup_context(setup_context);
     let source_trustee_bindings = verify_source_trustee_commitment_records(
         source_trustee_record_values,
         setup_context,
         public_matrix_seed_hash,
+        &roster,
     )?;
     let coefficient_commitments = verify_coefficient_commitment_material(
         commitment_material_values,
         setup_context,
         public_matrix_seed_hash,
+        &roster,
         &source_trustee_bindings,
     )?;
 
@@ -907,6 +927,7 @@ pub(crate) fn derive_threshold_share_commitment_set_from_parts(
         public_matrix_seed_hash,
         ring_degree,
         ring_degree_status,
+        &roster,
         &source_trustee_bindings,
         &coefficient_commitments,
     )?;
@@ -1133,6 +1154,7 @@ enum PendingRead<T> {
 }
 
 struct StreamingVssThresholdMaterialParser {
+    roster: AcceptedRosterParameters,
     pending_bytes: Vec<u8>,
     pending_offset: usize,
     ring_degree: Option<usize>,
@@ -1143,8 +1165,9 @@ struct StreamingVssThresholdMaterialParser {
 }
 
 impl StreamingVssThresholdMaterialParser {
-    fn new() -> Self {
+    fn new(roster: AcceptedRosterParameters) -> Self {
         Self {
+            roster,
             pending_bytes: Vec::new(),
             pending_offset: 0,
             ring_degree: None,
@@ -1176,7 +1199,10 @@ impl StreamingVssThresholdMaterialParser {
                 "transported VSS material ended before the binary header was complete",
             )
         })?;
-        let expected_record_count = vss_material_record_count();
+        let expected_record_count = vss_material_record_count(
+            self.roster.participant_count,
+            self.roster.decryption_threshold as usize,
+        );
         if self.completed_record_count != expected_record_count {
             return Err(invalid_threshold_commitment_input(
                 "transported VSS material ended before every commitment record was supplied",
@@ -1187,7 +1213,7 @@ impl StreamingVssThresholdMaterialParser {
                 "transported VSS material has trailing bytes after the final commitment record",
             ));
         }
-        for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        for source_trustee_roster_position in 0..self.roster.participant_count {
             if self
                 .constant_commitments_by_source_trustee
                 .get(&source_trustee_roster_position)
@@ -1211,6 +1237,7 @@ impl StreamingVssThresholdMaterialParser {
                 public_matrix_seed_hash,
                 ring_degree,
                 ring_degree_status,
+                &self.roster,
                 &self.accumulators,
             )?;
 
@@ -1235,7 +1262,10 @@ impl StreamingVssThresholdMaterialParser {
             return Ok(());
         };
         let record_length = vss_material_binary_record_length(ring_degree)?;
-        let expected_record_count = vss_material_record_count();
+        let expected_record_count = vss_material_record_count(
+            self.roster.participant_count,
+            self.roster.decryption_threshold as usize,
+        );
         while self.completed_record_count < expected_record_count
             && self.available_byte_count() >= record_length
         {
@@ -1246,7 +1276,10 @@ impl StreamingVssThresholdMaterialParser {
                     invalid_threshold_commitment_input("transport parser offset overflowed")
                 })?;
             let (source_trustee_roster_position, rns_limb_index, shamir_coefficient_index) =
-                expected_vss_material_record_coordinates(self.completed_record_count)?;
+                expected_vss_material_record_coordinates(
+                    self.completed_record_count,
+                    self.roster.decryption_threshold as usize,
+                )?;
             let rns_prime = DATA_PRIMES[rns_limb_index];
             let mut reader =
                 SliceMaterialReader::new(&self.pending_bytes[self.pending_offset..record_end]);
@@ -1287,6 +1320,7 @@ impl StreamingVssThresholdMaterialParser {
                 rns_limb_index,
                 rns_prime,
                 shamir_coefficient_index,
+                &self.roster,
                 &commitment_root,
                 &commitment,
                 &mut self.accumulators,
@@ -1357,12 +1391,12 @@ impl StreamingVssThresholdMaterialParser {
                 "transported VSS material binary version is unsupported",
             ));
         }
-        if participant_count != FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        if participant_count != self.roster.participant_count {
             return Err(invalid_threshold_commitment_input(
                 "transported VSS material participant count does not match the accepted profile",
             ));
         }
-        if threshold_degree != FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+        if threshold_degree != self.roster.decryption_threshold {
             return Err(invalid_threshold_commitment_input(
                 "transported VSS material threshold degree does not match the accepted profile",
             ));
@@ -1447,8 +1481,8 @@ fn try_read_varuint_from_pending(
     ))
 }
 
-fn vss_material_record_count() -> usize {
-    FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD
+fn vss_material_record_count(participant_count: u64, decryption_threshold: usize) -> usize {
+    participant_count as usize * DATA_PRIMES.len() * decryption_threshold
 }
 
 fn vss_material_binary_record_length(ring_degree: usize) -> CanonicalResult<usize> {
@@ -1475,17 +1509,18 @@ fn vss_material_binary_record_length(ring_degree: usize) -> CanonicalResult<usiz
 
 fn expected_vss_material_record_coordinates(
     record_index: usize,
+    decryption_threshold: usize,
 ) -> CanonicalResult<(u64, usize, u64)> {
     let records_per_source_trustee = DATA_PRIMES
         .len()
-        .checked_mul(FIRST_PROFILE_DECRYPTION_THRESHOLD)
+        .checked_mul(decryption_threshold)
         .ok_or_else(|| {
             invalid_threshold_commitment_input("transport material coordinate overflowed")
         })?;
     let source_trustee_roster_position = record_index / records_per_source_trustee;
     let record_within_source = record_index % records_per_source_trustee;
-    let rns_limb_index = record_within_source / FIRST_PROFILE_DECRYPTION_THRESHOLD;
-    let shamir_coefficient_index = record_within_source % FIRST_PROFILE_DECRYPTION_THRESHOLD;
+    let rns_limb_index = record_within_source / decryption_threshold;
+    let shamir_coefficient_index = record_within_source % decryption_threshold;
 
     Ok((
         u64::try_from(source_trustee_roster_position).map_err(|_| {
@@ -1936,6 +1971,7 @@ fn setup_transport_chunk_manifest_root(
 }
 
 fn read_constant_vss_commitments_from_transport_bytes(
+    roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     chunks: &[Vec<u8>],
 ) -> CanonicalResult<TransportConstantVssMaterial> {
@@ -1951,12 +1987,12 @@ fn read_constant_vss_commitments_from_transport_bytes(
             "transported VSS material binary version is unsupported",
         ));
     }
-    if reader.read_varuint()? != FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    if reader.read_varuint()? != roster.participant_count {
         return Err(invalid_threshold_commitment_input(
             "transported VSS material participant count does not match the accepted profile",
         ));
     }
-    if reader.read_varuint()? != FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+    if reader.read_varuint()? != roster.decryption_threshold {
         return Err(invalid_threshold_commitment_input(
             "transported VSS material threshold degree does not match the accepted profile",
         ));
@@ -1980,7 +2016,7 @@ fn read_constant_vss_commitments_from_transport_bytes(
 
     let mut constant_commitments_by_source_trustee =
         BTreeMap::<u64, Vec<SetupCommitmentValue>>::new();
-    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for source_trustee_roster_position in 0..roster.participant_count {
         let source_trustee_binding = source_trustee_bindings
             .get(&source_trustee_roster_position)
             .ok_or_else(|| {
@@ -1989,7 +2025,7 @@ fn read_constant_vss_commitments_from_transport_bytes(
                 )
             })?;
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
-            for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+            for shamir_coefficient_index in 0..roster.decryption_threshold {
                 let commitment = read_binary_setup_commitment(
                     &mut reader,
                     source_trustee_roster_position,
@@ -2026,7 +2062,7 @@ fn read_constant_vss_commitments_from_transport_bytes(
             "transported VSS material has trailing bytes after the final commitment record",
         ));
     }
-    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for source_trustee_roster_position in 0..roster.participant_count {
         if constant_commitments_by_source_trustee
             .get(&source_trustee_roster_position)
             .map(Vec::len)
@@ -2052,6 +2088,7 @@ fn read_constant_vss_commitments_from_transport_bytes(
 fn derive_threshold_share_commitment_set_from_transport_bytes(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
+    roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     chunks: &[Vec<u8>],
 ) -> CanonicalResult<TransportThresholdDerivation> {
@@ -2067,12 +2104,12 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
             "transported VSS material binary version is unsupported",
         ));
     }
-    if reader.read_varuint()? != FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    if reader.read_varuint()? != roster.participant_count {
         return Err(invalid_threshold_commitment_input(
             "transported VSS material participant count does not match the accepted profile",
         ));
     }
-    if reader.read_varuint()? != FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+    if reader.read_varuint()? != roster.decryption_threshold {
         return Err(invalid_threshold_commitment_input(
             "transported VSS material threshold degree does not match the accepted profile",
         ));
@@ -2098,7 +2135,7 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
     let mut observed_commitment_roots = BTreeMap::<(u64, usize, u64), String>::new();
     let mut constant_commitments_by_source_trustee =
         BTreeMap::<u64, Vec<SetupCommitmentValue>>::new();
-    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for source_trustee_roster_position in 0..roster.participant_count {
         let source_trustee_binding = source_trustee_bindings
             .get(&source_trustee_roster_position)
             .ok_or_else(|| {
@@ -2107,7 +2144,7 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
                 )
             })?;
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
-            for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+            for shamir_coefficient_index in 0..roster.decryption_threshold {
                 let commitment = read_binary_setup_commitment(
                     &mut reader,
                     source_trustee_roster_position,
@@ -2145,6 +2182,7 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
                     rns_limb_index,
                     rns_prime,
                     shamir_coefficient_index,
+                    roster,
                     &commitment_root,
                     &commitment,
                     &mut accumulators,
@@ -2173,6 +2211,7 @@ fn derive_threshold_share_commitment_set_from_transport_bytes(
         public_matrix_seed_hash,
         ring_degree,
         ring_degree_status,
+        roster,
         &accumulators,
     )?;
 
@@ -2260,17 +2299,18 @@ fn accumulate_transport_threshold_commitments(
     rns_limb_index: usize,
     rns_prime: u64,
     shamir_coefficient_index: u64,
+    roster: &AcceptedRosterParameters,
     commitment_root: &str,
     commitment: &SetupCommitmentValue,
     accumulators: &mut BTreeMap<(u64, usize), TransportThresholdAccumulator>,
 ) -> CanonicalResult<()> {
-    for recipient_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for recipient_roster_position in 0..roster.participant_count {
         let recipient_roster_position_usize =
             usize::try_from(recipient_roster_position).map_err(|_| {
                 invalid_threshold_commitment_input("recipient roster position does not fit usize")
             })?;
         let trustee_point = canonical_trustee_point(recipient_roster_position_usize, rns_prime)?;
-        let scalar = shamir_coefficient_scalars(trustee_point, FIRST_PROFILE_DECRYPTION_THRESHOLD)?
+        let scalar = shamir_coefficient_scalars(trustee_point, roster.decryption_threshold as usize)?
             [shamir_coefficient_index as usize];
         let accumulator_key = (recipient_roster_position, rns_limb_index);
         match accumulators.get_mut(&accumulator_key) {
@@ -2307,10 +2347,11 @@ fn threshold_share_commitment_set_from_transport_accumulators(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     ring_degree_status: &str,
+    roster: &AcceptedRosterParameters,
     accumulators: &BTreeMap<(u64, usize), TransportThresholdAccumulator>,
 ) -> CanonicalResult<Value> {
-    let mut recipient_records = Vec::with_capacity(FIRST_PROFILE_PARTICIPANT_COUNT);
-    for recipient_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    let mut recipient_records = Vec::with_capacity(roster.participant_count as usize);
+    for recipient_roster_position in 0..roster.participant_count {
         let recipient_identity = format!("trustee-{recipient_roster_position}");
         let recipient_roster_position_usize =
             usize::try_from(recipient_roster_position).map_err(|_| {
@@ -2326,7 +2367,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
                     )
                 })?;
             let expected_root_count =
-                FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+                roster.participant_count as usize * roster.decryption_threshold as usize;
             if accumulator.coefficient_commitment_roots.len() != expected_root_count {
                 return Err(invalid_threshold_commitment_input(
                     "transport threshold accumulator does not contain every coefficient root",
@@ -2347,6 +2388,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
                     &recipient_identity,
                     recipient_roster_position,
                     recipient_roster_position_usize,
+                    roster.decryption_threshold as usize,
                     &threshold_limb_without_root,
                 )?,
             )?;
@@ -2360,6 +2402,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
                 &recipient_identity,
                 recipient_roster_position,
                 recipient_roster_position_usize,
+                roster.decryption_threshold as usize,
                 ring_degree_status,
                 &threshold_limb,
             )?);
@@ -2394,8 +2437,8 @@ fn threshold_share_commitment_set_from_transport_accumulators(
         "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "derivationRule": THRESHOLD_SHARE_DERIVATION_RULE,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
-        "thresholdDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "participantCount": roster.participant_count,
+        "thresholdDegree": roster.decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
@@ -2414,6 +2457,7 @@ fn transported_vss_material_set_value(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     ring_degree_status: &str,
+    roster: &AcceptedRosterParameters,
     material_record_count: usize,
     vss_coefficient_commitment_root: &str,
     hashes: &SetupVssMaterialTransportHashes,
@@ -2432,8 +2476,8 @@ fn transported_vss_material_set_value(
         "binaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
-        "thresholdDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "participantCount": roster.participant_count,
+        "thresholdDegree": roster.decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
@@ -2519,8 +2563,9 @@ fn verify_source_trustee_commitment_records(
     source_trustee_records: &[Value],
     setup_context: &Value,
     public_matrix_seed_hash: &str,
+    roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<BTreeMap<u64, SourceTrusteeCommitmentBinding>> {
-    if source_trustee_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT {
+    if source_trustee_records.len() != roster.participant_count as usize {
         return Err(invalid_threshold_commitment_input(
             "sourceTrusteeCoefficientCommitmentRecords must contain one record for every accepted trustee",
         ));
@@ -2532,6 +2577,7 @@ fn verify_source_trustee_commitment_records(
             source_trustee_record,
             setup_context,
             public_matrix_seed_hash,
+            roster,
         )?;
         if source_trustee_bindings
             .insert(
@@ -2545,7 +2591,7 @@ fn verify_source_trustee_commitment_records(
             ));
         }
     }
-    for roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for roster_position in 0..roster.participant_count {
         if !source_trustee_bindings.contains_key(&roster_position) {
             return Err(invalid_threshold_commitment_input(
                 "sourceTrusteeCoefficientCommitmentRecords must cover the full accepted roster",
@@ -2560,6 +2606,7 @@ fn verify_source_trustee_commitment_record(
     source_trustee_record: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
+    roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<SourceTrusteeCommitmentBinding> {
     if source_trustee_record
         .get("objectType")
@@ -2597,14 +2644,14 @@ fn verify_source_trustee_commitment_record(
         string_field(source_trustee_record, "sourceTrusteeIdentity")?.to_string();
     let source_trustee_roster_position =
         u64_field(source_trustee_record, "sourceTrusteeRosterPosition")?;
-    if source_trustee_roster_position >= FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    if source_trustee_roster_position >= roster.participant_count {
         return Err(invalid_threshold_commitment_input(
             "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeRosterPosition is outside the accepted roster",
         ));
     }
 
     let coefficient_commitments = array_field(source_trustee_record, "coefficientCommitments")?;
-    if coefficient_commitments.len() != DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD {
+    if coefficient_commitments.len() != DATA_PRIMES.len() * roster.decryption_threshold as usize {
         return Err(invalid_threshold_commitment_input(
             "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments must contain every Q_share limb and Shamir coefficient",
         ));
@@ -2619,6 +2666,7 @@ fn verify_source_trustee_commitment_record(
                 public_matrix_seed_hash,
                 &source_trustee_identity,
                 source_trustee_roster_position,
+                roster.decryption_threshold,
             )?;
         if !seen_coordinates.insert((rns_limb_index, shamir_coefficient_index)) {
             return Err(invalid_threshold_commitment_input(
@@ -2661,6 +2709,7 @@ fn verify_coefficient_record(
     public_matrix_seed_hash: &str,
     source_trustee_identity: &str,
     source_trustee_roster_position: u64,
+    decryption_threshold: u64,
 ) -> CanonicalResult<(usize, u64, String)> {
     if coefficient_record.get("objectType").and_then(Value::as_str)
         != Some(VSS_COEFFICIENT_COMMITMENT_OBJECT_TYPE)
@@ -2709,7 +2758,7 @@ fn verify_coefficient_record(
         ));
     }
     let shamir_coefficient_index = u64_field(coefficient_record, "shamirCoefficientIndex")?;
-    if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+    if shamir_coefficient_index >= decryption_threshold {
         return Err(invalid_threshold_commitment_input(
             "VSS coefficient commitment shamirCoefficientIndex is outside the accepted threshold degree",
         ));
@@ -2734,10 +2783,11 @@ fn verify_coefficient_commitment_material(
     commitment_material_values: &[Value],
     setup_context: &Value,
     public_matrix_seed_hash: &str,
+    roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
 ) -> CanonicalResult<BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>> {
     let expected_count =
-        FIRST_PROFILE_PARTICIPANT_COUNT * DATA_PRIMES.len() * FIRST_PROFILE_DECRYPTION_THRESHOLD;
+        roster.participant_count as usize * DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if commitment_material_values.len() != expected_count {
         return Err(invalid_threshold_commitment_input(
             "coefficientCommitments must contain full public commitment material for every source trustee, Q_share limb, and Shamir coefficient",
@@ -2751,6 +2801,7 @@ fn verify_coefficient_commitment_material(
             material_value,
             setup_context,
             public_matrix_seed_hash,
+            roster.decryption_threshold,
             source_trustee_bindings,
         )?;
         match ring_degree {
@@ -2780,9 +2831,9 @@ fn verify_coefficient_commitment_material(
         }
     }
 
-    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    for source_trustee_roster_position in 0..roster.participant_count {
         for rns_limb_index in 0..DATA_PRIMES.len() {
-            for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+            for shamir_coefficient_index in 0..roster.decryption_threshold {
                 if !commitment_bindings.contains_key(&(
                     source_trustee_roster_position,
                     rns_limb_index,
@@ -2803,6 +2854,7 @@ fn verify_coefficient_commitment_material_record(
     material_value: &Value,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
+    decryption_threshold: u64,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
 ) -> CanonicalResult<CoefficientCommitmentBinding> {
     if material_value.get("objectType").and_then(Value::as_str)
@@ -2856,7 +2908,7 @@ fn verify_coefficient_commitment_material_record(
         ));
     }
     let shamir_coefficient_index = u64_field(material_value, "shamirCoefficientIndex")?;
-    if shamir_coefficient_index >= FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+    if shamir_coefficient_index >= decryption_threshold {
         return Err(invalid_threshold_commitment_input(
             "coefficient commitment material shamirCoefficientIndex is outside the accepted threshold degree",
         ));
@@ -2915,11 +2967,12 @@ fn threshold_share_commitment_set(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     ring_degree_status: &str,
+    roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
 ) -> CanonicalResult<Value> {
-    let mut recipient_records = Vec::with_capacity(FIRST_PROFILE_PARTICIPANT_COUNT);
-    for recipient_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+    let mut recipient_records = Vec::with_capacity(roster.participant_count as usize);
+    for recipient_roster_position in 0..roster.participant_count {
         let recipient_identity = format!("trustee-{recipient_roster_position}");
         let recipient_record = threshold_share_recipient_record(
             setup_context,
@@ -2928,6 +2981,7 @@ fn threshold_share_commitment_set(
             recipient_roster_position,
             ring_degree,
             ring_degree_status,
+            roster,
             source_trustee_bindings,
             coefficient_commitments,
         )?;
@@ -2941,8 +2995,8 @@ fn threshold_share_commitment_set(
         "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "derivationRule": THRESHOLD_SHARE_DERIVATION_RULE,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
-        "thresholdDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD,
+        "participantCount": roster.participant_count,
+        "thresholdDegree": roster.decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
@@ -2964,6 +3018,7 @@ fn threshold_share_recipient_record(
     recipient_roster_position: u64,
     ring_degree: usize,
     ring_degree_status: &str,
+    roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
 ) -> CanonicalResult<Value> {
@@ -2981,6 +3036,7 @@ fn threshold_share_recipient_record(
             recipient_roster_position_usize,
             rns_limb_index,
             rns_prime,
+            roster,
             source_trustee_bindings,
             coefficient_commitments,
         )?;
@@ -2990,6 +3046,7 @@ fn threshold_share_recipient_record(
             recipient_identity,
             recipient_roster_position,
             recipient_roster_position_usize,
+            roster.decryption_threshold as usize,
             ring_degree_status,
             &threshold_limb,
         )?);
@@ -3026,16 +3083,18 @@ fn derive_threshold_limb_commitment(
     recipient_roster_position_usize: usize,
     rns_limb_index: usize,
     rns_prime: u64,
+    roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
 ) -> CanonicalResult<ThresholdLimbCommitment> {
+    let decryption_threshold = roster.decryption_threshold as usize;
     let trustee_point = canonical_trustee_point(recipient_roster_position_usize, rns_prime)?;
-    let scalars = shamir_coefficient_scalars(trustee_point, FIRST_PROFILE_DECRYPTION_THRESHOLD)?;
+    let scalars = shamir_coefficient_scalars(trustee_point, decryption_threshold)?;
     let mut coefficient_commitment_roots =
-        Vec::with_capacity(FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_DECRYPTION_THRESHOLD);
+        Vec::with_capacity(roster.participant_count as usize * decryption_threshold);
     let mut combination_terms =
-        Vec::with_capacity(FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_DECRYPTION_THRESHOLD);
-    for source_trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT as u64 {
+        Vec::with_capacity(roster.participant_count as usize * decryption_threshold);
+    for source_trustee_roster_position in 0..roster.participant_count {
         let _source_trustee_binding = source_trustee_bindings
             .get(&source_trustee_roster_position)
             .ok_or_else(|| {
@@ -3043,7 +3102,7 @@ fn derive_threshold_limb_commitment(
                     "threshold derivation is missing an accepted source trustee binding",
                 )
             })?;
-        for shamir_coefficient_index in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD as u64 {
+        for shamir_coefficient_index in 0..roster.decryption_threshold {
             let coefficient_binding = coefficient_commitments
                 .get(&(
                     source_trustee_roster_position,
@@ -3077,6 +3136,7 @@ fn derive_threshold_limb_commitment(
             recipient_identity,
             recipient_roster_position,
             recipient_roster_position_usize,
+            decryption_threshold,
             &threshold_limb,
         )?,
     )?;
@@ -3094,6 +3154,7 @@ fn threshold_limb_commitment_value(
     recipient_identity: &str,
     recipient_roster_position: u64,
     recipient_roster_position_usize: usize,
+    decryption_threshold: usize,
     ring_degree_status: &str,
     threshold_limb: &ThresholdLimbCommitment,
 ) -> CanonicalResult<Value> {
@@ -3103,6 +3164,7 @@ fn threshold_limb_commitment_value(
         recipient_identity,
         recipient_roster_position,
         recipient_roster_position_usize,
+        decryption_threshold,
         threshold_limb,
     )?;
     value["ringDegreeStatus"] = json!(ring_degree_status);
@@ -3118,6 +3180,7 @@ fn threshold_limb_commitment_root_payload(
     recipient_identity: &str,
     recipient_roster_position: u64,
     recipient_roster_position_usize: usize,
+    decryption_threshold: usize,
     threshold_limb: &ThresholdLimbCommitment,
 ) -> CanonicalResult<Value> {
     let trustee_point =
@@ -3142,7 +3205,7 @@ fn threshold_limb_commitment_root_payload(
         },
         "shamirCoefficientScalarsDecimal": shamir_coefficient_scalars(
             trustee_point,
-            FIRST_PROFILE_DECRYPTION_THRESHOLD,
+            decryption_threshold,
         )?
         .iter()
         .map(u128::to_string)

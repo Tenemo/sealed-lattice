@@ -68,6 +68,7 @@ pub(super) fn verify_public_evaluation_key_set(
             "setupContext was required before evaluation-key assembly verification",
         )
     })?;
+    let roster = super::accepted_roster_from_package(setup_package);
     if let Err(error) =
         verify_context_fields_match(evaluation_keys, setup_context, "evaluationKeys")
     {
@@ -93,7 +94,7 @@ pub(super) fn verify_public_evaluation_key_set(
         }
     }
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if evaluation_keys.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
@@ -1507,6 +1508,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<usize, KeySwitchKey>> {
+    let roster = super::accepted_roster_from_package(setup_package);
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let transported_key_switch_component_material =
         transported_evaluation_key_share_component_material_from_request(request)?;
@@ -1546,7 +1548,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
     let expected_levels = scheduled_relinearization_levels()?;
     let expected_record_count = expected_levels
         .len()
-        .checked_mul(FIRST_PROFILE_PARTICIPANT_COUNT as usize)
+        .checked_mul(roster.participant_count as usize)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -1571,7 +1573,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
         let key_switch_seed_hex =
             expected_relinearization_key_switch_seed(&binding, "round-two", level)?;
         let mut aggregate_component_b = None;
-        for trustee_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT {
+        for trustee_roster_position in 0..roster.participant_count {
             let proof_record = records_by_level_and_trustee
                 .get(&(level, trustee_roster_position))
                 .ok_or_else(|| {
@@ -1625,6 +1627,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<(usize, usize), KeySwitchKey>> {
+    let roster = super::accepted_roster_from_package(setup_package);
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let transported_key_switch_component_material =
         transported_evaluation_key_share_component_material_from_request(request)?;
@@ -1645,7 +1648,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
         .map(|batch| Ok((value_u64(batch, "trusteeRosterPosition")?, batch)))
         .collect::<CanonicalResult<Vec<_>>>()?;
     sorted_batches.sort_by_key(|(trustee_roster_position, _)| *trustee_roster_position);
-    if sorted_batches.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if sorted_batches.len() != roster.participant_count as usize {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "accepted public Galois key material requires one proof batch per trustee",

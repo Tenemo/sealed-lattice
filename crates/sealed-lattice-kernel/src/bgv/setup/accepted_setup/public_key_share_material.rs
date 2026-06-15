@@ -187,13 +187,14 @@ pub(super) fn verify_collective_public_key_material(
             )?));
         }
     };
+    let roster = super::accepted_roster_from_package(setup_package);
     let ring_degree = value_u64(aggregate_object, "ringDegree")?;
     if ring_degree == 0
         || ring_degree > POLYNOMIAL_DEGREE as u64
         || aggregate_object
             .get("participantCount")
             .and_then(Value::as_u64)
-            != Some(FIRST_PROFILE_PARTICIPANT_COUNT)
+            != Some(roster.participant_count)
         || aggregate_object.get("rnsLimbCount").and_then(Value::as_u64)
             != Some(DATA_PRIMES.len() as u64)
     {
@@ -276,6 +277,7 @@ pub(super) fn verify_collective_public_key_material(
                 "collective public-key ring degree does not fit usize",
             )
         })?,
+        roster.participant_count,
     ) {
         return Ok(Some(public_key_share_proof_refusal(
             "collectivePublicKeyVerificationFailed",
@@ -343,8 +345,11 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
             "collective public key must bind the accepted public matrix seed",
         ));
     }
-    let expected_public_derivations =
-        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)?;
+    let roster = super::accepted_roster_from_package(setup_package);
+    let expected_public_derivations = derive_collective_bgv_setup_public_derivations(
+        public_matrix_seed_hash,
+        roster.decryption_threshold,
+    )?;
     if common_randomness.get("publicDerivations") != Some(&expected_public_derivations) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
@@ -447,8 +452,9 @@ fn verify_collective_public_key_coefficients(
     aggregate_object: &Value,
     material_bindings: &BTreeMap<u64, PublicKeyShareMaterialBinding>,
     ring_degree: usize,
+    participant_count: u64,
 ) -> CanonicalResult<()> {
-    if material_bindings.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    if material_bindings.len() != participant_count as usize {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "collective public-key aggregation requires one verified share material record per trustee",
@@ -584,7 +590,8 @@ fn verify_embedded_public_key_share_material_set(
                 "publicKeyShareMaterial.shareMaterialRecords are required",
             )
         })?;
-    if material_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
+    let roster = super::accepted_roster_from_setup_context(setup_context);
+    if material_records.len() != roster.participant_count as usize {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "publicKeyShareMaterial.shareMaterialRecords must contain one record per trustee",
@@ -1117,7 +1124,8 @@ fn decode_public_key_share_material_bindings(
             "transported public-key share material binary version is unsupported",
         ));
     }
-    if reader.read_varuint("participantCount")? != FIRST_PROFILE_PARTICIPANT_COUNT {
+    let roster = super::accepted_roster_from_setup_context(setup_context);
+    if reader.read_varuint("participantCount")? != roster.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "transported public-key share material participant count does not match the accepted profile",
@@ -1144,7 +1152,7 @@ fn decode_public_key_share_material_bindings(
 
     let mut bindings = BTreeMap::new();
     let mut material_roots = Vec::new();
-    for expected_roster_position in 0..FIRST_PROFILE_PARTICIPANT_COUNT {
+    for expected_roster_position in 0..roster.participant_count {
         if reader.read_varuint("trusteeRosterPosition")? != expected_roster_position {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -1350,8 +1358,9 @@ pub(super) fn verify_public_key_share_material_set(
             "publicKeyShareMaterial.materialEncoding must be embedded full public-key share coefficients or binary-chunked full public-key share coefficients",
         ));
     }
+    let roster = super::accepted_roster_from_setup_context(setup_context);
     for (field_name, expected_value) in [
-        ("participantCount", FIRST_PROFILE_PARTICIPANT_COUNT),
+        ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if material_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {

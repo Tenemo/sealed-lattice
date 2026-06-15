@@ -191,10 +191,11 @@ pub(super) fn verify_private_vss_envelope_commitments(
             "setupPackage.privateVssEnvelopeCommitments.mailboxEncryptionProfileId",
         )?));
     }
+    let roster = super::accepted_roster_from_package(setup_package);
     if commitment_set
         .get("participantCount")
         .and_then(Value::as_u64)
-        != Some(FIRST_PROFILE_PARTICIPANT_COUNT)
+        != Some(roster.participant_count)
     {
         return Ok(Some(private_vss_envelope_refusal(
             "privateVssEnvelopeParticipantCountMismatch",
@@ -202,7 +203,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
             "setupPackage.privateVssEnvelopeCommitments.participantCount",
         )?));
     }
-    let expected_envelope_count = FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_PARTICIPANT_COUNT;
+    let expected_envelope_count = roster.participant_count * roster.participant_count;
     if commitment_set.get("envelopeCount").and_then(Value::as_u64) != Some(expected_envelope_count)
     {
         return Ok(Some(private_vss_envelope_refusal(
@@ -447,8 +448,9 @@ fn private_vss_envelope_bindings_from_set(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
         )));
     };
+    let roster = super::accepted_roster_from_setup_context(setup_context);
     let expected_envelope_count =
-        (FIRST_PROFILE_PARTICIPANT_COUNT * FIRST_PROFILE_PARTICIPANT_COUNT) as usize;
+        (roster.participant_count * roster.participant_count) as usize;
     if envelope_references.len() != expected_envelope_count {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeReferenceCountMismatch",
@@ -696,7 +698,8 @@ fn private_vss_envelope_binding_from_reference(
         )));
     }
     // Source-major sequence number uniquely identifying the ordered (source, recipient) envelope; it is bound into the AEAD associated data to prevent cross-pair ciphertext replay.
-    let expected_sequence_number = source_trustee_roster_position * FIRST_PROFILE_PARTICIPANT_COUNT
+    let roster = super::accepted_roster_from_setup_context(setup_context);
+    let expected_sequence_number = source_trustee_roster_position * roster.participant_count
         + recipient_roster_position;
     if envelope_reference
         .get("envelopeSequenceNumber")
